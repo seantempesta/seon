@@ -747,7 +747,7 @@
                     :seon.web.datastar-test/surface-attrs))
             "the structural transition replaces shared dependency authority"))
 
-      (.emit req-a "close")
+      (.emit res-a "close")
       (is (= 1 (count (::datastar/views @datastar/!feeds)))
           "closing the first socket leaves its peer open")
       (is (= 1 (count (::datastar/subscriptions @datastar/!feeds)))
@@ -763,7 +763,7 @@
       (is (= "shared-b" (ffirst @pushes)))
       (is (str/includes? (second (first @pushes)) "new-dependency-target")
           "the new dependency produces the expected targeted morph")
-      (.emit req-b "close"))))
+      (.emit res-b "close"))))
 
 (deftest equivalent-open-views-share-first-paint-until-a-transaction
   (let [renders (atom 0)
@@ -1132,6 +1132,8 @@
   (let [listen-requests (atom [])
         unlisten-requests (atom [])
         cleared (atom [])
+        heartbeat-starts (atom 0)
+        heartbeat-clears (atom [])
         pending-state {::datastar/pending-change
                        {:seon.db/db :example.db/pending}
                        ::datastar/timer :example.timer/pending
@@ -1141,9 +1143,14 @@
     (with-redefs [datastar/!feeds
                   (atom @#'datastar/empty-feed-registry)
                   datastar/!coalescer (atom pending-state)
+                  datastar/!heartbeat-timer (atom nil)
                   db/listen! #(do (swap! listen-requests conj %) {:seon.db/key ::datastar/views})
                   db/unlisten! #(do (swap! unlisten-requests conj %) {:seon.db/ok? true})
-                  datastar/clear-broadcast-timeout! #(swap! cleared conj %)]
+                  datastar/clear-broadcast-timeout! #(swap! cleared conj %)
+                  datastar/set-heartbeat-interval!
+                  (fn [_] (swap! heartbeat-starts inc) :example.timer/heartbeat)
+                  datastar/clear-heartbeat-interval!
+                  #(swap! heartbeat-clears conj %)]
       (datastar/install!)
       (datastar/install!)
       (is (= [::datastar/views ::datastar/views]
@@ -1169,7 +1176,31 @@
           "a surviving feed restores the stable listener after reload")
       (is (= ::datastar/views
              (:seon.db/key (last @listen-requests)))
-          "hot reload does not create a second listener identity"))))
+          "hot reload does not create a second listener identity")
+      (is (= 1 @heartbeat-starts)
+          "one surviving feed restores one shared heartbeat")
+      (datastar/before-reload)
+      (is (= [:example.timer/heartbeat] @heartbeat-clears)
+          "reload clears the timer owned by the feed lifecycle"))))
+
+(deftest heartbeat-flushes-without-displacing-pending-state
+  (let [writes (atom [])
+        flushes (atom 0)
+        draining? (atom false)
+        gz #js {:writableEnded false
+                :write (fn [event] (swap! writes conj event) true)
+                :flush (fn [_] (swap! flushes inc))}
+        res #js {:writableEnded false}
+        conn {:seon.web.feed/gzip gz
+              :seon.web.feed/response res
+              :seon.web.feed/draining? draining?}]
+    (@#'datastar/push-heartbeat! conn)
+    (is (= 1 (count @writes)) "an idle feed receives one heartbeat")
+    (is (= 1 @flushes) "the heartbeat immediately flushes through gzip")
+    (reset! draining? true)
+    (@#'datastar/push-heartbeat! conn)
+    (is (= 1 (count @writes))
+        "a backpressured feed keeps its pending application event untouched")))
 
 (deftest backpressured-feed-retains-only-latest-event
   (let [writes (atom [])
@@ -1240,12 +1271,12 @@
                  (::datastar/active-tokens
                    (registry-view @datastar/!feeds view-id)))
               "reconnect inherits the view's active state")
-          (.emit req-a "close")
+          (.emit res-a "close")
           (is (= second-owner
                  (:seon.web.feed/id
                    (registry-view @datastar/!feeds view-id)))
               "a stale close cannot release the replacement")
-          (.emit req-b "close")
+          (.emit res-b "close")
           (is (empty? (::datastar/views @datastar/!feeds))
               "closing the final owner releases catalog and active state")
           (is (empty? (::datastar/subscriptions @datastar/!feeds))

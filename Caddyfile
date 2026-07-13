@@ -1,15 +1,20 @@
-# Caddy reverse proxy for HTTP/2 + TLS
-# Eliminates Chrome's 6-connection limit on HTTP/1.1
-# which blocks SSE-heavy pages (Datastar) when multiple tabs are open.
+# Optional browser-facing HTTP/2 + TLS boundary for Seon's Node web UI.
+# The pod remains the application server and defaults to 127.0.0.1:7890.
+# Caddy multiplexes visible-tab Datastar feeds while proxying to that one
+# canonical HTTP/1.1 implementation.
 #
-# Note: We do NOT add `encode` directive here because:
-# 1. SSE streams handle their own Brotli compression (Content-Encoding: br)
-# 2. Static files can be pre-compressed if needed
-# Caddy passes through our Content-Encoding headers correctly.
+# The pod owns SSE gzip and Z_SYNC_FLUSH. Do not add an `encode` directive here
+# or create a second buffering/compression policy. `flush_interval -1` makes the
+# proxy stream every upstream write immediately; the pod also emits
+# X-Accel-Buffering: no for proxies that understand it.
 #
-# Access via: https://localhost:3030
-# First visit: accept the self-signed certificate warning in your browser.
+# Defaults can be overridden without editing this file:
+#   SEON_CADDY_ADDRESS=https://localhost:3030
+#   SEON_CADDY_UPSTREAM=127.0.0.1:7890
 
-https://localhost:3030 {
-	reverse_proxy localhost:8080
+{$SEON_CADDY_ADDRESS:https://localhost:3030} {
+	tls internal
+	reverse_proxy {$SEON_CADDY_UPSTREAM:127.0.0.1:7890} {
+		flush_interval -1
+	}
 }

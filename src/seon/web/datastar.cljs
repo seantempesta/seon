@@ -407,6 +407,49 @@
     (catch :default e
       (log/error-console! "seon.web.datastar" "push-event! failed" e))))
 
+(def ^:private heartbeat-interval-ms 15000)
+
+(defonce ^{:private true
+           :doc "The one timer keeping every currently open feed proxy-safe."}
+  !heartbeat-timer (atom nil))
+
+(defn- set-heartbeat-interval! [callback]
+  (js/setInterval callback heartbeat-interval-ms))
+
+(defn- clear-heartbeat-interval! [timer]
+  (js/clearInterval timer))
+
+(defn- push-heartbeat!
+  "Flush one inert SSE comment without displacing pending application state."
+  [{gz :seon.web.feed/gzip
+    res :seon.web.feed/response
+    draining? :seon.web.feed/draining?
+    :as conn}]
+  (try
+    (when (and (not (.-writableEnded ^js gz))
+               (not (.-writableEnded ^js res))
+               (not @draining?))
+      (let [accepted? (.write ^js gz ": keep-alive\n\n")]
+        (.flush ^js gz (.. zlib -constants -Z_SYNC_FLUSH))
+        (when-not accepted?
+          (reset! draining? true)
+          (.once ^js gz "drain" #(drain-feed! conn)))))
+    (catch :default e
+      (log/error-console! "seon.web.datastar" "feed heartbeat failed" e))))
+
+(defn- heartbeat! []
+  (doseq [conn (vals (::views @!feeds))]
+    (push-heartbeat! conn)))
+
+(defn- ensure-heartbeat! []
+  (when-not @!heartbeat-timer
+    (reset! !heartbeat-timer (set-heartbeat-interval! heartbeat!))))
+
+(defn- stop-heartbeat! []
+  (when-let [timer @!heartbeat-timer]
+    (clear-heartbeat-interval! timer)
+    (reset! !heartbeat-timer nil)))
+
 (defn- shared-full-event!
   "Return one current full patch shared by equivalent open views.
 
@@ -770,12 +813,13 @@
   (db/listen! {:seon.db/key ::views :seon.db/handler on-tx}))
 
 (defn uninstall!
-  "Remove the view tx-listener and cancel its pending broadcast."
+  "Remove the view listener, pending broadcast, and shared heartbeat."
   []
   (try
     (db/unlisten! {:seon.db/key ::views})
     (finally
-      (clear-coalescer!))))
+      (clear-coalescer!)
+      (stop-heartbeat!))))
 
 (defn ^:dev/before-load before-reload
   "Uninstall the view tx-listener before a hot reload."
@@ -783,10 +827,12 @@
   (try (uninstall!) (catch :default _ nil)))
 
 (defn ^:dev/after-load after-reload
-  "Restore the view tx-listener only when a feed survived hot reload."
+  "Restore listener and heartbeat only when a feed survived hot reload."
   []
   (try
-    (when (seq (::views @!feeds)) (install!))
+    (when (seq (::views @!feeds))
+      (install!)
+      (ensure-heartbeat!))
     (catch :default _ nil)))
 
 ;; ============================================================
@@ -1038,29 +1084,44 @@
                   supplied-view-id
                   (str (random-uuid)))
         previous (get-in @!feeds [::views view-id])
-        conn (prepare-feed feed previous view-id feed-id gz res)]
-    (.on gz "error"  (fn [e] (log/error-console! "seon.web.datastar" "gz error" e)))
-    (.on res "error" (fn [e] (log/error-console! "seon.web.datastar" "res error" e)))
+        conn (prepare-feed feed previous view-id feed-id gz res)
+        closed? (atom false)
+        close!
+        (fn []
+          (when (compare-and-set! closed? false true)
+            (let [released? (release-feed! view-id feed-id)]
+              (close-feed-socket! conn)
+              (when (and released? (empty? (::views @!feeds)))
+                (uninstall!))
+              (log/info-console! "seon.web.datastar" "FEED CLOSE"
+                                 {:seon.web.feed/id (str feed-id)
+                                  :seon.web.datastar/view-id view-id
+                                  :seon.web.feed/released? released?
+                                  :seon.web.feed/count
+                                  (count (::views @!feeds))}))))]
+    (.on gz "error"
+         (fn [e]
+           (log/error-console! "seon.web.datastar" "gz error" e)
+           (close!)))
+    (.on res "error"
+         (fn [e]
+           (log/error-console! "seon.web.datastar" "res error" e)
+           (close!)))
     (.pipe gz res)
     (when-let [replaced (replace-feed! conn)]
       (close-feed-socket! replaced))
+    (ensure-heartbeat!)
     (log/info-console! "seon.web.datastar" "FEED OPEN"
                        {:seon.web.feed/id (str feed-id)
                         :seon.web.datastar/view-id view-id
                         :seon.web.feed/count (count (::views @!feeds))})
     ;; First paint immediately so the page populates without waiting for a tx.
     (push-full! conn)
-    (.on req "close"
-         (fn []
-           (let [released? (release-feed! view-id feed-id)]
-             (close-feed-socket! conn)
-             (when (and released? (empty? (::views @!feeds)))
-               (uninstall!))
-             (log/info-console! "seon.web.datastar" "FEED CLOSE"
-                                {:seon.web.feed/id (str feed-id)
-                                 :seon.web.datastar/view-id view-id
-                                 :seon.web.feed/released? released?
-                                 :seon.web.feed/count (count (::views @!feeds))}))))
+    ;; `ServerResponse.close` is the raw Node equivalent of a stream abort. It
+    ;; follows the response/socket lifetime; `IncomingMessage.close` changed
+    ;; semantics across Node releases and is not the ownership authority.
+    (.once res "close" close!)
+    (.once req "aborted" close!)
     view-id))
 
 (defn- query-value
