@@ -55,7 +55,7 @@
     [seon.eval :as seval]
     [seon.log :as log]
     ;; Build-inclusion only (no alias): db->routes resolves datastar's core
-    ;; handler SYMBOLS (`serve-root!`, `serve-agents-page!`, `open-roster-feed!`,
+    ;; handler SYMBOLS (`serve-root!`, `serve-agents-page!`, `open-agents-feed!`,
     ;; `handle-view-unit!`, `serve-agent-page!`, `open-agent-feed!`) at request time via
     ;; eval/lookup-value, so the ns must be compiled into the build. router is
     ;; its sole requirer.

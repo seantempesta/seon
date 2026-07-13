@@ -25,7 +25,7 @@ datahike commit re-renders a whole element and morphs it in place.
 `seon.web.datastar` ports the hyperlith pattern into the pod. There is no
 per-fragment update, no `refresh-all!`, no signal-diffing handler-per-action:
 
-1. ONE render fn produces the **whole** `#app-view` element (`roster-view` for
+1. ONE render fn produces the **whole** `#app-view` element (`agents-view` for
    `/agents`, or `seon.ui.agent-view/agent-view` for `/agent/{id}`).
 2. Each page is **two routes**: a tiny **shim page** (GET) and a **separate
    long-lived `/feed` GET** that is a gzip-compressed SSE stream. The shim's
@@ -44,7 +44,7 @@ per-fragment update, no `refresh-all!`, no signal-diffing handler-per-action:
 The render fn is **pure of external state** and **NEVER throws** — a render
 error degrades to a visible `#app-view-error` tile inside the same element, because
 the morph engine must be crash-proof. Source: `src/seon/web/datastar.cljs`
-(`patch-elements`, `roster-view`, `push-conn!`, `broadcast!`, `open-feed!`).
+(`patch-elements`, `agents-view`, `push-conn!`, `broadcast!`, `open-feed!`).
 
 ### Time-travel falls out for free
 
@@ -179,7 +179,7 @@ Full palette, type scale, density rules, component patterns, and anti-patterns:
 | File | Purpose |
 |---|---|
 | `src/seon/web/serve.cljs` | HTTP server on 7890; POST handlers (`/chat`, `/agents/new`, `/stop`, …); same-origin gate |
-| `src/seon/web/datastar.cljs` | the gzip-morph `view=f(db)` feed: `roster-view`, `open-feed!`, `broadcast!`, the human input bars, time-travel |
+| `src/seon/web/datastar.cljs` | the gzip-morph `view=f(db)` feed: `agents-view`, `open-feed!`, `broadcast!`, the human input bars, time-travel |
 | `src/seon/web/router.cljs` | reitit over `:seon.route/*` datoms; the Node↔Ring adapter + hijack sentinel |
 | `src/seon/web/debug.cljs` | operator dev tools: `/agent/{id}/debug` (the exact LLM bytes) + `/data` (datom browser) |
 | `src/seon/web/brand.cljs` | downstream brand seam (name/tagline/theme as DATA, read at render time) |

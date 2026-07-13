@@ -333,7 +333,7 @@ Function instrumentation is another disposable runtime projection of canonical
 program/schema facts. A fresh runtime derives one exact Malli `:data` map from
 the validated program graph and performs one bulk instrumentation call after
 the complete registry and safe declarations are live. Seon does not populate or
-read Malli's process-global function-schema roster as a second authority. Agent
+read Malli's process-global function-schema registry as a second authority. Agent
 birth/resume, config apply, renders, and ordinary transactions never run that
 pass.
 
@@ -342,7 +342,7 @@ symbols whose body/spec changed, appeared, lost a spec, or were deleted. It
 filtered-unstruments the affected old exact-data entries from Malli's recorded
 originals, compiles replacements against the candidate registry, and
 instruments the remaining exact map once. A replacement wrapper never stacks;
-spec removal/deletion leaves no stale wrapper or roster entry. Same-key schema
+spec removal/deletion leaves no stale wrapper or registry entry. Same-key schema
 changes are detected by canonical form equality, not key-set snapshots.
 
 Compiled wrappers close over validators, so a schema definition change is also
@@ -354,7 +354,7 @@ not regex/literal-scan keywords or reinstrument the whole program. Candidate
 validation requires complete live multi-arity/variadic contract coverage before
 any unstrument. Definition/spec/schema versions are derived from canonical
 facts and registry generation; no durable `instrumented?`, dependency datoms,
-or second roster is stored. If post-commit wrapper surgery cannot finish, close
+or second registry is stored. If post-commit wrapper surgery cannot finish, close
 readiness and reconstruct the committed generation rather than admitting a
 mixed registry/wrapper state.
 
@@ -564,12 +564,12 @@ every historical result. Broad/unknown reads receive definition recency only;
 pin/human selection is the exact override. This policy is separate from live
 invalidation, which still compares before/after read results exactly.
 
-One gzip Datastar feed mechanism serves agent, roster, debug, and data views.
+One gzip Datastar feed mechanism serves per-agent, agents, debug, and data views.
 The separate debug registry, unused `/sse` registry, hard-coded read sets, and
 provenance fan-out are deleted after equivalence proof. Route-projection changes
 recompile the cached Reitit router through the same database listener.
 
-Legitimate renders must still be bounded. Roster rows, transcript/debug HTML
+Legitimate renders must still be bounded. Agent rows, transcript/debug HTML
 twins, and data-browser results become stable/windowed units; the shared header
 uses cheap index counts rather than full inventory scans. Raising the SCI render
 budget is not a scaling fix.
@@ -847,7 +847,7 @@ The design is implemented only when live proof shows:
   quiesced live restore/undo survives injected supervisor crashes;
 - unrelated transactions invoke zero renderers/SCI work;
 - equivalent tabs share one correct subscription after either socket closes;
-- debug/roster/agent/data pages use one bounded reactive feed path;
+- debug, agents, per-agent, and data pages use one bounded reactive feed path;
 - the grown-database CPU/RSS profile scales with dirty unique units rather than
   sockets times whole views; and
 - every retained mutable cell is either irreducible runtime state or a proven

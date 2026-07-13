@@ -1,7 +1,7 @@
 (ns seon.ui.header
   "The persistent global status bar — `system-header = f(db)` — rendered as a
    fixed top bar on EVERY view (every `/agent/{id}`, root `/`, the `/agents`
-   roster, `/data`, `/debug`). One pure function of the db value: same db
+   agent list, `/data`, `/debug`). One pure function of the db value: same db
    always renders the same hiccup, nothing stored, self-healing.
 
    It is the fleet's pulse at a glance, left→right:
@@ -28,7 +28,7 @@
    On the morphed app views the header rides inside `#app-view`, so every
    commit re-renders it and the stats tick LIVE. On the server-rendered
    `/data` and `/debug` pages it is a request-time snapshot. The `+ new
-   agent` button creates immediately without a modal; the roster page owns the
+   agent` button creates immediately without a modal; the agents page owns the
    optional-purpose input outside its live morph target."
   (:require
     [seon.agent.ctx.usage :as usage]
@@ -188,8 +188,8 @@
 (def ^:private new-agent-onclick
   "Inline new-agent action: POST `/agents/new`, then switch to the new agent.
 
-   The universal header creates an unpurposed agent immediately. The roster's
-   outside-the-morph form is the one place for an optional purpose. Inline JS
+   The universal header creates an unpurposed agent immediately. The agents
+   page's outside-the-morph form is the one place for an optional purpose. Inline JS
    (not Datastar `@post`) reads the returned id before navigating. Failures
    stay visible in the button instead of depending on modal browser APIs."
   (str "var b=this;"

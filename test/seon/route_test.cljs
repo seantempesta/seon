@@ -19,8 +19,8 @@
 
 (def ^:private expected
   "name → [pattern method] — the authoritative seeded core route set. `/`
-   is the root agent view and the fleet roster lives at `/agents` +
-   `/agents/feed`. The seed is `/` + the roster page + its `…/feed` stream +
+   is the root agent view and the agent list lives at `/agents` +
+   `/agents/feed`. The seed is `/` + the agents page + its `…/feed` stream +
    the generic unit door + the per-agent page + its separate `…/feed` SSE
    stream + the one POST door."
   {:seon.route/root        ["/" :get]
@@ -43,7 +43,7 @@
         (let [r (by-nm nm)]
           (is (= pattern (:seon.route/pattern r)))
           (is (= method (:seon.route/method r))))))
-    (testing "the roster and per-agent feeds stay separate GET paths"
+    (testing "the agents and per-agent feeds stay separate GET paths"
       (is (contains? by-nm :seon.route/agents))
       (is (contains? by-nm :seon.route/agents-feed))
       (is (contains? by-nm :seon.route/agent-feed))

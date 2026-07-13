@@ -204,7 +204,7 @@ is a surface. All pages are agent views — one mechanism, a tree of routes:
   own page;
   its working data uses colocated `:seon.render.surface/*` keys. Expanded details
   lazily show up to five recent messages and failed evals. Root remains in the
-  roster, but its self-card is summary-only: its agent-derived focused surface is
+  agent list, but its self-card is summary-only: its agent-derived focused surface is
   this fleet `system-view`, so materializing that preview or canvas-AI twin would
   recurse. These are independent view units, so one agent update does not rebuild
   the fleet. Dive
@@ -227,7 +227,7 @@ is a surface. All pages are agent views — one mechanism, a tree of routes:
   surface. Within one explicit block budget it adds non-root canvas-AI,
   five-message, and recent-failure detail in the order running → erroring →
   recent. A cap never
-  silently drops the roster; it marks which detail was omitted. The same twin
+  silently drops agents from the list; it marks which detail was omitted. The same twin
   includes the normalized location from the root message's originating browser
   session, so root knows what that human is currently seeing.
 
@@ -265,7 +265,7 @@ re-derived); datom count (links `/data`) + `SEON_EMBED` on/off; and a
   inventory scan. The `+ new agent` button POSTs the one `/agents` creation door
   with an empty purpose and switches to the new `/agent/{id}`. The same door
   accepts an optional purpose from a root-fleet form; there is no separate
-  creation or roster page.
+  creation or agents page.
 
 The persistent header has no rolling clock-driven rate. Usage totals and rates
 over an operator-selected interval are derived on demand from timestamped turn/

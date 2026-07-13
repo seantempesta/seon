@@ -343,7 +343,7 @@ context through the same auto-run rule above. The root canvas's bounded AI twin
 provides current fleet facts through the ordinary canvas block: every agent is
 listed compactly, while running, erroring, and recently active agents receive
 bounded recent-message, failed-eval, and canvas-AI detail. Root itself remains a
-summary-only roster row because its canvas is the fleet view; recursively
+summary-only agent row because its canvas is the fleet view; recursively
 materializing its own surface or canvas-AI detail is forbidden. The fleet is not
 copied into a second context block. The originating human session's normalized
 route is also derived into that root view, so root knows what the user is seeing.

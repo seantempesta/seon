@@ -9,16 +9,16 @@
 
    ## The surfaces (seeded `:seon.route/*` datoms → this ns's handlers)
 
-     GET /agents       → the roster shim page ([[serve-agents-page!]]): loads
+     GET /agents       → the agents shim page ([[serve-agents-page!]]): loads
                          datastar.js + opens the feed via
                          `data-init=\"@get('/agents/feed')\"`, empty
                          `<main id=\"app-view\">` morph target.
-     GET /agents/feed  → the long-lived gzip roster SSE stream
-                         ([[open-roster-feed!]] → [[roster-view]]).
+     GET /agents/feed  → the long-lived gzip agents SSE stream
+                         ([[open-agents-feed!]] → [[agents-view]]).
      GET /agent/{id}   → one agent's view ([[serve-agent-page!]]); its
      GET /agent/{id}/feed  gzip feed ([[open-agent-feed!]] → agent-view).
      GET /             → root's view ([[serve-root!]]); `/` IS root's
-                         dashboard, so `/agents` is the explicit fleet roster.
+                         dashboard, so `/agents` is the explicit agent list.
 
    ## Wire format (grounded in datastar consts.clj + the proven ds-spike.js)
 
@@ -117,7 +117,7 @@
    [:tuple [:= :seon.web.feed/agent] :seon.agent/id]
    [:tuple [:= :seon.web.feed/agent] :seon.agent/id
     [:= :seon.web.feed/as-of] :int]
-   [:tuple [:= :seon.web.feed/roster]]
+   [:tuple [:= :seon.web.feed/agents]]
    [:tuple [:= :seon.web.feed/debug] :seon.agent/id ::view-id]])
 (schema/register! ::render-full [:fn fn?])
 (schema/register! ::render-change [:fn fn?])
@@ -249,27 +249,27 @@
        patch-elements))
 
 ;; ============================================================
-;; view = f(db) — the live agent roster as `[:main#app-view …tiles…]`.
+;; view = f(db) — the live agents view as `[:main#app-view …rows…]`.
 ;; ============================================================
 
-(def ^:private roster-state-dot
-  "DERIVED FSM state → the Phosphor dot color class for a roster row."
+(def ^:private agent-state-dot
+  "DERIVED FSM state → the Phosphor dot color class for an agent row."
   {:running    "text-signal"
    :idle       "text-text-400"
    :paused     "text-warning"
    :terminated "text-text-500"})
 
-(defn- tile-preview
-  "Agent `id`'s canvas as a clipped compact face for its roster tile, or nil.
+(defn- agent-canvas-preview
+  "Agent `id`'s canvas as a clipped compact face for its row, or nil.
 
    The canvas = the agent's canvas — `render/render-agent-canvas` (the ONE
-   tile entry point: the pinned `:seon.render.canvas/content`, else the
-   derived last-updated tile, else the welcome card; throw-safe). Clipped to
+   canvas entry point: the pinned `:seon.render.canvas/content`, else the
+   derived last-updated surface, else the welcome card; throw-safe). Clipped to
    a fixed height (inline style — no matching Tailwind class in the built
    vocabulary) with a stretched inset-0 anchor to `/agent/<id>` (the
    system-view card pattern: agent hiccup can CONTAIN `<a>`, and nested
    anchors split in the parser). Skipped for root: root's canvas is the `/`
-   dashboard itself (`system-view`), which renders this roster's agents —
+   dashboard itself (`system-view`), which renders this list's agents —
    embedding it in a row would recurse the whole dashboard into the list.
    Guarded: any failure → nil (row renders without a preview)."
   [db id]
@@ -278,7 +278,7 @@
       (when-let [hiccup (:seon.render/hiccup
                           (render/render-agent-canvas
                             {:seon.db/db db :seon.agent/id id}))]
-        [:div {:id    (str "app-agent-" id "-tile")
+        [:div {:id    (str "app-agent-" id "-canvas")
                :class "relative overflow-hidden border-t border-base-800/60 bg-base-950/40"
                :style "max-height:7rem"}
          hiccup
@@ -287,21 +287,21 @@
               :class      "absolute inset-0"}]])
       (catch :default _ nil))))
 
-(defn- agent-tile
-  "One roster tile for `id` — a LINK to that agent's view (`/agent/<id>`)
+(defn- agent-card
+  "One agent row for `id` — a LINK to that agent's view (`/agent/<id>`)
    showing its id, DERIVED FSM state as a dot+text chip, its purpose line-1
-   (when set), and its canvas compact face ([[tile-preview]] — the agent's
+   (when set), and its canvas compact face ([[agent-canvas-preview]] — the agent's
    canvas, morphed live with every commit). `derive-state`, the purpose
    pull, and the preview are each guarded so a single bad agent can never
    abort the whole-view render (the never-crash floor). Keeps the
-   `app-agent-<id>` id so idiomorph anchors the tile."
+   `app-agent-<id>` id so idiomorph anchors the card."
   [db id]
   (let [state   (try (derive/derive-state db id) (catch :default _ :unknown))
         purpose (try (:seon.agent/purpose
                        (db/pull db '[:seon.agent/purpose] [:seon.agent/id id]))
                      (catch :default _ nil))
         p1      (when (seq purpose) (first (str/split-lines purpose)))
-        dot-cls (get roster-state-dot state "text-text-500")]
+        dot-cls (get agent-state-dot state "text-text-500")]
     [:li {:id (str "app-agent-" id) :class "border-b border-base-800"}
      [:a {:href  (str "/agent/" id)
           :class "flex items-center gap-3 px-3 py-2 hover:bg-base-900 text-xs font-mono"}
@@ -309,19 +309,19 @@
       [:span {:class (str "flex items-center gap-1 shrink-0 w-24 " dot-cls)}
        [:span "●"] [:span (name state)]]
       [:span {:class "text-text-400 truncate min-w-0"} (or p1 "")]]
-     (tile-preview db id)]))
+     (agent-canvas-preview db id)]))
 
-(defn roster-view
-  "The live agent roster (`/agents`) as `[:main#app-view …rows…]` = f(db).
+(defn agents-view
+  "The live agents view (`/agents`) as `[:main#app-view …rows…]` = f(db).
 
-   Every agent is a tile (id, DERIVED FSM state, purpose line-1, and its
+   Every agent is a card (id, DERIVED FSM state, purpose line-1, and its
    canvas compact face — the agent's canvas) linking to its
    `/agent/<id>` view.
 
    Pure of external state — reads only the supplied db value, so the same
    db always renders the same hiccup. NEVER throws (the whole-view morph
    engine must be crash-proof): a render error degrades to a visible error
-   tile inside `#app-view`. Root id is the morph target the shim
+   card inside `#app-view`. Root id is the morph target the shim
    page declares."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] :any]}
   [db]
@@ -341,9 +341,9 @@
         [:span {:id "app-count" :class "text-text-400 text-xs font-mono tabular-nums"}
          (str (count ids) " agent" (when (not= 1 (count ids)) "s"))]]
        (if (seq ids)
-         (into [:ul {:id "app-roster"
+         (into [:ul {:id "app-agents"
                      :class "flex flex-col border border-base-800 rounded-md bg-base-900 overflow-hidden"}]
-               (map #(agent-tile db %) ids))
+               (map #(agent-card db %) ids))
          [:div {:id "app-empty" :class "text-text-500 text-xs font-mono"}
           "no agents yet"])])
     (catch :default e
@@ -755,7 +755,7 @@
              :data-init (str "@get('" feed "', " opts ")")}])))
 
 (defn- new-agent-bar-html
-  "The `/agents` roster's new-agent affordance, as a raw HTML string.
+  "The `/agents` view's new-agent affordance, as a raw HTML string.
 
    A fixed bottom bar (outside the morph) whose button INLINE-FETCH POSTs the
    existing `/agents/new` (optional form-urlencoded `purpose=`) then navigates
@@ -792,8 +792,8 @@
         "+ new agent"]])))
 
 (defn- agents-page-html
-  "The `/agents` roster shim page (brand-aware head — see [[shim-html]]). Its
-   feed effect opens `/agents/feed` → [[roster-view]]; carries the new-agent
+  "The `/agents` shim page (brand-aware head — see [[shim-html]]). Its feed
+   effect opens `/agents/feed` → [[agents-view]]; carries the new-agent
    bar (P1c) as its OUTSIDE-the-morph human affordance."
   []
   (shim-html "agents" "bg-base-950 text-text-200 font-mono p-3" "/agents/feed"
@@ -1192,7 +1192,7 @@
           (.end res "unknown agent id")))))
 
 (defn serve-agents-page!
-  "Serve GET /agents — the live agent roster shim page.
+  "Serve GET /agents — the live agents shim page.
 
    The seeded :seon.route/agents handler. A Ring handler: self-extracts the
    node res. Public — db->routes resolves its symbol at request time."
@@ -1202,8 +1202,8 @@
                              "Cache-Control" "no-store, no-cache, must-revalidate"})
     (.end res (agents-page-html))))
 
-(defn open-roster-feed!
-  "Open GET /agents/feed — the roster gzip feed bound to [[roster-view]].
+(defn open-agents-feed!
+  "Open GET /agents/feed — the gzip feed bound to [[agents-view]].
 
    The seeded :seon.route/agents-feed handler — the SAME whole-`#app-view` morph
    engine the per-agent view rides, so a new/terminated agent appears/updates
@@ -1216,10 +1216,10 @@
         view-id (requested-view-id req)]
     (open-feed! req res
                 (cond->
-                  {:seon.web.feed/key [:seon.web.feed/roster]
+                  {:seon.web.feed/key [:seon.web.feed/agents]
                    :seon.web.feed/live? true
-                   :seon.web.feed/render-full #(roster-view @db/*conn*)
+                   :seon.web.feed/render-full #(agents-view @db/*conn*)
                    :seon.web.feed/render-change
                    (fn [_subscription {dbv :seon.db/db}]
-                     {::elements [(roster-view dbv)]})}
+                     {::elements [(agents-view dbv)]})}
                   view-id (assoc ::view-id view-id)))))

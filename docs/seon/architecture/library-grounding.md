@@ -506,7 +506,7 @@ Read: `reference-code/hyperlith/src/hyperlith/core.clj:88-110`
 A long-lived `text/event-stream` 503s through the in-tool chrome agent's network
 layer, so do NOT try to verify the morph with a browser agent. Verify SERVER-SIDE: a
 small Node client opens the gzip stream, gunzips, and asserts the payload changes on a
-real datahike tx (the `seon.web.datastar` acme proof: roster `1→2→1` on ADD/RETRACT,
+real datahike tx (the `seon.web.datastar` acme proof: agents view `1→2→1` on ADD/RETRACT,
 ~300ms post-commit, store clean). The final live-morph eyeball is the OWNER's, in real
 Chrome.
 

@@ -13,12 +13,12 @@ tags: [component, web]
 | Route | Render path | What it is |
 |-------|-------------|------------|
 | `/` | `serve-root!` → root `agent-view` | Root's ordinary agent view; its pinned `seon.render.system/system-view` canvas is the cluster dashboard. |
-| `/agents` | `agents-page-html` → `roster-view` | The live roster: status header plus one agent row with the agent's compact canvas preview. The new-agent purpose bar is outside the morph target. |
+| `/agents` | `agents-page-html` → `agents-view` | The live agents view: status header plus one row per `:seon.agent/id` fact, with the agent's compact canvas preview. The new-agent purpose bar is outside the morph target. |
 | `/agent/<id>` | `agent-page-html` → `seon.ui.agent-view/agent-view` | A large primary surface and a scrollable rail of every context block that has an HTML twin. The most recently agent-updated surface is selected initially; selecting a rail card is browser-local state. |
 | `/agent/<id>/debug` | `debug-page!` → `/agent/<id>/debug/feed` | A cheap operator shell: lazy exact AI text and HTML twins, token breakdown, activity, and chat. |
 | `/data` | `data-page!` → `data-browser-fragment` | The live database browser. |
 
-Routing: `seon.web.serve` hosts the HTTP front door and supplies handlers to `seon.web.router`. Seeded `:seon.route/*` datoms own the agent, roster, unit, and per-agent debug page/feed routes. Static assets, `/data`, and POST actions are the router's static supplement. Handler symbols resolve late, so a redefinition takes effect without a parallel route path.
+Routing: `seon.web.serve` hosts the HTTP front door and supplies handlers to `seon.web.router`. Seeded `:seon.route/*` datoms own the agents, unit, and per-agent debug page/feed routes. Static assets, `/data`, and POST actions are the router's static supplement. Handler symbols resolve late, so a redefinition takes effect without a parallel route path.
 
 ## SSE morphing
 

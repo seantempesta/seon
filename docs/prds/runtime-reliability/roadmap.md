@@ -301,7 +301,7 @@ as an agent page with no session override; the current
 to `seon.render.surface` / `:seon.render.surface/*`, and their old definitions
 are deleted. Visible/expanded cards are independent view units, so one agent
 update does not rebuild every preview. The root AI twin
-always carries the complete compact roster, then spends a bounded detail budget
+always carries the complete compact agent list, then spends a bounded detail budget
 on running, erroring, and most-recently-active agents: up to five recent
 messages, recent failed-eval summaries, and the bounded AI render of their
 canvas. Omitted detail is explicit, never mistaken for an absent agent.
@@ -681,7 +681,7 @@ agents idle and one exact notice visible to root.
     the agent page and root's fleet cards. Every agent gets a cheap card shell;
     visible non-root cards show the compact agent-derived focus, and closed
     details lazily show up to five recent messages and failed evals. Root remains
-    in the roster, but its own card is summary-only: materializing root's focused
+    in the agent list, but its own card is summary-only: materializing root's focused
     `system-view` inside itself would recurse. The root AI
     twin lists every agent and includes bounded canvas-AI/message/error detail
     for non-root running, erroring, then most-recently-active agents until its

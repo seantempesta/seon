@@ -22,7 +22,7 @@ note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
   handlers.
 - **Route truth (the ONE place — link here, don't restate):** `/` is root's
   agent view (`datastar/serve-root!`, not a redirect); `/agents` +
-  `/agents/feed` is the fleet roster (`roster-view`); `/agent/{id}` +
+  `/agents/feed` is the agents view (`agents-view`); `/agent/{id}` +
   `/agent/{id}/feed` is a per-agent view; `/agent/{id}/call` is the action
   door. Route changes are `:seon.route/*` datom seeds, so a
   `bin/seon cluster reset default` is required for a new/renamed route to land.
