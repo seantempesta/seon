@@ -45,7 +45,6 @@
    `[ns :refer [functions…]]` — `pr-str`'d straight into the `(ns … (:require …))`
    head by [[home-ns-form]]."
   '[[seon.agent.message :as message]
-    [seon.agent :as agent]
     [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
     [seon.schema :as schema]
     [seon.db :as db]

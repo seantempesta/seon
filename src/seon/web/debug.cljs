@@ -35,8 +35,8 @@
     [seon.derive :as derive]
     [seon.agent.debug :as agent-debug]
     [seon.log :as log]
+    [seon.render.surface :as surface]
     [seon.schema :as schema]
-    [seon.ui.agent-view :as agent-view]
     [seon.ui.components :as comp]
     [seon.ui.header :as header]
     [seon.ui.html :as html]
@@ -326,21 +326,21 @@
           (:block-texts @!snapshot))
         html-defs
         (keep-indexed
-          (fn [index {selection ::agent-view/selection
-                      label ::agent-view/label}]
+          (fn [index {selection ::surface/selection
+                      label ::surface/label}]
             (when (not= "canvas" selection)
               {::datastar/coordinate
                {:seon.agent/id agent-id
                 ::debug-format :html
-                ::agent-view/selection selection}
+                ::surface/selection selection}
                ::datastar/label label
                ::datastar/order index
                ::datastar/producer
-               #(agent-view/materialize-surface
+               #(surface/materialize-surface
                   {:seon.db/db @db/*conn*
                    :seon.agent/id agent-id
-                   ::agent-view/selection selection
-                   ::agent-view/face :expanded})}))
+                   ::surface/selection selection
+                   ::surface/face :expanded})}))
           surface-catalog)]
     (vec (concat [exact-def] raw-defs html-defs))))
 
@@ -349,7 +349,7 @@
   [agent-id !snapshot]
   (let [snap (snapshot agent-id)
         _ (reset! !snapshot snap)
-        surfaces (agent-view/surface-catalog @db/*conn* agent-id)
+        surfaces (surface/surface-catalog @db/*conn* agent-id)
         catalog (datastar/unit-catalog
                   (debug-definitions agent-id !snapshot surfaces))]
     {:seon.web.debug/snapshot snap

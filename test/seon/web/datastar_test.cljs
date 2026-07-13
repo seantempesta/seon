@@ -28,6 +28,7 @@
     [seon.agent.debug :as agent-debug]
     [seon.db :as db]
     [seon.derive :as derive]
+    [seon.render.surface :as surface]
     [seon.ui.agent-view :as agent-view]
     [seon.ui.html :as html]
     [seon.web.brand :as brand]
@@ -249,19 +250,19 @@
                       [{:seon.agent.ctx/name :probe
                         :seon.agent.ctx/priority 1
                         :seon.render/text "ai"}]})
-                   agent-view/surface-catalog
+                   surface/surface-catalog
                    (fn [_ _]
-                     [{::agent-view/selection "context-probe"
-                       ::agent-view/label "probe"
-                       ::agent-view/read-attrs #{}
-                       ::agent-view/touch 0
-                       ::agent-view/focus-touch 0}
-                      {::agent-view/selection "canvas"
-                       ::agent-view/label "canvas"
-                       ::agent-view/read-attrs #{}
-                       ::agent-view/touch 0
-                       ::agent-view/focus-touch 0}])
-                   agent-view/materialize-surface
+                     [{::surface/selection "context-probe"
+                       ::surface/label "probe"
+                       ::surface/read-attrs #{}
+                       ::surface/touch 0
+                       ::surface/focus-touch 0}
+                      {::surface/selection "canvas"
+                       ::surface/label "canvas"
+                       ::surface/read-attrs #{}
+                       ::surface/touch 0
+                       ::surface/focus-touch 0}])
+                   surface/materialize-surface
                    (fn [_]
                      (swap! html-renders inc)
                      [:div "html"])]

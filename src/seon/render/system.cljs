@@ -12,18 +12,16 @@
    value (passed explicitly), returning the `:seon.render/html-response`
    envelope (`:seon.render/hiccup` for the human card, `:seon.render/ai` for
    root's prompt understanding of the fleet — same data, agent-facing). It
-   composes four derived sub-views, top-down — the scan path of someone
+   composes three derived sub-views, top-down — the scan path of someone
    running a fleet: *is it healthy? who's doing what? what does it know?
    what just happened?*
 
      1. VITALS    ([[fleet-summary]]) — agent count by derived state, total
                   turns/evals, last activity, embeddings on/off.
-     2. AGENTS    — a card grid, one `render/render-agent-canvas` preview per
-                  agent + derived state dot + turn count + purpose, each card
-                  a link to `/agent/{id}`. Root's own card first, marked.
-     3. STORE     ([[store-summary]]) — `seon.db/store-inventory`: which attrs
-                  hold data, the system's memory at a glance. Links to `/data`.
-     4. ACTIVITY  ([[recent-activity]]) — the UNFILTERED cross-agent event
+     2. AGENTS    — a card grid using each agent's shared derived focus and
+                  compact surface + state, turns, and purpose. Root's own card
+                  is first and remains summary-only to prevent recursion.
+     3. ACTIVITY  ([[recent-activity]]) — the UNFILTERED cross-agent event
                   stream (messages + evals, no per-agent filter), newest
                   first, each line linking to its agent.
 
@@ -36,14 +34,14 @@
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.embed :as embed]
-    [seon.render :as render]
+    [seon.render.surface :as surface]
     [seon.runtime.recovery :as recovery]
     [seon.schema :as schema]))
 
 ;; ============================================================
 ;; The literal root id (carved into `:seon.agent/id` — agent.cljs). Root's
-;; card renders a COMPACT system summary, NOT `render-agent-canvas`: root's
-;; tile content IS system-view, so re-rendering it per card would recurse.
+;; card renders a COMPACT system summary. Root's focused canvas IS system-view,
+;; so materializing it in its own fleet card would recurse.
 ;; ============================================================
 
 (def ^:private root-id "root")
@@ -90,6 +88,8 @@
    [:seon.derive/state  :seon.derive/state]
    [::turns             :int]
    [:seon.agent/purpose {:optional true} :string]
+   [::focus-selection   :seon.render.surface/selection]
+   [::focus-label       :seon.render.surface/label]
    [::root?             :boolean]])
 
 (schema/register! ::fleet
@@ -115,10 +115,18 @@
                  (fn [id]
                    (let [a       (db/entity {:seon.db/db db
                                              :seon.db/ref [:seon.agent/id id]})
-                         purpose (:seon.agent/purpose a)]
+                         purpose (:seon.agent/purpose a)
+                         catalog (surface/surface-catalog db id)
+                         selection (surface/latest-focus-selection catalog)
+                         focused (some #(when (= selection
+                                                (::surface/selection %))
+                                          %)
+                                       catalog)]
                      (cond-> {:seon.agent/id     id
                               :seon.derive/state (derive/derive-state db id)
                               ::turns            (derive/agent-turn-count db id)
+                              ::focus-selection  selection
+                              ::focus-label      (::surface/label focused)
                               ::root?            (= root-id id)}
                        (string? purpose) (assoc :seon.agent/purpose purpose))))
                  ids)
@@ -144,21 +152,7 @@
       last-at (assoc ::last-activity last-at))))
 
 ;; ============================================================
-;; 3. Store / schema overview — the system's memory at a glance.
-;; ============================================================
-
-(defn store-summary
-  "The cluster's `seon.db/store-inventory` over db `db`.
-
-   Which attrs hold
-   data RIGHT NOW (the concise map-out: `:seon.db/attr-groups` rows,
-   namespace/attr/datom counts). Consumed DEFENSIVELY by key. Pure read."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] :map]}
-  [db]
-  (db/store-inventory {:seon.db/db db}))
-
-;; ============================================================
-;; 4. Recent cross-agent activity — the UNFILTERED event stream.
+;; 3. Recent cross-agent activity — the UNFILTERED event stream.
 ;; ============================================================
 
 (schema/register! ::activity-event
@@ -278,12 +272,14 @@
      [:span {:class "text-text-500"}
       (if last-activity (str "last " (short-time last-activity)) "no activity yet")]
      [:span {:class (if embedding? "text-amber-400" "text-text-600")}
-      (if embedding? "⌁ embeddings on" "embeddings off")]]))
+      (if embedding? "⌁ embeddings on" "embeddings off")]
+     [:a {:href "/data"
+          :class "ml-auto text-amber-500 hover:text-amber-300"}
+      "database →"]]))
 
 (defn- root-card-hiccup
-  "Root's OWN card — a compact, marked system label (NOT render-agent-canvas;
-   root's tile IS system-view, so re-rendering it would recurse)."
-  [{::keys [turns] :keys [seon.agent/purpose]}]
+  "Root's own summary card, without recursively materializing its focus."
+  [{::keys [turns focus-label] :keys [seon.agent/purpose]}]
   [:div {:class "flex flex-col gap-1 p-3 h-full"}
    [:div {:class "flex items-center gap-2"}
     [:span {:class "text-amber-400"} "★"]
@@ -293,22 +289,23 @@
    [:div {:class "text-xs text-text-400"}
     (or purpose "supervisor — the fleet at a glance")]
    [:div {:class "mt-auto text-[10px] font-mono text-text-600"}
-    (str turns " turns · you are here")]])
+    (str turns " turns · focused " focus-label " · you are here")]])
 
 (defn- agent-card-hiccup
-  "One agent card: the agent's `render-agent-canvas` preview (its own live
-   tile / welcome) + a footer with the derived-state dot, turn count, and an
-   `open →`. The whole card is a stretched link to `/agent/{id}` (a DIV +
-   inset-0 anchor, NOT a wrapping `<a>` — agent hiccup can contain `<a>`,
-   and nested anchors split in the parser)."
-  [db {:keys [seon.agent/id] ::keys [root? turns] state :seon.derive/state :as line}]
+  "One agent card using the shared derived focus and compact materializer."
+  [db {:keys [seon.agent/id]
+       ::keys [root? turns focus-selection focus-label]
+       state :seon.derive/state :as line}]
   (let [[dot cls] (state-dot state)
         body (if root?
                (root-card-hiccup line)
-               (or (:seon.render/hiccup
-                     (render/render-agent-canvas {:seon.db/db db :seon.agent/id id}))
+               (or (surface/materialize-surface
+                     {:seon.db/db db
+                      :seon.agent/id id
+                      ::surface/selection focus-selection
+                      ::surface/face :compact})
                    [:div {:class "p-3 text-xs text-text-500 italic"}
-                    "no tile yet"]))]
+                    "no focused surface yet"]))]
     [:div {:class (str "relative flex flex-col h-44 border rounded overflow-hidden "
                        "transition-colors animate-appear "
                        (if root?
@@ -318,8 +315,10 @@
      [:div {:class (str "shrink-0 flex items-center gap-2 px-3 py-1 "
                         "border-t border-base-800 bg-base-900/80 text-xs font-mono")}
       [:span {:class cls} dot]
+      [:span {:class "text-text-200 truncate"} id]
       [:span {:class "text-text-400"} (name state)]
-      [:span {:class "text-text-600"} (str "turn " turns)]
+      [:span {:class "text-text-600 truncate"}
+       (str "turn " turns " · " focus-label)]
       [:span {:class "ml-auto text-amber-500"} "open →"]]
      [:a {:href (str "/agent/" id)
           :aria-label (str "open agent " id)
@@ -359,28 +358,6 @@
           [:span {:class "text-text-400"} detail])]))
    [:div {:class "mt-1 text-text-400"}
     "Review the affected agents and resume only when appropriate."]])
-
-(defn- store-hiccup [{:seon.db/keys [attr-groups attr-ns-count attr-count datom-count]}]
-  [:div {:class "px-3 py-2 border-t border-base-800"}
-   [:div {:class "flex items-baseline gap-3 mb-1"}
-    [:span {:class "text-xs font-semibold text-text-200"} "store"]
-    [:span {:class "text-[11px] font-mono text-text-500"}
-     (str (or attr-ns-count 0) " namespaces · " (or attr-count 0) " attrs · "
-          (or datom-count 0) " datoms")]
-    [:a {:href "/data"
-         :class "ml-auto text-[11px] font-mono text-amber-500 hover:text-amber-300"}
-     "⛁ data browser →"]]
-   (if (seq attr-groups)
-     [:div {:class "flex flex-col gap-0.5"}
-      (doall
-        (for [{:seon.db/keys [attr-ns attrs]} (take 8 attr-groups)]
-          [:div {:key (str attr-ns) :class "text-[11px] font-mono text-text-400"}
-           [:span {:class "text-text-200"} (str attr-ns)] " "
-           [:span {:class "text-text-600"}
-            (str/join " "
-                      (for [[a c] (take 6 attrs)] (str (name a) "(" c ")")))]]))]
-     [:div {:class "text-[11px] font-mono text-text-600 italic"}
-      "no agent-written data yet"])])
 
 (defn- activity-hiccup [events]
   [:div {:class "px-3 py-2 border-t border-base-800"}
@@ -430,20 +407,10 @@
             " · embeddings " (if embedding? "on" "off"))
        "; AGENTS"]
       (for [{:keys [seon.agent/id seon.agent/purpose]
-             ::keys [turns root?] state :seon.derive/state} agents]
+             ::keys [turns root? focus-label] state :seon.derive/state} agents]
         (str "; - " (when root? "★ ") id " [" (name state) "] " turns " turns"
+             " · focused " focus-label
              (when purpose (str " — " (truncate purpose 15))))))))
-
-(defn- store-ai [{:seon.db/keys [attr-groups attr-ns-count attr-count datom-count]}]
-  (str/join
-    "\n"
-    (concat
-      ["; STORE — which attrs hold data, grouped by namespace (see (seon.db/store-inventory))"
-       (str "; " (or attr-ns-count 0) " namespaces · " (or attr-count 0)
-            " attrs · " (or datom-count 0) " datoms")]
-      (for [{:seon.db/keys [attr-ns attrs]} (take 8 attr-groups)]
-        (str "; - " attr-ns ": "
-             (str/join " " (for [[a c] (take 6 attrs)] (str (name a) "(" c ")"))))))))
 
 (defn- activity-ai [events]
   (str/join
@@ -483,29 +450,26 @@
   "Root's canvas content (`:seon.render.canvas/content` symbol).
 
    Called
-   by `render/render-agent-canvas` with the render input map (carrying the db
+   by the shared canvas renderer with the render input map (carrying the db
    value); returns the `:seon.render/html-response` envelope — the system
    dashboard hiccup for the human card + root's fleet understanding for its
    prompt. Reads the db EXPLICITLY (purity); composes [[fleet-summary]],
-   the agent grid, [[store-summary]], and [[recent-activity]]."
+   the agent grid, and [[recent-activity]]."
   {:malli/schema [:=> [:cat ::view-input] :seon.render/html-response]}
   [{:seon.db/keys [db]}]
   (let [db       (or db @db/*conn*)
         fleet    (fleet-summary db)
         recoveries (recovery/pending-notices {:seon.db/db db})
-        store    (store-summary db)
         activity (recent-activity db)]
     {:seon.render/hiccup
      [:div {:class "seon-tile flex flex-col bg-base-950 text-text-200"}
       (vitals-hiccup fleet)
       (when (seq recoveries) (recovery-hiccup recoveries))
       (grid-hiccup db fleet)
-      (store-hiccup store)
       (activity-hiccup activity)]
      :seon.render/ai
      (->> [(fleet-ai fleet)
            (recovery-ai recoveries)
-           (store-ai store)
            (activity-ai activity)]
           (remove str/blank?)
           (str/join "\n;\n"))}))

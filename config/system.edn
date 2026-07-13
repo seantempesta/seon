@@ -271,11 +271,11 @@
  ;; block sets root's canvas = the system/fleet dashboard, the config-driven
  ;; replacement for the hardcoded client.cljs root branch.
  ;;
- ;; `:seon.eval/home-requires` — root gets the SHARED toolbelt PLUS
- ;; `[seon.agent :as agent]` (the orchestration surface — start!/create!/
- ;; delegate!/set-purpose!/armable-agent-ids), so root additionally shows the
- ;; `seon.agent` orchestration card. `context-config-for` merges root-context's
- ;; scalar keys over the defaulted base; the `:seon.agent/ctx` block vector below
+ ;; `:seon.eval/home-requires` — root's complete curated toolbelt replaces the
+ ;; ordinary list and includes `[seon.agent :as agent]` (the orchestration
+ ;; surface — start!/create!/delegate!/set-purpose!/armable-agent-ids).
+ ;; `context-config-for` merges root-context's scalar keys over the base; the
+ ;; `:seon.agent/ctx` block vector below
  ;; is upserted by name (not overwritten). Every entry must carry `:as`/`:refer`
  ;; (bare `[ns]` is rejected by `seon.agent.home/require-spec`).
  :seon.config/root-context
@@ -293,12 +293,9 @@
    [seon.agent.fs :as fs]
    [seon.agent :as agent]]
   :seon.agent/ctx
-  ;; Cutover 2026-07-11: root's :canvas dashboard override DEPRECATED with
-  ;; the legacy tree (returns at the canvas milestone). The three blocks
-  ;; below are KEPT: derived, 0-token-when-healthy fault surfaces (the
-  ;; warnings idea already working reactively); first formally validated at
-  ;; the warnings milestone.
-  [;; ROOT-ONLY (owner ruling, error-blame-strict-gate 2026-07-04): the
+  [{:seon.agent.ctx/name :canvas
+    :seon.render.canvas/content seon.render.system/system-view}
+   ;; ROOT-ONLY (owner ruling, error-blame-strict-gate 2026-07-04): the
    ;; :core-fault block renders on the root agent only — other agents see
    ;; nothing (core bugs are not theirs to fix; the affected agent already
    ;; got its in-place :seon/error envelope). Derived; vanishes when the
