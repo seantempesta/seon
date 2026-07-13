@@ -20,6 +20,7 @@ from inspect_ai import eval as inspect_eval
 
 from seon_inspect.tasks.e1_spec_fn import e1_spec_fn
 from seon_inspect.tasks.ladder_lift import ladder_lift
+from seon_inspect.tasks.long_term_planning import long_term_planning
 from seon_inspect.tasks.milestone_lift import milestone_lift
 from seon_inspect.tasks.skill_lift import skill_lift
 
@@ -44,6 +45,8 @@ RUNS = [
                                                  endpoint="mock:good")),
     ("milestone db bad", lambda: milestone_lift(milestone="db",
                                                 endpoint="mock:bad")),
+    ("planning good", lambda: long_term_planning(endpoint="mock:good")),
+    ("planning bad", lambda: long_term_planning(endpoint="mock:bad")),
 ]
 
 
