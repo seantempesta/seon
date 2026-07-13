@@ -806,27 +806,29 @@
 (defn recent-html-events
   "Bound the normal HTML transcript to `retained` recent turns.
 
-   Evals are selected by their derived `::turn-idx`. Messages at or after the
-   oldest retained turn are kept, plus the single preceding message so the
-   visible conversation starts with its immediate context. With no turns yet,
-   retain the newest `retained` events. A zero window renders no history.
+   `turn-ats` is the ordered projection of `:seon.agent.turn/at` facts, not
+   database entity views. Evals are selected by their derived `::turn-idx`.
+   Messages at or after the oldest retained turn are kept, plus the single
+   preceding message so the visible conversation starts with its immediate
+   context. With no turns yet, retain the newest `retained` events. A zero
+   window renders no history.
 
    This is a pure projection over database-derived turns/events. Call it before
    [[coalesce-events]] so an error run is bounded before it is summarized."
-  {:malli/schema [:=> [:catn [::turns [:sequential :map]]
+  {:malli/schema [:=> [:catn [::turn-ats [:sequential :inst]]
                              [::retained :int]
                              [::events [:sequential :map]]]
                   [:vector :map]]}
-  [turns retained events]
-  (let [turns    (vec turns)
+  [turn-ats retained events]
+  (let [turn-ats (vec turn-ats)
         events   (vec events)
         retained (max 0 retained)]
     (cond
       (zero? retained) []
-      (empty? turns)   (vec (take-last retained events))
+      (empty? turn-ats) (vec (take-last retained events))
       :else
-      (let [first-turn-idx (max 0 (- (count turns) retained))
-            cutoff         (:seon.agent.turn/at (nth turns first-turn-idx))
+      (let [first-turn-idx (max 0 (- (count turn-ats) retained))
+            cutoff         (nth turn-ats first-turn-idx)
             cutoff-ms      (.getTime ^js cutoff)
             preceding      (->> events
                                 (filter #(and (= :message (::kind %))
@@ -871,13 +873,16 @@
         node     (:seon.render/node input)
         tblock   (block-ent db my-eid :transcript)
         retained (or (::turns-retained node) (::turns-retained tblock) 8)
-        turns    (ctx/agent-turns id db)
+        ;; Project only the ordered fact the window policy needs. Datahike
+        ;; entities are associative views, not Clojure maps; keeping them out
+        ;; of the pure helper also keeps its public contract storage-agnostic.
+        turn-ats (mapv :seon.agent.turn/at (ctx/agent-turns id db))
         ;; The HTML twin is a human navigation surface, not a second copy of
         ;; the full technical log. Bound first, then coalesce the visible
         ;; window so a historical error burst cannot re-enter through its
         ;; member cards.
         events   (->> (ordered-events db own-id my-eid)
-                      (recent-html-events turns retained)
+                      (recent-html-events turn-ats retained)
                       coalesce-events)
         render-message
         (fn [ev]

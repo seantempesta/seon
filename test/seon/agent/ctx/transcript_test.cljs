@@ -70,24 +70,21 @@
     (some? turn-idx) (assoc ::t/turn-idx turn-idx)))
 
 (deftest recent-html-window-is-turn-bounded
-  (let [turns [{:seon.agent.turn/at (at 100)}
-               {:seon.agent.turn/at (at 200)}
-               {:seon.agent.turn/at (at 300)}
-               {:seon.agent.turn/at (at 400)}]
+  (let [turn-ats [(at 100) (at 200) (at 300) (at 400)]
         events [(html-ev :old-message 150 :message)
                 (html-ev :preceding-message 250 :message)
                 (html-ev :old-eval 260 :eval 1)
                 (html-ev :recent-eval 310 :eval 2)
                 (html-ev :recent-message 350 :message)
                 (html-ev :latest-eval 410 :eval 3)]
-        out (t/recent-html-events turns 2 events)]
+        out (t/recent-html-events turn-ats 2 events)]
     (testing "the last two turns' evals and messages remain"
       (is (= [:preceding-message :recent-eval :recent-message :latest-eval]
              (mapv ::event-id out))))
     (testing "only one message before the cutoff is retained for context"
       (is (not-any? #(= :old-message (::event-id %)) out)))
     (testing "a zero-sized configured window renders no historical DOM"
-      (is (empty? (t/recent-html-events turns 0 events))))))
+      (is (empty? (t/recent-html-events turn-ats 0 events))))))
 
 (deftest recent-html-window-bounds-a-message-only-agent
   (let [events [(html-ev :one 100 :message)
