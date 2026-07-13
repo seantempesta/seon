@@ -39,6 +39,7 @@
 (def ^:private source-truncate 200)
 (def ^:private result-summary-truncate 20)
 (def ^:private error-summary-truncate 30)
+(def ^:private activity-label-truncate 40)
 
 (defn- short-result
   "One-line summary of a successful eval's `:seon.eval/result-edn`. The
@@ -117,14 +118,53 @@
           owner-tail (some-> owner (str/split #"\.") last)]
       (if fname (str owner-tail "/" fname) op))))
 
+(defn- activity-label
+  "A terse human activity label for one eval entity.
+
+   Narration wins because it records the agent's stated intent. Without it,
+   identify only the operation name; arguments and source never enter the
+   normal transcript row."
+  [entity]
+  (let [narration (:seon.eval/narration entity)
+        source    (:seon.eval/source entity)
+        label     (if (and narration (not (str/blank? narration)))
+                    (-> narration str/trim str/split-lines first)
+                    (if-let [op (compact-operation source)]
+                      (str "ran " op)
+                      "worked"))]
+    (tokens/clip-str label activity-label-truncate)))
+
+(defn render-activity-html
+  "The fixed-size eval activity row used by the normal agent transcript.
+
+   This projection deliberately contains no source, result, or error body and
+   no closed disclosure subtree. Historical technical payloads therefore do
+   not inflate every live agent-view morph. The exact AI transcript remains in
+   the debug web UI; [[render-html]] remains the explicit technical entity
+   renderer for surfaces that deliberately request eval detail."
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
+  [{:seon.render/keys [node entity]}]
+  (let [entity (or node entity)
+        eid    (:seon.eval/id entity)
+        ok?    (boolean (:seon.eval/ok? entity))
+        dur    (:seon.eval/duration-ms entity)]
+    [:div {:class "agent-activity flex items-baseline gap-1.5 px-2 py-1 text-xs min-w-0"
+           :title (when eid (str "eval " eid))}
+     [:span {:class "font-medium text-text-400 truncate"}
+      (activity-label entity)]
+     (when dur
+       [:span {:class "font-mono text-text-600 shrink-0"} (str dur "ms")])
+     [:span {:class (str "font-mono shrink-0 "
+                         (if ok? "text-success" "text-error"))}
+      (if ok? "done" "failed")]]))
+
 (defn render-html
-  "Collapsed activity row for the human transcript.
+  "Technical eval detail card for deliberate inspection surfaces.
 
    Every part routes through the
    typed `seon.render/block` renderer so each kind gets first-class TLC.
 
-   The normal surface is one quiet summary line. Technical material is inside
-   a closed `<details>` disclosure so the conversation remains primary:
+   Technical material is inside a closed `<details>` disclosure:
 
    - Summary: narration when present, otherwise `agent activity`, plus duration
      and success/error state.
@@ -153,11 +193,7 @@
         err-str   (:seon.eval/error entity)
         dur       (:seon.eval/duration-ms entity)
         status-class (if ok? "text-success" "text-error")
-        activity-label (if (and narration (not (str/blank? narration)))
-                         (-> narration str/trim str/split-lines first)
-                         (if-let [op (compact-operation src)]
-                           (str "ran " op)
-                           "worked"))]
+        activity-label (activity-label entity)]
     [:div {:class "py-0.5 min-w-0"}
      [:details {:class "agent-activity rounded border border-base-800 bg-base-950/40"}
       [:summary {:class (str "cursor-pointer px-2 py-1 text-xs min-w-0 "

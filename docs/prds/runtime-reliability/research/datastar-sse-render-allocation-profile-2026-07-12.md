@@ -8,10 +8,10 @@ tags: [research, web, database, flow]
 
 ## TL;DR
 
-The default pod is idle-cheap, but its live agent feed is not yet bounded or
-exactly invalidated. The earlier 1.4–2.5 GB RSS sawtooth is transient render
-allocation followed by garbage collection, not evidence of an idle loop or a
-monotonic leak.
+The default pod is idle-cheap. Its normal transcript is now bounded, while
+exact read-result invalidation is still pending. The earlier 1.4–2.5 GB RSS
+sawtooth is transient render allocation followed by garbage collection, not
+evidence of an idle loop or a monotonic leak.
 
 The current default-store reproduction is smaller but decisive. Agent
 `vast-seals-kick` has 182 evals and four messages. Its initial agent feed is
@@ -161,6 +161,54 @@ depending on the current canvas value, and one measured render/serialization
 pass took 498 ms with roughly 52 MiB of additional live heap at the sample
 boundary.
 
+### Live JavaScript CPU profile
+
+An inclusive V8 CPU profile was captured from the actual long-running pod with
+the Node Inspector/CDP `Profiler` API: attach to the live process, enable and
+start the profiler, issue 25 identical expedition toggle POSTs, then stop the
+profiler and aggregate samples by JavaScript function. This method matters: an
+earlier `--cpu-prof` attempt was invalid because the startup npm/CSS child
+claimed the output name, and supervisor SIGTERM did not flush a usable profile
+from the long-running pod. The CDP profile stayed in `/tmp` and is deliberately
+not a repository artifact.
+
+Across the 25-click interval:
+
+- broadcast work occupied 79.5% of sampled time;
+- `agent-view-changes` occupied 65.2%;
+- Datahike query work occupied 39.5%;
+- `system-header` occupied 20.4%;
+- `renderer-touch` occupied 17.8%;
+- Hiccup-to-HTML serialization occupied 14.4%;
+- `transcript-block-html` occupied 10.4%;
+- SCI rendering occupied 8.9%;
+- garbage collection occupied 5.4%.
+
+Each click still rendered eight targets, emitted about 105,000 estimated
+tokens, and took 330–365 ms. This is inclusive attribution, so percentages
+overlap; it identifies owners in the call tree rather than additive phases.
+The result makes the order of work measurable: bound the eager transcript,
+then rebuild with Datahike's semantic no-op report fix and repeat the identical
+workload before choosing the next cache owner.
+
+### Bounded transcript result
+
+The normal HTML transcript now applies the block entity's existing
+`turns-retained` value even when AI eviction tiers are empty. It keeps the
+recent turns plus one preceding message, renders evals as fixed-size activity
+rows, and coalesces error runs without embedding their member cards. The
+technical `seon.handlers.eval/render-html` renderer remains available for a
+surface that deliberately requests eval detail; the normal transcript calls a
+separate terse projection and contains no source/result/error disclosure tree.
+
+On the same 182-eval `vast-seals-kick` store, the hot-compiled initial agent
+feed fell from about 105,000 to 13,865 estimated tokens—a roughly 7.6× reduction
+for the complete view. A source sentinel unique to the expedition defn was
+absent from the emitted normal feed. Focused transcript and agent-view tests
+passed 14 tests / 42 assertions, including a behavioral proof that arbitrarily
+large source/result/error payloads do not change the normal activity-row DOM.
+The final cold-rebuild profile remains the authoritative performance gate.
+
 Before the canvas dependency repair, twelve identical button-shaped patch
 derivations each emitted about 99,400 estimated tokens. Render time was
 144–169 ms and serialization was 53–55 ms. Heap dropped on some iterations
@@ -259,15 +307,16 @@ tabs from database state alone. The subscription plan therefore needs stable
 per-face units or a bounded shared representation, while preserving the one
 renderer and complete-element morph semantics.
 
-### 3. Make transcript activity summary-first in computation, not only CSS
+### 3. Make transcript activity summary-first in computation, not only CSS — implemented
 
-The human transcript contract already says message conversation is primary and
-evals are compact activity disclosures. Implement that contract structurally:
+The human transcript contract says message conversation is primary and evals
+are compact activity rows. The implementation now enforces that contract
+structurally:
 
 - retain message bubbles as the conversation;
 - derive compact eval activity rows without constructing code/result bodies;
-- materialize detailed eval cards only for the deliberately focused recent
-  window or one requested eval;
+- keep detailed eval rendering out of the normal transcript; a deliberate
+  inspection surface may request the existing technical entity renderer;
 - take the window coordinate from the transcript block's existing
   `:seon.agent.ctx.transcript/turns-retained`/tier policy or an explicit
   database query, not a second hard-coded output substring cap;
@@ -314,8 +363,9 @@ and control latency.
 ## Current verdict
 
 The canvas now updates correctly from the transaction's current immutable
-database value. The broader performance work is not complete: report-level
-false positives, eager transcript detail, roster-wide previews, and duplicate
-debug/data stream ownership remain. Until the exact invalidation and bounded
-transcript changes are live-proven, it is inaccurate to claim that boot,
+database value, and the normal transcript no longer serializes its full eval
+history. The broader performance work is not complete: report-level false
+positives, roster-wide previews, and duplicate debug/data stream ownership
+remain. Until the Datahike fix and bounded transcript are cold-rebuilt and the
+identical workload is re-profiled, it is inaccurate to claim that boot,
 updates, every HTML stream, and CPU/RSS behavior are all performant.

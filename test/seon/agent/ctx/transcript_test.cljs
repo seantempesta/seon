@@ -8,7 +8,8 @@
    Run: bin/test-cljs, or (cljs.test/run-tests 'seon.agent.ctx.transcript-test)."
   (:require
     [cljs.test :refer [deftest is testing]]
-    [seon.agent.ctx.transcript :as t]))
+    [seon.agent.ctx.transcript :as t]
+    [seon.handlers.eval :as eval-handler]))
 
 (defn- ev
   ([turn kind] (ev turn kind nil))
@@ -60,3 +61,68 @@
       (is (= 16384 (t/decay-cap-for-offset levels 99 16384))))
     (testing "absent levels → the default-cap"
       (is (= 16384 (t/decay-cap-for-offset [] 5 16384))))))
+
+(defn- at [millis]
+  (js/Date. millis))
+
+(defn- html-ev [event-id millis kind & [turn-idx]]
+  (cond-> {::event-id event-id ::t/at (at millis) ::t/kind kind}
+    (some? turn-idx) (assoc ::t/turn-idx turn-idx)))
+
+(deftest recent-html-window-is-turn-bounded
+  (let [turns [{:seon.agent.turn/at (at 100)}
+               {:seon.agent.turn/at (at 200)}
+               {:seon.agent.turn/at (at 300)}
+               {:seon.agent.turn/at (at 400)}]
+        events [(html-ev :old-message 150 :message)
+                (html-ev :preceding-message 250 :message)
+                (html-ev :old-eval 260 :eval 1)
+                (html-ev :recent-eval 310 :eval 2)
+                (html-ev :recent-message 350 :message)
+                (html-ev :latest-eval 410 :eval 3)]
+        out (t/recent-html-events turns 2 events)]
+    (testing "the last two turns' evals and messages remain"
+      (is (= [:preceding-message :recent-eval :recent-message :latest-eval]
+             (mapv ::event-id out))))
+    (testing "only one message before the cutoff is retained for context"
+      (is (not-any? #(= :old-message (::event-id %)) out)))
+    (testing "a zero-sized configured window renders no historical DOM"
+      (is (empty? (t/recent-html-events turns 0 events))))))
+
+(deftest recent-html-window-bounds-a-message-only-agent
+  (let [events [(html-ev :one 100 :message)
+                (html-ev :two 200 :message)
+                (html-ev :three 300 :message)]]
+    (is (= [:two :three]
+           (mapv ::event-id (t/recent-html-events [] 2 events))))))
+
+(defn- hiccup-tags [hiccup]
+  (->> (tree-seq coll? seq hiccup)
+       (filter keyword?)
+       set))
+
+(deftest normal-eval-activity-row-does-not-embed-technical-payloads
+  (let [source-sentinel "SOURCE-PAYLOAD-SENTINEL"
+        result-sentinel "RESULT-PAYLOAD-SENTINEL"
+        error-sentinel  "ERROR-PAYLOAD-SENTINEL"
+        ok-row (eval-handler/render-activity-html
+                 {:seon.render/node
+                  {:seon.eval/id "ok-eval"
+                   :seon.eval/source (apply str (repeat 1000 source-sentinel))
+                   :seon.eval/result-edn (apply str (repeat 1000 result-sentinel))
+                   :seon.eval/ok? true
+                   :seon.eval/duration-ms 12}})
+        failed-row (eval-handler/render-activity-html
+                     {:seon.render/node
+                      {:seon.eval/id "failed-eval"
+                       :seon.eval/source source-sentinel
+                       :seon.eval/error (apply str (repeat 1000 error-sentinel))
+                       :seon.eval/ok? false}})
+        rendered (str ok-row failed-row)]
+    (testing "normal rows have no disclosure subtree"
+      (is (not (contains? (hiccup-tags ok-row) :details)))
+      (is (not (contains? (hiccup-tags failed-row) :details))))
+    (testing "source, result, and error bodies never enter the normal DOM"
+      (is (not (re-find (re-pattern source-sentinel) rendered)))
+      (is (not (re-find (re-pattern result-sentinel) rendered)))
+      (is (not (re-find (re-pattern error-sentinel) rendered))))))

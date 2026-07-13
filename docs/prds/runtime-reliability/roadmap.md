@@ -852,6 +852,13 @@ Commit: observed-read compiler/invalidation and stored-read-set deletion.
 
 ## Phase 13 — bound legitimate work and profile the grown store
 
+Progress on 2026-07-12: the normal transcript HTML projection is now bounded
+by its database-owned `turns-retained` policy. It renders message bubbles plus
+fixed-size eval activity rows and never constructs hidden source/result/error
+subtrees; exact AI transcript text remains in the debug web UI. The baseline
+25-click CDP profile and post-change measurements live in
+[[datastar-sse-render-allocation-profile-2026-07-12]].
+
 - Replace the header's whole-store inventory with an honest index count and
   shared bounded projections.
 - Window/page roster previews, transcript/debug HTML twins, and data results

@@ -42,6 +42,7 @@
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.derive :as derive]
+    [seon.handlers.eval :as eval-handler]
     [seon.render :as render]
     [seon.schema :as schema]))
 
@@ -802,42 +803,82 @@
 ;; kind), oldest-first.
 ;; ------------------------------------------------------------
 
+(defn recent-html-events
+  "Bound the normal HTML transcript to `retained` recent turns.
+
+   Evals are selected by their derived `::turn-idx`. Messages at or after the
+   oldest retained turn are kept, plus the single preceding message so the
+   visible conversation starts with its immediate context. With no turns yet,
+   retain the newest `retained` events. A zero window renders no history.
+
+   This is a pure projection over database-derived turns/events. Call it before
+   [[coalesce-events]] so an error run is bounded before it is summarized."
+  {:malli/schema [:=> [:catn [::turns [:sequential :map]]
+                             [::retained :int]
+                             [::events [:sequential :map]]]
+                  [:vector :map]]}
+  [turns retained events]
+  (let [turns    (vec turns)
+        events   (vec events)
+        retained (max 0 retained)]
+    (cond
+      (zero? retained) []
+      (empty? turns)   (vec (take-last retained events))
+      :else
+      (let [first-turn-idx (max 0 (- (count turns) retained))
+            cutoff         (:seon.agent.turn/at (nth turns first-turn-idx))
+            cutoff-ms      (.getTime ^js cutoff)
+            preceding      (->> events
+                                (filter #(and (= :message (::kind %))
+                                              (< (.getTime ^js (::at %)) cutoff-ms)))
+                                last)
+            recent         (filterv
+                             (fn [ev]
+                               (case (::kind ev)
+                                 :eval (>= (or (::turn-idx ev) -1) first-turn-idx)
+                                 :message (>= (.getTime ^js (::at ev)) cutoff-ms)
+                                 false))
+                             events)]
+        (if preceding
+          (into [preceding] recent)
+          recent)))))
+
 (defn- coalesced-card-html
-  "Hiccup for a COALESCED error run: a collapsed `✗ N× <class>` summary that
-   expands (`<details>`) to the individual eval cards. The `<summary>` is NOT
-   a flex container (a flex summary hides the native ▾ disclosure marker);
-   its inner spans lay out inline instead."
-  [{::keys [signature count members]} input db]
-  [:div {:class "py-1"}
-   [:details {:class "rounded border border-error/30 bg-error/5"}
-    [:summary {:class "text-xs font-mono text-error cursor-pointer px-2 py-1"}
-     [:span {:class "font-semibold"} (str "✗ " count "× ")]
-     [:span signature]
-     [:span {:class "text-text-500"}
-      (str " — " count " consecutive failures collapsed")]]
-    [:div {:class (str "px-2 pb-2 pt-1 flex flex-col gap-1 border-t "
-                       "border-error/20")}
-     (map (fn [m]
-            (render/render-entity-html
-              (assoc input :seon.render/node (::entity m) :seon.db/db db)))
-          members)]]])
+  "One fixed-size activity row for a coalesced error run.
+
+   The normal transcript never embeds the member eval cards in a closed
+  disclosure: their technical payload remains database data and the exact AI
+  transcript remains available in the debug web UI."
+  [{::keys [signature count]}]
+  [:div {:class "agent-activity flex items-baseline gap-1.5 px-2 py-1 text-xs min-w-0"}
+   [:span {:class "font-medium text-text-400 truncate"}
+    (tokens/clip-str signature 30)]
+   [:span {:class "font-mono text-error shrink-0"} (str count "× failed")]])
 
 (defn transcript-block-html
   "The HTML TWIN of [[transcript-block]]: the agent's flat time-ordered
-   event stream rendered as cards (message bubbles + eval cards),
-   oldest-first. Each event's UNDERLYING entity (`:seon.agent.message` /
-   `:seon.eval`) is rendered through `seon.render/render-entity-html`,
-   which resolves the entity's schema-kind html converter. Returns BARE
-   hiccup; an empty transcript renders a friendly placeholder."
+   event stream rendered as a professional chat (message bubbles + terse eval
+   activity rows), oldest-first. The normal surface is bounded by the block's
+   `::turns-retained` policy and never embeds eval source/result/error payloads
+   in hidden DOM. Returns BARE hiccup; an empty transcript renders a friendly
+   placeholder."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
   [{:seon.agent/keys [id] db :seon.db/db :as input}]
   (let [db       (or db @db/*conn*)
         a        (agent-rec id db)
         my-eid   (:db/id a)
         own-id   id
-        ;; Same coalescing as the :ai twin — content-free noise dropped,
-        ;; consecutive same-error runs collapsed (here: expandable cards).
-        events   (coalesce-events (ordered-events db own-id my-eid))
+        node     (:seon.render/node input)
+        tblock   (block-ent db my-eid :transcript)
+        retained (or (::turns-retained node) (::turns-retained tblock) 8)
+        turns    (ctx/agent-turns id db)
+        ;; The HTML twin is a human navigation surface, not a second copy of
+        ;; the full technical log. Bound first, then coalesce the visible
+        ;; window so a historical error burst cannot re-enter through its
+        ;; member cards.
+        events   (->> (ordered-events db own-id my-eid)
+                      (recent-html-events turns retained)
+                      coalesce-events)
         render-message
         (fn [ev]
           (when-let [mid (::id ev)]
@@ -854,12 +895,12 @@
              (keep
                (fn [ev]
                  (case (::kind ev)
-                   :coalesced (coalesced-card-html ev input db)
+                   :coalesced (coalesced-card-html ev)
                    ;; Message events carry projected fields, not the raw
                    ;; entity — re-pull the message by id so the html
                    ;; converter sees its full shape.
                    :message   (render-message ev)
-                   :eval      (render/render-entity-html
+                   :eval      (eval-handler/render-activity-html
                                 (assoc input :seon.render/node (::entity ev)
                                        :seon.db/db db))
                    nil)))

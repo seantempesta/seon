@@ -107,11 +107,15 @@ client markdown JS; the old client-side `data-markdown` / marked.js lane is gone
 the agent-view page. One lane, server-side, for every message/eval body.
 
 **The human transcript is chat-first.** Message entities render as the visible
-conversation. Eval entities render as one-line activity disclosures derived
+conversation. Eval entities render as fixed-size one-line activity rows derived
 from their called symbol and status; source, arguments, result projections, and
-full errors stay collapsed until requested. Consecutive equivalent failures
-remain coalesced into one disclosure. This changes only the HTML projection—the
-agent's AI transcript remains byte-faithful.
+full errors are not embedded in the normal transcript DOM. The visible history
+is bounded by the transcript block's database-owned `turns-retained` policy,
+with one preceding message retained for conversational orientation.
+Consecutive equivalent failures remain coalesced into one row. Exact AI text
+and technical data remain available in the separate debug/data surfaces. This
+changes only the HTML projection—the agent's AI transcript remains
+byte-faithful.
 
 **Large context twins are summaries first.** Plan roots render as compact
 title/progress disclosures; only the focused root starts open, and its tree has
