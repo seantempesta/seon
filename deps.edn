@@ -96,6 +96,12 @@
          ;; "not available" even though the .cljs files exist on disk.
          ;; The `seon.dev.test-preload` namespace requires the platform
          ;; CLJS tests so they're reachable from the live `:client` pod.
+         ;; This alias owns every CLJS compiler JVM: the long-lived client
+         ;; watcher and one-shot test compilers. Host-sized JDK ergonomics on
+         ;; a 128 GiB workstation otherwise commit a 2 GiB initial heap and
+         ;; permit ~30 GiB per concurrent compiler. Keep one explicit bounded
+         ;; policy here; do not duplicate heap flags in launch scripts.
+         :jvm-opts      ["-Xms256m" "-Xmx3g"]
          :extra-paths   ["test"]
          :extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
