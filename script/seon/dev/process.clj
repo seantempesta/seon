@@ -63,12 +63,16 @@
 (def ^:private managed-environment-keys
   #{"HOME" "PATH" "JAVA_HOME" "JAVA_CMD" "NODE_PATH" "TMPDIR"})
 
+(def ^:private operation-environment-keys
+  #{"SEON_CONFIG"})
+
 (defn- managed-environment [environment]
   (into (sorted-map)
         (filter (fn [[env-key _]]
-                  (or (contains? managed-environment-keys env-key)
-                      (some #(str/starts-with? env-key %)
-                            managed-environment-prefixes))))
+                  (and (not (contains? operation-environment-keys env-key))
+                       (or (contains? managed-environment-keys env-key)
+                           (some #(str/starts-with? env-key %)
+                                 managed-environment-prefixes)))))
         environment))
 
 (defn- environment-digest [environment]

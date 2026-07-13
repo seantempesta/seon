@@ -40,7 +40,11 @@
             ambient-noise-spec
             (update spec :seon.dev.process/environment
                     assoc "CODEX_THREAD_ID" (str (random-uuid)))
-            ambient-record (process/ensure! configuration ambient-noise-spec)]
+            ambient-record (process/ensure! configuration ambient-noise-spec)
+            boot-config-spec
+            (update spec :seon.dev.process/environment
+                    assoc "SEON_CONFIG" "/tmp/one-boot.edn")
+            boot-config-record (process/ensure! configuration boot-config-spec)]
         (is (= (:seon.dev.process/pid first-record)
                (:seon.dev.process/pid second-record)))
         (is (state/process-identity-alive? first-record))
@@ -49,6 +53,9 @@
         (is (= (:seon.dev.process/pid first-record)
                (:seon.dev.process/pid ambient-record))
             "ambient operator variables do not restart the managed process")
+        (is (= (:seon.dev.process/pid first-record)
+               (:seon.dev.process/pid boot-config-record))
+            "operation-scoped boot config is not permanent process identity")
         (let [result (shell/sh {:out :string :err :string :continue true
                                 :cmd ["ps" "-p"
                                       (str (:seon.dev.process/pid first-record))
