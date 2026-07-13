@@ -153,7 +153,7 @@ Severity: **P0** blocks the build wave / governance · **P1** correctness ·
 - **#G3 (P2) gym §3 catalog incomplete.** X2/X4–X11 unwritten;
   condition-B (embeddings-lift) scaffold and §6 loader lints pending. X4 hits
   format-limitation #4 (no "extend-ok-fork-not" predicate). Spec:
-  [[docs/prds/gym-v2/design]], [[docs/prds/gym-v2/scenarios-draft-2026-06-25]].
+  the retired `docs/prds/gym-v2/` design files remain available in Git history.
 
 ### Smaller / latent
 
