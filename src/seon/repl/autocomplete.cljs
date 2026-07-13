@@ -255,9 +255,8 @@
     (let [row (db/pull {:seon.db/db db
                         :seon.db/ref [:seon.fn/sym sym-str]
                         :seon.db/pull-pattern '[:seon.fn/sym :seon.fn/arglists
-                                                :seon.fn/doc :seon.fn/spec]})
-          ns-str (subs sym-str 0 (or (str/index-of sym-str "/") 0))]
-      (ns-cards/compact-fn-head ns-str row))))
+                                                :seon.fn/doc :seon.fn/spec]})]
+      (ns-cards/compact-fn-head row))))
 
 (def ^:private keyword-token-re
   "Keyword tokens in Clojure source — `:kw`, `:ns/kw`, `::kw` (the `::`

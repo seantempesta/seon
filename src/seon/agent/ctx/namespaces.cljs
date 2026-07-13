@@ -520,17 +520,12 @@
 ;; render full, the current ns's `:require`s render here as compact cards.
 ;; ============================================================
 
-(defn- abbrev-ns-kws
-  "NO-OP (2026-07-13): cards render FULLY-QUALIFIED keywords, never `::`.
-   A card is read from the AGENT'S namespace, not the fn's — so a `::` key
-   (which means the agent's OWN ns) is the WRONG keyword for every toolkit
-   key. Models fumbled the old abbreviation into malformed
-   `::seon.db/tx-data` (which the reader parses as an unresolved alias) and
-   every db/schema/canvas call failed. `:seon.db/tx-data` is copy-pasteable
-   and correct from anywhere. `ns-str` retained for the call sites; ignored.
-   (Was: `(str/replace s (str \":\" ns-str \"/\") \"::\")`.)"
-  [s _ns-str]
-  s)
+;; Cards render FULLY-QUALIFIED keywords, never `::`. A card is read from the
+;; AGENT'S namespace, not the fn's, so a `::` key would mean the agent's OWN
+;; ns — the wrong keyword for every toolkit key. `:seon.db/tx-data` is
+;; copy-pasteable and correct from anywhere. (An earlier `abbrev-ns-kws`
+;; rewrote own-ns keys to `::`; models fumbled it into malformed
+;; `::seon.db/tx-data` and every db/schema/canvas call failed — removed.)
 
 (defn- soft-clip
   "Return `s` unchanged when ≤ `n` chars, else clipped to `n` chars with a
@@ -547,7 +542,7 @@
    keyword FULLY QUALIFIED (schemas are global; a card is read from the
    agent's ns, so `::` would resolve to the wrong ns). Errors-as-values: a
    lookup that throws degrades to the source/`<not registered>` fallback."
-  [ns-str {:seon.schema/keys [key source]}]
+  [{:seon.schema/keys [key source]}]
   (let [key-str (pr-str key)
         def     (when (keyword? key)
                   (try (schema/schema-definition key) (catch :default _ nil)))
@@ -555,7 +550,7 @@
                   (some? def)               (pr-str def)
                   (not (str/blank? source)) (str/trim source)
                   :else                     "<not registered>")]
-    (str "(register! " key-str " " (abbrev-ns-kws form ns-str) ")")))
+    (str "(register! " key-str " " form ")")))
 
 (defn compact-arities
   "The arity portion of a compact fn head, from an arglists string.
@@ -582,7 +577,6 @@
                     s)]
         (str inner " …")))))
 
-(schema/register! ::ns-str :string)
 ;; Concrete value shapes, NOT references to the :seon.fn/* attr schemas —
 ;; those register in `seon.agent`, which loads AFTER this ns at boot, and
 ;; register! validates compilability eagerly (forward refs throw here).
@@ -601,13 +595,12 @@
    docstring omits the string; a fn with no `:malli/schema` omits the
    metadata map; every keyword in the spec + arglist stays FULLY QUALIFIED
    (copy-pasteable from the agent's own ns — `::` would mean the WRONG ns).
-   Multi-arity specs/arglists pass through unchanged. `ns-str` is the fn's
-   own namespace (retained for call sites; no longer drives abbreviation);
-   the row is the indexed `:seon.fn` map. PUBLIC: the ONE per-fn card renderer — the
-   compact ns cards below and the `seon.repl.autocomplete` exporter's
-   fn cards both render through it."
-  {:malli/schema [:=> [:catn [::ns-str ::ns-str] [::fn-row ::fn-row]] :string]}
-  [ns-str {:seon.fn/keys [sym arglists doc spec]}]
+   Multi-arity specs/arglists pass through unchanged. The row is the indexed
+   `:seon.fn` map. PUBLIC: the ONE per-fn card renderer — the compact ns
+   cards below and the `seon.repl.autocomplete` exporter's fn cards both
+   render through it."
+  {:malli/schema [:=> [:catn [::fn-row ::fn-row]] :string]}
+  [{:seon.fn/keys [sym arglists doc spec]}]
   (let [nm      (if-let [i (str/index-of sym "/")] (subs sym (inc i)) sym)
         doc-1   (when (and doc (not (str/blank? doc)))
                   (soft-clip (str/trim (first (str/split-lines doc))) 78))
@@ -615,9 +608,8 @@
         specpart (if (and spec (not (str/blank? spec)))
                    (str " {:malli/schema " spec "}")
                    "")
-        arities (compact-arities arglists)
-        head    (str "(defn " nm docpart specpart " " arities ")")]
-    (abbrev-ns-kws head ns-str)))
+        arities (compact-arities arglists)]
+    (str "(defn " nm docpart specpart " " arities ")")))
 
 (schema/register! ::render-one-ns-compact-request
   [:map
@@ -659,8 +651,8 @@
             fns     (->> (:seon.fn/_ns pull)
                          (remove :seon.fn/private?)
                          (sort-by :seon.fn/sym))
-            reg-lines (map #(compact-schema-line ns-str %) schemas)
-            fn-lines  (map #(compact-fn-head ns-str %) fns)
+            reg-lines (map compact-schema-line schemas)
+            fn-lines  (map compact-fn-head fns)
             ;; The cross-ns schema DEFINITIONS these fns reference (transitive,
             ;; global — the ns's OWN schemas are already in reg-lines above and
             ;; excluded). Shared closure lives in seon.agent.ctx (one mechanism).

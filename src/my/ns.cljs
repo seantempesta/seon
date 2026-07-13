@@ -71,7 +71,7 @@
             cards  (->> (:seon.fn/_ns pulled)
                         (remove :seon.fn/private?)
                         (sort-by :seon.fn/sym)
-                        (mapv #(ns-cards/compact-fn-head (name ns-kw) %)))]
+                        (mapv ns-cards/compact-fn-head))]
         (cond-> {:seon.result/ok? true
                  ::cards cards
                  ::count (count cards)}
