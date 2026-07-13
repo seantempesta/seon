@@ -58,7 +58,7 @@
   /* Fonts - JetBrains Mono for terminal aesthetic */
   --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace;
 
-  /* `text-2xs` — the dense label size used throughout the tile/web UI.
+  /* `text-2xs` — the dense label size used throughout the web UI.
      Tailwind v4 has no built-in 2xs, so without this token the class generated
      NOTHING and every `text-2xs` label silently fell back to the inherited size. */
   --text-2xs: 0.625rem;
@@ -352,7 +352,7 @@ details.tool-call-details[open] .tool-preview {
   height: 100%;
 }
 /* The compact block is a CLAMPED card face: bounded height,
-   overflow clipped — a tile must never grow its grid cell
+   overflow clipped — a card must never grow its grid cell
    vertically, no matter what an agent renders into it. 10rem
    pairs with the grid card's fixed h-44 (footer takes the rest);
    whichever bound is hit first clips. The EXPANDED block stays
@@ -367,10 +367,10 @@ details.tool-call-details[open] .tool-preview {
   .seon-card-compact { display: none; }
   .seon-card-expanded { display: block; }
 }
-/* A HERO tile is a PRIMARY surface, not a grid-cell preview, so it always
+/* A focused canvas is a primary surface, not a grid-cell preview, so it always
    shows the rich EXPANDED face — never the clamped, text-clipping compact face
    — regardless of container width (phones included). Scoped to `.surface-focus`;
-   the container-query default above is untouched for every other tile. */
+   the container-query default above is untouched for every other card. */
 .surface-focus .seon-card-compact { display: none; }
 .surface-focus .seon-card-expanded { display: block; }
 

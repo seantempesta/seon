@@ -4,7 +4,7 @@
    `run-vars` runs a set of cljs.test vars and returns the events +
    summary as data, not stdout. `record-run!` transacts the run
    onto `:seon.test/*` entities so the warnings / recent-evals
-   tiles can read test state via Datalog.
+   surfaces can read test state via Datalog.
 
    Both fns map-in / map-out with registered Malli schemas. Reporter
    capture never mutates `cljs.test/report` at the var root — instead
@@ -609,7 +609,7 @@
 ;; ============================================================
 
 (def ^:private failure-summary-max-tokens
-  "Token cap for :seon.test/last-failure-summary. Keeps the warnings tile
+  "Token cap for :seon.test/last-failure-summary. Keeps the warnings surface
    renderable while the full event remains in the bounded live detail store."
   50)
 

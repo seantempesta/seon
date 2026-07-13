@@ -81,7 +81,7 @@
 (schema/register! :seon.typeahead/prompt-tokens :int)     ; the call's render size, tokens/estimate
 (schema/register! :seon.typeahead/worker-sha :string)     ; the diffusion-server build that answered (wire field `worker_sha`, name kept for continuity)
 (schema/register! :seon.typeahead/agent :seon.db/ref)
-;; The code-buffer picture (additive, P6+ tile upgrade). Bounded
+;; The code-buffer picture (additive, P6+ surface upgrade). Bounded
 ;; projections of the wire's buffer_text/buffer_spans/offer_status/
 ;; expansion — spans/offers/holes ride as EDN strings (the
 ;; :seon.eval/result-edn pattern), capped at write time; full
@@ -254,7 +254,7 @@
   160)
 
 (def ^:private buffer-preview-chars
-  "Cap on the persisted code-buffer PREVIEW (the tile's centerpiece pane;
+  "Cap on the persisted code-buffer preview (the surface's centerpiece pane;
    displayed sizes are tokens). The wire may carry up to 4000 chars —
    the datom keeps a bounded projection; the full text rides
    `:seon.ai/raw` for the turn that made it."
@@ -405,7 +405,7 @@
    nothing are WITHHELD from the wire by the loop (`failed`), so the
    worker's `offer_status` cannot know them. This appends each as
    `{… :seon.typeahead/state :suppressed :seon.typeahead/reason
-   :failed-before}` so the tile shows the whole offer picture."
+   :failed-before}` so the surface shows the whole offer picture."
   {:malli/schema [:=> [:catn [::proj ::proj] [::withheld ::withheld]]
                   ::proj]}
   [proj withheld]

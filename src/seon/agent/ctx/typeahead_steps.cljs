@@ -6,7 +6,7 @@
    render time — reactive-context, nothing stored):
 
      - `:seon.render/html` ([[steps-surface-html]]) — the agent-page live
-       tile: a state banner (FSM state now, provider, step k/N, rounds,
+       surface: a state banner (FSM state now, provider, step k/N, rounds,
        wall, ctx tokens, server sha), THE CODE-BUFFER PANE (the last
        step's `buffer_text` painted by `buffer_spans` status — locked /
        clamped / settled / resolving / repaired / frontier — with a
@@ -16,9 +16,9 @@
        the done-ness strip (EOS logprob meter + harvest totals) and the
        compact step history. Fed by the per-step `:seon.typeahead/*`
        projections the provider loop (`seon.ai.typeahead`) transacts
-       each round, so a tx during a live call morphs the tile via the
+       each round, so a tx during a live call morphs the surface via the
        normal datastar SSE channel. nil when the agent has no step
-       rows — the tile vanishes; every panel vanishes when its rows
+       rows — the surface vanishes; every panel vanishes when its rows
        lack the data (reactive-context).
      - `:seon.render/ai` ([[steps-ai]]) — the provider protocol's
        special instructions, rendered ONLY when the agent's RESOLVED
@@ -106,7 +106,7 @@
     (if (typeahead-provider? db id) instructions "")))
 
 ;; ============================================================
-;; :seon.render/html — the step-trace tile, derived at render from the
+;; :seon.render/html — the step-trace surface, derived at render from the
 ;; provider loop's per-step :seon.typeahead/* projections.
 ;; ============================================================
 
@@ -168,7 +168,7 @@
       {:dot "●" :class "text-signal"  :label "denoise"})))
 
 (defn- state-banner
-  "The tile masthead: `● <state>` + provider · N steps · step k/N ·
+  "The surface masthead: `● <state>` + provider · N steps · step k/N ·
    rounds j/b · wall so far · ctx tokens · server sha (short) —
    whichever of those the rows carry."
   [db id steps]

@@ -6,7 +6,7 @@
    agent's own context every turn, so the agent always knows what its
    human currently sees.
 
-   ## Wiring the tile
+   ## Wiring the canvas
 
    ONE attr on your agent entity: `:seon.render.canvas/content`.
    Its value follows the `:seon.render/html` semantics exactly:
@@ -21,11 +21,11 @@
        (seon.db/transact!
          {:seon.db/tx-data
           [{:seon.agent/id (seon.db/current-agent-id)
-            :seon.render.canvas/content 'my.workouts/chart-tile}]})
+            :seon.render.canvas/content 'my.workouts/chart-canvas}]})
 
    ## The two renders
 
-   A tile FN returns the standard `:seon.render/html-response` map,
+   A canvas fn returns the standard `:seon.render/html-response` map,
    carrying the html render AND an ai render:
 
        {:seon.render/hiccup [...]   ;; what the human sees
@@ -82,10 +82,10 @@
      `divide-base-800` `overflow-hidden` `overflow-auto`
      `overflow-x-auto`
 
-   ## Tile updates should be RENDERED DATABASE QUERIES
+   ## Canvas updates should be rendered database queries
 
    Transact important findings as linked entities; render by
-   reference. A tile fn that QUERIES the db re-derives on a fresh
+   reference. A canvas fn that queries the db re-derives on a fresh
    pod (session resume works for free) — a hardcoded hiccup snapshot
    of a computed value goes stale and dies with the session. This is
    the reactive-context principle applied to the human surface.
@@ -94,11 +94,11 @@
 
    `seon.render/render-agent-canvas` is the one entry point: it calls
    [[wired-content]] to resolve WHICH value is wired
-   (`::content` pin → the caller-derived last-updated tile → [[welcome]]),
+   (`::content` pin → the caller-derived last-updated surface → [[welcome]]),
    invokes it
    through `seon.render/html-render` (the ONE value-or-fn dispatch),
    and on a throw builds the legible [[error-response]] — a broken
-   tile must never silently vanish (vanish = indistinguishable from
+   canvas must never silently vanish (vanish = indistinguishable from
    unwired; banned)."
   (:require
     [seon.ai.tokens :as tokens]
@@ -183,9 +183,9 @@
 ;; AUTHORING shape, deliberately narrower than what the serializer
 ;; accepts (seqs, numbers, raw, stringifiable values all render fine
 ;; via seon.ui.html/->string) — so it CANNOT gate the render path
-;; without falsely erroring legitimate tiles. The fns below mirror
+;; without falsely erroring legitimate canvases. The fns below mirror
 ;; the SERIALIZER's acceptance exactly and return the FIRST fatal
-;; defect with its path, so a broken tile degrades to
+;; defect with its path, so a broken canvas degrades to
 ;; [[error-response]] with a legible message instead of throwing
 ;; later at page serialization and 500ing /agent/<id> + the grid.
 ;; ============================================================
@@ -251,7 +251,7 @@
               ;; position, so this map silently becomes garbage content.
               ;; CONSERVATIVE on purpose: fires ONLY when the 2nd slot is
               ;; already a non-map child AND a (non-raw) map appears at
-              ;; child index ≥ 1 — never on a valid tile ([:h3 "x"] has no
+              ;; child index ≥ 1 — never on valid hiccup ([:h3 "x"] has no
               ;; map; [:div {:k 1} "x"] has the map in correct 2nd
               ;; position so attrs? is true and this branch is skipped).
               misplaced-i (when (and (seq body) (not attrs?))
@@ -285,7 +285,7 @@
     :else nil))
 
 (defn hiccup-structure-error
-  "Serializer-faithful structural check for a tile's hiccup.
+  "Serializer-faithful structural check for a canvas's hiccup.
 
    Returns
    nil when `seon.ui.html/->string` would serialize `x` cleanly, or
@@ -313,17 +313,17 @@
 ;; this shape (deliberate uniformity — agents already know that
 ;; vocabulary).
 ;; Widened (config-driven agent-init CP-1): add `:none` (no canvas) + a
-;; `:default :none` so an unconfigured block carries no tile. The existing
+;; `:default :none` so an unconfigured block carries no surface. The existing
 ;; qualified-fn-`:symbol` and literal-`::hiccup` arms are PRESERVED. This
 ;; REPLACES the hardcoded root branch (client.cljs) — root's block carries
 ;; `::content 'seon.render.system/system-view` via root-context.
 (schema/register! ::content [:or {:default :none} [:enum :none] :symbol ::hiccup])
 
-;; Where the wired value came from — the tile's provenance. Rendered
+;; Where the wired value came from — the canvas's provenance. Rendered
 ;; into the agent's awareness section header so the agent always sees
 ;; HOW to change the display. (The legacy `:seon.render/html` arm was
 ;; deleted in the render sweep — PRD canvas §8.1, no legacy: that
-;; key now means ONLY the generic entity-tile render slot.)
+;; key now means ONLY the generic entity-surface render slot.)
 (schema/register! ::source [:enum ::content ::derived ::welcome])
 
 (schema/register! ::derived :symbol)
@@ -331,7 +331,7 @@
 (schema/register! ::wired-request
   [:map
    [:seon.render/entity :map]
-   ;; The DERIVED canvas default — the agent's last-updated tile fn
+   ;; The DERIVED canvas default — the agent's last-updated surface fn
    ;; (seon.agent.ctx.render-fns/last-updated-surface), computed by the
    ;; caller (this ns loads below render-fns) and consulted only when
    ;; no pin is stored. Derive the default, store only the pin.
@@ -367,7 +367,7 @@
 ;; ============================================================
 
 (def welcome-sym
-  "The core default tile — [[welcome]], late-resolved like any
+  "The core default canvas — [[welcome]], late-resolved like any
    other wired symbol (the default eats the same dogfood)."
   'seon.render.canvas/welcome)
 
@@ -375,15 +375,15 @@
   "Resolve WHICH value is the agent's canvas, with provenance.
 
    Resolution on the pulled agent `:seon.render/entity`:
-   `:seon.render.canvas/content` (THE tile key — the PIN) when
+   `:seon.render.canvas/content` (the canvas pin) when
    present; else the caller-supplied `::derived` symbol (the agent's
-   last-updated tile — the derived default, see
+   last-updated surface — the derived default, see
    `seon.agent.ctx.render-fns/last-updated-surface`); else [[welcome-sym]]
    (the core welcome). Pin wins over derived; retract the pin and the
    canvas falls back to derived. Neither the per-entity
    `:seon.render/html` nor the `:seon.agent` KIND default is consulted
-   — that key means ONLY the generic entity-tile render slot (one key,
-   one meaning; the legacy tile fallback was deleted per PRD
+   — that key means ONLY the generic entity-surface render slot (one key,
+   one meaning; the legacy fallback was deleted per PRD
    canvas-prd-2026-06-11 §8.1).
 
    Values arrive pr-str-encoded from the mixed-:or bridge; the attr
@@ -414,14 +414,14 @@
       "literal hiccup on your entity")
 
     ::derived
-    (str value " (derived — your last-updated tile; transact "
+    (str value " (derived — your last-updated surface; transact "
          ":seon.render.canvas/content to pin a different one)")
 
     ::welcome
     (str value " (the core default — wire your own)")))
 
 ;; ============================================================
-;; The welcome — the default tile every uncustomized agent shows.
+;; The welcome — the default canvas every uncustomized agent shows.
 ;; ============================================================
 
 (defn greeting
@@ -457,19 +457,19 @@
       {})))
 
 (def welcome-line
-  "The double-duty line: tells the HUMAN what the tile is, and —
+  "The double-duty line: tells the human what the canvas is, and —
    because the agent reads this fn's render and source every turn —
    reinforces to the AGENT that writing hiccup-returning fns is
    normal and easy."
-  "I'll update this tile as I work — charts, statuses, whatever you ask for.")
+  "I'll update this canvas as I work — charts, statuses, whatever you ask for.")
 
 (defn welcome
-  "The core default tile — elegant, simple, TIME-AWARE.
+  "The core default canvas — elegant, simple, time-aware.
 
    COMPACT (the root grid): purpose headline + agent id + the agent's
    last reply as readable text (`seon.render.chat/last-reply` — the
    conversation query, not raw message data), so an uncustomized
-   agent's grid tile is worth glancing at. EXPANDED (the canvas): when
+   agent's grid card is worth glancing at. Expanded (the canvas): when
    the agent has a reply, LEAD with that reply as a real markdown card
    (`seon.ui.markdown/md->hiccup`) with the greeting/date demoted to a
    thin subhead — so a plain chat answer renders richly on the canvas;
@@ -477,11 +477,11 @@
    store knows one), today's date and time, the purpose line, and
    [[welcome-line]].
 
-   This fn is itself the worked example of the tile contract: ONE
+   This fn is itself the worked example of the canvas contract: one
    render emitting tagged compact + expanded blocks, plus the
    `:seon.render/ai` render saying what the human sees. Note it
    DERIVES everything from the db value and the wall clock at render
-   time — nothing stored, nothing stale (write your tile fns the
+   time — nothing stored, nothing stale (write your canvas fns the
    same way: rendered database queries, not hiccup snapshots)."
   {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
   [{:seon.db/keys [db] :seon.render/keys [entity] :seon.agent/keys [id]}]
@@ -576,7 +576,7 @@
    `;;` comments + ONE form that transacts [[welcome-sym]] onto the
    agent's OWN entity by its `:seon.agent/id` lookup ref (identity-attr
    upsert — the same 'transact to my own lookup ref' move the agent
-   uses for every later tile change). Evaled AS the new agent at
+   uses for every later canvas change). Evaled AS the new agent at
    creation by `seon.client/creation-evals!`, so the eval log's first
    entry is a real worked example; the datom it writes is durable,
    surviving pod restarts with no re-seed."
@@ -586,7 +586,7 @@
     ";; I am an entity in the shared store — everything about me is data,\n"
     ";; and I change myself by transacting to my own lookup ref: the\n"
     ";; identity attr :seon.agent/id in this map addresses MY entity.\n"
-    ";; First act: wire my canvas (the tile my human sees) to the\n"
+    ";; First act: wire my canvas (the surface my human sees) to the\n"
     ";; core welcome fn. Any fn returning\n"
     ";; {:seon.render/hiccup … :seon.render/ai …} can go here — when I\n"
     ";; have something better to show, I define a fn and point this\n"
@@ -597,7 +597,7 @@
     "     :seon.render.canvas/content '" welcome-sym "}]})\n"))
 
 ;; ============================================================
-;; Errors are legible — a broken tile never silently vanishes.
+;; Errors are legible — a broken canvas never silently vanishes.
 ;;
 ;; ONE overridable seam ([[error-card]]) renders error surfaces
 ;; (entity render, agent-view slot, a render failure); a consumer `set!`s it to

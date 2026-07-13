@@ -314,7 +314,7 @@
    [:seon.ns/source :seon.ns/source]])
 
 ;; :seon.agent — the agent's OWN entity-kind. The `:seon.render/html`
-;; property makes `seon.render.default/view` the DEFAULT tile renderer via
+;; property makes `seon.render.default/view` the default surface renderer via
 ;; the same kind-lookup every other kind uses; an agent OVERRIDES by
 ;; transacting `:seon.render/html '<its-own-fn-sym>` onto its own entity
 ;; (per-entity override wins in `seon.render/entity-html-sym`). No
@@ -478,7 +478,7 @@
    gets `:seon.agent/purpose` ONLY when the human stated one; otherwise the
    attr stays ABSENT (optional = absent) until the agent derives a purpose and
    transacts it. Purpose is ENTITY DATA, never agent-directed instruction text
-   — the welcome tile shows it verbatim to the customer.
+   — the welcome canvas shows it verbatim to the customer.
    `:seon.agent/default-turn-limit`, when given, is part of that initial entity.
    Identity, the full configured context component tree, scalar dials, purpose,
    parent, and the structural home-namespace entity commit in ONE transaction.

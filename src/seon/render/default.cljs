@@ -6,13 +6,13 @@
    - `pretty-ai` / `pretty-html` — the two universal floors `seon.render`
      falls back to so the render mechanism never crashes (A-2 contract:
      missing renderer → pretty-print, never an exception).
-   - `view` — the default `:seon.render/html` agent tile (status dot,
+   - `view` — the default `:seon.render/html` agent surface (status dot,
      turn count, error banner, recent messages). Agents repoint their
-     tile by transacting a different symbol onto the slot.
+     surface by transacting a different symbol onto the slot.
    - Read helpers (`recent-messages`, `recent-errors`) used by `view`
      and the web UI.
 
-   This namespace renders the tile and reads the message log; it does
+   This namespace renders the surface and reads the message log; it does
    NOT compose the agent's prompt (that is `seon.agent.ctx`'s job).
 
    ## Independent of seon.agent
@@ -54,10 +54,10 @@
    Its content symbol
    names an agent-authored render fn that ISN'T loaded in the runtime
    right now (`seon.eval/lookup-value` returned nil). Mirrors the
-   `seon.render.canvas/welcome` tile shape (compact + expanded,
+   `seon.render.canvas/welcome` card shape (compact + expanded,
    muted text) so the human sees \"preparing this view…\", NOT an error
    dump of the render-context map. Self-heals: the moment the fn is
-   (re)defined the symbol resolves and the real tile renders again."
+   (re)defined the symbol resolves and the real surface renders again."
   {:malli/schema [:=> [:cat :symbol] :seon.render/html-response]}
   [sym]
   {:seon.render/hiccup
@@ -206,17 +206,17 @@
 ;; `seon.derive/armable-agent-ids` (state = :idle).
 
 ;; ============================================================
-;; VIEW — the default :seon.render/html. Agent-tile dashboard:
+;; View — the default :seon.render/html agent dashboard:
 ;; status dot + agent id + turn count + error banner + recent msgs.
 ;; Phosphor Terminal palette via seon.ui.components.
 ;; ============================================================
 
 (defn view
-  "Default `:seon.render/html` renderer for an agent tile.
+  "Default `:seon.render/html` renderer for an agent surface.
 
    System fn → takes system input
    shape (`:seon.db/db` + `:seon.agent/id`). Pulls the entity, renders
-   a tile with status, turn count, recent-errors banner, last 5 messages.
+   a surface with status, turn count, recent-errors banner, last 5 messages.
    Returns `{:seon.render/hiccup [...]}`."
   {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
@@ -234,7 +234,7 @@
       ;; `(for …)` lazy seqs — `seon.render.canvas/valid-hiccup?`
       ;; (the render-boundary validator) accepts only
       ;; string/int/nil/vector children, so a lazy-seq child makes
-      ;; instrumentation reject the whole tile.
+      ;; instrumentation reject the whole surface.
       (when (seq errs)
         (into [:section {:class "flex flex-col gap-1 border border-error/40 bg-error/10 rounded p-2"}]
               (map (fn [e]

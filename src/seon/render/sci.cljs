@@ -1,13 +1,12 @@
 (ns seon.render.sci
-  "SCI-bounded invocation for AGENT-authored canvas fns (tile-isolation
-   PRD Layer 1, docs/prds/agent-runtime/tile-isolation-prd-2026-06-21.md).
+  "SCI-bounded invocation for agent-authored canvas fns.
 
    ## Why this exists
 
    The pod is a SINGLE Node thread. A canvas lets an agent point
    `:seon.render.canvas/content` at a fn symbol that is invoked
    SYNCHRONOUSLY in the render path (`seon.render/html-render` →
-   `(f input-map)`). A non-terminating agent tile fn (a sync
+   `(f input-map)`). A non-terminating agent canvas fn (a sync
    `(loop [] (recur))` / `(while true)` / runaway interpreted recursion)
    blocks the one thread and freezes the WHOLE pod — heartbeat, HTTP, SSE,
    every other agent — with no recovery but a manual restart. `try/catch`
@@ -48,17 +47,17 @@
 
    `clojure.*`/`cljs.*` are SCI built-ins (aliased, not exposed). `js`
    interop is exposed via `:classes`. The exposed core/agent fns run COMPILED
-   (fast, trusted) — only the tile fn's own body is interpreted, so only ITS
+   (fast, trusted) — only the canvas fn's own body is interpreted, so only its
    loops are bounded.
 
    ## What this does NOT cover (residual class — needs Layer 2, deferred)
 
-   A tile that calls a NATIVE host loop (compiled CLJS / JS `while(true)`,
+   A canvas that calls a native host loop (compiled CLJS / JS `while(true)`,
    incl. a loop hidden in an exposed COMPILED helper) or a NATIVE regex (CLJS
    ReDoS) still blocks: `:interrupt-fn` never fires inside host code (the
    interrupt-aware overrides are JVM-only). Bounding that needs a killable
    worker (PRD Layer 2). Layer 1 bounds the reproduced freeze: an interpreted
-   loop/recursion in the tile fn's own body.
+   loop/recursion in the canvas fn's own body.
 
    Toggle: env `SEON_CANVAS_SCI=0` disables bounding (agent canvas fns fall
    back to the direct compiled call). Default on."
@@ -82,12 +81,12 @@
 ;; ============================================================
 
 (def default-budget-ms
-  "Wall-clock budget for one agent tile render. The PRD test plan wants
-   `budget ≥ max(250ms, 4 × baseline)`; measured live, a real agent tile (a few
+  "Wall-clock budget for one agent canvas render. The PRD test plan wants
+   `budget ≥ max(250ms, 4 × baseline)`; measured live, a real agent canvas (a few
    DB queries → hiccup, under the full SCI reconstruction path) renders in
    ~52ms, so 4 × baseline ≈ 208ms < 250ms — the 250ms floor holds with headroom,
    and a blocked loop is bounded to roughly this + interpreter slack (~316ms
-   observed for a cold fork). Revisit if real tiles ever exceed ~60ms p99."
+   observed for a cold fork). Revisit if real canvases ever exceed ~60ms p99."
   250)
 
 (defn bounding-enabled?
@@ -113,7 +112,7 @@
 ;; ============================================================
 ;; Per-invocation mutable holders.
 ;;
-;; The pod is single-threaded and tile renders are SYNCHRONOUS (html-render
+;; The pod is single-threaded and canvas renders are synchronous (html-render
 ;; returns before the next render begins), so a process-wide deadline +
 ;; input volatile read by each fresh ctx's interrupt-fn / host accessor is
 ;; safe — there is no overlapping invocation to race.
@@ -124,7 +123,7 @@
 
 (defn- current-input
   "Host accessor exposed to the SCI ctx as `seon.render.sci/current-input` —
-   lets the eval'd tile fn receive the live (non-serializable) input map by
+   lets the eval'd canvas fn receive the live (non-serializable) input map by
    reference without inlining it into the eval string."
   []
   @!input)
@@ -162,7 +161,7 @@
 (defn- interrupt-ex?
   "True if `e` (or any exception in its cause chain) carries the private
    `:sci.impl/interrupt` marker — i.e. it is the deadline interrupt, not a
-   plain tile error."
+   plain canvas error."
   [e]
   (loop [x e, guard 0]
     (cond
@@ -189,7 +188,7 @@
 (defn- warn-bounding-failure-once!
   "Warn + `record!` a bounding failure ONCE per [sym fault].
 
-   The render path re-invokes a persistently-broken tile on every
+   The render path re-invokes a persistently-broken canvas on every
    fetch/feed tick — per-occurrence recording would flood the DB the
    same way per-occurrence warns would flood the log, so both ride one
    dedup. `raw` is the thrown value (or a minted ex-info for the
@@ -379,16 +378,16 @@
       constant (set/map/vector/string/number/keyword); and
    3. the `:seon.fn` index members, resolved via `lookup-value`.
 
-   (1) fixed the unspecced-helper miss: a tile fn calling an aliased UNSPECCED
+   (1) fixed the unspecced-helper miss: a canvas fn calling an aliased unspecced
    helper (`h/format-count`) found no entry when `expose-ns` enumerated only the
-   SPECCED index, so SCI threw 'Unable to resolve symbol' and the tile fell to
+   specced index, so SCI threw 'Unable to resolve symbol' and the canvas fell to
    the UNBOUNDED compiled path. (2) fixes the SAME class for NON-fn own-ns vars:
-   a tile referencing an own-ns `(def grounded-dims #{…})` data constant likewise
+   a canvas referencing an own-ns `(def grounded-dims #{…})` data constant likewise
    found no entry (fns-only enumeration) and fell off the bounded path. Both
-   unions resolve the member under SCI so the tile stays interrupt-bounded — and
+   unions resolve the member under SCI so the canvas stays interrupt-bounded — and
    both reuse the SAME globalThis munge/demunge machinery as the index lookups.
 
-   `exclude` is a set of full-sym strings to skip (the tile fn itself —
+   `exclude` is a set of full-sym strings to skip (the canvas fn itself —
    re-defined via the eval). Returns nil when the ns has no resolvable members
    (an indexed-but-unloaded ns: no globalThis object, no index hits) or on any
    failure — caller degrades the SCI surface, never throws."
@@ -400,9 +399,9 @@
           ;; `exclude` (matched by full-sym string, the same shape `exclude`
           ;; carries). FNS include unspecced helpers absent from the index; the
           ;; DATA members are own-ns `(def …)` constants (sets/maps/vectors/…)
-          ;; that a tile body references by simple name. Both come from the same
+          ;; that a canvas body references by simple name. Both come from the same
           ;; live globalThis object via the one munge/demunge scheme; fns are
-          ;; merged on TOP of data so a name collision keeps the fn (a tile that
+          ;; merged on top of data so a name collision keeps the fn (a canvas that
           ;; both defs and shadows a name is degenerate, but fn-wins matches the
           ;; index merge below).
           compiled (reduce-kv (fn [m simple-sym v]
@@ -459,7 +458,7 @@
      :seon.render/ai                — a map, a bare STRING, or nil.
    Anything else is a broken render fn → a `:seon/error` block in place
    (fail-loud; re-running it on the unbounded compiled path is banned).
-   The TILE caller (`seon.render/render-agent-canvas`) additionally requires
+   The canvas caller (`seon.render/render-agent-canvas`) additionally requires
    the map envelope and fail-louds a bare value itself — the envelope-vs-
    bare tolerance is the caller's contract, not SCI's."
   [view r]
@@ -545,7 +544,7 @@
                                       m)
                                     m))
                                 {} nses)
-               ;; own-ns helpers (exclude the tile fn — re-defined via eval) +
+               ;; own-ns helpers (exclude the canvas fn — re-defined via eval) +
                ;; any :refer'd vars + every member of a `:refer :all` ns, all
                ;; resolvable by simple name after (in-ns).
                own      (or (expose-ns db (symbol agent-ns) #{(str sym)}) {})
@@ -610,7 +609,7 @@
        (bounding-error sym e :core)))))
 
 ;; ============================================================
-;; Recovery — reset the hung tile to welcome + inform the agent.
+;; Recovery — reset the hung canvas to welcome and inform the agent.
 ;;
 ;; Fire-and-forget async (db/transact! + message! are async; the render fn is
 ;; sync and returns the welcome fallback immediately). Deduped per agent-id so
@@ -627,7 +626,7 @@
 (defn- warning-text
   [sym budget-ms]
   (str "Your canvas fn `" sym "` did not terminate within " budget-ms
-       "ms and was reset to the welcome tile. Tile fns must be PURE, FAST, "
+       "ms and was reset to the welcome canvas. Canvas fns must be pure, fast, "
        "TERMINATING database→hiccup renders — no loops, blocking, or native "
        "regex. They return {:seon.render/hiccup … :seon.render/ai …} from a "
        "few DB queries. Re-wire :seon.render.canvas/content with a fn that "
@@ -665,20 +664,20 @@
         (.catch (fn [e]
                   (log/warn! {:seon.log/source  ::recover-hung-canvas!
                               :seon.log/message
-                              (str "tile recovery for " agent-id
+                              (str "canvas recovery for " agent-id
                                    " hit an error: " (or (.-message e) (str e)))})))
         (.finally (fn [] (swap! !recovering disj agent-id)))))
   nil)
 
-;; The active tile-error PUSH was DROPPED (#43 / D2, 2026-06-21). A
-;; forged message wakes the agent — and the old notify-tile-error! sent
+;; The active canvas-error push was dropped (#43 / D2, 2026-06-21). A
+;; forged message wakes the agent — and the old notification sent
 ;; FROM the user-ref with :force, indistinguishable from a human message,
-;; so a broken tile re-armed the wake loop AND defeated the halt. There is
-;; no active intervention now: a broken tile is a DERIVED surface. The
+;; so a broken canvas re-armed the wake loop and defeated the halt. There is
+;; no active intervention now: a broken canvas is a derived surface. The
 ;; `:seon.render/ai` render in seon.render.canvas/error-response carries
 ;; "YOUR CANVAS IS BROKEN — …" and the :seon.agent.ctx.canvas/canvas-
 ;; section re-derives it from the db value EVERY turn (a pure fn of state,
-;; no stored error flag, self-healing when the tile renders clean again).
+;; no stored error flag, self-healing when the canvas renders clean again).
 ;; The agent learns of breakage by reading its own context, not by being
-;; woken. The dedup atom + note-tile-ok! that existed only to throttle the
+;; woken. The deleted dedup atom existed only to throttle the
 ;; push went with it — a derived surface needs no dedup.

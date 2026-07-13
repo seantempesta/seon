@@ -2,7 +2,7 @@
   "Cron-as-data — the SCHEDULE entity + the PURE cron logic. An agent owns a
    vector of schedule maps (`:seon.agent/schedules`); each carries a 5-field
    cron expression AND the qualified fn to invoke when due (code-as-data,
-   resolved like tile-content / section-ai). This generalizes cron from
+   resolved like canvas content / section AI). This generalizes cron from
    'wake me' to 'at this schedule, run this fn.'
 
    This namespace OWNS the `:seon.agent.schedule/*` schemas and the pure cron

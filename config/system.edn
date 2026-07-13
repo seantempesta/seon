@@ -153,7 +153,7 @@
  ;; ARE what a fresh agent sees as its function surface. Each entry must match
  ;; `seon.agent.home/require-spec` (`[ns :as alias]` or `[ns :refer [fns…]]`) — a
  ;; bare `[ns]` is rejected by the transact schema, so the `my.*` toolkit carries
- ;; its conventional short alias (kb/data/ui/tile) even though it is called
+ ;; its conventional short alias (kb/data/ui/canvas) even though it is called
  ;; full-qualified. `seon.agent` (the orchestration surface) is deliberately
  ;; NOT here — it belongs to root only (see note on :seon.config/root-context).
  ;; ── SYSTEM TEXT — GRADUATED from the measured minimal arc (v3.1,
@@ -201,7 +201,7 @@
  ;; tested blocks per context-rebuild.md; the old tree is frozen in
  ;; config/legacy.edn for comparison drives only). Blocks: namespaces
  ;; (repl+namespaces milestones) · plan (plan milestone, html twin = the
- ;; human's live plan tile) · transcript (the spine).
+ ;; human's live plan surface) · transcript (the spine).
  :seon.config/agent-context
  {:seon.agent/ctx
   [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20

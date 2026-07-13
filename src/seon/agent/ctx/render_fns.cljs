@@ -5,7 +5,7 @@
    The render pass QUERIES THE PROGRAM GRAPH for fns in the agent's CURRENT
    namespace whose OUTPUT schema is a render type — a `:map` declaring
    `:seon.render/ai` (a block: its string joins the prompt) and/or
-   `:seon.render/hiccup` (a tile: its own surface on the agent's page; the
+   `:seon.render/hiccup` (its own surface on the agent's page; the
    `:seon.render/html-response` envelope declares both — the twins). Each
    such fn becomes ONE DERIVED context block ([[derived-blocks]]) that
    [[seon.agent.ctx/context-root]] merges into the agent's stored block set
@@ -28,7 +28,7 @@
    injection): the runner passes the render's frozen `:seon.db/db`, the
    `:seon.agent/id`, and `:seon.render/at` (basis-t) in the input map. A
    throw / interrupt / wrong shape becomes a `;; ⚠` line in the block and
-   a `:seon/error` tile — the render pass always survives. The ai output
+   a `:seon/error` card — the render pass always survives. The ai output
    is clipped at `seon.config/render-fn-token-cap` TOKENS."
   (:require
     [cljs.reader :as reader]
@@ -50,7 +50,7 @@
   30)
 
 (def ^:private twin-keys
-  "The output-map keys that make a fn a renderer — the block/tile twins
+  "The output-map keys that make a fn a renderer — the block/surface twins
    (`:seon.render/html-response` is the established envelope; a map
    declaring either key alone is a single-sided renderer)."
   #{:seon.render/ai :seon.render/hiccup})
@@ -142,7 +142,7 @@
    [::pinned-syms  {:optional true} ::pinned-syms]])
 
 ;; ============================================================
-;; The canvas default — the agent's LAST-UPDATED tile (context.md /
+;; The canvas default — the agent's last-updated surface (context.md /
 ;; ui.md §canvas: "derived by default, pinnable to override"). Pure
 ;; f(db value): nothing is stored, no touched-at stamp — the touch
 ;; coordinate is read off the datoms' tx column (+ the history view,
@@ -517,11 +517,11 @@
                      ":seon.render/ai — fix its output"))))))
 
 (defn render-fn-block-html
-  "The derived auto-run block's `:seon.render/html` slot — the tile twin.
+  "The derived auto-run block's `:seon.render/html` slot — the surface twin.
 
    Runs the node's `::fn-sym` through [[run-render-fn]] and returns its
    `:seon.render/hiccup` (envelope or bare vector); nil renders nothing. An
-   interrupt / error / wrong shape becomes the ONE `:seon/error` tile in
+   interrupt / error / wrong shape becomes the one `:seon/error` card in
    place ([[seon.render.canvas/error-card]]) — the render pass survives."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
   [in]

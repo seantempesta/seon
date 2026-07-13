@@ -965,7 +965,7 @@
           "moment the symbol resolves — no re-pointing needed. (Or point the "
           "canvas at a fn that already exists, or at literal hiccup.)")
      :seon.warn/example
-     (str "(defn my-kb-tile\n"
+     (str "(defn my-kb-canvas\n"
           "  {:malli/schema [:=> [:cat :seon.render/system-input]\n"
           "                  :seon.render/html-response]}\n"
           "  [{:seon.db/keys [db] :seon.agent/keys [id]}]\n"
@@ -973,7 +973,7 @@
           "(seon.db/transact!\n"
           "  {:seon.db/tx-data\n"
           "   [{:seon.agent/id \"<id>\"\n"
-          "     :seon.render.canvas/content `my.agent.<id>/my-kb-tile}]})")}))
+          "     :seon.render.canvas/content `my.agent.<id>/my-kb-canvas}]})")}))
 
 ;; ============================================================
 ;; Registry + clustered renderer

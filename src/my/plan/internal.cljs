@@ -1466,11 +1466,11 @@
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (plan-body (or db @db/*conn*) [:seon.agent/id id]))
 
-;; --- The `:seon.render/html` TWIN — the human's live plan tile. -----------
+;; --- The `:seon.render/html` twin — the human's live plan surface. --------
 ;; --- Colocated with [[plan-block]] (the transcript precedent). Zero prompt
 ;; --- cost: `*.internal` nses never render into agent context
 ;; --- (seon.agent.ctx.namespaces/hidden-ns-name?). Where the :ai block
-;; --- WINDOWS (anchor + capped frontier + recent-done tail), the tile shows
+;; --- Windows (anchor + capped frontier + recent-done tail), the surface shows
 ;; --- the WHOLE forest — the human explores what the prompt windows away.
 ;; ---
 ;; --- STRUCTURE vs SIGNAL (2026-07-11): [[build-forest]] assembles ONLY the
@@ -1483,8 +1483,8 @@
 ;; --- ([[rollup]] / [[ready?]] / [[blocked?]] / [[anchor]]), ONE derivation
 ;; --- mechanism over the fixed recursive `descendant` rule. (Until the
 ;; --- datahike-CLJS recursive-rule engine fix — fork 1598a824 — those rules
-;; --- yielded nothing past depth 1, so the tile carried a parallel pure-walk
-;; --- re-derivation; that workaround is now deleted and the tile agrees with
+;; --- yielded nothing past depth 1, so the surface carried a parallel pure-walk
+;; --- re-derivation; that workaround is now deleted and the surface agrees with
 ;; --- the :ai block on every tree by construction.) Plain pulled data only
 ;; --- (no lazy Entity walk): a `my.*` render symbol is SCI-re-interpreted
 ;; --- from its stored source at render time, and the plain-data primitives
@@ -1715,7 +1715,7 @@
        (map #(step-row-html db % next-id 0) (:my.plan/children root))]]]))
 
 (defn plan-block-html
-  "Live, explorable HTML twin of [[plan-block]] — the `/agent/{id}` tile.
+  "Live, explorable HTML twin of [[plan-block]] — a `/agent/{id}` surface.
 
    Renders the agent's WHOLE plan forest behind bounded root disclosures (the
    :ai block windows by content). The focused root starts open; other roots are

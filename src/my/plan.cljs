@@ -28,10 +28,10 @@
         :my.plan/children
         [{:my.plan/title \"design + register the schema\" :my.plan/ref \"schema\"
           :my.plan/expect \"register! returns and a test row transacts\"}
-         {:my.plan/title \"store the seed expenses\" :my.plan/after [\"schema\"]
+         {:my.plan/title \"write the seed expenses\" :my.plan/after [\"schema\"]
           :my.plan/ref \"rows\"}
-         {:my.plan/title \"summary fn + tile\" :my.plan/after [\"rows\"]
-          :my.plan/expect \"tile renders totals with zero warnings\"}]})
+         {:my.plan/title \"summary fn + surface\" :my.plan/after [\"rows\"]
+          :my.plan/expect \"surface renders totals with zero warnings\"}]})
      (my.plan/active! {:my.plan/id \"<schema-step-id>\"})
      ;; …do the work, VERIFY the expect, then:
      (my.plan/done!   {:my.plan/id \"<schema-step-id>\"})"

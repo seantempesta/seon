@@ -1,7 +1,7 @@
 (ns seon.web.reactive.transform
   "Render-time rewrite — agent fn-calls in handler slots → standard Datastar.
 
-   Agents make a tile interactive by writing a NORMAL Clojure fn-call (or a
+   Agents make a canvas interactive by writing a normal Clojure fn-call (or a
    bare fn-ref) in an event-handler slot of their hiccup. The browser only
    ever sees STANDARD Datastar — there is no bespoke client macro. This is a
    server-side postwalk that runs at render time over AGENT-authored hiccup
@@ -11,7 +11,7 @@
 
    - fn-CALL — a seq whose head is a symbol, args bound at RENDER time:
        [:button {:on-click (list 'cancel-order! id)} \"Cancel\"]
-     `id` is the live value captured when the tile rendered. Rewritten to a
+     `id` is the live value captured when the canvas rendered. Rewritten to a
      POST that carries those args transit-serialized.
 
    - fn-REF — a bare (or qualified) symbol, args from CLICK-time signals:

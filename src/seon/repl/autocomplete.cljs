@@ -104,7 +104,7 @@
    one live-`now` line), no `result/<id>` handles or resume markers (the
    process-identity bytes) — the render is a pure function of the db VALUE.
    The `:warnings` derivation is deliberately EXCLUDED (its slow-evals check
-   reads the wall clock and tile checks read live vars — impure over a db
+   reads the wall clock and canvas checks read live vars — impure over a db
    value). Per-block `:seon.agent.ctx/token-cap` bounds each band. The
    CODE default for the config-through-DB `:seon.config/context-profiles`
    `:autocomplete` entry — a db-stored profile (the one in force at an

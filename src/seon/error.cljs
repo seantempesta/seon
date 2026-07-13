@@ -189,7 +189,7 @@
 (defn agent-authored-sym?
   "True when `sym` names an AGENT-authored fn.
 
-   Any agent-authored render/layout/handler (a tile fn, a context-block
+   Any agent-authored render/layout/handler (a canvas fn, a context-block
    render, a `/call` handler) gets the SCI wrapper, and a failure while
    CALLING it is `:agent`-fault; the core
    (`seon.*`/`clojure.*`/`cljs.*`/`sci.*`/`goog.*`) compiled path is

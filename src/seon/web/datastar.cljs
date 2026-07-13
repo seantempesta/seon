@@ -918,7 +918,7 @@
 ;; SIBLING in <body>) so the feed's whole-`#app-view` morph never clobbers the
 ;; input's focus/value. They reuse the already-routed, same-origin-gated
 ;; POST endpoints (`/chat`, `/agents/new`) — no Core change. A fixed bottom
-;; bar + an inline-style spacer reserves scroll room so the last tile is never
+;; bar + an inline-style spacer reserves scroll room so the last card is never
 ;; hidden behind the bar. Only output.css-present utilities are used (the
 ;; spacer height is an inline style, not a Tailwind class).
 ;; ============================================================
@@ -935,7 +935,7 @@
    used). `data-bind=\"text\"` keeps the input value in a datastar signal so a
    trailing `$text=''` clears it after send; `required` blocks a blank send
    client-side. The agent's reply needs NO handling here: it transacts and the
-   broadcast feed re-renders the `:transcript` tile. A 204 reply closes the
+   broadcast feed re-renders the `:transcript` surface. A 204 reply closes the
    datastar stream cleanly (no morph from this POST). `id` is pre-validated by
    `safe-id?`, so it is injection-safe inside the single-quoted `@post('…')`."
   [id]

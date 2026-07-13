@@ -97,7 +97,7 @@
    [:seon.agent.message/to {:optional true}
     [:or :seon.db/ref [:vector :seon.db/ref]]]
    ;; Provenance override. Absent ⇒ DERIVED from `from` (user ⇒ :human,
-   ;; else :agent). A substrate-originated nudge (tile recovery) passes
+   ;; else :agent). A substrate-originated nudge (canvas recovery) passes
    ;; :core explicitly so it can't wake an idle agent. The HTTP/user
    ;; adapter relies on the derived :human; agent sends on the derived
    ;; :agent.

@@ -29,7 +29,7 @@
       no matching `:seon.fn` row → REFUSED.
 
    A refused call is NEVER invoked; it returns a clean error envelope (403).
-   This is the SAME surface idea as the SCI tile sandbox that denies `fs` (the
+   This is the same surface idea as the SCI canvas sandbox that denies `fs` (the
    symbol simply doesn't resolve) — but as an explicit, queryable pre-invoke
    gate, because for an interaction the refusal IS the security claim.
 

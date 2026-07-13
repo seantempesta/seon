@@ -1438,20 +1438,20 @@
     "; twins: :seon.render/ai (text for you) + :seon.render/html (hiccup\n"
     "; for their screen) — one render, two surfaces. Your canvas and\n"
     "; your context sections both ride this shape. A *section* (not just\n"
-    "; the tile) can carry an :seon.render/html twin — that is where rich\n"
+    "; the surface) can carry an :seon.render/html twin — that is where rich\n"
     "; panels (tables, images, SVG) go: the agent reads the :ai text, the\n"
     "; human sees the :html panel, one section row serving both.\n"
     "; AUTO-RUN: a defn in your CURRENT ns whose :malli/schema OUTPUT is a\n"
     "; map declaring :seon.render/ai (and/or :seon.render/hiccup) runs\n"
     "; automatically every turn — its output becomes a live section of your\n"
-    "; own context AND a tile on your page, no call needed. Declare\n"
+    "; own context and a surface on your page, no call needed. Declare\n"
     "; :seon.db/db / :seon.agent/id as optional request keys and the\n"
     "; current values arrive by themselves. Writing such a specced view fn\n"
     "; IS building a live, always-current view.\n"
     "; SHOW, DON'T TELL: your canvas (the canvas section below) is\n"
     "; your PRIMARY surface for showing your human data, results, and\n"
     "; status; (message/user \"...\") is narration/backup that scrolls away.\n"
-    "; One carve-out: a tile is never a REPLY — a final answer must still\n"
+    "; One carve-out: a surface is never a reply — a final answer must still\n"
     "; be SENT with (message/user \"...\") or (complete \"...\").\n"
     ";\n"
     "; THE SHARED STORE. All agents are wired to ONE shared datahike\n"
@@ -1617,7 +1617,7 @@
     ";   (complete …)), the task is DONE — end the loop that same turn. Do\n"
     ";   NOT keep going once the goal is met: re-confirming a value you\n"
     ";   already computed, re-storing what you already stored, restyling a\n"
-    ";   tile, or re-announcing \"it works / I'm ready\" are not progress —\n"
+    ";   surface, or re-announcing \"it works / I'm ready\" are not progress —\n"
     ";   they burn turns on a finished task. The done-signal is the GOAL\n"
     ";   being satisfied, not your open steps or the turn cap. Ask each turn:\n"
     ";   \"do I already have what was asked for?\" If yes, deliver it and stop.\n"
@@ -1650,7 +1650,7 @@
     ";   grants one MORE turn — so a fresh message always buys you a turn to\n"
     ";   see and respond to it. The readline shows loop K/cap. As you near\n"
     ";   the cap, wrap up: (complete \"...\") with what you have.\n"
-    "; - Building tile or panel hiccup from a sequence: splice children\n"
+    "; - Building canvas or panel hiccup from a sequence: splice children\n"
     ";   with (into [:div ...] children), never nest a bare seq as one\n"
     ";   child. Eval your render fn once at the REPL to eyeball the hiccup\n"
     ";   before you wire it onto a surface.\n"
@@ -2493,7 +2493,7 @@
   "The agent entity, pulled ONCE (the run/turn history is walked separately
    by the transcript; a bare `[*]` pull would inline every turn/eval
    component). Rides in the injected ctx so every section fn reads it without
-   re-pulling. Registered-but-uninstalled attrs (e.g. the tile slot on a
+   re-pulling. Registered-but-uninstalled attrs (e.g. the canvas pin on a
    store predating it) are silently filtered by the pull guard — safe."
   [db id]
   (if-let [eid (ffirst
@@ -2532,7 +2532,7 @@
    [[agent-blocks]], with NO render-time merge over a separate default
    catalog (every block was seed-copied into the agent at creation) —
    PLUS the DERIVED auto-run blocks ([[seon.agent.ctx.render-fns/derived-blocks]]):
-   one block/tile twin per current-ns fn whose output schema declares a
+   one block/surface twin per current-ns fn whose output schema declares a
    render type, computed per render, never stored. One ordered list.
    The agent entity is pulled once
    and stashed so every child reads it without re-pulling.
@@ -2676,10 +2676,10 @@
 (defn- block-renders-ai?
   "A context block contributes to the agent's PROMPT only when it declares an
    `:seon.render/ai` render. An html-only block (a human-facing widget — the
-   canvas/canvas, an acme dashboard tile) has nothing to say to the agent:
+   canvas/canvas, an ACME dashboard surface) has nothing to say to the agent:
    it is OMITTED from the prompt entirely — no self-demarcating bracket, no
    generic data-dump stub (`;; :canvas {:db/id … :seon.agent.ctx/name …}`).
-   This is the inverse of the html view's 'ai-only block contributes no tile'
+   This is the inverse of the html view's 'AI-only block contributes no surface'
    rule, and the reactive-context principle: a block surfaces to the agent
    only when it has ai content for the current state. The html twin is
    untouched — the block still renders for humans ([[render-context-html]]).

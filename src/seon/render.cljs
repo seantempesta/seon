@@ -1,6 +1,6 @@
 (ns seon.render
   "The two renders every renderable carries — `:seon.render/ai` (the
-   prompt text) and `:seon.render/html` (a tile) — selected by key
+   prompt text) and `:seon.render/html` (a surface) — selected by key
    presence, never a stored discriminator.
 
    Each slot is a fully-qualified symbol (or a literal: a verbatim
@@ -176,12 +176,12 @@
 ;; (render-entity-html callers already handle nil via `or`).
 ;;
 ;; `:seon.render/ai` — the OPTIONAL ai render (PRD §2): how the agent
-;; knows what its human sees. Tile fns return it alongside the hiccup;
+;; knows what its human sees. Canvas fns return it alongside the hiccup;
 ;; the awareness section renders it into the agent's context every turn.
 ;; Same render idea as `:seon.agent.ctx/block`.
 ;;
 ;; `:seon.render/error` — present when the renderer THREW: the hiccup
-;; is the human fallback tile and this entry carries the envelope so
+;; is the human fallback card and this entry carries the envelope so
 ;; the agent sees its own renderer is broken (vanish = banned).
 (schema/register! :seon.render/html-response
   [:map
@@ -375,7 +375,7 @@
 ;; may return BARE content — hiccup for the html view, a String for the
 ;; ai view — OR the established `:seon.render/html-response` MAP envelope
 ;; `{:seon.render/hiccup <h> :seon.render/ai <s> …}`. This is the ONLY
-;; place the envelope is unwrapped, so entity tiles AND ctx-block slots
+;; place the envelope is unwrapped, so entity surfaces and context-block slots
 ;; AND recursive sections never leak a raw map into hiccup (the
 ;; map-renders-empty bug). No second extraction site, no second contract.
 ;; ============================================================
@@ -460,7 +460,7 @@
    The schema's html symbol IS a converter (`seon.handlers.*/render-html`)
    that returns BARE hiccup, called with the entity under
    `:seon.render/node`. A renderer that THROWS does NOT vanish (same
-   posture as the canvas's `error-response`): the tile becomes a
+   posture as the canvas's `error-response`): the surface becomes a
    legible error banner naming the fn + message, siblings render
    untouched, the page stays 200.
 
@@ -727,12 +727,12 @@
           :ai   msg)))))
 
 ;; ============================================================
-;; Agent tile (canvas U1) — the agent's ONE always-visible HTML
+;; Agent canvas (canvas U1) — the agent's one always-visible HTML
 ;; surface. Resolution (seon.render.canvas/wired-content):
 ;; per-entity `:seon.render.canvas/content` → the core
 ;; welcome. Neither `:seon.render/html` nor the `:seon.agent` schema
-;; default is consulted for the TILE — that key means only the
-;; generic entity-tile render (one key, one meaning; PRD §8.1).
+;; default is consulted for the canvas — that key means only the
+;; generic entity-surface render (one key, one meaning; PRD §8.1).
 ;; ============================================================
 
 (def ^:private canvas-entity-pattern
@@ -740,7 +740,7 @@
    (wired-content), the welcome's purpose/id, and the run pointer (derived
    state). Deliberately NOT '[*]: the full pull would inline the agent's whole
    component tree per canvas render (T5's amplifier finding, open-issues
-   2026-06-11). Tile fns needing more get `:seon.db/db` in their input and
+   2026-06-11). Canvas fns needing more get `:seon.db/db` in their input and
    query for it."
   [:db/id
    :seon.agent/id
@@ -763,9 +763,9 @@
 
    Returns `:seon.render/html-response`. A renderer that THROWS does
    NOT vanish: the response is `seon.render.canvas/error-response`
-   — fallback tile for the human, `:seon.render/error` envelope +
+   — fallback card for the human, `:seon.render/error` envelope +
    `:seon.render/ai` render for the agent. nil hiccup only when the
-   agent entity doesn't exist (the tile never crashes its caller)."
+   agent entity doesn't exist (the canvas never crashes its caller)."
   {:malli/schema [:=> [:cat :seon.render/canvas-request] :seon.render/html-response]}
   [{:seon.agent/keys [id] :seon.db/keys [db]}]
   (let [db  (or db @db/*conn*)
@@ -777,12 +777,12 @@
         ent (try (db/pull db canvas-entity-pattern [:seon.agent/id id])
                  ;; probe: the only throw this covers is the unresolvable
                  ;; lookup-ref of a MISSING agent — nil ent is the documented
-                 ;; contract (tile renders nothing), an expected absence.
+                 ;; contract (canvas renders nothing), an expected absence.
                  (catch :default _ nil))]
     (if (nil? (:seon.agent/id ent))
       {:seon.render/hiccup nil}
       (let [;; No pin stored → the DERIVED default: the agent's
-            ;; last-updated tile (context.md §canvas — derive the
+            ;; last-updated surface (context.md §canvas — derive the
             ;; default, store only the pin). Guarded: a derivation
             ;; failure means no derived candidate → the welcome.
             derived
@@ -792,7 +792,7 @@
                        {:seon.db/db db :seon.agent/id id}))
                    ;; core derivation (last-updated-surface) throwing is a defect
                    ;; (:core) — a genuine "no candidate" RETURNS nil, it does
-                   ;; not throw; the tile still degrades to the welcome.
+                   ;; not throw; the canvas still degrades to the welcome.
                    (catch :default e
                      (when-not (err/recorded? e)
                        (err/record! {:seon.error/raw e :seon.error/fault :core}))
@@ -806,17 +806,17 @@
                    :seon.agent/id      id
                    :seon.render/entity ent}]
         (try
-          (let [;; AGENT-authored tile fns run under an SCI wall-clock
-                ;; interrupt so a non-terminating tile (a sync loop/recur)
+          (let [;; Agent-authored canvas fns run under an SCI wall-clock
+                ;; interrupt so a non-terminating canvas (a sync loop/recur)
                 ;; aborts in-process instead of freezing the single pod thread
-                ;; (tile-isolation PRD Layer 1). The core `welcome`, core
+                ;; (canvas isolation PRD Layer 1). The core `welcome`, core
                 ;; section fns, and literal hiccup stay on the fast compiled
                 ;; `html-render` path untouched.
                 resp   (if (and (render-sci/bounding-enabled?)
                                 (err/agent-authored-sym? value))
                          (let [r (render-sci/invoke-bounded value input)]
                            (cond
-                             ;; deadline tripped — reset the tile to welcome +
+                             ;; deadline tripped — reset the canvas to welcome +
                              ;; warn the agent (async, deduped), and render the
                              ;; known-good welcome for the human this turn.
                              (:seon.render.sci/interrupt r)
@@ -831,21 +831,21 @@
                              ;; single-threaded pod.
                              (:seon.render.sci/error r)
                              (throw (ex-info
-                                      (str "tile fn " value " could not run "
+                                      (str "canvas fn " value " could not run "
                                            "under SCI bounding — "
                                            (get-in r [:seon.render.sci/error
                                                       :seon.error/message]))
                                       {:seon/error (:seon.render.sci/error r)}))
-                             ;; the TILE contract is the html-response MAP
+                             ;; the canvas contract is the html-response map
                              ;; envelope (nil tolerated — renders nothing);
-                             ;; a bare value is a broken tile fn → the same
+                             ;; a bare value is a broken canvas fn → the same
                              ;; guard below (legible error-response), never
                              ;; an unbounded compiled re-run.
                              (or (nil? r) (map? r)) r
                              :else
                              (throw (ex-info
-                                      (str "tile fn " value " returned a bare "
-                                           "value — a tile fn must return the "
+                                      (str "canvas fn " value " returned a bare "
+                                           "value — a canvas fn must return the "
                                            "{:seon.render/hiccup … "
                                            ":seon.render/ai …} map envelope")
                                       {:seon.render.canvas/content value}))))
@@ -856,8 +856,8 @@
                 ;; handler symbols qualify to the authoring namespace; /call
                 ;; routes by that namespace into the owning agent's sandbox.
                 ;;
-                ;; The authoring ns is the tile fn's ns when an agent wired a
-                ;; SYMBOL, but a LITERAL-HICCUP tile (the easiest path the
+                ;; The authoring ns is the canvas fn's ns when an agent wired a
+                ;; symbol, but a literal-hiccup canvas (the easiest path the
                 ;; canvas guidance pushes) has no symbol — it is still
                 ;; agent-authored, so we qualify its bare handlers to the
                 ;; agent's OWN home ns `my.agent.<id>` (the same id /call
@@ -891,7 +891,7 @@
               (when-some [{:seon.render.canvas/keys
                            [structure-path structure-message]}
                           (canvas/hiccup-structure-error hiccup)]
-                (throw (ex-info (str "invalid tile hiccup — "
+                (throw (ex-info (str "invalid canvas hiccup — "
                                      structure-message
                                      " (at path " (pr-str structure-path)
                                      ")")
@@ -900,26 +900,26 @@
               ;; (b) backstop: PROVE the hiccup serializes. ->string is
               ;;     pure + deterministic, so success here guarantees
               ;;     the page render embedding this hiccup cannot throw
-              ;;     on this tile.
+              ;;     on this canvas.
               (html/->string hiccup))
             resp)
           (catch :default e
-            ;; The tile `value` decides the population: an agent-authored
+            ;; The canvas `value` decides the population: an agent-authored
             ;; symbol OR literal hiccup (qualified to my.agent.<id> above) is
-            ;; the agent's own tile → :agent; a core tile symbol → :core.
+            ;; the agent's own canvas → :agent; a core canvas symbol → :core.
             ;; recorded? skips the datom when the SCI bounding funnel already
-            ;; recorded an agent tile-fn failure (re-thrown at :sci/error).
+            ;; recorded an agent canvas-fn failure (re-thrown at :sci/error).
             ;; Record BEFORE strict-fail! (re-throws in strict mode).
             (when-not (err/recorded? e)
               (err/record! {:seon.error/raw   e
                             :seon.error/fault (if (or (err/agent-authored-sym? value)
                                                       (vector? value))
                                                 :agent :core)}))
-            ;; STRICT dial: dev/test/benchmark → re-throw LOUD (catch a broken tile
+            ;; Strict dial: dev/test/benchmark → re-throw loudly (catch a broken canvas
             ;; the moment it renders); prod → the calm derived banner below.
             (strict-fail! :canvas e)
-            ;; A broken tile must never crash the render and never show the
-            ;; human a scary error: return the calm 'updating this tile' placeholder
+            ;; A broken canvas must never crash the render and never show the
+            ;; human a scary error: return the calm fallback placeholder
             ;; for the human. The agent is NOT actively pushed a message (#43 /
             ;; D2 — a forged self-message wakes + defeats the halt); breakage
             ;; is a DERIVED surface: error-response's :seon.render/ai render
@@ -953,7 +953,7 @@
           (unwrap-response :seon.render/ai r))
         ;; A throwing AI renderer is LEGIBLE, never nil-vanished — the
         ;; agent reading its context sees its own renderer is broken
-        ;; (mirror of the html banner above / the tile's error render).
+        ;; (mirror of the html banner above / the canvas's error render).
         (catch :default e
           ;; Classify by the render symbol (fault-for): agent-authored
           ;; converter → :agent, core converter → :core. Record BEFORE
@@ -1083,7 +1083,7 @@
               ;; NOWHERE is a genuinely-missing slot → the legible self-heal
               ;; line; anything else throws into the walker's guard
               ;; (strict dial → loud; prod → the in-place ⚠ line / error
-              ;; tile). NEVER the unbounded compiled call: a hang there
+              ;; canvas). Never the unbounded compiled call: a hang there
               ;; would wedge the single-threaded pod.
               (and (map? r) (:seon.render.sci/error r))
               (if (nil? (eval/lookup-value slot-val))
@@ -1114,7 +1114,7 @@
    path, so the result is always a String (`:seon.render/ai`) or hiccup
    (`:seon.render/html`), never a raw map. A hidden node contributes a
    one-line prune note (ai) or nothing (html); a throwing html render
-   becomes the overridable error tile, never crashes."
+   becomes the overridable error card, never crashes."
   {:malli/schema [:=> [:cat :keyword :map :any] :any]}
   [view ctx node]
   (if (:seon.render/hidden? node)
@@ -1152,9 +1152,9 @@
 ;; layout hole. `(slot ctx :canvas)` looks the block up by
 ;; `:seon.agent.ctx/name` in the agent's OWN `:seon.agent/ctx`, renders
 ;; its `:seon.render/html` through the guarded engine, and wraps it as
-;; `[:div {:id "tile-<name>" :data-slot "<name>"} <html>]` — a stable DOM
+;; `[:div {:id "surface-<name>" :data-slot "<name>"} <html>]` — a stable DOM
 ;; id for idiomorph. GUARDED: a missing block or a throwing render
-;; becomes a `:seon/error` value rendered as an error tile in the slot,
+;; becomes a `:seon/error` value rendered as an error card in the slot,
 ;; so a sibling slot never crashes (never-crash-always-surface). The same
 ;; handle is injected into every render ctx as `:seon.render/slot`, so a
 ;; core or agent layout calls `((:seon.render/slot in) :canvas)`.
@@ -1188,13 +1188,13 @@
    [:seon.agent/id {:optional true} :seon.agent/id]])
 
 (defn slot
-  "Place the agent's block named `block-name` into a named tile slot.
+  "Place the agent's block named `block-name` into a named surface slot.
    Looks the block up by `:seon.agent.ctx/name` in the agent's OWN
    `:seon.agent/ctx` (`ctx` carries `:seon.db/db` + `:seon.agent/id`),
    renders its `:seon.render/html` through the guarded engine, and wraps
-   it as `[:div {:id \"tile-<name>\" :data-slot \"<name>\"} <html>]` — a
+   it as `[:div {:id \"surface-<name>\" :data-slot \"<name>\"} <html>]` — a
    stable DOM id for idiomorph. GUARDED: a missing block or a throwing
-   render becomes a `:seon/error` value surfaced as an error tile, so a
+   render becomes a `:seon/error` value surfaced as an error card, so a
    sibling slot never crashes (never-crash-always-surface). Injected into
    every render ctx as `:seon.render/slot`."
   {:malli/schema [:=> [:catn [::ctx ::slot-request] [::block-name :keyword]]

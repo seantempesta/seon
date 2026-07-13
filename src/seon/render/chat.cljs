@@ -203,7 +203,7 @@
    outgoing peer sends never count (direction-classified upstream).
    Returns `{}` when the agent has never replied (optional = absent).
 
-   This is what the default root tile shows
+   This is what the default root canvas shows
    (`seon.render.canvas/welcome`'s compact block: purpose + id +
    last reply) — DERIVED from the message log at render time, nothing
    stored (reactive-context doctrine)."

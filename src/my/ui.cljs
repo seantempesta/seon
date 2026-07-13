@@ -26,7 +26,7 @@
           [{:seon.agent/id (seon.db/current-agent-id)
             :seon.render.canvas/content (:seon.render/hiccup s)}]}))
 
-   For a LIVE tile that re-derives every render, wrap a `section` call in a
+   For a live surface that re-derives every render, wrap a `section` call in a
    home-ns fn and wire its SYMBOL instead (see the `ui-canvas` skill).
 
    All helpers emit ONLY safelisted classes (`resources/public/css/input.css`)
@@ -283,7 +283,7 @@
    Stacks every block's
    `:seon.render/hiccup` and joins every block's `:seon.render/ai`, so the
    composed result is itself a faithful `:seon.render/html-response` you can
-   transact onto your canvas (or return from a tile fn).
+   transact onto your canvas (or return from a canvas fn).
 
      (section {:my.ui/title \"Subscriptions\"
                :my.ui/blocks [(status-line {…}) (kv-table {…})]})"
