@@ -41,15 +41,15 @@
 #                      ALL cluster stores + transient data, clear ALL logs,
 #                      restart the default stack fresh. No undo.
 #
-# State per process: tmp/proc/<name>/{pid,cmd,started-at,lock/}
+# State per process: tmp/proc/<name>/{pid,pid-start,session-owned,cmd,started-at,lock}
 # Logs:              logs/<name>.log (truncated on fresh start)
 #
 # Stale lock recovery: if `bin/seon` is itself SIGKILLed mid-operation,
-# the lock dir may persist. Remove with `rm -rf tmp/proc/<name>/lock`.
+# the lock symlink may persist. Remove with `rm -f tmp/proc/<name>/lock`.
 
 set -euo pipefail
 
-SEON_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SEON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SEON_ROOT"
 
 # Pin the JDK for every JVM process this supervisor launches via the shared
@@ -827,6 +827,8 @@ cmd_prep() {
 
 state_dir()    { echo "$PROC_DIR/$1"; }
 pid_file()     { echo "$PROC_DIR/$1/pid"; }
+pid_start_file() { echo "$PROC_DIR/$1/pid-start"; }
+session_owned_file() { echo "$PROC_DIR/$1/session-owned"; }
 cmd_file()     { echo "$PROC_DIR/$1/cmd"; }
 started_file() { echo "$PROC_DIR/$1/started-at"; }
 lock_dir()     { echo "$PROC_DIR/$1/lock"; }
@@ -835,14 +837,74 @@ log_file()     { echo "$LOG_DIR/$1.log"; }
 ensure_state() { mkdir -p "$(state_dir "$1")"; }
 
 # ============================================================
-# Mutex via mkdir (atomic on POSIX, works on macOS without flock).
-# Each lock dir contains an `owner` file with the holding script's PID
-# so a competing acquirer can detect + reclaim stale locks (held by
-# a script that died without cleanup, e.g. SIGKILL).
+# Mutex via symlink creation (atomic on POSIX, works on macOS without flock).
+# The symlink target IS the holding script's PID, so ownership is published in
+# the same atomic operation that acquires the lock. This avoids the old
+# mkdir-then-write-owner interval where a descheduled live owner briefly looked
+# abandoned to a competitor.
 #
-# Lock is released by `release_lock` (explicit) or by the EXIT trap as
-# a backstop. Both call paths converge on the same rm -rf.
+# Lock is released by `release_lock` (explicit) or by the process-wide trap as
+# a backstop. The trap tracks EVERY lock this invocation holds. This matters
+# for nested critical sections such as pod-<cluster> start -> bench-bundle:
+# releasing the inner lock must not disarm cleanup for the outer process lock.
 # ============================================================
+
+HELD_LOCKS=""
+
+lock_owner() {
+  local lock
+  lock="$(lock_dir "$1")"
+  if [ -L "$lock" ]; then
+    readlink "$lock" 2>/dev/null || true
+  else
+    # Compatibility with a stale lock directory from an older supervisor.
+    cat "$lock/owner" 2>/dev/null || true
+  fi
+}
+
+remove_lock_path() {
+  rm -f "$(lock_dir "$1")" 2>/dev/null || true
+  rm -rf "$(lock_dir "$1")" 2>/dev/null || true
+}
+
+cleanup_held_locks() {
+  local previous_ifs="$IFS" name owner
+  IFS=':'
+  for name in $HELD_LOCKS; do
+    [ -n "$name" ] || continue
+    owner="$(lock_owner "$name")"
+    # Never remove a lock that has already been reclaimed by another process.
+    [ "$owner" = "$$" ] && remove_lock_path "$name"
+  done
+  IFS="$previous_ifs"
+  HELD_LOCKS=""
+}
+
+arm_lock_cleanup() {
+  trap cleanup_held_locks EXIT
+  trap 'cleanup_held_locks; exit 130' INT
+  trap 'cleanup_held_locks; exit 143' TERM
+}
+
+remember_held_lock() {
+  local name="$1"
+  HELD_LOCKS="${HELD_LOCKS:+$HELD_LOCKS:}$name"
+  arm_lock_cleanup
+}
+
+forget_held_lock() {
+  local forgotten="$1" previous_ifs="$IFS" name retained=""
+  IFS=':'
+  for name in $HELD_LOCKS; do
+    [ -n "$name" ] || continue
+    if [ "$name" != "$forgotten" ]; then
+      retained="${retained:+$retained:}$name"
+    fi
+  done
+  IFS="$previous_ifs"
+  HELD_LOCKS="$retained"
+  if [ -n "$HELD_LOCKS" ]; then arm_lock_cleanup; else trap - EXIT INT TERM; fi
+}
 
 acquire_lock() {
   # $2 (optional) = max seconds to wait (default 10). Long-running critical
@@ -856,26 +918,25 @@ acquire_lock() {
   lock="$(lock_dir "$name")"
   local tries=0
   while true; do
-    if mkdir "$lock" 2>/dev/null; then
-      # Got it — record our PID and arm the EXIT-trap backstop.
-      echo "$$" > "$lock/owner"
-      # shellcheck disable=SC2064
-      trap "rm -rf '$lock' 2>/dev/null || true" EXIT INT TERM
+    if ln -s "$$" "$lock" 2>/dev/null; then
+      # Got it — ownership and exclusion became visible atomically.
+      remember_held_lock "$name"
       return 0
     fi
     # Lock exists — is the owner still alive?
     local owner_pid=""
-    if [ -f "$lock/owner" ]; then
-      owner_pid="$(cat "$lock/owner" 2>/dev/null || true)"
+    owner_pid="$(lock_owner "$name")"
+    if [ -n "$owner_pid" ]; then
       if [ -n "$owner_pid" ] && ! kill -0 "$owner_pid" 2>/dev/null; then
         echo "  ↻ reclaiming stale lock for $name (owner pid $owner_pid is dead)" >&2
-        rm -rf "$lock"
+        remove_lock_path "$name"
         continue
       fi
-    elif [ "$tries" -gt 5 ]; then
-      # Lock exists with no owner file after 0.5s — abandoned mid-init.
-      echo "  ↻ reclaiming abandoned lock for $name (no owner file)" >&2
-      rm -rf "$lock"
+    elif [ "$tries" -gt 50 ]; then
+      # Only a legacy/corrupt non-symlink can lack an owner now. Give an old
+      # live mkdir-based acquirer five seconds to publish before reclaiming.
+      echo "  ↻ reclaiming abandoned legacy lock for $name (no owner)" >&2
+      remove_lock_path "$name"
       continue
     fi
     tries=$((tries + 1))
@@ -895,23 +956,113 @@ release_lock() {
   # Idempotent — the EXIT trap still fires as a backstop if release
   # is missed.
   local name="$1"
-  rm -rf "$(lock_dir "$name")" 2>/dev/null || true
-  trap - EXIT INT TERM
+  local owner
+  owner="$(lock_owner "$name")"
+  [ "$owner" = "$$" ] && remove_lock_path "$name"
+  forget_held_lock "$name"
 }
 
 # ============================================================
-# Aliveness check — handles both managed and adopted PIDs.
+# Process identity + aliveness. A PID alone is not an identity: after an
+# unmanaged death the kernel may reuse it, and a blind `stop` could signal an
+# unrelated process. Fresh supervisor launches and adoptions persist the OS
+# process start stamp beside the PID. `(pid, start stamp)` is stable across the
+# pod's bash -> node exec and distinguishes later PID reuse.
 # ============================================================
 
-is_running() {
+process_start_stamp() {
+  # `lstart` is available on both BSD/macOS ps and procps. Trim its leading
+  # whitespace so the stored value compares byte-for-byte on later reads.
+  ps -p "$1" -o lstart= 2>/dev/null | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//'
+}
+
+process_group_alive() {
+  # Supervisor-spawned children are session leaders (PGID == recorded PID).
+  # A child may outlive a leader killed during a pre-exec step, so group
+  # liveness—not only leader liveness—is the drain condition.
+  kill -0 -- "-$1" 2>/dev/null
+}
+
+legacy_process_matches() {
+  # One-time bridge for live registrations written before pid-start existed.
+  # A command-specific identity check is required before trusting/backfilling
+  # the PID; unknown/adopted legacy rows fail closed and can be adopted again.
+  local name="$1" pid="$2" command
+  command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  case "$name" in
+    pod|pod-*)
+      case "$command" in *node*main.js*) return 0 ;; esac ;;
+    cljs-watch)
+      case "$command" in *shadow.cljs.devtools.cli*watch*client*) return 0 ;; esac ;;
+    wire-server)
+      case "$command" in *seon.server.boot*"--req-sock $SEON_REQ_SOCK"*) return 0 ;; esac ;;
+    jvm)
+      case "$command" in *clojure.main*seon.runner*) return 0 ;; esac ;;
+    diffusion-server)
+      case "$command" in *seon_diffusion.server*) return 0 ;; esac ;;
+  esac
+  return 1
+}
+
+registered_process_status() {
+  # Exit status:
+  #   0 = the recorded process instance is alive
+  #   1 = no live process or group remains
+  #   2 = PID is alive but belongs to a different process instance
+  #   3 = the recorded leader died but its owned process group has survivors
   local name="$1"
-  local pf
+  local pf pid recorded_stamp current_stamp
   pf="$(pid_file "$name")"
   [ -f "$pf" ] || return 1
-  local pid
-  pid="$(cat "$pf")"
+  pid="$(cat "$pf" 2>/dev/null || true)"
   [ -n "$pid" ] || return 1
-  kill -0 "$pid" 2>/dev/null
+  case "$pid" in *[!0-9]*) return 1 ;; esac
+
+  if kill -0 "$pid" 2>/dev/null; then
+    if [ -f "$(pid_start_file "$name")" ]; then
+      recorded_stamp="$(cat "$(pid_start_file "$name")" 2>/dev/null || true)"
+      current_stamp="$(process_start_stamp "$pid")"
+      [ -n "$recorded_stamp" ] && [ "$recorded_stamp" = "$current_stamp" ] \
+        || return 2
+    elif legacy_process_matches "$name" "$pid"; then
+      # Backfill only after matching a service-specific command signature.
+      # Do not infer session ownership for a legacy launch; its next
+      # controlled start records that stronger fact.
+      current_stamp="$(process_start_stamp "$pid")"
+      [ -n "$current_stamp" ] || return 2
+      echo "$current_stamp" > "$(pid_start_file "$name")"
+    else
+      return 2
+    fi
+    return 0
+  fi
+
+  if [ -f "$(session_owned_file "$name")" ] && process_group_alive "$pid"; then
+    return 3
+  fi
+  return 1
+}
+
+is_running() {
+  registered_process_status "$1"
+}
+
+clear_process_registration() {
+  rm -f "$(pid_file "$1")" "$(pid_start_file "$1")" \
+        "$(session_owned_file "$1")"
+}
+
+record_process_identity() {
+  local name="$1" pid="$2" ownership="${3:-managed}" stamp
+  stamp="$(process_start_stamp "$pid")"
+  [ -n "$stamp" ] || return 1
+  echo "$pid"   > "$(pid_file "$name")"
+  echo "$stamp" > "$(pid_start_file "$name")"
+  if [ "$ownership" = "managed" ]; then
+    echo "$pid" > "$(session_owned_file "$name")"
+  else
+    rm -f "$(session_owned_file "$name")"
+  fi
 }
 
 spawn_detached() {
@@ -960,10 +1111,23 @@ PY
 _start_unlocked() {
   local name="$1"
 
-  if is_running "$name"; then
-    echo "● $name already running (pid $(cat "$(pid_file "$name")"))"
-    return 0
-  fi
+  local registration_status=0
+  registered_process_status "$name" || registration_status=$?
+  case "$registration_status" in
+    0)
+      echo "● $name already running (pid $(cat "$(pid_file "$name")"))"
+      return 0 ;;
+    2)
+      echo "  ⚠ discarding stale $name registration: pid $(cat "$(pid_file "$name")") was reused by another process" >&2
+      clear_process_registration "$name" ;;
+    3)
+      # A stopped leader with surviving descendants is still this supervised
+      # lifetime. Drain it before spawning, or start could create a duplicate.
+      echo "  ↻ draining orphaned $name process group before start" >&2
+      _stop_unlocked "$name" || return 1 ;;
+    *)
+      clear_process_registration "$name" ;;
+  esac
 
   local cmd
   cmd="$(process_command "$name")" || { echo "unknown process: $name" >&2; return 1; }
@@ -1017,7 +1181,13 @@ _start_unlocked() {
   local pid
   pid="$(spawn_detached "$cmd" "$(log_file "$name")")" || return 1
 
-  echo "$pid"        > "$(pid_file "$name")"
+  if ! record_process_identity "$name" "$pid" managed; then
+    # The child died between Popen and registration. Do not leave a PID-only
+    # row that a later invocation could mistake for a reused process.
+    clear_process_registration "$name"
+    echo "✗ $name exited before the supervisor could record its process identity" >&2
+    return 1
+  fi
   echo "$cmd"        > "$(cmd_file "$name")"
   date -u +%FT%TZ    > "$(started_file "$name")"
 
@@ -1029,25 +1199,53 @@ _start_unlocked() {
 _stop_unlocked() {
   local name="$1"
 
-  if ! is_running "$name"; then
-    rm -f "$(pid_file "$name")"
-    echo "○ $name not running"
-    return 0
-  fi
+  local registration_status=0 pid owned=0
+  registered_process_status "$name" || registration_status=$?
+  pid="$(cat "$(pid_file "$name")" 2>/dev/null || true)"
+  case "$registration_status" in
+    1)
+      clear_process_registration "$name"
+      echo "○ $name not running"
+      return 0 ;;
+    2)
+      # PID reuse is not liveness. Never signal the unrelated replacement.
+      echo "⚠ $name registration was stale (pid $pid now belongs to another process); no signal sent" >&2
+      clear_process_registration "$name"
+      return 0 ;;
+    3)
+      echo "  ↻ $name leader exited but its process group is still alive; draining group $pid" >&2 ;;
+  esac
+  [ -f "$(session_owned_file "$name")" ] && owned=1
 
-  local pid
-  pid="$(cat "$(pid_file "$name")")"
-  kill "$pid" 2>/dev/null || true
+  if [ "$owned" = 1 ]; then
+    kill -TERM -- "-$pid" 2>/dev/null || true
+  else
+    kill -TERM "$pid" 2>/dev/null || true
+  fi
 
   # Give 2.5s for graceful exit.
   local i
   for i in 1 2 3 4 5; do
-    kill -0 "$pid" 2>/dev/null || break
+    if [ "$owned" = 1 ]; then
+      process_group_alive "$pid" || break
+    else
+      kill -0 "$pid" 2>/dev/null || break
+    fi
     sleep 0.5
   done
 
-  if kill -0 "$pid" 2>/dev/null; then
-    kill -9 "$pid" 2>/dev/null || true
+  local target_alive=1
+  if [ "$owned" = 1 ]; then
+    process_group_alive "$pid" || target_alive=0
+  else
+    kill -0 "$pid" 2>/dev/null || target_alive=0
+  fi
+  if [ "$target_alive" = 1 ]; then
+    if [ "$owned" = 1 ]; then
+      kill -KILL -- "-$pid" 2>/dev/null || true
+    else
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
     # CONFIRM the process is ACTUALLY gone before returning. `kill -9` only
     # *sends* SIGKILL — the kernel may still be tearing the process down
     # (the wire-server flushing LMDB, releasing its UDS socket). Callers
@@ -1056,23 +1254,32 @@ _stop_unlocked() {
     # writing → corruption. Block (bounded) until the pid disappears.
     local j
     for j in 1 2 3 4 5 6 7 8 9 10; do
-      kill -0 "$pid" 2>/dev/null || break
+      if [ "$owned" = 1 ]; then
+        process_group_alive "$pid" || break
+      else
+        kill -0 "$pid" 2>/dev/null || break
+      fi
       sleep 0.5
     done
-    if kill -0 "$pid" 2>/dev/null; then
+    target_alive=1
+    if [ "$owned" = 1 ]; then
+      process_group_alive "$pid" || target_alive=0
+    else
+      kill -0 "$pid" 2>/dev/null || target_alive=0
+    fi
+    if [ "$target_alive" = 1 ]; then
       # Pathological — a normal JVM/node never ignores SIGKILL. Fail LOUD
       # rather than let a caller wipe the store under a live writer.
-      echo "✗ $name (pid $pid) survived SIGKILL after 5s — NOT confirmed dead" >&2
+      echo "✗ $name (pid/session $pid) survived SIGKILL after 5s — NOT confirmed dead" >&2
       echo "  a store wipe now could corrupt a live writer; investigate the pid" >&2
-      rm -f "$(pid_file "$name")"
       return 1
     fi
-    echo "○ $name killed (SIGKILL, confirmed dead, was pid $pid)"
+    echo "○ $name killed (SIGKILL, process group confirmed drained, was pid $pid)"
   else
-    echo "○ $name stopped (was pid $pid)"
+    echo "○ $name stopped (process group drained, was pid $pid)"
   fi
 
-  rm -f "$(pid_file "$name")"
+  clear_process_registration "$name"
 
   # A dead pod's port file is a LIE — the next pod binds a fresh ephemeral
   # port, and a reader polling the stale file (a harness, a curl loop) races
@@ -1087,13 +1294,55 @@ _stop_unlocked() {
   esac
 }
 
-start_all() {
+with_stack_lock() {
+  # Every process mutation participates in this coarse lifecycle mutex. It is
+  # intentionally held across multi-process reset/nuke/restart-all sequences,
+  # closing the old gap where another invocation could start the writer while
+  # its store was being deleted. Per-process locks remain the narrow identity
+  # fence; this lock orders whole lifecycle transitions.
+  local operation="$1"
+  shift
+  local rc=0
+  acquire_lock supervisor-stack 900
+  "$operation" "$@" || rc=$?
+  release_lock supervisor-stack
+  return "$rc"
+}
+
+process_start_locked() {
+  local name="$1" rc=0
+  acquire_lock "$name" 900
+  _start_unlocked "$name" || rc=$?
+  release_lock "$name"
+  [ "$rc" = 0 ] || return "$rc"
+  wait_ready "$name"
+}
+
+process_stop_locked() {
+  local name="$1" rc=0
+  acquire_lock "$name" 900
+  _stop_unlocked "$name" || rc=$?
+  release_lock "$name"
+  return "$rc"
+}
+
+process_restart_locked() {
+  local name="$1" rc=0
+  acquire_lock "$name" 900
+  _stop_unlocked "$name" || rc=$?
+  if [ "$rc" = 0 ]; then _start_unlocked "$name" || rc=$?; fi
+  release_lock "$name"
+  [ "$rc" = 0 ] || return "$rc"
+  wait_ready "$name"
+}
+
+start_all_locked() {
   # Dependency-ordered bring-up, each stage gated on REAL readiness
   # before the next starts. Idempotent: already-running stages no-op
   # in cmd_start and (being ready) pass their gate immediately.
   local name
   for name in $(stack_processes); do
-    cmd_start "$name" || {
+    process_start_locked "$name" || {
       echo "✗ start all ABORTED at $name (later stages not started)" >&2
       exit 1
     }
@@ -1106,12 +1355,12 @@ start_all() {
   echo "    bin/seon restart jvm"
 }
 
-stop_all() {
+stop_all_locked() {
   # Reverse dependency order: pod → wire-server → cljs-watch.
   local name reversed=""
   for name in $(stack_processes); do reversed="$name $reversed"; done
   for name in $reversed; do
-    cmd_stop "$name"
+    process_stop_locked "$name"
   done
   echo "  NOTE: the jvm is NOT part of 'all' and was left running"
   echo "  (by design — shared nREPL 7888; see bin/seon header)."
@@ -1120,29 +1369,27 @@ stop_all() {
 
 cmd_start() {
   local name="${1:?start requires a process name}"
-  if [ "$name" = "all" ]; then start_all; return 0; fi
-  acquire_lock "$name"
-  _start_unlocked "$name"
-  release_lock "$name"
-  # A successful `start` means usable, not merely forked. This also checks an
-  # already-running process and gives every entry point the same readiness
-  # contract as restart/start-all/cluster operations.
-  wait_ready "$name"
+  if [ "$name" = "all" ]; then
+    with_stack_lock start_all_locked
+  else
+    with_stack_lock process_start_locked "$name"
+  fi
 }
 
 cmd_stop() {
   local name="${1:?stop requires a process name}"
-  if [ "$name" = "all" ]; then stop_all; return 0; fi
-  acquire_lock "$name"
-  _stop_unlocked "$name"
-  release_lock "$name"
+  if [ "$name" = "all" ]; then
+    with_stack_lock stop_all_locked
+  else
+    with_stack_lock process_stop_locked "$name"
+  fi
 }
 
 cmd_restart() {
   # One lock spans stop+start. Atomic from any other agent's POV —
   # they see "stopped" or "started" but never an intermediate state
   # where another agent could race in and start a competing instance.
-  # (`restart all` is per-process atomic, not stack-atomic.)
+  # `restart all` holds the coarse lifecycle lock across the whole stack.
   #
   # Ready-gate parity with `create` / `start all`: after the fresh process
   # spawns, BLOCK on the SAME wait_ready/ready_check the create path uses,
@@ -1156,17 +1403,16 @@ cmd_restart() {
   # Processes with no ready_check (jvm) have ready_bound 0 → wait_ready
   # returns immediately, so this never hangs them.
   local name="${1:?restart requires a process name}"
-  if [ "$name" = "all" ]; then stop_all; start_all; return 0; fi
-  acquire_lock "$name"
-  _stop_unlocked "$name"
-  _start_unlocked "$name"
-  release_lock "$name"
-  # Gate AFTER releasing the lock — readiness is observation, not a shared
-  # mutation, so another agent needn't wait behind it; the process is
-  # already spawned + recorded. wait_ready is loud on timeout/early death
-  # and names the log to read; propagate its exit so a failed reboot is a
-  # failed `restart`.
-  wait_ready "$name"
+  if [ "$name" = "all" ]; then
+    with_stack_lock restart_all_locked
+  else
+    with_stack_lock process_restart_locked "$name"
+  fi
+}
+
+restart_all_locked() {
+  stop_all_locked
+  start_all_locked
 }
 
 cmd_status() {
@@ -1177,11 +1423,17 @@ cmd_status() {
     procs="$(all_processes)"
   fi
   for name in $procs; do
-    if is_running "$name"; then
+    local registration_status=0
+    registered_process_status "$name" || registration_status=$?
+    if [ "$registration_status" = 0 ]; then
       local pid started
       pid="$(cat "$(pid_file "$name")")"
       started="$(cat "$(started_file "$name")" 2>/dev/null || echo unknown)"
       echo "● $name  pid=$pid  started=$started"
+    elif [ "$registration_status" = 2 ]; then
+      echo "⚠ $name  stale registration (pid $(cat "$(pid_file "$name")") was reused; start/stop will clear it safely)"
+    elif [ "$registration_status" = 3 ]; then
+      echo "◐ $name  leader exited; owned process group $(cat "$(pid_file "$name")") still draining"
     else
       echo "○ $name  (not running)"
     fi
@@ -1249,7 +1501,7 @@ cmd_cluster() {
   #   create <name> [--ephemeral]  a NEW cluster on THIS supervisor's
   #                             wire-server: db entry + its own pod.
   #   fork <src> <t|--at t> [fork-name]  a NEW cluster whose db is the
-  #                             source cluster's world at basis-t <t> —
+  #                             source cluster's snapshot at basis-t <t> —
   #                             independent, writable, disposable
   #                             (error forensics: t = :seon.error/at).
   #   destroy <name>            stop its pod, delete its db from the
@@ -1264,10 +1516,10 @@ cmd_cluster() {
   local sub="${1:?cluster requires a subcommand (reset|create|fork|destroy)}"
   shift
   case "$sub" in
-    reset)   cluster_reset "${1:-default}" ;;
-    create)  cluster_create "$@" ;;
-    fork)    cluster_fork "$@" ;;
-    destroy) cluster_destroy "${1:?cluster destroy requires a name}" ;;
+    reset)   with_stack_lock cluster_reset "${1:-default}" ;;
+    create)  with_stack_lock cluster_create "$@" ;;
+    fork)    with_stack_lock cluster_fork "$@" ;;
+    destroy) with_stack_lock cluster_destroy "${1:?cluster destroy requires a name}" ;;
     *) echo "unknown cluster subcommand: $sub (try: reset [name] | create <name> [--ephemeral] [--frozen|--watched] | fork <src> <t|--at t> [fork-name] | destroy <name>)" >&2; exit 1 ;;
   esac
 }
@@ -1316,8 +1568,9 @@ cluster_create() {
   # own boot then ping-gates the socket AND ensure-db's its cluster db
   # (backend :file, path data/clusters/<name>/store) before attaching its
   # read conn — no bash-side db call needed, one creation path.
-  # cmd_start returns only after the shared readiness fence succeeds.
-  cmd_start wire-server || exit 1
+  # process_start_locked returns only after the shared readiness fence succeeds;
+  # cmd_cluster already holds the lifecycle lock around this whole transition.
+  process_start_locked wire-server || exit 1
 
   mkdir -p "data/clusters/$name"
   # `--ephemeral` records INTENT (this cluster is disposable — a bench
@@ -1339,7 +1592,7 @@ cluster_create() {
     ensure_bench_bundle present || exit 1
   fi
 
-  cmd_start "pod-$name" || exit 1
+  process_start_locked "pod-$name" || exit 1
   local port
   port="$(cat "tmp/seon-port-$name" 2>/dev/null || echo '?')"
   echo "▶ cluster $name created — pod http://127.0.0.1:$port (db-name $name, store data/clusters/$name/store)"
@@ -1348,7 +1601,7 @@ cluster_create() {
 cluster_fork() {
   # Fork an existing cluster's db at a basis-t (tx id) into a NEW live,
   # writable, disposable cluster — the error-forensics door: an error's
-  # :seon.error/at is exactly this t, so the fork boots the world the
+  # :seon.error/at is exactly this t, so the fork boots the database snapshot the
   # failing code SAW. (:seon.error/at is captured at the CATCH site; the
   # error datom itself was recorded in a LATER tx, so it is NOT inside
   # its own fork.) Mechanism: seon.server.registry/fork-db! over the
@@ -1385,7 +1638,7 @@ cluster_fork() {
   echo "▶ cluster fork: $src @t=$t → $fork_name"
   # The source db lives on THIS supervisor's wire-server; the fork op
   # runs inside that JVM (registry fn over the loopback REPL).
-  cmd_start wire-server || exit 1
+  process_start_locked wire-server || exit 1
 
   local expr out
   # Port from THIS supervisor's env: $SEON_WRITER_REPL_PORT is exactly what
@@ -1407,20 +1660,20 @@ cluster_fork() {
     exit 1
   fi
 
-  # The forensic world includes the source's turn-capture blobs (prompt/
+  # The forensic snapshot includes the source's turn-capture blobs (prompt/
   # reply content the store only REFERENCES by hash) — copy them alongside
   # so inspect/turn replay works inside the fork.
   [ -d "data/clusters/$src/blobs" ] && cp -R "data/clusters/$src/blobs" "data/clusters/$fork_name/blobs"
   # Forks are disposable by intent (same marker create --ephemeral writes);
-  # WATCHED bundle (no frozen marker): a fork is a dev-triage world, and
+  # WATCHED bundle (no frozen marker): a fork is a dev-triage cluster, and
   # fixing the bug usually means iterating on src/ against it.
   date -u +%FT%TZ > "data/clusters/$fork_name/ephemeral"
 
-  cmd_start "pod-$fork_name" || exit 1
+  process_start_locked "pod-$fork_name" || exit 1
   local port
   port="$(cat "tmp/seon-port-$fork_name" 2>/dev/null || echo '?')"
   echo "▶ cluster $fork_name forked from $src @t=$t — pod http://127.0.0.1:$port (store data/clusters/$fork_name/store)"
-  echo "  triage inside: (seon.agent.inspect/errors) etc. — this world is what the failing code saw at t=$t; done: bin/seon cluster destroy $fork_name"
+  echo "  triage inside: (seon.agent.inspect/errors) etc. — this snapshot is what the failing code saw at t=$t; done: bin/seon cluster destroy $fork_name"
 }
 
 cluster_destroy() {
@@ -1435,7 +1688,7 @@ cluster_destroy() {
 
   echo "▶ cluster destroy: $name"
 
-  cmd_stop "pod-$name"
+  process_stop_locked "pod-$name"
 
   # Delete the db from the LIVE wire-server registry (release the conn +
   # datahike delete-database) via the loopback socket REPL — the
@@ -1519,8 +1772,8 @@ cluster_reset() {
   echo "▶ cluster reset: $name"
 
   if [ "$bounce" = 1 ]; then
-    cmd_stop pod
-    cmd_stop wire-server
+    process_stop_locked pod
+    process_stop_locked wire-server
     # Stale UDS sockets from the killed server would refuse the fresh
     # one's bind; they're recreated on start.
     rm -f "$SEON_REQ_SOCK" "$SEON_PUB_SOCK"
@@ -1535,11 +1788,11 @@ cluster_reset() {
   fi
 
   if [ "$bounce" = 1 ]; then
-    # cmd_start owns the one readiness fence. Do not probe again here: the
+    # process_start_locked owns the one readiness fence. Do not probe again here: the
     # duplicate waits used to add another complete stability window for both
     # writer and pod after they were already proven usable.
-    cmd_start wire-server || exit 1
-    cmd_start pod || exit 1
+    process_start_locked wire-server || exit 1
+    process_start_locked pod || exit 1
     echo "▶ cluster $name reset complete — pod boot re-seeds the core"
   else
     echo "▶ cluster $name store wiped (no processes registered for it)"
@@ -1548,7 +1801,7 @@ cluster_reset() {
 
 cmd_nuke() {
   # DESTRUCTIVE clean slate. `cluster reset` wipes ONE cluster's store and
-  # bounces the default stack; `nuke` goes further — it tears the whole world
+  # bounces the default stack; `nuke` goes further — it tears the whole runtime
   # down to bare metal: stop EVERY managed process (incl. jvm), wipe EVERY
   # cluster store + all transient runtime data, and clear ALL logs — then
   # bring the default stack back up fresh (pod boot re-seeds the core).
@@ -1588,17 +1841,24 @@ cmd_nuke() {
     exit 1
   fi
 
-  echo "▶ nuke: tearing the world down"
+  with_stack_lock nuke_locked
+}
+
+nuke_locked() {
+  # The lifecycle lock spans every stop, destructive wipe, and restart below.
+  # No concurrent start/restart/reset can reopen a writer during deletion.
+
+  echo "▶ nuke: tearing the runtime down"
 
   # 1. Stop every managed process (jvm included — full clean slate, unlike
   #    `start/stop all` which excludes it), cluster pods too (their stores
   #    are wiped below). Idempotent no-ops if not running.
   for name in pod wire-server cljs-watch jvm; do
-    cmd_stop "$name"
+    process_stop_locked "$name"
   done
   for d in "$PROC_DIR"/pod-*/; do
     [ -d "$d" ] || continue
-    cmd_stop "$(basename "$d")"
+    process_stop_locked "$(basename "$d")"
     rm -rf "$d"
   done
   rm -f tmp/seon-port-* 2>/dev/null || true
@@ -1627,8 +1887,8 @@ cmd_nuke() {
   # 5. Bring the default stack back up fresh — pod boot re-seeds the core
   #    from the indexed codebase, same as `cluster reset`.
   echo "▶ restarting the default stack fresh"
-  start_all
-  echo "▶ nuke complete — fresh world, core re-seeded on pod boot"
+  start_all_locked
+  echo "▶ nuke complete — fresh runtime, core re-seeded on pod boot"
 }
 
 cmd_watch_faults() {
@@ -1713,16 +1973,32 @@ cmd_watch_faults() {
 }
 
 cmd_adopt() {
+  with_stack_lock adopt_locked "$@"
+}
+
+adopt_locked() {
   # Use case: process started manually in a terminal (e.g. node out/client/main.js
   # in a watched tab) and the supervisor should now track it.
   local name="${1:?adopt requires a process name}"
   local pid="${2:?adopt requires a PID}"
   acquire_lock "$name"
+  local registration_status=0
+  registered_process_status "$name" || registration_status=$?
+  if [ "$registration_status" = 0 ]; then
+    local current_pid
+    current_pid="$(cat "$(pid_file "$name")")"
+    release_lock "$name"
+    echo "✗ $name is already managed as live pid $current_pid — stop it before adopting another process" >&2
+    return 1
+  fi
   if ! kill -0 "$pid" 2>/dev/null; then
     release_lock "$name"
-    echo "✗ pid $pid not alive" >&2; exit 1
+    echo "✗ pid $pid not alive" >&2; return 1
   fi
-  echo "$pid"        > "$(pid_file "$name")"
+  if ! record_process_identity "$name" "$pid" adopted; then
+    release_lock "$name"
+    echo "✗ could not record process identity for pid $pid" >&2; return 1
+  fi
   echo "(adopted)"   > "$(cmd_file "$name")"
   date -u +%FT%TZ    > "$(started_file "$name")"
   echo "● $name adopted (pid $pid)"
@@ -1733,6 +2009,14 @@ cmd_adopt() {
 # ============================================================
 # Dispatch.
 # ============================================================
+
+# Mechanical supervisor tests source these functions into an isolated process
+# registry and override only the process command. Normal execution reaches the
+# dispatch below; sourcing defines the real lifecycle mechanism without
+# starting or stopping anything.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  return 0
+fi
 
 case "${1:-help}" in
   start)   shift; cmd_start "$@" ;;
@@ -1893,9 +2177,10 @@ Auto-prep:
 
 Concurrency:
   Multi-agent safe — any number of agents can invoke any command at
-  any time. The supervisor uses mkdir-as-mutex per process. If a
-  bin/seon invocation is killed mid-operation and leaves a stale
-  lock, remove with: rm -rf tmp/proc/<name>/lock
+  any time. The supervisor uses atomic owner-PID symlink locks: one
+  lifecycle lock orders whole stack/reset/nuke transitions, with a
+  narrower lock per process. Dead owners are reclaimed automatically;
+  manual recovery after inspection: rm -f tmp/proc/<name>/lock
 EOF
     ;;
 esac
