@@ -796,8 +796,11 @@ agents idle and one exact notice visible to root.
    fallback wrapper cannot transact again and create a render/error
    invalidation loop. The source-checkout operator also restores fail-loud
    development rendering by default while retaining an explicit graceful-mode
-   override. Debug panes and database details still need their own coordinates
-   and bounded projections.
+   override. The canvas context now composes the existing bounded render-fn cap
+   over its AI twin and renderer source independently; the observed failing
+   agent fell from 11,870 to 4,358 estimated tokens without another stored
+   projection or context path. Debug panes and database details still need
+   their own coordinates and bounded projections.
 8. Keep installed-schema and direct attribute-presence queries as the small
    composable agent/domain discovery tools. A later KB surface must be a focused
    domain query through the normal block/render/surface mechanism, not a

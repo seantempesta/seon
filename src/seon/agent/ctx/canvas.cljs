@@ -11,12 +11,20 @@
    Self-contained: no spine read API, just the canvas renderer +
    wired-content provenance."
   (:require
+    [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.render-fns :as render-fns]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.error :as err]
     [seon.render :as render]
     [seon.render.canvas :as canvas]))
+
+(defn- clip-marker
+  "A loud, token-denominated cut marker for one canvas-context value."
+  [what budget total]
+  (str "\n…⟨" what " clipped at " budget " of " total
+       " tokens — narrow the canvas render⟩"))
 
 (defn- wired-fn-source
   "The program-graph source of the qualified fn `sym` driving the agent's
@@ -54,8 +62,10 @@
 (defn canvas-block
   "Show and explain the agent's current live canvas.
 
-   The `:canvas` section — what your human currently sees and the complete,
-   compact operational contract for changing it.
+   The `:canvas` section — what your human currently sees and the compact
+   operational contract for changing it. Agent-authored twins and source are
+   independently bounded by the one render-fn token cap; a canvas cannot
+   consume an unbounded share of every later turn.
 
    Invokes the agent's wired canvas value against this turn's db
    value through `seon.render/render-agent-canvas` (the one canvas entry
@@ -94,6 +104,7 @@
           ;; the safety the canvas rides; the body below is always a
           ;; clean twin, an error twin, or the welcome card — never raw.
           (render/render-agent-canvas {:seon.agent/id id :seon.db/db db})
+          cap  (config/render-fn-token-cap)
           body (cond
                  ;; Renderer THREW — your human is staring at an error
                  ;; canvas right now. Say so loudly and first (the agent must
@@ -110,7 +121,9 @@
                       (when (some? ai) (str "\n" ai)))
 
                  (some? ai)     ai
-                 (some? hiccup) (pr-str hiccup))]
+                 (some? hiccup) (pr-str hiccup))
+          body (when (some? body)
+                 (tokens/clip-str body cap (partial clip-marker "canvas twin")))]
       (if (nil? body)
         ""
         ;; Provenance for the header. Resolve the agent entity from the
@@ -174,7 +187,9 @@
               ;; shared welcome/system source wastes context and invites the
               ;; exact core-edit mistake the block warns against.
               fn-src       (when (err/agent-authored-sym? wired-value)
-                             (wired-fn-source db wired-value))]
+                             (some-> (wired-fn-source db wired-value)
+                                     (tokens/clip-str
+                                       cap (partial clip-marker "canvas source"))))]
           (str "; Your canvas — what your human currently sees (as-of this\n"
                "; turn's render; the human's view live-updates between turns).\n"
                "; Wired: " (canvas/wired-label wired) "\n"
@@ -186,47 +201,19 @@
                       "; your human sees):\n"
                       (ctx/quote-lines fn-src) "\n"
                       ";\n"))
-               "; To deliberately UPDATE THE CANVAS, reuse my.canvas/show! and verify\n"
-               "; its returned :seon.db/ok?. Defining a render fn alone only creates\n"
-               "; an auto-run context surface; it does NOT deliberately wire canvas.\n"
-               "; Canvas values and operations (the complete contract):\n"
-               "; 1. STATIC — show a literal hiccup vector. Use semantic hiccup\n"
-               ";    such as [:section [:h2 \"Title\"] [:p \"State\"]]. Raw HTML\n"
-               ";    and <script> strings are escaped; arbitrary browser JS is not\n"
-               ";    a canvas API.\n"
-               "; 2. LIVE — define a schema'd fn in your home ns that accepts\n"
-               ";    :seon.render/system-input and returns (my.canvas/view {...}).\n"
-               ";    Query database state from its injected :seon.db/db value, then\n"
-               ";    EXPLICITLY wire its qualified fn symbol below. The feed redraws after\n"
-               ";    every transaction.\n"
-               "; 3. INTERACTIVE — compose my.canvas/button, input, select, toggle,\n"
-               ";    or form into that live fn. A handler is YOUR schema'd home-ns\n"
-               ";    fn symbol, never a URL/string. Button handlers receive one\n"
-               ";    map directly: the VALUE of :my.canvas/data, never a wrapper\n"
-               ";    keyed by :my.canvas/data. Do not re-register my.canvas schemas.\n"
-               ";    Form fields are qualified\n"
-               ";    keywords and arrive as one map with those exact keys.\n"
-               ";    The /agent/<id>/call capability gate invokes it,\n"
-               ";    its DB transaction changes state, and the normal feed redraws.\n"
-               ";    Controls return reusable hiccup directly; my.canvas/view supplies\n"
-               ";    required :my.canvas/content and an optional :my.canvas/ai twin.\n"
-               ";    Handler fns need concrete Malli contracts.\n"
-               ";    Always inspect :seon.db/ok? before claiming an action worked.\n"
-               ";    For common agent-local state, my.canvas/state reads selected\n"
-               ";    qualified attrs and my.canvas/save! writes qualified values; both\n"
-               ";    inject your agent id (state also injects the render db).\n"
-               "; 4. COMPOSE — reuse my.canvas directly, or define higher-level helpers\n"
-               ";    in YOUR namespace from the same constructs. my.data aggregates DB\n"
-               ";    rows. Use only fully namespaced\n"
-               ";    data keys and registered schemas. Pull `ui-canvas` only when\n"
-               ";    you need the detailed cookbook and CSS vocabulary.\n"
-               ";\n"
-               "; Pin either literal hiccup or a live qualified fn symbol:\n"
+               "; Update deliberately with my.canvas/show!; defining a render fn alone\n"
+               "; does not pin it. A live fn accepts :seon.render/system-input, queries\n"
+               "; its injected :seon.db/db, and returns my.canvas/view. Compose\n"
+               "; my.canvas controls with schema'd handlers in your home namespace;\n"
+               "; handlers transact facts and the normal feed re-renders. Button data\n"
+               "; and qualified form fields arrive directly as the handler's input map.\n"
+               "; my.canvas/state and save! are the agent-local state helpers. Reuse\n"
+               "; these constructs or define higher-level helpers in your own namespace.\n"
+               "; Always inspect :seon.db/ok? before claiming a write worked.\n"
                ";   (my.canvas/show! {:my.canvas/content\n"
                ";                  <hiccup-vector OR 'my.agent." id "/your-fn>})\n"
-               "; Read (my.canvas/pinned {}) to inspect the explicit pin; call\n"
-               "; (my.canvas/clear! {}) to resume automatic derived selection.\n"
-               "; Evolve YOUR fn; never edit the shared core welcome canvas."))))
+               "; Use (my.canvas/pinned {}) to inspect the pin and\n"
+               "; (my.canvas/clear! {}) to resume automatic selection."))))
     ;; CONTRACT: this section NEVER vanishes and NEVER surfaces a bare
     ;; ⚠/malli code. `render-agent-canvas` is already throw-safe, so this
     ;; backstop only fires on an UNEXPECTED failure (e.g. a db read) —
