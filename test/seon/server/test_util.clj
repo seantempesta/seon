@@ -77,9 +77,17 @@
     (try (binding [*ctx* ctx] (tfn))
          (finally (teardown-writer! ctx)))))
 
+(defn request
+  "Build a current wire request, minting each logical transact identity."
+  [op extra]
+  (cond-> (assoc extra :seon.store.wire/op op)
+    (and (= "transact" op)
+         (not (contains? extra :seon.store.wire/id)))
+    (assoc :seon.store.wire/id (str (random-uuid)))))
+
 (defn req!
   "Send one request envelope over the ctx's req socket, return the response.
    `op` is the op string; `extra` is a map of `:seon.store.wire/*` keys."
   [op extra]
   (with-open [ch (client/connect (:req-sock *ctx*))]
-    (client/call! ch (merge {:seon.store.wire/op op} extra))))
+    (client/call! ch (request op extra))))

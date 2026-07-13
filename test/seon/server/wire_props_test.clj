@@ -27,12 +27,11 @@
    `deftest`s (rather than `defspec`) so clj-kondo resolves every symbol; the
    `passing?` helper turns a quick-check result map into a single assertion
    that prints the shrunk counterexample on failure."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
-            [seon.server.store :as store]
+            [seon.server.test-util :as tu :refer [*ctx*]]
             [seon.server.transit :as transit]
             [seon.server.wire :as wire]))
 
@@ -126,18 +125,30 @@
    {:db/ident :ent/tag  :db/valueType :db.type/keyword
     :db/cardinality :db.cardinality/one}])
 
-(defn- fresh-conn!
-  "A fresh, isolated in-memory datahike conn with the test schema installed.
-   Uniqueness via gensym so concurrent specs don't share a process-global
-   :memory store (see test-util's note on config-for's per-name id)."
+(defn- op!
+  "Run one direct handler call through the shared current request builder."
+  [conn op extra]
+  (wire/handle-op conn (tu/request op extra)))
+
+(defn- with-wire-conn
+  "Run one test against an isolated fixture with its schema installed once."
+  [test-fn]
+  (tu/with-fresh-writer
+   (fn []
+     (let [response (op! (:conn *ctx*)
+                         "transact"
+                         {:seon.store.wire/tx-data schema-tx})]
+       (when-not (true? (:seon.store.wire/ok response))
+         (throw (ex-info "Property-test schema installation failed."
+                         {:seon.server.wire/response response})))
+       (test-fn)))))
+
+(use-fixtures :each with-wire-conn)
+
+(defn- fixture-conn
+  "The current test fixture's isolated Datahike connection."
   []
-  (let [cfg (store/config-for
-             {:seon.server.store/db-name (keyword "test" (str (gensym "props")))
-              :seon.server.store/backend :memory})]
-    (when-not (d/database-exists? cfg) (d/create-database cfg))
-    (let [conn (d/connect cfg)]
-      (wire/handle-op conn {:seon.store.wire/op "transact" :seon.store.wire/tx-data schema-tx})
-      conn)))
+  (:conn *ctx*))
 
 (defn- ok? [resp] (true? (:seon.store.wire/ok resp)))
 
@@ -161,15 +172,14 @@
   (passing?
    (check 50
           (prop/for-all [ents gen-entity-set]
-            (let [conn (fresh-conn!)
-                  tx   (wire/handle-op conn {:seon.store.wire/op "transact" :seon.store.wire/tx-data ents})]
+            (let [conn (fixture-conn)
+                  tx   (op! conn "transact" {:seon.store.wire/tx-data ents})]
               (and (ok? tx)
                    (every?
                     (fn [{:keys [:ent/id :ent/n :ent/tag]}]
-                      (let [r (wire/handle-op
-                               conn
-                               {:seon.store.wire/op "q"
-                                :seon.store.wire/query '[:find ?n ?tag :in $ ?id :where
+                      (let [r (op!
+                               conn "q"
+                               {:seon.store.wire/query '[:find ?n ?tag :in $ ?id :where
                                                          [?e :ent/id ?id]
                                                          [?e :ent/n ?n]
                                                          [?e :ent/tag ?tag]]
@@ -182,25 +192,23 @@
   (passing?
    (check 50
           (prop/for-all [ents gen-entity-set]
-            (let [conn (fresh-conn!)
-                  tx   (wire/handle-op conn {:seon.store.wire/op "transact" :seon.store.wire/tx-data ents})]
+            (let [conn (fixture-conn)
+                  tx   (op! conn "transact" {:seon.store.wire/tx-data ents})]
               (and (ok? tx)
                    (every?
                     (fn [{:keys [:ent/id] :as ent}]
-                      (let [pr (wire/handle-op
-                                conn
-                                {:seon.store.wire/op "pull"
-                                 :seon.store.wire/selector '[:ent/id :ent/n :ent/tag]
-                                 :seon.store.wire/eid [:ent/id id]})
-                            ep (wire/handle-op
-                                conn
-                                {:seon.store.wire/op "entity-pull"
-                                 :seon.store.wire/ref [:ent/id id]
+                      (let [pull-resp (op!
+                                       conn "pull"
+                                       {:seon.store.wire/selector '[:ent/id :ent/n :ent/tag]
+                                        :seon.store.wire/eid [:ent/id id]})
+                            ep (op!
+                                conn "entity-pull"
+                                {:seon.store.wire/ref [:ent/id id]
                                  :seon.store.wire/selector '[:ent/id :ent/n :ent/tag]})
-                            pm (:seon.store.wire/result pr)
+                            pm (:seon.store.wire/result pull-resp)
                             em (:seon.store.wire/result ep)
                             want (select-keys ent [:ent/id :ent/n :ent/tag])]
-                        (and (ok? pr) (ok? ep)
+                        (and (ok? pull-resp) (ok? ep)
                              (= want (select-keys pm [:ent/id :ent/n :ent/tag]))
                              (= want (select-keys em [:ent/id :ent/n :ent/tag])))))
                     ents)))))))
@@ -209,18 +217,18 @@
   (passing?
    (check 50
           (prop/for-all [ents gen-entity-set]
-            (let [conn (fresh-conn!)
-                  _    (wire/handle-op conn {:seon.store.wire/op "transact" :seon.store.wire/tx-data ents})
+            (let [conn (fixture-conn)
+                  _    (op! conn "transact" {:seon.store.wire/tx-data ents})
                   eids (mapv (fn [{:keys [:ent/id]}] [:ent/id id]) ents)
                   sel  '[:ent/id :ent/n :ent/tag]
-                  many (-> (wire/handle-op conn {:seon.store.wire/op "pull-many"
-                                                 :seon.store.wire/selector sel
-                                                 :seon.store.wire/eids eids})
+                  many (-> (op! conn "pull-many"
+                                {:seon.store.wire/selector sel
+                                 :seon.store.wire/eids eids})
                            :seon.store.wire/result)
                   singles (mapv (fn [eid]
-                                  (-> (wire/handle-op conn {:seon.store.wire/op "pull"
-                                                            :seon.store.wire/selector sel
-                                                            :seon.store.wire/eid eid})
+                                  (-> (op! conn "pull"
+                                           {:seon.store.wire/selector sel
+                                            :seon.store.wire/eid eid})
                                       :seon.store.wire/result))
                                 eids)]
               (= singles many))))))
@@ -229,12 +237,12 @@
   (passing?
    (check 50
           (prop/for-all [batches (gen/vector gen-entity-set 1 5)]
-            (let [conn (fresh-conn!)]
+            (let [conn (fixture-conn)]
               (loop [[b & more] batches
                      prev nil]
                 (if (nil? b)
                   true
-                  (let [r  (wire/handle-op conn {:seon.store.wire/op "transact" :seon.store.wire/tx-data b})
+                  (let [r  (op! conn "transact" {:seon.store.wire/tx-data b})
                         bt (:seon.store.wire/basis-t r)]
                     (if (and (ok? r)
                              (integer? bt)
@@ -246,12 +254,12 @@
   (passing?
    (check 50
           (prop/for-all [ents gen-entity-set]
-            (let [conn   (fresh-conn!)
-                  tx     (wire/handle-op conn {:seon.store.wire/op "transact" :seon.store.wire/tx-data ents})
+            (let [conn   (fixture-conn)
+                  tx     (op! conn "transact" {:seon.store.wire/tx-data ents})
                   bt-tx  (:seon.store.wire/basis-t tx)
-                  q1     (wire/handle-op conn {:seon.store.wire/op "q"
-                                               :seon.store.wire/query '[:find ?e :where [?e :ent/id _]]})
-                  q2     (wire/handle-op conn {:seon.store.wire/op "q"
-                                               :seon.store.wire/query '[:find ?e :where [?e :ent/id _]]})]
+                  q1     (op! conn "q"
+                              {:seon.store.wire/query '[:find ?e :where [?e :ent/id _]]})
+                  q2     (op! conn "q"
+                              {:seon.store.wire/query '[:find ?e :where [?e :ent/id _]]})]
               (and (ok? tx) (ok? q1) (ok? q2)
                    (= bt-tx (:seon.store.wire/basis-t q1) (:seon.store.wire/basis-t q2))))))))
