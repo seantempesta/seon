@@ -1,4 +1,4 @@
-{:paths ["script" "test"]
+{:paths ["script" "src" "test"]
  :deps {metosin/malli {:mvn/version "0.20.0"}}
  :tasks
  {operator-test

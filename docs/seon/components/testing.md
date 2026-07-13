@@ -18,6 +18,10 @@ suite, nREPL test runner, `user/run-tests`, or fallback `bin/test` path.
 | Full CLJS checkpoint | `bin/test-cljs` |
 | Retained JVM database server | `bin/test-writer` |
 | One JVM database-server namespace | `bin/test-writer seon.db.writer-integration-test` |
+| Public focused pod gate | `bin/seon test pod seon.example-test` |
+| Public focused database gate | `bin/seon test database seon.db.writer-integration-test` |
+| Operator, Markdown, and docstring gate | `bin/seon test operator` |
+| Complete checkpoint | `bin/seon test all` |
 
 `bin/test-cljs` compiles the Shadow `:node-test` target and requires a real
 cljs.test completion summary; a process exit without the summary is an
@@ -28,6 +32,11 @@ explicit fixture. Async tests await the actual Promise and always complete the
 `bin/test-writer` loads an explicit list of retained JVM namespaces through the
 `:writer:writer-test` basis. It does not discover or load the archived JVM
 application.
+
+`bin/seon test` is the public operator surface. It delegates to those two
+canonical runners rather than implementing another harness. The `operator`
+target runs the Babashka lifecycle, artifact, Markdown, and docstring behavior;
+`all` runs operator, database, then pod gates and stops on the first failure.
 
 Run the smallest gate that can falsify the change while debugging, then the
 relevant batch checkpoint once at the unit boundary. Behavioral invariants and

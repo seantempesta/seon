@@ -72,7 +72,9 @@ These are the current Babashka operator doors:
 ```bash
 bin/seon status
 bin/seon restart
-bin/test-cljs
+bin/seon test pod seon.example-test
+bin/seon test database seon.db.registry-test
+bin/seon test operator
 curl -fsS http://127.0.0.1:7890/agents >/dev/null
 ```
 

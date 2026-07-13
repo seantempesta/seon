@@ -266,6 +266,47 @@
     (throw (ex-info "The supported cluster transition is `cluster reset <name>`."
                     {:seon.dev.cli/arguments (vec arguments)}))))
 
+(defn- pod-test-arguments [arguments]
+  (mapv #(if (str/starts-with? % "--") % (str "--test=" %)) arguments))
+
+(defn- test-commands [configuration arguments]
+  (let [root (:seon.dev.config/root configuration)
+        target (first arguments)
+        target-arguments (vec (rest arguments))
+        pod-command (into [(str (fs/path root "bin/test-cljs"))]
+                          (pod-test-arguments target-arguments))
+        database-command (into [(str (fs/path root "bin/test-writer"))]
+                               target-arguments)
+        operator-command ["bb" "--config" (str (fs/path root "bb.edn"))
+                          "--deps-root" root "-m" "seon.dev.test-runner"]]
+    (case target
+      "pod" [pod-command]
+      "database" [database-command]
+      "operator"
+      (do
+        (when (seq target-arguments)
+          (throw (ex-info "`test operator` takes no selectors."
+                          {:seon.dev.cli/arguments target-arguments})))
+        [operator-command])
+      "all"
+      (do
+        (when (seq target-arguments)
+          (throw (ex-info "`test all` takes no selectors."
+                          {:seon.dev.cli/arguments target-arguments})))
+        [operator-command
+         [(str (fs/path root "bin/test-writer"))]
+         [(str (fs/path root "bin/test-cljs"))]])
+      (throw (ex-info "Choose `test pod`, `test database`, `test operator`, or `test all`."
+                      {:seon.dev.cli/arguments (vec arguments)})))))
+
+(defn- test! [configuration arguments]
+  (doseq [argv (test-commands configuration arguments)]
+    (println (str "▶ " (str/join " " argv)))
+    (shell/shell {:dir (:seon.dev.config/root configuration)
+                  :env (:seon.dev.config/environment configuration)
+                  :cmd argv}))
+  nil)
+
 (defn- help! []
   (println
     (str "Usage: bin/seon [up] [--open]\n\n"
@@ -275,6 +316,7 @@
          "  status [--edn]           report live health\n"
          "  logs [writer|watcher|pod] [--lines N] [--follow]\n"
          "  doctor [--edn]           check host prerequisites\n"
+         "  test pod|database|operator|all [selector]\n"
          "  cluster reset <name>     drain and reset one named database\n")))
 
 (defn -main
@@ -293,6 +335,7 @@
           "status" (status! configuration command-arguments)
           "logs" (logs! configuration command-arguments)
           "doctor" (doctor! configuration command-arguments)
+          "test" (test! configuration command-arguments)
           "cluster" (cluster! configuration command-arguments)
           ("help" "--help" "-h") (help!)
           (throw (ex-info "Unknown Seon command."

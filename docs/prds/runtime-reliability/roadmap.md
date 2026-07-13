@@ -125,6 +125,12 @@ The disabled-but-retryable Gemini queue, timestamp, and pending-file mechanism
 are deleted; model review is explicit rather than an automatic network side
 effect of editing a file.
 
+The public operator now owns `test pod|database|operator|all` and delegates to
+the existing CLJS and writer runners. The operator gate includes lifecycle,
+artifact, Markdown, and docstring behavior; it no longer leaves the two linter
+suites orphaned. The underlying focused scripts remain implementation doors,
+not competing harnesses.
+
 The source-grounded system audits are complete and committed:
 
 - [[research/database-runtime-responsiveness-audit-2026-07-13]]
