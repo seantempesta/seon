@@ -324,7 +324,7 @@
 ;; ============================================================
 
 (defn ^:async user
-  "Send a message to your human.
+  "Send a message to your human user.
 
    [[message!]] with `to` := THE one user. `from` is you (the ALS
    agent). Returns `message!`'s concise envelope.
