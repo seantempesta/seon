@@ -32,9 +32,11 @@ other indexed ns is dropped:
   presence-set. Real full file source, unclipped. `full? ⇔ (nm = current-ns ∧
   ::current-full?) ∨ (nm ∈ ::full-source)` — ONE rule, no second full control.
 - **COMPACT CARD** — every ns the CURRENT ns `:require`s (`required-ns-set`), via
-  `render-one-ns-compact`: the ns's `register!` schema block (verbatim) + every
-  public fn as a one-line `(defn name "doc." {:malli/schema …} [args] …)` head,
-  body elided (`…`). ~3–5× smaller than full.
+  `render-one-ns-compact`: reader-commented schema records + every public fn as
+  one inert `fn full.ns/name [args] — "doc." — :malli/schema …` signature.
+  There are no pseudo-definitions or fake body tokens for an agent to echo as
+  code, and runtime predicate objects become readable placeholders. ~3–5×
+  smaller than full.
 - **DROPPED** — everything else. Still indexed (`:seon.ns/name` + `:seon.fn` /
   `:seon.schema` rows), grep-able, and full on demand via
   `seon.agent.ctx/render-namespace` — just not resident in the section.
@@ -88,6 +90,10 @@ also rides `:seon.config/namespaces` (`:seon.config/always` + `:seon.config/curr
   recency-ordered nearest the tail.
 - **Errors-as-values.** A bad indexed row degrades one card line; it never throws
   into the render.
+- **Echo-safe at the parser boundary.** The entire compact body routes through
+  the shared context quoter. Parsing a copied card produces no eval forms or
+  reader errors; names, signatures, doc line 1, and Malli contracts remain
+  visible as documentation.
 
 ## Third-party override-proven (acme)
 

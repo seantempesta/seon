@@ -220,7 +220,7 @@
                 "per-row ingredients coverage rides the meta")
             (is (str/includes? (get r2 "context" "") "(+ 11 22)")
                 "the row's context is the PRE-turn projection (prior turn visible)")
-            (is (some #(str/includes? % "defn query") (get r2 "cards"))
+            (is (some #(str/includes? % "seon.db/query") (get r2 "cards"))
                 "the called fn's compact card rides the row"))
           ;; curation: exclude t1, gold t2, re-export
           (let [r-ex (await (auto/rate! {:seon.agent.turn/id (:seon.agent.turn/id t1)

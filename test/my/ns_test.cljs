@@ -15,7 +15,8 @@
     [datahike.api :as d]
     [my.ns :as my-ns]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.repl.internal :as repl-internal]))
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema — includes
@@ -92,9 +93,9 @@
                          (is (= 2 (:my.ns/count res))
                              "two public fns; the private one is excluded")
                          (is (= 2 (count cards)))
-                         (is (str/starts-with? (first cards) "(defn add")
+                         (is (str/includes? (first cards) "my.demo/add")
                              "cards sort by name")
-                         (is (str/starts-with? twice "(defn twice"))
+                         (is (str/includes? twice "my.demo/twice"))
                          (is (str/includes? twice "Double a number.")
                              "docstring LINE 1 rides the card")
                          (is (not (str/includes? twice "mechanism story"))
@@ -104,7 +105,14 @@
                          (is (str/includes? twice "[n]")
                              "the arglist renders")
                          (is (not-any? #(str/includes? % "secret-helper") cards)
-                             "private fns never card")))))))
+                             "private fns never card")
+                         (is (every?
+                               (fn [card]
+                                 (not-any?
+                                   #(contains? #{:form :read} (:seon.repl/kind %))
+                                   (repl-internal/parse-forms card)))
+                               cards)
+                             "cards are inert documentation if copied into a reply")))))))
       done)))
 
 (deftest functions-accepts-symbol-keyword-and-string

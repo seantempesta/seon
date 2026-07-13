@@ -23,7 +23,9 @@
     [seon.ai.tokens :as tokens]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.db.id :as db.id]))
+    [seon.db.id :as db.id]
+    [seon.repl.internal :as repl-internal]
+    [seon.schema :as schema]))
 
 ;; A valid agent id (`:seon.agent/id` is a strict shape) and its home ns —
 ;; a fresh agent's current ns falls back to `(home-ns id)`.
@@ -174,3 +176,54 @@
               (is (contains? (section-nses card) "ktest.absent")
                   "an un-indexed ns still renders a bracketed note, never throws"))))
         (.then (fn [_] (done)) (fn [e] (is false (str "threw: " (.-message e))) (done))))))
+
+(deftest compact-fn-record-keeps-contract-without-becoming-code
+  (let [card (nss/compact-fn-head
+               "my.helper"
+               {:seon.fn/sym "my.helper/assist"
+                :seon.fn/arglists "([x] [x y])"
+                :seon.fn/doc "Assist with a value.\n\nDeep implementation notes."
+                :seon.fn/spec "[:=> [:cat [:fn #object[Function]]] :boolean]"})
+        parsed (repl-internal/parse-forms card)]
+    (testing "the useful callable contract remains visible"
+      (is (str/includes? card "my.helper/assist"))
+      (is (str/includes? card "[x]"))
+      (is (str/includes? card "[x y]"))
+      (is (str/includes? card "Assist with a value."))
+      (is (str/includes? card ":malli/schema"))
+      (is (not (str/includes? card "Deep implementation notes."))))
+    (testing "the record is inert and reader-safe when copied"
+      (is (not (str/includes? card "#object")))
+      (is (not-any? #(contains? #{:form :read} (:seon.repl/kind %)) parsed)
+          "a raw fn card is prose, not an executable pseudo-definition"))))
+
+(deftest compact-namespace-card-is-inert-at-the-reply-parser-boundary
+  (async done
+    (-> (with-seeded
+          [{:seon.schema/key :my.helper/runtime-predicate
+            :seon.schema/ns [:seon.ns/name :my.helper]
+            ;; Simulate an already-indexed legacy source. The live definition
+            ;; below independently exercises the function-valued Malli path.
+            :seon.schema/source "[:fn #object[Function]]"}]
+          (fn [conn]
+            (let [original schema/schema-definition
+                  card (with-redefs
+                         [schema/schema-definition
+                          (fn [k]
+                            (if (= k :my.helper/runtime-predicate)
+                              [:fn (fn [_] true)]
+                              (original k)))]
+                         (nss/render-one-ns-compact
+                           {:seon.ns/name :my.helper :seon.db/db @conn}))
+                  parsed (repl-internal/parse-forms (str card "\n(+ 20 22)"))
+                  forms (filter #(= :form (:seon.repl/kind %)) parsed)
+                  reads (filter #(= :read (:seon.repl/kind %)) parsed)]
+              (testing "runtime predicates never leak unreadable reader tags"
+                (is (str/includes? card "runtime-predicate"))
+                (is (not (str/includes? card "#object"))))
+              (testing "copying the complete card enqueues nothing from it"
+                (is (empty? reads))
+                (is (= ["(+ 20 22)"] (mapv :seon.repl/source forms))
+                    "only the deliberately appended real form reaches eval")))))
+        (.then (fn [_] (done))
+               (fn [e] (is false (str "threw: " (.-message e))) (done))))))

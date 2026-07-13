@@ -16,7 +16,7 @@
 
 ;; [[functions]]'s map-in / map-out. `::ns` tolerates the three spellings a
 ;; caller naturally reaches for ('my.plan, :my.plan, "my.plan"). A card is
-;; a one-line `(defn name "doc line 1" {:malli/schema …} [args] …)` head.
+;; one inert `fn full.ns/name [args] — "doc line 1" — :malli/schema …` record.
 (schema/register! ::ns [:or :symbol :keyword :string])
 (schema/register! ::card :string)
 (schema/register! ::cards [:vector ::card])
@@ -41,7 +41,7 @@
    excluded; cards sort by name. SYNC — reads only.
 
      (my.ns/functions {:my.ns/ns 'my.plan})
-     ; ⟹ «map: :seon.result/ok? true, :my.ns/cards [\"(defn done! …)\" …],
+     ; ⟹ «map: :seon.result/ok? true, :my.ns/cards [\"fn my.plan/done! […]\" …],
      ;    :my.ns/count int»
 
    An unknown namespace returns an ok?-false envelope whose `::hint`

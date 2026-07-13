@@ -8,10 +8,11 @@
        the per-agent `::full-source` presence-set. Nothing else renders full.
        The current ns is gated by the `::current-full?` flag (default true).
      - COMPACT CARD — every ns the CURRENT ns `:require`s (ALL of them), that
-       isn't already full: its `register!` block + one-line `defn` heads (body
-       elided). Self-healing on the `:seon.ns/require-edges` rows — write a real
-       `(:require [x …])` and `x` joins as a card; drop the require → it
-       vanishes ([[render-one-ns-compact]]).
+       isn't already full: inert schema and fn signature records, with no
+       pseudo-definitions or serialized runtime objects. Self-healing on the
+       `:seon.ns/require-edges` rows — write a real `(:require [x …])` and `x`
+       joins as a card; drop the require → it vanishes
+       ([[render-one-ns-compact]]).
      - DROPPED — everything else. Still INDEXED (its `:seon.ns/name` +
        `:seon.fn` / `:seon.schema` / `:seon.test` rows) and readable in FULL on
        demand via [[seon.agent.ctx/render-namespace]], just not resident in the
@@ -37,10 +38,12 @@
   (:require
     [cljs.reader :as edn]
     [clojure.string :as str]
+    [malli.core :as m]
     [seon.agent.ctx :as ctx]
     [seon.agent.home :as home]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
     [seon.schema :as schema]))
 
@@ -297,8 +300,8 @@
        "; the declaration. Redefining a fn/schema/test IS how you update it;\n"
        "; (ns-unmap 'name) removes one.\n"
        "; Your CURRENT namespace renders in FULL; its required namespaces\n"
-       "; render as COMPACT CARDS (fn head + docstring line 1 + :malli/schema,\n"
-       "; bodies elided as …). More namespaces exist in the db than render\n"
+       "; render as INERT COMPACT CARDS (fn signatures + docstring line 1 +\n"
+       "; :malli/schema; no bodies or pseudo-definitions). More namespaces exist\n"
        "; here — query rather than guess."))
 
 (defn- cur-ns-workspace-stub
@@ -388,9 +391,10 @@
        presence-set. A `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─`
        bracketed block carrying its REAL FULL FILE SOURCE, unclipped.
      - COMPACT CARD — every ns the CURRENT ns `:require`s ([[required-ns-set]])
-       that isn't already full ([[render-one-ns-compact]]): its `register!`
-       schema block + every public fn's one-line `defn` head (body elided),
-       ~3–5× smaller than full. Self-healing on the `:seon.ns/require-edges` rows.
+       that isn't already full ([[render-one-ns-compact]]): inert schema
+       records + every public fn's one-line signature, ~3–5× smaller than full.
+       The whole card is reader-commented, so echoing it cannot enqueue evals.
+       Self-healing on the `:seon.ns/require-edges` rows.
      - DROPPED — everything else, reachable via grep /
        [[seon.agent.ctx/render-namespace]]. (`*.internal` / `*-test` excluded
        outright, [[included-ns?]]; empty cards dropped.)
@@ -505,9 +509,9 @@
 ;; The COMPACT card renderer — a SIBLING detail-level to
 ;; [[seon.agent.ctx/render-one-ns-ai]]'s full-source block, NOT a
 ;; replacement. A card is 3–5× smaller than full source: it keeps the
-;; whole `register!` data model + every public fn's `:malli/schema`
-;; I/O contract + its arglist, and elides only the fn BODY (`…`) and
-;; the deep multiline prose (all but docstring line 1). This is the
+;; whole schema data model + every public fn's `:malli/schema` I/O contract +
+;; its arglist, as INERT comment records. It omits the fn BODY and the deep
+;; multiline prose (all but docstring line 1). This is the
 ;; coverage lever — for the budget of ~11 full nses the agent instead
 ;; sees its ENTIRE function surface as cards.
 ;;
@@ -536,49 +540,103 @@
   [s n]
   (if (> (count s) n) (str (subs s 0 (dec n)) "…") s))
 
+(def ^:private runtime-object-tag-re
+  "A legacy/runtime `pr-str` object tag, which `cljs.reader` cannot read.
+
+   Function-valued Malli predicates are the common source. New live forms are
+   projected through [[einstrument/pr-str-readable]] before this backstop; the
+   regex also heals already-indexed `:seon.schema/source` / `:seon.fn/spec`
+   strings without a database migration. Bounded to one line so a malformed
+   tag can never consume a following compact record."
+  #"#object\[[^\]\n]*\]")
+
+(defn- omit-runtime-object-tags
+  "Replace unreadable runtime object tags in display string `s`.
+
+   Compact namespace records are documentation, not a replay source. An opaque
+   predicate therefore becomes an explicit display marker instead of leaking
+   `#object[...]` into the agent's Clojure-shaped prompt."
+  [s]
+  (let [clean (str/replace (str s) runtime-object-tag-re "<runtime value omitted>")]
+    (if (str/includes? clean "#object")
+      "<unreadable runtime value omitted>"
+      clean)))
+
+(defn- schema-form-text
+  "Reader-safe display text for a live Malli definition or stored source.
+
+   Malli's `m/form` preserves predicate functions in `[:fn ...]`; its source
+   confirms that those children are the original evaluated values. Route the
+   form through the existing readable printer so functions become data, then
+   scrub legacy `#object[...]` strings already present in the program graph."
+  [definition source]
+  (if (some? definition)
+    (let [form (try (m/form definition) (catch :default _ definition))]
+      (omit-runtime-object-tags (einstrument/pr-str-readable form)))
+    (if (str/blank? source)
+      "<not registered>"
+      (omit-runtime-object-tags (str/trim source)))))
+
 (defn- compact-schema-line
-  "One `(register! <key> <form>)` line for a schema row the ns OWNS.
-   `<form>` is the LIVE registry definition ([[seon.schema/schema-definition]]),
-   falling back to the persisted `:seon.schema/source`, then a `<not
-   registered>` note — kept VERBATIM (real runnable `register!`), with
-   ns-local keywords abbreviated to `::`. Errors-as-values: a lookup that
-   throws degrades to the source/`<not registered>` fallback."
+  "One inert `schema <key> = <form>` record for a schema the ns owns.
+
+   `<form>` is the live registry definition ([[seon.schema/schema-definition]]),
+   falling back to persisted `:seon.schema/source`, with ns-local keywords
+   abbreviated to `::`. It is deliberately NOT a synthetic `register!` form:
+   compact cards describe callable code but never present partial/reprojected
+   data as executable source."
   [ns-str {:seon.schema/keys [key source]}]
   (let [key-str (if (= (namespace key) ns-str)
                   (str "::" (name key))
                   (pr-str key))
         def     (when (keyword? key)
                   (try (schema/schema-definition key) (catch :default _ nil)))
-        form    (cond
-                  (some? def)               (pr-str def)
-                  (not (str/blank? source)) (str/trim source)
-                  :else                     "<not registered>")]
-    (str "(register! " key-str " " (abbrev-ns-kws form ns-str) ")")))
+        form    (schema-form-text def source)]
+    (str "schema " key-str " = " (abbrev-ns-kws form ns-str))))
+
+(defn- parsed-arglists
+  "Stored arglists as a nonempty seq of vectors, or nil when unreadable."
+  [arglists]
+  (let [parsed (try (edn/read-string arglists) (catch :default _ nil))]
+    (when (and (seq? parsed) (seq parsed) (every? vector? parsed)) parsed)))
+
+(defn- raw-arglists-inner
+  "Best-effort raw arglist text with one enclosing pair of parens removed."
+  [arglists]
+  (let [s (str/trim (or arglists ""))]
+    (if (and (str/starts-with? s "(") (str/ends-with? s ")"))
+      (subs s 1 (dec (count s)))
+      s)))
 
 (defn compact-arities
-  "The arity portion of a compact fn head, from an arglists string.
+  "The arity portion of a function-menu entry, from an arglists string.
 
    Derived from the stored `:seon.fn/arglists` string
    (`\"([{:my.kb/keys [a]}])\"`). Single arity → `[args] …`; multi-arity →
    `([a] …) ([a b] …)`. Errors-as-values: an unreadable arglists string
    falls back to its raw text (outer parens stripped) with an elided
    body. Public: the `:function-menu` menu section
-   (`seon.agent.ctx.menu`) renders its glyph entries with the SAME
-   arity grammar as these compact cards."
+   (`seon.agent.ctx.menu`) renders its glyph entries with this deliberately
+   source-like grammar; compact namespace cards use [[compact-signatures]] so
+   they never present a fake body."
   {:malli/schema [:=> [:catn [::arglists [:maybe :string]]] :string]}
   [arglists]
-  (let [parsed (try (edn/read-string arglists) (catch :default _ nil))]
+  (let [parsed (parsed-arglists arglists)]
     (cond
-      (and (seq? parsed) (seq parsed) (every? vector? parsed))
+      parsed
       (if (= 1 (count parsed))
         (str (pr-str (first parsed)) " …")
         (str/join " " (map (fn [v] (str "(" (pr-str v) " …)")) parsed)))
       :else
-      (let [s (str/trim (or arglists ""))
-            inner (if (and (str/starts-with? s "(") (str/ends-with? s ")"))
-                    (subs s 1 (dec (count s)))
-                    s)]
-        (str inner " …")))))
+      (str (raw-arglists-inner arglists) " …"))))
+
+(defn- compact-signatures
+  "Inert signature text from stored arglists, with no fake body token."
+  [arglists]
+  (if-let [parsed (parsed-arglists arglists)]
+    (str/join " | " (map pr-str parsed))
+    (let [raw (raw-arglists-inner arglists)]
+      (if (str/blank? raw) "<args unavailable>" raw))))
 
 (schema/register! ::ns-str :string)
 ;; Concrete value shapes, NOT references to the :seon.fn/* attr schemas —
@@ -592,28 +650,24 @@
    [:seon.fn/spec     {:optional true} :string]])
 
 (defn compact-fn-head
-  "One fn condensed to a single-line `defn` head with the body elided.
+  "One fn condensed to an inert single-line signature record.
 
-   `(defn name \"<doc line 1>\" {:malli/schema <spec>} [args] …)` — real
-   Clojure. Docstring line 1 is soft-clipped at 78; a fn with no
-   docstring omits the string; a fn with no `:malli/schema` omits the
-   metadata map; ns-local keywords in the spec + arglist abbreviate to
-   `::`. Multi-arity specs/arglists pass through unchanged. `ns-str` is
-   the fn's own namespace (drives the `::` abbreviation); the row is the
-   indexed `:seon.fn` map. PUBLIC: the ONE per-fn card renderer — the
-   compact ns cards below and the `seon.repl.autocomplete` exporter's
-   fn cards both render through it."
+   `fn full.ns/name [args] — \"<doc line 1>\" — :malli/schema <spec>`.
+   There is no synthetic `defn` and no fake body token for an agent to echo as
+   code. Docstring line 1 is soft-clipped at 78; missing docs/specs are omitted;
+   ns-local keywords abbreviate to `::`. PUBLIC: the ONE per-fn card renderer —
+   compact namespace cards, `my.ns/functions`, and autocomplete export all use
+   this same inert record."
   {:malli/schema [:=> [:catn [::ns-str ::ns-str] [::fn-row ::fn-row]] :string]}
   [ns-str {:seon.fn/keys [sym arglists doc spec]}]
-  (let [nm      (if-let [i (str/index-of sym "/")] (subs sym (inc i)) sym)
-        doc-1   (when (and doc (not (str/blank? doc)))
+  (let [doc-1   (when (and doc (not (str/blank? doc)))
                   (soft-clip (str/trim (first (str/split-lines doc))) 78))
-        docpart (if doc-1 (str " " (pr-str doc-1)) "")
+        docpart (if doc-1 (str " — " (pr-str doc-1)) "")
         specpart (if (and spec (not (str/blank? spec)))
-                   (str " {:malli/schema " spec "}")
+                   (str " — :malli/schema " (omit-runtime-object-tags spec))
                    "")
-        arities (compact-arities arglists)
-        head    (str "(defn " nm docpart specpart " " arities ")")]
+        arities (compact-signatures arglists)
+        head    (str "fn " sym " " arities docpart specpart)]
     (abbrev-ns-kws head ns-str)))
 
 (schema/register! ::render-one-ns-compact-request
@@ -624,9 +678,10 @@
 (defn render-one-ns-compact
   "Render ONE namespace as a COMPACT CARD string.
 
-   The ns's `register!` schema block (KEPT verbatim) plus every PUBLIC fn
-   condensed to a one-line `defn` head with the body elided (`…`), inside the standard
-   `;;; ┌─/└─` demarcation ([[seon.agent.ctx/ns-demarc]]).
+   The ns's schema definitions plus every PUBLIC fn condensed to inert comment
+   records, inside the standard `;;; ┌─/└─` demarcation
+   ([[seon.agent.ctx/ns-demarc]]). Compact output contains no executable
+   pseudo-definitions and no serialized runtime objects.
 
    Reads INDEXED ROWS ONLY (`:seon.schema/_ns` / `:seon.fn/_ns` off the
    `:seon.ns/name` entity) — NEVER a file read (code-as-data). A sibling
@@ -661,20 +716,21 @@
             ;; The cross-ns schema DEFINITIONS these fns reference (transitive,
             ;; global — the ns's OWN schemas are already in reg-lines above and
             ;; excluded). Shared closure lives in seon.agent.ctx (one mechanism).
-            ref-blk   (ctx/referenced-schema-block
-                        {:seon.db/db          db
-                         :seon.agent.ctx/seed-specs (into [] (keep :seon.fn/spec) fns)
-                         :seon.agent.ctx/own-keys   (into #{} (map :seon.schema/key) schemas)})
-            ;; Schema block = own register! lines THEN the referenced ones
-            ;; (contiguous, unlabeled — a register! is self-evidently a schema);
-            ;; one blank line, then the fn heads (the `…` already shows the body
-            ;; is elided — no label). `;;;` ns demarcation stays (structural).
+            ref-blk   (some-> (ctx/referenced-schema-block
+                                {:seon.db/db          db
+                                 :seon.agent.ctx/seed-specs (into [] (keep :seon.fn/spec) fns)
+                                 :seon.agent.ctx/own-keys   (into #{} (map :seon.schema/key) schemas)})
+                              omit-runtime-object-tags)
+            ;; Schema records first, then referenced definitions, one blank line,
+            ;; then fn signatures. The WHOLE body routes through quote-lines so
+            ;; an echo is inert at the actual reply parser boundary.
             parts (cond-> []
                     (seq reg-lines)                 (into reg-lines)
                     ref-blk                         (conj ref-blk)
                     (and (or (seq reg-lines) ref-blk) (seq fn-lines)) (conj "")
                     (seq fn-lines)                  (into fn-lines))
             body  (if (seq parts)
-                    (str/join "\n" parts)
+                    (ctx/quote-lines (str/join "\n" parts)
+                                     {:seon.agent.ctx/strip-markers? true})
                     "; (nothing indexed)")]
         (ctx/ns-demarc ns-kw body)))))
