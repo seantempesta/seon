@@ -96,10 +96,10 @@ production alias and paused/advanced process verbs are not primary UX.
   database language. Cut them over atomically to db/database/backend terms,
   with literal upstream `:store` keys confined inside the third-party adapter.
 - The inventory context, `db/store-inventory`, `my.kb/inventory`, root-canvas
-  “STORE” panel, header, and `/data` browser repeat broad namespace/count
-  scans. `/data` also owns a legacy SSE registry. Delete this whole family
-  instead of renaming it. Installed schema plus small attribute-presence/domain
-  queries are the composable discovery primitives.
+  “STORE” panel, header count, and `/data` browser repeat broad
+  namespace/count scans. Delete the generic inventory family, but keep and port
+  `/data`: it becomes the single database browser on the canonical lazy
+  render-unit/feed lifecycle with bounded `seon.db.browser` projections.
 - `my.kb` domain facts and provenance are independent of that inventory. A
   later refined KB may compose purpose-specific database queries without
   restoring a global default context section.
@@ -114,6 +114,11 @@ production alias and paused/advanced process verbs are not primary UX.
 
 - One product vocabulary: database/db, block/render/surface/canvas/card/slot.
   No store, tile/live-tile, world, or inspector concepts in active Seon APIs.
+- Database namespace ownership is fixed: `seon.db` public API,
+  `seon.db.protocol` shared semantic messages, `seon.db.backend` private
+  Datahike/Konserve translation, `seon.db.registry` JVM connections/lifecycle,
+  and `seon.db.transport.*` delivery adapters. Protocol behavior never forks
+  by transport.
 - Third-party implementation names are encapsulated at their adapter boundary;
   Seon does not fork upstream merely to rename private keys.
 - The old JVM application is archived through a known Git ref and deleted from
@@ -134,8 +139,9 @@ production alias and paused/advanced process verbs are not primary UX.
   bounded runtime caches are derived and discardable.
 - Four dormant context-display adapters—findings, inventory, jobs, and
   testrun—are deleted precisely. The generic inventory API/root panel/header
-  link/`/data` route are deleted with the inventory adapter. Useful
-  domain/runtime facts remain.
+  scan are deleted with the inventory adapter. The header database link and
+  `/data` route remain; `/data/sse` and its private feed registry do not.
+  Useful domain/runtime facts remain.
 - `my.canvas` is the one permanent agent-facing canvas/control API and injects
   current agent/database identity.
 - Local UDS and remote WebSocket may both be transport adapters, but one
@@ -177,8 +183,8 @@ The owner has already selected the complete-development-stack semantics for
 4. Finish exact config/schema/program/database lifecycle reconstruction,
    coordinates, as-of, branches, restore, undo, and crash recovery.
 5. Converge canvas/surface/card UI vocabulary, delete weak context/inventory
-   paths, finish pay-for-use rendering, responsive layout, controls, focus, and
-   ACME cutover after default proof.
+   paths, port `/data` to bounded lazy database units on the one feed, finish
+   responsive layout/controls/focus, and cut over ACME after default proof.
 6. Harden and adopt one remote writer/replica protocol over UDS/WebSocket
    adapters.
 7. Ship thin hosted web, browser replica, downstream native shell, and a proven

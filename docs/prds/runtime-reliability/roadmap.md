@@ -141,6 +141,45 @@ is confined to the Datahike/Konserve adapter and translated immediately; it is
 never re-exported as Seon vocabulary. Ordinary English verbs in historical
 material and upstream source are not compatibility APIs.
 
+Namespace ownership follows the same vocabulary:
+
+| Namespace | Owns |
+|---|---|
+| `seon.db` | canonical public query/transaction/database API on each platform |
+| `seon.db.protocol` | one platform-neutral message schema and pure protocol data transformations |
+| `seon.db.backend` | JVM-only translation from fully namespaced Seon database options into private Datahike/Konserve config maps |
+| `seon.db.registry` | JVM-only live connection/database/branch registry and lifecycle |
+| `seon.db.browser` | bounded, index-backed, read-only projections used by the canonical `/data` database browser |
+| `seon.db.transport.uds` | local Unix-socket framing and delivery only |
+| `seon.db.transport.websocket` | later remote framing and delivery only |
+
+Protocol semantics never live in a transport adapter. Every Seon-owned map key
+is fully namespaced to the namespace that specs and manages it.
+
+### Database browser target
+
+`/data` is the one operator-facing database exploration view. It describes
+facts as attributes, entities, references, transactions, and history—never as
+entity kinds and never as an unqualified “inventory.”
+
+| Region | Default cost | Expanded capability |
+|---|---|---|
+| database bar | O(1) database datom count/head coordinate plus installed-schema size | branch/as-of coordinate selection when lifecycle support lands |
+| attribute navigator | installed schema only; grouped visually by attribute namespace | selected attribute schema, bounded AEVT/AVET rows, values, carrier entities, and cursor |
+| entity table | one cursor-bounded page for the selected attribute/search | sortable visible columns only; no complete pull of offscreen rows |
+| entity detail | absent until selected | EAVT facts, identity, outbound refs, reverse refs, provenance, and bounded entity history |
+| transaction browser | absent until selected/opened | latest transaction metadata, user/process/instant, effective datoms, and bounded history reconstruction |
+| raw data | closed stub | exact EDN/datoms for the selected bounded object, rendered only when expanded |
+
+Navigation state is encoded in validated URL parameters so links, reloads, and
+back/forward work without database writes. Index cursors replace offset walks.
+A page reads at most `page-size + 1` rows to prove whether another page exists;
+it does not compute an exact global count merely to render pagination. Total
+datoms use the database index's counted root rather than Datahike `metrics`,
+whose per-attribute diagnostics scan the complete EAVT index. Transaction
+reconstruction is explicitly on demand and budgeted because Datahike does not
+currently expose a TX-leading primary index.
+
 ### Operator contract
 
 The owner-selected primary door is:
@@ -179,9 +218,10 @@ transitions as data; the shell file becomes a tiny launcher.
   `seon.agent.ctx.findings`, `inventory`, `jobs`, and `testrun`.
   Durable findings, job execution, and parsed test-run facts remain. The weak
   whole-database `db/store-inventory` API is also deleted, not renamed: schema
-  discovery uses installed attributes, and domain discovery belongs in small
-  purpose-specific database queries. A refined KB may compose those facts
-  later without restoring a global inventory/context mechanism.
+  discovery uses installed attributes, domain discovery belongs in small
+  purpose-specific database queries, and operator exploration belongs in the
+  canonical `/data` browser. A refined KB may compose those facts later without
+  restoring a global inventory/context mechanism.
 - One canonical skill source generates or links tool/runtime views; three
   hand-edited copies are not authorities.
 - Local UDS and remote WebSocket may both exist as transport adapters, but they
@@ -204,7 +244,7 @@ transitions as data; the shell file becomes a tiny launcher.
 | Dependencies | Heavy paused-app dependencies live in base `:deps`; the writer, CLJS build, tools, and tests do not have honest narrow closures. |
 | Writer protocol | Dead query subscriptions, in-process subscriber routing, duplicate Transit helpers, unused read/filter/batch operations, an unwired agent registry, and a fake SQLite backend remain. |
 | Database vocabulary | `seon.store.wire`, `:seon.store.wire/*`, `{store-id, ...}`, `db/store-inventory`, `seon.server.store`, `/store` paths, and matching docs/UI/skills expose a second name for the database. |
-| Database inventory | The inventory context block, `db/store-inventory`, `my.kb/inventory`, root-canvas “STORE” panel, header link, and `/data` browser repeat broad namespace/count scans. `/data` also retains a second legacy SSE connection registry. |
+| Database browser | The inventory context block, `db/store-inventory`, `my.kb/inventory`, root-canvas “STORE” panel, header count, and `/data` repeat broad namespace/count scans. `/data` also retains a second legacy SSE connection registry instead of the canonical lazy render-unit feed. |
 | Developer hooks | Active hook config still calls the paused nREPL JVM on port 7888, so several claimed checks silently do not run. |
 | Operator | `bin/seon` is a 2,186-line shell program exposing implementation processes and a destructive global nuke. |
 | Tests | Disabled tests and old JVM application suites remain; focused writer and CLJS doors are not the complete active authority split. |
@@ -278,12 +318,15 @@ subsequent deletion is recoverable from the archive ref.
 
 ### Phase 2 — isolate the permanent JVM server
 
-1. Atomically rename the database boundary in place: `seon.store.wire` to
-   `seon.db.wire`, `:seon.store.wire/*` to `:seon.db.wire/*`,
-   `seon.server.store` to a database-owned namespace, and every Seon
-   `store-id`/`store-path`/`store-name` contract to its database/backend name.
-   Rename the managed filesystem leaf from `/store` to `/db`; test databases
-   need no migration. Do not leave aliases or dual protocol keys.
+1. Atomically rehome the database boundary in place: `seon.store.wire` and
+   `seon.server.wire` converge on shared `seon.db.protocol` plus the local
+   `seon.db.transport.uds` adapter; `seon.server.store` becomes
+   `seon.db.backend`; `seon.server.registry` becomes `seon.db.registry`; and
+   every `:seon.store.wire/*` / Seon `store-id` / `store-path` / `store-name`
+   contract becomes the fully namespaced protocol/database/backend term owned
+   by that namespace. Rename the managed filesystem leaf from `/store` to
+   `/db`; test databases need no migration. Do not leave aliases, forwarding
+   vars, or dual protocol keys.
 2. Fold the exact Datahike/Konserve fork, secondary-index source, JVM flags,
    writer dependencies, and main class into one honest server build contract.
 3. Split dependency ownership into minimal shared, CLJS, writer,
@@ -385,40 +428,59 @@ or duplicate runtime registry.
 3. Delete exactly the four dormant context-display namespaces and their display
    tests while preserving their underlying domain/runtime facts. Delete the
    entire duplicate inventory family: `db/store-inventory`,
-   `my.kb/inventory`, the root-canvas “STORE” panel, header inventory call/link,
-   `/data`, `/data/sse`, their whole-database scans and legacy feed registry,
-   warning coupling, teaching references, and brittle tests. Keep
-   installed-schema and direct attribute-presence queries as the small
-   composable discovery tools. A later KB surface must be a focused domain
-   query through the normal block/render/surface mechanism, not a restored
-   global browser.
-4. Make `seon-skills` the canonical distributable skill source; generate or
+   `my.kb/inventory`, the root-canvas “STORE” panel, header inventory scan,
+   warning coupling, teaching references, and brittle tests. Keep the header's
+   database link, but make `/data` the only database exploration surface.
+4. Port `/data` in place to the canonical render-unit and shared gzip Datastar
+   feed lifecycle. Delete `/data/sse`, `!data-connections`, its listener flag,
+   broadcast loop, and full `[?e ?a]` rescan. The route returns a cheap shell;
+   `/data/feed` owns one normal view descriptor; `/view/unit` activates only
+   visible/expanded database units; URL params remain the shareable navigation
+   state.
+5. Add fully specified, read-only `seon.db.browser` projections backed by
+   Datahike indexes and bounded pages: installed attributes/schema, attribute
+   values and carrier entities, entity facts/outbound and reverse refs,
+   transaction datoms/user/process/instant, and history. Omit unavailable
+   sections. Counts/samples that cannot be obtained cheaply are lazy units with
+   explicit budgets, not work performed on every transaction.
+6. Give each browser region a stable fully namespaced unit coordinate and
+   observed database dependencies. A commit rerenders only the open summary,
+   table, or detail whose read result changed; equivalent tabs compose through
+   the existing cache/fan-out; identical output sends no morph. Pagination and
+   row windows are bounded, and closed details construct no Hiccup or SCI work.
+7. Keep installed-schema and direct attribute-presence queries as the small
+   composable agent/domain discovery tools. A later KB surface must be a focused
+   domain query through the normal block/render/surface mechanism, not a
+   restored global inventory/context block.
+8. Make `seon-skills` the canonical distributable skill source; generate or
    validate tool-facing views mechanically. Delete `ui-live-tiles` and stale
    world/inspector/`my.tile` teaching.
-5. Keep `my.canvas` as the permanent API, make its leaf encodings
+9. Keep `my.canvas` as the permanent API, make its leaf encodings
    browser-portable, and ensure its docstrings/Malli errors make buttons,
    inputs, selects, toggles, forms, state, save, pin, and clear self-explanatory.
-6. Complete stable render-unit membership, runtime database-read observation,
+10. Complete stable render-unit membership, runtime database-read observation,
    changed-result invalidation, bounded compositional caches, and identical
    output suppression in the existing Datastar feed.
-7. Pay only for open/visible work: debug remains an empty shell until opened;
+11. Pay only for open/visible work: debug remains an empty shell until opened;
    offscreen/closed bodies are stubs; hidden source/result/error trees are not
    constructed.
-8. Finish the responsive layout: full-height primary canvas, independent
+12. Finish the responsive layout: full-height primary canvas, independent
    readable right rail, bounded fonts/code, compact plan disclosures,
    transcript bottom anchoring, no visible focused duplicate, and no live-bar
    overlap.
-9. Prove deliberate focus: canvas/domain writes select canvas; an agent reply
+13. Prove deliberate focus: canvas/domain writes select canvas; an agent reply
    selects transcript; human selection stays locally sticky until invalid.
-10. Prove every `my.canvas` control with valid, invalid, rejected, rapid, and
+14. Prove every `my.canvas` control with valid, invalid, rejected, rapid, and
     throwing handlers. Feedback is structured and visible to the agent.
-11. Cold-prove the default cluster, then coordinate the same no-alias cutover in
+15. Cold-prove the default cluster, then coordinate the same no-alias cutover in
     ACME and rebuild/reset it.
 
 Exit proof: one database transaction causes only affected units to render and
 one Datastar path to update; the agent view, compact previews, forms, focus,
-scroll, debug view, CSS, skills, and ACME use the same canvas/surface/card
-contract. Grown-database idle feeds do not repeat SCI/HTML work or sawtooth RSS.
+scroll, debug view, database browser, CSS, skills, and ACME use the same
+render-unit/feed contract. `/data` can inspect schema, entities, refs,
+transactions, provenance, and history without a global per-commit scan.
+Grown-database idle feeds do not repeat SCI/HTML work or sawtooth RSS.
 
 ### Phase 6 — harden and adopt one remote writer/replica protocol
 
