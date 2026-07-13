@@ -74,6 +74,18 @@ record `ok? true` silently (taints ok-eval mining), `db/query` returns
 `#{}` on a request without `:seon.db/query`. A2 gate = the audit
 harness (`src-needle/audit/` + `lora_audit_*.py`); any LoRA eval win
 must be re-scored for head resolvability before it counts.
+**Tool-surface overhaul SHIPPED + re-lint-proven**
+([[research/tool-surface-overhaul-2026-07-12.md]]): the owner-cleared
+source fixes — ~50 glyph-free capability line-1s (FIX8 sweep texts
+applied), 5 schema sharpenings (`:seon.db/query-form`/`entity-ref`/
+`pull-pattern`/`thunk`/`time-point`) + `:my.plan/root?`→`:my.plan/root`,
+ZERO renames (sweep verdict held; candidates deferred with evidence) —
+re-measured on the LIVE re-dumped surface: needle 0.283→0.372 (+.090,
+≈ the full translation-layer stack), 0.00-tier 21→14, false-sug
+0.25→0.208, Qwen FIX8 7→13/24; baselines reproduce byte-for-byte on
+the control index; suite 1236/5649/0/0 in the pin worktree
+(`repl-autosuggest/fn-surface-pin`). `db/query` aggregation-asks still
+abstain everywhere (the `recall` case-bank gap owns that shape).
 Live status: [[roadmap.md]].
 
 ## Settled — do NOT re-litigate

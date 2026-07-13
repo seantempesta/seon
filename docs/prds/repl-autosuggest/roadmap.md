@@ -193,6 +193,25 @@ shape is re-measured against a real contract (and `my.ns/functions`
 enters the leaderboard) — the dump script picks both up automatically
 (`my.*` surface rule).
 
+## Tool-surface overhaul — SHIPPED + re-lint-proven (2026-07-12)
+
+The owner-cleared source fixes from the KT2b lint + surface sweep
+([[research/tool-surface-overhaul-2026-07-12.md]]): ~50 docstring
+line-1s rewritten to glyph-free capability sentences (the 8
+sweep-measured FIX8 texts first), 5 schemas sharpened
+(`:seon.db/query-form` / `entity-ref` / `pull-pattern` / `thunk` /
+`time-point`) + `:my.plan/root?`→`:my.plan/root`, ZERO fn renames (the
+sweep's no-rename verdict held; candidates deferred with evidence).
+Re-lint on the LIVE re-dumped surface: **needle 0.283 → 0.372 (+0.090,
+above the doc-action override's prediction, ≈ the full stack), 0.00
+tier 21 → 14 fns, false-sug 0.25 → 0.208; Qwen FIX8 7/24 → 13/24**;
+baselines reproduced byte-for-byte on a near-baseline control index.
+Suite green in the isolated pin worktree (1236/5649/0/0). Residuals as
+predicted: `db/query` aggregation-asks abstain everywhere (the `recall`
+contract lane owns it); `transact!`/`register!`/`put!` stay 0/3 needle
+(not-a-docstring failures). Commits `2de88e0f`/`608b2331`/`6b75705c`/
+`f6cd9761`.
+
 ## Ordered path (spend-gated; thresholds in design.md §Measurement)
 
 1. **KT1 tokenizer envelope — FIRED 2026-07-12**
