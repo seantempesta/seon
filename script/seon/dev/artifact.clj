@@ -141,12 +141,15 @@
   (run-step! config "warm CLJS classpath" ["clojure" "-P" "-M:cljs"])
   (run-step! config "build canonical database server"
              ["clojure" "-T:build" "writer-uber"])
-  (run-step! config "preflight canonical database server"
-             [(get-in config [:seon.dev.config/environment "JAVA_CMD"] "java")
-              "--add-modules" "jdk.incubator.vector"
-              "--enable-native-access=ALL-UNNAMED"
-              "-XX:+UseG1GC" "-Xmx2g" "-jar"
-              (:seon.dev.config/writer-output config) "--preflight"])
+  ;; `--preflight` is explicitly the live embedding round-trip gate. Its
+  ;; correct master-OFF result is exit 11, not a failed writer artifact.
+  (when (get-in config [:seon.dev.config/environment "SEON_EMBED"])
+    (run-step! config "preflight embedding-backed database server"
+               [(get-in config [:seon.dev.config/environment "JAVA_CMD"] "java")
+                "--add-modules" "jdk.incubator.vector"
+                "--enable-native-access=ALL-UNNAMED"
+                "-XX:+UseG1GC" "-Xmx2g" "-jar"
+                (:seon.dev.config/writer-output config) "--preflight"]))
   (run-step! config "build client" (cljs-command config "compile" "client"))
   (run-step! config "build self-host bootstrap"
              (cljs-command config "compile" "bootstrap"))
