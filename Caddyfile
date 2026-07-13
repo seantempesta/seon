@@ -12,9 +12,10 @@
 #   SEON_CADDY_ADDRESS=https://localhost:3030
 #   SEON_CADDY_UPSTREAM=127.0.0.1:7890
 # Local certificates are deliberately not installed into host trust stores at
-# process start. For a trusted browser URL, run `caddy start --config Caddyfile`,
-# then `caddy trust`, then `caddy stop` once; curl and other diagnostics can
-# instead opt into the local certificate.
+# process start. For a trusted browser URL, keep `caddy run --config Caddyfile`
+# open in one terminal, run `caddy trust` in a second terminal, then stop the
+# first process once. Curl and other diagnostics can instead opt into the local
+# certificate.
 {
 	auto_https disable_redirects
 	skip_install_trust
