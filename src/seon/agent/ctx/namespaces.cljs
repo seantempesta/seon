@@ -580,7 +580,7 @@
    CURRENT ns, not necessarily the namespace it describes. It is deliberately
    NOT a synthetic `register!` form: compact cards describe callable code but
    never present partial/reprojected data as executable source."
-  [_ns-str {:seon.schema/keys [key source]}]
+  [{:seon.schema/keys [key source]}]
   (str "schema " (pr-str key) " = " (schema-form-text source)))
 
 (defn- parsed-arglists
@@ -753,7 +753,7 @@
             fns     (->> (:seon.fn/_ns pull)
                          (remove :seon.fn/private?)
                          (sort-by :seon.fn/sym))
-            reg-lines (map #(compact-schema-line ns-str %) schemas)
+            reg-lines (map compact-schema-line schemas)
             fn-lines  (map compact-fn-head fns)
             ;; The cross-ns schema DEFINITIONS these fns reference (transitive,
             ;; global — the ns's OWN schemas are already in reg-lines above and
