@@ -84,11 +84,13 @@
         ;; content whose datom lived in the peer's tx — the web UI lied).
         db  @db/*conn*
         ctx {:seon.agent/id id :seon.db/db db}
-        ;; THE SAME single producer the prompt path uses — both route
-        ;; through `seon.agent.ctx/render-context`, so the LLM prompt and this
-        ;; human web UI are byte-identical by construction.
-        text          (ctx/render-context ctx)
-        blocks        (ctx/rendered-context-blocks ctx #{:ai :html})
+        ;; Render the ordered AI blocks ONCE, assemble the context from those
+        ;; same strings, and add HTML twins only for the current eager debug
+        ;; consumer. The lazy unit cutover will request the twins separately;
+        ;; either way no AI renderer is invoked twice for token accounting.
+        {:seon.render/keys [text]
+         blocks :seon.agent.ctx/rendered-blocks}
+        (ctx/rendered-context ctx #{:ai :html})
         ;; Block 1 — the resolved system message, via the EXACT fn the
         ;; adapters call (no re-implementation, no drift). No override is
         ;; passed, so this returns the cluster's `:seon.config/system-text`

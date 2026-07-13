@@ -2435,6 +2435,22 @@
    [:seon.db/db    {:optional true} :seon.db/db]
    [:seon.agent.ctx/profile {:optional true} :seon.agent.ctx/profile]])
 
+(schema/register! ::rendered-block
+  [:map
+   [:seon.agent.ctx/name :seon.agent.ctx/name]
+   [:seon.agent.ctx/priority :seon.agent.ctx/priority]
+   [:seon.render/text {:optional true} :string]
+   [:seon.render/token-estimate {:optional true} :int]
+   [:seon.render/hiccup {:optional true} :seon.render.canvas/hiccup]
+   [:seon.render/html {:optional true} :seon.render/html]])
+(schema/register! ::rendered-blocks [:vector ::rendered-block])
+(schema/register! ::rendered-context
+  [:map
+   [:seon.render/text {:optional true} :string]
+   [:seon.agent.ctx/rendered-blocks ::rendered-blocks]])
+
+(declare rendered-context)
+
 (defn render-context
   "THE agent's full LLM context, as a bare String.
 
@@ -2459,22 +2475,8 @@
    per-agent slot override is bypassed (a profile asks for exactly those
    blocks). Absent ⇒ byte-parity with today."
   {:malli/schema [:=> [:cat ::render-context-request] :string]}
-  [{:seon.agent/keys [id] :seon.db/keys [db] profile :seon.agent.ctx/profile}]
-  (let [db   (or db @db/*conn*)
-        ent  (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
-        slot (when-not (seq profile)
-               (some->> (:seon.render/ai ent)
-                        (db/decode-edn-value :seon.render/ai)))
-        ctx  (cond-> {:seon.db/db db :seon.agent/id id}
-               (seq profile) (assoc :seon.agent.ctx/profile (vec profile)))]
-    (cond
-      (string? slot) slot
-      (symbol? slot) (or (render/render :seon.render/ai ctx
-                                        {:seon.agent.ctx/name :prompt :seon.render/ai slot})
-                         "")
-      :else          (or (render/render :seon.render/ai ctx
-                                        (context-root ctx))
-                         ""))))
+  [request]
+  (or (:seon.render/text (rendered-context request #{:ai})) ""))
 
 (defn- block-renders-ai?
   "A context block contributes to the agent's PROMPT only when it declares an
@@ -2547,6 +2549,90 @@
                out))))
        vec))
 
+(defn- rendered-blocks->context-text
+  "Assemble already-rendered AI blocks into the exact prompt context.
+
+   This owns only ordering/bracketing/cache-boundary assembly. Child renderers
+   have already run, so callers can reuse the same block strings for debug
+   token accounting instead of invoking every AI renderer a second time."
+  [root rendered]
+  (let [bracketed (->> rendered
+                       (filter #(contains? % :seon.render/text))
+                       (mapv (fn [block]
+                               (assoc block :seon.render/bracketed
+                                      (block-bracket-ai
+                                        (:seon.agent.ctx/name block)
+                                        (:seon.render/text block))))))]
+    (if (:seon.agent.ctx/profile-render? root)
+      (->> bracketed (map :seon.render/bracketed) (str/join "\n\n"))
+      (let [breakpoint (cache-breakpoint)
+            stable (->> bracketed
+                        (filter #(<= (or (:seon.agent.ctx/priority %) 999)
+                                     breakpoint))
+                        (map :seon.render/bracketed)
+                        (str/join "\n\n"))
+            volatile (->> bracketed
+                          (remove #(<= (or (:seon.agent.ctx/priority %) 999)
+                                       breakpoint))
+                          (map :seon.render/bracketed)
+                          (str/join "\n\n"))]
+        (cond
+          (str/blank? stable) volatile
+          (str/blank? volatile) stable
+          :else (str stable "\n\n" stable-boundary "\n\n" volatile))))))
+
+(defn rendered-context
+  "Render one frozen context projection, reusing its AI block results.
+
+   The returned `:seon.render/text` is the same bare context string as
+   [[render-context]] when `formats` includes `:ai`. The accompanying ordered
+   `:seon.agent.ctx/rendered-blocks` are the exact strings used to assemble
+   it, plus HTML twins only when `:html` was requested. An agent-level
+   `:seon.render/ai` override replaces the whole context, so it produces one
+   synthetic `:prompt` AI block and no unrelated default HTML twins.
+
+   This is a pure projection over the supplied db value and writes no datoms."
+  {:malli/schema [:=> [:catn [::request ::render-context-request]
+                       [:seon.render/formats [:set [:enum :ai :html]]]]
+                  ::rendered-context]}
+  [{:seon.agent/keys [id] :seon.db/keys [db]
+    profile :seon.agent.ctx/profile}
+   formats]
+  (let [db (or db @db/*conn*)
+        entity (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
+        slot (when-not (seq profile)
+               (some->> (:seon.render/ai entity)
+                        (db/decode-edn-value :seon.render/ai)))
+        ctx (cond-> {:seon.db/db db :seon.agent/id id}
+              (seq profile) (assoc :seon.agent.ctx/profile (vec profile)))]
+    (if (or (string? slot) (symbol? slot))
+      (let [text (when (contains? formats :ai)
+                   (if (string? slot)
+                     slot
+                     (or (render/render :seon.render/ai ctx
+                                        {:seon.agent.ctx/name :prompt
+                                         :seon.render/ai slot})
+                         "")))
+            blocks (cond-> []
+                     (and (string? text) (not (str/blank? text)))
+                     (conj {:seon.agent.ctx/name :prompt
+                            :seon.agent.ctx/priority 0
+                            :seon.render/text text
+                            :seon.render/token-estimate (tokens/estimate text)}))]
+        (cond-> {:seon.agent.ctx/rendered-blocks blocks}
+          (contains? formats :ai) (assoc :seon.render/text (or text ""))))
+      (let [root (context-root ctx)
+            ctx* (assoc ctx :seon.agent/entity (:seon.agent/entity root))
+            blocks (rendered-child-blocks
+                     (:seon.agent.ctx/children root)
+                     formats
+                     #(render/render :seon.render/ai ctx* %)
+                     #(render/render :seon.render/html ctx* %))]
+        (cond-> {:seon.agent.ctx/rendered-blocks blocks}
+          (contains? formats :ai)
+          (assoc :seon.render/text
+                 (rendered-blocks->context-text root blocks)))))))
+
 (defn rendered-context-blocks
   "Resolved context blocks for one agent and frozen db snapshot.
 
@@ -2558,13 +2644,7 @@
                        [:seon.render/formats [:set [:enum :ai :html]]]]
                   [:vector :map]]}
   [ctx formats]
-  (let [root (context-root ctx)
-        ctx* (assoc ctx :seon.agent/entity (:seon.agent/entity root))]
-    (rendered-child-blocks
-      (:seon.agent.ctx/children root)
-      formats
-      #(render/render :seon.render/ai ctx* %)
-      #(render/render :seon.render/html ctx* %))))
+  (:seon.agent.ctx/rendered-blocks (rendered-context ctx formats)))
 
 (defn render-context-ai
   "The ROOT renderable's `:ai` slot — the block renderer.
@@ -2578,35 +2658,10 @@
    provider side."
   {:malli/schema [:=> [:catn [::input :map]] :string]}
   [{:seon.render/keys [node render]}]
-  (let [rendered  (rendered-child-blocks
-                    (:seon.agent.ctx/children node) #{:ai} render (constantly nil))
-        bracketed (mapv (fn [s]
-                          (assoc s :seon.render/bracketed
-                                 (block-bracket-ai (:seon.agent.ctx/name s)
-                                                     (:seon.render/text s))))
-                        rendered)]
-    ;; PROFILE render (the root node is flagged by [[context-root]]): a
-    ;; curated-subset render has no provider cache line — no breakpoint
-    ;; read (a live-conn read — nondeterministic over a db value), no
-    ;; [[stable-boundary]]; just the bracketed blocks in priority order.
-    ;; The DEFAULT path below is byte-identical to before profiles existed.
-    (if (:seon.agent.ctx/profile-render? node)
-      (->> bracketed (map :seon.render/bracketed) (str/join "\n\n"))
-      (let [breakpoint (cache-breakpoint)
-            stable   (->> bracketed
-                          (filter #(<= (or (:seon.agent.ctx/priority %) 999)
-                                       breakpoint))
-                          (map :seon.render/bracketed)
-                          (str/join "\n\n"))
-            volatile (->> bracketed
-                          (remove #(<= (or (:seon.agent.ctx/priority %) 999)
-                                       breakpoint))
-                          (map :seon.render/bracketed)
-                          (str/join "\n\n"))]
-        (cond
-          (str/blank? stable)   volatile
-          (str/blank? volatile) stable
-          :else (str stable "\n\n" stable-boundary "\n\n" volatile))))))
+  (rendered-blocks->context-text
+    node
+    (rendered-child-blocks
+      (:seon.agent.ctx/children node) #{:ai} render (constantly nil))))
 
 (defn render-context-html
   "The ROOT renderable's `:html` slot — each child's html twin.

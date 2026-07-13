@@ -89,6 +89,15 @@
                  (-> (js/Promise.resolve (body conn))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
+(defonce ^:private !debug-ai-render-count (atom 0))
+
+(defn counted-debug-ai
+  "Test renderer used to prove debug prompt assembly does not rerun AI blocks."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [_]
+  (swap! !debug-ai-render-count inc)
+  "test-rendered-ai-block")
+
 (defn- allocate-turn!
   "Allocate and commit one turn fixture."
   [conn turn]
@@ -861,6 +870,39 @@
                       ;; validator internals, never the taught vocabulary
                       (is (not (str/includes? prod-txt ":malli.core/"))
                           "no raw malli internals leak into the prompt")))))))
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
+(deftest debug-preview-reuses-the-ai-block-render
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (-> (agent/create! {:seon.agent/id "AGTdebugonce01"})
+                (.then
+                  (fn [_]
+                    (db/with-agent
+                      "AGTdebugonce01"
+                      (fn ^:async []
+                        (ctx/install!
+                          {:seon.agent.ctx/name :debug-count-probe
+                           :seon.agent.ctx/priority 25
+                           :seon.render/ai 'seon.ctx-test/counted-debug-ai})))))
+                (.then
+                  (fn [_]
+                    (reset! !debug-ai-render-count 0)
+                    (let [preview (agent-debug/ctx-preview
+                                    {:seon.agent/id "AGTdebugonce01"})
+                          block (some #(when (= :debug-count-probe
+                                                (:seon.agent.ctx/name %))
+                                         %)
+                                      (:seon.agent.ctx/rendered-blocks preview))]
+                      (is (= 1 @!debug-ai-render-count)
+                          "one debug snapshot invokes each AI producer once")
+                      (is (string? (:seon.render/text block))
+                          "the rendered block string is retained for the breakdown")
+                      (is (str/includes? (:seon.render/text preview)
+                                         (:seon.render/text block))
+                          "the full prompt is assembled from that retained string")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
