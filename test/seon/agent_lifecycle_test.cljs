@@ -298,7 +298,7 @@
                        (fn ^:async w [] (await (lifecycle/wait "park")))))
               (is (= ["aaa-2606101200" "bbb-2606101200"]
                      (agent/armable-agent-ids {:seon.db/db @db/*conn*}))))
-            (testing "a terminated agent is excluded (history, not roster)"
+            (testing "a terminated agent is excluded (history, not armable)"
               (await (lifecycle/terminate "aaa-2606101200"))
               (is (= ["bbb-2606101200"]
                      (agent/armable-agent-ids {:seon.db/db @db/*conn*})))

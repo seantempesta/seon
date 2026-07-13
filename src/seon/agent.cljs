@@ -14,7 +14,7 @@
        `:seon.schema/*` corpus schemas (`:seon.agent.message/*` lives in
        [[seon.agent.message]], `:seon.agent.turn/*` in [[seon.agent.turn]],
        `:seon.agent.run/*` in [[seon.agent.run]], `:seon.agent.ctx/*` in [[seon.agent.ctx]])
-     - `armable-agent-ids` — the wakeable roster (a `:seon.db/db` map-in
+     - `armable-agent-ids` — the wakeable agent ids (a `:seon.db/db` map-in
        adapter over the one [[seon.derive]] leaf); state is a projection of the
        run/terminated-at primitives, never stored
      - `derive-status` — the agent fingerprint, re-exported from [[seon.derive]]
@@ -345,7 +345,7 @@
 ;; DERIVED state — there is no stored `:seon.agent/state`. The FSM state is a
 ;; projection of the agent's primitives (terminated-at / open run / paused-at)
 ;; via [[seon.derive/derive-state]] — the ONE derivation leaf. `armable-agent-ids`
-;; (below) is the wakeable roster, a FILTER over that one rule;
+;; (below) returns the wakeable agent ids, a FILTER over that one rule;
 ;; `derive-status` (re-exported below) is the full fingerprint. The loop + wake
 ;; gate now call [[seon.derive/derive-state]] directly with the db value they
 ;; hold.
@@ -363,7 +363,7 @@
    `:idle` = not `:terminated` AND with no OPEN run. Open a fresh run for one;
 
    a running/paused agent is mid-run, a terminated agent is dead. The boot
-   resume roster + the wake re-arm both read this. Map-in `:seon.db/db` adapter
+   resume pass + the wake re-arm both read this. Map-in `:seon.db/db` adapter
    over [[seon.derive/armable-agent-ids]] (the one filter-over-derive-state
    rule); `:seon.db/db` optional (defaults to `*conn*`'s db)."
   {:malli/schema [:=> [:cat ::armable-agent-ids-request] ::armable-agent-ids-response]}

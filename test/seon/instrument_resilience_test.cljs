@@ -88,7 +88,7 @@
                   (is (= 0 (:seon.instrument/registered stats))
                       "the ghost row is never instrumented")
                   (is (= snapshot (m/function-schemas :cljs))
-                      "boot instrumentation never mutates Malli's roster"))))))
+                      "boot instrumentation never mutates Malli's function-schema registry"))))))
         (.catch (fn [e]
                   (is false (str "deftest threw: " (ex-message e)))))
         (.finally done))))

@@ -235,7 +235,7 @@
     ;; `mcp__seon_cljs__eval agent_id=<id>` pins THIS runtime.
     [seon.dev.runtime-id :as runtime-id])
   ;; Compile-time enumeration of the build's PUBLIC fns — `core-vars`
-  ;; below IS this macro's whole-closure roster: every public first-party
+  ;; below IS this macro's whole-closure var vector: every public first-party
   ;; fn the build loads, specced or not (owner directive — 'just index
   ;; everything'; never hand-list vars).
   (:require-macros [seon.indexing :refer [public-fn-vars first-party-ns-strs]]))
@@ -1066,17 +1066,17 @@
 ;; This produces a `:seon.fn` row IDENTICAL in shape to a detect-and-tee row
 ;; (eval.cljs/build-tee-entities) — downstream readers never branch on origin.
 ;; The agent extends the indexed surface by transacting its own fns; the core
-;; surface auto-widens — `core-vars` is the `public-fn-vars` macro roster, so
+;; surface auto-widens — `core-vars` is the `public-fn-vars` macro output, so
 ;; a new public first-party defn is seeded the moment the build loads it.
 ;; ---------------------------------------------------------------------------
 
 (def ^:private core-vars
-  "Every var indexed into the corpus at boot: the compile-time roster of
+  "Every var indexed into the corpus at boot: the compile-time vector of
    EVERY public first-party fn across the build's whole require closure
    (`seon.indexing/public-fn-vars` — owner directive 'just index
    everything': all functions in the cljs package become `:seon.fn` rows,
-   specced or not). No hand-curated inclusion list — the macro IS the
-   roster; a new public fn is indexed the moment it loads. Each var's
+   specced or not). No hand-curated inclusion list — the macro supplies the
+   complete vector; a new public fn is indexed the moment it loads. Each var's
    spec/doc/source is read by [[var->fn-row]]; an unspecced fn simply omits
    `:seon.fn/spec` (honestly unspecced). Macro output is already
    sym-unique, so no dedup pass is needed."
@@ -1084,7 +1084,7 @@
 
 ;; Deftest vars the pod build loads, populated at load time by
 ;; `seon.dev.test-preload` (the ONE ns whose require closure contains the
-;; test roster — a macro expanded HERE can't see nses compiled after this
+;; test namespaces — a macro expanded HERE can't see nses compiled after this
 ;; file). Empty in builds without the preload (e.g. :node-test), where
 ;; tests index themselves via the runner's run-and-record path instead.
 (defonce !indexed-test-vars (atom []))
@@ -1255,9 +1255,9 @@
    is readable but `:line` points past its end (or is non-positive). That
    happens when a `defn` is deleted from a hot-reloaded ns — shadow recompiles
    the file but leaves the old var (carrying its stale `:line`) bound in the
-   running namespace object, so the compile-time roster keeps enumerating it.
+   running namespace object, so the compile-time var scan keeps enumerating it.
    Distinct from a genuinely-unreadable file (`txt` nil), which is a real
-   error. A ghost is pruned from the boot roster with a single :warn."
+   error. A ghost is skipped from the boot var set with a single :warn."
   [txt line]
   (and (some? txt)
        (or (not (pos-int? line))
@@ -1449,7 +1449,7 @@
                (str "ghost var " sym " — `:line` " (:line m) " points past "
                     "file " (pr-str (:file m)) " (a defn deleted from a "
                     "hot-reloaded ns; shadow left the stale var bound). "
-                    "Pruned from the roster.")})
+                    "Skipped from the indexed function vars.")})
             (log/error-console!
               "seon.client/var->fn-row"
               (str "could not read real source for " sym
@@ -1779,7 +1779,7 @@
   {:malli/schema [:=> [:cat] :any]}
   []
   (let [now     (js/Date.)
-        ;; Downstream extra-core vars join the roster after the
+        ;; Downstream extra-core vars join the indexed vars after the
         ;; sym-dedup against core-vars; the reserved-prefix guard
         ;; (seon.*/my.*) is the boot-index-time LOUD refusal — extra-src
         ;; research §e.
@@ -1880,7 +1880,7 @@
                (str "ghost test var " sym " — `:line` " (:line m) " points "
                     "past file " (pr-str (:file m)) " (a deftest deleted from "
                     "a hot-reloaded ns; shadow left the stale var bound). "
-                    "Pruned from the roster.")})
+                    "Skipped from the indexed test vars.")})
             (log/error-console!
               "seon.client/var->test-row"
               (str "could not read real source for " sym
@@ -1942,7 +1942,7 @@
 
    The namespace/function/schema desired populations must be non-empty before
    any removal is compiled. Tests may legitimately be absent from a build, so
-   an empty test roster is preserve-only. Returns a Promise of tx-data."
+   an empty desired test-var set is preserve-only. Returns a Promise of tx-data."
   {:malli/schema [:=> [:catn [::conn :any]] :any]}
   [conn]
   (let [all       (concat (index-core!)

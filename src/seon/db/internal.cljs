@@ -1428,7 +1428,7 @@
 (defn merge-tx-context-into-opts
   "Attach only selected user/process refs to ordinary transaction metadata.
 
-   The AsyncLocalStorage map is execution context, not a persistence roster:
+   The AsyncLocalStorage map is execution context, not persisted provenance:
    turn, eval, replay, and test values never
    cross this boundary. Explicit caller tx metadata may carry a genuine custom
    transaction fact outside `:seon.db`; the selected provenance refs always

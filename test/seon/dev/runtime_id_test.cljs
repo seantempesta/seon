@@ -5,7 +5,7 @@
 
      - `advertisement` is THE probe envelope: the cluster this process
        declared (`cluster!`) + the VECTOR of ids it hosts — core agent
-       ids AND `proc:<name>` infra ids share ONE roster.
+       ids AND `proc:<name>` infra ids share ONE hosted-id set.
      - resolution is `parse-id` + `select-runtime` — the ns is CLJC so
        the bb resolver LOADS these exact fns; these tests ARE the
        resolver's unit tests (no mirrored logic). The rule: 0 matches →
@@ -15,7 +15,7 @@
        disjoint by construction (persistent id schemas reject `:`, cluster
        names reject `/`).
 
-   Tests snapshot + restore the defonce'd roster + cluster so the LIVE
+   Tests snapshot + restore the defonce'd hosted ids + cluster so the LIVE
    pod's hosted set (the booted agents) is never disturbed."
   (:require
     [cljs.test :refer [deftest is testing]]
@@ -23,8 +23,8 @@
     [seon.db.id]
     [seon.dev.runtime-id :as runtime-id]))
 
-(defn- with-clean-roster
-  "Run `f` against an emptied roster, restoring the prior hosted set
+(defn- with-clean-hosted-ids
+  "Run `f` against emptied hosted ids, restoring the prior hosted set
    after — the pod under test may be LIVE and hosting real agents."
   [f]
   (let [before (runtime-id/hosted)]
@@ -36,9 +36,9 @@
         (doseq [id before] (runtime-id/host! id))))))
 
 (deftest host-unhost-hosted-roundtrip
-  (with-clean-roster
+  (with-clean-hosted-ids
     (fn []
-      (testing "empty roster answers []"
+      (testing "empty hosted set answers []"
         (is (= [] (runtime-id/hosted))))
       (testing "host! registers; idempotent; sorted vector out"
         (runtime-id/host! "bbb-2606101200")
@@ -54,7 +54,7 @@
         (is (= ["bbb-2606101200"] (runtime-id/hosted)))))))
 
 (deftest membership-resolution-agent-and-proc-ids
-  (with-clean-roster
+  (with-clean-hosted-ids
     (fn []
       ;; The pod topology: one runtime hosting N agents; an infra runtime
       ;; hosting its proc:<name>. The bb resolver's match is
@@ -67,14 +67,14 @@
         (testing "every hosted agent id resolves to this runtime"
           (is (match? "iCg-2606101519"))
           (is (match? "Kpx-2606101522")))
-        (testing "proc:<name> infra ids resolve through the SAME roster"
+        (testing "proc:<name> infra ids resolve through the SAME hosted set"
           (is (match? "proc:wire")))
         (testing "unhosted ids do not match"
           (is (not (match? "zzz-2606101599")))
           (is (not (match? "proc:replica"))))))))
 
 (deftest cluster-declaration-and-advertisement
-  (with-clean-roster
+  (with-clean-hosted-ids
     (fn []
       (let [before (:seon.dev.runtime-id/cluster (runtime-id/advertisement))]
         (try

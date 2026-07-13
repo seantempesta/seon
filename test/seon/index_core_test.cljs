@@ -356,11 +356,11 @@
   ;; [:seon.ns/name <kw>] lookup-ref (a single :seon.db/ref), NEVER a bare
   ;; keyword — the malformed value the Run-3 findings traced to the second boot.
   ;;
-  ;; DERIVED expectations: the roster is now the compile-time
+  ;; DERIVED expectations: the indexed vars now come from the compile-time
   ;; `seon.indexing/public-fn-vars` macro over EVERY public first-party fn
   ;; in the whole build closure — specced OR not (owner directive 'just
   ;; index everything'; the hand-curated inclusion list is gone). Never
-  ;; assert a hardcoded count (the old `= 14` broke on every roster
+  ;; assert a hardcoded count (the old `= 14` broke whenever the var set
   ;; change). Instead: the known core surface (incl. honestly-unspecced fns
   ;; like register!/read-file/grep) must be present, the set must be
   ;; substantially wider than the old curated 14, and every row must be
@@ -369,16 +369,16 @@
         fns  (filter :seon.fn/sym tx)
         syms (map :seon.fn/sym fns)]
     (is (>= (count fns) 14)
-        "the widened roster is at least as big as the old curated set")
+        "the indexed var set is at least as big as the old curated set")
     (is (> (count fns) 50)
         "the whole-package surface is indexed, not a curated sliver")
     (is (= (count syms) (count (distinct syms)))
-        "no duplicate :seon.fn/sym rows (curated + macro roster deduped)")
+        "no duplicate :seon.fn/sym rows (curated + macro vars deduped)")
     (doseq [sym ["seon.db/transact!" "seon.db/query" "seon.db/pull"
                  "seon.db/entity" "seon.db/listen!" "seon.db/current-agent-id"
                  "seon.schema/register!" "seon.agent.fs/read-file" "seon.agent.fs/walk-dir"
                  "seon.agent.search/grep" "seon.test.runner/run!"]]
-      (is (some #{sym} syms) (str sym " present in the indexed roster")))
+      (is (some #{sym} syms) (str sym " present in the indexed vars")))
     (is (every? #(let [r (:seon.fn/ns %)]
                    (and (vector? r) (= 2 (count r)) (= :seon.ns/name (first r))
                         (keyword? (second r))))
@@ -428,7 +428,7 @@
 (deftest index-tests-builds-rows-from-deftest-vars
   ;; Fix b: deftest vars → :seon.test rows via the same file-read
   ;; introspection. Driven here with an explicit var (the preload-populated
-  ;; default roster is empty in the :node-test build).
+  ;; default deftest-var vector is empty in the :node-test build).
   (let [rows (client/index-tests [#'pure-index-emits-valid-refs])
         row  (first (filter :seon.test/sym rows))]
     (is (= "seon.index-core-test/pure-index-emits-valid-refs"

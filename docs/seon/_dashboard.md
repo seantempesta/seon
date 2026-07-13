@@ -92,7 +92,7 @@ notes (web-ui, agent-system, reply-segmenter, loadable-skills) and in
 | [[components/namespace-lifecycle]] | production | Dynamic ns startup, ctx injection |
 | [[components/web-layer]] | stable | HTTP, SSE, Datastar, Phosphor Terminal |
 | [[components/web-brand]] | stable | Downstream brand surface — env-synced rows, titles/h1/theme, CSS hook |
-| [[components/web-ui]] | active | CLJS pod web lane — dashboard/roster/agent/debug pages, SSE morphing, findings pane, debug overlay |
+| [[components/web-ui]] | active | CLJS pod web lane — root/agents/per-agent/debug pages, SSE morphing, findings pane, debug overlay |
 | [[components/agent-system]] | stable | AI providers, sessions, observatory |
 | [[components/agent-reply-segmenter]] | active | CLJS pod — LLM reply → form/prose/read entries (`parse-forms`) |
 | [[components/loadable-skills]] | active | CLJS pod — `my.skills`, dial knowledge into agent ctx, drop when done |

@@ -173,7 +173,7 @@
         ;; exhaust (`seon.agent`, `seon.eval`, `seon.ns`, `seon.agent.turn`,
         ;; …) is post-bootstrap too, but it is machinery, not knowledge to
         ;; consult before researching — the transcript already shows the
-        ;; agent's evals, the roster shows agents. Filtering it out is what
+        ;; agent's evals, the agents list shows agents. Filtering it out is what
         ;; makes this surface answer "what KNOWLEDGE exists?" instead of
         ;; drowning the one `my.kb` line under bookkeeping. Empty after the
         ;; filter → "" → the section reactively vanishes (a fresh cluster

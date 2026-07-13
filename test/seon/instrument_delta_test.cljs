@@ -32,7 +32,7 @@
     (gobj/set ns-object (cljs.core/munge (name sym)) f)))
 
 (deftest exact-data-and-delta-refresh-only-affected-wrappers
-  (let [roster-before (m/function-schemas :cljs)
+  (let [function-schemas-before (m/function-schemas :cljs)
         initial [(target a-sym [:=> [:cat :int] :int])
                  (target b-sym [:=> [:cat :int] :int])]]
     (try
@@ -75,8 +75,8 @@
             (is (nil? (gobj/get (live-fn a-sym)
                                 "malli$instrument$original"))))))
 
-      (testing "explicit data never becomes a second process-global roster"
-        (is (= roster-before (m/function-schemas :cljs))))
+      (testing "explicit data never becomes a second process-global registry"
+        (is (= function-schemas-before (m/function-schemas :cljs))))
       (finally
         (instrument/instrument-delta!
           {::instrument/changed-syms target-syms

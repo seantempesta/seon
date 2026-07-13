@@ -54,7 +54,7 @@
 ;; `client/index-core!` is the production canonical program snapshot builder.
 ;; The fixture selects this guard's namespaces from those rows and hands their
 ;; specs to seon.instrument as explicit exact data. Malli's process-global
-;; function-schema roster is deliberately untouched.
+;; function-schema registry is deliberately untouched.
 ;; ============================================================
 
 (def ^:private target-nses
@@ -81,7 +81,7 @@
                       (cljs.reader/read-string spec-str)})))))
        vec))
 
-(def ^:private roster-before (m/function-schemas :cljs))
+(def ^:private function-schemas-before (m/function-schemas :cljs))
 
 (defn- instrument-all!
   "Instrument the guard's exact canonical program targets."
@@ -158,8 +158,8 @@
                   seon.ui.components/status-dot]]
       (is (contains? target-syms sym)
           (str sym " must be present in the canonical exact target set"))))
-  (is (= roster-before (m/function-schemas :cljs))
-      "exact instrumentation never mutates Malli's global function roster")
+  (is (= function-schemas-before (m/function-schemas :cljs))
+      "exact instrumentation never mutates Malli's global function-schema registry")
   ;; A wrapped fn rejects bad input with an instrumentation throw.
   (is (instrument-traps? #(db/core-attr-namespaces :not-a-db))
       "core-attr-namespaces must reject a non-db arg under instrumentation"))

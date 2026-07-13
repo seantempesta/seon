@@ -3,7 +3,7 @@
    value + an agent/run id into derived state lives HERE, exactly once.
 
    Why a leaf: the agent's derived state, turn counts, current-run, and the
-   armable roster were each re-implemented 5+ times across `seon.agent`,
+   armable-agent ID query were each re-implemented 5+ times across `seon.agent`,
    `seon.agent.ctx`, `seon.render.default`, `seon.agent.run`, and
    `seon.agent.schedule`, every copy justified by dodging the
    `agent → ctx → render` require cycle. A pure `(derive-x db id)` needs
@@ -216,7 +216,7 @@
 (defn resumable-agent-ids
   "Born agent ids whose derived state is not `:terminated`.
 
-   This is the process-host roster, distinct from [[armable-agent-ids]]: a
+   These are the agent IDs this process must host, distinct from [[armable-agent-ids]]: a
    running or paused agent still needs its transient namespace, loop input, and
    listener reconstructed after process start or code reload. Identity-only
    lookup targets are not hosts; birth requires `:seon.eval/home-requires`.

@@ -17,7 +17,7 @@ tags: [decision, architecture, schema]
 > snapshot owns Shadow publication, Shadow's zero-argument `after-load` hook
 > derives live unwrapped gaps from the canonical rows once and feeds only those
 > symbols through the same delta; healthy wrappers are never replaced. Seon
-> does not populate Malli's process-global function-schema atom as a second roster.
+> does not populate Malli's process-global function-schema atom as a second registry.
 > The implementation/deletion proof is tracked in
 > `docs/prds/runtime-reliability/roadmap.md` Phase 8.
 

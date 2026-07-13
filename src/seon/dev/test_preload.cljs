@@ -58,22 +58,22 @@
     [seon.ai.anthropic-test]
     ;; my.kb scaffold (V3-B, 2026-06-10): provenance shapes registered
     ;; once + my.kb.shared seed/append/read contract (V4-0).
-    ;; Required here so the deftest-vars roster carries my.kb-test and
+    ;; Required here so the deftest-vars vector carries my.kb-test and
     ;; its full source renders as the exemplar test sibling.
     [my.kb-test]
     ;; UI lane (agent-fsm): the Datastar app-view streamer framing + the
-    ;; view=f(db) roster (appear/vanish, determinism, never-crash) and the
+    ;; view=f(db) tests (appear/vanish, determinism, never-crash) and the
     ;; /call capability gate. Required here so seon.test.runner can drive
     ;; them against the live pod (the munged ns object must be in the build).
     [seon.web.datastar-test]
     [seon.web.reactive.call-test]
     ;; Boot-time test indexing (unit #23 fix b): this preload's require
-    ;; closure IS the pod's test roster, so the deftest-vars macro below
+    ;; closure defines the pod's test namespaces, so the deftest-vars macro below
     ;; can see every deftest var — seon.client (compiled before the test
     ;; nses) cannot.
     [seon.client :as client])
   (:require-macros [seon.indexing :refer [deftest-vars]]))
 
-;; Hand the pod's full deftest roster to the boot indexer
+;; Hand the pod's full deftest-var vector to the boot indexer
 ;; (seon.client/index-tests reads this; start-agent! transacts the rows).
 (reset! client/!indexed-test-vars (deftest-vars))

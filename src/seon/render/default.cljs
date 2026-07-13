@@ -202,7 +202,7 @@
 ;; Turn-count + derived-state are the [[seon.derive]] leaf — `view` (and the
 ;; web UI) call `seon.derive/agent-turn-count` / `seon.derive/derive-state`
 ;; with the db value they hold. They were duplicated here only to dodge the
-;; seon.agent require cycle; the armable-roster lives once in
+;; seon.agent require cycle; the armable-agent query lives once in
 ;; `seon.derive/armable-agent-ids` (state = :idle).
 
 ;; ============================================================

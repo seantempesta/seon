@@ -5,7 +5,7 @@
    once to [[instrument-from-db!]]. Later accepted program transitions
    supply only their changed symbols and new contracts to
    [[instrument-delta!]]. Both paths pass explicit `:data` to Malli; Seon
-   never populates Malli's process-global function-schema roster and never
+   never populates Malli's process-global function-schema registry and never
    scans it as a second authority.
 
    The injecting wrapper, structural async opt-out, and coverage census
@@ -199,7 +199,7 @@
       WRAPPED fns of the eval path (`seon.eval/eval-batch!`,
       `record-eval!`, …) — the outer conduits themselves are NOT
       instrumented (`seon.eval/eval` is a structural [[async-unwrappable?]]
-      opt-out; `raw-eval` is private, never in the roster). So the wrapped
+      opt-out; `raw-eval` is private, never in the instrumentation targets). So the wrapped
       fn's symbol alone ('what were we calling') misclassifies agent typos
       as `:core` and reds the strict gate forever. Content wins when it
       identifies the population:
@@ -278,7 +278,7 @@
       [[prepare-targets]] routes every simple fixed-arity `:=>` fn here. This
       is the ONE injecting boundary — no second wrapper. The resulting object
       rides in Malli's explicit instrumentation data, so stock
-      `mi/instrument!` reuses all its var surgery without a second roster.
+      `mi/instrument!` reuses all its var surgery without a second registry.
 
       `fn-sym` (the wrapped fn's QUALIFIED symbol) decides the
       `:seon.error/fault` population once, at register time — \"what were
@@ -453,7 +453,7 @@
       Each target is a namespaced map containing `::sym` (a qualified
       symbol), `::schema-form`, and optionally `::registry` (an immutable
       Malli registry projection). The result separates accepted target data
-      from rejected rows; it never mutates Malli's function-schema roster."
+      from rejected rows; it never mutates Malli's function-schema registry."
      {:malli/schema
       [:=>
        [:cat [:sequential
@@ -502,7 +502,7 @@
      "Instrument the complete supplied target set exactly once.
 
       This is the cold-reconstruction primitive. It calls Malli once with
-      explicit `:data`; the process-global function-schema roster is neither
+      explicit `:data`; the process-global function-schema registry is neither
       read nor written. Returns preparation and instrumentation counts."
      {:malli/schema
       [:=>
@@ -567,7 +567,7 @@
       Persisted specs are parsed into exact targets and handed to
       [[instrument-targets!]]. Unreadable, unresolved, dead, and structural
       opt-out rows degrade as namespaced counts without entering Malli's
-      roster. Runtime mint/resume and hot reload must use
+      instrumentation data. Runtime mint/resume and hot reload must use
       [[instrument-delta!]], never this complete query."
      {:malli/schema [:=> [:cat :any] :map]}
      [db]

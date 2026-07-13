@@ -1,12 +1,12 @@
 ---
 name: browser-automation
-description: "Verify the Seon pod's OWN web UI in a real browser. Use when eyeballing the /agents roster or an /agent/{id} page on http://127.0.0.1:7890, checking a Datastar morph rendered, or debugging a canvas/console error. Provides Chrome-MCP tab-ownership so agents don't clobber each other's tabs — and the KEY limit: the browser agent 503s long-lived SSE streams, so verify the /feed server-side (node gunzip client), not in the browser."
+description: "Verify the Seon pod's OWN web UI in a real browser. Use when eyeballing the /agents list or an /agent/{id} page on http://127.0.0.1:7890, checking a Datastar morph rendered, or debugging a canvas/console error. Provides Chrome-MCP tab-ownership so agents don't clobber each other's tabs — and the KEY limit: the browser agent 503s long-lived SSE streams, so verify the /feed server-side (node gunzip client), not in the browser."
 ---
 
 # Browser Automation — verifying the Seon pod UI
 
 You have Chrome MCP tools (`mcp__claude-in-chrome__*`) to look at the **pod's own
-web UI** on `http://127.0.0.1:7890` — the `/agents` roster, an `/agent/{id}` page,
+web UI** on `http://127.0.0.1:7890` — the `/agents` list, an `/agent/{id}` page,
 the `/data` datom browser. This skill is coordination (don't clobber peer tabs)
 + the one hard limit (SSE doesn't verify in-browser).
 
@@ -53,7 +53,7 @@ invalidate on navigation — re-`find` after navigating.
 | Page | Path |
 |---|---|
 | Root agent view | `/` |
-| Agent roster | `/agents` |
+| Agents list | `/agents` |
 | Agent page | `/agent/{id}` |
 | Datom browser | `/data` |
 | Agent debug (exact LLM bytes) | `/agent/{id}/debug` |
