@@ -112,8 +112,8 @@
 ;; EVERY arm, so it stays exactly as fresh as the live wake-handler closure (a
 ;; hot reload re-arms with a freshly-resolved llm-fn). A genuinely stateful
 ;; runtime artifact — the llm-fn is a closure and compile-state is the live
-;; bootstrap, neither DB-derivable — so a registry is the right home (same
-;; class as `seon.agent.run/!runs-this-process`, not a derivable-state store).
+;; bootstrap, neither DB-derivable. This registry remains a separate runtime-
+;; service consolidation target; it is not evidence about result liveness.
 ;; `drive-run!` reads it to RE-ENTER the loop on RESUME (the loop exits on
 ;; :pause; resume must re-drive the still-open run). `defonce` survives a hot
 ;; reload; the re-arm repopulates it regardless.

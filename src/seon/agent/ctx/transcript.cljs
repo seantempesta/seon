@@ -7,8 +7,8 @@
    its own stored time (`:seon.agent.message/at` / `:seon.eval/at`), sorted
    by that instant, rendered through the SAME recursive `seon.render/render`
    handle every other section uses (ONE section model). Turn boundaries are
-   NOT containers — there are no per-turn headers; the only structural
-   marker is the session-resume boundary, interleaved by time.
+   NOT containers — there are no per-turn headers or synthetic process
+   boundary rows.
 
    It reads as a REPL transcript: `;` comments + forms + BARE
    `⟹ <value> ⟸ result/<id>` runtime result lines (NOT comment-shaped, so a
@@ -37,11 +37,11 @@
   (:require
     [clojure.string :as str]
     [seon.agent.message :as msg]
-    [seon.agent.run :as run]
     [seon.agent.ctx :as ctx]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.derive :as derive]
+    [seon.eval :as seval]
     [seon.handlers.eval :as eval-handler]
     [seon.render :as render]
     [seon.schema :as schema]))
@@ -97,13 +97,12 @@
 ;; one moving line is switched off there.
 (schema/register! ::readline? [:boolean {:default true}])
 
-;; PROCESS-IDENTITY bytes — the `⟸ result/<id>` handles and the
-;; session-resume marker both depend on which PROCESS is rendering
-;; (`run/this-process-run?`): the same db value renders different bytes
-;; before and after a pod restart. Default true (byte-parity). `false`
-;; renders every eval in the process-INDEPENDENT form (no handles, no
-;; resume marker — as a prior-session eval renders), so an as-of export
-;; reproduces inference bytes regardless of restarts — the
+;; RUNTIME-CACHE bytes — the `⟸ result/<id>` handles depend on exact
+;; membership in the bounded result runtime
+;; (`seval/result-live?`): the same db value renders different bytes after
+;; eviction or a pod restart. Default true (byte-parity). `false` renders
+;; every eval in the runtime-INDEPENDENT form (no handles), so an as-of export
+;; reproduces inference bytes regardless of process/cache state — the
 ;; `seon.repl.autocomplete` profile sets it off.
 (schema/register! ::result-handles? [:boolean {:default true}])
 
@@ -270,14 +269,6 @@
        "; messages and evals interleaved, oldest-first. Append below.\n"
        (mode-fragment mode)))
 
-(def resume-marker-line
-  "The session-resume boundary: rendered ONCE per resume, between the
-   last event of a previous process and the first of the next, as a single
-   `;` runtime-structure comment. Everything above it ran in a process that
-   no longer exists — its `result/<id>` vars are not dereferenceable
-   (re-run a form to recompute a value)."
-  "; session resumed — the events above ran in a previous process; their result/<id> vars are gone (re-run a form to recompute)")
-
 ;; ------------------------------------------------------------
 ;; Time — every displayed event time derives from the event's FIXED
 ;; stored `:at` (byte-stable). `clock` FAILS LOUD on nil: a render fn
@@ -368,13 +359,13 @@
    carries the component caps ([[seon.agent.ctx/eval-render-cap]] /
    [[seon.agent.ctx/result-body-render-cap]]) forward. A `::ns-marker?` true
    event prepends a `; in <ns>` line (emitted only where the eval ns
-   changes from the prior eval). PRIOR-SESSION evals (`::prior?` true)
-   render their value WITHOUT the `result/<id>` handle (their vars died
-   with the restart; the resume marker says so once)."
+   changes from the prior eval). Only an exact bounded-runtime member
+   (`::result-live?` true) renders a `result/<id>` handle; evicted and
+   prior-process values remain visible without a dead handle."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{node :seon.render/node}]
-  (let [{::keys [entity prior? ns-marker]} node
-        row (ctx/format-eval-row entity (boolean prior?))]
+  (let [{::keys [entity result-live? ns-marker]} node
+        row (ctx/format-eval-row entity (not (true? result-live?)))]
     (if ns-marker
       (str ns-marker "\n" row)
       row)))
@@ -453,15 +444,13 @@
   [events]
   (->> events
        (remove noise-eval?)
-       (partition-by (fn [ev] [(error-signature ev) (::prior? ev)]))
+       (partition-by error-signature)
        (mapcat
          (fn [grp]
            (let [sig (error-signature (first grp))]
              (if (and sig (>= (count grp) coalesce-min-run))
                [{::kind          :coalesced
                  ::at            (::at (first grp))
-                 ::prior?        (::prior? (first grp))
-                 ::run-id        (::run-id (first grp))
                  ::signature     sig
                  ::count         (count grp)
                  ::members       (vec grp)
@@ -518,12 +507,12 @@
 
 (defn- eval-events
   "ALL of the agent's evals as transcript events across ALL its turns,
-   oldest-first, each `{::at ::kind :eval ::entity ::run-id ::prior? ::turn-idx
+   oldest-first, each `{::at ::kind :eval ::entity ::result-live? ::turn-idx
    :seon.render/ai 'eval->renderable}`. Walks agent → runs → turns → evals
-   (via [[seon.agent.ctx/agent-turns]]). `::run-id` tags each so the section can
-   interleave the resume marker at the process boundary; `::prior?` marks
-   evals from a run opened by a PREVIOUS pod process — its `result/<id>`
-   vars died ([[seon.agent.run/this-process-run?]]). `::turn-idx` is the
+   (via [[seon.agent.ctx/agent-turns]]). `::result-live?` is derived from
+   exact membership in the one bounded runtime cache, so an evicted result
+   loses its handle even when its run was opened by this process, while a live
+   member keeps its handle regardless of run. `::turn-idx` is the
    0-based enumeration index of the eval's TURN (oldest turn = 0), the handle
    the `::turns-retained` window + `::tiers` age-banding key on."
   [db id]
@@ -531,14 +520,12 @@
     (vec
       (for [[ti t] (map-indexed vector turns)
             e      (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
-        (let [rid (:seon.agent.run/id (:seon.agent.turn/run t))]
-          {::at       (:seon.eval/at e)
-           ::kind     :eval
-           ::entity   (into {} e)
-           ::run-id   rid
-           ::turn-idx ti
-           ::prior?   (and (some? rid) (not (run/this-process-run? rid)))
-           :seon.render/ai 'seon.agent.ctx.transcript/eval->renderable})))))
+        {::at           (:seon.eval/at e)
+         ::kind         :eval
+         ::entity       (into {} e)
+         ::result-live? (seval/result-live? (:seon.eval/id e))
+         ::turn-idx     ti
+         :seon.render/ai 'seon.agent.ctx.transcript/eval->renderable}))))
 
 (defn- agent-rec
   "The agent entity (lazy) for `id` against `db`."
@@ -643,10 +630,9 @@
    converter — [[message->renderable]] / [[eval->renderable]]), then the
    folded live [[readline]].
 
-   Turn boundaries are NOT containers — there are no per-turn headers; the
-   only structural marker is the [[resume-marker-line]], interleaved ONCE
-   at each session boundary (events from a previous process render with
-   `::prior?` true, so their evals carry no `result/<id>` handle).
+   Turn boundaries are NOT containers — there are no per-turn headers or
+   process-boundary rows. Exact cache membership, not run identity, decides
+   whether each eval carries a handle.
 
    An inbound that arrived after the agent's last action (a fresh wake or
    a mid-call arrival) is flagged NEW — UNANSWERED — so the agent
@@ -724,10 +710,10 @@
         ;; `:seon.render/result-body-cap` onto each eval event's `::entity`,
         ;; which `eval->renderable` forwards to `format-eval-row`.
         levels   (or (::result-decay node) (::result-decay tblock))
-        ;; Process-identity bytes OFF (`::result-handles?` false, node first):
-        ;; every eval renders in the prior-session form — no `result/<id>`
-        ;; handle, no resume marker — so the render is a pure function of the
-        ;; db value across pod restarts (the autocomplete profile's setting).
+        ;; Runtime-cache bytes OFF (`::result-handles?` false, node first):
+        ;; every eval renders without a `result/<id>` handle, so the render is
+        ;; a pure function of the db value across eviction/restarts (the
+        ;; autocomplete profile's setting).
         handles? (let [nv (::result-handles? node)
                        tv (::result-handles? tblock)]
                    (cond (some? nv) nv
@@ -753,32 +739,15 @@
                                (some? esc)
                                (update ::entity assoc
                                        :seon.agent.ctx/escape-clipping? esc)
-                               (not handles?) (assoc ::prior? true)))
+                               (not handles?) (assoc ::result-live? false)))
                            (cond-> ev
-                             (some? esc) (assoc ::escape? esc)
-                             (and (not handles?) (= :coalesced (::kind ev)))
-                             (assoc ::prior? true))))
+                             (some? esc) (assoc ::escape? esc))))
                        events*t)
-        ;; Render each event, interleaving the resume marker ONCE at the
-        ;; process boundary — before the first THIS-PROCESS eval that follows
-        ;; a PRIOR-process eval (its `result/<id>` vars are gone).
+        ;; Render each event directly. Handle availability is already an exact
+        ;; per-eval fact on the event; no run/process boundary is inferred.
         body
-        (->> (reduce
-               (fn [[rows prev-prior?] ev]
-                 (let [evalish? (boolean (#{:eval :coalesced} (::kind ev)))
-                       prior?   (::prior? ev)
-                       marker (when (and evalish?
-                                         (true? prev-prior?)
-                                         (false? prior?))
-                                resume-marker-line)
-                       text   (render* ev)
-                       rows'  (cond-> rows
-                                marker (conj marker)
-                                true   (conj text))]
-                   [rows' (if evalish? prior? prev-prior?)]))
-               [[] nil]
-               events**)
-             first
+        (->> events**
+             (map render*)
              (remove str/blank?)
              (str/join "\n"))
         head (masthead ns-str (ctx/repl-mode db))

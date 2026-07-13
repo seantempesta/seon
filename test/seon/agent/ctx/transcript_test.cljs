@@ -7,8 +7,11 @@
 
    Run: bin/test-cljs, or (cljs.test/run-tests 'seon.agent.ctx.transcript-test)."
   (:require
+    [clojure.string :as str]
     [cljs.test :refer [deftest is testing]]
+    [seon.agent.ctx :as ctx]
     [seon.agent.ctx.transcript :as t]
+    [seon.eval :as seval]
     [seon.handlers.eval :as eval-handler]))
 
 (defn- ev
@@ -16,6 +19,71 @@
   ([turn kind edn]
    (cond-> {::t/turn-idx turn ::t/kind kind}
      edn (assoc ::t/entity {:seon.eval/result-edn edn}))))
+
+(deftest transcript-handles-follow-exact-result-cache-membership
+  (let [prior-results (js/Reflect.get js/globalThis
+                                      (str seval/result-ns-sym))
+        compile-state (atom {:cljs.analyzer/namespaces {}})
+        cap           (deref #'seval/result-vars-cap)
+        ids           (mapv #(str "runtime-result-" %) (range (inc cap)))
+        evicted-id    (first ids)
+        current-id    (last ids)
+        prior-id      "prior-process-result"
+        row           (fn [id millis]
+                        {:seon.eval/id id
+                         :seon.eval/at (js/Date. millis)
+                         :seon.eval/source (str "(identity " (pr-str id) ")")
+                         :seon.eval/ok? true
+                         :seon.eval/result-edn (pr-str id)
+                         :seon.agent.ctx/escape-clipping? false})]
+    (try
+      ;; Isolate the process-global bounded cache, then cross its real cap.
+      ;; The first id is evicted by bind-result-var! itself; `prior-id` models
+      ;; a durable successful eval from a process whose runtime is gone.
+      (js/Reflect.set js/globalThis (str seval/result-ns-sym)
+                      (js/Object.create nil))
+      (doseq [id ids]
+        (seval/bind-result-var! compile-state id id))
+      (let [same-run {:seon.agent.run/id "one-run-for-all-three-results"}
+            turns    [{:seon.agent.turn/run same-run
+                       :seon.agent.turn/evals [(row evicted-id 100)
+                                               (row prior-id 200)
+                                               (row current-id 300)]}]
+            events   (with-redefs [ctx/agent-turns (fn
+                                                     ([_] turns)
+                                                     ([_ _] turns))]
+                       ((deref #'t/eval-events) nil "agent"))
+            by-id    (into {} (map (juxt #(get-in % [::t/entity :seon.eval/id])
+                                         identity)) events)
+            rendered (fn [id]
+                       (t/eval->renderable
+                         {:seon.render/node (get by-id id)}))]
+        (testing "the runtime cache itself is the liveness authority"
+          (is (false? (seval/result-live? evicted-id))
+              "crossing the cap evicts the oldest exact member")
+          (is (false? (seval/result-live? prior-id))
+              "a prior-process id has no runtime member")
+          (is (true? (seval/result-live? current-id))
+              "the newest exact member remains live"))
+        (testing "transcript events derive handles from membership, not run"
+          (is (false? (::t/result-live? (get by-id evicted-id))))
+          (is (false? (::t/result-live? (get by-id prior-id))))
+          (is (true? (::t/result-live? (get by-id current-id))))
+          (is (not (str/includes? (rendered evicted-id)
+                                  (str "result/" evicted-id)))
+              "an evicted result in the same run never advertises a dead handle")
+          (is (not (str/includes? (rendered prior-id)
+                                  (str "result/" prior-id)))
+              "a prior-process result never advertises a dead handle")
+          (is (str/includes? (rendered current-id)
+                             (str ctx/result-close " result/" current-id))
+              "the exact live member keeps its reusable handle")))
+      (finally
+        (if prior-results
+          (js/Reflect.set js/globalThis (str seval/result-ns-sym)
+                          prior-results)
+          (js/Reflect.deleteProperty js/globalThis
+                                     (str seval/result-ns-sym)))))))
 
 (def ^:private stream
   ;; 6 turns (0..5): a big old eval, a message, and recent evals.

@@ -1020,6 +1020,15 @@
    with SEON_EVAL_RESULT_VARS_CAP."
   (config/result-vars-cap))
 
+(defn result-live?
+  "True when the bounded runtime owns `result/<id>`."
+  {:malli/schema [:=> [:catn [::id :string]] :boolean]}
+  [id]
+  (let [robj (js/Reflect.get js/globalThis (str result-ns-sym))]
+    (boolean
+      (and robj
+           (js/Reflect.has robj (cljs.core/munge id))))))
+
 (defn result-var-ref?
   "TRUE when `form-str` is a single bare `result/<id>` reference.
 
@@ -1298,9 +1307,8 @@
    ERRORS ARE VALUES: a miss never throws — it returns an error map
    that says exactly why there is no value:
 
-   - the eval ran in a PRIOR SESSION (the row is in the db but the
-     process that held its value is gone) → \"prior session\" — the
-     resume boundary in the transcript marks where that history ends;
+   - the eval row exists but its bounded runtime slot does not (evicted or
+     from a prior process);
    - the eval ERRORED (it never produced a value);
    - no such eval id exists (typo)."
   {:malli/schema [:=> [:catn [::id :any]] :any]}
@@ -1308,7 +1316,7 @@
   (let [id-str (if (keyword? id) (name id) (str id))
         munged (cljs.core/munge id-str)
         robj   (js/Reflect.get js/globalThis (str result-ns-sym))]
-    (if (and robj (js/Reflect.has robj munged))
+    (if (result-live? id-str)
       (js/Reflect.get robj munged)
       (let [row (try (db/entity {:seon.db/ref [:seon.eval/id id-str]})
                      ;; probe: a lookup-ref to a NON-EXISTENT eval id
@@ -1333,10 +1341,9 @@
           :else
           {:seon.eval/ok? false
            :seon.error/message
-           (str "eval " id-str " is from a prior session — its live value "
-                "did not survive the process restart (the transcript's "
-                "resume marker shows the boundary). Re-run the form (its "
-                "source is on the eval's prompt line) to recompute it.")})))))
+           (str "eval " id-str " isn't live — its bounded result slot was "
+                "evicted or belonged to a prior process. Re-run the form "
+                "(its source is on the eval's prompt line) to recompute it.")})))))
 
 ;; ============================================================
 ;; `result/<id>` values + analyzer handles — binding side. Constants +

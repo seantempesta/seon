@@ -160,26 +160,6 @@
 (schema/register! ::default-deadline-ms [:int {:default 600000 :min 1}])
 
 ;; ============================================================
-;; Process-run set — the run-ids THIS pod process opened. `defonce` so a
-;; hot reload (same process) keeps it; empty on a fresh Node boot. The
-;; transcript marks evals from runs NOT in this set as `::prior?` (their
-;; in-memory `result/<id>` vars died with the previous process) — the
-;; run-grained successor to the old `!sessions-opened-this-run`.
-;; ============================================================
-
-(defonce ^:private !runs-this-process (atom #{}))
-
-(defn this-process-run?
-  "True iff `run-id` was opened by THIS pod process.
-
-   Its `result/<id>` eval
-   vars are live in the current runtime. False for a run reconstructed from
-   the store on a prior boot."
-  {:malli/schema [:=> [:catn [:seon.agent.run/id :seon.agent.run/id]] :boolean]}
-  [run-id]
-  (contains? @!runs-this-process run-id))
-
-;; ============================================================
 ;; Reads — sync over the local db value.
 ;; ============================================================
 
@@ -355,8 +335,7 @@
             run-id (get-in res [::db.id/ids :seon.agent.run/id])]
         (if (false? (:seon.db/ok? res))
           res
-          (do (swap! !runs-this-process conj run-id)
-              (snapshot {:seon.agent.run/id run-id})))))))
+          (snapshot {:seon.agent.run/id run-id}))))))
 
 (schema/register! ::close-run-request
   [:map

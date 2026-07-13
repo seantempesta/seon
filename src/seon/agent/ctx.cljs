@@ -913,11 +913,11 @@
    is no longer re-evaluable Clojure — clarity + anti-fabrication win,
    because the old `; ⟹` shape was mimicked by agents). The trailing
    `⟸ result/<id>` is the LIVE VAR HANDLE: the agent references
-   `result/<id>` directly to reuse the value. PRIOR-SESSION evals
-   (`prior?` true) render the value WITHOUT the handle (their vars died
-   with the restart; the resume boundary marker says so once). A clipped
-   value appends `(N of M)` to the handle so the agent knows the display
-   is a partial view.
+   `result/<id>` directly to reuse the value. An eval whose bounded runtime
+   slot is unavailable (`result-unavailable?` true) renders the value WITHOUT
+   a handle; this covers both an evicted result and one from a prior process.
+   A clipped value appends `(N of M)` to the handle so the agent knows the
+   display is a partial view.
 
    FAILURES render bare `⟹ ✗ <crystal-clear guidance>` (never a stack trace,
    never a `⟸ result/<id>` — there is no value to reuse): the
@@ -945,7 +945,8 @@
    repair catchable."
   {:malli/schema [:function
                   [:=> [:catn [::row :map]] :string]
-                  [:=> [:catn [::row :map] [::prior? :boolean]] :string]]}
+                  [:=> [:catn [::row :map]
+                              [::result-unavailable? :boolean]] :string]]}
   ([row] (format-eval-row row false))
   ([{src        :seon.eval/source
      ok?        :seon.eval/ok?
@@ -967,7 +968,7 @@
      ;; as-of render never reads the live conn. ABSENT (direct callers) →
      ;; the live [[escape-clipping?]] read, byte-identical to today.
      escape-override :seon.agent.ctx/escape-clipping?}
-    prior?]
+    result-unavailable?]
    (let [envelope    (read-error-envelope err-data)
          ;; `:seon.render/full?` (the no-clip opt-out, pinned on this eval
          ;; row) renders every authored component WHOLE past its cap. Absent
@@ -1035,9 +1036,9 @@
                  v       (cap-result-body raw body-cap eid full?)
                  ;; The live VAR HANDLE rides the `=>` line as a trailing
                  ;; `; result/<id>`: the agent references `result/<id>`
-                 ;; directly. Prior-session rows carry NO handle (their
-                 ;; vars died with the process). A clip appends `(N of M)`
-                 ;; so the agent knows the shown value is partial.
+                 ;; directly. Rows whose bounded result slot is unavailable
+                 ;; carry NO handle (evicted or prior-process). A clip appends
+                 ;; `(N of M)` so the agent knows the shown value is partial.
                  ;; The `(N of M)` clip marker is TOKENS (Token Reporting
                  ;; rule): `body-cap`/`full` are CHAR budgets (the ctx clip
                  ;; plumbing), converted here at the display site so this
@@ -1045,7 +1046,7 @@
                  ;; guide `cap-result-body` appends (no mixed units in one
                  ;; row). Render-time-computed off `raw`, so aging is
                  ;; unaffected (byte-stable per fixed age).
-                 handle  (when-not prior?
+                 handle  (when-not result-unavailable?
                            (str " " result-close " result/" eid
                                 (when clipped?
                                   (str " (" (tokens/chars->tokens body-cap)
@@ -1193,10 +1194,10 @@
   "ALL `:seon.eval` entries for `agent-id`, oldest-first.
 
    Across ALL its turns,
-   each tagged with its owning `:seon.agent.run/id-of-run` — the transcript's
-   cross-run read (evals from a run opened by a PRIOR pod process render
-   behind a resume boundary). Walks agent → runs → turns → evals. Optional
-   `db` snapshot."
+   each tagged with its owning `:seon.agent.run/id-of-run` for callers that
+   need durable run grouping. Result-handle availability does not derive from
+   that tag; it is exact bounded-runtime membership. Walks agent → runs →
+   turns → evals. Optional `db` snapshot."
   {:malli/schema [:=> [:catn [::agent-id :string] [::db :any]] [:vector :map]]}
   [agent-id db]
   (vec
