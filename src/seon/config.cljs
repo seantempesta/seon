@@ -332,6 +332,9 @@
 ;; The always-on FULL-source ns render list — the resolved keyword set
 ;; (`:seon.config/namespaces` `:always`). EDN-slot bridged (mixed `:or`).
 (schema/register! :seon.config/always [:or [:set :keyword] :nil])
+;; Selected skill-corpus input. The manifest shape is a map; the database slot
+;; is cardinality-one EDN so replacement is exact and optional means absent.
+(schema/register! :seon.config/skills [:or :seon.config/skills-spec :nil])
 ;; The per-class repair kill-switch map `{class-kw boolean}`. EDN-slot bridged.
 (schema/register! :seon.config.repair/classes [:or [:map-of :keyword :boolean] :nil])
 ;; The web allowlist hosts (meaningful only under `:allowlist`). EDN-slot bridged.
@@ -360,7 +363,7 @@
 (schema/register! :seon.config/singleton
   [:map {:seon.db/entity true}
    [:seon.config/id                          :seon.config/id]
-   [:seon.config/skills             {:optional true} :seon.config/skills-spec]
+   [:seon.config/skills             {:optional true} :seon.config/skills]
    [:seon.config/repl-mode          {:optional true} :seon.config/repl-mode]
    [:seon.config/current-ns         {:optional true} :seon.config/current-ns]
    [:seon.config/on-core-error      {:optional true} :seon.config/on-core-error]
