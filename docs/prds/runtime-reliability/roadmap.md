@@ -689,8 +689,17 @@ or discover archived behavior.
 3. Persist full canonical Malli forms and native backend signatures in the
    database. Reopen installed Datahike schema instead of reasserting it.
 4. Build one validated Malli/catalog candidate from the database and swap only
-   after durable validation succeeds. Remove persisted derived schema
-   decomposition and atom-backed duplicate authority.
+   after durable validation succeeds. The candidate contains the immutable
+   Malli registry, compiled validation, missing compatible Datahike attributes,
+   entity render catalog, dependency indexes, and a stable schema fingerprint.
+   The runtime holds only that disposable compiled projection; historical
+   projections are bounded by fingerprint. Remove persisted derived schema
+   decomposition, schema-source replay, async schema self-tee/rollback, and the
+   process-global registry as competing authorities. If commit succeeds but
+   projection activation fails, stop admission and reconstruct from committed
+   facts rather than writing a compensating transaction. The full evidence and
+   failure matrix are in
+   [[research/malli-runtime-schema-authority-audit-2026-07-13]].
 5. Use one analyzer/program snapshot and one exact add/change/remove
    transaction. Verify the ghost-pruning builder and every stale compatibility
    branch are absent.
