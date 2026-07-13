@@ -16,6 +16,7 @@
    into a scratch in-memory conn; there is no file read."
   (:require
     [clojure.string :as str]
+    [cljs.reader :as edn]
     [cljs.test :refer [deftest is testing async]]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as nss]
@@ -129,6 +130,91 @@
               (is (< (tokens/estimate compact) (tokens/estimate full))
                   "a compact card is smaller than the full render of the same ns"))))
         (.then (fn [_] (done)) (fn [e] (is false (str "threw: " (.-message e))) (done))))))
+
+(deftest schema-reference-closure-is-db-derived-in-both-densities
+  (async done
+    (-> (with-seeded
+          [;; Update the indexed fn with a contract that references both an
+           ;; owned schema and a cross-namespace schema. None of these are
+           ;; installed in Malli's process-global registry.
+           {:seon.fn/sym  "my.helper/assist"
+            :seon.fn/spec "[:=> [:cat :ctx.fixture/a :my.helper/local-contract] :my.helper/output]"}
+           {:seon.schema/key    :my.helper/local-contract
+            :seon.schema/ns     [:seon.ns/name :my.helper]
+            :seon.schema/source
+            "(seon.schema/register! :my.helper/local-contract [:map [:my.helper/input :string]])"}
+           ;; A raw boot-indexed form, a replayable register! call, then a
+           ;; raw form closing a cycle. The map label has a real schema row so
+           ;; the test catches a structural walker that mistakes labels for
+           ;; schema positions.
+           {:seon.schema/key    :ctx.fixture/a
+            :seon.schema/source "[:map [:ctx.fixture/value :ctx.fixture/b]]"}
+           {:seon.schema/key    :ctx.fixture/b
+            :seon.schema/source
+            "(seon.schema/register! :ctx.fixture/b [:tuple :ctx.fixture/c :string])"}
+           {:seon.schema/key    :ctx.fixture/c
+            :seon.schema/source "[:or :ctx.fixture/a :int]"}
+           {:seon.schema/key    :ctx.fixture/value
+            :seon.schema/source ":keyword"}]
+          (fn [conn]
+            (let [dbv        @conn
+                  refs       #{:ctx.fixture/a :ctx.fixture/b :ctx.fixture/c}
+                  ref-block  (ctx/referenced-schema-block
+                               {:seon.db/db dbv
+                                :seon.agent.ctx/seed-specs
+                                ["[:=> [:cat :ctx.fixture/a :my.helper/local-contract] :my.helper/output]"]
+                                :seon.agent.ctx/own-keys
+                                #{:my.helper/local-contract}})
+                  forms      (->> (str/split-lines ref-block)
+                                  (keep (fn [line]
+                                          (try
+                                            (let [form (edn/read-string line)]
+                                              (when (and (seq? form)
+                                                         (= 'register! (first form)))
+                                                form))
+                                            (catch :default _ nil))))
+                                  vec)
+                  by-key     (into {} (map (juxt second identity)) forms)
+                  full       (:seon.render/text
+                               (ctx/render-namespace
+                                 {:seon.ns/name :my.helper
+                                  :seon.render/depth 0
+                                  :seon.render/detail :full
+                                  :seon.db/db dbv}))
+                  compact    (nss/render-one-ns-compact
+                               {:seon.ns/name :my.helper :seon.db/db dbv})
+                  registry-noise
+                  (with-redefs [schema/schema-definition
+                                (fn [_] [:enum :runtime-only-definition])]
+                    (nss/render-one-ns-compact
+                      {:seon.ns/name :my.helper :seon.db/db dbv}))]
+              (testing "the database, not Malli's live registry, supplies refs"
+                (is (every? #(not (contains? (schema/current-keys) %)) refs))
+                (is (= refs (set (keys by-key)))
+                    "transitive cycle closes once; a map entry label is not a ref"))
+              (testing "both persisted source encodings normalize to one shape"
+                (is (= [:map [:ctx.fixture/value :ctx.fixture/b]]
+                       (nth (by-key :ctx.fixture/a) 2)))
+                (is (= [:tuple :ctx.fixture/c :string]
+                       (nth (by-key :ctx.fixture/b) 2))
+                    "a persisted register! call does not become a nested call"))
+              (testing "the one closure feeds both namespace densities"
+                (is (every? #(str/includes? full (str %)) refs))
+                (is (every? #(str/includes? compact (str %)) refs)))
+              (testing "compact owned schemas are also database projections"
+                (is (= compact registry-noise)
+                    "changing Malli runtime state cannot change a DB render")
+                (is (str/includes?
+                      compact
+                      "schema :my.helper/local-contract = [:map [:my.helper/input :string]]")
+                    "the persisted register! call normalizes to its Malli form"))
+              (testing "compact contracts remain valid outside the described ns"
+                (is (str/includes? compact ":my.helper/local-contract"))
+                (is (str/includes? compact ":my.helper/input"))
+                (is (str/includes? compact ":my.helper/output"))
+                (is (not (re-find #"::(?:local-contract|input|output)" compact)))))))
+        (.then (fn [_] (done))
+               (fn [e] (is false (str "threw: " (.-message e))) (done))))))
 
 (deftest workspace-stub-reflects-configured-requires-not-const
   ;; Turn-0 regression: a FRESH agent (no home-ns source yet) renders the

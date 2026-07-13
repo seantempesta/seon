@@ -38,7 +38,6 @@
   (:require
     [cljs.reader :as edn]
     [clojure.string :as str]
-    [malli.core :as m]
     [seon.agent.ctx :as ctx]
     [seon.agent.home :as home]
     [seon.config :as config]
@@ -524,15 +523,6 @@
 ;; render full, the current ns's `:require`s render here as compact cards.
 ;; ============================================================
 
-(defn- abbrev-ns-kws
-  "Rewrite every fully-qualified keyword whose namespace is `ns-str`
-   (`:my.kb/claim`) to its `::`-abbreviated form (`::claim`) in string
-   `s`. A literal prefix replace of `\":<ns>/\"` → `\"::\"`: the trailing
-   `/` means a SIBLING namespace (`:my.kb.source/rating`) is left intact.
-   No regex — the ns dots are literal."
-  [s ns-str]
-  (str/replace s (str ":" ns-str "/") "::"))
-
 (defn- soft-clip
   "Return `s` unchanged when ≤ `n` chars, else clipped to `n` chars with a
    trailing `…` (the last char is the ellipsis). Interim guard until the
@@ -563,36 +553,29 @@
       clean)))
 
 (defn- schema-form-text
-  "Reader-safe display text for a live Malli definition or stored source.
+  "Reader-safe display text derived from one persisted schema source.
 
-   Malli's `m/form` preserves predicate functions in `[:fn ...]`; its source
-   confirms that those children are the original evaluated values. Route the
-   form through the existing readable printer so functions become data, then
-   scrub legacy `#object[...]` strings already present in the program graph."
-  [definition source]
-  (if (some? definition)
-    (let [form (try (m/form definition) (catch :default _ definition))]
-      (omit-runtime-object-tags (einstrument/pr-str-readable form)))
-    (if (str/blank? source)
-      "<not registered>"
+   The database is the rendering authority. Both boot-indexed raw forms and
+   runtime-indexed `(seon.schema/register! ...)` calls normalize through
+   [[ctx/normalize-schema-source]]; unreadable legacy rows are scrubbed rather
+   than replaced from Malli's mutable process registry."
+  [source]
+  (if (str/blank? source)
+    "<not indexed>"
+    (if-some [form (ctx/normalize-schema-source source)]
+      (omit-runtime-object-tags (einstrument/pr-str-readable form))
       (omit-runtime-object-tags (str/trim source)))))
 
 (defn- compact-schema-line
   "One inert `schema <key> = <form>` record for a schema the ns owns.
 
-   `<form>` is the live registry definition ([[seon.schema/schema-definition]]),
-   falling back to persisted `:seon.schema/source`, with ns-local keywords
-   abbreviated to `::`. It is deliberately NOT a synthetic `register!` form:
-   compact cards describe callable code but never present partial/reprojected
-   data as executable source."
-  [ns-str {:seon.schema/keys [key source]}]
-  (let [key-str (if (= (namespace key) ns-str)
-                  (str "::" (name key))
-                  (pr-str key))
-        def     (when (keyword? key)
-                  (try (schema/schema-definition key) (catch :default _ nil)))
-        form    (schema-form-text def source)]
-    (str "schema " key-str " = " (abbrev-ns-kws form ns-str))))
+   `<form>` comes only from persisted `:seon.schema/source`. Every keyword
+   stays fully qualified because a compact card is read from the caller's
+   CURRENT ns, not necessarily the namespace it describes. It is deliberately
+   NOT a synthetic `register!` form: compact cards describe callable code but
+   never present partial/reprojected data as executable source."
+  [_ns-str {:seon.schema/keys [key source]}]
+  (str "schema " (pr-str key) " = " (schema-form-text source)))
 
 (defn- parsed-arglists
   "Stored arglists as a nonempty seq of vectors, or nil when unreadable."
@@ -655,11 +638,11 @@
    `fn full.ns/name [args] — \"<doc line 1>\" — :malli/schema <spec>`.
    There is no synthetic `defn` and no fake body token for an agent to echo as
    code. Docstring line 1 is soft-clipped at 78; missing docs/specs are omitted;
-   ns-local keywords abbreviate to `::`. PUBLIC: the ONE per-fn card renderer —
+   every keyword remains fully qualified. PUBLIC: the ONE per-fn card renderer —
    compact namespace cards, `my.ns/functions`, and autocomplete export all use
    this same inert record."
   {:malli/schema [:=> [:catn [::ns-str ::ns-str] [::fn-row ::fn-row]] :string]}
-  [ns-str {:seon.fn/keys [sym arglists doc spec]}]
+  [_ns-str {:seon.fn/keys [sym arglists doc spec]}]
   (let [doc-1   (when (and doc (not (str/blank? doc)))
                   (soft-clip (str/trim (first (str/split-lines doc))) 78))
         docpart (if doc-1 (str " — " (pr-str doc-1)) "")
@@ -668,7 +651,7 @@
                    "")
         arities (compact-signatures arglists)
         head    (str "fn " sym " " arities docpart specpart)]
-    (abbrev-ns-kws head ns-str)))
+    head))
 
 (schema/register! ::render-one-ns-compact-request
   [:map

@@ -64,6 +64,7 @@
     [clojure.string :as str]
     [cljs.reader :as edn]
     [malli.core :as m]
+    [malli.registry :as mr]
     [seon.agent.home :as home]
     [seon.agent.ctx.render-fns :as render-fns]
     [seon.ai.tokens :as tokens]
@@ -1806,8 +1807,8 @@
 ;;; compact card ([[seon.agent.ctx.namespaces/render-one-ns-compact]]).
 ;;;
 ;;; PURE FUNCTION OF THE DB VALUE (byte-identical train/serve): references are
-;;; detected with malli's own RefSchema walk (`m/-ref-schema?` / `m/-ref`, which
-;;; needs NO registry deref — registration-independent), and definitions are
+;;; detected with malli's own RefSchema walk (`m/-ref-schema?` / `m/-ref`),
+;;; supplied an isolated placeholder registry rather than Malli's live one, and definitions are
 ;;; resolved from `:seon.schema/source` in the db — NOT the live `*schemas`
 ;;; registry. (Malli's native transitive walk, `::m/walk-refs`, resolves refs
 ;;; THROUGH the registry to descend; using it would couple the render to live
@@ -1821,17 +1822,35 @@
   ;; the live corpus is ~26; 40 is headroom that essentially never trips.
   40)
 
+(def ^:private schema-ref-registry
+  ;; `m/schema` normally resolves qualified keywords through Malli's mutable
+  ;; process-global registry. Context is a projection of a DATABASE VALUE, so
+  ;; that registry is neither an authority nor a stable input. Malli already
+  ;; knows which positions in every schema form are schemas (rather than map /
+  ;; catn labels or enum values); give that parser only its built-ins plus an
+  ;; inert fallback for qualified schema refs. The resulting RefSchema nodes
+  ;; retain their names while dereferencing to `:any`, and `m/walk` therefore
+  ;; reports DIRECT refs without touching live registry state.
+  (mr/composite-registry
+    (mr/fast-registry (m/default-schemas))
+    (reify
+      mr/Registry
+      (-schema [_ type]
+        (when (qualified-keyword? type) :any))
+      (-schemas [_] {}))))
+
 (defn- schema-form-refs
   "The DIRECT registered-schema references in one Malli form — every qualified
    keyword in SCHEMA position (not a `:catn`/`:cat` entry LABEL), via malli's own
    RefSchema walk. Built-ins (`:string`, `:map`, …) are not refs and never
-   match; a bare `[:schema …]` inline (nil ref name) is skipped. No registry
-   deref, so detection holds even for a not-yet-registered ref. Errors-as-values:
-   a foreign/unbuildable form yields `#{}`, never throws into the render."
+   match; a bare `[:schema …]` inline (nil ref name) is skipped. The isolated
+   [[schema-ref-registry]] resolves refs to inert placeholders, never through
+   the process-global registry. Errors-as-values: a foreign/unbuildable form
+   yields `#{}`, never throws into the render."
   [form]
   (let [acc (atom #{})]
     (try
-      (m/walk (m/schema form)
+      (m/walk (m/schema form {:registry schema-ref-registry})
               (fn [sch _ _ _]
                 (when (m/-ref-schema? sch)
                   (let [r (m/-ref sch)]
@@ -1840,22 +1859,56 @@
       (catch :default _ nil))
     @acc))
 
-(defn- schema-str-refs
-  "[[schema-form-refs]] over a stored spec/source STRING — the read is guarded
-   too, so an unreadable string degrades to `#{}`."
+(defn- read-schema-form
+  "Read one schema/spec string to data, or nil when it is unreadable."
   [s]
-  (let [form (try (edn/read-string s) (catch :default _ ::bad))]
-    (if (= form ::bad) #{} (schema-form-refs form))))
+  (try (edn/read-string s) (catch :default _ nil)))
 
-(defn- schema-src-in-db
-  "The persisted `:seon.schema/source` for registered key `k`, purely from the
-   db VALUE (`[:seon.schema/key k]` lookup), or nil. Guarded — a missing row or
-   unresolved lookup degrades to nil, never throws."
+(defn- schema-str-refs
+  "[[schema-form-refs]] over a stored spec STRING."
+  [s]
+  (or (some-> s read-schema-form schema-form-refs) #{}))
+
+(defn- registration-call-form?
+  "True when `form` is one persisted three-argument `register!` call."
+  [form]
+  (and (seq? form)
+       (= 3 (count form))
+       (symbol? (first form))
+       (= "register!" (name (first form)))
+       (keyword? (second form))))
+
+(defn normalize-schema-source
+  "Normalize one persisted schema source to its Malli form.
+
+   Boot indexing stores the raw Malli form while the runtime tee stores the
+   replayable `(seon.schema/register! key form)` call. Parse once and return
+   the same definition shape for both. The database row's key remains the
+   identity; the call's key is deliberately not projected as another fact."
+  {:malli/schema [:=> [:catn [:seon.schema/source :string]] :any]}
+  [source]
+  (when-let [read-form (read-schema-form source)]
+    (if (registration-call-form? read-form)
+      (nth read-form 2)
+      read-form)))
+
+(defn- schema-definition-in-db
+  "The normalized persisted definition for schema key `k`, or nil."
   [db k]
   (when (keyword? k)
-    (try (:seon.schema/source
-           (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.schema/key k]}))
-         (catch :default _ nil))))
+    (try
+      (when-let [source (:seon.schema/source
+                          (db/entity-lazy
+                            {:seon.db/db db
+                             :seon.db/ref [:seon.schema/key k]}))]
+        {::schema-source source
+         ::schema-form   (normalize-schema-source source)})
+      (catch :default _ nil))))
+
+(defn- schema-definition-text
+  "Reader-shaped text for one normalized persisted schema definition."
+  [{::keys [schema-source schema-form]}]
+  (if (some? schema-form) (pr-str schema-form) schema-source))
 
 (defn- schema-ref-closure
   "Transitive closure of registered schema keys reachable from `seed`, resolved
@@ -1865,18 +1918,25 @@
    bounded at [[referenced-schema-cap]]. Returns
    `{::closure-keys [<kw>…] ::capped? bool}`, keys sorted."
   [db seed own-keys]
-  (loop [queue (vec seed), seen #{}, out #{}]
+  (loop [queue (vec seed), seen #{}, out #{}, definitions {}]
     (if (or (empty? queue) (>= (count out) referenced-schema-cap))
       {::closure-keys (vec (sort out))
-       ::capped?      (boolean (and (seq queue) (>= (count out) referenced-schema-cap)))}
+       ::capped?      (boolean (and (seq queue) (>= (count out) referenced-schema-cap)))
+       ::definitions  definitions}
       (let [k     (first queue)
             queue (subvec queue 1)]
         (if (contains? seen k)
-          (recur queue seen out)
-          (let [src   (schema-src-in-db db k)
-                child (if src (schema-str-refs src) #{})
-                out'  (if (or (contains? own-keys k) (nil? src)) out (conj out k))]
-            (recur (into queue (remove seen) child) (conj seen k) out')))))))
+          (recur queue seen out definitions)
+          (let [definition (schema-definition-in-db db k)
+                definitions' (cond-> definitions definition (assoc k definition))
+                child      (or (some-> definition ::schema-form schema-form-refs) #{})
+                out'       (if (or (contains? own-keys k) (nil? definition))
+                             out
+                             (conj out k))]
+            (recur (into queue (remove seen) child)
+                   (conj seen k)
+                   out'
+                   definitions')))))))
 
 (schema/register! ::seed-specs [:vector :string])
 (schema/register! ::own-keys   [:set :keyword])
@@ -1899,9 +1959,10 @@
   [{db :seon.db/db seed-specs ::seed-specs own-keys ::own-keys}]
   (let [seed    (reduce (fn [a s] (into a (schema-str-refs s))) #{} seed-specs)
         closure (schema-ref-closure db seed own-keys)
+        definitions (::definitions closure)
         lines   (mapv (fn [k]
                         (str "(register! " (pr-str k) " "
-                             (or (schema-src-in-db db k) "<not indexed>") ")"))
+                             (schema-definition-text (get definitions k)) ")"))
                       (::closure-keys closure))
         lines   (cond-> lines
                   (::capped? closure)
