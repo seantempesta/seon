@@ -2764,35 +2764,35 @@
 ;; no conn is bound yet, so nothing tees during boot ns-loads.
 (schema/set-tee-fn! tee-registered-schema!)
 
-(def store-edn-cap
+(def database-edn-cap
   "Store-time char cap for any pr-str'd string persisted as a datom
    (`:seon.eval/result-edn`, `:seon.eval/error`). Override with
-   SEON_RENDER_STORE_EDN_CAP.
+   SEON_RENDER_DATABASE_EDN_CAP.
 
    MEMORY-SAFETY invariant: the DB must never hold a multi-MB blob in a
    single datom. A 9.7M-char `pull [*]` result once landed verbatim as
    `:seon.eval/result-edn`; a later whole-DB `[?e ?a ?v]` scan
    materialized every bloated datom at once and OOM-killed the Node pod
    (losing the in-RAM `:memory` DB). This cap bounds each persisted
-   string so a whole-DB scan stays bounded by `N * store-edn-cap`.
+   string so a whole-database scan stays bounded by `N * database-edn-cap`.
 
    16k is generous headroom for direct datom inspection/debugging while
    staying ~600x below the 9.7M blob that caused the OOM. The FULL value
    remains available in-session as the live var `result/<id>` in the bounded
    process store — its VALUE is not clipped."
-  (config/store-edn-cap))
+  (config/database-edn-cap))
 
 (defn cap-edn
-  "Truncate a pr-str'd value string to `store-edn-cap`.
+  "Truncate a pr-str'd value string to `database-edn-cap`.
 
    Appends an elision marker reporting the estimated tokens omitted.
    Nil-safe. Mirrors `seon.agent/cap-result` but applies the larger
-   store-time cap at the persistence boundary."
+   database-write cap at the persistence boundary."
   {:malli/schema
    [:function
     [:=> [:catn [::s :any]] :string]
     [:=> [:catn [::s :any] [::limit :int]] :string]]}
-  ([s] (cap-edn s store-edn-cap))
+  ([s] (cap-edn s database-edn-cap))
   ([s limit]
    (let [s (str s)
          n (count s)]

@@ -288,6 +288,13 @@ is confined to the Datahike/Konserve adapter and translated immediately; it is
 never re-exported as Seon vocabulary. Ordinary English verbs in historical
 material and upstream source are not compatibility APIs.
 
+The active result-persistence ceiling follows the same rule:
+`:seon.config.render/database-edn-cap`, `seon.config/database-edn-cap`, and
+`SEON_RENDER_DATABASE_EDN_CAP` are the one schema/accessor/environment family.
+The obsolete comparison manifest is deleted; config-free boot now means the
+database remains authoritative rather than silently falling back to legacy
+context.
+
 Namespace ownership follows the same vocabulary:
 
 | Namespace | Owns |

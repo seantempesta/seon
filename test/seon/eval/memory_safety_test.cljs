@@ -45,31 +45,31 @@
 ;; route through it (blob file + projection datoms since 2026-06-09).
 ;; ---------------------------------------------------------------------------
 
-(deftest store-edn-cap-is-a-sane-positive-bound
+(deftest database-edn-cap-is-a-sane-positive-bound
   ;; ~10x the render cap (1500), ~600x below the 9.7M blob that OOM'd.
-  (is (= 16384 seval/store-edn-cap))
-  (is (pos? seval/store-edn-cap)))
+  (is (= 16384 seval/database-edn-cap))
+  (is (pos? seval/database-edn-cap)))
 
 (deftest cap-edn-truncates-a-huge-string-with-an-elision-marker
   (let [huge   (apply str (repeat (* 5 1024 1024) "x")) ; 5 MB string
         capped (seval/cap-edn huge)
-        marker (subs capped seval/store-edn-cap)]
+        marker (subs capped seval/database-edn-cap)]
     (testing "stored string is bounded — never the multi-MB original"
       (is (<= (count capped)
-              (+ seval/store-edn-cap 64))
+              (+ seval/database-edn-cap 64))
           "capped length is the cap plus a short elision marker"))
     (testing "the kept prefix is the head of the original value"
-      (is (= (subs huge 0 seval/store-edn-cap)
-             (subs capped 0 seval/store-edn-cap))))
+      (is (= (subs huge 0 seval/database-edn-cap)
+             (subs capped 0 seval/database-edn-cap))))
     (testing "the generated marker reports the canonical omitted-token estimate"
-      (is (= (tokens/chars->tokens (- (count huge) seval/store-edn-cap))
+      (is (= (tokens/chars->tokens (- (count huge) seval/database-edn-cap))
              (reported-elision-tokens marker)))
       (is (false? (raw-text-size-unit? marker))))))
 
 (deftest cap-edn-leaves-a-normal-small-result-verbatim
   ;; Regression: the cap must not truncate ordinary results.
   (let [small (pr-str {:seon.demo/total 42 :seon.demo/rows [1 2 3]})]
-    (is (< (count small) seval/store-edn-cap))
+    (is (< (count small) seval/database-edn-cap))
     (is (= small (seval/cap-edn small))
         "small string passes through unchanged — no marker, no truncation")
     (is (nil? (reported-elision-tokens (seval/cap-edn small))))))
@@ -111,7 +111,7 @@
     (seval/bind-result-var! compile-state eval-id big-value)
     (try
       (testing "persisted datom is bounded"
-        (is (<= (count persisted) (+ seval/store-edn-cap 64)))
+        (is (<= (count persisted) (+ seval/database-edn-cap 64)))
         (is (< (count persisted) (count big-value))))
       (testing "the public var and internal lookup share one unclipped slot"
         (is (= big-value (seval/lookup-result eval-id)))
@@ -175,7 +175,7 @@
 (deftest bounded-result-survives-the-store-cap
   ;; render-result-edn output still flows through cap-edn at the write site;
   ;; the bounded skeleton + its hint must survive that too (a no-op here,
-  ;; since render-ai already keeps the output well under store-edn-cap).
+  ;; since render-ai already keeps the output well under database-edn-cap).
   (let [eval-id "ev00000004"
         edn     (seval/render-result-edn eval-id (vec (range 9000)))
         capped  (seval/cap-edn edn)]

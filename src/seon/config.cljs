@@ -11,7 +11,7 @@
         is the sparse root override (its `:canvas` block = the system canvas);
      2. routes — drop seeded `:seon.route/*` rows per cluster ([[resolve-routes]]);
      3. the global RENDER bounds — `:seon.config/render` (value/eval/message
-        display caps), read by the [[store-edn-cap]] etc. accessors.
+        display caps), read by the [[database-edn-cap]] etc. accessors.
 
    READER — aero (`aero.core/read-config`), the SAME library the JVM track's
    `seon.config` (`config.clj`) uses, so the two tracks are coherent siblings on
@@ -105,7 +105,7 @@
 ;; references it (register-once, no inline duplication).
 (schema/register! :seon.config/cap [:int {:min 1}])
 
-(schema/register! :seon.config.render/store-edn-cap      :seon.config/cap)
+(schema/register! :seon.config.render/database-edn-cap   :seon.config/cap)
 (schema/register! :seon.config.render/eval-cap           :seon.config/cap)
 (schema/register! :seon.config.render/message-cap        :seon.config/cap)
 (schema/register! :seon.config.render/result-body-cap    :seon.config/cap)
@@ -154,7 +154,7 @@
 ;;; apply the SAME literal as their own fallback when the section is absent.
 (schema/register! :seon.config/render
   [:map
-   [:seon.config.render/store-edn-cap      {:optional true} :seon.config.render/store-edn-cap]
+   [:seon.config.render/database-edn-cap   {:optional true} :seon.config.render/database-edn-cap]
    [:seon.config.render/eval-cap           {:optional true} :seon.config.render/eval-cap]
    [:seon.config.render/message-cap        {:optional true} :seon.config.render/message-cap]
    [:seon.config.render/result-body-cap    {:optional true} :seon.config.render/result-body-cap]
@@ -370,7 +370,7 @@
    [:seon.config/context-profiles   {:optional true} :seon.config/context-profiles]
    [:seon.config/agent-context      {:optional true} :seon.config/agent-context]
    [:seon.config/root-context       {:optional true} :seon.config/root-context]
-   [:seon.config.render/store-edn-cap      {:optional true} :seon.config/cap]
+   [:seon.config.render/database-edn-cap   {:optional true} :seon.config/cap]
    [:seon.config.render/eval-cap           {:optional true} :seon.config/cap]
    [:seon.config.render/message-cap        {:optional true} :seon.config/cap]
    [:seon.config.render/result-body-cap    {:optional true} :seon.config/cap]
@@ -651,7 +651,7 @@
              (coerce-enum (get manifest :seon.config/on-core-error :gate) #{:crash :gate :log} :gate)
              :seon.config/spawn-depth-cap
              (let [v (get manifest :seon.config/spawn-depth-cap 1)] (if (and (int? v) (>= v 0)) v 1))
-             :seon.config.render/store-edn-cap      (get r :seon.config.render/store-edn-cap 16384)
+             :seon.config.render/database-edn-cap   (get r :seon.config.render/database-edn-cap 16384)
              :seon.config.render/eval-cap           (get r :seon.config.render/eval-cap 1500)
              :seon.config.render/message-cap        (get r :seon.config.render/message-cap 4000)
              :seon.config.render/result-body-cap    (get r :seon.config.render/result-body-cap 16384)
@@ -863,7 +863,7 @@
 ;;; [[namespaces-policy]]); the literal fallback in the accessor equals the
 ;;; manifest default, so a no-manifest boot is byte-identical to today. Callers
 ;;; (render/value.cljs, ctx.cljs, eval.cljs) are UNTOUCHED — they still call
-;;; `store-edn-cap` etc.; only the accessor body moved from `env-int` to a
+;;; `database-edn-cap` etc.; only the accessor body moved from `env-int` to a
 ;;; manifest read.
 
 ;; The render caps are datoms on the config singleton now — [[render-config]]
@@ -879,14 +879,14 @@
   []
   (config-view))
 
-(defn store-edn-cap
+(defn database-edn-cap
   "Per-value pr-str truncation cap for stored EDN display.
 
    Manifest
-   `:seon.config.render/store-edn-cap`; env `SEON_RENDER_STORE_EDN_CAP`; 16384."
+   `:seon.config.render/database-edn-cap`; env `SEON_RENDER_DATABASE_EDN_CAP`; 16384."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (get (render-config) :seon.config.render/store-edn-cap 16384))
+  (get (render-config) :seon.config.render/database-edn-cap 16384))
 
 (defn eval-render-cap
   "Char cap for one eval row's echoed SOURCE + captured STDOUT.

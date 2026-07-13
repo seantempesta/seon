@@ -536,9 +536,9 @@
    (`seon.eval/render-result-edn`), so a body this size is STRUCTURED, not
    a wall of text.
 
-   The default 16384 currently EQUALS `store-edn-cap`, so a stored result
+   The default 16384 currently equals `database-edn-cap`, so a stored result
    renders WHOLE — but this is a CROSS-REFERENCE, NOT an alias. The render
-   cap (an LLM-facing read-time projection) and `store-edn-cap` (the
+   cap (an LLM-facing read-time projection) and `database-edn-cap` (the
    write-time per-datom anti-OOM RAM ceiling) are different tiers.
 
    This is the FALLBACK cap (the decay default-cap): the transcript's

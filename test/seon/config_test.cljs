@@ -37,7 +37,7 @@
   (testing "the render-bounds section validates"
     (is (m/validate :seon.config/manifest
                     {:seon.config/render {:seon.config.render/value-width 72
-                                          :seon.config.render/store-edn-cap 16384}})))
+                                          :seon.config.render/database-edn-cap 16384}})))
   (testing "a minimal-cluster-shaped manifest validates (system-text + repl-mode + explicit ctx)"
     (is (m/validate :seon.config/manifest
                     {:seon.config/system-text "; ── system ──\n; the minimal prompt"
@@ -257,15 +257,15 @@
     (with-redefs [config/load-manifest (fn [] {})]
       (binding [db/*conn* nil]
         (is (= 72 (config/value-width)))
-        (is (= 16384 (config/store-edn-cap)))
+        (is (= 16384 (config/database-edn-cap)))
         (is (= 3 (config/value-max-depth))))))
   (testing "a manifest value overrides the fallback"
     (with-redefs [config/load-manifest
                   (fn [] {:seon.config/render {:seon.config.render/value-width 40
-                                               :seon.config.render/store-edn-cap 999}})]
+                                               :seon.config.render/database-edn-cap 999}})]
       (binding [db/*conn* nil]
         (is (= 40 (config/value-width)))
-        (is (= 999 (config/store-edn-cap)))
+        (is (= 999 (config/database-edn-cap)))
         ;; an unset key in a present section still falls back to the literal
         (is (= 3 (config/value-max-depth)))))))
 
@@ -417,7 +417,7 @@
   (let [attrs [:seon.config/id :seon.config/repl-mode :seon.config/current-ns
                :seon.config/on-core-error :seon.config/spawn-depth-cap
                :seon.config/always :seon.config/system-text
-               :seon.config.render/eval-cap :seon.config.render/store-edn-cap
+               :seon.config.render/eval-cap :seon.config.render/database-edn-cap
                :seon.config.render/value-width :seon.config.render/line-numbers
                :seon.config.repair/level :seon.config.repair/classes
                :seon.agent.web/policy :seon.agent.web/allowed-domains
