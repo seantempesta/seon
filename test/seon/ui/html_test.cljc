@@ -242,7 +242,7 @@
 ;; would produce for an agent tile.
 ;; ============================================================
 
-(deftest realistic-agent-tile
+(deftest realistic-agent-card
   (let [tile [:div#agent-seon {:class "p-3 bg-base-900"}
               [:header {:class "flex gap-2"}
                [:span {:class "h-2 w-2 rounded-full bg-signal animate-pulse"}]

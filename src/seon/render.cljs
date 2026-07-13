@@ -491,7 +491,7 @@
             (err/record! {:seon.error/raw e :seon.error/fault (err/fault-for sym)}))
           ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → graceful guard.
           (strict-fail! sym e)
-          (canvas/error-tile
+          (canvas/error-card
             {:seon.error/message (str sym " threw: " (or (.-message e) (str e)))
              :seon.error/symbol  sym}))))))
 
@@ -502,7 +502,7 @@
 ;; GENERALIZES the same unwrap/guard seam `render-entity-html` centralizes
 ;; (the ONE `unwrap-response`) from "dispatch on the entity's render symbol"
 ;; to "dispatch on the value's KIND," reusing the existing renderers that
-;; already exist (md->hiccup, the value panel, clj->hiccup, the error-tile
+;; already exist (md->hiccup, the value panel, clj->hiccup, the error-card
 ;; seam). The converters (`handlers/*/render-html`) become THIN — each tags
 ;; its fields and hands them to `block`.
 ;;
@@ -699,7 +699,7 @@
         (message-block? x) (md/md->hiccup (:seon.render/markdown x))
         (source-block? x)  (cljhl/clj->hiccup (:seon.render/source x))
         (data-projection? x) (data-panel x)
-        (error-value? x)   (canvas/error-tile x)
+        (error-value? x)   (canvas/error-card x)
         (canvas/valid-hiccup? x) x
         :else              (data-panel (value/render-html-data "inline" x)))
 
@@ -723,7 +723,7 @@
       (strict-fail! :block e)
       (let [msg (str "block render failed: " (err/->message e))]
         (case view
-          :html (canvas/error-tile {:seon.error/message msg :seon.error/where :block})
+          :html (canvas/error-card {:seon.error/message msg :seon.error/where :block})
           :ai   msg)))))
 
 ;; ============================================================
@@ -787,10 +787,10 @@
             ;; failure means no derived candidate → the welcome.
             derived
             (when (nil? (:seon.render.canvas/content ent))
-              (try (:seon.agent.ctx.render-fns/tile-sym
-                     (render-fns/last-updated-tile
+              (try (:seon.agent.ctx.render-fns/surface-sym
+                     (render-fns/last-updated-surface
                        {:seon.db/db db :seon.agent/id id}))
-                   ;; core derivation (last-updated-tile) throwing is a defect
+                   ;; core derivation (last-updated-surface) throwing is a defect
                    ;; (:core) — a genuine "no candidate" RETURNS nil, it does
                    ;; not throw; the tile still degrades to the welcome.
                    (catch :default e
@@ -1144,7 +1144,7 @@
           (strict-fail! (renderable-id node) e)
           (if (= view :seon.render/ai)
             (str ";; ⚠ [" (renderable-id node) "] render failed: " (ex-message e))
-            (canvas/error-tile
+            (canvas/error-card
               {:seon.error/message (str (renderable-id node) " — " (ex-message e))})))))))
 
 ;; ============================================================
@@ -1204,7 +1204,7 @@
         id    (:seon.agent/id ctx)
         block (agent-ctx-block db id block-name)
         body  (if (nil? block)
-                (canvas/error-tile
+                (canvas/error-card
                   {:seon.error/message (str "no block named " block-name " on "
                                             (or id "this agent"))
                    :seon.error/where   block-name
@@ -1221,7 +1221,7 @@
                       (err/record! {:seon.error/raw e :seon.error/fault :core}))
                     ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → guard.
                     (strict-fail! block-name e)
-                    (canvas/error-tile
+                    (canvas/error-card
                       {:seon.error/message (str block-name " render failed: "
                                                 (err/->message e))
                        :seon.error/where   block-name}))))]

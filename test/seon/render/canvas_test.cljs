@@ -153,9 +153,9 @@
                                                :day     "numeric"})]
         (is (some #(re-find (re-pattern date-str) %) (hiccup-strings hiccup)))))
     (testing "the double-duty tile line is present in BOTH renders"
-      (is (some #(= canvas/tile-line %) (hiccup-strings hiccup)))
-      (is (str/includes? ai canvas/tile-line)
-          "the ai render surfaces the tile-line verbatim"))))
+      (is (some #(= canvas/welcome-line %) (hiccup-strings hiccup)))
+      (is (str/includes? ai canvas/welcome-line)
+          "the ai render surfaces the welcome-line verbatim"))))
 
 (deftest welcome-uses-purpose-when-present
   (let [{:seon.render/keys [hiccup ai]}

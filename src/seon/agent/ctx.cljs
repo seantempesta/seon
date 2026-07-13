@@ -2573,14 +2573,14 @@
                                          (db/decode-edn-value
                                            :seon.render.canvas/content))
                          ;; No pin → the canvas is the DERIVED last-updated
-                         ;; tile (render-fns/last-updated-tile — the same
+                         ;; surface (render-fns/last-updated-surface — the same
                          ;; resolution render-agent-canvas applies), so that fn
                          ;; is equally "already rendering on the canvas" and
                          ;; is skipped as its own auto-run block.
                          canvas (or canvas
                                     (when id
-                                      (::render-fns/tile-sym
-                                        (render-fns/last-updated-tile
+                                      (::render-fns/surface-sym
+                                        (render-fns/last-updated-surface
                                           {:seon.db/db db :seon.agent/id id}))))
                          pinned (cond-> (into #{}
                                               (comp (mapcat (juxt :seon.render/ai

@@ -159,7 +159,7 @@
   (async done
     (-> (with-conn
           (fn [conn]
-            (is (nil? (ts/steps-tile-html {:seon.db/db @conn
+            (is (nil? (ts/steps-surface-html {:seon.db/db @conn
                                            :seon.agent/id a-id}))
                 "no step rows → nil (the tile body vanishes)")))
         (.then (fn [_] (done)))
@@ -213,7 +213,7 @@
                 (.then
                   (fn [res]
                     (ok! res)
-                    (let [tile (ts/steps-tile-html {:seon.db/db @conn
+                    (let [tile (ts/steps-surface-html {:seon.db/db @conn
                                                     :seon.agent/id a-id})
                           s    (pr-str tile)]
                       ;; 1. state banner
@@ -251,7 +251,7 @@
                 (.then
                   (fn [res]
                     (ok! res)
-                    (let [tile (ts/steps-tile-html {:seon.db/db @conn
+                    (let [tile (ts/steps-surface-html {:seon.db/db @conn
                                                     :seon.agent/id a-id})
                           s    (pr-str tile)]
                       (is (vector? tile) "tile still renders")
@@ -272,7 +272,7 @@
                 (.then
                   (fn [res]
                     (ok! res)
-                    (let [tile (ts/steps-tile-html {:seon.db/db @conn
+                    (let [tile (ts/steps-surface-html {:seon.db/db @conn
                                                     :seon.agent/id a-id})
                           s    (pr-str tile)]
                       (is (vector? tile) "step rows → hiccup tile")

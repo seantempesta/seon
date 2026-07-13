@@ -232,7 +232,7 @@
         (.then done))))
 
 ;; ============================================================
-;; last-updated-tile — the derived canvas default (context.md §canvas).
+;; last-updated-surface — the derived canvas default (context.md §canvas).
 ;; Candidates = THIS agent's authored tile fns (tx provenance); touch =
 ;; max(own source tx, txs of the attrs the source names). Pure f(db).
 ;; ============================================================
@@ -274,17 +274,17 @@
                                      env)))
                    env))))))
 
-(deftest last-updated-tile-derives-nothing-without-authored-tiles
+(deftest last-updated-surface-derives-nothing-without-authored-surfaces
   (async done
     (-> (with-seeded
           (fn [conn]
             ;; the standard seed has NO agent tx-provenance → no candidates.
             (testing "no authored tile fns → {} (caller falls back to welcome)"
-              (is (= {} (rf/last-updated-tile {:seon.db/db @conn
+              (is (= {} (rf/last-updated-surface {:seon.db/db @conn
                                                :seon.agent/id agent-id}))))))
         (.then done))))
 
-(deftest last-updated-tile-follows-authorship-then-data
+(deftest last-updated-surface-follows-authorship-then-data
   (async done
     (-> (with-seeded
           (fn [conn]
@@ -297,27 +297,27 @@
                              clock-tile-source)])))
                 (.then (fn [_]
                   (testing "the most recently AUTHORED tile is derived"
-                    (is (= {::rf/tile-sym
+                    (is (= {::rf/surface-sym
                             (symbol (str cur-ns-str "/clock-tile"))}
-                           (rf/last-updated-tile {:seon.db/db @conn
+                           (rf/last-updated-surface {:seon.db/db @conn
                                                   :seon.agent/id agent-id}))))
                   (transact-as! conn other-agent-id
                     [{:seon.agent/id agent-id
                       :seon.agent/purpose "peer write"}])))
                 (.then (fn [_]
                   (testing "another agent's data write cannot steal focus"
-                    (is (= {::rf/tile-sym
+                    (is (= {::rf/surface-sym
                             (symbol (str cur-ns-str "/clock-tile"))}
-                           (rf/last-updated-tile {:seon.db/db @conn
+                           (rf/last-updated-surface {:seon.db/db @conn
                                                   :seon.agent/id agent-id}))))
                   (transact-as-process! conn "root" ::process/config
                     [{:seon.agent/id agent-id
                       :seon.agent/purpose "config repair"}])))
                 (.then (fn [_]
                   (testing "root/config data work cannot steal agent focus"
-                    (is (= {::rf/tile-sym
+                    (is (= {::rf/surface-sym
                             (symbol (str cur-ns-str "/clock-tile"))}
-                           (rf/last-updated-tile {:seon.db/db @conn
+                           (rf/last-updated-surface {:seon.db/db @conn
                                                   :seon.agent/id agent-id}))))
                   ;; now the owning agent deliberately writes DATA the
                   ;; purpose-tile reads — the canvas follows with zero ceremony.
@@ -326,13 +326,13 @@
                       :seon.agent/purpose "canvas proof"}])))
                 (.then (fn [_]
                   (testing "a write to a watched attr makes that tile last-updated"
-                    (is (= {::rf/tile-sym
+                    (is (= {::rf/surface-sym
                             (symbol (str cur-ns-str "/purpose-tile"))}
-                           (rf/last-updated-tile {:seon.db/db @conn
+                           (rf/last-updated-surface {:seon.db/db @conn
                                                   :seon.agent/id agent-id})))))))))
         (.then done))))
 
-(deftest last-updated-tile-prefers-the-stored-read-set
+(deftest last-updated-surface-prefers-the-stored-read-set
   ;; C28 structural store: a row WITH :seon.fn/read-attrs is watched by
   ;; the STORED set, never the source regex. opaque-tile's SOURCE names
   ;; no attr literal (a dynamic read), but its stored read-set declares
@@ -353,18 +353,18 @@
                              clock-tile-source)])))
                 (.then (fn [_]
                   (testing "later-authored clock-tile is derived first"
-                    (is (= {::rf/tile-sym
+                    (is (= {::rf/surface-sym
                             (symbol (str cur-ns-str "/clock-tile"))}
-                           (rf/last-updated-tile {:seon.db/db @conn
+                           (rf/last-updated-surface {:seon.db/db @conn
                                                   :seon.agent/id agent-id}))))
                   (transact-as! conn agent-id
                     [{:seon.agent/id agent-id
                       :seon.agent/purpose "stored read-set proof"}])))
                 (.then (fn [_]
                   (testing "a write to a STORED-declared attr surfaces the tile (regex would miss it)"
-                    (is (= {::rf/tile-sym
+                    (is (= {::rf/surface-sym
                             (symbol (str cur-ns-str "/opaque-tile"))}
-                           (rf/last-updated-tile {:seon.db/db @conn
+                           (rf/last-updated-surface {:seon.db/db @conn
                                                   :seon.agent/id agent-id})))))))))
         (.then done))))
 
@@ -397,7 +397,7 @@
                         "provenance transport attrs do not invalidate views"))))))
         (.then done))))
 
-(deftest last-updated-tile-gates-on-provenance-process-and-privacy
+(deftest last-updated-surface-gates-on-provenance-process-and-privacy
   (async done
     (-> (with-seeded
           (fn [conn]
@@ -412,11 +412,11 @@
                              "(defn ai-only-tile [_] {:seon.render/ai \"a\"})")])))
                 (.then (fn [_]
                   (testing "another agent's fn, a private fn, and an ai-only fn are not candidates"
-                    (is (= {} (rf/last-updated-tile {:seon.db/db @conn
+                    (is (= {} (rf/last-updated-surface {:seon.db/db @conn
                                                      :seon.agent/id agent-id})))))))))
         (.then done))))
 
-(deftest last-updated-tile-excludes-root-boot-renderers
+(deftest last-updated-surface-excludes-root-boot-renderers
   (async done
     (-> (with-seeded
           (fn [conn]
@@ -425,7 +425,7 @@
                            "(defn render-namespace [_] {:seon.render/hiccup [:div]})")])
                 (.then
                   (fn [_]
-                    (is (= {} (rf/last-updated-tile
+                    (is (= {} (rf/last-updated-surface
                         {:seon.db/db @conn
                                  :seon.agent/id "root"}))
                         "root/boot source facts are not root-agent canvas authorship"))))))

@@ -923,13 +923,13 @@
    :seon.warn/example
    "(seon.test.runner/run-vars {:seon.test.runner/vars ['my.ns/my-test]})"})
 
-(defn check-tile-unresolved
+(defn check-canvas-unresolved
   "Canvass pointing at a fn symbol not loaded in the runtime.
 
    `:seon.render.canvas/content` names a qualified fn symbol that
    `seon.eval/lookup-value` can't resolve, so the human sees a calm
    \"preparing this view…\" placeholder instead of the real view. Literal
-   hiccup tiles (vectors) and resolving symbols (incl. the welcome
+   hiccup canvases (vectors) and resolving symbols (incl. the welcome
    default) produce nothing. DERIVED at render; self-heals the moment the
    fn is (re)defined. GLOBAL — :seon.warn/ns is ignored."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
@@ -941,7 +941,7 @@
                   :where
                   [?e :seon.agent/id ?aid]
                   [?e :seon.render.canvas/content ?content]]})]
-    {:seon.warn/kind :tile-unresolved
+    {:seon.warn/kind :canvas-unresolved
      :seon.warn/urgent? true
      :seon.warn/affected
      (->> rows
@@ -961,9 +961,9 @@
           "this view…\" placeholder INSTEAD of your view — this very "
           "render. The fn does not exist (most likely its defn failed to "
           "parse/eval — check your failed evals above). FIX IT IMMEDIATELY: "
-          "define the named fn (eval its defn) and the tile auto-updates the "
+          "define the named fn (eval its defn) and the canvas auto-updates the "
           "moment the symbol resolves — no re-pointing needed. (Or point the "
-          "tile at a fn that already exists, or at literal hiccup.)")
+          "canvas at a fn that already exists, or at literal hiccup.)")
      :seon.warn/example
      (str "(defn my-kb-tile\n"
           "  {:malli/schema [:=> [:cat :seon.render/system-input]\n"
@@ -999,7 +999,7 @@
    check-hop-exhausted
    check-slow-evals
    check-failing-tests
-   check-tile-unresolved])
+   check-canvas-unresolved])
 
 (defn- check-name
   "Best-effort display name for a registry fn — the demunged compiled

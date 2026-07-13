@@ -549,7 +549,7 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; Urgent broken-tile warning (Group C / §C.2). check-tile-unresolved is the
+;; Urgent broken-canvas warning (Group C / §C.2). check-canvas-unresolved is the
 ;; one URGENT check: when a canvas points at a fn that isn't loaded, the
 ;; human is staring at the calm "preparing this view…" placeholder RIGHT NOW.
 ;; It is DERIVED (query the stored pointer + resolvability), self-heals, and
@@ -579,9 +579,9 @@
           [{:seon.agent/id "warntst-tile01"
             :seon.render.canvas/content 'my.agent.warntst/missing-tile}]
           (fn [db]
-            (let [r     (warn/check-tile-unresolved {:seon.db/db db})
+            (let [r     (warn/check-canvas-unresolved {:seon.db/db db})
                   entry (first (:seon.warn/affected r))]
-              (is (= :tile-unresolved (:seon.warn/kind r)))
+              (is (= :canvas-unresolved (:seon.warn/kind r)))
               (is (true? (:seon.warn/urgent? r))
                   "broken-tile is the URGENT tier")
               (is (= #{"my.agent.warntst/missing-tile"} (affected-syms r))
@@ -602,7 +602,7 @@
            {:seon.agent/id "warntst-hicc01"
             :seon.render.canvas/content [:div {:class "seon-tile"} "literal"]}]
           (fn [db]
-            (let [r (warn/check-tile-unresolved {:seon.db/db db})]
+            (let [r (warn/check-canvas-unresolved {:seon.db/db db})]
               (is (= [] (:seon.warn/affected r))
                   "resolving symbol + literal hiccup → clean, no warning"))))
         (.then (fn [_] (done)))
@@ -623,7 +623,7 @@
                      :seon.render.canvas/content 'my.agent.warntst/not-yet-defined}]})
                 (.then (fn [env]
                   (is (:seon.db/ok? env) "broken-tile tx lands")
-                  (let [r (warn/check-tile-unresolved {:seon.db/db @conn})]
+                  (let [r (warn/check-canvas-unresolved {:seon.db/db @conn})]
                     (is (= #{"my.agent.warntst/not-yet-defined"} (affected-syms r))
                         "fires while the symbol is unresolvable"))
                   ;; re-point the tile at a fn that resolves → self-heal
@@ -634,7 +634,7 @@
                        :seon.render.canvas/content 'seon.warn/render-warnings}]})))
                 (.then (fn [env]
                   (is (:seon.db/ok? env) "re-point tx lands")
-                  (let [r2 (warn/check-tile-unresolved {:seon.db/db @conn})]
+                  (let [r2 (warn/check-canvas-unresolved {:seon.db/db @conn})]
                     (is (= [] (:seon.warn/affected r2))
                         "symbol now resolves → warning vanished, same db lineage"))))))))
         (.then (fn [_] (done)))

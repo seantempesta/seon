@@ -179,7 +179,7 @@
      content in the normal chrome: a collapsible `<details>` whose summary
      is a one-line `✗ <short>`, expanded to an error-tinted `✗ eval failed`
      block with the FULL `:seon.error/message`. It deliberately does NOT
-     route through the `error-tile` seam — that seam is the never-throw
+     route through the `error-card` seam — that seam is the never-throw
      backstop for actual RENDER throws and its header reads 'render error',
      which would mislabel (and alarm about) an ordinary eval error."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}

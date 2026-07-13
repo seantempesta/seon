@@ -393,16 +393,16 @@
 
 (deftest slot-missing-block-routes-through-overridable-error-never-throws
   ;; CONVERGENCE: a missing (or throwing) block surfaces THROUGH the
-  ;; overridable seon.render.canvas/error-tile seam — not a hardcoded
+  ;; overridable seon.render.canvas/error-card seam — not a hardcoded
   ;; div — so a consumer's set! override (acme's branded card) applies on
   ;; the agent view too. Never throws; stable id + sibling kept.
   (async done
     (-> (with-block-conn
           (fn [conn agent-id]
             (let [ctx  {:seon.db/db @conn :seon.agent/id agent-id}
-                  orig canvas/error-tile]
+                  orig canvas/error-card]
               (try
-                (set! canvas/error-tile
+                (set! canvas/error-card
                       (fn [_] [:div.acme-override "OVERRIDE CARD"]))
                 (let [missing (render/slot ctx :no-such-block)
                       sibling (render/slot ctx :mytile)]
@@ -411,10 +411,10 @@
                   (is (= "tile-no-such-block" (:id (second missing)))
                       "the slot div keeps its stable id even on error")
                   (is (re-find #"OVERRIDE CARD" (html/->string missing))
-                      "the error tile routes through the overridable error-tile seam")
+                      "the error surface routes through the overridable error-card seam")
                   (is (re-find #"tile!" (html/->string sibling))
                       "a sibling slot renders untouched (never-crash-always-surface)"))
-                (finally (set! canvas/error-tile orig))))))
+                (finally (set! canvas/error-card orig))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

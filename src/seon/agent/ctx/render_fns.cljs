@@ -210,11 +210,11 @@
   [:map
    [:seon.db/db    :seon.db/db]
    [:seon.agent/id :string]])
-(schema/register! ::tile-sym :symbol)
+(schema/register! ::surface-sym :symbol)
 (schema/register! ::touch :int)
 (schema/register! ::last-updated-response
   [:map
-   [::tile-sym {:optional true} ::tile-sym]
+   [::surface-sym {:optional true} ::surface-sym]
    [::touch    {:optional true} ::touch]])
 
 (defn- fn-row
@@ -316,10 +316,10 @@
       (if (seq touches) {::touch (apply max touches)} {}))
     {}))
 
-(defn last-updated-tile
-  "The agent's last-updated tile fn — the derived canvas default.
+(defn last-updated-surface
+  "The agent's last-updated surface fn — the derived canvas default.
 
-   Candidates are THIS agent's authored tile fns: `:seon.fn` rows whose
+   Candidates are THIS agent's authored surface fns: `:seon.fn` rows whose
    `:seon.fn/source` datom's tx carries the agent user AND the REPL process.
    Both facts are required: root boot/config transactions also carry root as
    their user, but they are system work rather than definitions deliberately
@@ -327,15 +327,15 @@
    spec whose output declares `:seon.render/hiccup`
    ([[output-twin-keys]] — the same structural detection as auto-run).
    Each candidate's TOUCH coordinate is the max agent/REPL tx over (a) its own
-   source datom — redefining the tile touches it — and (b) every datom
+   source datom — redefining the surface touches it — and (b) every datom
    of the attrs it declares ([[declared-read-attrs]] — the stored
    `:seon.fn/read-attrs`, regex fallback for pre-structural rows), read
    on the HISTORY view so retractions count. The candidate with the max touch
-   is the last-updated tile; `{}` when the agent has authored none (the
+   is the last-updated surface; `{}` when the agent has authored none (the
    caller falls back to the welcome). Ties break on the fn name.
 
    Pure over the frozen db value — derive-don't-store: no touched-at
-   stamp exists anywhere. Honest bound: a tile reading attrs it never
+   stamp exists anywhere. Honest bound: a surface reading attrs it never
    names literally (dynamic attr construction) follows only its own
    redefinitions."
   {:malli/schema [:=> [:cat ::last-updated-request] ::last-updated-response]}
@@ -388,7 +388,7 @@
                               (when (and (not priv)
                                          (contains? (output-twin-keys spec)
                                                     :seon.render/hiccup))
-                                {::tile-sym (symbol sym)
+                                {::surface-sym (symbol sym)
                                  ::src-tx   srctx
                                  ::attrs    (declared-read-attrs
                                               installed (stored-kws sym) src)}))))
@@ -409,14 +409,14 @@
                                   :seon.db/args [id repl-eid (vec attrs)]}))
                       {})
             best    (->> rows
-                         (map (fn [{::keys [tile-sym src-tx attrs]}]
-                                {::tile-sym tile-sym
+                         (map (fn [{::keys [surface-sym src-tx attrs]}]
+                                {::surface-sym surface-sym
                                  ::touch (reduce max src-tx
                                                  (keep attr-tx attrs))}))
-                         (sort-by (juxt ::touch (comp str ::tile-sym)))
+                         (sort-by (juxt ::touch (comp str ::surface-sym)))
                          last)]
         (if (some? best)
-          {::tile-sym (::tile-sym best)}
+          {::surface-sym (::surface-sym best)}
           {})))))
 
 (defn derived-blocks
@@ -522,19 +522,19 @@
    Runs the node's `::fn-sym` through [[run-render-fn]] and returns its
    `:seon.render/hiccup` (envelope or bare vector); nil renders nothing. An
    interrupt / error / wrong shape becomes the ONE `:seon/error` tile in
-   place ([[seon.render.canvas/error-tile]]) — the render pass survives."
+   place ([[seon.render.canvas/error-card]]) — the render pass survives."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
   [in]
   (let [sym (::fn-sym (:seon.render/node in))
         r   (run-render-fn in :seon.render/html)]
     (cond
       (and (map? r) (:seon.render.sci/interrupt r))
-      (canvas/error-tile
+      (canvas/error-card
         {:seon.error/message (str sym " did not terminate within its budget")
          :seon.error/where   :auto-run
          :seon.error/hint    "render fns must be fast, terminating db→view derivations"})
       (and (map? r) (:seon.render.sci/error r))
-      (canvas/error-tile
+      (canvas/error-card
         (assoc (:seon.render.sci/error r) :seon.error/where :auto-run
                :seon.error/symbol sym))
       :else
@@ -542,7 +542,7 @@
         (cond
           (nil? h)    nil
           (vector? h) h
-          :else (canvas/error-tile
+          :else (canvas/error-card
                   {:seon.error/message (str sym " returned a non-hiccup "
                                             ":seon.render/hiccup — fix its output")
                    :seon.error/where   :auto-run}))))))

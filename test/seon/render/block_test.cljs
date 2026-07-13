@@ -95,7 +95,7 @@
       (is (str/includes? out ":nested")))))
 
 (deftest block-error-kind
-  (testing "a :seon/error value → the error-tile seam"
+  (testing "a :seon/error value → the error-card seam"
     (let [out (s (render/block :html {:seon.error/message "kaboom" :seon.error/where :probe}))]
       (is (str/includes? out "render error"))
       (is (str/includes? out "kaboom")))))

@@ -332,7 +332,7 @@
   [:map
    [:seon.render/entity :map]
    ;; The DERIVED canvas default — the agent's last-updated tile fn
-   ;; (seon.agent.ctx.render-fns/last-updated-tile), computed by the
+   ;; (seon.agent.ctx.render-fns/last-updated-surface), computed by the
    ;; caller (this ns loads below render-fns) and consulted only when
    ;; no pin is stored. Derive the default, store only the pin.
    [::derived {:optional true} ::derived]])
@@ -378,7 +378,7 @@
    `:seon.render.canvas/content` (THE tile key — the PIN) when
    present; else the caller-supplied `::derived` symbol (the agent's
    last-updated tile — the derived default, see
-   `seon.agent.ctx.render-fns/last-updated-tile`); else [[welcome-sym]]
+   `seon.agent.ctx.render-fns/last-updated-surface`); else [[welcome-sym]]
    (the core welcome). Pin wins over derived; retract the pin and the
    canvas falls back to derived. Neither the per-entity
    `:seon.render/html` nor the `:seon.agent` KIND default is consulted
@@ -456,7 +456,7 @@
         {})
       {})))
 
-(def tile-line
+(def welcome-line
   "The double-duty line: tells the HUMAN what the tile is, and —
    because the agent reads this fn's render and source every turn —
    reinforces to the AGENT that writing hiccup-returning fns is
@@ -475,7 +475,7 @@
    thin subhead — so a plain chat answer renders richly on the canvas;
    when there's no reply yet, a greeting empty-state (by name when the
    store knows one), today's date and time, the purpose line, and
-   [[tile-line]].
+   [[welcome-line]].
 
    This fn is itself the worked example of the tile contract: ONE
    render emitting tagged compact + expanded blocks, plus the
@@ -538,7 +538,7 @@
          [:div {:class "text-xs font-mono text-signal"}
           (str date-str " · " time-str)]
          [:div {:class "text-sm text-text-200"} purpose-line]
-         [:div {:class "text-xs text-text-400 italic"} tile-line]])]
+         [:div {:class "text-xs text-text-400 italic"} welcome-line]])]
      :seon.render/ai
      (str "Welcome — your tile is showing the core default "
           "(point :seon.render.canvas/content at your own fn to "
@@ -553,7 +553,7 @@
             (str ", and \"" greet-line "\""))
           "; expanded (the agent view): \"" greet-line "\" with "
           date-str " " time-str ", your purpose line, and: \""
-          tile-line "\" "
+          welcome-line "\" "
           "To replace it, transact :seon.render.canvas/content onto "
           "your agent entity — a qualified fn symbol or literal hiccup.")}))
 
@@ -599,7 +599,7 @@
 ;; ============================================================
 ;; Errors are legible — a broken tile never silently vanishes.
 ;;
-;; ONE overridable seam ([[error-tile]]) renders the ERROR-TILE surfaces
+;; ONE overridable seam ([[error-card]]) renders error surfaces
 ;; (entity render, agent-view slot, a render failure); a consumer `set!`s it to
 ;; a branded card (acme does) and the override carries across them all.
 ;; The canvas HERO ([[error-response]]) is the deliberate EXCEPTION: it
@@ -607,14 +607,14 @@
 ;; twin), so the hero does NOT route through the seam.
 ;; ============================================================
 
-(defn default-error-tile
+(defn default-error-card
   "The core default html render of a `:seon/error` value.
 
    The ONE error
-   tile shared by the error-tile surfaces (entity render, slot, a render
+   card shared by the error surfaces (entity render, slot, a render
    failure). Reads only the shared error core (message + optional
    where/symbol/hint), so it renders ANY error. Override the whole look by
-   `set!`-ing [[error-tile]]."
+   `set!`-ing [[error-card]]."
   {:malli/schema [:=> [:cat :seon.db/error] ::hiccup]}
   [{:seon.error/keys [message where hint] sym :seon.error/symbol}]
   [:div {:class (str "seon-tile flex flex-col gap-1 p-3 border "
@@ -625,17 +625,17 @@
    (when sym  [:div {:class "text-[10px] font-mono text-text-500"} (str sym)])
    (when hint [:div {:class "text-xs text-text-400 italic"} hint])])
 
-(def error-tile
-  "THE one overridable error-tile seam — a fn `(fn [:seon/error] → hiccup)`
-   the error-tile surfaces call (entity render, slot, a render failure) —
+(def error-card
+  "THE one overridable error-card seam — a fn `(fn [:seon/error] → hiccup)`
+   the error surfaces call (entity render, slot, a render failure) —
    NOT the calm canvas hero ([[error-response]]). A consumer `set!`s
    this var to a branded card and the override carries across those
    surfaces (the late-binding `set!` pattern acme already uses). Defaults
-   to [[default-error-tile]]. One error renderer, no forks."
-  default-error-tile)
+   to [[default-error-card]]. One error renderer, no forks."
+  default-error-card)
 
 (defn error-response
-  "Build the html-response for a tile fn that THREW.
+  "Build the html-response for a canvas fn that THREW.
 
    THE HUMAN sees a calm,
    nicely-formatted 'updating this tile' placeholder — never a scary error

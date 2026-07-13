@@ -150,8 +150,8 @@
               ;; rendered (one resolution, two readers). Guarded like the
               ;; render side: derivation failure → welcome provenance.
               derived (when (nil? (:seon.render.canvas/content ent))
-                        (try (::render-fns/tile-sym
-                               (render-fns/last-updated-tile
+                        (try (::render-fns/surface-sym
+                               (render-fns/last-updated-surface
                                  {:seon.db/db db :seon.agent/id id}))
                              (catch :default _ nil)))
               wired (canvas/wired-content

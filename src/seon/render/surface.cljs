@@ -192,8 +192,8 @@
   [dbv agent-id]
   (let [pinned (pinned-canvas-renderer dbv agent-id)
         derived (when (nil? pinned)
-                  (::render-fns/tile-sym
-                    (render-fns/last-updated-tile
+                  (::render-fns/surface-sym
+                    (render-fns/last-updated-surface
                       {:seon.db/db dbv :seon.agent/id agent-id})))
         renderer (or pinned derived)]
     (when (symbol? renderer) renderer)))

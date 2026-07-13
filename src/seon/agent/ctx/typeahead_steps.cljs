@@ -5,7 +5,7 @@
    ONE block, BOTH render slots, both reactive (pure fns of the db at
    render time — reactive-context, nothing stored):
 
-     - `:seon.render/html` ([[steps-tile-html]]) — the agent-page live
+     - `:seon.render/html` ([[steps-surface-html]]) — the agent-page live
        tile: a state banner (FSM state now, provider, step k/N, rounds,
        wall, ctx tokens, server sha), THE CODE-BUFFER PANE (the last
        step's `buffer_text` painted by `buffer_spans` status — locked /
@@ -53,7 +53,7 @@
   {:seon.agent.ctx/name     :typeahead-steps
    :seon.agent.ctx/priority 95
    :seon.render/ai          'seon.agent.ctx.typeahead-steps/steps-ai
-   :seon.render/html        'seon.agent.ctx.typeahead-steps/steps-tile-html})
+   :seon.render/html        'seon.agent.ctx.typeahead-steps/steps-surface-html})
 
 ;; ============================================================
 ;; :seon.render/ai — the provider's special instructions, gated on the
@@ -443,7 +443,7 @@
              " tok ")]
        draft-preview])))
 
-(defn steps-tile-html
+(defn steps-surface-html
   "The typeahead canvas — the last provider call, fully legible.
 
    Composed top to bottom, every panel reactive (vanishes when its rows
