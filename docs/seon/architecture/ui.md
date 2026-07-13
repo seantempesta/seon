@@ -24,13 +24,14 @@ two **renders**, selected by key presence — there is no stored discriminator:
 
 - **ai render** (`:seon.render/ai`) → **prompt** text: a verbatim string, or a
   qualified symbol late-resolved each render via `seon.eval/lookup-value`.
-- **html render** (`:seon.render/html`) → a **tile**: a symbol, a literal hiccup
+- **html render** (`:seon.render/html`) → a **surface**: a symbol, a literal hiccup
   vector, else the structural pretty-print.
 
-Presence decides placement: ai-render-only = prompt only (no tile); html-render-
-only = a tile only (zero prompt tokens); both = both. `:seon.agent.ctx/name` is
+Presence decides placement: ai-render-only = prompt only (no surface);
+html-render-only = a surface only (zero prompt tokens); both = both.
+`:seon.agent.ctx/name` is
 one keyword in three roles — the prompt header, the per-agent upsert key, and the
-DOM slot id `#tile-<name>` — always in sync, which is what makes "the agent edits
+DOM slot id `#surface-<name>` — always in sync, which is what makes "the agent edits
 the same thing the human sees" true. Renders are fns/symbols; the rendered output
 is ephemeral, never stored.
 
@@ -70,9 +71,9 @@ late.
 **Pinning a fn is a block; config shapes the seed.** Any render fn an agent wants
 always-on is nothing but a block — `install!` at a chosen priority pins it,
 `remove!` drops it, so the agent dials context in and the cost is derived at
-render. (This is the mechanism the retiring `my.skills` load/unload facade rode
-on — the facade retires, the `install!`/`remove!`-block path stays; see
-[[data-model]] §5.5 + [[context-rebuild]].) And the per-cluster `seon.config`
+render. (`my.skills` explicit load/unload reuses this exact override; importing
+a corpus alone installs no block—see [[data-model]] §5.5 + [[context]].) And the
+per-cluster `seon.config`
 manifest (aero `config/system.edn`) shapes the seed set declaratively WITHOUT a
 code change. An absent block tree means no blocks; no hidden code fallback or
 implicit skill-body injection exists.
@@ -86,7 +87,8 @@ hung render yields a `:seon/error` value (see [[data-model]] §6) for THAT rende
 only; siblings never crash.
 
 **prompt == page by construction.** Both derive from the same blocks over the
-same db value resolved from the turn's `{store-id, branch, commit-id, t}`: the prompt is
+same db value resolved from the turn's
+`{database-id, branch, commit-id, t}`: the prompt is
 `seon.agent.ctx/render-context` (ai renders concatenated by
 `:seon.agent.ctx/priority`), the page is the same blocks' html renders placed into
 a layout's slots. "What the agent saw at turn N" is a re-derive from that exact
@@ -97,7 +99,7 @@ layer, `seon.render/block` — `(block view x)` dispatches on the value-KIND `x`
 carries (the namespaced key ON the value, never a stored `:kind`): a **message**
 (`:seon.render/markdown`) → `seon.ui.markdown/md->hiccup`, a **source**
 (`:seon.render/source`) → `clj->hiccup`, a **data** projection → the value panel, a
-**`:seon/error`** → the error tile, a literal **hiccup** vector → passthrough, and
+**`:seon/error`** → an error card, a literal **hiccup** vector → passthrough, and
 anything else → the data panel (never throws). The transcript and the canvas both
 route their bodies through it, so every surface "just displays the block."
 
@@ -138,73 +140,103 @@ every context band renders an html representation for inspectability.
 
 ## Slots and layouts
 
-- **slot** — `(slot :name)` emits `[:div {:id "tile-<name>" :data-slot :name}]`, a
+- **slot** — `(slot :name)` emits
+  `[:div {:id "surface-<name>" :data-slot :name}]`, a
   named, DB-keyed EMPTY hole keyed on `:seon.agent.ctx/name`. It does not resolve
   `:name`; it marks a hole. Resolution happens at expansion: render the named
   block's html, and if THAT output contains more slots, recurse to fixpoint.
 - **layout** — a render whose hiccup contains slots; it queries the db (the
-  request carries it) + path-params and owns placement + CSS. **layout-vs-tile is
+  request carries it) + path-params and owns placement + CSS.
+  **layout-vs-surface is
   a role, never stored**: a render with child slots is a layout, a render with
-  none is a leaf **tile**.
+  none is a leaf **surface**.
 
-## Pages — agent view, debug view, roster, app
+## Pages — agent view, root view, debug view, app
 
 Every **page** is a layout placing block html renders into slots; each filled slot
-is a tile. All pages are agent views — one mechanism, a tree of routes:
+is a surface. All pages are agent views — one mechanism, a tree of routes:
 
-- **agent view** (`/agent/{id}`) — one agent: a large primary panel showing the
-  **most recently agent-updated surface**, and a right rail containing every
-  current HTML context-block render ordered by the same database transaction
-  recency. Selecting a rail card
+- **agent view** (`/agent/{id}`) — one agent: a large primary panel plus a right
+  rail containing every current HTML context-block render ordered by database
+  transaction recency. Selecting a rail card sets this tab's **page focus** and
   displays that render in the primary panel. Missing and AI-only renders are
-  omitted. The canvas is NOT a `(slot :canvas)` block — it is the agent's live
-  tile projection. Renderer recency is the latest transaction by this agent
-  through the REPL, found by a bounded indexed history lookup over scoped
-  inputs captured by the renderer's current runtime-observed database reads; canvas
-  slot writes share that same coordinate. Content recency orders the rail,
-  while deliberate-focus recency
-  treats an agent-to-human reply as a transcript update and a canvas/domain
-  write as a canvas update; eval bookkeeping alone never steals focus. A human
-  click is sticky browser-local inspection state until the human leaves or the
-  selected surface disappears. **What the canvas shows is derived by default,
-  pinnable to override** (the same derive-default/store-override pattern as
-  everywhere): by default it is the **last-updated tile** — among the agent's
-  own authored tile fns, the one most recently touched (redefined, or an
-  agent-user/REPL transaction that touches a current observed read's scoped
-  input;
-  `seon.agent.ctx.render-fns/last-updated-tile`, pure over the db value plus the
-  runtime-derived read plan — see [[context]] for the exact derivation) — so the
-  human's focus follows what the agent is actively doing, and the agent
-  *knows* it does, since it's derived from the agent's own last write (the
-  shared-view property, [[context]]). The agent overrides by pinning
-  `:seon.render.canvas/content` to a specific tile to feature it
-  regardless of recency (retracting the pin falls back to derived; the
-  derived tile is skipped as its own auto-run block, same as a pin). With
-  neither a pin nor any authored tile yet, the default
-  (`seon.render.canvas/welcome`) LEADS with the agent's latest reply as a
-  markdown card, falling back to the greeting only before the agent has
-  spoken.
+  omitted. The canvas is NOT a `(slot :canvas)` block — it is the agent's focal
+  surface projection.
+
+  Two focus values are deliberately distinct. **Agent-derived focus** is shared
+  database meaning: the agent's `:seon.render.canvas/content` pin when present,
+  otherwise its **last agent-updated surface**, otherwise
+  `seon.render.canvas/welcome`. **Page focus** is this tab's valid manual surface
+  selector when present, otherwise agent-derived focus. The selector is scoped
+  to the tab's database-backed web-session location; it never changes another
+  tab or becomes an agent-global selected-surface projection.
+
+  Renderer recency is the latest transaction by this agent through the REPL,
+  found by a bounded indexed history lookup over scoped inputs captured by the
+  renderer's current runtime-observed database reads; canvas writes share that
+  same coordinate. Content recency orders the rail, while focus recency treats
+  an agent-to-human reply as a transcript update and a canvas/domain write as a
+  canvas update; eval bookkeeping alone never steals focus.
+  `seon.render.surface/last-updated-surface` is pure over the db value plus the
+  runtime-derived read plan (see [[context]]). Pinning is the exact durable
+  override; retracting the pin falls back to recency. The page-focused surface
+  is skipped as its own supporting card, so it is not duplicated. The welcome
+  surface leads with the agent's latest reply as markdown and falls back to the
+  greeting only before the agent has spoken.
 
   Focus recency is intentionally a current-renderer heuristic, not historical
   dependency replay: it does not reconstruct old conditional branches, and a
-  broad/unknown read earns definition recency only. Human selection/pinning is
-  the exact override. Live invalidation remains exact before/after result
-  comparison and is not weakened by this focus policy.
+  broad/unknown read earns definition recency only. Session selection and agent
+  pinning are separate overrides at separate scopes. Live invalidation remains
+  exact before/after result comparison and is not weakened by this focus policy.
 
-  Both provenance dimensions are load-bearing for deliberate focus. Root boot
+  Both provenance dimensions are load-bearing for agent-derived focus. Root boot
   and config transactions legitimately name root as their user, but are system
   maintenance rather than updates authored by the root agent. Requiring the
   REPL process keeps those facts available for provenance without letting them
   select or reorder the root canvas.
 - **the root agent’s view** (`/`) — the all-agents overview IS the **root
   agent's** view (`:seon.agent/id "root"`). Its system-scoped blocks query across
-  all agents to render a preview tile each; dive into one via reverse routing
-  (step back to see all, dive into one). The IDENTICAL block/layout/route
+  all agents to render a card each. A cheap card shell always shows identity,
+  purpose, derived state, and the agent-derived focus label. Visible non-root
+  cards materialize that surface's compact HTML face through
+  the same `seon.render.surface` catalog/focus/materializer used by the agent's
+  own page;
+  its working data uses colocated `:seon.render.surface/*` keys. Expanded details
+  lazily show up to five recent messages and failed evals. Root remains in the
+  roster, but its self-card is summary-only: its agent-derived focused surface is
+  this fleet `system-view`, so materializing that preview or canvas-AI twin would
+  recurse. These are independent view units, so one agent update does not rebuild
+  the fleet. Dive
+  into one via reverse routing (step back to see all, dive into one). Its human
+  input addresses root, whose
+  deliberately small role context is to understand the fleet, start/select an
+  ordinary agent, delegate, and route the originating browser tab there. Root's
+  operational detail comes from its orchestration/navigation namespace cards
+  and current-namespace source, not a long root instruction block. The IDENTICAL
+  block/layout/route
   machinery — NOT a separate overview page. It grounds the render + route tree: root
   view (`/`) → per-agent views (`/agent/{id}`) → apps. (Root's
   lifecycle/orchestrator facet lives in [[agent-runtime]]; here it is just the
   agent whose view is `/`.) It is the same page as any `/agent/{id}` view,
-  with `seon.render.system/system-view` as its canvas (its canvas content).
+  with `seon.render.system/system-view` as its canvas (its canvas content). A
+  first-ever database also contains one ordinary agent; `bin/seon up --open`
+  opens that ordinary agent while `/` remains available as mission control.
+
+  `system-view`'s AI twin always names every agent and its status/focused
+  surface. Within one explicit block budget it adds non-root canvas-AI,
+  five-message, and recent-failure detail in the order running → erroring →
+  recent. A cap never
+  silently drops the roster; it marks which detail was omitted. The same twin
+  includes the normalized location from the root message's originating browser
+  session, so root knows what that human is currently seeing.
+
+  Host telemetry is a separate optional system-status surface, not prose added
+  to every turn. Once the operator exposes one reusable process-status
+  projection, the surface samples pod/writer liveness, CPU, RSS, uptime, and
+  feed pressure on demand. It is one independently refreshed unit on the normal
+  feed, persists no rolling projection, and contributes to root's AI context
+  only when anomalous.
 - **debug view** (`/agent/{id}/debug`) — the exact AI context grouped into
   collapsible blocks, with HTML twins alongside when present. It also derives
   the total prompt token estimate, per-block token breakdown, cache boundary,
@@ -216,8 +248,6 @@ is a tile. All pages are agent views — one mechanism, a tree of routes:
   It uses the same gzip Datastar subscription graph and activation door as every
   other live page, not a provenance-routed debug listener. With no open page it
   owns no listener or render work.
-- **roster** (`/agents`) — the live agent list, backed by `/agents/feed` and
-  the same whole-element Datastar morph mechanism.
 - **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
   is an agent layout symbol, SCI-bounded.
 
@@ -229,13 +259,13 @@ Left→right: the brand (`seon.web.brand`, links `/`); agents-by-state dots+coun
 (reusing `seon.render.system/fleet-summary` — one fleet counter, not
 re-derived); datom count (links `/data`) + `SEON_EMBED` on/off; and a
 `+ new agent` button + home/data links + a health dot. It is one shared stable
-render unit: a relevant database dependency change renders it once and
-fans the same complete element to every subscribed page. It does not recompute
-inside every whole view and it uses a cheap index count rather than a full-store
-inventory scan. The `+ new agent` button POSTs
-the same `/agents/new` create door with an empty purpose and SWITCHES to the new
-`/agent/{id}`. It creates immediately without a browser modal; the `/agents`
-roster's outside-the-morph form owns optional-purpose entry.
+  render unit: a relevant database dependency change renders it once and
+  fans the same complete element to every subscribed page. It does not recompute
+  inside every whole view and it uses a cheap index count rather than a full-database
+  inventory scan. The `+ new agent` button POSTs the one `/agents` creation door
+  with an empty purpose and switches to the new `/agent/{id}`. The same door
+  accepts an optional purpose from a root-fleet form; there is no separate
+  creation or roster page.
 
 The persistent header has no rolling clock-driven rate. Usage totals and rates
 over an operator-selected interval are derived on demand from timestamped turn/
@@ -245,7 +275,10 @@ log facts; merely passing time never forces a page morph.
 
 No request dead-ends on a raw 404. The reitit no-match default-handler 302s to
 `/` (root's dashboard); a well-formed but UNKNOWN `/agent/{id}` (stale bookmark,
-reset store, typo) also 302s home (`"root"` always resolves, never redirected).
+reset database, typo) also 302s home. `/agent/root` canonicalizes to `/` before
+render, so root never has two live page/feed identities. There is no GET
+`/agents` view or `/agents/feed`; a GET to the creation collection follows the
+same no-match redirect to `/`.
 
 ## Routing is data — reitit + the capability gate
 
@@ -260,11 +293,12 @@ the route datoms rebuilt on tx via a reloading thunk. This replaces hand-rolled
 `case`/`cond`/`re-matches` dispatch. (The `:seon.route/*` attributes are
 registered per [[data-model]].)
 
-- **Seeded core routes:** `/` (root agent’s view), `/agents` + `/agents/feed`, and
-  `/agent/{id}` + `/agent/{id}/feed` — all GET. Each view is TWO GET routes: the
+- **Seeded core routes:** `/` + `/feed` (root agent’s view) and
+  `/agent/{id}` + `/agent/{id}/feed` — GET. Each view is TWO GET routes: the
   shim page and its long-lived SSE stream at a `…/feed` sibling path (the shim's
   `data-init="@get('…/feed')"` opens the stream). The one action door is
-  `/agent/{id}/call` (POST). Agents add `/agent/{id}/app/{x}` rows
+  `/agent/{id}/call` (POST); `POST /agents` is the sole agent-birth HTTP door.
+  Agents add `/agent/{id}/app/{x}` rows
   (capability-gated, handler in the agent's own `my.agent.<id>` ns).
 - **Nested routes ARE nested layouts** — reitit meta-merges route-data parent →
   child (`:seon.route/owner` + middleware flow down). `match-by-name` gives reverse
@@ -292,6 +326,63 @@ registered per [[data-model]].)
   middleware reads route-data and vanishes when N/A. Auth is wired empty — adding
   it later is one keyword + one registry entry, zero handler edits.
 
+### Database-backed human location and root-directed navigation
+
+Each browser tab owns one compact `:seon.web.session/id` represented by database
+facts defined in [[data-model]]. Tab-local browser storage keeps the attachment
+tuple `{database-id, branch, session-id}` needed to reconnect it. The
+session carries a ref to the human plus one normalized local location string.
+That location is the fact: route name, agent target, and URL are derived through
+reitit rather than duplicated as more session attributes. Transaction metadata
+provides recency, so there is no stored `updated-at`, `active?`, or presence
+registry.
+
+First load has no browser-generated identity. Bootstrap accepts a stored tuple
+only when its database/branch match the current attachment and its lookup ref
+exists in that database for the current human. Otherwise the page asks the
+writer's one `seon.db.id/allocate!` path to create the session entity atomically
+with its initial normalized location, returns the replacement tuple, stores it
+in `sessionStorage`, and only then opens the feed keyed by it. Reload and
+reconnect reuse a validated ID. Every subsequent route observation compares the
+normalized location and transacts only when it changed. If a reset or restore
+removes the session beneath an already-open feed, that feed sends one
+auto-removing control patch that clears only this tab's Seon session tuple and
+reloads the current local route through the same bootstrap; it never preserves
+a ghost cursor or client-upserts the missing identity.
+
+An agent page's manual surface selection is the one meaningful sub-route state:
+it is encoded in the normalized location's query component. With no selection
+parameter, the page uses agent-derived focus. Clicking a rail card updates the
+URL/session fact and the Datastar signal together; reload restores that tab's
+selection, and root can query it through the originating session, but a fleet
+card does not adopt it. Scroll position, disclosure state, and form signals stay
+browser-transient and are not falsely promoted to database facts.
+
+Opening/navigating a route reconciles that same session location. A human message
+links to the originating session, and each turn records the exact inbound
+message it is assigned to answer as `:seon.agent.turn/cause-message`; the run's
+waking message is insufficient because a run can absorb later input. Root can
+therefore receive the right session through the ordinary injection boundary.
+Root calls the protected, fully specified
+`seon.web.session/select-agent!`; its required
+`:seon.web.session/agent-id` names the target and its optional injected
+`:seon.web.session/id` names the originating tab. That key is context-only at
+the eval boundary: agent input cannot override it. It validates/reverse-routes
+the target, compares the normalized location, and transacts only a real change. A
+missing originating session or target returns an error envelope. The already-open
+feed for that session applies the
+official Datastar redirect-helper semantics: an auto-removing script patch over
+the existing stream, not a second event family or channel, only when the stored
+location differs from that feed's normalized current route. Arrival at the new
+route observes equality, writes nothing, and emits no redirect. Another tab has
+a different session identity and does not move.
+
+This is desired/current UI state, not authentication and not a second command
+queue. Root can query exactly what the human who messaged it is seeing, while
+the browser remains a projection of database state. A missing originating
+session returns an explicit error envelope instead of guessing which tab to
+move.
+
 ## The live channel — gzip morph SSE
 
 The live channel is **ours** (reitit has no streaming primitives by design): one
@@ -303,7 +394,7 @@ in `seon.web.datastar`.
 - **view = f(db-at-coordinate), compiled into stable units.** Reitit route
   match + normalized path/query/resolved coordinate define one view key. Database route,
   context, and program facts compile to one plan containing a shell, shared
-  header, roster rows, surfaces, focus controller, debug panes, or data result
+  header, fleet cards, surfaces, focus controller, debug panes, or data result
   as stable ID-addressed units. Initial paint derives the whole
   `[:main#app-view …]`; later updates render only dirty units and emit their
   complete elements in one `datastar-patch-elements` event (default `outer`). A
@@ -315,7 +406,7 @@ in `seon.web.datastar`.
   subscriptions do no current work.
 - **gzip + immediate flush.** The stream is long-lived and `Content-Encoding:
   gzip`: each event is written then sync-flushed (`Z_SYNC_FLUSH`) so the
-  compressed bytes hit the wire at once; the browser transparently gunzips before
+  compressed bytes reach the browser connection at once; the browser transparently gunzips before
   datastar reads. The streamer is crash-proofed — error handlers on the gzip
   stream + the response, a `writableEnded` guard before every write, and
   `req.on('close')` ends the gzip stream and deregisters the connection. A
@@ -344,13 +435,12 @@ in `seon.web.datastar`.
   travel is `view = f(db-at-coordinate)` over the bitemporal DB—a different
   resolved commit, the same render. Reconnect needs no numeric `since-t` replay:
   the first paint fires
-  immediately on open and repaints the current view. **Status: LIVE** (`/agent/{id}`).
-  The canonical historical request carries branch, commit id, and t; the server
-  verifies it against the registered store attachment and echoes the full
-  `{store-id, branch, commit-id, t}` in its response/bookmark. A legacy
-  `?t=<tx-id>` is only a convenience selector on the named branch and must
-  resolve to exactly one retained commit. That feed is marked frozen and
-  excluded from current broadcasts. No coordinate means the current
+  immediately on open and repaints the current view. **Status: LIVE**
+  (`/agent/{id}`). A historical request carries the complete canonical
+  `{database-id, branch, commit-id, t}`; the server verifies it against the
+  registered database attachment and echoes that coordinate in its
+  response/bookmark. There is no bare-t compatibility selector. That feed is
+  marked frozen and excluded from current broadcasts. No coordinate means the current
   dependency-reactive feed. The `/agent`
   shim's time-travel controls (siblings of `#app-view`) own the feed connection;
   one `data-effect` `@get` lets Datastar's per-attribute auto-cancellation abort
@@ -368,9 +458,9 @@ in `seon.web.datastar`.
   browser POST → the owning agent's sandbox → result datoms → tx-listener →
   morph). The DB is the bus both ways.
 
-The same gzip subscription mechanism serves agent, roster, debug, and data
+The same gzip subscription mechanism serves root, agent, debug, and data
 views. There is no provenance-routed debug stream or unused generic `/sse`
-registry. Transaction user/process is relevant to deliberate-focus semantics,
+registry. Transaction user/process is relevant to agent-derived focus semantics,
 never to dependency invalidation. Legitimate expensive units are bounded before
 building hidden hiccup; collapsed markup alone is not a compute bound.
 
@@ -384,15 +474,15 @@ so verify a streamed change with a Node client that opens the gzip stream, gunzi
 the payload, and asserts it changes on a real tx; the final live-morph eyeball is
 the owner's, in real Chrome.
 
-## Errors render as tiles
+## Errors render as surfaces
 
 Any render failure becomes a **`:seon/error`** value (the one base shape — see
 [[data-model]] §6) instead of crashing siblings. The html render shows it as an
-**error tile** — friendly message, the offending block/route name and symbol, an
+**error card** — friendly message, the offending block/route name and symbol, an
 actionable hint — ancestors and siblings untouched, self-healing on the next
 render. The SAME source feeds the agent's **warnings block** (its ai render), so a
 render failure the agent owns enters its prompt as fix-oriented prose; when the
-underlying fn is fixed, both the tile and the warning vanish (pure fn of state,
+underlying fn is fixed, both the error card and the warning vanish (pure fn of state,
 never stored). Route/layout throws flow identically via the error-catch
 middleware.
 
@@ -403,12 +493,12 @@ reusing the same primitives, with zero `src/seon` edits:
 
 | Layer | Override mechanism | Default |
 |---|---|---|
-| **block set** (supporting tiles) | `ctx/install!` / `ctx/remove!` from downstream namespaces | the configured DB block set |
+| **block set** (supporting surfaces) | `ctx/install!` / `ctx/remove!` from downstream namespaces | the configured DB block set |
 | **initial block tree per cluster** | explicitly applied manifest `:seon.config/agent-context` / `:seon.config/root-context`; omission from the complete route population removes a route | schema/default compiler input materialized as DB facts |
-| **a tile's look** | the block's `:seon.render/html` symbol | seon's html render fn |
-| **focal `#agent-view-primary-canvas` (the canvas)** | the agent's `:seon.render.canvas/content` symbol | seon's `welcome` tile |
-| **the calm hero error (a broken canvas)** | `set!` of `seon.render.canvas/error-response` (the CALM hero — keeps the agent-facing `:seon.render/ai`/`:seon.render/error`, swaps only the human hiccup) | seon's "updating this tile" card |
-| **slot / view / entity error tiles** | `set!` of `seon.render.canvas/error-tile` (the `(fn [:seon/error] → hiccup)` seam the `render` / `slot` / `render-entity-html` catches call) | seon's `default-error-tile` (informative card) |
+| **a surface's look** | the block's `:seon.render/html` symbol | Seon's html render fn |
+| **focal `#agent-view-primary-canvas` (the canvas)** | the agent's `:seon.render.canvas/content` symbol | Seon's `welcome` surface |
+| **the calm hero error (a broken canvas)** | `set!` of `seon.render.canvas/error-response` (the calm hero keeps the agent-facing `:seon.render/ai`/`:seon.render/error` and swaps only the human hiccup) | Seon's “canvas is updating” card |
+| **slot / view / entity error cards** | `set!` of `seon.render.canvas/error-card` (the `(fn [:seon/error] → hiccup)` seam the `render` / `slot` / `render-entity-html` catches call) | Seon's `default-error-card` |
 | **root agent’s view (`/`)** | the `/` route handler symbol (root's agent-view layout) | seon's root agent-view layout |
 | **routes / apps** | explicitly applied `:seon.config/routes` → exact `:seon.route/*` rows | config-compiler route input materialized as DB facts |
 | **brand head — name / tagline / CSS** | explicitly applied `:seon.config/brand` → exact `[:seon.web.brand/id "brand"]` DB facts | config-compiler brand input / Phosphor |
@@ -420,15 +510,15 @@ where it already wires its overrides. There are **two error seams**, and acme
 
 - the **focal `#agent-view-primary-canvas`** flows through the canvas path:
   `seon.ui.agent-view/agent-view` calls `render-agent-canvas`, resolving the agent's
-  `:seon.render.canvas/content`, and a throwing tile routes through the CALM
+  `:seon.render.canvas/content`, and a throwing surface routes through the calm
   hero seam `seon.render.canvas/error-response` (the human never sees the
   failure here — it rides the agent twin, so the hero does NOT delegate).
-- the **slot / view / entity error tiles** (`render` / `slot` /
+- the **slot / view / entity error cards** (`render` / `slot` /
   `render-entity-html` catches) route through the SEPARATE
-  `seon.render.canvas/error-tile` var (`(fn [:seon/error] → hiccup)`,
-  defaulting to `default-error-tile`).
+  `seon.render.canvas/error-card` var (`(fn [:seon/error] → hiccup)`,
+  defaulting to `default-error-card`).
 
-One `set!` per seam — two lines in `acme.overrides` — brands every error tile on
+One `set!` per seam — two lines in `acme.overrides` — brands every error card on
 the page.
 
 ## Malli throughout
@@ -449,6 +539,8 @@ link and read it.
 - [[data-model]] — the block / `:seon.route/*` / `:seon/error` schemas these renders read, and the `my.*` domains.
 - [[agent-runtime]] — the loop that assembles the prompt, fact-first agent initialization, and the run-status block's data source (`derive-status`).
 - [[toolkit]] — `my.canvas` and the agent functions that drive the canvas.
-- [[context-rebuild]] — the governing arc for knowledge-on-demand (cards + state-gated teaching + pull); the `my.skills` loadable-skills facade retires ([[loadable-skills]] is the deprecated reference).
+- [[context-rebuild]] — the measured arc for knowledge-on-demand (cards +
+  state-gated teaching + pull); imported `my.skills` bodies remain explicit
+  overrides rather than a default context block.
 - [[roadmap]] — current code state + the dependency-ordered migration to this target (Lane U).
 - [[datahike-primer]] — the datahike-in-the-grain mindset.

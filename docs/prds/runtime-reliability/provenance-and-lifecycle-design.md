@@ -21,7 +21,7 @@ normal application-provenance facts:
 The user and process are deliberately orthogonal. Root is a user. Boot and
 config are processes running as root. An agent is its own database user and its
 evals run through the REPL process. No duplicate actor/user entity is created.
-The transport separately retains `:seon.store.wire/write-id` as request/commit
+The protocol separately retains `:seon.db.protocol/request-id` as request/commit
 correlation; it is not application provenance.
 
 Normal production transactions after genesis carry both refs. They do not
@@ -68,7 +68,7 @@ Neither decision changes the provenance/config/replay boundaries above.
 [:seon.user/id human-id]
 ```
 
-There is no `:seon.db.user/id`. Root is the existing root agent. A child-mint
+There is no `:seon.db.user/id`. Root is the existing root agent. A child-birth
 transaction names its parent agent; a human-created agent names the human; boot
 and config writes name root. A newly created agent cannot claim authorship of
 its own creation merely because runtime setup has already selected its home
@@ -141,7 +141,7 @@ recalculates.
 ### The one genesis exception
 
 The provenance attributes and their ref targets cannot describe the transaction
-that creates them. A fresh store therefore has one explicit un-attributed
+that creates them. A fresh database therefore has one explicit un-attributed
 genesis transaction:
 
 1. Detect absence of the root identity in the database.
@@ -152,7 +152,7 @@ genesis transaction:
 5. Enable the normal transaction boundary, which requires user and process.
 
 This is a mathematical base case, not a bypass API. It is more accurate than
-claiming root authored root. The default store's one-time transition installed
+claiming root authored root. The default database's one-time transition installed
 the equivalent base and backfilled its historical transactions; after the live
 proof, that classifier was deleted. Runtime startup now implements only fresh
 genesis and exact convergence.
@@ -183,8 +183,8 @@ Do not add:
   state;
 - authorization roles, permissions, credentials, or principals.
 
-The wire write id remains a transport correlation fact in
-`:seon.store.wire/write-id`. It is not application provenance and is retained
+The protocol request ID remains a transport correlation fact in
+`:seon.db.protocol/request-id`. It is not application provenance and is retained
 because it joins an asynchronous write request to its committed response/feed
 event.
 
@@ -231,7 +231,7 @@ config populations are concrete and narrow:
 | `:seon.route/name` identities | Complete registered route attrs and owned middleware/components | Exact exclusive set with destructive guard |
 | `[:seon.agent/id "root"]` | Only the configured root `:seon.agent/ctx` component subtree and explicitly listed root defaults | Replace that subtree exactly; preserve every other root fact |
 
-The general agent-context value on the config singleton is a mint template.
+The general agent-context value on the config singleton is a birth template.
 Non-root agents receive a component copy once at creation and may customize it;
 later config applies do not rewrite existing agents. Agents, messages, plans,
 knowledge, and agent-authored program facts remain outside config. The retiring
@@ -286,7 +286,7 @@ first-transaction scans, and core ghost pruning.
 Do not collapse these layers:
 
 1. **Native Datahike schema** is durable database capability state. Reopening
-   the Konserve store restores it with the database indexes. Install only
+   the Konserve backend restores it with the database indexes. Install only
    missing attributes. Compare the complete bridge-derived storage signature—
    value type, cardinality, unique identity, and component semantics—before
    accepting a canonical Malli form. Any divergence is an explicit migration,
@@ -297,7 +297,7 @@ Do not collapse these layers:
    complete canonical facts and replaced atomically after validation.
 
 Compiled core registrations are bootstrap/desired inputs, not a second durable
-registry. Fresh-store genesis, an explicit current-core overlay, hot reload, or
+registry. Fresh-database genesis, an explicit current-core overlay, hot reload, or
 reset compares them with the database's canonical core schema facts. An ordinary
 populated no-overlay runtime reconstructs from database forms without compiling
 or reconciling today's core snapshot. After any selected reconciliation, the
@@ -311,7 +311,7 @@ A fresh runtime:
 1. loads the minimal compiled bootstrap needed to access the database;
 2. queries every current canonical schema form, including agent-authored forms;
 3. overlays compiled core desired additions/changes/removals in memory only for
-   fresh-store genesis or an explicitly selected current-core/hot-reload/reset
+   fresh-database genesis or an explicitly selected current-core/hot-reload/reset
    transition;
 4. parses all forms as EDN and compares every attribute's full native storage
    signature with installed Datahike schema;
@@ -334,7 +334,7 @@ program/schema facts. A fresh runtime derives one exact Malli `:data` map from
 the validated program graph and performs one bulk instrumentation call after
 the complete registry and safe declarations are live. Seon does not populate or
 read Malli's process-global function-schema roster as a second authority. Agent
-mint/resume, config apply, renders, and ordinary transactions never run that
+birth/resume, config apply, renders, and ordinary transactions never run that
 pass.
 
 After boot, the program write path passes one delta containing exact qualified
@@ -394,11 +394,10 @@ same transaction. Identity/native-system attrs and independent runtime result
 facts such as test pass/fail instants are outside that row contract. No public
 path partially patches source, spec, arglists, doc, namespace, or require edges.
 
-Migration audits every managed datom on legacy rows. A mixed-author row may not
-be classified from source alone: normalize it through an explicit complete
-definition or preserve/report it for review. After the invariant is established,
-all declaration datoms share one transaction user and removal/default policy is
-unambiguous.
+This cutover resets current test databases; it does not retain a mixed-author
+legacy-row classifier. Genesis and every declaration writer enforce exact
+whole-row replacement from the start. A row that violates the invariant is a
+typed integrity error, not an input to a compatibility path.
 
 Schema identities do not use generic stale-program deletion. Before a canonical
 schema form can disappear/rename, build its dependency closure across other
@@ -441,7 +440,7 @@ All three database operations are required, but they are not synonyms:
 - **Read-only simulation** resolves a full coordinate and passes its immutable
   database value into ordinary queries/renders. It does not move a branch head,
   open a writer, or execute an eval.
-- **Writable fork** is a Datahike same-store branch created with `branch!` at
+- **Writable fork** is a Datahike same-database branch created with `branch!` at
   the resolved retained commit. Logical writes diverge while immutable index nodes remain copy-on-write
   shared. A distinct debug pod/writer connects to that branch through normal
   branch-qualified Datahike configuration. This explicitly debug-scoped branch
@@ -466,19 +465,21 @@ prerequisites for opening durable state. A restore plan independently selects:
 Preserving both reconstructs from the target's own canonical schema/program/
 config/domain facts and requires no external config. Overlay policy belongs to
 this requested transition, not to a stored config mode. The durable attachment
-descriptor records logical db-name, store path/id, branch, source/blob read
-base, branch-local blob write overlay, and launch endpoints. After a selected
+descriptor records logical database name, database ID, backend path, branch,
+source/blob read base, branch-local blob write overlay, and launch endpoints.
+After a selected
 overlay commits, its resulting database facts survive; a later cold boot with
 no overlay performs no desired-state write and never rereads current source,
 environment, a prior path, or `config/system.edn`.
 
 A live restore is coordinated by the external supervisor, not the root agent it
 stops. Config apply and restore share one schema'd external lifecycle-intent
-store/scanner and atomic-write protocol; restore extends the same record with
+registry/scanner and atomic-write protocol; restore extends the same record with
 branch/undo fields rather than adding a second mechanism. Before quiescing, the
 supervisor persists an irreducible intent record in
 its durable registry outside the branch being replaced: request id/requesting
-user lookup; exact source, target, and undo `{store-id, branch, commit-id, t}`
+user lookup; exact source, target, and undo
+`{database-id, branch, commit-id, t}`
 coordinates; selected core/config policies; each frozen canonical desired
 overlay payload and digest; and the confirmation token.
 Completion is a resulting fact; intermediate phase is derived by comparing that
@@ -488,11 +489,12 @@ undo; it never requires a config artifact that was not part of the confirmed
 plan.
 
 Rewinding a branch can reuse transaction ids from the abandoned lineage. All
-writer/read-replica connections, pending write-id correlations, SSE
+writer/read-replica connections, pending request-ID correlations, SSE
 subscriptions, view/read caches, and replay cursors are therefore closed and
 recreated from the restored head. Historical coordinates/bookmarks contain
-store, branch, commit, and t—not bare transaction ids. Registry/wire routing
-verifies logical db-name against the registered `{store-id, branch}` attachment,
+database ID, branch, commit, and t—not bare transaction ids. Registry/protocol
+routing verifies the logical database name against the registered
+`{database-id, branch}` attachment,
 and filtered handles/agent hosts are attachment-qualified so duplicate agent ids
 on main/debug cannot cross-route. The nontransactional branch
 head move is audited by the supervisor intent/completion facts; later database
@@ -506,13 +508,14 @@ manipulate Konserve roots directly. Seon wraps upstream `as-of`, corrected
 `branch!`, and guarded `force-branch!`; it does not define a
 snapshot format or version tree. The existing physical `fork-database` copy path
 is retired from the normal cluster-fork workflow unless a future, separately
-proven physical-store-clone requirement justifies it.
+proven physical-backend-clone requirement justifies it.
 
 Every mutable lifecycle plan rejects before intent/admission unless history and
 the effective commit graph are enabled, the selected commit/ancestry records
 are readable, and the primary plus every secondary key map exists. An absent
-literal `:commit-graph?` key may mean the default true; an effective false store
-cannot be repaired by flipping the flag or backfilled in place. The pinned
+literal `:commit-graph?` key may mean the default true; a database whose
+effective value is false cannot be repaired by flipping the flag or backfilled
+in place. The pinned
 Datahike fix makes historical/non-current `branch!` use the selected commit's
 secondary roots, makes release await writer shutdown, and gives
 `force-branch!` an expected-head guard/readback so stale writers/plans cannot
@@ -586,10 +589,10 @@ into one monolithic atom, but it leaves no mutable cell unclassified.
 1. Validate a fresh-runtime request that explicitly selects current core and an
    initial canonical config input. An explicit `{}` is valid and compiles the
    schema-owned safe defaults; the ordinary CLI may instead explicitly supply
-   `config/system.edn`. A fresh store never infers either from absence. A
-   populated store needs no external config because its canonical config floor
+   `config/system.edn`. A fresh database never infers either from absence. A
+   populated database needs no external config because its canonical config floor
    is already database data.
-2. Open the empty store, set the one runtime connection, and perform/verify the
+2. Open the empty database, set the one runtime connection, and perform/verify the
    un-attributed genesis transaction.
 3. Compile one deterministic core program/schema snapshot, grouped by source
    file, and the selected canonical config maps from defaults, manifest, and env.
@@ -601,15 +604,21 @@ into one monolithic atom, but it leaves no mutable cell unclassified.
 7. Atomically install the already validated Malli registry/catalog projection.
 8. Commit the combined nonempty config delta as root/config.
 9. Load persisted safe namespace/function/test declarations, instrument once,
-   install global services/listeners once, recover fenced runs, and resume
-   eligible agents.
+   install global services/listeners once, and reconstruct clean runtime hosts.
+   An unexpected prior-runtime crash follows the idle-and-notify transition
+   below rather than resuming interrupted work.
+10. Use the normal atomic agent-birth compiler once to create one ordinary
+    readable-word child of root under root/boot provenance. This is a genesis
+    result, not a config-managed population; later config repair/restart never
+    recreates or overwrites it.
 
 The root identity created by genesis is completed through steps 6–8. Core and
 config exact transitions are independently restart-safe through their frozen
 operation intent; after completion the database facts are sufficient.
 
 Step 6 also ensures the stable human identity row before any interactive route
-accepts a write.
+accepts a write. `bin/seon up --open` selects the ordinary initial agent; root's
+`/` route remains the system/coordinator view.
 
 ### Cold restart of a populated cluster
 
@@ -624,8 +633,9 @@ accepts a write.
 4. Commit only selected nonempty root/boot and root/config deltas, then swap the
    validated registry/catalog. A converged or preserve-target restart advances
    no seed transaction and wakes no UI listener for seed work.
-5. Rebuild analyzer/function/instrumentation/service state and recover/resume
-   agents from durable run/FSM facts without replaying arbitrary evals.
+5. Rebuild analyzer/function/instrumentation/service state. A clean restart may
+   reconstruct eligible hosts from durable FSM facts; an unexpected crash fences
+   interrupted runs to idle and notifies root without replaying arbitrary evals.
 
 ### Config apply
 
@@ -660,7 +670,7 @@ keep a compatibility path. Function/test/namespace deletions are ordinary delta
 retractions; schema deletion follows the migration guard. There is no
 ghost-pruning pass.
 
-### Agent mint
+### Agent birth
 
 Allocate the identity through the sole writer and atomically transact every
 initial durable fact with the actual submitting user and REPL process: agent,
@@ -668,7 +678,7 @@ purpose/defaults, complete context components, home-namespace row/require edges,
 and canonical safe declaration facts whose identities are unique to that agent.
 Shared schemas/default declarations such as `:my.agent/purpose` are established
 once by their root/boot program contract and are never reasserted by a later
-mint. Only after commit does Seon
+birth. Only after commit does Seon
 establish the analyzer namespace, load those declarations, install the wake
 trigger/runtime host, and return the identity. A crash before commit created
 nothing; a crash after commit is an ordinary resume, never a half-bootstrap
@@ -677,29 +687,30 @@ graph, instrument globally, or install services.
 
 ### Agent resume
 
-Pull and validate the existing agent, reconstruct its transient host and wake
-trigger, and continue from durable run/FSM facts. It does not mint or overwrite
-initial state. Crash-recovery facts, when needed, are root/boot writes.
+Pull and validate the existing idle/paused agent, reconstruct its transient host
+and wake trigger, and open work only through an explicit trigger/resume. It does
+not create or overwrite initial state. Crash-recovery facts, when needed, are
+root/boot writes; an unexpected crash never implicitly invokes this transition
+for an interrupted run.
 
 ### Supervisor crash recovery matrix
 
 The external cluster supervisor runs this derivation before admitting new work;
 the in-pod root agent is a database user/capability holder, not the process that
-survives its own pod. Recovery threads one current database value and applies
-only the necessary CAS-fenced root/boot repairs:
+survives its own pod. A clean planned restart quiesces at turn boundaries. When
+the prior runtime ended unexpectedly, recovery threads one current database
+value and applies only the necessary CAS-fenced root/boot repairs:
 
 | Durable facts | Recovery decision | Durable repair |
 |---|---|---|
 | `:seon.agent/terminated-at` present | Do not host or wake | None |
 | No `:seon.agent/run` ref | Rebuild idle host + wake trigger | None |
 | Ref points to a closed run | Rebuild idle host; clear stale pointer | Assert old→old, retract exact ref |
-| Open run has `:seon.agent.run/paused-at` | Rebuild host/wake; remain paused | None |
-| Open run exceeded deadline/work bound | Do not resume loop | Assert old→old, retract exact ref, close run with derived bound reason |
-| Open run contains a stranded `:running` turn/eval but remains within its bounds | Never rerun its source/effects; continue the same run at the next turn | Assert old→old, mark only the interrupted turn/eval terminal error; retain the run pointer |
-| Open run is within bounds and every prior turn is terminal | Rebuild host/wake and continue with the next turn | None |
+| Any open run, paused or running | Never continue it automatically; return the agent to idle | Assert old→old, mark its running turn `:interrupted` when present, close run `:crashed`, retract exact ref; never fabricate an eval row |
 
-Each destructive repair transaction uses this ordered fence shape (Datahike
-cannot CAS a ref to `nil`):
+One deterministic recovery transaction contains every destructive repair. Each
+owned pointer uses this ordered fence shape (Datahike cannot CAS a ref to
+`nil`):
 
 ```clojure
 [:db.fn/cas agent-ref :seon.agent/run run-ref run-ref]
@@ -708,13 +719,18 @@ cannot CAS a ref to `nil`):
 ```
 
 The old→old assertion leads, so a changed fence aborts the whole transaction.
-Closing cases then retract the exact pointer and write close facts atomically;
-an in-bounds interrupted turn instead becomes terminal while the same open run
-and pointer remain current. Recovery never creates a replacement run, never
-replays a prior turn, and never stores a resume checklist. After runtime rebuild,
-the existing driver opens the next turn behind the retained CAS fence. A crash
-before a repair commit leaves the same derivation for the next supervisor; a
-crash after commit sees the repaired facts.
+Closing cases retract the exact pointer and write close facts atomically.
+Recovery never creates a replacement run, never replays a prior turn, and never
+stores a resume checklist. The affected nonterminated agents derive `:idle`.
+The same transaction asserts one idempotent `:seon.runtime.recovery/id` anchor,
+its `:unexpected-exit` reason, and an optional bounded diagnostic. Affected
+agent/run/turn refs and prior/current coordinates are projections of that
+transaction's changed datoms and commit parent, so they are not copied onto the
+anchor. Root renders the notice from that join; it stays prominent until each
+affected agent opens a later run. A crash before commit leaves the same frozen
+operation ID/derivation for retry; a crash after commit upserts the same anchor
+and cannot duplicate the notice. Root or the human later sends a new message
+when resumption is appropriate.
 
 ### Agent eval
 
@@ -722,7 +738,10 @@ Run in the agent's home namespace under `{user agent, process repl}`. Persist
 the eval/result facts and any resulting domain/program declarations. Instrument
 only new/redefined functions. Scratch effects execute once and are not made
 reconstructable merely because their source/result is visible in the
-transcript.
+transcript. Opening a turn also records the optional
+`:seon.agent.turn/cause-message` selected from the current inbound address task;
+session injection follows that exact message rather than the run's original
+waking message.
 
 ### Route or view-definition change
 
@@ -752,12 +771,14 @@ profile and there is no public candidate-only function.
 - Every other generated persistent identity attribute uses
   `:seon.db.id.generator/compact`: npm `@paralleldrive/cuid2` in CLJS and
   `io.github.thibaultmeyer:cuid` on the JVM. This includes runs, turns,
-  messages, evals, schedules, plans, and future high-volume identities.
+  messages, evals, schedules, plans, browser sessions, recovery anchors,
+  completed restores, and future high-volume identities.
 - Stable config/program identities and external protocol ids are known domain
   facts, not alternate generated-ID paths.
 
 Both runtime adapters expose the same Seon contract but need not emit the same
-package grammar. Existing legacy ids remain valid and are never rewritten.
+package grammar. The registered Seon grammar is the compatibility boundary;
+there is no legacy ID arm.
 Creation time is projected through the identity assertion's transaction and
 `:db/txInstant`; it is not duplicated into the id.
 
@@ -773,12 +794,11 @@ manifest is retryable. Each retry discards and rebuilds the entire
 transaction—agent home namespace, function/schema identities, lookup refs,
 source forms, and response included. Sixteen failed candidate rounds return a
 namespaced exhaustion error; there is no fallback grammar or unbounded loop.
-The write id preserves commit ambiguity resolution, and ids are returned only
+The protocol request ID preserves commit ambiguity resolution, and ids are returned only
 after commit plus the normal read-your-own-write fence.
 
-The shared `:seon.db/id` value schema accepts reserved, word, compact, and the
-complete old 14-character schema domain. Generator policy belongs to each
-registered identity attribute,
+The shared `:seon.db/id` value schema accepts reserved, word, and compact
+syntax. Generator policy belongs to each registered identity attribute,
 not to an entity and not to a caller option. Values stay lowercase URL/DOM/
 CLJS-namespace safe; the schema does not copy package word lists.
 
@@ -802,7 +822,7 @@ candidate conflict; no global identity table or duplicate universal-id datom is
 stored. Local Datahike connections name the fully namespaced
 `:seon.db.id.writer/serialized` backend. Its runtime multimethod delegates to
 Datahike's self writer with the private operation in memory, while the durable
-connection config contains only the backend keyword. The JVM wire registry
+connection config contains only the backend keyword. The JVM database registry
 uses the same backend. Preparation therefore receives the writer's exact old
 database without another lock, queue, or unserializable function in stored
 config. Independent branches may diverge and generate the same later value;
@@ -818,7 +838,7 @@ The design is implemented only when live proof shows:
   no-op when converged;
 - native schema reopens without full reinstallation;
 - Malli restoration is complete, forward-reference-safe, and atomic on failure;
-- a warm agent mint runs no cluster lifecycle work and remains below the agreed
+- a warm agent birth runs no cluster lifecycle work and remains below the agreed
   latency bound;
 - deleted/renamed core and omitted config facts disappear through exact
   reconciliation, with no pruner/healer;
@@ -828,9 +848,9 @@ The design is implemented only when live proof shows:
 - unrelated transactions invoke zero renderers/SCI work;
 - equivalent tabs share one correct subscription after either socket closes;
 - debug/roster/agent/data pages use one bounded reactive feed path;
-- the grown-store CPU/RSS profile scales with dirty unique units rather than
+- the grown-database CPU/RSS profile scales with dirty unique units rather than
   sockets times whole views; and
 - every retained mutable cell is either irreducible runtime state or a proven
   rebuildable projection of database facts; and
 - agent-word and compact allocation pass collision/retry/exhaustion, whole-
-  transaction rollback, namespace, URL, legacy, and token-cost proofs.
+  transaction rollback, namespace, URL, reader, and token-cost proofs.

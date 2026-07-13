@@ -14,7 +14,7 @@ layers:
 
 - one authoritative JVM database/heavy-compute server;
 - one canonical CLJS agent and web UI implementation;
-- one versioned writer/replica protocol with local and remote transports;
+- one versioned local writer protocol with a clean future remote-transport seam;
 - one database-derived block/render/surface model;
 - one robust development operator;
 - one tiered behavioral test system; and
@@ -28,9 +28,11 @@ compensate for unclear functions.
 
 ## Current position
 
-**Current phase: plan review and clean-base freeze (phase 1 of 8).** Production
-implementation does not start until the owner resolves the three choices under
-[[#Owner decisions before phases 6–7]].
+**Current phase: plan review and clean-base freeze (phase 1 of 6).** The owner
+decisions are resolved. Production implementation starts from the coordinated
+clean-base proof; remote replication, cloud topology, browser replicas, offline
+mutation, mobile packaging, and the full paid Inspect AI battery are explicit
+follow-on work rather than completion gates for this branch.
 
 The source-grounded system audits are complete and committed:
 
@@ -43,6 +45,7 @@ The source-grounded system audits are complete and committed:
 - [[research/jvm-server-cljs-client-storage-sync-2026-07-13]]
 - [[research/client-distribution-and-server-rendering-boundary-2026-07-13]]
 - [[research/surface-vocabulary-and-dead-ui-path-audit-2026-07-13]]
+- [[research/root-view-presence-crash-batch-audit-2026-07-13]]
 - [[research/cljs-test-suite-speed-and-quality-audit-2026-07-12]]
 
 Several foundational corrections have already landed:
@@ -74,29 +77,35 @@ Those gains are the base. The remaining work is not a restart from scratch.
 |---|---|---|
 | JVM server | serialized Datahike writes, durable Konserve storage, transaction receipts, branch/as-of/restore, schema/config commit authority, embeddings, secondary indexes, bounded heavy work | agent execution, context rendering, HTML, a duplicate application |
 | CLJS UI host and agent runtimes | agent loop/eval, program reconstruction, context derivation, canvas/surfaces, Hiccup, Datastar, server-hosted agents | authoritative writes, cloud credentials, a second database |
-| Browser/Tauri client | thin HTML mode or a CLJS memory/IndexedDB read replica, local projections, device input, bounded unsent-intent outbox | JVM-only indexes, direct cloud database authority, offline conflict-free commits |
+| Browser | thin Datastar HTML, per-tab navigation identity, human input, and device-originated facts | authoritative writes, a local full-history database, JVM-only indexes |
 
 The local development composition co-locates the JVM writer, Shadow watcher,
-and Node CLJS runtime. A hosted deployment runs the JVM server beside headless
-Node CLJS agent/UI processes. A native client is a webview around the canonical
-browser CLJS build, not the rejected Wasmtime/WIT pod.
+and Node CLJS runtime. A hosted deployment may run the same JVM server beside
+headless Node CLJS agent/UI processes. Phone-class clients are intentionally
+thin and connect to that hosted cluster; local phone data enters through typed
+facts. Browser replicas and a native shell are later work, not a second runtime
+introduced by this refactor.
 
-### Three planes, one connection lifecycle
+### Current local data path and preserved remote seam
 
-The target protocol distinguishes three contracts without turning them into
-three independently configured systems:
+The current refactor proves two local contracts without turning them into
+independently configured systems:
 
-1. **Replica data** — missing immutable Konserve nodes, then the mutable branch
-   head, with the head exposed only after every reachable node is readable.
-2. **Commit notification** — old/new coordinate, effective datoms, changed
+1. **Commit notification** — old/new coordinate, effective datoms, changed
    attributes, request ID, and transaction metadata for listeners, dependency
    invalidation, and durable processors.
-3. **HTML delivery** — complete-element Datastar morphs for thin clients.
+2. **HTML delivery** — complete-element Datastar morphs for thin clients.
 
-Pure projections reconnect to the current root and derive once. Exact bounded
-transaction replay remains available for receipts, forensics, and consumers
-whose durable contract genuinely requires every transaction. Coalesce
+The authoritative local writer acknowledges a transaction after the local
+Datahike commit and its same-request receipt are accepted; it does not wait for
+a UI replica, remote mirror, or future cloud copy to catch up. Exact bounded
+transaction replay remains available for receipts and forensics. Coalesce
 notifications, never state.
+
+The source-grounded immutable-Konserve-root and Kabel research is preserved for
+a later remote-replica PRD. It does not justify retaining a second live routing
+path in this branch, and its unresolved cloud/RPO/client choices do not block
+the local system.
 
 ### One UI vocabulary
 
@@ -180,6 +189,12 @@ whose per-attribute diagnostics scan the complete EAVT index. Transaction
 reconstruction is explicitly on demand and budgeted because Datahike does not
 currently expose a TX-leading primary index.
 
+The browser is intentionally complete: knowledge-base facts, plans, messages,
+agent-authored domain attributes, schemas, framework facts, and transaction
+metadata are all reachable through the same attribute/entity/ref/history
+machinery. User/domain attributes lead and framework/system groups begin
+collapsed, but no second KB inventory or hidden data path is created.
+
 The source-grounded access rules are:
 
 - EAVT cursors page entities/facts; AEVT cursors page one attribute's carrier
@@ -217,6 +232,86 @@ The owner-selected primary door is:
 The implementation is a Babashka program with process specifications and state
 transitions as data; the shell file becomes a tiny launcher.
 
+In a source checkout, every `up` performs one complete canonical writer + CLJS
+build before process reconciliation, then leaves file watchers running for
+incremental updates. The build artifact digest is the launch truth: a changed
+artifact restarts only its dependent process; an unchanged artifact proves the
+running code without a stale-log or mtime shortcut. A packaged installation
+verifies immutable shipped artifacts instead of pretending to be a source
+checkout.
+
+Readiness is one atomic application-ready fact backed by direct process/socket/
+HTTP verification. There is no fixed three-second stabilization ritual.
+
+### First run, root, and human navigation
+
+A provably fresh database is initialized once from the explicitly selected
+manifest, creates the reserved root plus one ordinary readable-word agent, and
+prints both URLs. `bin/seon up --open` opens the ordinary agent; `/` remains the
+root system view rather than the default work destination.
+
+Root is the system-scoped coordinator. It may technically do ordinary work, but
+its small root-only context tells it to understand the fleet, start an ordinary
+agent when necessary, route/delegate work, and move the human to that agent. The
+role text stays deliberately short. Operational knowledge comes from root's
+fully specified home-require namespace cards; entering a namespace makes its
+source current and brings in the colocated/state-gated context for that work.
+Root's home requirements are one complete, deliberately smaller role-specific
+list, replacing the ordinary agent list through the existing scalar override.
+That lets root omit workbench capabilities it has not proven it needs; do not
+add a second union/merge rule. The root canvas's bounded AI twin supplies current
+fleet facts through the existing canvas block; there is no second fleet-summary
+instruction block. No skills catalog or long generic manual is injected merely
+because the agent is root.
+
+The root canvas is the fleet view. Its cheap shell lists every agent with
+identity, purpose, derived state, and the label of its shared agent-derived
+focus (pin, then agent recency, then welcome). Each human-facing agent card uses
+the same surface catalog, agent-derived focus function, and compact materializer
+as an agent page with no session override; the current
+`seon.ui.agent-view` functions and `:seon.ui.agent-view/*` working-map keys move
+to `seon.render.surface` / `:seon.render.surface/*`, and their old definitions
+are deleted. Visible/expanded cards are independent view units, so one agent
+update does not rebuild every preview. The root AI twin
+always carries the complete compact roster, then spends a bounded detail budget
+on running, erroring, and most-recently-active agents: up to five recent
+messages, recent failed-eval summaries, and the bounded AI render of their
+canvas. Omitted detail is explicit, never mistaken for an absent agent.
+
+Each browser tab has one database-backed UI-session identity. The session stores
+one normalized local location fact plus a ref to the human; the transaction
+already supplies recency/provenance, so no duplicate `updated-at` or active flag
+is stored. On an agent page, a manual surface choice is encoded in that
+location's query component; page focus is the valid session selector when
+present and the shared agent-derived focus otherwise. A root card never claims
+to mirror another tab's selector. Scroll position, open disclosures, and form
+signals remain transient.
+A human message carries the originating session ref, and each turn records the
+exact inbound message it is assigned to answer. Root's fully-specified
+navigation function follows turn → cause-message → web-session through normal
+injection, reverse-routes an agent target, and updates the same location fact.
+The tab's existing Datastar feed applies the official Datastar redirect-helper
+semantics for that changed fact. In the reference SDK this is an auto-removing
+script patch on the existing stream, not a second redirect event or channel.
+Browser navigation writes the same fact, so root can query what the human
+is seeing without a parallel presence service. Per-tab identity prevents two
+open tabs from fighting over one global cursor.
+
+### Skills are importable data, not standing context
+
+The existing `my.skills` corpus/import mechanism is retained and refined in
+place. A standard `SKILL.md` directory, CLI import, or later web upload all pass
+through one parser/validator and transact the same canonical skill source facts;
+config-free restart reads those facts from the database rather than requiring
+the original upload path. `seon-skills` is the shipped corpus source and tool
+directories are generated or validated adapter views.
+
+Importing a skill does not install a permanent skills context block. Default and
+test agents keep that block disabled so dynamic context, compact namespace cards,
+current-namespace source, and colocated state-specific blocks must surface what
+is actually needed. Explicit skill loading remains available as an override and
+is evaluated behaviorally, not by asserting prose.
+
 ## Settled invariants
 
 - The JVM application is archived; the JVM server is permanent.
@@ -226,16 +321,29 @@ transitions as data; the shell file becomes a tiny launcher.
   dirty flags, render output, or derivable lifecycle state.
 - Config is optional on an existing healthy database. When explicitly selected,
   it repairs exactly its declared subset and does nothing when converged.
-- A fresh writable database receives one explicit genesis/config floor.
+- A fresh writable database receives one explicit genesis/config floor, the
+  reserved root, and one ordinary initial agent. This one-time birth is not a
+  config-managed population on later boots.
 - Malli runtime state is rebuilt from canonical database facts and changed
   incrementally after committed schema/program changes.
 - Arbitrary evals and external effects are never replayed.
+- After an unexpected runtime crash, every interrupted nonterminated agent is
+  fenced back to derived `:idle`; the supervisor records one recovery anchor in
+  that same transaction. The affected agents and ambiguity are projections of
+  the transaction, and root renders the notice. Root or the human decides what
+  to resume.
+- Batch mode attempts every complete parsed form in order. A normal form error
+  is persisted and does not suppress later forms; the next turn sees every real
+  success and failure.
 - Every database identity, map key, and public contract is fully namespaced and
   schema'd.
 - `my.canvas` is the one permanent agent-facing canvas/control API; current
   agent/database identity is injected.
-- Skills are not a default context block. Dynamic context and compact
-  namespaces surface relevant capabilities.
+- Root has one concise role-specific block plus orchestration/navigation
+  namespace cards. It does not receive a long generic manual.
+- Skills are importable database facts but not a default context block. Dynamic
+  context, compact namespace cards, current-namespace source, and colocated
+  state blocks surface relevant capabilities.
 - Four dormant display adapters are deleted precisely:
   `seon.agent.ctx.findings`, `inventory`, `jobs`, and `testrun`.
   Durable findings, job execution, and parsed test-run facts remain. The weak
@@ -244,12 +352,17 @@ transitions as data; the shell file becomes a tiny launcher.
   purpose-specific database queries, and operator exploration belongs in the
   canonical `/data` browser. A refined KB may compose those facts later without
   restoring a global inventory/context mechanism.
-- One canonical skill source generates or links tool/runtime views; three
-  hand-edited copies are not authorities.
-- Local UDS and remote WebSocket may both exist as transport adapters, but they
-  carry one message schema and one client state machine.
-- The existing UDS path is the behavioral oracle until the Datahike/Kabel path
-  proves parity. No permanent dual routing toggle survives cutover.
+- One skill importer persists exact validated source; `seon-skills` supplies the
+  shipped corpus and generated/validated tool views are not authorities.
+- One runtime attaches to exactly one `{database-id, branch}` coordinate. The
+  existing UDS path is the local behavioral authority; no permanent dual
+  routing toggle survives this refactor.
+- A successful write is acknowledged after the authoritative local commit and
+  receipt are accepted, without waiting for UI catch-up or future cloud
+  mirroring.
+- One database-backed per-tab UI-session location is the only human-navigation
+  state. Root redirects the originating session through the normal Datastar
+  feed; there is no second presence or push channel.
 - Tests assert facts, transitions, envelopes, DOM identity, omission,
   idempotency, and rendered structure—not teaching prose.
 - Every replacement deletes the superseded mechanism in the same phase after
@@ -272,11 +385,10 @@ transitions as data; the shell file becomes a tiny launcher.
 | Tests | Disabled tests and old JVM application suites remain; focused writer and CLJS doors are not the complete active authority split. |
 | UI | Surface/focus machinery exists, but active symbols, CSS, DOM, docs, skills, and ACME still say tile; four dead context renderers still load. |
 | Live rendering | Agent view unitization/read-observation is incomplete; legitimate work still needs bounded caching, layout/focus/browser proof, and grown-database profiling. |
-| Skills | `.agents/skills`, `.claude/skills`, and `seon-skills` drift. One runtime copy still teaches deleted `my.tile`, live-tile, and world APIs. |
-| Datahike/Kabel | `src-kabel` is beta/test-only, does not wire foreign commits through normal listeners, can wait forever, and lacks durable same-ID recovery. |
-| Replica docs | Active architecture incorrectly calls transaction-datom replay the settled replica bootstrap. Immutable-root synchronization is the implemented mechanism. |
-| Browser client | There is no current browser CLJS application target or IndexedDB replica integration. |
-| Cloud | S3/GCS are external Konserve packages and are not configured or proven by Seon. |
+| Recent activity reads | `seon.render.default/recent-messages`, `seon.agent.ctx/messages`, transcript/activity queries, `seon.derive/real-eval-oks`, and the function menu independently scan and sort growing message/eval history before taking a small tail. Root's current cross-agent activity does the same over the whole database. |
+| Root/UI presence | `/` already renders root's system canvas, but first-run routing, concise root role context, originating-tab identity, database-backed current location, and feed-driven agent navigation are not one finished path. |
+| Root context | Root's scalar home-require replacement is the correct way to keep its role smaller, but the manifest comments incorrectly call it “shared plus,” and the no-config fallback in `seon.agent.home` still exposes root orchestration to every ordinary agent. Root's system-canvas override is also intentionally absent during the minimal-context experiment. |
+| Skills | `.agents/skills`, `.claude/skills`, and `seon-skills` drift; file-backed bodies still depend on source paths after import; one runtime copy teaches deleted `my.tile`, live-tile, and world APIs. |
 | Prototypes | Wasmtime/WIT Tauri, Rust client-runtime, and old libdatahike CLJS spikes remain in the active tree despite settled rejection. |
 
 ## Implementation discipline
@@ -300,41 +412,42 @@ transitions as data; the shell file becomes a tiny launcher.
 
 | Transition | Durable facts/work | Process/reactive work | Failure proof |
 |---|---|---|---|
-| `bin/seon up`, cold | build/publish complete artifact if inputs changed | reconcile watcher → writer → pod; wait for stage-specific readiness; print URL | failed stage returns nonzero with exact logs; prior healthy stage is reported truthfully and next `up` resumes |
-| `bin/seon up`, warm | none when artifacts/config/database converge | verify existing process identities/readiness | no duplicate process, seed, listener, or rebuild |
-| fresh database | minimal genesis, native schema floor, root/process refs, explicitly selected initial config | rebuild Malli/program runtime and services | no circular provenance, partial schema, or hidden ambient config |
+| `bin/seon up`, source checkout | fully rebuild and publish canonical writer + CLJS artifacts; no database write when converged | reconcile changed artifact dependents, start watchers, wait for atomic readiness, print URLs | no stale artifact/log truth, fixed delay, duplicate process, or manual build prerequisite |
+| `bin/seon up`, packaged | verify immutable shipped artifact manifest | reconcile process identities/readiness | packaged mode never silently compiles a different program |
+| fresh database | minimal genesis, native schema floor, root/process refs, explicitly selected initial config, root plus one ordinary agent | rebuild Malli/program runtime and services; `--open` selects the ordinary agent | no circular provenance, partial schema, hidden ambient config, or root-as-default-workspace |
 | existing database, no config | normally no transaction | rebuild process-local handles/registries; resume durable work | restart does not “heal” by rewriting canonical facts |
 | explicit config apply | exact managed-subset delta plus lifecycle intent/recovery facts | invalidate only affected projections | missing/changed/extra facts repaired; outside facts unchanged; convergence writes nothing |
 | core/schema hot reload | one exact program/schema delta | load/instrument only changed dependency closure | removal and same-key schema change work; no global rescan or ghost prune |
 | agent birth | one allocation transaction for identity and initial components | create compiler namespace, host, listener, wake | no cluster seed/global instrumentation; failed birth leaves no partial agent |
 | agent resume | normally none | restore one host/wake from durable facts | arbitrary evals/effects are not replayed |
-| agent eval | eval/result/domain/declaration facts once | execute once; await/bound; instrument changed defs | ambiguous result does not allocate a new ID or re-fire effects |
-| remote write, lost reply | one commit and one durable same-ID receipt | retry identical request and catch replica up to accepted coordinate | different-payload ID reuse rejects; every disconnect edge is at-most-once commit |
-| local reader attach | none | open the shared immutable database read-only and catch the transaction cursor | no reader backend mutation; exact own/foreign listener behavior |
-| cold remote replica | none on writer beyond attachment facts if required | sync reachable immutable nodes, publish head last, reconstruct local DB | interruption never exposes a head with missing children |
-| warm reconnect | none | differential node sync to current head, one explicit root-advance invalidation | pure UI derives once; exact replay remains available to durable processors |
+| unexpected runtime crash | close/fence interrupted runs, terminalize running turns, and persist one recovery anchor in the same transaction | rebuild root and safe transient services; derive the detailed notice; leave affected agents idle | no interrupted form/effect is replayed and root sees exactly which agents may need resumption |
+| agent eval batch | one eval/result fact per parsed entry plus resulting domain/declaration facts | execute every complete form in order, capture each error, continue, instrument changed defs | an early ordinary error cannot erase later attempts; a process crash cannot fabricate missing results |
+| local write, lost reply | one commit and one same-ID receipt | retry identical request and catch the local reader up to accepted coordinate | different-payload ID reuse rejects; every disconnect edge is at-most-once commit |
 | browser action | one typed command/transaction and receipt | Datastar call → writer → commit notification → affected unit morph | no manual refresh, duplicate client state, or silent handler failure |
+| root navigation | upsert the originating UI session's normalized location | the same session feed applies one redirect patch to the reverse-routed agent URL | another tab is unchanged; reload derives the selected location from the database |
+| root fleet view | none beyond normal agent/session facts | cheap all-agent catalog; visible non-root card units materialize the compact agent-derived focus; bounded AI detail derives separately | every agent is represented in structured summary data; a card equals a no-session-override agent page and never claims parity with another tab's manual selection; unrelated cards do not render; token caps are proven without prose assertions |
 | debug route closed/open | none | closed owns no debug render/listener; open activates only requested units | prompt/raw/HTML/token work is absent while closed |
 | as-of/fork/restore | branch/head/intent facts through Datahike primitives | quiesce, drain, attach exact coordinate, rebuild process state | stale writers/cursors cannot cross head movement; external effects are not undone/replayed |
 | stop/reset | only explicit lifecycle facts | reverse-order drain, verify PID+start stamp/process group, then mutate the named database | no global nuke, reused-PID signal, orphan child, or deletion under a live writer |
-| cloud commit crash | immutable nodes may be orphaned; head is old or complete new | reopen exact published head | never a visible head referencing absent objects |
 
 ## Ordered implementation plan
 
 ### Phase 1 — review, coordinate, and freeze the archival boundary
 
-1. Resolve the three owner decisions below.
-2. Let the active ACME/plan/repl-autosuggest lane commit or clearly hand off
+1. Let the active ACME/plan/repl-autosuggest lane commit or clearly hand off
    its files. Do not absorb its dirty working tree into this refactor.
-3. Record the exact default-cluster process set, writer namespace closure,
-   dependency trees, targeted test doors, cold/warm boot, mint, live feed,
+2. Record the exact default-cluster process set, writer namespace closure,
+   dependency trees, targeted test doors, cold/warm boot, agent birth, live feed,
    browser action, CPU, heap, event-loop delay, and RSS.
-4. Build the current CLJS artifact and writer artifact from a clean dependency
+3. Build the current CLJS artifact and writer artifact from a clean dependency
    state far enough to expose packaging defects honestly.
+4. Verify the existing root system view, root-only blocks, multi-form batch
+   behavior, and skill importer against the new settled contract before
+   deciding what old material survives.
 5. Create an annotated pre-removal tag or protected archive branch. Add one
    concise pointer document; Git is the archive.
 
-Exit proof: one known commit can still start, mint/resume an agent, commit and
+Exit proof: one known commit can still start, birth/resume an agent, commit and
 replay a transaction, render the web UI, and process a canvas form. Every
 subsequent deletion is recoverable from the archive ref.
 
@@ -368,7 +481,7 @@ subsequent deletion is recoverable from the archive ref.
    correctness baseline.
 
 Exit proof: a standalone JVM process loads only the retained server closure,
-opens fresh and existing stores, commits/recoveries one request, broadcasts and
+opens fresh and existing databases, commits and recovers one request, broadcasts and
 replays it, runs optional KNN work, performs typed admin operations, and drains
 cleanly. No paused application or nREPL namespace loads.
 
@@ -380,25 +493,33 @@ cleanly. No paused application or nREPL namespace loads.
 2. Preserve PID+OS-start identity, process-group ownership, atomic lifecycle
    locks, stale-artifact cleanup, idempotent reconciliation, reverse drain, and
    scoped destructive safety.
-3. Make `up` start the owner-selected complete development stack and
-   `--open` the only browser-launch switch. Bound the Shadow JVM and make the
-   latest build result—not an old log line—its readiness truth.
-4. Publish build inputs/outputs through one atomic artifact manifest. Remove
-   presence/mtime heuristics and special benchmark artifact paths.
-5. Remove global nuke. Reset only a named cluster after proving its writer and
+3. Make bare `bin/seon` equivalent to `bin/seon up`; `up` starts the complete
+   development stack and `--open` is the only browser-launch switch.
+4. In source mode, perform one complete canonical writer + CLJS build on every
+   `up`, publish it through one atomic artifact manifest, then start incremental
+   watchers. Restart only processes whose artifact digest changed. Packaged mode
+   verifies immutable shipped artifacts. Remove presence/mtime heuristics and
+   special benchmark artifact paths.
+5. Replace fixed stabilization waits with one atomic application-ready signal
+   plus direct process/socket/HTTP verification. Bound the Shadow JVM and make
+   the current build result—not an old log line—its readiness truth.
+6. Remove global nuke. Reset only a named cluster after proving its writer and
    readers are drained.
-6. Port the few useful syntax/markdown/docstring checks to a direct
+7. Port the few useful syntax/markdown/docstring checks to a direct
    Babashka/tool door. Delete the dead nREPL hook pipeline and update hook
    configuration atomically.
-7. Delete the paused Integrant/core.async JVM application, old agent/providers,
+8. Delete the paused Integrant/core.async JVM application, old agent/providers,
    context/graph/session/embedded DB, JVM renderer/web/SSE, old MCP/REPL, app
    resources/profiles/aliases, and their tests.
-8. Delete the disabled-test graveyard and the Wasmtime/WIT, Rust client-runtime,
+9. Delete the disabled-test graveyard and the Wasmtime/WIT, Rust client-runtime,
    old libdatahike CLJS, and unused harness trees after their evidence is linked.
-9. Keep two primary code gates: focused `bin/test-cljs` and focused
+   Remove old Inspect run branches/artifacts after proving they are not recent or
+   referenced by the concurrently active lane; do not introduce an arbitrary
+   retention policy in this refactor.
+10. Keep two primary code gates: focused `bin/test-cljs` and focused
    `bin/test-writer`. Separate fast pure tests from explicit runtime,
    subprocess, browser, and process acceptance tiers.
-10. Remove test/demo preloads from the ordinary pod artifact. Delete hidden
+11. Remove test/demo preloads from the ordinary pod artifact. Delete hidden
     list/poll/kill and tail-retry-to-green runner behavior. Every async test has
     one bounded terminal.
 
@@ -427,23 +548,39 @@ or discover archived behavior.
    dependency closures after commit.
 7. Reconstruct declarations/program state only. Never replay arbitrary evals or
    process-local values.
-8. Finish the canonical `{database-id, branch, commit-id, t}` coordinate through
+8. Make crash recovery a distinct supervisor transition: fence/close every
+   interrupted open run, mark its running turn `:interrupted` without executing
+   or fabricating an eval, leave every affected agent derived idle, and persist
+   one idempotent recovery anchor in that same transaction. Derive affected
+   agent/run/turn refs and prior/current coordinates by joining the anchor's
+   transaction to its changed datoms and commit parent; root renders that join
+   as the notice. Clean planned restarts quiesce at turn boundaries rather than
+   masquerading as crashes.
+9. Make batch evaluation explicitly non-fail-fast: attempt every complete parsed
+   form in order, persist each success/error at its transcript position, and show
+   the complete real batch on the next turn. Later dependent forms may fail
+   normally; no synthetic results are inserted.
+10. On a provably fresh database, create root plus one ordinary agent through the
+    normal atomic birth compiler exactly once. Existing/config-repair boots never
+    reassert or recreate that ordinary agent.
+11. Finish the canonical `{database-id, branch, commit-id, t}` coordinate through
    reads, receipts, feeds, turns, caches, bookmarks, and errors.
-9. Finish read-only as-of, same-database writable branches, non-autonomous forensic
+12. Finish read-only as-of, same-database writable branches, non-autonomous forensic
    runtimes, quiesced restore/undo, branch-local blobs, and crash recovery
    through the maintained Datahike lifecycle.
 
-Exit proof: fresh, converged, partial-config, config-free, hot-reload, mint,
-resume, as-of, fork, restore, undo, and crash-boundary transitions satisfy the
-acceptance table with no broad rewrite, physical copy fork, arbitrary replay,
-or duplicate runtime registry.
+Exit proof: fresh, converged, partial-config, config-free, hot-reload, first-run,
+birth, resume, multi-form failure, as-of, fork, restore, undo, and crash-boundary
+transitions satisfy the acceptance table with no broad rewrite, physical copy
+fork, arbitrary replay, or duplicate runtime registry. A crash leaves affected
+agents idle and one exact notice visible to root.
 
 ### Phase 5 — converge the local web UI and agent-facing surface
 
 1. Freeze the vocabulary in active architecture, then rename the existing
    symbols in place:
    `last-updated-surface`, `::surface-sym`,
-   unresolved-canvas warning, error-card seam, surface renderers, roster cards,
+   unresolved-canvas warning, error-card seam, surface renderers, fleet cards,
    `#surface-*`, and `.seon-card*`.
 2. Update every producer/consumer/schema/test and regenerate CSS atomically.
    Do not leave forwarding vars or old selectors.
@@ -463,8 +600,10 @@ or duplicate runtime registry.
    Datahike indexes and bounded pages: installed attributes/schema, attribute
    values and carrier entities, entity facts/outbound and reverse refs,
    transaction datoms/user/process/instant, and history. Omit unavailable
-   sections. Counts/samples that cannot be obtained cheaply are lazy units with
-   explicit budgets, not work performed on every transaction.
+   sections. List user/domain/KB data first and keep framework/system groups
+   collapsed, while making every installed attribute reachable. Counts/samples
+   that cannot be obtained cheaply are lazy units with explicit budgets, not
+   work performed on every transaction.
 6. Add the general Datahike `count-datoms` public primitive over its existing
    subtree count-slice implementation, then expose it only through the
    fully-specified Seon database API. Use cursor windows—not Datalog
@@ -482,114 +621,121 @@ or duplicate runtime registry.
    composable agent/domain discovery tools. A later KB surface must be a focused
    domain query through the normal block/render/surface mechanism, not a
    restored global inventory/context block.
-9. Make `seon-skills` the canonical distributable skill source; generate or
-   validate tool-facing views mechanically. Delete `ui-live-tiles` and stale
+9. Refine the existing skill path in place: one parser/validator and desired-fact
+   compiler accepts the shipped `seon-skills` tree, an operator directory, or
+   uploaded `SKILL.md` content; it stores exact canonical source/body facts so a
+   later config-free restart does not depend on the original path. Generate or
+   validate tool-facing adapter views mechanically. Keep default/test skill
+   context blocks absent; explicit load remains an override through the normal
+   block mechanism. Delete `ui-live-tiles` and stale
    world/inspector/`my.tile` teaching.
-10. Keep `my.canvas` as the permanent API, make its leaf encodings
+10. Replace every full-history-then-`take-last` message/eval reader with one
+    bounded path per fact owner: `seon.agent.message` owns recent conversation,
+    `seon.eval` owns recent evals, and `seon.log/tail` remains the one error-log
+    tail. Expose Datahike's fixed lazy `rseek-datoms` only through a fully
+    specified `seon.db` wrapper, compose the two bounded streams where a timeline
+    is needed, and delete the duplicate readers in `seon.render.default`,
+    `seon.agent.ctx`, system activity, error-storm, transcript, and menu code.
+    Do not store a recent-list projection or rely on a growing Datalog sort.
+11. Restore a deliberately small root-only role block after behavioral review:
+    root understands the fleet, starts/routes to ordinary agents, and handles
+    recovery notices. Keep root's home requirements as one complete curated
+    scalar replacement rather than unioning in the ordinary workbench; align the
+    no-config ordinary fallback so it does not grant orchestration. Put
+    operational detail in root's orchestration/navigation namespace cards;
+    moving into a namespace brings its full source and colocated/state-gated
+    context. Root's system canvas contributes bounded current fleet facts
+    through the existing canvas AI twin. Do not restore the retired instruction
+    wall or add a second fleet block.
+    Move the current surface catalog/focus/materialization logic out of the page
+    layout into `seon.render.surface`, colocating its fully namespaced schemas
+    and deleting the old `seon.ui.agent-view` definitions, then use it for both
+    the agent page and root's fleet cards. Every agent gets a cheap card shell;
+    visible non-root cards show the compact agent-derived focus, and closed
+    details lazily show up to five recent messages and failed evals. Root remains
+    in the roster, but its own card is summary-only: materializing root's focused
+    `system-view` inside itself would recurse. The root AI
+    twin lists every agent and includes bounded canvas-AI/message/error detail
+    for non-root running, erroring, then most-recently-active agents until its
+    block cap.
+    Make `/` + its one feed the only fleet/root view. Delete the separate
+    `/agents` GET/feed; keep `POST /agents` as the sole HTTP birth action, and
+    canonicalize `/agent/root` to `/` before opening a feed.
+12. Add one fully specified database-backed UI-session model owned by its web
+    namespace: per-tab identity, human ref, and normalized local location only.
+    Keep `{database-id, branch, session-id}` in `sessionStorage`. Bootstrap reuses
+    it only when the attachment matches and the lookup ref exists for the current
+    human; otherwise allocate the replacement through the one writer-side
+    `seon.db.id/allocate!` path, return/store it, then open the keyed feed. If a
+    reset or restore removes an open feed's session, clear that tuple and force
+    the same bootstrap instead of client-upserting a ghost identity. Compare
+    normalized locations and transact only when changed.
+    Encode a manual agent-surface choice in the location query; no query value
+    means the shared agent-derived focus. Do not persist scroll,
+    disclosure, or form-signal state.
+    Link an inbound human message to its originating session and record the
+    exact message assigned to each turn as
+    `:seon.agent.turn/cause-message`. Browser route changes and root's protected
+    `seon.web.session/select-agent!` update that same location fact; its
+    context-only injected session ID comes only through
+    turn → cause-message → web-session, caller input cannot override it, and
+    absence is an error. The existing feed applies
+    the official Datastar redirect-helper semantics only when its normalized
+    current route differs from the stored location.
+    Do not store duplicate agent/route projections, `updated-at`, active flags,
+    or a presence registry.
+13. Keep `my.canvas` as the permanent API, make its leaf encodings
    browser-portable, and ensure its docstrings/Malli errors make buttons,
    inputs, selects, toggles, forms, state, save, pin, and clear self-explanatory.
-11. Complete stable render-unit membership, runtime database-read observation,
+14. Complete stable render-unit membership, runtime database-read observation,
    changed-result invalidation, bounded compositional caches, and identical
    output suppression in the existing Datastar feed.
-12. Pay only for open/visible work: debug remains an empty shell until opened;
+15. Pay only for open/visible work: debug remains an empty shell until opened;
    offscreen/closed bodies are stubs; hidden source/result/error trees are not
    constructed.
-13. Finish the responsive layout: full-height primary canvas, independent
+16. Finish the responsive layout: full-height primary canvas, independent
    readable right rail, bounded fonts/code, compact plan disclosures,
    transcript bottom anchoring, no visible focused duplicate, and no live-bar
    overlap.
-14. Prove deliberate focus: canvas/domain writes select canvas; an agent reply
+17. Prove agent-derived focus: canvas/domain writes select canvas; an agent reply
    selects transcript; human selection stays locally sticky until invalid.
-15. Prove every `my.canvas` control with valid, invalid, rejected, rapid, and
+18. Prove every `my.canvas` control with valid, invalid, rejected, rapid, and
     throwing handlers. Feedback is structured and visible to the agent.
-16. Cold-prove the default cluster, then coordinate the same no-alias cutover in
+19. Add one optional root system-status surface only after the operator owns a
+    reusable process-status projection. It samples pod/writer liveness, CPU,
+    RSS, uptime, and feed pressure on demand; it persists no rolling projection,
+    refreshes as one view unit on the existing feed at a modest cadence, and
+    contributes only anomalous status to root's AI context. Do not revive the
+    paused JVM health application or create a second metrics stream.
+20. Cold-prove the default cluster, then coordinate the same no-alias cutover in
     ACME and rebuild/reset it.
 
 Exit proof: one database transaction causes only affected units to render and
 one Datastar path to update; the agent view, compact previews, forms, focus,
 scroll, debug view, database browser, CSS, skills, and ACME use the same
 render-unit/feed contract. `/data` can inspect schema, entities, refs,
-transactions, provenance, and history without a global per-commit scan.
+transactions, provenance, history, and KB/domain facts without a global
+per-commit scan. `/` is root's coherent system view; root can start an ordinary
+agent and redirect only the originating browser tab through database facts.
 Grown-database idle feeds do not repeat SCI/HTML work or sawtooth RSS.
 
-### Phase 6 — harden and adopt one remote writer/replica protocol
-
-1. Define one fully namespaced Malli protocol for attach, sync, command,
-   receipt, commit notification, resume/control, heartbeat, deadlines,
-   backpressure, and terminal errors. Transport framing is an adapter.
-2. Keep transaction semantics in Seon's writer owner: durable request ID,
-   payload fingerprint, candidate allocation, effective datoms, exact receipt,
-   and bounded forensic replay.
-3. Promote/package Datahike's `src-kabel` and its pinned Kabel,
-   distributed-scope, and Konserve Sync dependencies in the maintained fork.
-   Do not vendor-copy those namespaces into Seon.
-4. Fix the general library gaps in their owning sources:
-   node/head ordering, full handshake drain, multi-client foreign listeners,
-   finite catch-up deadlines, cancellation, reconnect, page reload,
-   backpressure, branch scoping, and clean shutdown.
-5. Make immutable-root synchronization the canonical remote replica data
-   mechanism. Emit an explicit `root-advanced` event for coalesced catch-up;
-   do not pretend it is one ordinary transaction.
-6. Feed exact live commit notifications through native listener semantics once.
-   Durable processors query remaining actionable facts under fences; pure
-   projections may derive once at the current head.
-7. Drive the same state-machine behavior suite over UDS and WebSocket adapters.
-8. After parity proof, delete overlapping custom remote sync/reconnect code and
-   the disconnected Datahike tx-broadcast path. Keep one bounded exact replay
-   operation, not two event systems.
-
-Exit proof: cold/warm/interrupted sync, two-client foreign writes, every
-lost-request/reply edge, read-your-own-write, replay/live overlap, branch
-movement, restore, backpressure, and shutdown all preserve one logical commit
-and one readable coordinate. No unbounded promise or global fan-out remains.
-
-### Phase 7 — ship server, browser, native-shell, and cloud deployment modes
-
-1. Ship thin remote web mode first: the canonical Node CLJS UI host runs beside
-   the JVM and serves Datastar HTML to a browser with no local database.
-2. Split Node-specific adapters from portable CLJS render/program/database
-   code in place; do not create a browser-v2 namespace tree.
-3. Add one browser Shadow target using the canonical renderer and a
-   memory/IndexedDB tiered Datahike replica.
-4. Restore only the program graph required for active local surfaces. Server
-   action functions and heavy capabilities remain server-side.
-5. Add a bounded durable outbox of typed, stable-ID transaction/fact intents.
-   Datahike optimistic overlays improve immediate display but are never durable
-   authority. Arbitrary server actions require connectivity.
-6. Initially sync the complete implemented root/history contract and measure
-   it. Add a Datahike-owned current-state export/origin format only if potato
-   client measurements require it; do not invent an unproven datom applier.
-7. Publish the browser build/protocol from Seon core. Package Tauri 2 or another
-   native webview shell downstream with only secure storage, notifications,
-   file/device access, and lifecycle bridges.
-8. Integrate one selected Konserve cloud backend behind the JVM database
-   compiler.
-   Benchmark direct cloud authority versus an explicitly specified local-hot
-   topology; state acknowledgment durability/RPO honestly.
-9. Keep cloud credentials, secondary indexes, embeddings, branch mutation, and
-   heavy queries on the server.
-
-Exit proof: server agents remain available with the user's device offline; a
-thin browser works from a clean profile; a full browser reloads from IndexedDB,
-reads offline, reconnects, drains idempotent intents, and renders the same
-surface data; the selected cloud topology survives writer crash/restart and
-client resync.
-
-### Phase 8 — acceptance, profiling, documentation, and graduation
+### Phase 6 — local acceptance, profiling, documentation, and graduation
 
 1. Run focused structural/generative tests during each phase, then run the
    complete active CLJS and writer gates once at the boundary.
-2. Complete Inspect AI journeys for durable multi-step planning across restart,
-   schema-backed write/later-query, and interactive UI construction.
+2. Run a bounded Inspect AI smoke check that covers the basic agent loop,
+   database write/read, and one canvas interaction. The full paid planning/
+   memory/UI battery is deliberately deferred; this branch only proves the
+   refactor did not break the harness or basic agentic work.
 3. Run the full transition table from a destructively reset authorized default
-   cluster, including failure injection at every process/protocol/restore/cloud
-   boundary.
-4. Browser-drive roster, agent, debug, canvas controls, focus, scroll, route
-   facts, two tabs, reconnect, and responsive layouts. Verify gzip SSE
-   server-side.
-5. Profile cold/warm boot, five mints, writer latency, sync, dirty-unit renders,
+   cluster, including failure injection at every local process, write/receipt,
+   restore, and crash boundary.
+4. Browser-drive `/`, first-run routing, agent, debug, canvas controls, root
+   navigation, focus, scroll, `/data`, route facts, two tabs, reconnect, and
+   responsive layouts. Verify gzip SSE server-side.
+5. Profile cold/warm boot, five agent births, writer latency, sync, dirty-unit renders,
    SCI invocations, gzip bytes, browser morph time, event-loop delay, CPU, heap,
-   GC, and RSS on small and grown stores.
+   GC, and RSS on small and grown databases.
 6. Establish explicit budgets and fail loudly when agent-authored database
    reads/renders exceed them; do not hide unbounded work by increasing timeouts.
 7. Update active architecture, skills, runbooks, Docker/build docs, and
@@ -600,40 +746,33 @@ client resync.
    mechanism.
 
 Exit: fast, stable, responsive agents; one writer, one CLJS runtime/UI, one
-protocol state machine, one operator, one test authority split, one vocabulary,
-and no known duplicate or compatibility path.
+local protocol, one operator, one test authority split, one vocabulary, and no
+known duplicate or compatibility path in the local cluster.
 
-## Owner decisions before phases 6–7
+## Deferred follow-on direction — preserve evidence, do not implement here
 
-These choices do not block the archival/server/operator work, but they materially
-change the remote/cloud implementation:
+The research remains useful, but these are separate PRDs after local graduation:
 
-1. **Remote replica:** approve immutable Konserve root synchronization as the
-   first supported remote replica, with exact datom-apply deferred unless
-   Datahike gains and proves a native replica primitive? **Recommendation:
-   yes.**
-2. **Cloud durability:** must a successful transaction wait until GCS/S3 has
-   durably accepted the commit, or may a local hot database acknowledge under an
-   explicit nonzero cloud RPO? **Recommendation: require zero acknowledged
-   cloud data loss for authoritative facts, then benchmark direct GCS first
-   because the current deployment already uses Google infrastructure.**
-3. **Client sequence:** approve thin server-rendered mode first, then the full
-   browser/IndexedDB/Tauri replica from the same CLJS source? **Recommendation:
-   yes.** This delivers hosted agents early without creating a temporary
-   renderer.
-
-Defaults that do not require an owner decision now:
-
-- durable offline mutation is a bounded stable-ID outbox plus optimistic
-  projection, not a local authoritative branch/CRDT;
-- initial clients use the complete implemented root/history sync and route
-  heavy/history work to the server only after a real current-state export
-  exists;
-- GCS is evaluated first, S3 is not added speculatively;
-- generic remote Datalog/admin operations are kept only when a named bounded
-  capability requires them; and
-- `seon-skills` is the canonical distributable skill source, with tool-facing
-  views generated/validated rather than hand-maintained.
+- **Remote writer/replica.** UDS remains local and WebSocket is the likely remote
+  adapter over one `seon.db.protocol` state machine. Immutable Konserve-root sync
+  with head-last publication is the leading state-transfer design; exact replay
+  remains opt-in. Before adoption, Datahike/Kabel must own and prove foreign
+  listeners, deadlines, cancellation, reconnect, backpressure, branch scoping,
+  and clean shutdown. Do not delete source that is useful to that work, but do
+  not run a second live path now.
+- **Cloud.** Evaluate GCS first when cloud work begins. The current owner policy
+  is local-authority acknowledgment: success does not wait for a cloud mirror,
+  so the eventual deployment must publish and measure its nonzero cloud RPO
+  honestly. Exact mirroring/topology remains undecided.
+- **Thin/mobile clients.** Phone-class clients are thin and use a hosted JVM +
+  Node cluster; the UI is phone-focused and primarily admits local device facts.
+  Browser/IndexedDB replica shape, history depth, native packaging, and offline
+  mutation semantics remain open. They must reuse the canonical CLJS renderer
+  and database protocol rather than create a second client runtime.
+- **Inspect AI.** Full paid journeys for long-term planning, later database
+  recall, interactive UI construction, and cross-agent behavior are deferred.
+  Stale old run branches/artifacts may be deleted after active references are
+  checked; no permanent retention policy is selected here.
 
 ## Commit and proof policy
 
@@ -652,27 +791,36 @@ the running system.
 
 ## Definition of done
 
-- A new user runs `bin/seon up`, sees truthful progress, receives the web UI
-  URL, and can operate agents without knowing process names.
+- A new user runs bare `bin/seon` or `bin/seon up`, sees truthful build/readiness
+  progress and useful URLs, and can operate agents without knowing process names.
+- A first-ever database contains root plus one ordinary agent; `--open` lands on
+  the ordinary agent while `/` is root's system/coordinator view.
 - Cold and warm starts are bounded, idempotent, and free of ghost pruning,
   broad schema/program rewrites, global instrumentation, or duplicate services.
-- Agent mint/resume/eval and config/schema/program/restore transitions are
-  explicit and database-correct.
+- Agent birth/resume/eval/crash and config/schema/program/restore transitions are
+  explicit and database-correct; a crash never replays effects and leaves
+  interrupted agents idle with one exact recovery anchor and a derived root
+  notice.
+- Batch mode attempts every complete form and preserves each real success/error
+  for the next turn.
 - One JVM server owns writes/storage/heavy work; one CLJS source owns agents and
   rendering on server and client.
-- Local and remote clients share one semantic protocol and reconnect state
-  machine.
+- The local UDS writer/read path has one fully namespaced semantic protocol and
+  same-request recovery contract; remote transport remains a documented seam.
 - Canvas, surfaces, cards, blocks, slots, and views mean one thing everywhere;
   tile/live-tile/world/inspector are absent from active product vocabulary.
 - The normal web UI is bounded and reactive; closed debug/offscreen content
   costs nothing; context and HTML render only when used.
 - Buttons, inputs, selects, toggles, forms, errors, focus, and scroll work live
   from database facts.
+- Root can see the originating tab's database-backed location, start an ordinary
+  agent, and switch only that tab through the existing Datastar feed.
+- `/data` lazily explores every installed attribute, including KB/domain facts,
+  without a global per-transaction scan.
+- Standard skills import into canonical database facts through one path, while
+  the default/test skills context block stays absent and root context stays
+  concise, namespace-led, and state-gated.
 - The active test doors are fast by default, bounded, behavioral, and contain no
   retired application or homegrown evaluator.
-- Server agents, thin browsers, full browser replicas, and downstream native
-  shells use the same data/render contracts.
-- The selected cloud backend has measured durability, latency, recovery, and
-  cost behavior.
 - The old JVM application and rejected prototypes are recoverable from Git but
   absent from active source, classpaths, startup, tests, docs, and skills.

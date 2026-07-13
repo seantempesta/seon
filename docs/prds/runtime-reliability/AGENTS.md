@@ -16,9 +16,9 @@ JVM server, canonical CLJS runtime/UI, archive boundary, local and remote
 database synchronization, client distribution, test authority, and exact
 canvas/surface/card cutover.
 
-This PRD is in **phase 1 of 8: plan review and clean-base freeze**. Do not begin
-production implementation until the remaining owner decisions in [[roadmap]]
-are answered. The active plan replaces mechanisms in place and deletes their
+This PRD is in **phase 1 of 6: plan review and clean-base freeze**. The owner
+decisions are resolved; production implementation starts from the coordinated
+clean-base proof. The active plan replaces mechanisms in place and deletes their
 superseded paths; it does not create compatibility namespaces or parallel
 architectures.
 
@@ -62,9 +62,12 @@ bin/seon up
 bin/seon up --open
 ```
 
-`up` starts the complete development stack, waits for real readiness, and
-prints the useful URLs. Only `--open` launches a browser. There is no fake
-production alias and paused/advanced process verbs are not primary UX.
+Bare `bin/seon` means `up`. In a source checkout, `up` fully rebuilds the
+canonical writer + CLJS artifacts, reconciles only changed dependents, starts
+incremental watchers, waits on atomic verified readiness, and prints useful
+URLs. Only `--open` launches a browser; on first-ever boot it opens the ordinary
+initial agent, not root. There is no fake production alias and paused/advanced
+process verbs are not primary UX.
 
 ## Load-bearing findings
 
@@ -86,9 +89,8 @@ production alias and paused/advanced process verbs are not primary UX.
   receipts, same-ID recovery, bounded replay, overlap deduplication, and
   read-your-own-write. Datahike/Kabel has useful immutable-root sync but needs
   listener, deadline, cancellation, reconnect, and backpressure fixes.
-- Replica state should synchronize immutable Konserve nodes and expose the
-  branch head last. Exact transaction replay remains for receipts, forensics,
-  and genuinely durable processors—not for every projection.
+- Immutable-root sync/Kabel evidence is preserved for a later remote PRD; it is
+  not a second live path or completion gate for this branch.
 - The current agent view already has a surface catalog, database-recency focus,
   and right rail. Rename and finish that mechanism; do not invent a new view.
 - `seon.store.wire`, `:seon.store.wire/*`, `{store-id, ...}`,
@@ -104,15 +106,30 @@ production alias and paused/advanced process verbs are not primary UX.
   offset/limit. Add a general upstreamable Datahike `count-datoms` API over its
   existing O(log n) subtree count-slice; keep transaction bodies lazy/capped
   until a measured need justifies a Datahike-owned transaction-leading index.
-- `my.kb` domain facts and provenance are independent of that inventory. A
-  later refined KB may compose purpose-specific database queries without
-  restoring a global default context section.
-- Three skill trees drift. One canonical distributable source must generate or
-  validate tool-facing views; stale live-tile/world/inspector/`my.tile`
-  teaching is deleted.
-- Thin server-rendered web mode is the first remote client. A full browser
-  CLJS/IndexedDB replica and downstream Tauri shell follow from the same
-  renderer and protocol, not from Wasmtime/WIT or a second client runtime.
+- `my.kb` facts are ordinary database facts and must be browsable through
+  `/data`; a later focused KB surface must not restore a global inventory block.
+- Three skill trees drift. One importer persists canonical `SKILL.md` source;
+  `seon-skills` is the shipped corpus and tool-facing trees are generated or
+  validated adapters. Import does not imply a standing skills context block.
+- `/` already points at root's system canvas. The remaining target is one short
+  root-role block, namespace-led orchestration/navigation context, one ordinary
+  first-run agent, and database-backed per-tab location so root can switch the
+  originating human view through the normal feed.
+- Root's complete home-require scalar correctly replaces the ordinary workbench
+  so root can stay smaller; fix the misleading “shared plus” comment rather
+  than inventing union semantics. The actual leak is the no-config fallback,
+  which still exposes `seon.agent` orchestration to ordinary agents. Let the
+  existing canvas AI twin carry bounded fleet facts.
+- Root fleet cards consume the shared agent-derived focus (pin, then agent
+  recency, then welcome) and the same compact materializer as an agent page with
+  no session override. Per-tab manual page focus remains session-scoped. Always
+  list every agent; lazily render human detail, and budget AI detail by
+  running/erroring/recent priority. CPU/RSS waits for one reusable operator
+  status projection and never gets its own feed.
+- Recent messages/evals currently have several duplicate full-history scans.
+  Put bounded reverse-index readers in the fact-owning namespaces, expose
+  Datahike `rseek-datoms` only through `seon.db`, and make transcript, chat,
+  menus, error-storms, activity, and root cards consume those functions.
 
 ## Settled — do not re-litigate
 
@@ -139,6 +156,12 @@ production alias and paused/advanced process verbs are not primary UX.
 - Native Datahike schema reopens from durable data. Canonical Malli/program
   forms are database facts; runtime registries are validated projections.
 - No arbitrary eval replay and no promise to reconstruct non-database effects.
+- An unexpected crash fences interrupted runs closed, leaves affected agents
+  idle, and writes one recovery anchor in that same transaction. Root derives
+  the detailed notice from the transaction and commit graph; root/human chooses
+  resumption.
+- Batch mode attempts every complete form in order and persists every real
+  success/error; an ordinary early failure does not suppress later forms.
 - No persisted UI dependency/subscription/cache entities. Read observation and
   bounded runtime caches are derived and discardable.
 - Four dormant context-display adapters—findings, inventory, jobs, and
@@ -148,33 +171,27 @@ production alias and paused/advanced process verbs are not primary UX.
   Useful domain/runtime facts remain.
 - `my.canvas` is the one permanent agent-facing canvas/control API and injects
   current agent/database identity.
-- Local UDS and remote WebSocket may both be transport adapters, but one
-  versioned message model and reconnect state machine own semantics.
-- Durable offline mutation is a bounded stable-ID intent outbox plus optimistic
-  projection, not a browser-authoritative database or CRDT.
+- The local UDS path is authoritative in this branch. Writes acknowledge after
+  the local commit/receipt is accepted, without waiting for UI/cloud catch-up.
+- Root context is concise and role-specific. Core operational knowledge lives in
+  fully specified namespace cards/current source plus colocated state blocks.
+- Standard skills remain importable facts, but default/test skills blocks stay
+  disabled so dynamic context must prove relevance.
 - Tests assert facts, transitions, envelopes, DOM identity, omission,
   idempotency, and rendered structure—not context prose.
 - No migration is needed for current test data. Rename filesystem/database
   layouts directly after coordinated reset.
 - Every phase commits small gains and finishes with focused plus live proof.
 
-## Open owner decisions
+## Explicitly deferred follow-on work
 
-These choices do not block phases 1–5, but they change phases 6–7:
-
-1. Approve immutable Konserve root synchronization as the first remote replica
-   mechanism, deferring exact datom apply unless Datahike gains and proves a
-   native primitive? Recommendation: yes.
-2. Must a successful authoritative transaction wait for durable GCS/S3
-   acceptance, or may a local hot database acknowledge under an explicit
-   nonzero cloud RPO? Recommendation: require zero acknowledged cloud data loss
-   and benchmark direct GCS first.
-3. Approve thin server-rendered mode first, followed by the full
-   browser/IndexedDB/Tauri replica from the same CLJS source? Recommendation:
-   yes.
-
-The owner has already selected the complete-development-stack semantics for
-`bin/seon up`, including readiness/URL output and opt-in `--open`.
+Remote replica/reactive catch-up, WebSocket adoption, cloud topology, browser/
+IndexedDB, offline mutation, mobile packaging, and the full paid Inspect AI
+battery are not this branch's completion criteria. Preserve the existing
+Datahike/Kabel/Konserve research and useful source, but do not run or maintain a
+parallel live path. GCS is evaluated first later; cloud mirroring has an honest
+nonzero RPO under the selected local-ack policy. Phone clients are thin and use
+a hosted JVM + Node cluster.
 
 ## Ordered next steps
 
@@ -185,22 +202,21 @@ The owner has already selected the complete-development-stack semantics for
 3. Replace the operator with Babashka, archive/delete the paused JVM app and
    rejected prototypes, and split fast CLJS/writer/runtime/browser test doors.
 4. Finish exact config/schema/program/database lifecycle reconstruction,
-   coordinates, as-of, branches, restore, undo, and crash recovery.
+   first-run root+ordinary-agent creation, non-fail-fast batches, coordinates,
+   as-of, branches, restore, undo, and idle-and-notify crash recovery.
 5. Converge canvas/surface/card UI vocabulary, delete weak context/inventory
-   paths, port `/data` to bounded lazy database units on the one feed, finish
-   responsive layout/controls/focus, and cut over ACME after default proof.
-6. Harden and adopt one remote writer/replica protocol over UDS/WebSocket
-   adapters.
-7. Ship thin hosted web, browser replica, downstream native shell, and a proven
-   cloud database backend.
-8. Run transition/failure/browser/Inspect AI/profiling acceptance, update the
-   one architecture, and graduate only when active searches find no duplicate
-   mechanism.
+   paths, port `/data` to bounded lazy database units, restore concise root
+   context, persist per-tab location/navigation, refine skill import without a
+   default block, finish responsive layout/controls/focus, and cut over ACME
+   after default proof.
+6. Run local transition/failure/browser/basic-Inspect/profiling acceptance,
+   update the one architecture, and graduate only when active searches find no
+   duplicate local mechanism.
 
 ## Entry points
 
-- [[roadmap]] — authoritative eight-phase order, acceptance transitions, and
-  owner decisions.
+- [[roadmap]] — authoritative six-phase order, acceptance transitions, settled
+  choices, and explicit follow-on boundary.
 - [[provenance-and-lifecycle-design]] — database provenance/config/lifecycle
   target semantics.
 - [[research/jvm-archive-boundary-2026-07-13]] — retained/deleted JVM closure,
@@ -211,6 +227,8 @@ The owner has already selected the complete-development-stack semantics for
   canonical CLJS renderer, browser/Tauri/server-agent boundaries.
 - [[research/surface-vocabulary-and-dead-ui-path-audit-2026-07-13]] — exact
   UI rename/delete graph and four dormant context adapters.
+- [[research/root-view-presence-crash-batch-audit-2026-07-13]] — exact root
+  canvas/focus/session/crash/batch/telemetry ownership and minimal slice.
 - [[research/seon-cli-lifecycle-audit-2026-07-13]] — current shell/process
   failure modes and Babashka target.
 - [[research/cljs-test-suite-speed-and-quality-audit-2026-07-12]] — active

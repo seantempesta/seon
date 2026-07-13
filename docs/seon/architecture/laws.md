@@ -33,7 +33,7 @@ around it.
 
 ## Honesty
 
-- **Canvas-first mitigates fabrication.** A derived tile is computed from
+- **Canvas-first mitigates fabrication.** A derived surface is computed from
   data; prose is where agents lie. The same agent fabricated a number in
   prose while its `my.data`-derived canvas showed the correct one — moving
   the agent onto the canvas flipped the judge to PASS. Prefer surfaces that

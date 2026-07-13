@@ -28,10 +28,11 @@ It is **dual-track**: a CLJ **JVM server** (the DB writer + render/serve + Integ
 lifecycle + heavy processing, data-only) and CLJS **agent executors** (isolated),
 sharing the `.cljc` **schema** layer. The derived-state rule and the transition
 table are CLJS (`seon.derive` / `seon.agent.loop`), reached from the device the same
-way every read is — over the wire against the replica.
+way every read is — through the database protocol against the replica.
 
 **Client/server is the shape.** The pod is a **read-only datahike replica** of the
-single JVM **writer** (reads local off the replica, writes forwarded over the wire).
+single JVM **writer** (reads local off the replica, writes forwarded through the
+database protocol).
 Agent clusters run on user devices, each a replica the writer feeds datoms to —
 indexes are materialized once per cluster, all writes forwarded to the one writer
 (total order). A **local "system" cluster** does system work; **user clusters** do
@@ -59,7 +60,7 @@ already expresses it? (A new noun is a parallel-system risk — map every
 concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
 
 1. **Everything is data in one graph.** One bitemporal db; every moving part —
-   the loop, the prompt, a tile, the plan, the code itself — is a function of a
+   the loop, the prompt, a surface, the plan, the code itself — is a function of a
    frozen db snapshot. Replay, debugging, diffing, and time-travel are queries,
    not archaeology. Entities are attributes + refs (no kinds); provenance rides
    the tx entity. Anchors: `seon.db` (sole API), the single writer, [[data-model]].
@@ -72,7 +73,8 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    present: always-on context beats loadable skills, and composition functions
    render FULL — [[laws]].)
 3. **The agent authors its own environment.** A `defn` returning
-   `:seon.render/ai` and/or `:seon.render/hiccup` is a block and/or tile —
+   `:seon.render/ai` and/or `:seon.render/hiccup` supplies one or both render
+   twins —
    writing a function IS authoring context, tools, and UI at once. Both keys =
    twins: agent and human look at ONE derived value; shared situational
    awareness is structural, not messaged (canvas-first mitigates fabrication —
@@ -116,12 +118,12 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   seeded into the agent's own `:seon.agent/ctx` and rendered in
   `:seon.agent.ctx/priority` order. `:seon.agent.ctx/block` in `seon.agent.ctx`.
   `:seon.agent.ctx/name` is a plain `:keyword` — the app-level upsert key (prompt
-  header = DOM `#tile-<name>`), NOT a datahike identity.
+  header = DOM `#surface-<name>`), NOT a datahike identity.
 - **render** — a block's output; the one word for the projection. Engine:
   `seon.render`. A render is never stored.
 - **ai render** — a block's prompt-text output (a string, or a symbol late-resolved
   via `seon.eval/lookup-value`). `:seon.render/ai`.
-- **html render** — a block's hiccup output → a tile. `:seon.render/html`.
+- **html render** — a block's hiccup output → a surface. `:seon.render/html`.
 - **prompt** — the agent's assembled context: ai renders concatenated by priority
   (`seon.agent.ctx/render-context`), prefixed by a system role resolved by
   `seon.ai/effective-system-prompt` — the per-request `:seon.ai/system-prompt`
@@ -129,15 +131,18 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   `seon.agent.ctx/system-text` default. The system prompt is DB state and
   per-request overridable ([[context]] §"The system prompt itself is DB state").
 - **page** — the human's UI: a layout placing html renders into slots. `seon.ui.*`.
-- **tile** — an html render placed in a slot (the live UI element).
+- **surface** — a resolved html render displayed by the web UI.
+- **card** — a compact/expanded visual CSS component; never an architectural
+  object or persisted entity.
 - **slot** — a named, DB-keyed hole in a layout: `(slot :name)` →
-  `[:div {:id "tile-<name>" :data-slot :name}]`, keyed on `:seon.agent.ctx/name`.
-- **layout** — a render whose hiccup contains slots (it nests tiles); a role, not a
-  stored kind. A render with no slots is a leaf tile.
-- **canvas** — the focal block on an agent's view: the agent↔human communication
-  block.
+  `[:div {:id "surface-<name>" :data-slot :name}]`, keyed on
+  `:seon.agent.ctx/name`.
+- **layout** — a render whose hiccup contains slots (it nests surfaces); a role,
+  not a stored kind. A render with no slots is a leaf surface.
+- **canvas** — the focal, agent-controlled surface in an agent view: the
+  agent↔human communication area.
 - **view** — an agent's page, route `/agent/{id}`: the canvas plus a
-  `:seon.agent.ctx/priority` scroll of the agent's tiles.
+  recency-ordered rail of the agent's other html surfaces.
 - **root agent** — ONE `:seon.agent/id "root"` that is BOTH the `/`-view owner (the
   UI) AND the system orchestrator (lifecycle) — the same elevated grant, never two
   entities. Its view IS the all-agents overview at route `/`, rendered by the
@@ -155,7 +160,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   datoms (vendored, `reference-code/reitit`, `.cljc`). The capability gate
   (`seon.web.reactive.call`) authorizes the fn behind `/call`. See [[ui]].
 - **warnings block** — the block surfacing current problems: an ai render to the
-  agent, error tiles to the human, one source. `seon.agent.ctx.warnings` + `seon.warn`.
+  agent, error cards to the human, one source. `seon.agent.ctx.warnings` + `seon.warn`.
   Self-healing — empty when clean.
 - **`:seon/error`** — the structured value any failure produces: ONE base shape
   (`:seon.error/message` humanized via `malli.error/humanize`; `:seon.error/data` the
@@ -177,7 +182,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **run / turn / derive-state** — the bounded unit of work a trigger opens
   (`seon.agent.run`), the per-iteration value-transform (`seon.agent.loop`), and the
   one projection rule for agent state (`seon.derive`). See [[agent-runtime]].
-- **wire-server / pod / tx-listener** — the JVM datahike writer; the Node CLJS
+- **database-server / pod / tx-listener** — the JVM datahike writer; the Node CLJS
   runtime; the `listen!→derive→push` streamer role (any replica-holding process can
   play it).
 
@@ -190,8 +195,8 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
    NODE UI-HOST ── read-only replica + ONE tx-listener + the route table (reitit)
         │  listen! → derive view → whole-element morph → push  the only browser-facing HTTP/SSE
         ▲                                                    (derives every page; runs NO agent code)
-        │  wire (RPC + tx-feed, attachment/commit cursor)
-   JVM WIRE-SERVER ── single-writer datahike + heavy processing (embeddings/LLM/indexing) + Integrant
+        │  database protocol (RPC + tx-feed, attachment/commit cursor)
+   JVM DATABASE SERVER ── single-writer datahike + heavy processing (embeddings/LLM/indexing) + Integrant
         ▲   the bus + authoritative writer; handles only DATA, never agent code
         │
    ISOLATED PER-AGENT NODE RUNTIMES ── each its own SCI cage + event loop; the ONE exec service
@@ -200,7 +205,8 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 
 Three roles, decoupled in principle, co-located in one pod for v1:
 
-- **JVM wire-server** — the sole authoritative datahike writer (durable, bitemporal)
+- **JVM database server** — the sole authoritative datahike writer (durable,
+  bitemporal)
   plus heavy processing (embeddings, LLM, indexing) and Integrant lifecycle. Data
   only; it never executes agent code.
 - **Node UI-host** — the browser's single front door: a read-only replica + one
@@ -210,10 +216,12 @@ Three roles, decoupled in principle, co-located in one pod for v1:
   tx-listener can play it, so the UI-host is relocatable.
 - **Isolated per-agent Node runtimes** — the dangerous part: each runs the one
   sandboxed-execution service in its own SCI cage + event loop; its output is just
-  data (hiccup, a result, a transaction) handed back over the wire. The isolation
+  data (hiccup, a result, a transaction) handed back through the database
+  protocol. The isolation
   tiers (worker + SCI / microVM) live in [[agent-runtime]].
 
-**v1 = a single pod plays all three roles.** The wire + DB-as-bus is the only
+**v1 = a single pod plays all three roles.** The database protocol + DB-as-bus is
+the only
 boundary. The endgame decouples to a **Node-only user box** (UI-host + isolated
 agents) with the writer/server either remote (a home server over a private network —
 the user's data stays on their own box) or re-homed to Node.
@@ -234,12 +242,12 @@ fans the tx out → the relevant unit's `listen!` fires, it computes and writes 
 **facts** back → the writer fans out → the Node UI-host's `listen!` fires,
 re-renders the WHOLE element (`view = f(db-at-coordinate)`) and pushes one gzip datastar
 **morph**, which idiomorph diffs client-side (a coalescing throttle collapses a tx
-burst into one morph). Two channels ride the wire with different reliability:
+burst into one morph). Two channels share the database protocol with different reliability:
 reads/writes/heavy calls ride a **request-reply RPC** (only *values* cross —
 `:db.fn/cas` is data and crosses fine, closures can't); the **tx feed** is a separate
 broadcast made lossless across reconnect by a full attachment/commit cursor and
 branch-local tx replay from the bitemporal log (this is the pod↔writer
-wire-replication layer—the dropped event
+replication layer—the dropped event
 is the wake trigger, so it must not be lost; the browser stream needs no UI-side
 `since-t`, it just repaints `view = f(db)` on reconnect). **No agent code ever touches
 an SSE connection** — agents write facts; the UI-host derives and streams.
@@ -254,7 +262,7 @@ work bound is `default-turn-limit` + the inbound-message count, not a per-messag
 write. Renders are projections, never persisted. New ways to surface data are new
 block render fns, not new mechanisms — when the underlying problem is fixed, the
 query returns empty and the surface vanishes (self-healing). Frozen caches key
-on the full resolved `{store-id, branch, commit-id, t}` coordinate, never on a db
+on the full resolved `{database-id, branch, commit-id, t}` coordinate, never on a db
 value or bare t.
 
 ### Never crash, always surface
@@ -264,7 +272,7 @@ error, a throwing check or handler — is caught at its site and surfaced as a
 **`:seon/error`** value in a derived, agent-visible place, never a process crash (the
 pod is single-threaded; one uncaught throw would blank every agent + the UI-host).
 One source, two renders: the **warnings block** (ai) for the agent and an **error
-tile** (html) for the human. The full map of failure-site → where it surfaces
+card** (html) for the human. The full map of failure-site → where it surfaces
 lives in [[data-model]] §7.
 
 ### Seed-copy, not merge
@@ -331,7 +339,7 @@ UI-root == orchestrator-root), and the isolation tiers. See [[agent-runtime]].
 ### UI — [[ui]]
 
 The human UI is **pages** — a **layout** placing block html renders into named
-**slots**, each filled slot a **tile**; all pages are agent **views**, a tree of
+**slots**, each filled slot a **surface**; all pages are agent **views**, a tree of
 routes: the root agent’s view (`/`), per-agent views (`/agent/{id}`), and apps
 (`/agent/{id}/app/{x}`). Routing is data via **reitit** over `:seon.route/*` datoms;
 `/call` is the one browser-action door and its gate authorizes registered
@@ -355,8 +363,9 @@ envelope). See [[toolkit]].
 
 Every question about agent behavior — what an agent saw at turn N, what changed
 between turns, why it acted — is answered by a **query against the DB plus the
-blob store**, never by hunting log files: each turn persists the frozen
-`{store-id, branch, commit-id, t}` coordinate that makes context re-derivable, the assembled prompt
+blob archive**, never by hunting log files: each turn persists the frozen
+`{database-id, branch, commit-id, t}` coordinate that makes context
+re-derivable, the assembled prompt
 verbatim as a blob, and the raw reply. `agent-debug/turn` reconstructs any turn;
 `turn-diff` shows what changed between two; a dedicated **forensic agent** runs
 these queries on demand; the `/agents/run` door drives a reproducible task
@@ -381,7 +390,7 @@ doc; this one stays pure target.
   the gzip-morph SSE live channel, the seed-copy + `install!`/`remove!` override.
 - [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
 - [[observability]] — historical turn reconstruction (resolved coordinate + prompt blob + reply), `agent-debug/turn` /
-  `turn-diff`, the blob store, the forensic agent, cluster lifecycle + the
+  `turn-diff`, the blob archive, the forensic agent, cluster lifecycle + the
   `/agents/run` door.
 - [[context]] — the dynamic context system: `context = f(db, location,
   window, tail)`, the three-band cache gradient (stable prefix / sliding
@@ -392,7 +401,8 @@ doc; this one stays pure target.
   constrain every design above. Not principles — measurements.
 - [[roadmap]] — we-are-here → the gap → the migration checklist + the final gate.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db is
-  a value, only values cross the wire, CAS-as-assertion, resolved-coordinate caching). Read before
+  a value, only values cross the database protocol, CAS-as-assertion,
+  resolved-coordinate caching). Read before
   touching the loop.
 - [[library-grounding]] — the concrete `reference-code/…:LINE` read-map (datahike,
   malli, SCI, reitit) per phase: every load-bearing claim grounded in real source +

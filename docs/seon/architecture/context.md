@@ -67,7 +67,7 @@ always renders:
   work-tracking that still carries a live lifecycle status is not a settled
   finding and never renders as one.
 - **what changed since I last looked** — the **delta**, derived from the
-  previous turn's rendered `{store-id, branch, commit-id, t}` coordinate: the
+  previous turn's rendered `{database-id, branch, commit-id, t}` coordinate: the
   datoms transacted since I last saw the view when that commit is an ancestor
   of the current head (new messages, newly-completed children, newly-failed
   items). A series of independent snapshots becomes a felt continuity because
@@ -171,27 +171,27 @@ warning blocks. Every turn persists the cost (`prompt_cache_hit_tokens` /
 `prompt_cache_miss_tokens`, forms, `:seon.agent.turn/results-stripped`) so the
 two modes are comparable on identical tasks.
 
-## A render fn is a block and a tile — the twins
+## A render fn supplies twin projections
 
 A `defn` whose input accepts the db and whose output carries a render key is
 a **renderer**, and the keys present decide where it goes:
 
 - `{:seon.render/ai …}` → a **block**: its string joins the agent's prompt.
-- `{:seon.render/hiccup …}` → a **tile**: its own hiccup surface on the
-  agent's page (each block has its own separate tile — not a merged vector).
+- `{:seon.render/hiccup …}` → a **surface**: its own hiccup projection on the
+  agent's page (each block has its own separate surface, not a merged vector).
   (`:seon.render/hiccup` is the fn's OUTPUT-map key that twin-detection reads,
   `seon.agent.ctx.render-fns/twin-keys`; `:seon.render/html` is the stored
   block/pin ATTR and the render-engine view selector — [[ui]].)
 - **both keys → twins**: one value, two projections — the agent's context
   and the human's screen showing the same thing.
 
-The **canvas** is a distinct, focal tile. Default: it shows the
-**last-updated tile** — a pure function of the db
-(`seon.agent.ctx.render-fns/last-updated-tile`): among the agent's own
-authored tile fns (its `:seon.fn` rows whose tx provenance names the agent
+The **canvas** is a distinct, focal surface. Its shared **agent-derived focus**
+shows the **last-updated surface** by default — a pure function of the db
+(`seon.render.surface/last-updated-surface`): among the agent's own
+authored surface fns (its `:seon.fn` rows whose tx provenance names the agent
 through the REPL process and whose output schema declares the hiccup twin), the
 one most recently *touched*—redefined, or an agent-user/REPL transaction that
-touches a scoped input captured by the tile's **current** runtime-observed
+touches a scoped input captured by the surface's **current** runtime-observed
 database reads. Initial/cold
 render captures actual `seon.db` query/pull/entity calls (including current
 helpers/conditional branches), then runs a bounded indexed history lookup for
@@ -199,15 +199,17 @@ the newest matching user+entity/attr datom. It does not reconstruct every past
 conditional dependency or evaluate every historical before/after result. A
 broad/unknown observation gets definition recency only; the agent can make its
 read selective or pin the canvas. No literal keyword read-set is stored. So the
-human's focus follows what the current tile most plausibly received from the
+human's focus follows what the current surface most plausibly received from the
 agent's recent work
-with zero ceremony: author a plan tile, write plan data, and the plan tile
-is the canvas. Override: the agent pins the canvas to a specific tile
+with zero ceremony: author a plan surface, write plan data, and that surface
+is the canvas. Override: the agent pins the canvas to a specific surface
 (`:seon.render.canvas/content`) to feature it regardless of recency;
 retract the pin to fall back to derived; with neither, the core welcome.
 Derive the default, store only the pin — the same rule as everywhere else.
 (Unknown/dynamic reads are conservatively compared for live invalidation, but do
-not claim precise historical focus.)
+not claim precise historical focus.) A browser session may temporarily select a
+different page-focused surface; that tab-local database fact neither changes
+the agent-derived focus nor propagates into root fleet cards.
 
 The process qualifier prevents root-owned boot/config facts from masquerading
 as root-agent authorship. `:seon.db/user` answers who; `:seon.db/process`
@@ -218,13 +220,13 @@ now emitted by any in-scope `defn`, not only by seeded blocks. Its args are
 the db value (all data is reachable from it — [[think-in-clojure]]); it
 `require`s only the *code* it calls. It is pure over the frozen db, so it
 re-runs safely every turn, is bounded + errors-as-values through the exec
-service (a throw becomes a `:seon/error` tile, never a crash), and replays
+service (a throw becomes a `:seon/error` card, never a crash), and replays
 from database state at a resolved coordinate ([[observability]]). The historical prompt
 blob—not a re-executed effect—is the byte ground truth.
 
 ## Shared view — the agent knows the human sees it
 
-Because the *same* function feeds both the prompt and the tile vector, the
+Because the *same* function feeds both the prompt and the surface catalog, the
 agent and the human look at one derived value. An agent working in `my.plan`
 runs its plan-view `defn`: the `:ai` twin puts the full plan in its own
 context, the `:html` twin puts the full plan on the human's page. The agent
@@ -259,18 +261,31 @@ contract:
 
 - A map-in fn declares an injectable as an **optional** request key —
   `:seon.db/db`, `:seon.agent/id` ("me"), `:seon.render/at` (the branch-local t
-  display aid; the db/attachment carries the resolved coordinate),
-  and whatever else the registry grows to hold. It is `{:optional true}` to
-  the *caller* (may omit) but the wrapper guarantees it *present in the body*.
-- On an agent call, the eval boundary inspects the fn's request schema, and
-  for every **injectable key the schema declares that the caller left
-  absent**, fills the current value from the eval context. Declared-and-
-  present is never overwritten (explicit args win — the agent, a test, or a
-  forensic inspection can pass a different db/agent).
-- The injectable **registry** is a small explicit map `injectable-key → (fn
-  [eval-ctx] value)`: `:seon.db/db` → the turn's frozen db, `:seon.agent/id`
-  → whose turn is running, etc. Adding a dependency means adding one registry
-  entry and having fns declare the key. One mechanism; no second wrapper.
+  display aid; the db/attachment carries the resolved coordinate), and
+  `:seon.web.session/id` (the browser tab attached to the human message this
+  turn is answering),
+  and whatever else the registry grows to hold. It is `{:optional true}` in the
+  request shape, and the registry decides whether an explicit caller value is
+  allowed; the wrapper guarantees it *present in the body*.
+- On an agent call, the eval boundary inspects the fn's request schema and the
+  one injectable registry. Each registry entry declares its caller policy.
+  Ordinary inspectable dependencies may accept an explicit value; a
+  context-only dependency may not. For every declared key the caller omitted,
+  the boundary fills the current value from the eval context.
+- The injectable **registry** is one explicit map of
+  `injectable-key → {resolver, caller-policy}`: `:seon.db/db` → the turn's frozen
+  db, `:seon.agent/id` → whose turn is running, and
+  `:seon.web.session/id` → the session ref reached through
+  current turn → `:seon.agent.turn/cause-message` → web session. The session
+  entry is context-only: an
+  agent-supplied value is rejected as a typed error rather than accepted or
+  silently replaced. Trusted unit code may call the pure implementation with a
+  validated explicit request; that is not an agent-eval override or a second
+  injection wrapper. Adding a dependency means adding one registry entry and
+  having fns declare the key. If a declared injectable has no current value—for
+  example a scheduled root turn has no human session—the boundary returns a
+  typed error envelope and never invokes the function with nil or guesses
+  another tab.
 - The injectable contract has **one named request shape**:
   `:seon.render/section-request` (registered in `seon.render`) — an OPEN map
   naming exactly the registry's keys, each `{:optional true}` and referencing
@@ -285,7 +300,7 @@ contract:
 This rides the **one instrumentation layer** (every schema'd fn whose shape
 takes a wrapper is Malli-instrumented off the program graph—once after runtime
 boot/declaration loading, immediately for a newly evaluated/redefined fn, and
-only for changed or currently unwrapped fn objects after hot reload; agent mint
+only for changed or currently unwrapped fn objects after hot reload; agent birth
 never runs global instrumentation. The structural
 exception is `^:async` non-simple shapes like `transact!`/`eval`, which
 validate in their own body — and coverage is itself a derived invariant:
@@ -309,10 +324,45 @@ pass **queries the program graph** for fns in the current namespace whose
 output schema is a render type (`:seon.render/ai` / `:seon.render/html`) and
 **runs each through the same injecting wrapper** (they're map-in fns declaring
 `:seon.db/db` + `:seon.agent/id`), bounded + errors-as-values. Their outputs
-are the block/tile twins, positioned right after the stable code they belong
-to. So a `defn` in the agent's namespace becomes live context automatically —
+are the AI/HTML twins, positioned right after the stable code they belong to.
+So a `defn` in the agent's namespace becomes live context automatically —
 authoring context is writing a specced render fn, and the injection makes it
 run with no arguments the agent has to supply.
+
+### Root is a small specialization of the same mechanism
+
+Root receives one concise role-specific block: understand the fleet, start or
+select an ordinary agent, route/delegate work, and respond to recovery notices.
+It does not receive a broad root manual. Its capabilities appear as compact,
+fully specified home-required namespace cards from one complete curated root
+list. That scalar list replaces the ordinary agent workbench, allowing root to
+start smaller; there is no special union rule. When root moves into an
+orchestration, database, or UI-session namespace, that
+namespace becomes current and its full source plus colocated render fns enter
+context through the same auto-run rule above. The root canvas's bounded AI twin
+provides current fleet facts through the ordinary canvas block: every agent is
+listed compactly, while running, erroring, and recently active agents receive
+bounded recent-message, failed-eval, and canvas-AI detail. Root itself remains a
+summary-only roster row because its canvas is the fleet view; recursively
+materializing its own surface or canvas-AI detail is forbidden. The fleet is not
+copied into a second context block. The originating human session's normalized
+route is also derived into that root view, so root knows what the user is seeing.
+Derived root-only warnings still render only when their queries return facts.
+
+This is the quality bar for restoring historical root context: keep a statement
+only when it names root's irreducible role or a currently true state; move
+operational detail into the namespace that owns the functions; delete generic
+advice and duplicated instructions. Behavior is measured before more standing
+text is admitted.
+
+### Importing a skill does not inject it
+
+Users may import standard `SKILL.md` content into canonical `my.skills` database
+facts, but corpus availability and prompt placement are independent. Default and
+test context trees omit the skills block. Namespace cards, current-namespace
+source, state-gated blocks, and pull references remain the normal discovery
+path. An explicit `my.skills/load` uses the ordinary `install!` override when the
+full skill body is actually wanted; loaded state is derived from block presence.
 
 ## Order = stability, so the cache holds
 
@@ -376,7 +426,7 @@ empty — the reactive rule):
 
 The `:html` twin means every context position has a view the human can
 inspect: the per-block prompt-text + hiccup panes with per-block token counts
-(`/agent/{id}/debug`), the agent's page showing the same tiles, and — through
+  (`/agent/{id}/debug`), the agent's page showing the same surfaces, and — through
 [[observability]] — the exact historical context of any turn (`agent-debug/turn`,
 `turn-diff`, the prompt at its resolved commit, the prompt blob as byte ground truth).
 The human debugging an agent and the forensic agent debugging it read the
@@ -396,7 +446,7 @@ selected input and never become a side-door runtime dependency.
 a transition input, not a runtime dependency. At a selected startup/apply,
 `seon.config/resolve-config-singleton` resolves every knob (environment overrides
 manifest, which overrides defaults), and the exact population reconciler
-restores the declared config singleton/routes/root-context subset. Omitted managed attributes and
+restores the declared config singleton/routes/root-context/skill-import subset. Omitted managed attributes and
 stale exclusive rows retract; outside facts remain untouched; equal state emits
 no transaction. A config-free boot skips this transition. The write is
 `{user root, process config}`. From attachment onward every
@@ -406,7 +456,7 @@ db query: the accessors (`config/eval-render-cap`, `config/on-core-error`,
 and arities but read `config/config-view` — the seeded singleton datom (a
 projection is threaded once per snapshot or cached only by a branch-qualified
 basis/commit coordinate—never by a db value). Only a tiny compiled kernel policy
-may serve the pre-connection store-connect/error path; after attachment, missing
+  may serve the pre-connection database-connect/error path; after attachment, missing
 required config is a typed readiness error, never manifest/default fallback.
 `seon.config` cannot require `seon.db`
 (the require dir is db→error→config), so `seon.db` INJECTS the reader — the
@@ -436,13 +486,18 @@ milestone measures from. Its companion rule:
 block tree** — nothing (identity file-blocks included) is auto-prepended onto
 an enumerated tree.
 
+The skills manifest section is an import input, never a default loadout. Apply
+freezes and validates the selected files, stores their canonical source facts,
+and then forgets the path. A later config-free boot reads those facts from the
+database and adds no skill block on its own.
+
 ## See also
 
-- [[ui]] — the block, its two renders, the tile vector, `install!`/`remove!`,
+- [[ui]] — the block, its two renders, the surface catalog, `install!`/`remove!`,
   the live channel.
 - [[data-model]] — `my.plan` (the worked example: its plan-view `defn` is the
   twin an agent sees and the human watches), the `my.*` schemas.
-- [[observability]] — turn record, replay functions, the blob store.
+- [[observability]] — turn record, replay functions, the blob archive.
 - [[laws]] — cache-stability, render-prominence, always-on-beats-skills.
 - [[think-in-clojure]] — a fn's specced in/out is the query substrate for
   both rendering and running.

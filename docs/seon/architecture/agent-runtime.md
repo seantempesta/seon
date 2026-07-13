@@ -67,9 +67,11 @@ opens. Its **run-id is the fencing token**; it records `started-at`, its
 two bounds, a per-turn heartbeat `last-beat-at`, a `status` (`:open`/`:closed`),
 and — once closed — a `closed-reason`
 (`:completed`/`:waited`/`:turn-limit`/`:deadline-exceeded`/`:terminated`/
-`:superseded`/`:error`). A **run replaces any "session" concept** — there is no
-session entity. Runs link back to the agent via `:seon.agent.run/agent`; turns to
-their run via `:seon.agent.turn/run`.
+`:superseded`/`:error`/`:crashed`). A **run replaces any agent-execution
+"session" concept** — there is no separate runtime-session entity. The web UI's
+per-tab `:seon.web.session/*` facts are navigation provenance, not execution
+lifecycle. Runs link back to the agent via `:seon.agent.run/agent`; turns to their
+run via `:seon.agent.turn/run`.
 
 ### The two bounds, the lease, the heartbeat
 
@@ -113,9 +115,18 @@ surfaces the banked budget, not `deadline − now` (which would keep decaying).
 
 Each **turn** threads **one frozen db value** (re-read once at the top) through
 `next-event`, the prompt render, and the bound checks, so the LLM reasons over a
-single resolved `{store-id, branch, commit-id, t}` coordinate/view. The **next** turn re-reads the latest store — and
+single resolved `{database-id, branch, commit-id, t}` coordinate/view. The
+**next** turn re-reads the latest database value — and
 because there is a single writer, that read sees every other writer's commits, so
 a turn never runs in a private view.
+
+The run's waking message is not automatically the turn's cause: a human message
+may arrive while that run is already open. At turn open, the runtime selects the
+exact inbound address task this turn is assigned to answer and persists its
+message ref as `:seon.agent.turn/cause-message`. Continuation turns may retain
+that message; later queued messages become causes of later turns. A scheduled or
+internal turn may have no human cause. This one fact lets tools target the exact
+originating browser without guessing from the run opener or the latest message.
 
 **The in-tx work-fence.** Every WORK transaction (`beat!`, `open-turn!`,
 `eval-batch!`) **leads** with an in-tx assertion:
@@ -133,7 +144,7 @@ check-then-act ownership pre-read and fences the eval batch atomically with its
 result write. **Ground in** `transaction.cljc:873` (`compare-and-swap`) +
 `db/utils.cljc:109` (`entid` resolves the `:db/unique` lookup-ref entity) — read
 [[library-grounding]] before building the fence. (The mindset — db is a value,
-only values cross the wire, CAS-as-assertion, never memoize on a db value — is
+only values cross the protocol, CAS-as-assertion, never memoize on a db value — is
 [[datahike-primer]].)
 
 ### REPL forms — namespaces are places (settled 2026-07-10)
@@ -165,6 +176,20 @@ REPL moves work:
   `:seon.fn`/`:seon.test` row retracted (resume + instrumentation forget
   it); compiled-core fns are refused (the override-guard symmetry).
   `ns-unalias` drops an alias from the analyzer, declaration, and edges.
+
+**Batch evaluation is intentionally non-fail-fast.** In `:batch` mode every
+complete parsed form is attempted in source order. Each form receives its own
+real eval/result row; an ordinary read/compile/runtime error is captured as
+data and evaluation continues with the next parsed form. A later form that
+depends on a failed earlier form may therefore fail too, which is honest and
+cheap compared with another model round trip. The next turn's transcript shows
+all successes and failures in their original positions. A worker/process crash
+is different: forms not actually attempted receive no fabricated eval/result.
+One catch at the existing per-entry record boundary handles an unexpected but
+recordable exception: it persists the core-fault eval and continues. If that
+recording transaction itself fails, the batch stops loudly; it never claims the
+later entries ran. There is no outer catch that turns a broken recorder into
+synthetic per-form results.
 
 ## The loop as data — the FSM table + the fold
 
@@ -360,7 +385,7 @@ whole point of enforcing the clock bound externally.
 open — the run's `status`/`trigger`/`turn-limit`/`deadline`/`last-beat-at`, the
 derived current `turn`, `turns-remaining`, and `ms-remaining`. It is a pure read
 (no writes) composing the same `seon.derive` primitives every other reader reads,
-so the agent-facing run-status block and the human-facing status tile agree by
+so the agent-facing run-status block and the human-facing status surface agree by
 construction. The run-status **block** (ai + html renders) is owned by [[ui]];
 this fn is its sole data source.
 
@@ -404,20 +429,22 @@ functions in [[toolkit]]). The derived open-todo count feeds the fingerprint abo
 
 ## Cluster boot — exact durable deltas + runtime reconstruction
 
-`bin/seon start` has a usability boundary, not a fork boundary. Every managed
-process starts in a new operating-system session, so closing the invoking
-terminal cannot reap it, and the command returns only after that process's real
-readiness probe succeeds. Pod readiness means its cold-start promise has logged
-completion only after database-backed AI/provider configuration has synchronized
-and shared debug/ticker services are installed. Its PID plus fundamental HTTP
-route must then remain healthy across three consecutive observations. An
-unexpected core-fault marker fails that gate as soon as the fault is known,
-before durable fault recording and the configured process exit finish. Port
-files, REPL-port files, and Unix sockets belong to one process lifetime: a fresh
-spawn removes stale artifacts before waiting and refuses to unlink an artifact
-that is still serving an unregistered live process. Thus a reboot cannot turn an
-old port file into a false-positive boot, and an unmanaged listener is reported
-for inspection/adoption rather than silently replaced.
+Bare `bin/seon` and `bin/seon up` are the one usability boundary. In a source
+checkout the operator performs one complete canonical JVM-server + CLJS build,
+atomically publishes the artifact manifest, starts incremental watchers, and
+reconciles only processes whose artifact digest changed. A packaged install
+verifies its immutable shipped manifest. Every managed process starts in a new
+operating-system session, so closing the invoking terminal cannot reap it.
+
+The command returns only after one atomic application-ready signal agrees with
+direct process, socket, and HTTP checks. A log line, old artifact, fixed sleep,
+or repeated polling streak is never readiness truth. An unexpected core-fault
+marker fails the gate as soon as the fault is known. Port files and Unix sockets
+belong to one process lifetime: a fresh spawn removes stale artifacts before
+waiting and refuses to unlink an artifact that is still serving an unregistered
+live process. Thus a reboot cannot turn an old port file into a false-positive
+boot, and an unmanaged listener is reported for adoption or explicit operator
+action rather than silently replaced.
 
 Process ownership is `(pid, operating-system start stamp)`, never a bare PID.
 That identity survives the supervised shell's `exec` into Node/JVM while a
@@ -426,19 +453,19 @@ launch owns a complete operating-system session: stop sends TERM and, when
 needed, KILL to the process group and does not return until the group is
 drained, so a child from a pre-exec build cannot become a duplicate orphan.
 Atomic owner-PID locks serialize each process, while one lifecycle lock spans
-multi-process restart/reset/nuke transitions from teardown through any durable
-store mutation and final readiness. A second invocation therefore cannot
-reopen the writer while its store is being replaced.
+multi-process restart and named-cluster reset transitions from teardown through
+any durable database mutation and final readiness. A second invocation therefore
+cannot reopen the writer while its database is being replaced.
 
 The cluster runtime has one boot entry and a strict durable/runtime split:
 
-1. Open the durable Datahike store. A fresh store performs the one explicit
+1. Open the durable Datahike database. A fresh database performs the one explicit
    un-attributed genesis transaction that installs root and the transaction
-   user/process refs; a populated store reuses its native schema/index roots.
-2. Read the branch-qualified attachment descriptor. A fresh-store request
+   user/process refs; a populated database reuses its native schema/index roots.
+2. Read the branch-qualified attachment descriptor. A fresh-database request
    explicitly supplies current core and an initial canonical config value
    (`{}` is valid and materializes the safe floor). A
-   populated-store startup compiles core/config candidates only when that
+   populated-database startup compiles core/config candidates only when that
    operation explicitly supplies them. Overlay only selected candidates on the
    current database value in memory; absence never implies current source,
    environment, or `config/system.edn`.
@@ -454,7 +481,13 @@ The cluster runtime has one boot entry and a strict durable/runtime split:
    there is no ghost-pruning or config-healing pass.
 5. Atomically swap in the complete Malli registry, load only safe persisted
    declarations, instrument the complete loaded program once, install global services/listeners once,
-   recover fenced runs, and resume eligible agents.
+   and recover runtime services.
+6. On a provably fresh database only, call the same atomic birth compiler used by
+   `start!` to create one ordinary readable-word agent under root/boot
+   provenance. Root is the coordinator; this child is the initial work agent.
+   Existing/config-repair boots never manage or recreate it.
+7. Reconstruct clean eligible hosts. If the prior runtime crashed, apply the
+   crash rule below instead of resuming interrupted work.
 
 Config is an exact recovery surface for its declared populations/attributes,
 not an owner of the whole database. Native Datahike schema is accumulating
@@ -482,12 +515,12 @@ recorded original and instrumented once; a changed schema key reinstruments only
 the transitive function-contract dependents derived through Malli schema refs.
 Mint, resume, config apply, and render do no instrumentation work.
 
-A warm agent mint never calls this sequence. Mint commits the complete durable
+A warm agent birth never calls this sequence. Birth commits the complete durable
 birth value in one transaction under the actual submitting user/REPL process:
 the agent, initial components, home namespace, home-require rows, and safe
 declarations. Only after that commit does it create the transient wake trigger
 and runtime host. Resume is a third explicit operation that reconstructs one
-existing host without minting or overwriting initial state.
+existing host without creating or overwriting initial state.
 
 Runtime “replay” is limited to declaration loading. Scratch/effectful evals,
 Promises, handles, sockets, and external effects are never re-executed to mimic
@@ -496,15 +529,24 @@ The complete transition contract is
 [[docs/prds/runtime-reliability/provenance-and-lifecycle-design]].
 
 The external cluster supervisor performs process recovery; the in-pod root agent
-cannot survive stopping its own pod. The supervisor acts as the logical root
-database user for any repair transaction. It derives terminated, idle, paused,
-expired/exhausted, stranded-running-turn, and safely resumable open-run outcomes
-from durable FSM facts/CAS fences, records only necessary repairs as `{user root,
-process boot}`, rebuilds small transient host/wake state, and resumes what
-remains valid. An in-bounds stranded turn/eval is marked terminal error without
-replaying it; the same open run remains current and continues at its next turn
-behind the existing CAS fence. Deadline/exhaustion/watchdog cases still close
-and retract the run pointer. There is no stored per-agent resume checklist.
+cannot survive stopping its own pod. A clean planned restart first quiesces at
+turn boundaries. An unexpected crash is deliberately more conservative: the
+supervisor acts as the logical root database user, CAS-fences every interrupted
+open run, marks its running turn `:interrupted`, closes the run `:crashed`, and
+retracts its pointer. It does not fabricate an eval row for work whose result
+never committed; already committed eval facts remain unchanged. Every affected
+nonterminated agent therefore derives back to `:idle`; no replacement run opens
+and no source/effect is replayed.
+
+That same transaction also asserts one `:seon.runtime.recovery/id` anchor with
+the unexpected-exit reason and optional bounded diagnostic. It does not copy
+affected agent/run/turn refs or prior/current coordinates: those are derived by
+joining the anchor's transaction to the run/turn/pointer datoms it changed and
+to the commit graph. The root-visible notice is a render of that fact and stays
+prominent while an affected agent has opened no later run. Root or the human
+decides by sending a new message; recovery never guesses. Runtime handles/wake
+state are rebuilt only after the one durable transaction. There is no stored
+acknowledgement, per-agent resume checklist, or auto-recovery turn.
 
 The same external supervisor quiesces writers/hosts, records durable restore
 intent outside the branch being replaced, preserves an undo head, and
@@ -528,15 +570,26 @@ and manages other agents). These are two facets of the same elevated grant and t
 same initialization; there is **never** a second in-database orchestrator agent
 or overview entity. The external cluster process supervisor is not an agent.
 
+Root carries one concise role-specific context block: understand the fleet,
+start or select an ordinary agent for work, route/delegate to it, and respond to
+crash notices. It does not carry the retired instruction wall. Its operational
+surface is its fully specified home-required namespace cards—principally
+orchestration and UI navigation. Moving root into one of those namespaces makes
+that namespace's full source current and brings in only its colocated or
+state-gated context. This is the same context mechanism as every other agent,
+not a root-only documentation system.
+
 - **`seon.agent/start!` — the spawn function, a SOFT gate + a hard depth-cap backstop.**
-  `start!` is a core function (an alias of `create!`) that transacts a new **idle** child
-  agent and **writes `:seon.agent/parent` = the caller**. That write *is* the
-  activation of `:seon.agent/parent`; no separate writer exists. Two spawn
+  `start!` is the sole public core birth function. A private pure compiler builds
+  its transaction; there is no callable `create!`, `delegate!`, or forwarding
+  alias. It transacts a new **idle** child agent and **writes
+  `:seon.agent/parent` = the caller**. That write *is* the activation of
+  `:seon.agent/parent`; no separate writer exists. Two spawn
   controls are real. The `/call` HTTP gate separately admits only registered
   home-namespace browser callbacks; it neither grants nor mediates an agent's
   direct call to this core function:
-  - **Soft gate — home-requires.** The spawn functions (`start!`/`delegate!` via the
-    `seon.agent` alias) sit only in **root's** `:seon.eval/home-requires`
+  - **Soft gate — home-requires.** `start!` sits only in **root's**
+    `:seon.eval/home-requires`
     (`config/system.edn`'s `:seon.config/root-context`), so an ordinary agent's
     rendered context never surfaces them. It catches the honest case.
   - **Hard backstop — a computed depth cap.** A full-qualified
@@ -545,7 +598,7 @@ or overview entity. The external cluster process supervisor is not an agent.
     and **refuses** when the caller's depth ≥ `:seon.config/spawn-depth-cap`
     (default **1**: root at depth 0 spawns, a depth-1 subagent may not). The refusal
     is the standard **error ENVELOPE** (`{:seon.db/ok? false …}`), datom-free (no
-    child minted), never a throw. It is a **config-dialed number, never a name
+    child created), never a throw. It is a **config-dialed number, never a name
     list** — raise the dial + add the spawn requires to the general agent-context to
     deepen the tree.
 - **Start = durable creation + transient host, leaving the child idle.** `start!`
@@ -575,7 +628,7 @@ or overview entity. The external cluster process supervisor is not an agent.
 
 Message intake is **write-side**, independent of render (render is a pure read
 projection). When an inbound `:human` message lands, `seon.agent.message/message!`
-mints one **address-todo in the same tx** as the message (atomic with the
+creates one **address-todo in the same tx** as the message (atomic with the
 message's birth, gated on `:human` origin) — carrying a short clipped preview plus
 a back-ref to the message; the agent pulls the full message by its identity attr
 when it acts. "Addressed" then **derives** from that todo's completion — there is
@@ -616,7 +669,7 @@ mechanisms — extended, never duplicated — make every hang a value:
 - **One fence: the run-id CAS.** A late-settling await from a reaped or
   superseded run cannot corrupt state — its writes lead with the work-fence
   and abort at commit. Late results are values, absorbed or discarded.
-- **One leak-bound: the `result/<id>` store.** A never-settling Promise occupies
+- **One leak-bound: the `result/<id>` cache.** A never-settling Promise occupies
   the same capped runtime slot read by the analyzer-emitted `result/<id>` symbol
   and the internal reader. Value and analyzer handle evict together
   oldest-first and disappear on restart. A late settlement updates only a slot
@@ -654,7 +707,8 @@ and it is **tiered**:
   the CPU-proof backstop SCI can't deliver (a native loop, ReDoS) and the
   deadline-watchdog's only real kill.
 - **Capability** (*what* code may do) → the **SCI curated surface**. Agent code runs
-  in SCI exposing only GRANTED fns (`db/query`, `message!`, the wire capabilities);
+  in SCI exposing only granted fns (`db/query`, `message!`, the database protocol
+  capabilities);
   `fs`/`child_process`/`net`/`require` aren't in scope, so a worker can't format the
   disk — the symbol doesn't resolve. A bare worker has full process perms and
   `terminate()` can't stop an instant `fs` call, so **untrusted agent code MUST go
@@ -705,7 +759,7 @@ bitemporal, reactive DB. We have one, so:
   `:seon.agent.run/*`, `:seon.agent.turn/*`, message, todo, schedule, the
   `:seon/error` model, and the `my.kb` / `my.plan` (tree) / `my.agent` domain
   schemas + data-agent-ref scoping.
-- [[ui]] — the block / render / tile / slot / layout system, the seed-copy +
+- [[ui]] — the block / render / surface / slot / layout system, the seed-copy +
   variadic `install!`/`remove!` override model, the pages (root agent view / view /
   app), routing-as-data via reitit + the capability gate, and the gzip-morph
   SSE live channel.
@@ -714,6 +768,6 @@ bitemporal, reactive DB. We have one, so:
 - [[roadmap]] — current code state, the gap, and the dependency-ordered,
   replace-in-place migration to this target.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db
-  is a value, only values cross the wire, CAS-as-assertion,
+  is a value, only values cross the protocol, CAS-as-assertion,
   resolved-coordinate caching). Read
   before touching the loop.
