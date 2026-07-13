@@ -958,7 +958,7 @@
      ;; CP-3 move 4: the citable RESULT-BODY cap, selected by the eval's AGE
      ;; from the transcript block's `::result-decay` levels — computed by the
      ;; transcript converter (which reads the block) and threaded in here.
-     ;; ABSENT (every non-transcript caller: gym, tests, direct calls) →
+     ;; ABSENT (every non-transcript caller: tests and direct calls) →
      ;; `result-body-render-cap` (16384) = byte-identical to today.
      result-body-cap :seon.render/result-body-cap
      ;; Escape-clipping THREADED on the row (byte-exact path): the transcript

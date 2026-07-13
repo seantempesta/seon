@@ -260,10 +260,10 @@ config the agent runs under (provider/model/temperature/max-tokens/
 thinking), COMPUTED at response time by the pure resolver
 `seon.ai/resolved-config` (agent overrides → config row → shipped
 defaults; derive-don't-store, [[data-model]] §4.4 — per-turn historical
-exactness is the same resolver over an as-of db). External harnesses drive per-sample
-ephemeral clusters by port; the gym drives the same primitives in-process.
-The answer key never enters the pod — scoring stays host-side. Benchmark
-vocabulary is harness-side only.
+exactness is the same resolver over an as-of db). Inspect AI drives per-sample
+ephemeral clusters by port through this same production boundary; there is no
+in-process evaluator lifecycle. The answer key never enters the pod — scoring
+stays host-side. Benchmark vocabulary is harness-side only.
 
 ## Build path
 
@@ -272,7 +272,8 @@ Turn capture is partly LIVE (2026-07-02): every turn persists legacy
 `seon.agent.debug/turn` /
 `turn-diff` reconstruct/compare turns from them. The blob refs are the ONE
 capture path — the old gated `seon.debug` file tree (`SEON_DEBUG_CAPTURE`,
-`logs/turns/`) is deleted; the gym driver reads prompts back by blob hash.
+`logs/turns/`) is deleted; Inspect AI and debug projections read prompts back
+by blob hash.
 Remaining gaps—the full store/branch/commit coordinate and honest legacy-t
 migration, the as-of per-block re-render inside `agent-debug/turn`, the
 volatile prompt inputs as recorded data, grep/embedding targets not yet

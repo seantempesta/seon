@@ -101,8 +101,8 @@ it (mirrors `seon.dev.test-preload`):
   (classpath fixed at watcher launch); file edits inside the root hot
   reload like seon's own.
 - `bin/test-cljs` with the env set sweeps the downstream's `-test$`
-  nses too (feature). seon CI/gym stay env-clean — `bin/gym` strips
-  the `SEON_EXTRA_*` vars.
+  nses too (feature). Run core-only CI from an environment with the
+  `SEON_EXTRA_*` vars unset.
 - One seon checkout = one flavored bundle at a time (combined output
   lands in seon's `out/`).
 - `.cljs` files only for the extra root (boot source read probes
@@ -111,8 +111,7 @@ it (mirrors `seon.dev.test-preload`):
 
 ## Key files
 
-- `bin/seon` (injection helpers + `print-cmd`), `bin/test-cljs`,
-  `bin/gym` (env-clean)
+- `bin/seon` (injection helpers + `print-cmd`) and `bin/test-cljs`
 - `src/seon/client.cljs` — `!extra-core-vars`, reserved-prefix
   guard, `read-src-file` extra roots, full-source ns-rows
 - `src/seon/indexing.clj` — `first-party-file?` extra root

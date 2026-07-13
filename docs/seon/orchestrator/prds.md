@@ -20,8 +20,7 @@ target design.
 | agent-fsm | active | The core program: config-driven agent init, the data-FSM loop, blocks/renders/tiles, the `my.*` toolkit. Target design is the canonical set in `docs/seon/architecture/`; the sole "we-are-here" doc is the roadmap. | [[prds/agent-fsm/CLAUDE]], [[prds/agent-fsm/roadmap]], [[architecture]] |
 | diffusion-dynamic-context | active | Diffusion LLM as a dynamic-context provider: unified `refine` oracle, control loop, worker clamp/infill/renoise/KV-reuse. Offline-proven both sides; deploy+measure remain (owner-driven). | [[prds/diffusion-dynamic-context/CLAUDE]], [[prds/diffusion-dynamic-context/north-star]] |
 | embeddings | dormant | Semantic recall on Vertex `gemini-embedding-2` + Proximum HNSW on the wire-server. Gated behind `SEON_EMBED`. | [[prds/embeddings/vertex-usage-reference-2026-06-25]] |
-| gym-v2 | active | Agent exercise harness: long-term planning + database-memory drives, scored without coaching. | [[prds/gym-v2/design]] |
-| inspect.ai bridge | research | Benchmark bridge driving seon agents from Inspect AI; spike lives under agent-fsm research. | [[prds/agent-fsm/research/inspect-bridge-spike/init-agent-unification-spec-2026-07-01]] |
+| Inspect AI evaluations | active | Sole model/agent evaluation control plane; drives the real Seon boundary and owns samples, scorers, epochs, and `.eval` artifacts. | `src-inspect-ai/README.md`, [[prds/runtime-reliability/research/evaluation-harness-replacement-2026-07-12]] |
 
 ## Paused (JVM-track era)
 

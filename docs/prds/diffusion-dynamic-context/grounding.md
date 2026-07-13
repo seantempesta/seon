@@ -27,7 +27,7 @@ tags: [reference, agent, schema, flow]
 | **forced-spec / missing-spec detector** | `src/seon/agent.cljs:210,215`; `src/seon/eval.cljs:1357` | `:seon.fn/spec` present + no `:seon.fn/schema-error` = the detector |
 | **the mode schema / malli shapes** | `src/seon/db/internal.cljs:147-360` (the malli→datahike bridge); `src/seon/schema.cljc:193` | what each registered attr bridges to; `register!` ≠ bridge |
 | **the `:diffusiongemma` provider** | `src/seon/ai/openai_compat.cljs:322,415`; `src/seon/ai.cljs:160`; `src/seon/agent/turn.cljs:330-357`; `src/seon/retry.cljs:167` | the two-backend dispatch + the free transport-retry |
-| **the gym predicates** | `test/seon/gym/driver.cljs:701-775` (`eval-predicate`), `:1585` (hermetic `:memory` boot) | scenario→predicate→scorecard; a throwing predicate scores RED |
+| **the evaluation control plane** | `src-inspect-ai/src/seon_inspect/tasks/e1_spec_fn.py`; `src-inspect-ai/src/seon_inspect/oracle_scorers.py`; `src-inspect-ai/src/seon_inspect/offline_proof.py` | Inspect owns samples, scorers, epochs, and `.eval` artifacts; Seon remains the system under test |
 | **deploy stability / keep-warm** | `reference-code/flash/.../serverless.py:1294,571`; `reference-code/runpod-python/.../rp_job.py:150` | `imageName` is structural; FlashBoot is a platform-side toggle only |
 
 ## transformers v5.11.0 — the generation seams

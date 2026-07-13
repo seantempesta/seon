@@ -101,8 +101,8 @@ inclusion bar in [[context-rebuild]]).
 ```bash
 bin/seon status                       # pods/pids/port (7890 default)
 bin/seon restart pod                  # wait for "auto-boot ready" in logs/pod.log
-bin/seon cluster reset default        # fresh world — WIPES the store; re-seeds
-bin/gym-scorecard                     # free fitness signal (no LLM spend)
+bin/seon cluster reset default        # fresh default cluster — WIPES the store; re-seeds
+src-inspect-ai/.venv/bin/pytest       # offline harness and scorer proof
 # eval suite: src-inspect-ai/README.md run matrix → evals/scorecard.jsonl
 # live-drive: (seon.db/with-agent "root" (fn [] (seon.agent/start! {:seon.agent/purpose "…"}))) ; then rearm-wake-triggers!
 ```
@@ -120,7 +120,7 @@ default` after a context/block change to re-seed the shared pod.
 - **Architecture (idealized system):** [[architecture]] · [[context]] ·
   [[data-model]] · [[agent-runtime]] · [[ui]] · [[observability]] · [[toolkit]]
 - **Eval-lane docs:** [[eval-design]] (the spec) · [[eval-lane-plan]] (work plan
-  + the boundary) · harness code in `src-inspect-ai/` (do not maintain from the
+  and boundary) · harness code in `src-inspect-ai/` (do not maintain from the
   tooling lane)
 - **Audits (2026-07-11):** [[research/claude-md-audit-2026-07-11]] ·
   [[research/vocabulary-audit-2026-07-11]]

@@ -1,10 +1,14 @@
 ---
 type: prd
-status: active
+status: abandoned
 tags: [prd, agent]
 ---
 
 # Agent-Gym Scenario Catalog (2026-06-10)
+
+> Retired on 2026-07-12. This is historical design evidence only. Inspect AI
+> under `src-inspect-ai/` is the sole evaluation control plane; no scenario
+> format or compatibility reader survives.
 
 The WHAT of the gym (§7 item 12 of
 `cljs-finish-clj-pivot-plan-2026-06-09.md`). The harness/driver (scratch

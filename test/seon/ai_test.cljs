@@ -56,8 +56,8 @@
 ;; env-row — reads SEON_AI_*, parses to concrete types. SNAPSHOT/
 ;; RESTORE, never delete-what-we-didn't-set: these tests mutate the
 ;; OPERATOR's process.env, and the old js-delete teardown wiped a live
-;; SEON_AI_PROVIDER=anthropic mid-suite — a paid "Opus" gym run
-;; silently drove DeepSeek (opus-live-tests 2026-06-12, limitation 2).
+;; SEON_AI_PROVIDER=anthropic mid-suite — a paid evaluation silently drove
+;; DeepSeek (opus-live-tests 2026-06-12, limitation 2).
 ;; ============================================================
 
 (def ^:private seon-ai-env-vars

@@ -186,7 +186,10 @@ The milestone table above frames the long arc on the original JVM runtime. Since
 - **A live ClojureScript REPL is the agent's entire surface — no fixed tool catalog.** The agent reads, computes, stores, and replies by evaluating Clojure forms against the shared database. Two properties make this tractable and are the newest load-bearing pieces: the agent's **whole context is a render of the database** (every message, eval, todo, namespace, and document is a *renderable* projected from datoms by its schema — one recursive walker, two views: text for the model, HTML for the human), and its **loop is a function of the database** (runnability is a single datom; a datahike tx-listener wakes the agent when a message lands; the stop policy is one `cond` over DB state). Context is *derived*, not accumulated — fix the underlying data and the surface heals itself, with nothing stored that needs clearing.
 - **Dual-track storage that converges at the wire.** The JVM wire-server is the sole authoritative datahike writer and carries a Proximum HNSW vector index; the pod is an on-device read replica that executes functions locally and forwards writes over the socket. Reads are local lazy database values, so **pod memory scales with the working set, not the corpus**.
 - **Measured scale.** On an isolated benchmark store, point lookups and ref-joins stay sub-millisecond and KNN vector search stays ~5 ms at **100k entities / ~28k vectors**, with the heap at ~**150 MB** after GC and storage at ~**9.5 KB/entity**. Reads scale on a `log(n)` / lazy-paging curve; the one real cost is *bulk write* throughput (HNSW insertion + file commits), a one-time, cache-mitigated batch cost that never touches the read path. Concrete evidence the foundation holds for a six-figure-entity personal corpus. Full numbers: [`docs/prds/embeddings/db-scalability-benchmark-2026-06-25.md`](docs/prds/embeddings/db-scalability-benchmark-2026-06-25.md).
-- **The gym.** An outcome + LLM-judge evaluation harness that measures whether an agent can store data and then cold-retrieve and process it — the measurement loop for context quality, so changes to what the agent sees get scored rather than guessed at.
+- **Inspect AI evaluations.** The `src-inspect-ai/` package drives the real
+  agent boundary, restarts pods, scores durable facts and trajectories, and
+  retains portable `.eval` artifacts. It is the sole model/agent evaluation
+  control plane; focused CLJS tests own deterministic production behavior.
 
 **Designed and proven against the real API, being wired in.**
 
@@ -247,4 +250,3 @@ For licensing inquiries, partnership questions, contracting opportunities, or an
 ---
 
 *This README is a living document. Last updated 2026-06-25.*
-

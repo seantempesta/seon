@@ -141,8 +141,8 @@
 ;; The worker `output` map is Google/RunPod's shape, not seon's — a :map
 ;; boundary (like :seon.ai/provider-fields). We surface a normalized
 ;; :seon.ai/text (output.text / completion_text / middle_text per mode)
-;; for the agent loop, the RAW worker output for experiments (the gym
-;; asserts on it), and the errors-as-values envelope.
+;; for the agent loop, the RAW worker output for experiments and deterministic
+;; adapter tests, and the errors-as-values envelope.
 (schema/register! ::worker-output :map)
 (schema/register! ::response
   [:map

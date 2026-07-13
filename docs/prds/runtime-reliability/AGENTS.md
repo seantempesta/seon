@@ -30,7 +30,14 @@ integrated: Datahike through upstream 0.8.1729 plus the lifecycle/versioning
 fixes, Konserve through upstream 0.9.356 plus legacy cross-runtime header reads,
 and Konserve-sync 0.1.35. The fake Konserve version shim is gone and both fork
 sources are exact submodules. Parent and fresh-cluster acceptance are the active
-gate. The authoritative target is
+gate. The homegrown evaluator is now retired atomically: its CLJS
+driver, predicate language, scenarios, scorecards, gated pseudo-tests, scripts,
+and live docs are deleted. Focused production tests already own its deterministic
+regressions; Datahike itself owns the former multi-group join regression. Inspect
+AI is the sole agent/model evaluation control plane. Its restart/resume planning
+journey is implemented; the schema-backed memory and UI journeys remain explicit
+Inspect work rather than reasons to retain a compatibility harness. The
+authoritative target is
 [[provenance-and-lifecycle-design]] and the ordered implementation/commit plan
 is [[roadmap]].
 
@@ -142,9 +149,8 @@ target semantics and are not available until Phase 5 lands.
    lifecycle.
 7. Unify live subscriptions/feeds, add observed-read invalidation, then bound
    legitimate renders.
-8. Move unique gym regressions to their subsystem owners, drive the canonical
-   restart/planning and store/retrieve journeys through Inspect AI, and delete
-   the homegrown gym atomically.
+8. Finish the schema-backed store/retrieve and mechanical UI journeys through
+   Inspect AI; the duplicate homegrown evaluator is already deleted.
 9. Run the full cold/restart/agent-workflow/browser/feed/CPU/RSS acceptance
    matrix and graduate the PRD.
 
@@ -170,11 +176,11 @@ target semantics and are not available until Phase 5 lands.
   sites, Malli ref/wrapper behavior, exact-data target, and acceptance matrix.
 - [[research/test-runtime-trim-design-2026-07-12]] — measured full-seed test
   repetition, immutable-DB test seams, behavioral assertion policy, and the
-  fast/runtime/process suite cutover. Its proposed gym refactor is superseded:
-  gym is being replaced, not rebuilt.
+  fast/runtime/process suite cutover. Its proposed evaluator refactor is
+  superseded by the completed atomic removal.
 - [[research/evaluation-harness-replacement-2026-07-12]] — why the existing
-  Inspect AI integration is the one replacement control plane, which gym
-  evidence moves to subsystem tests, and the atomic retirement sequence.
+  Inspect AI integration is the one replacement control plane, which historical
+  evidence belongs to subsystem tests, and the completed retirement sequence.
 - [[docs/seon/architecture/agent-runtime]], [[docs/seon/architecture/data-model]],
   and [[docs/seon/architecture/ui]] — ideal system docs to keep current.
 - `src/seon/client.cljs`, `src/seon/state.cljs`, `src/seon/db.cljs`,

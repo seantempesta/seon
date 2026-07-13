@@ -514,7 +514,7 @@
    Reactive-context (no cache): the GLOBAL `::config` row with the CURRENT agent's `::agent-*`
    overrides laid over it (config-driven agent-init — per-agent LLM). The agent
    is the ambient `seon.db/current-agent-id` (fiber-local across the adapter's
-   awaits); OUTSIDE an agent scope (boot, gym render) it is just the global row.
+   awaits); OUTSIDE an agent scope (boot or direct render) it is just the global row.
    `:inherit` (the default) ⇒ the global value = byte-parity for a no-override
    agent. NEVER throws ({} on the conn-not-up boot edge). 1-arity takes an
    explicit db value (global-only — a render read, not an agent call)."

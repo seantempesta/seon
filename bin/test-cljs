@@ -87,8 +87,8 @@ if [ "$BUILD" = "1" ]; then
   #
   # SEON_EXTRA_SRC (task #36): when set, the downstream's deps.edn project
   # joins the classpath via -Sdeps :local/root — the :test build's
-  # :ns-regexp "-test$" then sweeps THEIR tests too (feature for them;
-  # seon CI/gym stays env-clean — bin/gym strips these vars). The
+  # :ns-regexp "-test$" then sweeps THEIR tests too (feature for them).
+  # The
   # SEON_EXTRA_PRELOAD entry ns is appended to :devtools :preloads via
   # --config-merge (node-test honors preloads — shadow node_test.clj:50),
   # so extra-core registration is live for tests that exercise it.

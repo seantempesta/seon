@@ -1131,8 +1131,8 @@
 
    Read from env `SEON_RENDER_STRICT` (`1`/`true`/`on`/`yes` → ON; anything
    else / unset → OFF). DEFAULT OFF: a bare pod boot (the live prod agent) is
-   graceful. Turned ON explicitly in dev / test / gym / benchmark contexts
-   (`bin/test-cljs` exports it; a gym/bench driver sets it per run) so a
+   graceful. Turned ON explicitly in dev / test / benchmark contexts
+   (`bin/test-cljs` exports it; a benchmark driver may set it per run) so a
    silent render failure SCREAMS the moment it happens instead of hiding in a
    one-line `⚠ … render failed` guard. This is the config seam the
    `seon.render` guards + the transcript converter route their swallow through

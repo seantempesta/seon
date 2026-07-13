@@ -68,7 +68,7 @@
 ;;; and then RE-RUN the same builders inside core-index-tx / prune-core-ghosts!
 ;;; at a later instant (T2) and assert the two agree (idempotent no-op, exactly
 ;;; the seeded ghosts, only the drifted ns re-emits). When the overnight loop
-;;; runs this suite concurrently with the gym scorecard (or another run), a
+;;; runs this suite concurrently with another test/evaluation process, a
 ;;; mutation of those globals between T1 and T2 reclassifies a boot-authored
 ;;; row as a ghost / re-emits a fn row, flaking the assertions — even though
 ;;; each conn here is a fresh per-test :memory store.

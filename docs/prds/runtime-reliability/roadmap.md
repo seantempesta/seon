@@ -126,8 +126,9 @@ The token-reporting surface audit is also dispositioned: required active paths
 now use the single `seon.ai.tokens` estimator at reporting boundaries; public
 filesystem/web/shell contracts no longer expose private raw-size quantities;
 and operational substring/transport/RAM coordinates remain exact and private.
-The non-gym focused CLJS gate is green at 151 tests / 686 assertions, and the
-gym-driver gate is green at 33 tests / 165 assertions. The optional JVM
+Before retirement, the focused CLJS gate was green at 151 tests / 686
+assertions and the duplicate evaluator gate was green at 33 tests / 165
+assertions. The optional JVM
 embedding-writer log contract is green at 1 test / 3 assertions. The full-suite
 script now trusts one authoritative Node run: a missing final summary fails
 without a discovery process, polling, killing, or a fresh-process tail retry
@@ -144,15 +145,17 @@ coverage passes 20 tests / 75 assertions with no synthetic core-fault or
 data-loss output; the result-var fixture now owns the CLJS root connection for
 its complete asynchronous span.
 
-The test-runtime trim design identifies 24 full cluster seeds in the gym driver
-namespace and two obsolete reconciler seeds. Gym alone accounts for roughly
-half the Node gate. The owner subsequently marked the homegrown gym for
-replacement, possibly by Inspect AI, so no new predicate/scorer architecture
-will be built into it. Unique regressions move to their production owners,
-scenario/evidence data remains available for the selected external harness, and
-the old driver/scorer leaves the default gate and is deleted. The independent
-immutable-Datahike test support, test tiers, and presentation-text cleanup still
-apply.
+The test-runtime trim design identified 24 full cluster seeds in the homegrown
+evaluator and two obsolete reconciler seeds. The evaluator alone accounted for
+roughly half the Node gate. It is now deleted atomically: no driver, predicate
+schema, scenario EDN, scorecard, paid pseudo-test, command, or runtime helper
+remains. Deterministic regressions were already covered by their production
+owners; the one unique multi-group identity-join regression is pinned in
+Datahike's own CLJS suite. Inspect AI is the sole model/agent evaluation control
+plane. Its restart/resume planning journey exists; memory store/later-retrieve
+and UI journeys remain work in Inspect, with no compatibility path. The
+independent immutable-Datahike test support, test tiers, and presentation-text
+cleanup still apply.
 
 - Capture cold boot, converged restart, five sequential mints, one concurrent
   mint attempt, core reload, and config apply timings.
@@ -856,19 +859,24 @@ by whole views; no SCI budget increase masks unbounded work.
 
 Commit: bounded render/read paths and profiling evidence.
 
-## Phase 14 — replace the homegrown gym with Inspect AI
+## Phase 14 — complete Inspect journeys after evaluator retirement
 
-Retire the duplicate evaluation lifecycle after the runtime, coordinates, and
-restore surfaces it must drive are stable. The existing `src-inspect-ai/`
-integration is the only evaluation control plane; Harbor remains an optional
-upstream source of containerized benchmark tasks, not a second Seon harness.
+The duplicate evaluation lifecycle was retired early by owner decision on
+2026-07-12. The existing `src-inspect-ai/` integration is the only evaluation
+control plane; Harbor remains an optional upstream source of containerized
+benchmark tasks, not a second Seon harness. This phase now completes the
+remaining Inspect journeys after the runtime coordinate/restore operations they
+need become stable.
 
-- Inventory every gym assertion and classify it as a production subsystem
+- Completed: audited every retired assertion as a production subsystem
   regression, an end-to-end agent journey, presentation-only text, or obsolete
   duplicate coverage.
-- Move unique deterministic regressions to the owning subsystem tests. Keep
-  those tests behavioral: assert datoms, state transitions, process survival,
-  and rendered structure rather than exact model prose.
+- Completed: verified deterministic regressions at their owning production
+  tests and the Datahike multi-group query test; no scenario/predicate code was
+  transplanted.
+- Completed: removed the evaluator namespaces, drivers, scenarios, scorecards,
+  scripts, default discovery, live references, and its config-only helper in one
+  cutover. No compatibility wrapper remains.
 - Express the first two Inspect journeys through Seon's public operator surface:
   a multi-step plan that resumes after a pod restart, and schema-backed facts
   stored in one turn then queried in a later turn.
@@ -878,16 +886,13 @@ upstream source of containerized benchmark tasks, not a second Seon harness.
 - Replace the homegrown scorecard writer with one import/projection of Inspect
   result facts. Keep raw artifacts outside the hot Datahike graph and persist
   only the facts needed for comparison and provenance.
-- Remove gym namespaces, drivers, scenarios, scorecards, scripts, and default
-  test discovery in the same commit once the two journeys and migrated
-  regressions are green. No compatibility wrapper remains.
 
-Exit proof: the fast CLJS gate contains the migrated subsystem regressions but
-no gym namespace; Inspect can drive both canonical journeys against a freshly
-started pod and after restart; failures identify a durable run/turn/eval fact;
-and repository search finds no live homegrown gym control path.
+Exit proof: the fast CLJS gate contains the subsystem regressions with no
+retired evaluator namespace; Inspect can drive both canonical journeys against a
+freshly started pod and after restart; failures identify a durable run/turn/eval
+fact. Repository search already finds no live homegrown evaluator control path.
 
-Commit: Inspect AI evaluation control plane and atomic gym retirement.
+Commit: complete the remaining Inspect AI journeys and lifecycle integration.
 
 ## Phase 15 — system acceptance and graduation
 

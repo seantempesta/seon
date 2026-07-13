@@ -666,8 +666,8 @@
         cur-ns   (ctx/current-ns {:seon.agent/id id :seon.db/db db})
         ns-str   (if (keyword? cur-ns) (name cur-ns) (str cur-ns))
         ;; Render handle: the recursive walker injects `:seon.render/render`
-        ;; (ONE section model). When the section is called DIRECTLY (the
-        ;; gym driver, the `seon.agent/transcript-block` re-export), there
+        ;; (ONE section model). When the section is called DIRECTLY (through
+        ;; the `seon.agent/transcript-block` re-export), there
         ;; is no injected handle — fall back to a local ai render so the
         ;; same code path produces the same String.
         render*  (or render-fn #(render/render :seon.render/ai input %))
@@ -700,7 +700,7 @@
         ;; The injected node (this block's OWN map, `:seon.render/node` —
         ;; same convention as the warnings block's :seon.warn/ns override)
         ;; takes precedence; the stored block entity is the fallback for
-        ;; direct callers (gym driver, tests) with no injected node. On the
+        ;; direct callers and tests with no injected node. On the
         ;; render-context path node = the stored block, so this is
         ;; byte-identical — it additionally lets a PROFILE caller (the
         ;; seon.repl.autocomplete projection) pass per-render config.

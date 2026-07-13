@@ -585,7 +585,7 @@
      :seon.db/db                the FROZEN db value the loop pinned for this
                                 turn (§8a — the prompt render + the loop's
                                 bound-checks share ONE basis-t); defaults to
-                                `@*conn*` when absent (gym/bootstrap callers)
+                                `@*conn*` when absent (bootstrap/direct callers)
 
    Wraps the pipeline in a `with-tx-context` scope so every transact (incl.
    the per-form txs inside `eval-batch!`) auto-tags with the causality

@@ -1,10 +1,14 @@
 ---
 type: prd
-status: draft
+status: abandoned
 tags: [prd, agent]
 ---
 
 # Gym Upgrade — per-turn fidelity, harness integrity, context-driven improvement (2026-06-11)
+
+> Abandoned on 2026-07-12 when the homegrown evaluator was deleted atomically.
+> This file is historical design evidence, not an implementation plan. Inspect
+> AI under `src-inspect-ai/` is the sole evaluation control plane.
 
 Fresh-read spec. Executes the findings of
 `research/gym-disconnect-analysis-2026-06-11.md` (read it for evidence;

@@ -155,17 +155,6 @@
   (contains? (:seon.config/always (config/namespaces-policy))
              (if (keyword? ns-name) ns-name (keyword (str ns-name)))))
 
-(defn always-full-my-nses
-  "The `my.*` members of the config `:seon.config/always` set.
-
-   The toolkit exemplars `my.kb`/`my.data`/`my.ui`/`my.canvas` by default. DERIVED from
-   config, never hardcoded. NOT a render-selection input (the `:namespaces`
-   section no longer pins `:always`); used by the GYM harness
-   (`seon.gym.driver`) to derive the toolkit aliases it seeds."
-  {:malli/schema [:=> [:cat] [:set :keyword]]}
-  []
-  (into #{} (filter my-ns-name?) (:seon.config/always (config/namespaces-policy))))
-
 (defn full-source-ns?
   "True when `ns-name` carries its REAL FULL FILE TEXT as `:seon.ns/source`.
 

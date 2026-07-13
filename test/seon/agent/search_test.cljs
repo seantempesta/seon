@@ -43,9 +43,8 @@
 
 (def ^:private fixture-dir
   ;; Per-PROCESS unique dir (pid-scoped). grep searches a REAL fs dir, so the
-  ;; fixture must be hermetic: a SHARED tmp/search-test lets a concurrent
-  ;; process (the overnight loop runs this suite + the gym scorecard, or two
-  ;; test runs, at once) write/teardown the same files mid-grep — skewing the
+  ;; fixture must be hermetic: a SHARED tmp/search-test lets concurrent
+  ;; test processes write/teardown the same files mid-grep — skewing the
   ;; honest count/path assertions intermittently. A pid-scoped dir, wiped on
   ;; :before and removed on :after, makes every count deterministic.
   (.resolve npath (str "tmp/search-test-" (.-pid js/process))))

@@ -404,7 +404,7 @@
 ;; ============================================================
 ;; Fail-loud render dial — the ONE place every render swallow-guard routes
 ;; its caught exception. When `seon.config/render-strict?` is ON (dev / test
-;; / gym / benchmark), a render/converter failure RE-THROWS with the
+;; / benchmark), a render/converter failure RE-THROWS with the
 ;; offending block name + the full malli explain (a silent render failure
 ;; SCREAMS the moment it happens); when OFF (a live prod agent), it returns
 ;; nil so the caller falls back to today's graceful guard — no block ever
@@ -489,7 +489,7 @@
           ;; bypassing the tail). recorded? skips an inner funnel's datom.
           (when-not (err/recorded? e)
             (err/record! {:seon.error/raw e :seon.error/fault (err/fault-for sym)}))
-          ;; STRICT dial: dev/test/gym → re-throw LOUD; prod → graceful guard.
+          ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → graceful guard.
           (strict-fail! sym e)
           (canvas/error-tile
             {:seon.error/message (str sym " threw: " (or (.-message e) (str e)))
@@ -719,7 +719,7 @@
       ;; strict-fail! (re-throws in strict mode); recorded? skips a funnel dup.
       (when-not (err/recorded? e)
         (err/record! {:seon.error/raw e :seon.error/fault :core}))
-      ;; STRICT dial: dev/test/gym → re-throw LOUD; prod → graceful guard.
+      ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → graceful guard.
       (strict-fail! :block e)
       (let [msg (str "block render failed: " (err/->message e))]
         (case view
@@ -915,7 +915,7 @@
                             :seon.error/fault (if (or (err/agent-authored-sym? value)
                                                       (vector? value))
                                                 :agent :core)}))
-            ;; STRICT dial: dev/test/gym → re-throw LOUD (catch a broken tile
+            ;; STRICT dial: dev/test/benchmark → re-throw LOUD (catch a broken tile
             ;; the moment it renders); prod → the calm derived banner below.
             (strict-fail! :canvas e)
             ;; A broken tile must never crash the render and never show the
@@ -960,7 +960,7 @@
           ;; strict-fail! (re-throws in strict mode); recorded? skips a dup.
           (when-not (err/recorded? e)
             (err/record! {:seon.error/raw e :seon.error/fault (err/fault-for sym)}))
-          ;; STRICT dial: dev/test/gym → re-throw LOUD; prod → legible line.
+          ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → legible line.
           (strict-fail! sym e)
           (str "[render error — " sym " threw: "
                (or (.-message e) (str e)) "]"))))))
@@ -1139,7 +1139,7 @@
                                               (if (and (symbol? sv)
                                                        (err/agent-authored-sym? sv))
                                                 :agent :core))}))
-          ;; STRICT dial: dev/test/gym → re-throw LOUD (block name + full
+          ;; STRICT dial: dev/test/benchmark → re-throw LOUD (block name + full
           ;; malli explain); prod → fall through to the graceful guard below.
           (strict-fail! (renderable-id node) e)
           (if (= view :seon.render/ai)
@@ -1219,7 +1219,7 @@
                     ;; strict mode).
                     (when-not (err/recorded? e)
                       (err/record! {:seon.error/raw e :seon.error/fault :core}))
-                    ;; STRICT dial: dev/test/gym → re-throw LOUD; prod → guard.
+                    ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → guard.
                     (strict-fail! block-name e)
                     (canvas/error-tile
                       {:seon.error/message (str block-name " render failed: "

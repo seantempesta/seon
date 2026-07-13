@@ -2239,12 +2239,11 @@
 
 (defn ^:async boot-seed!
   "THE core boot seed — one code path for reconciling a store's managed
-   startup facts, shared by `start-runtime!` and isolated scenario setup, so the
-   two can never drift again (the gym hand-mirrored this sequence and
-   drifted twice). The agent's identity is NOT seeded — SOUL.md /
+   startup facts, shared by `start-runtime!` and isolated runtime setup so
+   callers cannot drift. The agent's identity is NOT seeded — SOUL.md /
    AGENTS.md are read LIVE as context sections every render
-   (`seon.agent.ctx/file-block`), so gym and live prompts get the same
-   identity with no seed step.
+   (`seon.agent.ctx/file-block`), so every prompt gets the same identity with
+   no seed step.
 
    Steps, in boot order. TWO provenance layers:
 
@@ -2589,7 +2588,7 @@
         ;; configured with its key unset silently drove a whole trial on the
         ;; stub. ERROR level + the SEON-STUB-LLM token so harnesses can
         ;; refuse to dispatch against an accidental stub; boot still
-        ;; proceeds — the suite/gym rely on the stub deliberately.
+        ;; proceeds — deterministic tests rely on the stub deliberately.
         (log/error-console! "seon.client"
                             (str "SEON-STUB-LLM: using stub LLM — provider "
                                  (name provider) " is configured but its API "

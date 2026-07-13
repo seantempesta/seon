@@ -29,10 +29,9 @@
 (schema/register! :warntest.dom/duration-minutes :int)
 (schema/register! :warntest.dom/date :inst)
 (schema/register! :warntest.dom/type :keyword)
-;; The provenance test's agent-authored DATA domain (same registration
-;; the S-21 gym scenario seeds; renamed :seon.workout → :my.workout
-;; 2026-06-11 — agent data domains are my.*, the old name is out of
-;; the shipping product).
+;; The provenance test's agent-authored DATA domain. It was renamed
+;; :seon.workout → :my.workout on 2026-06-11: agent data domains are my.*,
+;; and the old name is out of the shipping product.
 (schema/register! :my.workout/date :string)
 ;; The unmarked-entity-kinds fixture: an identity attr plus a
 ;; registered-but-UNMARKED :map schema carrying it (the shape the old
