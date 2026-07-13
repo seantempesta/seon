@@ -460,6 +460,12 @@ multi-process restart and named-cluster reset transitions from teardown through
 any durable database mutation and final readiness. A second invocation therefore
 cannot reopen the writer while its database is being replaced.
 
+`SEON_CONFIG` is an operation-scoped boot input, not managed-process identity.
+An explicit config operation restarts the pod through the normal reconciliation
+boundary so the candidate is consumed once; later config-free health checks and
+boots compare only durable runtime environment. The database facts remain the
+authority after the operation completes.
+
 The cluster runtime has one boot entry and a strict durable/runtime split:
 
 1. Open the durable Datahike database. A fresh database performs the one explicit

@@ -88,13 +88,20 @@ group ownership pass 10 focused tests/29 assertions. Phase 3 remains open for
 active caller and test-door migration; the default-cluster cold live proof now
 passes, so ACME and Inspect can follow.
 
-The 2026-07-13 canonical restart rebuilt the writer, client, self-host
-bootstrap, and CSS, replaced the watcher/writer/pod process identities, and
-returned READY. The pod reopened the existing database, attached its replay/live
-feed with zero replay gap, replayed 2/2 forms, instrumented 772 definitions with
-zero bad specs, resumed `root` and `little-cars-laugh` idle, and preserved the
-agent's database-backed canvas. `/`, `/agents`, and `/data` returned HTTP 200;
-the agent feed returned gzip and an immediate `datastar-patch-elements` event.
+The latest 2026-07-13 cold reset rebuilt a fresh default database and returned
+READY. A subsequent config-free status independently reported the watcher,
+writer, and pod alive and ready; operation-scoped `SEON_CONFIG` no longer poisons
+permanent process identity. The pod attached its replay/live feed, replayed 2/2
+forms, instrumented 767 definitions with zero bad specs, and created `root` plus
+`mighty-spoons-clap`. `/` and `/data` returned HTTP 200, while the retired
+`GET /agents` correctly redirects to `/`. The database-defined `POST /agents`
+created readable-word agents in both direct HTTP and real-browser button proofs.
+The new agent view rendered its canvas, plan, and transcript surfaces without a
+browser console error; its gzip feed delivered an immediate Datastar patch. A
+single-process mutation proof observed a 307 ms POST-to-patch interval, including
+a 68 ms targeted render. All three long-lived processes returned to 0% sampled
+CPU after agent work stopped. Entity-scoped invalidation between different open
+agent views remains an active performance gap.
 
 The canonical live-feed cut now includes `/data`: its separate connection atom,
 listener flag, coalescer, uncompressed `/data/sse`, and the unused generic
