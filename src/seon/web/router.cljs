@@ -281,7 +281,7 @@
      ;; The data browser is a static operator route, but its live projection
      ;; rides the same canonical Datastar feed registry as every seeded view.
      ["/data"     {:get {:handler (fn [r] (debug/data-page! (node-req r) (node-res r)) hijacked)}}]
-     ["/data/feed" {:get {:handler debug/data-feed!}}]
+     ["/data/feed" {:get {:handler (fn [r] (debug/data-feed! r) hijacked)}}]
 
      ["/chat"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler chat)}}]
      ["/stop"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler stop)}}]

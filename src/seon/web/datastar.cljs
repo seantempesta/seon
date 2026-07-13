@@ -1111,13 +1111,17 @@
     (.pipe gz res)
     (when-let [replaced (replace-feed! conn)]
       (close-feed-socket! replaced))
+    (let [attached (get-in @!feeds [::views view-id])]
+      ;; `attach-feed` adds the normalized subscription coordinate. First
+      ;; paint must use that registry-owned descriptor, not the pre-attach
+      ;; local socket, or every page aliases through a nil subscription and
+      ;; can receive another view's cached HTML.
+      (push-full! attached))
     (ensure-heartbeat!)
     (log/info-console! "seon.web.datastar" "FEED OPEN"
                        {:seon.web.feed/id (str feed-id)
                         :seon.web.datastar/view-id view-id
                         :seon.web.feed/count (count (::views @!feeds))})
-    ;; First paint immediately so the page populates without waiting for a tx.
-    (push-full! conn)
     ;; `ServerResponse.close` is the raw Node equivalent of a stream abort. It
     ;; follows the response/socket lifetime; `IncomingMessage.close` changed
     ;; semantics across Node releases and is not the ownership authority.

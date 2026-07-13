@@ -794,6 +794,33 @@
       (is (= 2 @renders)
           "a transaction invalidates the shared first paint before reconnect"))))
 
+(deftest open-feed-first-paint-uses-the-attached-subscription
+  (let [EventEmitter (.-EventEmitter (js/require "node:events"))
+        PassThrough (.-PassThrough (js/require "node:stream"))
+        req (new EventEmitter)
+        res (new PassThrough)
+        _write-head (aset res "writeHead" (fn [_ _] nil))
+        events (atom [])
+        feed (test-feed
+               "attached-first-paint"
+               {:seon.web.feed/key [:seon.web.feed/data nil 0 false]
+                :seon.web.feed/render-full
+                (fn [] [:div {:id "data-browser"}])})]
+    (with-redefs [datastar/!feeds (atom @#'datastar/empty-feed-registry)
+                  datastar/install! (fn [] nil)
+                  datastar/uninstall! (fn [] nil)
+                  datastar/push-event! (fn [conn event]
+                                         (swap! events conj [conn event]))]
+      (@#'datastar/open-feed! req res feed)
+      (let [[conn event] (first @events)]
+        (is (= [[:seon.web.feed/data nil 0 false] "W10"]
+               (::datastar/subscription-key conn))
+            "first paint uses the registry-owned normalized descriptor")
+        (is (str/includes? event "data-browser"))
+        (is (not (contains? (::datastar/subscriptions @datastar/!feeds) nil))
+            "first paint never creates a cross-view nil cache authority"))
+      (.emit res "close"))))
+
 (deftest obsolete-subscription-does-not-push-into-a-rebound-view
   (let [pushes (atom 0)
         initial-feed
