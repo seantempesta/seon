@@ -2455,7 +2455,7 @@
                   (throw (ex-info "start-runtime!: agent resume failed" failed)))
               {:seon.agent/keys [id ns]} (first results)
               {:seon.web/keys [port port-file]} (await (web.serve/start!))]
-          (ai/sync!)
+          (await (ai/sync!))
           (seon.web.debug/install!)
           (agent-loop/install-ticker!)
           (log/info-console! "seon.client" "runtime started"

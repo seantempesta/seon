@@ -810,7 +810,7 @@
   "SEED the config row on the ambient conn from the SEON_AI_* env vars.
 
    Once, only when the row is unconfigured (see ns doc: env SEEDS, the DB
-   OWNS). Called from `seon.client/start-agent!` at boot;
+   OWNS). Awaited by `seon.client/start-runtime!` before boot readiness;
    idempotent — a boot with an already-configured row transacts nothing,
    so runtime switches persist. Failures log LOUDLY and resolve
    `{::synced? false}` — LLM config must never take the boot down."
