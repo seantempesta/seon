@@ -283,6 +283,28 @@
               (is (not (re-find prose-note-re (str (:narration row)))) "NOT demoted")))))
       done)))
 
+(deftest undefined-head-with-quoted-data-is-kept-and-fails
+  ;; Quoted query data contains symbols, but none are executable references.
+  ;; Walking into `(quote ...)` used to count `quote` + `?x` as two bare
+  ;; argument symbols, silently demoting this undeclared call as prose and
+  ;; recording ok? true. The call must reach the compiler and fail normally.
+  (async done
+    (settle!
+      (with-conn
+        (fn ^:async run []
+          (let [src "(zzz-frobnicate-2607 '[:find ?x])"
+                res (await (run-batch! src fixture-turn-id))
+                row (row-for src)]
+            (is (= 0 (:seon.eval/n-ok res)))
+            (is (= 1 (:seon.eval/n-fail res))
+                "an undeclared head is a real compile failure")
+            (is (false? (:ok? row))
+                "the transcript must not record a false success")
+            (is (some? (:error row)))
+            (is (not (re-find prose-note-re (str (:narration row))))
+                "quoted data never triggers prose demotion"))))
+      done)))
+
 ;; ===========================================================================
 ;; Pure-predicate unit matrix — drives `prose-paren?` directly against the
 ;; live bootstrap compile-state, no DB round-trip. The structural heart of
@@ -319,7 +341,9 @@
                 (testing "KEEP — lone undefined head, literal-only or single-arg (typo'd call)"
                   (is (false? (p? "(undefined-fn 1 2)")))
                   (is (false? (p? "(undefined-fn \"x\")")))
-                  (is (false? (p? "(parse-it x)"))))
+                  (is (false? (p? "(parse-it x)")))
+                  (is (false? (p? "(frobnicate '[:find ?x])"))
+                      "symbols inside quoted data do not count as prose words"))
                 (testing "KEEP — not a single bare-headed list"
                   (is (false? (p? "(:keyword m)")) "keyword head = code")
                   (is (false? (p? "((f) x y)")) "non-symbol head")

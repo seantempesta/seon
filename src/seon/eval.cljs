@@ -2010,14 +2010,23 @@
                  [:cljs.analyzer/namespaces 'cljs.core$macros :defs sym])))
 
 (defn- collect-symbols
-  "Every symbol appearing anywhere in `x` (recursively through lists,
-   vectors, maps, sets), as a vector in encounter order."
+  "Every executable symbol appearing anywhere in `x`, in encounter order.
+
+   Recurses through lists, vectors, maps, and sets, but treats `(quote ...)`
+   as data. Symbols inside quoted data are not references and must not make an
+   undeclared call look like prose to [[prose-paren?]]."
   [x]
   (let [acc  (volatile! [])
         walk (fn walk [y]
                (cond
-                 (symbol? y) (vswap! acc conj y)
-                 (coll? y)   (doseq [z y] (walk z))))]
+                 (symbol? y)
+                 (vswap! acc conj y)
+
+                 (and (seq? y) (= 'quote (first y)))
+                 nil
+
+                 (coll? y)
+                 (doseq [z y] (walk z))))]
     (walk x)
     @acc))
 
