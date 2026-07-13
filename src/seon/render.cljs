@@ -186,7 +186,9 @@
   [:map
    [:seon.render/hiccup [:or :nil :seon.render.canvas/hiccup]]
    [:seon.render/ai    {:optional true} :string]
-   [:seon.render/error {:optional true} :seon.render/error]])
+   [:seon.render/error {:optional true} :seon.render/error]
+   [:seon.render.canvas/wired {:optional true}
+    :seon.render.canvas/wired-response]])
 
 ;; System renderer input — for `seon.render.default/*` and other
 ;; non-agent-namespaced fns. Doesn't know which agent ahead of time;
@@ -648,24 +650,10 @@
 ;; ============================================================
 ;; Agent canvas (canvas U1) — the agent's one always-visible HTML
 ;; surface. Resolution (seon.render.canvas/wired-content):
-;; per-entity `:seon.render.canvas/content` → the core
-;; welcome. Neither `:seon.render/html` nor the `:seon.agent` schema
-;; default is consulted for the canvas — that key means only the
-;; generic entity-surface render (one key, one meaning; PRD §8.1).
+;; explicit entity pin → configured canvas-block default → derived
+;; last-updated surface → core welcome. The exact `::canvas/wired`
+;; result rides the response so every consumer explains the same render.
 ;; ============================================================
-
-(def ^:private canvas-entity-pattern
-  "What canvas rendering READS of the agent entity — the wired slot
-   (wired-content), the welcome's purpose/id, and the run pointer (derived
-   state). Deliberately NOT '[*]: the full pull would inline the agent's whole
-   component tree per canvas render (T5's amplifier finding, open-issues
-   2026-06-11). Canvas fns needing more get `:seon.db/db` in their input and
-   query for it."
-  [:db/id
-   :seon.agent/id
-   :seon.agent/run
-   :seon.agent/purpose
-   :seon.render.canvas/content])
 
 (schema/register! :seon.render/canvas-request
   [:map
@@ -688,24 +676,22 @@
   {:malli/schema [:=> [:cat :seon.render/canvas-request] :seon.render/html-response]}
   [{:seon.agent/keys [id] :seon.db/keys [db]}]
   (let [db  (or db @db/*conn*)
-        ;; Guarded pull (seon.db/pull, 65dfc90): registered-but-never-
-        ;; installed attrs (e.g. ::content on a fresh store) are
-        ;; filtered, typos throw legibly. The remaining try covers only
-        ;; the unresolvable-lookup-ref throw (missing agent → nil
-        ;; hiccup, the documented contract).
-        ent (try (db/pull db canvas-entity-pattern [:seon.agent/id id])
-                 ;; probe: the only throw this covers is the unresolvable
-                 ;; lookup-ref of a MISSING agent — nil ent is the documented
-                 ;; contract (canvas renders nothing), an expected absence.
-                 (catch :default _ nil))]
+        {ent :seon.render/entity
+         configured :seon.render.canvas/configured}
+        (canvas/canvas-state {:seon.db/db db :seon.agent/id id})]
     (if (nil? (:seon.agent/id ent))
       {:seon.render/hiccup nil}
-      (let [;; No pin stored → the DERIVED default: the agent's
-            ;; last-updated surface (context.md §canvas — derive the
-            ;; default, store only the pin). Guarded: a derivation
-            ;; failure means no derived candidate → the welcome.
+      (let [base-wired
+            (canvas/wired-content
+              (cond-> {:seon.render/entity ent}
+                (some? configured)
+                (assoc :seon.render.canvas/configured configured)))
+            ;; Only an agent with neither an explicit pin nor a configured
+            ;; canvas-block default consults the derived last-updated surface.
+            ;; A derivation failure means no candidate and falls to welcome.
             derived
-            (when (nil? (:seon.render.canvas/content ent))
+            (when (= :seon.render.canvas/welcome
+                     (:seon.render.canvas/source base-wired))
               (try (:seon.agent.ctx.render-fns/surface-sym
                      (render-fns/last-updated-surface
                        {:seon.db/db db :seon.agent/id id}))
@@ -716,15 +702,19 @@
                      (when-not (err/recorded? e)
                        (err/record! {:seon.error/raw e :seon.error/fault :core}))
                      nil)))
-            {:seon.render.canvas/keys [value]}
-            (canvas/wired-content
-              (cond-> {:seon.render/entity ent}
-                (some? derived)
-                (assoc :seon.render.canvas/derived derived)))
+            wired (if (some? derived)
+                    (canvas/wired-content
+                      (cond-> {:seon.render/entity ent
+                               :seon.render.canvas/derived derived}
+                        (some? configured)
+                        (assoc :seon.render.canvas/configured configured)))
+                    base-wired)
+            value (:seon.render.canvas/value wired)
             input {:seon.db/db         db
                    :seon.agent/id      id
                    :seon.render/entity ent}]
-        (try
+        (assoc
+          (try
           (let [;; Agent-authored canvas fns run under an SCI wall-clock
                 ;; interrupt so a non-terminating canvas (a sync loop/recur)
                 ;; aborts in-process instead of freezing the single pod thread
@@ -854,7 +844,8 @@
             ;; clean render. No stored flag, no notification.
             (canvas/error-response
               {:seon.db/error                 (err/->map e)
-               :seon.render.canvas/content value})))))))
+               :seon.render.canvas/content value})))
+          :seon.render.canvas/wired wired)))))
 
 (defn render-entity-ai
   "Render `entity` to text via its resolved `:seon.render/ai` symbol.

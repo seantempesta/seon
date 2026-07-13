@@ -98,31 +98,42 @@
     (is (= :seon.render.canvas/welcome source))
     (is (= canvas/welcome-sym value))))
 
-(deftest wired-content-pin-beats-derived-beats-welcome
-  (testing "no pin + a derived last-updated tile → the derived fn"
+(deftest wired-content-resolves-one-precedence-chain
+  (testing "no pin or configured default + a derived surface"
     (let [{:seon.render.canvas/keys [source value]}
           (canvas/wired-content
             {:seon.render/entity {:seon.agent/id "wired-22060004"}
              :seon.render.canvas/derived 'my.agent.x/plan-tile})]
       (is (= :seon.render.canvas/derived source))
-      (is (= 'my.agent.x/plan-tile value))
-      (testing "the label names the derivation and how to pin"
-        (let [label (canvas/wired-label
-                      {:seon.render.canvas/source source
-                       :seon.render.canvas/value  value})]
-          (is (str/includes? label "my.agent.x/plan-tile"))
-          (is (str/includes? label "derived"))
-          (is (str/includes? label ":seon.render.canvas/content"))))))
-  (testing "a stored pin wins over the derived default"
+      (is (= 'my.agent.x/plan-tile value))))
+  (testing "a configured canvas-block default wins over derivation"
+    (let [{:seon.render.canvas/keys [source value]}
+          (canvas/wired-content
+            {:seon.render/entity {:seon.agent/id "wired-22060005"}
+             :seon.render.canvas/configured 'seon.render.system/system-view
+             :seon.render.canvas/derived 'my.agent.x/plan-tile})]
+      (is (= :seon.render.canvas/configured source))
+      (is (= 'seon.render.system/system-view value))))
+  (testing "an explicit pin wins over configured and derived defaults"
     (let [{:seon.render.canvas/keys [source value]}
           (canvas/wired-content
             {:seon.render/entity
-             {:seon.agent/id "wired-22060005"
+             {:seon.agent/id "wired-22060006"
               :seon.render.canvas/content (pr-str 'my.ns/pinned-tile)}
+             :seon.render.canvas/configured 'seon.render.system/system-view
              :seon.render.canvas/derived 'my.agent.x/plan-tile})]
       (is (= :seon.render.canvas/content source))
       (is (= 'my.ns/pinned-tile value)
-          "pin regardless of recency — the override"))))
+          "the deliberate pin is the override")))
+  (testing "the :none config sentinel is absence, not a pin"
+    (let [{:seon.render.canvas/keys [source value]}
+          (canvas/wired-content
+            {:seon.render/entity
+             {:seon.agent/id "wired-22060007"
+              :seon.render.canvas/content (pr-str :none)}
+             :seon.render.canvas/derived 'my.agent.x/plan-tile})]
+      (is (= :seon.render.canvas/derived source))
+      (is (= 'my.agent.x/plan-tile value)))))
 
 ;; ============================================================
 ;; welcome — time-aware, purpose-aware, twin-carrying, tagged blocks.
@@ -153,10 +164,9 @@
                                                :month   "long"
                                                :day     "numeric"})]
         (is (some #(re-find (re-pattern date-str) %) (hiccup-strings hiccup)))))
-    (testing "the double-duty tile line is present in BOTH renders"
-      (is (some #(= canvas/welcome-line %) (hiccup-strings hiccup)))
-      (is (str/includes? ai canvas/welcome-line)
-          "the ai render surfaces the welcome-line verbatim"))))
+    (is (some #(= canvas/welcome-line %) (hiccup-strings hiccup)))
+    (is (and (string? ai) (seq ai))
+        "the welcome has a compact semantic twin")))
 
 (deftest welcome-uses-purpose-when-present
   (let [{:seon.render/keys [hiccup ai]}
@@ -184,12 +194,8 @@
                         :seon.agent/purpose "track your workouts"}})]
     (is (some #(= "wlcm-2206110004" %) (hiccup-strings hiccup))
         "the agent's id renders on the default tile (canvas U3)")
-    (testing "the twin is TRUTHFUL — every minted agent IS wired (to welcome)"
-      (is (not (re-find #"haven't wired" ai))
-          "the old wording lied: creation wires every agent to welcome")
-      (is (re-find #"core default" ai))
-      (is (re-find #":seon.render.canvas/content" ai)
-          "the twin always says HOW to repoint the tile"))))
+    (is (re-find #"track your workouts" ai)
+        "the twin reports the meaningful content visible to the human")))
 
 ;; ============================================================
 ;; error-response — a broken tile is LEGIBLE on both sides.
@@ -374,7 +380,8 @@
   (async done
     (-> (with-agent-conn "tilewlc-000001"
           (fn [conn]
-            (let [{:seon.render/keys [hiccup ai]}
+            (let [{:seon.render/keys [hiccup ai]
+                   wired :seon.render.canvas/wired}
                   (render/render-agent-canvas {:seon.db/db @conn
                                              :seon.agent/id "tilewlc-000001"})]
               ;; DISPATCH MECHANISM, not the greeting prose: an unwired agent
@@ -387,8 +394,42 @@
                   "unwired agent dispatches to the core welcome renderable")
               (is (and (string? ai) (seq ai))
                   "the welcome twin (the ai-format string) rides the response")
-              (is (str/includes? ai ":seon.render.canvas/content")
-                  "the welcome twin teaches HOW to repoint the tile — its stable contract"))))
+              (is (= {:seon.render.canvas/source :seon.render.canvas/welcome
+                      :seon.render.canvas/value canvas/welcome-sym}
+                     wired)
+                  "the response records the exact renderer it used"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest render-agent-canvas-uses-configured-block-default
+  (async done
+    (-> (with-agent-conn "tilecfg-000001"
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [{:seon.agent/id "tilecfg-000001"
+                     :seon.agent/ctx
+                     [{:seon.agent.ctx/name :canvas
+                       :seon.render.canvas/content
+                       'seon.render.canvas-test/twin-tile}]}]})
+                (.then
+                  (fn [{ok? :seon.db/ok? :as tx}]
+                    (is (true? ok?) (pr-str tx))
+                    (binding [db/*conn* conn]
+                      (let [{:seon.render/keys [hiccup ai]
+                             wired :seon.render.canvas/wired}
+                            (render/render-agent-canvas
+                              {:seon.db/db @conn
+                               :seon.agent/id "tilecfg-000001"})]
+                        (is (= [:div.seon-card
+                                [:span "3 workouts this week"]]
+                               hiccup))
+                        (is (= "3 workouts this week: Mon, Wed, Fri — trending up."
+                               ai))
+                        (is (= :seon.render.canvas/configured
+                               (:seon.render.canvas/source wired)))
+                        (is (= 'seon.render.canvas-test/twin-tile
+                               (:seon.render.canvas/value wired))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

@@ -336,9 +336,7 @@
                      (is (not (str/includes? out "⚠"))
                          "no bare ⚠ render-failed placeholder")
                      (is (not (str/includes? out "malli"))
-                         "no swallowed malli code in the agent's context")
-                     (is (str/includes? out "Wired:")
-                         "the wired-label header resolves (welcome by default)"))
+                         "no swallowed malli code in the agent's context"))
                    ;; (b) the REAL prompt path (render-context-ai, NOT the
                    ;; debug view's rendered-context-blocks) must also be render-failure-free.
                    (let [ctx  {:seon.db/db @db/*conn* :seon.agent/id "AGTctxtile00p1"}

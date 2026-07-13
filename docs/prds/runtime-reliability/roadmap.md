@@ -129,6 +129,11 @@ slots use stable `#surface-*` identifiers, and the generated stylesheet uses
 `.seon-card*` plus `.surface-focus`. Focused recency, warning, render, canvas,
 and agent-view suites pass with no forwarding aliases. Remaining active prose,
 helper names, and downstream ACME references are part of the same in-place cut.
+Canvas resolution now also has one authority: explicit pin, configured canvas
+block default, derived focus, then welcome. The human renderer returns that
+resolved metadata to the context block, eliminating the split reader that made
+root describe `system-view` while displaying the welcome. Live root proof shows
+the configured system view in both projections and a 214-token canvas block.
 
 The CLJS test process now installs the pod's existing third-party log gate as a
 Shadow preload before any test namespace. A representative database run fell

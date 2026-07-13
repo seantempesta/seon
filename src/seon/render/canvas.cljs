@@ -8,8 +8,9 @@
 
    ## Wiring the canvas
 
-   ONE attr on your agent entity: `:seon.render.canvas/content`.
-   Its value follows the `:seon.render/html` semantics exactly:
+   An explicit pin is ONE attr on your agent entity:
+   `:seon.render.canvas/content`. Its value follows the
+   `:seon.render/html` semantics exactly:
 
    - a LITERAL HICCUP vector for static content — `[:h1 \"hi\"]`
    - a QUALIFIED FN SYMBOL for dynamic content, late-resolved at
@@ -94,7 +95,8 @@
 
    `seon.render/render-agent-canvas` is the one entry point: it calls
    [[wired-content]] to resolve WHICH value is wired
-   (`::content` pin → the caller-derived last-updated surface → [[welcome]]),
+   (`::content` pin → configured canvas-block default → the caller-derived
+   last-updated surface → [[welcome]]),
    invokes it
    through `seon.render/html-render` (the ONE value-or-fn dispatch),
    and on a throw builds the legible [[error-response]] — a broken
@@ -324,13 +326,18 @@
 ;; HOW to change the display. (The legacy `:seon.render/html` arm was
 ;; deleted in the render sweep — PRD canvas §8.1, no legacy: that
 ;; key now means ONLY the generic entity-surface render slot.)
-(schema/register! ::source [:enum ::content ::derived ::welcome])
+(schema/register! ::source [:enum ::content ::configured ::derived ::welcome])
 
 (schema/register! ::derived :symbol)
+(schema/register! ::configured ::content)
 
 (schema/register! ::wired-request
   [:map
    [:seon.render/entity :map]
+   ;; A database-configured default on the agent's :canvas context block.
+   ;; The explicit agent-entity pin above wins; `:none` is omitted by
+   ;; [[canvas-state]].
+   [::configured {:optional true} ::configured]
    ;; The DERIVED canvas default — the agent's last-updated surface fn
    ;; (seon.agent.ctx.render-fns/last-updated-surface), computed by the
    ;; caller (this ns loads below render-fns) and consulted only when
@@ -341,6 +348,16 @@
   [:map
    [::source ::source]
    [::value  ::content]])
+
+(schema/register! ::state-request
+  [:map
+   [:seon.db/db :seon.db/db]
+   [:seon.agent/id :string]])
+
+(schema/register! ::state-response
+  [:map
+   [:seon.render/entity :map]
+   [::configured {:optional true} ::configured]])
 
 (schema/register! ::error-request
   [:map
@@ -371,16 +388,48 @@
    other wired symbol (the default eats the same dogfood)."
   'seon.render.canvas/welcome)
 
+(def ^:private canvas-entity-pattern
+  "The exact agent and configured-canvas facts needed for resolution."
+  [:db/id
+   :seon.agent/id
+   :seon.agent/run
+   :seon.agent/purpose
+   :seon.render.canvas/content
+   {:seon.agent/ctx
+    [:seon.agent.ctx/name :seon.render.canvas/content]}])
+
+(defn canvas-state
+  "Read the facts that resolve one agent's canvas.
+
+   Returns the bounded agent entity plus an optional configured default from
+   its `:canvas` context block. The context component is consumed here and is
+   not exposed to renderer input. Missing agents return an empty entity. A
+   block value of `:none` means no configured default and is omitted."
+  {:malli/schema [:=> [:cat ::state-request] ::state-response]}
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [raw (or (db/pull db canvas-entity-pattern [:seon.agent/id id]) {})
+        configured (some (fn [block]
+                           (when (= :canvas (:seon.agent.ctx/name block))
+                             (let [value (some->>
+                                           (:seon.render.canvas/content block)
+                                           (db/decode-edn-value ::content))]
+                               (when (and (some? value) (not= :none value))
+                                 value))))
+                         (:seon.agent/ctx raw))]
+    (cond-> {:seon.render/entity (dissoc raw :seon.agent/ctx)}
+      (some? configured) (assoc ::configured configured))))
+
 (defn wired-content
   "Resolve WHICH value is the agent's canvas, with provenance.
 
-   Resolution on the pulled agent `:seon.render/entity`:
-   `:seon.render.canvas/content` (the canvas pin) when
-   present; else the caller-supplied `::derived` symbol (the agent's
-   last-updated surface — the derived default, see
+   Resolution over [[canvas-state]] plus the caller's derivation:
+   `:seon.render.canvas/content` (the explicit canvas pin) when present;
+   else `::configured` from the agent's canvas context block; else the
+   caller-supplied `::derived` symbol (the agent's last-updated surface, see
    `seon.agent.ctx.render-fns/last-updated-surface`); else [[welcome-sym]]
-   (the core welcome). Pin wins over derived; retract the pin and the
-   canvas falls back to derived. Neither the per-entity
+   (the core welcome). Pin wins over configured, configured wins over
+   derived; retract the pin to resume the configured or derived default.
+   Neither the per-entity
    `:seon.render/html` nor the `:seon.agent` KIND default is consulted
    — that key means ONLY the generic entity-surface render slot (one key,
    one meaning; the legacy fallback was deleted per PRD
@@ -389,13 +438,21 @@
    Values arrive pr-str-encoded from the mixed-:or bridge; the attr
    read decodes via `seon.db/decode-edn-value`."
   {:malli/schema [:=> [:cat ::wired-request] ::wired-response]}
-  [{:seon.render/keys [entity] ::keys [derived]}]
+  [{:seon.render/keys [entity] ::keys [configured derived]}]
   (let [content (some->> (::content entity)
                          (db/decode-edn-value ::content))]
     (cond
-      (some? content) {::source ::content ::value content}
-      (some? derived) {::source ::derived ::value derived}
-      :else           {::source ::welcome ::value welcome-sym})))
+      (and (some? content) (not= :none content))
+      {::source ::content ::value content}
+
+      (some? configured)
+      {::source ::configured ::value configured}
+
+      (some? derived)
+      {::source ::derived ::value derived}
+
+      :else
+      {::source ::welcome ::value welcome-sym})))
 
 (defn wired-label
   "The awareness-section header identity for a [[wired-content]] result.
@@ -410,15 +467,18 @@
   (case source
     ::content
     (if (symbol? value)
-      (str value " (a fn on your entity)")
-      "literal hiccup on your entity")
+      (str value " (explicit pin)")
+      "literal hiccup (explicit pin)")
+
+    ::configured
+    (str value " (configured default)")
 
     ::derived
     (str value " (derived — your last-updated surface; transact "
          ":seon.render.canvas/content to pin a different one)")
 
     ::welcome
-    (str value " (the core default — wire your own)")))
+    (str value " (core welcome)")))
 
 ;; ============================================================
 ;; The welcome — the default canvas every uncustomized agent shows.
@@ -540,22 +600,12 @@
          [:div {:class "text-sm text-text-200"} purpose-line]
          [:div {:class "text-xs text-text-400 italic"} welcome-line]])]
      :seon.render/ai
-     (str "Welcome — your canvas is showing the core default "
-          "(point :seon.render.canvas/content at your own fn to "
-          "replace it). Your human currently sees — in the root grid "
-          "(compact): "
-          (if purpose
-            (str "your purpose (\"" purpose "\")")
-            "a note that you're still acquiring your purpose")
-          ", your id"
+     (str "Core welcome canvas. "
           (if reply
-            (str ", and your last reply (\"" reply "\")")
-            (str ", and \"" greet-line "\""))
-          "; expanded (the agent view): \"" greet-line "\" with "
-          date-str " " time-str ", your purpose line, and: \""
-          welcome-line "\" "
-          "To replace it, transact :seon.render.canvas/content onto "
-          "your agent entity — a qualified fn symbol or literal hiccup.")}))
+            (str "Human sees the latest reply: " (pr-str reply) ".")
+            (str "Human sees " (pr-str greet-line) ", " date-str " " time-str
+                 ", and purpose " (pr-str purpose-line) "."))
+          " Replace it with my.canvas/show! when another view is useful.")}))
 
 ;; ============================================================
 ;; Creation wiring — the eval every NEW agent runs as its first

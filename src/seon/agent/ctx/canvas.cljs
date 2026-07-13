@@ -13,7 +13,6 @@
   (:require
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
-    [seon.agent.ctx.render-fns :as render-fns]
     [seon.config :as config]
     [seon.db :as db]
     [seon.error :as err]
@@ -41,23 +40,6 @@
                                 [?e :seon.fn/sym ?sym]
                                 [?e :seon.fn/source ?src]]
                :seon.db/args  [(str sym)]}))))
-
-(defn- block-content
-  "The MEANINGFUL canvas content on agent `id`'s `:canvas` BLOCK entity
-   (config-driven agent-init CP-3 move 11) — the block's decoded
-   `:seon.render.canvas/content` when it is a real value (a fn symbol or
-   literal hiccup), or nil when the block is absent or carries the `:none`
-   default. Reactive config-on-record: root-context seeds root's block with
-   `system-view`; a non-root agent's block defaults `:none`, so the caller
-   falls back to the agent-entity datom (byte-parity). Values arrive
-   pr-str-encoded from the mixed-:or bridge → decode on read."
-  [db id]
-  (let [blk (some (fn [b] (when (= :canvas (:seon.agent.ctx/name b)) b))
-                  (:seon.agent/ctx
-                    (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})))
-        c   (some->> (:seon.render.canvas/content blk)
-                     (db/decode-edn-value :seon.render.canvas/content))]
-    (when (and (some? c) (not= :none c)) c)))
 
 (defn canvas-block
   "Show and explain the agent's current live canvas.
@@ -97,7 +79,8 @@
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (try
-    (let [{:seon.render/keys [hiccup ai error]}
+    (let [{:seon.render/keys [hiccup ai error]
+           wired :seon.render.canvas/wired}
           ;; The one canvas entry point — SCI wall-clock-bounded for
           ;; agent-authored canvas fns, and on any throw it returns the
           ;; legible `error-response` (never throws past here). This is
@@ -105,6 +88,10 @@
           ;; clean twin, an error twin, or the welcome card — never raw.
           (render/render-agent-canvas {:seon.agent/id id :seon.db/db db})
           cap  (config/render-fn-token-cap)
+          body-kind (cond
+                      (some? error)  :error
+                      (some? ai)     :ai
+                      (some? hiccup) :hiccup)
           body (cond
                  ;; Renderer THREW — your human is staring at an error
                  ;; canvas right now. Say so loudly and first (the agent must
@@ -112,10 +99,9 @@
                  ;; (the agent-actionable parts; raw js error / 4KB stack
                  ;; dropped), then the fallback twin.
                  (some? error)
-                 (str "⚠ YOUR CANVAS IS BROKEN — your human currently sees an\n"
-                      "a fallback card, not your content. Fix the fn/hiccup driving\n"
-                      ":seon.render.canvas/content (its source is below).\n"
-                      "Why: " (:seon.error/message error) "\n"
+                 (str "Render failed; your human sees the fallback card.\n"
+                      "Fix the renderer or pin a working canvas. Cause: "
+                      (:seon.error/message error) "\n"
                       (pr-str (select-keys error [:seon.error/data
                                                   :seon.error/ex-data]))
                       (when (some? ai) (str "\n" ai)))
@@ -126,52 +112,7 @@
                  (tokens/clip-str body cap (partial clip-marker "canvas twin")))]
       (if (nil? body)
         ""
-        ;; Provenance for the header. Resolve the agent entity from the
-        ;; db by `:seon.agent/id` (the composer injects :seon.db/db +
-        ;; :seon.agent/id, not the entity itself). The canvas pin is read
-        ;; behind the same `seon.db/installed-schema` gate
-        ;; `canvas/user-name` uses: datahike THROWS on pulling an attr
-        ;; the conn never installed (installs are lazy, at first
-        ;; transact), so a fresh database predating any canvas transact must
-        ;; resolve to `{}` → the core welcome (load-bearing, not
-        ;; defensive fluff). `wired-content` needs a map; never a nil.
-        (let [ent   (if (contains? (db/installed-schema db)
-                                   :seon.render.canvas/content)
-                      (let [agent-content
-                            (or (db/pull {:seon.db/db db
-                                          :seon.db/pull-pattern
-                                          '[:seon.render.canvas/content]
-                                          :seon.db/ref [:seon.agent/id id]})
-                                {})
-                            ;; CP-3 move 11: the canvas content is READ off the
-                            ;; agent's `:canvas` BLOCK entity (root-context's
-                            ;; mechanism — root's block carries `system-view`).
-                            ;; A meaningful block content (not `:none`/absent)
-                            ;; wins; otherwise FALL BACK to the agent-entity
-                            ;; datom (today's behavior) so a non-root agent's
-                            ;; welcome-wired canvas is byte-identical. The
-                            ;; hardcoded root branch (client.cljs) still writes
-                            ;; the agent entity too until CP-4 — both carry
-                            ;; `system-view`, so reading either is identical.
-                            blk-content (block-content db id)]
-                        (if (some? blk-content)
-                          {:seon.render.canvas/content blk-content}
-                          agent-content))
-                      {})
-              ;; No pin → the derived last-updated surface, so the header's
-              ;; provenance names the SAME value render-agent-canvas just
-              ;; rendered (one resolution, two readers). Guarded like the
-              ;; render side: derivation failure → welcome provenance.
-              derived (when (nil? (:seon.render.canvas/content ent))
-                        (try (::render-fns/surface-sym
-                               (render-fns/last-updated-surface
-                                 {:seon.db/db db :seon.agent/id id}))
-                             (catch :default _ nil)))
-              wired (canvas/wired-content
-                      (cond-> {:seon.render/entity ent}
-                        (some? derived)
-                        (assoc :seon.render.canvas/derived derived)))
-              ;; The body is a render twin (:ai text, or hiccup pr-str, or
+        (let [;; The body is a render twin (:ai text, or hiccup pr-str, or
               ;; an error envelope) — arbitrary content the human's canvas
               ;; shows. It rides this comment-block as `;` lines (via
               ;; [[seon.agent.ctx/quote-lines]]) so the whole section reads as
@@ -189,31 +130,26 @@
               fn-src       (when (err/agent-authored-sym? wired-value)
                              (some-> (wired-fn-source db wired-value)
                                      (tokens/clip-str
-                                       cap (partial clip-marker "canvas source"))))]
-          (str "; Your canvas — what your human currently sees (as-of this\n"
-               "; turn's render; the human's view live-updates between turns).\n"
-               "; Wired: " (canvas/wired-label wired) "\n"
-               ";\n"
+                                       cap (partial clip-marker "canvas source"))))
+              body-label   (case body-kind
+                             :error "Render status:"
+                             :ai "Rendered meaning (:seon.render/ai; paired HTML is on screen):"
+                             :hiccup "Rendered Hiccup (exact human view):"
+                             "Rendered output:")]
+          (str "; CANVAS — current human-facing view\n"
+               "; Renderer: " (canvas/wired-label wired) "\n"
+               "; Snapshot: this prompt; the browser refreshes after relevant transactions.\n"
+               "; " body-label "\n"
                body-comment "\n"
-               ";\n"
                (when (some? fn-src)
-                 (str "; Source driving your canvas (redefine it to change what\n"
-                      "; your human sees):\n"
-                      (ctx/quote-lines fn-src) "\n"
-                      ";\n"))
-               "; Update deliberately with my.canvas/show!; defining a render fn alone\n"
-               "; does not pin it. A live fn accepts :seon.render/system-input, queries\n"
-               "; its injected :seon.db/db, and returns my.canvas/view. Compose\n"
-               "; my.canvas controls with schema'd handlers in your home namespace;\n"
-               "; handlers transact facts and the normal feed re-renders. Button data\n"
-               "; and qualified form fields arrive directly as the handler's input map.\n"
-               "; my.canvas/state and save! are the agent-local state helpers. Reuse\n"
-               "; these constructs or define higher-level helpers in your own namespace.\n"
-               "; Always inspect :seon.db/ok? before claiming a write worked.\n"
-               ";   (my.canvas/show! {:my.canvas/content\n"
-               ";                  <hiccup-vector OR 'my.agent." id "/your-fn>})\n"
-               "; Use (my.canvas/pinned {}) to inspect the pin and\n"
-               "; (my.canvas/clear! {}) to resume automatic selection."))))
+                 (str ";\n"
+                      "; Agent-authored renderer source:\n"
+                      (ctx/quote-lines fn-src) "\n"))
+               ";\n"
+               "; Change: (my.canvas/show! {:my.canvas/content <hiccup-or-qualified-fn>})\n"
+               "; Live fn: :seon.render/system-input → my.canvas/view; query its :seon.db/db.\n"
+               "; Actions: my.canvas controls call schema'd home-ns handlers; writes redraw.\n"
+               "; Inspect/auto: (my.canvas/pinned {}) / (my.canvas/clear! {})."))))
     ;; CONTRACT: this section NEVER vanishes and NEVER surfaces a bare
     ;; ⚠/malli code. `render-agent-canvas` is already throw-safe, so this
     ;; backstop only fires on an UNEXPECTED failure (e.g. a db read) —

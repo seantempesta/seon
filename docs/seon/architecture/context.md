@@ -202,22 +202,26 @@ read selective or pin the canvas. No literal keyword read-set is stored. So the
 human's focus follows what the current surface most plausibly received from the
 agent's recent work
 with zero ceremony: author a plan surface, write plan data, and that surface
-is the canvas. Override: the agent pins the canvas to a specific surface
-(`:seon.render.canvas/content`) to feature it regardless of recency;
-retract the pin to fall back to derived; with neither, the core welcome.
-Derive the default, store only the pin — the same rule as everywhere else.
+is the canvas. Resolution is one ordered chain: an explicit agent-entity pin
+(`:seon.render.canvas/content`), then the configured `:canvas` context-block
+default, then the derived last-updated surface, then the core welcome. The
+explicit pin is the deliberate override; retracting it resumes the configured
+or derived default. The renderer returns the exact resolved value and
+provenance with its projections, so the canvas context block explains the same
+render instead of performing a second lookup.
 (Unknown/dynamic reads are conservatively compared for live invalidation, but do
 not claim precise historical focus.) A browser session may temporarily select a
 different page-focused surface; that tab-local database fact neither changes
 the agent-derived focus nor propagates into root fleet cards.
 
 The canvas context block is the bounded AI projection of that same resolved
-canvas, not a second render. Its AI twin and the agent-authored renderer source
-are clipped independently by `:seon.config.render/render-fn-token-cap`, with a
-token-denominated marker at either cut. A short operational footer names the
-existing `my.canvas` controls. This preserves enough local source to repair a
-broken renderer without letting one verbose canvas duplicate an unbounded
-surface or program into every later prompt.
+canvas, not a second resolution or render. Its AI twin and the agent-authored
+renderer source are clipped independently by
+`:seon.config.render/render-fn-token-cap`, with a token-denominated marker at
+either cut. A short operational footer names the existing `my.canvas` controls.
+This preserves enough local source to repair a broken renderer without letting
+one verbose canvas duplicate an unbounded surface or program into every later
+prompt.
 
 The process qualifier prevents root-owned boot/config facts from masquerading
 as root-agent authorship. `:seon.db/user` answers who; `:seon.db/process`
