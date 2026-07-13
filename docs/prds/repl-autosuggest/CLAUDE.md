@@ -61,6 +61,19 @@ across a pod restart; recommendation = pre-transacted vs
 markdown-authored vs no-plan ARMS + store-derived metrics (oracle,
 plan integrity, prose-rate). Harvest store:
 `/Users/sean/src/seon-plan-pilot/data/clusters/acme`.
+**LoRA training-data audit RUN**
+([[research/lora-data-audit-2026-07-12.md]]): all 557 non-abstain kept
+pairs driven through the LIVE turn pipeline on hermetic worlds in the
+pin — **26.8% hard-fail** (49% of DeepSeek-authored, 0% of mechanical
+gold); root blindspot = bare heads pass name-existence but are
+undeclared in an agent's ns (128/149); coverage 15/170 fns via
+resolvable heads; kind mix register-heavy 6.5×/query-light 4.6× vs the
+mined 214; contexts teach unbalanced echoes (70) + fabricated query
+results (45). Two core smells by-catch: quoted-arg undeclared heads
+record `ok? true` silently (taints ok-eval mining), `db/query` returns
+`#{}` on a request without `:seon.db/query`. A2 gate = the audit
+harness (`src-needle/audit/` + `lora_audit_*.py`); any LoRA eval win
+must be re-scored for head resolvability before it counts.
 Live status: [[roadmap.md]].
 
 ## Settled — do NOT re-litigate

@@ -221,7 +221,14 @@ enters the leaderboard) — the dump script picks both up automatically
 5. **A2 data build** — synthetic/gold primary (staged db states +
    real profile renders; structured-markdown cheap supervision with
    reconcile-oracle filtering; quotas per design.md), agy
-   augmentation.
+   augmentation. **AUDIT LANDED (2026-07-12,
+   [[research/lora-data-audit-2026-07-12]])**: the frontier-draft set's
+   mechanical-only filter admitted 26.8% pairs that hard-fail the live
+   REPL (49% of everything DeepSeek-authored; 0% of mechanical gold) —
+   bare-head resolvability was the blindspot; eval+envelope gating on
+   staged worlds is NON-OPTIONAL for A2, and query/report pairs need
+   db-staged worlds (text-staging can't verify reads). Reusable gate
+   harness: `src-needle/audit/` + `src-needle/scripts/lora_audit_*.py`.
 6. **KT5 finetune reachability** (plan domain) → **B2 full train**
    (incl. Clojure-grammar constrained decoding; retrieval stays
    deterministic v0).
