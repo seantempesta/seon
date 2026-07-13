@@ -13,6 +13,7 @@
    objects."
   (:require
     #?@(:cljs [[cljs.reader :as reader]
+               [clojure.set :as set]
                [clojure.string :as str]
                [goog.object :as gobj]
                [malli.core :as m]
@@ -20,7 +21,8 @@
                [seon.config :as config]
                [seon.db :as db]
                [seon.error :as error]
-               [seon.error.instrument :as ei]])))
+               [seon.error.instrument :as ei]
+               [seon.schema :as schema]])))
 
 #?(:cljs
    (defn enabled?
@@ -549,16 +551,27 @@
         ::accepted-syms #{} ::rejected []}
        (let [{::keys [data accepted-syms rejected] :as prepared}
              (prepare-targets targets)
-             old-data (symbol-data changed-syms)]
-         (when (seq old-data)
-           (mi/unstrument! {:data old-data}))
-         (when (seq data)
-           (mi/instrument! {:data data :report ei/report-fn}))
-         (assoc prepared
-                ::enabled? true
-                ::n-unstrumented (count changed-syms)
-                ::n-instrumented (count accepted-syms)
-                ::rejected rejected)))))
+             fatal-rejections (remove #(= ::skipped (::reason %)) rejected)]
+         ;; Compile the complete replacement set before touching a live var.
+         ;; A bad target must not remove its still-valid old wrapper and leave
+         ;; the runtime in a mixed generation. Structural async opt-outs are
+         ;; intentional removals and therefore are not fatal.
+         (if (seq fatal-rejections)
+           (assoc prepared
+                  ::enabled? true
+                  ::ok? false
+                  ::n-unstrumented 0
+                  ::n-instrumented 0)
+           (let [old-data (symbol-data changed-syms)]
+             (when (seq old-data)
+               (mi/unstrument! {:data old-data}))
+             (when (seq data)
+               (mi/instrument! {:data data :report ei/report-fn}))
+             (assoc prepared
+                    ::enabled? true
+                    ::ok? true
+                    ::n-unstrumented (count changed-syms)
+                    ::n-instrumented (count accepted-syms))))))))
 
 #?(:cljs
    (defn instrument-from-db!
@@ -573,7 +586,9 @@
      [db]
      (if-not (enabled?)
        {::enabled? false ::n-instrumented 0}
-       (let [rows (db/query '[:find ?sym ?spec
+       (let [projection (schema/current-projection)
+             registry (:seon.schema.projection/registry projection)
+             rows (db/query '[:find ?sym ?spec
                               :where [?e :seon.fn/sym ?sym]
                                      [?e :seon.fn/spec ?spec]]
                             db)
@@ -584,7 +599,9 @@
                    (let [sym (symbol sym-str)
                          form (reader/read-string spec-str)]
                      (if (qualified-target-parts sym)
-                       (update acc ::targets conj {::sym sym ::schema-form form})
+                       (update acc ::targets conj
+                               (cond-> {::sym sym ::schema-form form}
+                                 registry (assoc ::registry registry)))
                        (update acc ::bad-spec inc)))
                    (catch :default _
                      (update acc ::bad-spec inc))))
@@ -611,9 +628,76 @@
                         db))))
 
 #?(:cljs
+   (defn instrument-schema-dependents-from-db!
+     "Refresh functions affected by one accepted schema-generation change.
+
+      The database supplies canonical function contracts. Malli's dependency
+      graph supplies the affected closure in both the old and new projections,
+      so removing an old edge still refreshes its former dependents. Only
+      selected functions become delta targets; unrelated live wrappers retain
+      object identity. Replacement contracts compile against the exact new
+      immutable registry before any live wrapper is touched."
+     {:malli/schema
+      [:=>
+       [:cat
+        [:map
+         [::db :any]
+         [::old-projection :map]
+         [::new-projection :map]
+         [::changed-schema-keys [:set :keyword]]]]
+       :map]}
+     [{::keys [db old-projection new-projection changed-schema-keys]}]
+     (if (or (not (enabled?)) (empty? changed-schema-keys))
+       {::enabled? (enabled?) ::ok? true ::n-inspected 0 ::n-dependent 0
+        ::n-unstrumented 0 ::n-instrumented 0 ::accepted-syms #{}
+        ::rejected []}
+       (let [affected
+             (into
+               (schema/dependent-schema-keys old-projection
+                                             changed-schema-keys)
+               (schema/dependent-schema-keys new-projection
+                                             changed-schema-keys))
+             registry (:seon.schema.projection/registry new-projection)
+             rows (program-schema-rows db)
+             selected
+             (reduce
+               (fn [acc [sym-str spec-str]]
+                 (try
+                   (let [sym (symbol sym-str)
+                         form (reader/read-string spec-str)
+                         old-refs (try
+                                    (schema/direct-references
+                                      old-projection form)
+                                    (catch :default _ #{}))
+                         new-refs (try
+                                    (schema/direct-references
+                                      new-projection form)
+                                    (catch :default _ #{}))]
+                     (if (and (qualified-target-parts sym)
+                              (seq (set/intersection
+                                     affected (into old-refs new-refs))))
+                       (conj acc {::sym sym
+                                  ::schema-form form
+                                  ::registry registry})
+                       acc))
+                   (catch :default _ acc)))
+               []
+               rows)
+             changed-syms (into #{} (map ::sym) selected)
+             result
+             (if (seq selected)
+               (instrument-delta!
+                 {::changed-syms changed-syms ::targets selected})
+               {::enabled? true ::ok? true ::n-unstrumented 0
+                ::n-instrumented 0 ::accepted-syms #{} ::rejected []})]
+         (assoc result
+                ::n-inspected (count rows)
+                ::n-dependent (count selected))))))
+
+#?(:cljs
    (defn- coverage-gap
      "A derived live-wrapper gap for one canonical row, or nil."
-     [[sym-str spec-str]]
+     [registry [sym-str spec-str]]
      (when-let [slash (str/index-of (str sym-str) "/")]
        (let [ns-sym (symbol (subs sym-str 0 slash))
              fn-sym (symbol (subs sym-str (inc slash)))
@@ -630,7 +714,11 @@
            (let [schema (try (reader/read-string spec-str)
                              (catch :default _ ::bad))
                  resolves? (when-not (= ::bad schema)
-                             (try (m/schema schema) true
+                             (try (m/schema schema
+                                            (cond-> {}
+                                              registry
+                                              (assoc :registry registry)))
+                                  true
                                   (catch :default _ false)))]
              (cond
                (= ::bad schema)
@@ -650,8 +738,8 @@
                 ::schema-form schema ::reason ::unwrapped})))))))
 
 #?(:cljs
-   (defn- coverage-gaps-for-rows [rows]
-     (into [] (keep coverage-gap) rows)))
+   (defn- coverage-gaps-for-rows [registry rows]
+     (into [] (keep #(coverage-gap registry %)) rows)))
 
 #?(:cljs
    (defn instrument-namespaces-from-db!
@@ -675,7 +763,10 @@
        {::enabled? false ::n-namespaces (count namespace-syms)
         ::n-inspected 0 ::n-gaps 0
         ::n-unstrumented 0 ::n-instrumented 0}
-       (let [namespace-names (mapv keyword (sort namespace-syms))
+       (let [registry
+             (:seon.schema.projection/registry
+               (schema/current-projection))
+             namespace-names (mapv keyword (sort namespace-syms))
              rows
              (if (seq namespace-names)
                (db/query
@@ -688,13 +779,15 @@
                    [?e :seon.fn/spec ?spec]]
                  db namespace-names)
                #{})
-             gaps (coverage-gaps-for-rows rows)
+             gaps (coverage-gaps-for-rows registry rows)
              changed-syms (into #{} (map ::target-sym) gaps)
              targets
              (into []
                    (keep (fn [{::keys [target-sym schema-form]}]
                            (when schema-form
-                             {::sym target-sym ::schema-form schema-form})))
+                             (cond-> {::sym target-sym
+                                      ::schema-form schema-form}
+                               registry (assoc ::registry registry)))))
                    gaps)
              result
              (if (seq changed-syms)
@@ -722,5 +815,9 @@
      [db]
      (if-not (enabled?)
        []
-       (mapv #(select-keys % [::sym ::reason])
-             (coverage-gaps-for-rows (program-schema-rows db))))))
+       (let [registry
+             (:seon.schema.projection/registry
+               (schema/current-projection))]
+         (mapv #(select-keys % [::sym ::reason])
+               (coverage-gaps-for-rows registry
+                                       (program-schema-rows db)))))))

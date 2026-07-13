@@ -1666,12 +1666,14 @@
    The analyzer tuples are converted to the namespaced target data owned by
    `seon.instrument`. Malli receives an explicit delta map; no process-global
    function list or whole-program filter is involved."
-  [targets]
+  [targets registry]
   (when (seq targets)
     (let [instrument-targets
           (mapv (fn [[ns-sym fn-sym schema-form _async?]]
-                  {::instrument/sym (symbol (str ns-sym) (str fn-sym))
-                   ::instrument/schema-form schema-form})
+                  (cond->
+                    {::instrument/sym (symbol (str ns-sym) (str fn-sym))
+                     ::instrument/schema-form schema-form}
+                    registry (assoc ::instrument/registry registry)))
                 targets)]
       (instrument/instrument-delta!
         {::instrument/changed-syms
@@ -2306,6 +2308,39 @@
                       [{:seon.ns/name   (keyword (str ns-sym))
                         :seon.ns/source source}])]
     (vec (concat ns-entities fn-entities schema-entities test-entities))))
+
+(def ^:private optional-fn-projection-attrs
+  #{:seon.fn/spec :seon.fn/schema-error})
+
+(defn- omitted-fn-projection-retractions
+  "Retract optional function facts omitted by an accepted redefinition.
+
+   A Datahike identity upsert replaces asserted card-one values but omission
+   is not a retraction. Without these ops, removing a contract or fixing a
+   schema error leaves the old fact durable and cold reconstruction revives
+   behavior the source no longer declares."
+  [db-value tee-entities]
+  (let [rows-by-sym
+        (into {}
+              (keep (fn [row]
+                      (when-let [sym (and (map? row) (:seon.fn/sym row))]
+                        [sym row])))
+              tee-entities)
+        syms (vec (sort (keys rows-by-sym)))]
+    (if (empty? syms)
+      []
+      (->> (db/query
+             '[:find ?sym ?attr
+               :in $ [?sym ...] [?attr ...]
+               :where
+               [?entity :seon.fn/sym ?sym]
+               [?entity ?attr _]]
+             db-value syms (vec (sort optional-fn-projection-attrs)))
+           (keep (fn [[sym attr]]
+                   (when-not (contains? (get rows-by-sym sym) attr)
+                     [:db.fn/retractAttribute [:seon.fn/sym sym] attr])))
+           (sort-by pr-str)
+           vec))))
 
 ;; ----------------------------------------------------------------------------
 ;; Reified require edges + declared fn read-sets (M4 + C28 structural
@@ -3925,6 +3960,11 @@
                     (vec tee-entities)
                     (core-boot-fn-syms @db/*conn* fn-syms))
                   tee-entities))
+              omitted-fn-tx
+              (when db/*conn*
+                (omitted-fn-projection-retractions
+                  @db/*conn* tee-entities))
+              tee-entities (into (vec tee-entities) omitted-fn-tx)
               ;; Capture the `:seon.ns/require-edges` for the ENDING ns
               ;; on EVERY successful eval — not only `(ns …)` forms —
               ;; so a re-eval'd ns form or a bare `(require '[x])`
@@ -4001,7 +4041,13 @@
                             ::output       output
                             ::tee          tee}))
               eval-id (:seon.eval/id recorded)
-              changed-schemas (schema/changed-keys schemas-before)]
+              changed-schemas (schema/changed-keys schemas-before)
+              old-projection (schema/current-projection)
+              new-projection
+              (when (and (seq changed-schemas)
+                         (:seon.db/ok? recorded)
+                         (::tee-recorded? recorded))
+                (schema/activate! (schema/snapshot)))]
           ;; A declaration becomes runtime-authoritative only when its schema
           ;; fact landed in the same accepted transaction. record-eval! may
           ;; preserve the transcript by retrying without a broken tee; in that
@@ -4009,7 +4055,20 @@
           ;; collector must roll back instead of leaving a process-only schema.
           (when (seq changed-schemas)
             (if (and (:seon.db/ok? recorded) (::tee-recorded? recorded))
-              (schema/activate! (schema/snapshot))
+              (when (and old-projection new-projection db/*conn*)
+                (let [stats
+                      (instrument/instrument-schema-dependents-from-db!
+                        {::instrument/db @db/*conn*
+                         ::instrument/old-projection old-projection
+                         ::instrument/new-projection new-projection
+                         ::instrument/changed-schema-keys changed-schemas})]
+                  (when (false? (::instrument/ok? stats))
+                    (error/record!
+                      {:seon.error/raw
+                       (ex-info
+                         "Accepted schema generation could not refresh all dependent function contracts"
+                         {:seon.instrument/stats stats})
+                       :seon.error/fault :core}))))
               (schema/restore! schemas-before)))
           ;; Bind only the committed id. A failed recorder leaves no orphaned
           ;; result slot; a rejected allocation candidate is never observable.
@@ -4053,7 +4112,9 @@
             (try
               (instrument-tee-fns!
                 (collect-instrument-targets compile-state defs-before
-                                            source @current-ns))
+                                            source @current-ns)
+                (:seon.schema.projection/registry
+                  (schema/current-projection)))
               (catch :default e
                 ;; OUR instrumentation machinery (an exact Malli delta over a
                 ;; newly-tee'd fn whose schema already parsed) throwing is a

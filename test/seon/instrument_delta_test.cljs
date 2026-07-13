@@ -5,7 +5,8 @@
     [goog.object :as gobj]
     [malli.core :as m]
     [seon.db :as db]
-    [seon.instrument :as instrument]))
+    [seon.instrument :as instrument]
+    [seon.schema :as schema]))
 
 (defn probe-a [x] x)
 (defn probe-b [x] x)
@@ -83,14 +84,78 @@
            ::instrument/targets []})))))
 
 (deftest unresolved-target-is-data-not-a-partial-wrapper
-  (let [result
-        (instrument/prepare-targets
-          [(target a-sym [:=> [:cat :int] :missing/schema])])]
-    (is (= #{} (:seon.instrument/accepted-syms result)))
-    (is (= [{:seon.instrument/sym a-sym
-             :seon.instrument/reason
-             :seon.instrument/unresolvable-schema}]
-           (:seon.instrument/rejected result)))))
+  (try
+    (instrument/instrument-targets!
+      [(target a-sym [:=> [:cat :int] :int])])
+    (let [old-wrapper (live-fn a-sym)
+          result
+          (instrument/instrument-delta!
+            {::instrument/changed-syms #{a-sym}
+             ::instrument/targets
+             [(target a-sym [:=> [:cat :int] :missing/schema])]})]
+      (is (false? (::instrument/ok? result)))
+      (is (= #{} (:seon.instrument/accepted-syms result)))
+      (is (= 0 (::instrument/n-unstrumented result)))
+      (is (= [{:seon.instrument/sym a-sym
+               :seon.instrument/reason
+               :seon.instrument/unresolvable-schema}]
+             (:seon.instrument/rejected result)))
+      (when (instrument/enabled?)
+        (is (identical? old-wrapper (live-fn a-sym))
+            "a rejected generation leaves the prior wrapper untouched")
+        (is (= 1 (probe-a 1)))
+        (is (trapped? #(probe-a "wrong")))))
+    (finally
+      (instrument/instrument-delta!
+        {::instrument/changed-syms #{a-sym}
+         ::instrument/targets []}))))
+
+(deftest schema-change-refreshes-only-transitive-function-dependents
+  (let [old-projection
+        (schema/build-projection
+          {:instrumenttest.contract/leaf :int
+           :instrumenttest.contract/root
+           [:vector :instrumenttest.contract/leaf]})
+        new-projection
+        (schema/build-projection
+          {:instrumenttest.contract/leaf :string
+           :instrumenttest.contract/root
+           [:vector :instrumenttest.contract/leaf]})
+        registry (:seon.schema.projection/registry old-projection)
+        a-form [:=> [:cat :instrumenttest.contract/root]
+                :instrumenttest.contract/root]
+        b-form [:=> [:cat :int] :int]
+        rows [[(str a-sym) (pr-str a-form)]
+              [(str b-sym) (pr-str b-form)]]]
+    (try
+      (instrument/instrument-targets!
+        [{::instrument/sym a-sym ::instrument/schema-form a-form
+          ::instrument/registry registry}
+         {::instrument/sym b-sym ::instrument/schema-form b-form
+          ::instrument/registry registry}])
+      (when (instrument/enabled?)
+        (let [a-before (live-fn a-sym)
+              b-before (live-fn b-sym)
+              result
+              (with-redefs [db/query (fn [& _] rows)]
+                (instrument/instrument-schema-dependents-from-db!
+                  {::instrument/db ::fake-db
+                   ::instrument/old-projection old-projection
+                   ::instrument/new-projection new-projection
+                   ::instrument/changed-schema-keys
+                   #{:instrumenttest.contract/leaf}}))]
+          (is (true? (::instrument/ok? result)))
+          (is (= 2 (::instrument/n-inspected result)))
+          (is (= 1 (::instrument/n-dependent result)))
+          (is (= 1 (::instrument/n-instrumented result)))
+          (is (not (identical? a-before (live-fn a-sym))))
+          (is (identical? b-before (live-fn b-sym)))
+          (is (= ["new"] (probe-a ["new"])))
+          (is (trapped? #(probe-a [1])))))
+      (finally
+        (instrument/instrument-delta!
+          {::instrument/changed-syms target-syms
+           ::instrument/targets []})))))
 
 (deftest reload-refresh-is-namespace-scoped-and-mutates-only-live-gaps
   (let [schema-form [:=> [:cat :int] :int]

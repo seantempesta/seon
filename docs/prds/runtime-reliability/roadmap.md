@@ -714,18 +714,27 @@ or discover archived behavior.
    database forms before code. Native backend reopening remains.
 4. **Candidate base complete:** a complete form set now builds and validates an
    immutable Malli registry, entity render catalog, and stable fingerprint
-   before activation. The renderer consumes that catalog directly; persisted
+   before activation. The same projection now derives exact direct and reverse
+   transitive schema-reference indexes through Malli's walker (keyword data is
+   not mistaken for a reference). The renderer consumes that catalog directly; persisted
    required/id/render decomposition, its boot transaction, Datalog discovery,
    and the renderer cache atom are deleted. Remaining: compute compatible
-   missing Datahike attributes and dependency indexes in the candidate, bound
+   missing Datahike attributes and function-contract indexes in the candidate, bound
    historical projections by fingerprint, and stop admission/reconstruct from
    committed facts if post-commit activation fails. The full evidence and failure matrix are in
    [[research/malli-runtime-schema-authority-audit-2026-07-13]].
 5. Use one analyzer/program snapshot and one exact add/change/remove
    transaction. Verify the ghost-pruning builder and every stale compatibility
    branch are absent.
-6. Instrument once at cold boot and incrementally for changed function/schema
-   dependency closures after commit.
+6. **Incremental instrumentation active:** cold boot and Shadow reload compile
+   contracts against the exact active immutable registry; an accepted schema
+   change refreshes only function contracts in its old/new transitive closure.
+   Delta replacement compiles completely before var surgery, so one rejected
+   target leaves the prior wrappers untouched, and omitted spec/schema-error
+   facts become explicit retractions rather than surviving identity upserts.
+   Remaining: move the function dependency inventory into the candidate so a
+   schema change does not scan contract rows, and close admission/reconstruct
+   when post-commit publication cannot complete.
 7. Reconstruct declarations/program state only. Never replay arbitrary evals or
    process-local values.
 8. Make crash recovery a distinct supervisor transition: fence/close every

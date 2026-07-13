@@ -193,6 +193,35 @@
    :seon.eval/result           {:seon.eval/ok? true :seon.eval/value :ok}
    :seon.eval/tee              tee})
 
+(deftest omitted-optional-function-facts-become-explicit-retractions
+  (let [query-rows #{["probe.user/f" :seon.fn/spec]
+                     ["probe.user/f" :seon.fn/schema-error]}
+        retractions
+        (with-redefs [db/query (fn [& _] query-rows)]
+          ((deref #'seval/omitted-fn-projection-retractions)
+            ::db
+            [{:seon.fn/sym "probe.user/f"
+              :seon.fn/source "(defn f [x] x)"}]))]
+    (is (= #{[:db.fn/retractAttribute
+              [:seon.fn/sym "probe.user/f"] :seon.fn/spec]
+             [:db.fn/retractAttribute
+              [:seon.fn/sym "probe.user/f"] :seon.fn/schema-error]}
+           (set retractions))))
+  (testing "an asserted replacement is retained while only omissions retract"
+    (let [retractions
+          (with-redefs [db/query
+                        (fn [& _]
+                          #{["probe.user/f" :seon.fn/spec]
+                            ["probe.user/f" :seon.fn/schema-error]})]
+            ((deref #'seval/omitted-fn-projection-retractions)
+              ::db
+              [{:seon.fn/sym "probe.user/f"
+                :seon.fn/source "(defn f [x] x)"
+                :seon.fn/spec "[:=> [:cat :int] :int]"}]))]
+      (is (= [[:db.fn/retractAttribute
+               [:seon.fn/sym "probe.user/f"] :seon.fn/schema-error]]
+             retractions)))))
+
 (deftest ambiguous-wire-result-never-starts-a-second-allocation
   (async done
     (let [!calls (atom 0)

@@ -522,6 +522,8 @@ Instrumentation follows effective definitions. Boot performs the one complete
 pass. Thereafter a new/redefined function is filtered-unstrumented from Malli's
 recorded original and instrumented once; a changed schema key reinstruments only
 the transitive function-contract dependents derived through Malli schema refs.
+Removing an optional contract/error fact emits an explicit attribute retraction;
+identity-upsert omission never leaves a stale cold-boot contract behind.
 Mint, resume, config apply, and render do no instrumentation work.
 
 A warm agent birth never calls this sequence. Birth commits the complete durable
