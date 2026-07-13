@@ -183,10 +183,23 @@
     ;; guiding one, the ORIGINAL message is preserved here verbatim.
     [::raw-error {:optional true} :string]]])
 
+;; The shape of a Datalog query ITSELF: the standard quoted vector, the
+;; raw map form, or a string. ONE registered shape — `::query-request`'s
+;; `::query` key and both of [[query]]'s arities reference it (the
+;; shared-shape rule; it was inlined three times before).
+(schema/register! ::query-form [:or [:vector :any] :map :string])
+
+;; An entity ADDRESS as an agent writes one: a raw eid (int) or a
+;; lookup-ref `[identity-attr value]`. THE shape to pass in `::ref` /
+;; `::cas-ref` slots. (Core internals may thread live Entity handles
+;; through some of these slots — the fn arities that must accept that
+;; keep an `:any` escape; this registered shape is the taught contract.)
+(schema/register! ::entity-ref [:or :int [:tuple :qualified-keyword :any]])
+
 (schema/register!
   ::query-request
   [:map
-   [::query :any]
+   [::query ::query-form]
    [::args  {:optional true} [:vector :any]]
    [::db    {:optional true} :any]
    [::conn  {:optional true} ::conn]])
@@ -194,7 +207,10 @@
 (schema/register!
   ::pull-request
   [:map
-   [::pull-pattern :any]
+   [::pull-pattern [:vector :any]]
+   ;; `::ref` stays `:any` here: pull's map-in arity validates this map
+   ;; DIRECTLY (no :any escape), and core render paths thread nested
+   ;; Entity handles through it. Agents write [[::entity-ref]] shapes.
    [::ref          :any]
    [::db           {:optional true} :any]
    [::conn         {:optional true} ::conn]])
@@ -202,7 +218,7 @@
 (schema/register!
   ::entity-request
   [:map
-   [::ref  :any]
+   [::ref  ::entity-ref]
    [::db   {:optional true} :any]
    [::conn {:optional true} ::conn]])
 
@@ -341,9 +357,9 @@
   (internal/current-agent-id))
 
 ;; Slot shapes for the two scope fns below (named-positional :catn slots
-;; reference a registered shape). `::thunk` is the 0-arg fn run within the
-;; scope — an opaque closure, hence :any.
-(schema/register! ::thunk      :any)
+;; reference a registered shape). `::thunk` is the 0-arg fn run within
+;; the scope (`'fn?` — the pure-data predicate form, like `::handler`).
+(schema/register! ::thunk      'fn?)
 (schema/register! ::tx-context :map)
 (schema/register! ::read-operation
   [:enum
@@ -458,9 +474,9 @@
 ;; Write path
 ;; ---------------------------------------------------------------------------
 
-(schema/register! ::cas-ref   :any)   ; lookup-ref or eid (third-party boundary)
+(schema/register! ::cas-ref   ::entity-ref)   ; lookup-ref or eid
 (schema/register! ::cas-attr  :keyword)
-(schema/register! ::cas-value :any)   ; lookup-ref, eid, or scalar
+(schema/register! ::cas-value :any)   ; lookup-ref, eid, or ANY scalar value
 (schema/register! ::cas-op    [:vector :any])
 
 (defn cas-assert
@@ -759,8 +775,8 @@
   ;; (`internal/db-value?`).
   {:malli/schema
    [:function
-    [:=> [:cat [:or [:vector :any] :map :string]] :any]
-    [:=> [:catn [::query [:or [:vector :any] :map :string]]
+    [:=> [:cat [:or ::query-request ::query-form]] :any]
+    [:=> [:catn [::query ::query-form]
                 [::rest [:+ :any]]] :any]]}
   [& args]
   (let [a0 (first args)]
@@ -1204,10 +1220,8 @@
 ;; Datomic/datahike shape: db in, db out.
 ;; ---------------------------------------------------------------------------
 
-;; A datahike time-point: a tx-id (int), a Date, or a txInstant. `:any`
-;; because it is a datahike-domain value, not seon-authored data (the
-;; documented third-party-boundary exception to the no-:any rule).
-(schema/register! ::time-point :any)
+;; A datahike time-point: a tx-id (int), or a Date/txInstant (`inst?`).
+(schema/register! ::time-point [:or :int 'inst?])
 
 (defn history
   "A db value spanning ALL of time — assertions and retractions.

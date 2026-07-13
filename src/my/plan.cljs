@@ -158,11 +158,11 @@
 
 (schema/register! ::tree-request
   [:map
-   [::root?        {:optional true} ::id]
+   [::root         {:optional true} ::id]   ; a root STEP ID — that subtree only
    [::all?         {:optional true} ::all?]
    [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
 
-;; root? → one subtree map; else → a vector of root subtrees; nil when nothing.
+;; ::root → one subtree map; else → a vector of root subtrees; nil when nothing.
 (schema/register! ::tree-response [:maybe [:or :map [:vector :map]]])
 
 ;; reconcile! — edit your whole OPEN plan as ONE document. A document node is
@@ -615,14 +615,14 @@
 (defn tree
   "Get the whole plan as nested EDN, the structural read for re-planning.
 
-   Children under `:my.plan/_parent`, dep ids inline. {::root? id} → that
+   Children under `:my.plan/_parent`, dep ids inline. {::root id} → that
    subtree; {::all? true} → every agent's forest; default → the calling
    agent's forest."
   {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
-  [{::keys [root? all?] agent-id :seon.agent/id}]
+  [{::keys [root all?] agent-id :seon.agent/id}]
   (let [db @db/*conn*]
     (cond
-      root? (internal/pull-subtree db root?)
+      root  (internal/pull-subtree db root)
       all?  (mapv #(internal/pull-subtree db %) (internal/all-root-ids db))
       :else (if-let [agent (internal/agent-ref agent-id)]
               (if-let [oe (internal/agent-eid db agent)]
@@ -637,7 +637,7 @@
    inline) with every `:done` step EXCLUDED — history can't be edited
    away. Every node keeps its `:my.plan/id`, so the edit round-trips:
    (my.plan/reconcile! {:my.plan/tree (my.plan/document {})}) is a no-op.
-   {::root? id} → that open subtree; default → your whole open forest."
+   {::root id} → that open subtree; default → your whole open forest."
   {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
   [request]
   (internal/prune-done (tree request)))
