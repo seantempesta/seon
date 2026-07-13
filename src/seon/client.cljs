@@ -2465,7 +2465,20 @@
               (instrument/instrument-from-db! (await (d/db conn)))
               _ (log/info-console! "seon.client/start-runtime!"
                                    (str "instrumentation: "
-                                        (pr-str instrument-stats)))
+                                        ;; The complete result carries Malli's
+                                        ;; per-function `::instrument/data` and
+                                        ;; every accepted symbol so callers can
+                                        ;; inspect the exact reconstruction.
+                                        ;; Printing that payload made one cold
+                                        ;; boot log hundreds of tokens of
+                                        ;; redundant program inventory. Boot
+                                        ;; status needs the counts and the few
+                                        ;; rejected rows; the database remains
+                                        ;; the detailed source of truth.
+                                        (pr-str
+                                          (dissoc instrument-stats
+                                                  ::instrument/data
+                                                  ::instrument/accepted-syms))))
               results
               (let [!results (volatile! [])]
                 (doseq [id resumable-ids]
