@@ -202,10 +202,12 @@
 (declare stat) ; text refuses a binary blob by naming stat's recorded media
 
 (defn ^:async put!
-  "Persist `:my.blob/content` content-addressed; record its projection.
+  "Save a long text durably; read it back page by page later.
 
-   The file write is IDEMPOTENT — same content ⇒ same hash ⇒ no rewrite,
-   and the datom row UPSERTS on the hash identity (never a duplicate).
+   Persists `:my.blob/content` content-addressed and records its DB
+   projection. The file write is IDEMPOTENT — same content ⇒ same hash
+   ⇒ no rewrite, and the datom row UPSERTS on the hash identity (never
+   a duplicate).
    Serialize data yourself first (`pr-str` for edn); an optional
    `:my.blob/media` keyword hints what the bytes are (:markdown :edn …).
 
