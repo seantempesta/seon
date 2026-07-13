@@ -10,6 +10,20 @@ Design: [[design.md]] · Review: [[research/design-review-2026-07-12.md]].
 Started 2026-07-12; scope = general REPL autocomplete (owner), v0 model
 contract = copy-heavy form kinds (plan/transact/register).
 
+## WE ARE HERE (2026-07-13) — correctness push, model work PAUSED
+
+Model work is paused behind a "garbage in, garbage out" correctness
+push. **[[root-cause-fixes-2026-07-13]] is the restart anchor** — read
+it first. Summary: our instruments lied (eval false-ok taints mined
+data; 27% of generated pairs fail at eval; the runtime refactor
+stabilized and must be adopted). 5-tier plan: adopt refactored runtime +
+rebuild acme → fix eval boundary → clean-data pipeline (stage→render→
+eval→keep-clean) → runtime hygiene → measurement instruments (display v3
++ fair scorer). **Next-session focus = DATA QUALITY** (owner): smarter
+models generate proper trajectories; investigate LLM judges for
+goal-achievement, calibrated against the benchmark oracles. The dated
+sections below are the prior arc's evidence trail.
+
 ## Built
 
 - `reference-code/needle` vendored (submodule); source fully read.

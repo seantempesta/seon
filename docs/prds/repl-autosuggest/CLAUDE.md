@@ -6,7 +6,20 @@ tags: [orchestrator, agent]
 
 # repl-autosuggest — PRD index
 
-**Current state (2026-07-12):** design reviewed adversarially and
+**START HERE (2026-07-13):** the model work is PAUSED behind a
+correctness push — our own instruments were found to lie (eval records
+`ok? true` for no-ops; 27% of generated training data fails at eval).
+**Read [[root-cause-fixes-2026-07-13]] first** — it is the self-contained
+restart anchor (5-tier plan, exact fixes with file:line, resolved owner
+decisions, all artifact paths). **Next-session focus = DATA QUALITY**
+(owner): smarter models generate proper multi-step trajectories (not
+cheap single-form drafts), and investigate LLM judges for
+goal-achievement (calibrated against the benchmark oracles). The history
+below is the prior arc.
+
+---
+
+**Prior state (2026-07-12):** design reviewed adversarially and
 re-founded ([[research/design-review-2026-07-12.md]] — verdict
 right-track-with-changes, changes folded into [[design.md]]). B1 MLX
 port SHIPPED (`5481ab36`: parity 20/20, ~0.25s/suggestion, Clojure
