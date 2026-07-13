@@ -8,10 +8,10 @@ tags: [research, web, database, flow]
 
 ## TL;DR
 
-The default pod is idle-cheap. Its normal transcript is now bounded, while
-exact read-result invalidation is still pending. The earlier 1.4–2.5 GB RSS
-sawtooth is transient render allocation followed by garbage collection, not
-evidence of an idle loop or a monotonic leak.
+The default pod is idle-cheap. Its normal transcript is now bounded and the
+Datahike transaction report now omits reasserted identity no-ops. The earlier
+1.4–2.5 GB RSS sawtooth was transient eager render allocation followed by
+garbage collection, not evidence of an idle loop or a monotonic leak.
 
 The current default-store reproduction is smaller but decisive. Agent
 `vast-seals-kick` has 182 evals and four messages. Its initial agent feed is
@@ -31,12 +31,11 @@ Two independent correctness/performance faults caused that result:
   old DOM in place. Commits `190404db` and `b32e6438` fix the argument order,
   consolidate one missing-safe lookup, and make malformed persisted pins a
   recorded core fault rather than a silently disabled subscription.
-- Datahike transaction reports include a reasserted unique identity datom from
-  an entity-map upsert even when that fact is equal in `db-before` and
-  `db-after` and does not appear in history at the new transaction. Every
-  agent-authored map update therefore reports `:seon.agent/id` as changed.
-  Plan, transcript, canvas, and header dependency sets all mention that
-  identity, so one canvas-domain transaction currently dirties all of them.
+- Datahike transaction reports included a reasserted unique identity datom
+  from an entity-map upsert even when that fact was equal in `db-before` and
+  `db-after` and did not appear in history at the new transaction. Every
+  agent-authored map update therefore reported `:seon.agent/id` as changed.
+  Commit `5112c4ed` pins the fork fix that reports only effective datoms.
 
 The dominant payload is the transcript primary element: about 94,000 estimated
 tokens for 182 evals. Closed `<details>` elements are only a browser display
@@ -45,10 +44,13 @@ subtree, serializes it, and gzip receives the whole string. Datastar then parses
 the entire elements payload through `DOMParser` before applying the ID-addressed
 morph. Disclosure is not a compute, allocation, or transport bound.
 
-The right next steps are exact no-op/result invalidation, then a transcript
-composition that emits compact activity faces by default and materializes
-detailed eval bodies only for the deliberate focused/windowed set. Do not raise
-the SCI deadline or add an arbitrary output substring cap.
+After a dependency/source rebuild, 25 correct-map button transactions each
+rendered exactly three roots: the focus marker and the canvas primary/rail
+faces. They emitted about 3,872 estimated tokens per patch and took 134–208 ms
+to render. No plan, transcript, header, false identity, or technical source
+payload appeared. Exact read-result invalidation is still the durable next
+step for same-attribute changes on unrelated entities. Do not raise the SCI
+deadline or add an arbitrary output substring cap.
 
 ## Scope and live baseline
 
@@ -207,7 +209,55 @@ for the complete view. A source sentinel unique to the expedition defn was
 absent from the emitted normal feed. Focused transcript and agent-view tests
 passed 14 tests / 42 assertions, including a behavioral proof that arbitrarily
 large source/result/error payloads do not change the normal activity-row DOM.
-The final cold-rebuild profile remains the authoritative performance gate.
+The rebuilt workload below is the authoritative performance gate.
+
+### Dependency/source rebuild and 25-click result
+
+The default dependencies and CLJS source were rebuilt before the comparable
+workload. `bin/seon prep` refreshed the pinned forks, and the writer classpath
+resolved Datahike commit `67934f650…`. The watcher compiled 530 files, including
+108 changed compilation units, with zero warnings in 9.52 seconds. A
+non-destructive `bin/seon restart all` then restarted the default watcher,
+writer, and pod while preserving the grown store. The writer became ready in
+5 seconds and the pod in 9 seconds; the pod restored `root` and
+`vast-seals-kick` and instrumented 733 definitions.
+
+The first post-rebuild click exposed a renderer boundary regression rather
+than a database regression. `ctx/agent-turns` returns Datahike entity views,
+while the new public `recent-html-events` contract claimed its turns were
+ordinary maps. Always-on Malli instrumentation rejected the first entity and
+the configured core-fault policy stopped the pod. The transaction itself had
+committed correctly and its history contained no false identity datom. Commit
+`704c311d` changes the pure helper to accept the ordered
+`:seon.agent.turn/at` facts it actually uses; the storage-facing caller now
+projects those instants explicitly. The focused suite then passed 14 tests / 42
+assertions and the pod resumed the same grown store cleanly.
+
+The authoritative server-side gzip feed workload then issued 25 sequential
+correct-map calls to the real expedition toggle and waited for one Datastar
+patch after each call:
+
+- 25 of 25 calls returned HTTP 204;
+- each patch contained exactly three complete targets: focus marker, canvas
+  primary, and canvas rail;
+- plan, transcript, and header target counts were zero across all 25 patches;
+- changed attributes contained the domain status/action facts and transaction
+  metadata, but not `:seon.agent/id`;
+- decompressed patches were 3,871–3,873 estimated tokens, mean 3,872;
+- `broadcast!` render time was 134–208 ms, mean 166.9 ms, versus 330–365 ms in
+  the eight-target baseline profile;
+- pod RSS was about 596 MiB before the workload, about 597 MiB immediately
+  after, and about 452 MiB after idle collection; idle CPU returned to zero;
+- no source sentinel, Malli fault, core fault, or repeated SCI interruption
+  appeared.
+
+This was a full dependency/source rebuild and a non-destructive cold restart,
+not a destructive store reset. The old `prune-core-ghosts!`/`boot-index GC`
+phase is absent from current source and did not appear in the boot logs. The
+remaining private `ghost-var?` predicate only recognizes a Shadow hot-reload
+artifact whose stale var metadata points past a shortened source file; it
+omits that stale runtime var from the one source roster and is not the deleted
+database reconciliation/pruning pass.
 
 Before the canvas dependency repair, twelve identical button-shaped patch
 derivations each emitted about 99,400 estimated tokens. Render time was
@@ -363,9 +413,11 @@ and control latency.
 ## Current verdict
 
 The canvas now updates correctly from the transaction's current immutable
-database value, and the normal transcript no longer serializes its full eval
-history. The broader performance work is not complete: report-level false
-positives, roster-wide previews, and duplicate debug/data stream ownership
-remain. Until the Datahike fix and bounded transcript are cold-rebuilt and the
-identical workload is re-profiled, it is inaccurate to claim that boot,
-updates, every HTML stream, and CPU/RSS behavior are all performant.
+database value, the normal transcript no longer serializes its full eval
+history, and effective Datahike reports no longer fan one canvas-domain update
+out through agent identity. The rebuilt 25-click workload is bounded and
+returns to a low idle RSS/CPU band. The broader performance work is not
+complete: same-attribute unrelated-entity invalidation, roster-wide previews,
+and duplicate debug/data stream ownership remain. It is still inaccurate to
+claim that every HTML stream and all grown-store paths are performant until
+those units receive equivalent mechanical proofs.
