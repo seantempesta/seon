@@ -3,10 +3,12 @@
   (:require
     [cljs.test :refer [async deftest is testing]]
     [clojure.string :as str]
+    [datahike.api :as d]
     [seon.agent.ctx :as agent-ctx]
     [seon.agent.ctx.render-fns :as render-fns]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.error :as err]
     [seon.ui.agent-view :as agent-view]
     [seon.ui.html :as html]))
 
@@ -111,6 +113,41 @@
                               (agent-view/agent-view-dependencies
                                 @conn agent-a))]
                         (is (contains? deps :my.agent.view/state)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest absent-canvas-pin-is-a-normal-missing-value
+  (async done
+    (-> (with-agents
+          [[agent-a []]]
+          (fn [conn]
+            (let [deps
+                  (:seon.ui.agent-view/surface-attrs
+                    (agent-view/agent-view-dependencies @conn agent-a))]
+              (is (contains? deps :seon.render.canvas/content)))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest malformed-canvas-pin-is-recorded-and-fails-loudly
+  (async done
+    (-> (with-agents
+          [[agent-a []]]
+          (fn [conn]
+            ;; Simulate a corrupted/pre-validation store by bypassing seon.db's
+            ;; registered Malli value gate. The physical slot is a string.
+            (-> (d/transact! conn
+                  {:tx-data
+                   [{:db/id [:seon.agent/id agent-a]
+                     :seon.render.canvas/content "["}]})
+                (.then
+                  (fn [_]
+                    (let [recorded (atom nil)]
+                      (with-redefs [err/record! #(reset! recorded %)]
+                        (is (thrown? js/Error
+                              (agent-view/agent-view-dependencies
+                                @conn agent-a)))
+                        (is (= :core
+                              (:seon.error/fault @recorded))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 

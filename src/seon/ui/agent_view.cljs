@@ -10,10 +10,12 @@
   (:require
     [clojure.set :as set]
     [clojure.string :as str]
+    [malli.core :as m]
     [seon.agent.ctx :as agent-ctx]
     [seon.agent.ctx.render-fns :as render-fns]
     [seon.db :as db]
     [seon.derive :as derive]
+    [seon.error :as err]
     [seon.render :as render]
     [seon.schema :as schema]
     [seon.ui.header :as header]))
@@ -190,17 +192,49 @@
          :seon.db/args [agent-id (repl-process-eid dbv)]}))
     0))
 
+(def ^:private literal-canvas
+  "Marker for a valid literal canvas pin, which has no renderer read-set."
+  ::literal-canvas)
+
+(defn- pinned-canvas-renderer
+  "The decoded pinned canvas renderer, literal marker, or nil when absent.
+
+   Uses a missing-safe query rather than catching lookup/decode failures. A
+   malformed persisted value is a core database invariant failure: record it
+   and throw so dependency routing cannot silently stop updating the canvas."
+  [dbv agent-id]
+  (let [stored
+        (ffirst
+          (db/query
+            {:seon.db/db dbv
+             :seon.db/query
+             '[:find ?content
+               :in $ ?aid
+               :where
+               [?agent :seon.agent/id ?aid]
+               [?agent :seon.render.canvas/content ?content]]
+             :seon.db/args [agent-id]}))
+        pinned (when (some? stored)
+                 (db/decode-edn-value :seon.render.canvas/content stored))]
+    (cond
+      (nil? stored) nil
+      (symbol? pinned) pinned
+      (m/validate :seon.render.canvas/content pinned) literal-canvas
+      :else
+      (let [e (ex-info
+                (str "Malformed :seon.render.canvas/content for agent "
+                     agent-id ": " (pr-str pinned))
+                {:seon.agent/id agent-id
+                 :seon.render.canvas/content pinned
+                 :seon.error/kind :core-bug})]
+        (err/record! {:seon.error/raw e :seon.error/fault :core})
+        (throw e)))))
+
 (defn- canvas-touch
   "Canvas recency from its explicit slot and its derived tile renderer."
   [dbv agent-id]
-  (let [pinned (try
-                 (some-> (db/pull dbv [:seon.render.canvas/content]
-                                  [:seon.agent/id agent-id])
-                         :seon.render.canvas/content
-                         (#(db/decode-edn-value
-                             :seon.render.canvas/content %)))
-                 (catch :default _ nil))
-        derived (when-not (symbol? pinned)
+  (let [pinned (pinned-canvas-renderer dbv agent-id)
+        derived (when (nil? pinned)
                   (::render-fns/tile-sym
                     (render-fns/last-updated-tile
                       {:seon.db/db dbv :seon.agent/id agent-id})))
@@ -211,14 +245,8 @@
 (defn- canvas-renderer
   "The symbolic renderer currently driving the canvas, when it has one."
   [dbv agent-id]
-  (let [pinned (try
-                 (some-> (db/pull dbv [:seon.render.canvas/content]
-                                  [:seon.agent/id agent-id])
-                         :seon.render.canvas/content
-                         (#(db/decode-edn-value
-                             :seon.render.canvas/content %)))
-                 (catch :default _ nil))
-        derived (when-not (symbol? pinned)
+  (let [pinned (pinned-canvas-renderer dbv agent-id)
+        derived (when (nil? pinned)
                   (::render-fns/tile-sym
                     (render-fns/last-updated-tile
                       {:seon.db/db dbv :seon.agent/id agent-id})))
