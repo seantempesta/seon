@@ -9,10 +9,9 @@
 (def jar-file (format "target/%s-%s.jar" (name lib) version))
 
 ;; The standalone artifact and the source-launched writer are the same program.
-;; Keep this composition in one value so the build cannot silently fall back to
-;; the Maven Datahike/Konserve graph while local launch uses the maintained
-;; forks and secondary-index source.
-(def writer-aliases [:simd :fork-deps :writer])
+;; :writer replaces the broad project graph and owns the maintained forks,
+;; secondary-index source, JVM flags, and writer-only dependencies in one basis.
+(def writer-aliases [:writer])
 
 (defn clean [_]
   (b/delete {:path "target"}))
@@ -47,10 +46,10 @@
 ;;   java --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED \
 ;;        -XX:+UseG1GC -Xmx2g -jar target/seon-wire-server-standalone.jar --preflight
 ;;
-;; It is built from the same `:simd:fork-deps:writer` basis as the source
-;; launcher (NOT the default `basis` the `uber` target above uses — that one is
-;; the PAUSED JVM app `seon.core`, with no embeddings classpath). Building from
-;; that exact composition bakes EVERYTHING the consumer would otherwise have to
+;; It is built from the same complete `:writer` basis as the source launcher
+;; (NOT the default `basis` the `uber` target above uses — that one is the
+;; PAUSED JVM app `seon.core`, with no embeddings classpath). Building from
+;; that exact basis bakes EVERYTHING the consumer would otherwise have to
 ;; assemble themselves into one jar:
 ;;   - the datahike fork's `src-secondary` Proximum source;
 ;;   - the datahike fork's prep output (no `clojure -X:deps prep`);

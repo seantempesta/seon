@@ -99,10 +99,16 @@
   :fork-deps
   {:extra-deps {org.replikativ/datahike
                 {:git/url "https://github.com/seantempesta/datahike"
-                 :git/sha "67934f650fae30924ac115c899cd3412d90dcacb"}}
+                 :git/sha "67934f650fae30924ac115c899cd3412d90dcacb"
+                 :exclusions [org.clojure/clojurescript
+                              com.github.pkpkpk/cljs-cache]}}
    :override-deps {org.replikativ/konserve
                    {:git/url "https://github.com/seantempesta/konserve"
-                    :git/sha "df6818d43ea3363a808cd051c0d68917f1b987a9"}}}
+                    :git/sha "df6818d43ea3363a808cd051c0d68917f1b987a9"
+                    :exclusions [org.clojure/clojurescript
+                                 org.clojars.mmb90/cljs-cache
+                                 com.github.pkpkpk/cljs-node-io
+                                 com.github.pkpkpk/fress]}}}
 
   :simd
   {:jvm-opts ["--add-modules" "jdk.incubator.vector"
@@ -168,31 +174,65 @@
                    "-XX:+HeapDumpOnOutOfMemoryError"
                    "-XX:HeapDumpPath=logs/"]}
 
-  ;; Platform-track (V2) JVM wire-server / datahike writer.
-  ;; Launched by the Rust host (client-runtime/host/src/main.rs) as:
-  ;;   clojure -M:writer --backend <b> --path <p> --req-sock <s> --pub-sock <s>
-  ;; from the repo root. Boots seon.server.boot/-main, a thin glue ns that
-  ;; loads BOTH seon.server.wire AND seon.server.reactive so each registers
-  ;; its own on-ensure-db hook + schema at startup (wire.clj stays
-  ;; reactive-free — the P1 decoupling); -main delegates to wire/-main, which
-  ;; owns the single datahike connection, serves requests over a UDS req
-  ;; socket, and broadcasts tx events over a UDS pub socket. Prints
-  ;; `[writer] ready`. See seon.server.boot.
+  ;; JVM datahike writer. This alias is the complete server contract: it
+  ;; replaces the paused application's broad base graph, selects the maintained
+  ;; Datahike/Konserve pair, exposes the optional Proximum source, and carries
+  ;; the launch flags required by its SIMD implementation. The still-live
+  ;; supervisor command may compose :simd/:fork-deps ahead of :writer; their
+  ;; matching coordinates merge to this same dependency graph.
   ;;
-  ;; The wire-server owns the single datahike connection. It COMPOSES the
-  ;; shared fork + native launch surface — invoked as:
-  ;;   clojure -M:simd:fork-deps:writer --backend file --path … --req-sock … …
-  ;; :simd supplies the SIMD jvm-opts + src-secondary path;
-  ;; :fork-deps supplies the datahike + konserve forks. Here we add only the
-  ;; wire-server's OWN deps: transit-clj (Transit value payloads — the sole
-  ;; control codec since the CBOR-envelope removal), proximum (HNSW vector
-  ;; index backing :db.secondary/type :proximum), google-genai (embeddings
-  ;; client). `src` + `resources` give the seon.server.* sources + seed
-  ;; resources; konserve-jdbc / sqlite-jdbc come from the base :deps.
-  :writer {:extra-deps {com.cognitect/transit-clj {:mvn/version "1.0.333"}
-                        org.replikativ/proximum {:mvn/version "0.1.25"}
-                        com.google.genai/google-genai {:mvn/version "1.59.0"}}
-           :main-opts ["-m" "seon.server.boot"]}
+  ;; `konserve-jdbc` remains only because seon.server.wire still requires its
+  ;; namespace while the fake SQLite operation awaits deletion. Keep it out of
+  ;; dependency authority: the maintained Konserve/Superv pair wins, and the
+  ;; old SLF4J→Timbre provider is excluded. Proximum's slf4j-simple is selected
+  ;; explicitly as the writer's sole SLF4J provider.
+  :writer
+  {:replace-paths ["src" "resources"]
+   :extra-paths ["reference-code/datahike/src-secondary"]
+   :replace-deps
+   {org.clojure/clojure {:mvn/version "1.12.0"}
+    metosin/malli {:mvn/version "0.20.0"}
+
+    org.replikativ/datahike
+    {:git/url "https://github.com/seantempesta/datahike"
+     :git/sha "67934f650fae30924ac115c899cd3412d90dcacb"
+     :exclusions [org.clojure/clojurescript
+                  com.github.pkpkpk/cljs-cache]}
+    org.replikativ/konserve
+    {:git/url "https://github.com/seantempesta/konserve"
+     :git/sha "df6818d43ea3363a808cd051c0d68917f1b987a9"
+     :exclusions [org.clojure/clojurescript
+                  org.clojars.mmb90/cljs-cache
+                  com.github.pkpkpk/cljs-node-io
+                  com.github.pkpkpk/fress]}
+    org.replikativ/hasch
+    {:mvn/version "0.4.100"
+     :exclusions [org.clojure/clojurescript]}
+
+    com.taoensso/timbre {:mvn/version "6.5.0"}
+    com.cognitect/transit-clj {:mvn/version "1.0.333"}
+    org.replikativ/proximum {:mvn/version "0.1.25"}
+    com.google.genai/google-genai {:mvn/version "1.59.0"}
+    com.github.kkuegler/human-readable-ids-java {:mvn/version "0.4"}
+    io.github.thibaultmeyer/cuid {:mvn/version "2.0.5"}
+
+    io.replikativ/konserve-jdbc
+    {:mvn/version "0.2.91"
+     :exclusions [io.replikativ/konserve
+                  io.replikativ/superv.async
+                  com.fzakaria/slf4j-timbre]}
+    org.slf4j/slf4j-simple {:mvn/version "2.0.16"}}
+   :jvm-opts ["--add-modules" "jdk.incubator.vector"
+              "--enable-native-access=ALL-UNNAMED"
+              "-XX:+UseG1GC" "-Xmx2g"]
+   :main-opts ["-m" "seon.server.boot"]}
+
+  ;; Focused writer tests add source only; clojure.test already rides Clojure.
+  ;; Clearing :main-opts lets bin/test-writer select the exact retained test
+  ;; namespaces without booting the server or discovering the paused JVM suite.
+  :writer-test
+  {:extra-paths ["test"]
+   :main-opts []}
 
   ;; The server-wire test nses load against the fork datahike + proximum via
   ;; the shared :simd + :fork-deps + :test (kaocha + proximum + transit + genai
