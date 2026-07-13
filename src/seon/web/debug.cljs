@@ -1031,15 +1031,16 @@
                       initial-catalog
                       (datastar/view-active-tokens view-id))
      :seon.web.feed/render-change
-     (fn [_change]
+     (fn [_subscription _change]
        (let [projection (debug-projection agent-id !snapshot)
              catalog (:seon.web.debug/catalog projection)
              active (datastar/reconcile-view-catalog!
                       {::datastar/view-id view-id
                        ::datastar/catalog catalog})]
-         [(debug-app-view agent-id view-id
-                          (:seon.web.debug/snapshot projection)
-                          catalog active)]))}))
+         {::datastar/elements
+          [(debug-app-view agent-id view-id
+                           (:seon.web.debug/snapshot projection)
+                           catalog active)]}))}))
 
 (defn- open-data-sse!
   "SSE stream for the /data browser. The connection pins ITS view's query

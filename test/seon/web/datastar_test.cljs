@@ -95,6 +95,31 @@
   {:query-string (str "view=" view-id "&unit=" token "&active=" active)
    :seon.http/node-res res})
 
+(defn- test-feed
+  "Minimal normalized-feed input with explicit test overrides."
+  [view-id overrides]
+  (merge
+    {:seon.web.feed/key [:seon.web.feed/agent agent-a]
+     :seon.web.feed/live? true
+     :seon.web.feed/render-full (fn [] [:main {:id "app-view"}])
+     :seon.web.feed/render-change
+     (fn [_subscription _change] {::datastar/elements []})
+     ::datastar/view-id view-id
+     ::datastar/catalog []
+     ::datastar/active-tokens #{}
+     :seon.web.feed/id (random-uuid)}
+    overrides))
+
+(defn- feed-registry
+  "Registry whose socket consumers share normalized subscription authority."
+  [feeds]
+  (reduce @#'datastar/attach-feed
+          @#'datastar/empty-feed-registry
+          feeds))
+
+(defn- registry-view [registry view-id]
+  (get-in registry [::datastar/views view-id]))
+
 ;; ============================================================
 ;; 1. View-unit contracts — stable coordinates and zero speculative work.
 ;; ============================================================
@@ -159,10 +184,12 @@
     (is (= 1 @renders) "activation crosses exactly one producer boundary")
     (reset! renders 0)
     (with-redefs [datastar/!feeds
-                  (atom {"catalog-view"
-                         {::datastar/view-id "catalog-view"
-                          ::datastar/catalog catalog
-                          ::datastar/active-tokens #{token "removed-token"}}})]
+                  (atom
+                    (feed-registry
+                      [(test-feed
+                         "catalog-view"
+                         {::datastar/catalog catalog
+                          ::datastar/active-tokens #{token "removed-token"}})]))]
       (is (= #{token}
              (datastar/reconcile-view-catalog!
                {::datastar/view-id "catalog-view"
@@ -339,12 +366,13 @@
         [closed-res closed] (response-probe)
         [missing-res missing] (response-probe)]
     (with-redefs [datastar/!feeds
-                  (atom {"known-view"
-                         {::datastar/view-id "known-view"
-                          ::datastar/catalog catalog
-                          ::datastar/active-tokens #{}
+                  (atom
+                    (feed-registry
+                      [(test-feed
+                         "known-view"
+                         {::datastar/catalog catalog
                           :seon.web.feed/id
-                          #uuid "00000000-0000-0000-0000-000000000001"}})]
+                          #uuid "00000000-0000-0000-0000-000000000001"})]))]
       (datastar/handle-view-unit!
         (unit-ring-request closed-res "closed-view" known-token "1"))
       (datastar/handle-view-unit!
@@ -383,11 +411,13 @@
         [active-res active-observed] (response-probe)
         [inactive-res inactive-observed] (response-probe)]
     (with-redefs [datastar/!feeds
-                  (atom {view-id
-                         {::datastar/view-id view-id
-                          ::datastar/catalog catalog
+                  (atom
+                    (feed-registry
+                      [(test-feed
+                         view-id
+                         {::datastar/catalog catalog
                           ::datastar/active-tokens #{prior-token}
-                          :seon.web.feed/id feed-id}})]
+                          :seon.web.feed/id feed-id})]))]
       (datastar/handle-view-unit!
         (unit-ring-request active-res view-id requested-token "1"))
       (let [body (::response-body @active-observed)]
@@ -403,7 +433,8 @@
         (is (str/includes? body "data-seon-unit-active=\"false\"")
             "exclusive deactivation returns an inactive stable root")
         (is (= #{requested-token}
-               (::datastar/active-tokens (get @datastar/!feeds view-id)))
+               (::datastar/active-tokens
+                 (registry-view @datastar/!feeds view-id)))
             "the view owns the transitioned active set"))
       (datastar/handle-view-unit!
         (unit-ring-request inactive-res view-id requested-token "0"))
@@ -415,7 +446,7 @@
                          "data-seon-unit-active=\"false\"")
           "the returned target is an inactive stub, not stale content")
       (is (empty? (::datastar/active-tokens
-                    (get @datastar/!feeds view-id)))
+                    (registry-view @datastar/!feeds view-id)))
           "deactivation removes future subscription work"))))
 
 ;; ============================================================
@@ -566,29 +597,34 @@
 ;; ============================================================
 
 (deftest broadcast-with-zero-connections-is-a-noop
-  (with-redefs [datastar/!feeds (atom {})]
+  (with-redefs [datastar/!feeds (atom @#'datastar/empty-feed-registry)]
     (is (nil? (@#'datastar/broadcast!
                 {:seon.db/db nil :seon.db/changed-attrs #{}}))
         "broadcast! over an empty feed registry is a silent no-op (no throw)")
-    (is (empty? @datastar/!feeds)
+    (is (empty? (::datastar/views @datastar/!feeds))
         "no connection was added or mutated")))
 
 (deftest broadcast-renders-once-per-live-view
   (let [renders (atom 0)
         pushes (atom 0)
-        render-change (fn [_]
+        render-change (fn [_subscription _change]
                         (swap! renders inc)
-                        [[:div {:id "first-target"} "one"]
-                         [:div {:id "second-target"} "two"]])
-        conn {:seon.web.feed/key [:seon.web.feed/agent agent-a]
-              :seon.web.feed/live? true
-              ::datastar/active-tokens #{}
-              :seon.web.feed/render-change render-change}]
+                        {::datastar/elements
+                         [[:div {:id "first-target"} "one"]
+                          [:div {:id "second-target"} "two"]]})]
     (with-redefs [datastar/!feeds
-                  (atom {"view-a" (assoc conn :seon.web.feed/id
-                                         #uuid "00000000-0000-0000-0000-000000000001")
-                         "view-b" (assoc conn :seon.web.feed/id
-                                         #uuid "00000000-0000-0000-0000-000000000002")})
+                  (atom
+                    (feed-registry
+                      [(test-feed
+                         "view-a"
+                         {:seon.web.feed/render-change render-change
+                          :seon.web.feed/id
+                          #uuid "00000000-0000-0000-0000-000000000001"})
+                       (test-feed
+                         "view-b"
+                         {:seon.web.feed/render-change render-change
+                          :seon.web.feed/id
+                          #uuid "00000000-0000-0000-0000-000000000002"})]))
                   datastar/push-event! (fn [_ event]
                                          (is (str/includes? event "first-target"))
                                          (is (str/includes? event "second-target"))
@@ -601,17 +637,20 @@
 (deftest broadcast-separates-different-active-fingerprints
   (let [renders (atom 0)
         pushes (atom 0)
-        render-change (fn [_]
+        render-change (fn [_subscription _change]
                         (swap! renders inc)
-                        [[:div {:id "target"}]])
-        base {:seon.web.feed/key [:seon.web.feed/agent agent-a]
-              :seon.web.feed/live? true
-              :seon.web.feed/render-change render-change}]
+                        {::datastar/elements [[:div {:id "target"}]]})]
     (with-redefs [datastar/!feeds
-                  (atom {"view-a" (assoc base
-                                         ::datastar/active-tokens #{"unit-a"})
-                         "view-b" (assoc base
-                                         ::datastar/active-tokens #{"unit-b"})})
+                  (atom
+                    (feed-registry
+                      [(test-feed
+                         "view-a"
+                         {:seon.web.feed/render-change render-change
+                          ::datastar/active-tokens #{"unit-a"}})
+                       (test-feed
+                         "view-b"
+                         {:seon.web.feed/render-change render-change
+                          ::datastar/active-tokens #{"unit-b"}})]))
                   datastar/push-event! (fn [_ _] (swap! pushes inc))]
       (@#'datastar/broadcast!
         {:seon.db/db nil :seon.db/changed-attrs #{:example/value}})
@@ -622,16 +661,131 @@
 (deftest broadcast-ignores-frozen-feeds
   (let [renders (atom 0)]
     (with-redefs [datastar/!feeds
-                  (atom {"frozen-view"
+                  (atom
+                    (feed-registry
+                      [(test-feed
+                         "frozen-view"
                          {:seon.web.feed/key [:seon.web.feed/agent agent-a
                                               :seon.web.feed/as-of 1]
                           :seon.web.feed/live? false
-                          ::datastar/active-tokens #{}
                           :seon.web.feed/render-change
-                          (fn [_] (swap! renders inc) [])}})]
+                          (fn [_subscription _change]
+                            (swap! renders inc)
+                            {::datastar/elements []})})]))]
       (@#'datastar/broadcast!
         {:seon.db/db nil :seon.db/changed-attrs #{:example/value}})
       (is (zero? @renders) "as-of feeds never rerender on current commits"))))
+
+(deftest shared-subscription-keeps-new-dependencies-after-first-socket-closes
+  (let [EventEmitter (.-EventEmitter (js/require "node:events"))
+        PassThrough (.-PassThrough (js/require "node:stream"))
+        req-a (new EventEmitter)
+        req-b (new EventEmitter)
+        res-a (new PassThrough)
+        res-b (new PassThrough)
+        _write-a (aset res-a "writeHead" (fn [_ _] nil))
+        _write-b (aset res-b "writeHead" (fn [_ _] nil))
+        renders (atom 0)
+        pushes (atom [])
+        initial-dependencies
+        {:seon.web.datastar-test/structural-attrs #{:example/structure}
+         :seon.web.datastar-test/surface-attrs #{:example/original}}
+        render-change
+        (fn [{dependencies ::datastar/dependencies}
+             {attrs :seon.db/changed-attrs}]
+          (swap! renders inc)
+          (cond
+            (some attrs
+                  (:seon.web.datastar-test/structural-attrs dependencies))
+            {::datastar/elements [[:div {:id "structure-target"}]]
+             ::datastar/dependencies
+             (assoc dependencies :seon.web.datastar-test/surface-attrs
+                    #{:example/new-dependency})}
+
+            (some attrs (:seon.web.datastar-test/surface-attrs dependencies))
+            {::datastar/elements
+             [[:div {:id "new-dependency-target"} "updated"]]}
+
+            :else {::datastar/elements []}))
+        definition
+        (fn [view-id]
+          {:seon.web.feed/key [:seon.web.feed/agent agent-a]
+           :seon.web.feed/live? true
+           :seon.web.feed/render-full (fn [] [:main {:id "app-view"}])
+           :seon.web.feed/render-change render-change
+           ::datastar/dependencies initial-dependencies
+           ::datastar/view-id view-id})]
+    (with-redefs [datastar/!feeds (atom @#'datastar/empty-feed-registry)
+                  datastar/uninstall! (fn [] nil)
+                  datastar/push-full! (fn [_] nil)
+                  datastar/push-event!
+                  (fn [conn event]
+                    (swap! pushes conj [(::datastar/view-id conn) event]))]
+      (@#'datastar/open-feed! req-a res-a (definition "shared-a"))
+      (@#'datastar/open-feed! req-b res-b (definition "shared-b"))
+      (let [subscriptions (::datastar/subscriptions @datastar/!feeds)
+            subscription (first (vals subscriptions))]
+        (is (= 1 (count subscriptions))
+            "equivalent views have one normalized render authority")
+        (is (= #{"shared-a" "shared-b"}
+               (::datastar/consumer-view-ids subscription))
+            "both sockets consume that one authority"))
+
+      (@#'datastar/broadcast!
+        {:seon.db/db nil :seon.db/changed-attrs #{:example/structure}})
+      (is (= 1 @renders) "the structural change renders once for both sockets")
+      (is (= 2 (count @pushes)) "both equivalent sockets receive the shared patch")
+      (let [subscription (first (vals (::datastar/subscriptions @datastar/!feeds)))]
+        (is (= #{:example/new-dependency}
+               (get (::datastar/dependencies subscription)
+                    :seon.web.datastar-test/surface-attrs))
+            "the structural transition replaces shared dependency authority"))
+
+      (.emit req-a "close")
+      (is (= 1 (count (::datastar/views @datastar/!feeds)))
+          "closing the first socket leaves its peer open")
+      (is (= 1 (count (::datastar/subscriptions @datastar/!feeds)))
+          "the learned authority remains while one consumer exists")
+      (reset! pushes [])
+
+      (@#'datastar/broadcast!
+        {:seon.db/db nil
+         :seon.db/changed-attrs #{:example/new-dependency}})
+      (is (= 2 @renders)
+          "the later dependency change is routed through the retained authority")
+      (is (= 1 (count @pushes)) "only the remaining socket receives the patch")
+      (is (= "shared-b" (ffirst @pushes)))
+      (is (str/includes? (second (first @pushes)) "new-dependency-target")
+          "the new dependency produces the expected targeted morph")
+      (.emit req-b "close"))))
+
+(deftest obsolete-subscription-does-not-push-into-a-rebound-view
+  (let [pushes (atom 0)
+        initial-feed
+        (test-feed
+          "rebound-view"
+          {:seon.web.feed/render-change
+           (fn [_subscription _change]
+             ;; Simulate a unit activation completing while this old render is
+             ;; in flight. The view now consumes a different normalized
+             ;; subscription before the old transition returns its patch.
+             (swap! datastar/!feeds
+                    @#'datastar/attach-feed
+                    (test-feed
+                      "rebound-view"
+                      {::datastar/active-tokens #{"new-active-unit"}}))
+             {::datastar/elements [[:div {:id "obsolete-target"}]]})})]
+    (with-redefs [datastar/!feeds
+                  (atom (feed-registry [initial-feed]))
+                  datastar/push-event! (fn [_ _] (swap! pushes inc))]
+      (@#'datastar/broadcast!
+        {:seon.db/db nil :seon.db/changed-attrs #{:example/value}})
+      (is (zero? @pushes)
+          "an obsolete authority cannot push into its replacement socket")
+      (is (= #{"new-active-unit"}
+             (::datastar/active-tokens
+               (registry-view @datastar/!feeds "rebound-view")))
+          "the replacement view remains bound to its new subscription"))))
 
 (deftest backpressured-feed-retains-only-latest-event
   (let [writes (atom [])
@@ -678,32 +832,39 @@
         base {:seon.web.feed/key [:seon.web.feed/agent agent-a]
               :seon.web.feed/live? true
               :seon.web.feed/render-full (fn [] [:main {:id "app-view"}])
-              :seon.web.feed/render-change (constantly [])
+              :seon.web.feed/render-change
+              (fn [_subscription _change] {::datastar/elements []})
               ::datastar/view-id view-id}]
-    (with-redefs [datastar/!feeds (atom {})
+    (with-redefs [datastar/!feeds (atom @#'datastar/empty-feed-registry)
                   datastar/uninstall! (fn [] (swap! uninstalls inc))
                   datastar/push-full! (fn [_] nil)]
       (@#'datastar/open-feed!
         req-a res-a (assoc base
                            ::datastar/catalog catalog
                            ::datastar/active-tokens #{token}))
-      (let [first-owner (:seon.web.feed/id (get @datastar/!feeds view-id))]
+      (let [first-owner (:seon.web.feed/id
+                          (registry-view @datastar/!feeds view-id))]
         (@#'datastar/open-feed! req-b res-b base)
-        (let [second-owner (:seon.web.feed/id (get @datastar/!feeds view-id))]
-          (is (= 1 (count @datastar/!feeds))
+        (let [second-owner (:seon.web.feed/id
+                             (registry-view @datastar/!feeds view-id))]
+          (is (= 1 (count (::datastar/views @datastar/!feeds)))
               "one view id has exactly one current socket owner")
           (is (not= first-owner second-owner)
               "reconnect replaces rather than appends socket ownership")
           (is (= #{token}
-                 (::datastar/active-tokens (get @datastar/!feeds view-id)))
+                 (::datastar/active-tokens
+                   (registry-view @datastar/!feeds view-id)))
               "reconnect inherits the view's active state")
           (.emit req-a "close")
           (is (= second-owner
-                 (:seon.web.feed/id (get @datastar/!feeds view-id)))
+                 (:seon.web.feed/id
+                   (registry-view @datastar/!feeds view-id)))
               "a stale close cannot release the replacement")
           (.emit req-b "close")
-          (is (empty? @datastar/!feeds)
+          (is (empty? (::datastar/views @datastar/!feeds))
               "closing the final owner releases catalog and active state")
+          (is (empty? (::datastar/subscriptions @datastar/!feeds))
+              "closing the final consumer releases normalized authority")
           (is (= 1 @uninstalls)
               "the final close releases the otherwise-idle tx listener"))))))
 
