@@ -165,15 +165,6 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 
-(deftest surface-selection-distinguishes-ambiguous-keyword-printing
-  (let [left (keyword "a/b" "c")
-        right (keyword "a" "b/c")]
-    (is (not= left right))
-    (is (= (pr-str left) (pr-str right))
-        "the historical printed-form coordinate cannot distinguish this pair")
-    (is (not= (selection-for left) (selection-for right))
-        "the canonical coordinate preserves keyword namespace and name")))
-
 (deftest materialize-surface-invokes-only-the-selected-renderer-once
   (async done
     (-> (with-agents

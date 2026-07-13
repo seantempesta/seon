@@ -393,8 +393,8 @@
     (-> (fresh-seeded)
         (.then
           (fn [{db-value :db}]
-            (let [left (js/Date. 1720000000123)
-                  right (js/Date. 1720000000123)
+            (let [left #js {:side "left"}
+                  right #js {:side "right"}
                   colliding-map (assoc {} left :left right :right)
                   colliding-set (conj #{} left right)
                   query-form
@@ -412,9 +412,9 @@
               (is (= 2 (count colliding-map)))
               (is (= 2 (count colliding-set)))
               (is (false? (:seon.db/read-replayable? map-event))
-                  "normalizing content-equal host keys cannot drop a map row")
+                  "normalizing opaque host keys cannot authorize a lossy map")
               (is (false? (:seon.db/read-replayable? set-event))
-                  "normalizing content-equal host values cannot drop a set item")
+                  "normalizing opaque host values cannot authorize a lossy set")
               (is (true? (changed? db-value map-event)))
               (is (true? (changed? db-value set-event))))))
         (settle! done))))

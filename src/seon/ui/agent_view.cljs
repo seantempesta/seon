@@ -52,7 +52,7 @@
    [::selection ::selection]
    [::face ::face]])
 (schema/register! ::materialized-surface
-  [:or [:enum nil] :seon.render.canvas/hiccup])
+  [:maybe :seon.render.canvas/hiccup])
 
 (declare agent-view)
 
