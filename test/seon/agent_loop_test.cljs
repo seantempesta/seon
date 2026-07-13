@@ -24,6 +24,7 @@
     [seon.agent.loop :as loop]
     [seon.agent.message :as msg]
     [seon.agent.run :as run]
+    [seon.agent.runtime :as runtime]
     [seon.agent.schedule :as schedule]
     [seon.ai.dispatch :as dispatch]
     [seon.client :as client]
@@ -42,6 +43,8 @@
 (def ^:private blob-fixture-dir (str "tmp/loop-test-blobs-" (.-pid js/process)))
 
 (defonce ^:private !saved-blob-dir (atom nil))
+
+(def ^:private agent-id "AGTlooprun0001")          ; 14 chars (:seon.db/id)
 
 (use-fixtures :once
   {:before (fn []
@@ -63,9 +66,11 @@
                  ;; need their stored source rows to render BOUNDED here.
                  (-> (db/transact! {:seon.db/tx-data (test-seed/my-core-rows)})
                      (.then (fn [_] (body)))
-                     (.finally (fn [] (set! db/*conn* prev)))))))))
-
-(def ^:private agent-id "AGTlooprun0001")          ; 14 chars (:seon.db/id)
+                     (.finally
+                       (fn []
+                         (loop/uninstall-wake-trigger!
+                           {:seon.agent/id agent-id})
+                         (set! db/*conn* prev)))))))))
 
 (defn- scripted-llm
   "ctx-string -> Promise<{:text text}> — replays `text` on every call."
@@ -146,6 +151,24 @@
                    [?t :seon.agent.turn/run ?run]]
                  :seon.db/args [id]})
       []))
+
+(defn- wake-work-settled?
+  "True after an agent's wake runs and all of its turns finish closing."
+  [id]
+  (let [run-ids  (runs-for id)
+        turn-eids (turns-for id)]
+    (and (seq run-ids)
+         (seq turn-eids)
+         (every? (fn [run-id]
+                   (= :closed
+                      (:seon.agent.run/status
+                        (run/snapshot {:seon.agent.run/id run-id}))))
+                 run-ids)
+         (every? (fn [turn-eid]
+                   (contains? #{:done :error}
+                              (:seon.agent.turn/status
+                                (db/entity {:seon.db/ref turn-eid}))))
+                 turn-eids))))
 
 (defn ^:async wait-until
   "Poll `pred` (0-arg → truthy) on the macrotask queue every `step-ms` up to
@@ -469,11 +492,7 @@
               ;; the handler schedules setTimeout(0) → open-run! + run-loop!;
               ;; the scripted (complete …) closes the run on turn 1.
               (let [ok? (await (wait-until
-                                 (fn []
-                                   (let [rs (runs-for agent-id)]
-                                     (and (seq rs)
-                                          (= :closed (:seon.agent.run/status
-                                                       (run/snapshot {:seon.agent.run/id (first rs)}))))))
+                                 (fn [] (wake-work-settled? agent-id))
                                  8000 25))
                     rids (runs-for agent-id)]
                 (testing "the wake opened EXACTLY ONE run, trigger :message"
@@ -524,56 +543,44 @@
                                              {:seon.agent/purpose
                                               "spawn-arm test"}))
                                 child-id (:seon.agent/id res)]
-                            (testing "start! returns the minted child id (addressable same-turn)"
-                              (is (string? child-id) "response carries :seon.agent/id")
-                              (is (some? (db/entity {:seon.db/ref [:seon.agent/id child-id]}))
-                                  "the returned id names a real entity — not a ghost"))
-                            (testing "the minted child is ARMED in-process: a message wakes it"
-                              (is (= [] (runs-for child-id)) "idle, no run before any message")
-                              (await (send-inbound! [:seon.user/id "user"]
-                                                    child-id "wake up" 0 :human))
-                              (let [woke? (await (wait-until
-                                                   (fn [] (seq (runs-for child-id)))
-                                                   8000 25))]
-                                (is woke?
-                                    (str "a message sent immediately after start! opened a run "
-                                         "on the freshly-spawned child — no out-of-band "
-                                         "resume"))
-                                (when woke?
-                                  (let [run-id (first (runs-for child-id))]
-                                    (is (= #{[child-id]}
-                                           (db/query
-                                             {:seon.db/query
-                                              '[:find ?user-id
-                                                :in $ ?run-id
-                                                :where
-                                                [?run :seon.agent.run/id ?run-id ?tx]
-                                                [?tx :seon.db/user ?user]
-                                                [?user :seon.agent/id ?user-id]
-                                                [?tx :seon.db/process ?process]
-                                                [?process :seon.db.process/id
-                                                 :seon.db.process/repl]]
-                                              :seon.db/args [run-id]}))
-                                        "the wake transaction belongs to the child through REPL")
-                                    (is (await
-                                          (wait-until
-                                            (fn []
-                                              (and
-                                                (= :closed
-                                                   (:seon.agent.run/status
-                                                     (run/snapshot
-                                                       {:seon.agent.run/id run-id})))
-                                                (seq (turns-for child-id))
-                                                (every?
-                                                  (fn [turn-eid]
-                                                    (contains?
-                                                      #{:done :error}
-                                                      (:seon.agent.turn/status
-                                                        (db/entity
-                                                          {:seon.db/ref turn-eid}))))
-                                                  (turns-for child-id))))
-                                            8000 25))
-                                        "the child loop settles before the isolated conn is restored")))))))))))))))
+                            (try
+                              (testing "start! returns the minted child id (addressable same-turn)"
+                                (is (string? child-id) "response carries :seon.agent/id")
+                                (is (some? (db/entity
+                                             {:seon.db/ref [:seon.agent/id child-id]}))
+                                    "the returned id names a real entity — not a ghost"))
+                              (testing "the minted child is ARMED in-process: a message wakes it"
+                                (is (= [] (runs-for child-id))
+                                    "idle, no run before any message")
+                                (await (send-inbound! [:seon.user/id "user"]
+                                                      child-id "wake up" 0 :human))
+                                (let [woke? (await (wait-until
+                                                     (fn []
+                                                       (wake-work-settled? child-id))
+                                                     8000 25))]
+                                  (is woke?
+                                      (str "a message sent immediately after start! opened a run "
+                                           "on the freshly-spawned child — no out-of-band "
+                                           "resume"))
+                                  (when woke?
+                                    (let [run-id (first (runs-for child-id))]
+                                      (is (= #{[child-id]}
+                                             (db/query
+                                               {:seon.db/query
+                                                '[:find ?user-id
+                                                  :in $ ?run-id
+                                                  :where
+                                                  [?run :seon.agent.run/id ?run-id ?tx]
+                                                  [?tx :seon.db/user ?user]
+                                                  [?user :seon.agent/id ?user-id]
+                                                  [?tx :seon.db/process ?process]
+                                                  [?process :seon.db.process/id
+                                                   :seon.db.process/repl]]
+                                                :seon.db/args [run-id]}))
+                                          "the wake transaction belongs to the child through REPL")))))
+                              (finally
+                                (runtime/unhost!
+                                  {:seon.agent/id child-id})))))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -632,7 +639,9 @@
               (testing "a fresh hops=0 human message DOES wake (opens + drives)"
                 (await (send-inbound! [:seon.user/id "user"]
                                       agent-id "fresh start" 0 :human))
-                (let [ok? (await (wait-until (fn [] (seq (runs-for agent-id))) 8000 25))]
+                (let [ok? (await (wait-until
+                                   (fn [] (wake-work-settled? agent-id))
+                                   8000 25))]
                   (is ok? "the hops=0 message opened a run")
                   (is (= 1 (count (runs-for agent-id)))
                       "exactly the one fresh run (the exhausted message opened none)"))))))
@@ -871,7 +880,7 @@
                                         :seon.agent.run/closed-reason :turn-limit})))
               ;; the notice must DRIVE the parent's wake: a run actually opens.
               (let [woke? (await (wait-until
-                                   (fn [] (seq (runs-for agent-id)))
+                                   (fn [] (wake-work-settled? agent-id))
                                    8000 25))
                     rids  (runs-for agent-id)]
                 (is woke? "the outcome notice OPENED a run on the parent (real wake path)")
