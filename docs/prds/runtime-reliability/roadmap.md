@@ -691,18 +691,14 @@ or discover archived behavior.
    rejected as durable definitions, schema source replay and the async self-tee
    are removed, failed redefinitions restore exactly, and replay activates
    database forms before code. Native backend reopening remains.
-4. **Candidate cut in progress:** build one validated Malli/catalog candidate
-   from the database and swap only
-   after durable validation succeeds. The candidate contains the immutable
-   Malli registry, compiled validation, missing compatible Datahike attributes,
-   entity render catalog, dependency indexes, and a stable schema fingerprint.
-   The runtime holds only that disposable compiled projection; historical
-   projections are bounded by fingerprint. Remove persisted derived schema
-   decomposition, schema-source replay, async schema self-tee/rollback, and the
-   process-global registry as competing authorities. If commit succeeds but
-   projection activation fails, stop admission and reconstruct from committed
-   facts rather than writing a compensating transaction. The full evidence and
-   failure matrix are in
+4. **Candidate base complete:** a complete form set now builds and validates an
+   immutable Malli registry, entity render catalog, and stable fingerprint
+   before activation. The renderer consumes that catalog directly; persisted
+   required/id/render decomposition, its boot transaction, Datalog discovery,
+   and the renderer cache atom are deleted. Remaining: compute compatible
+   missing Datahike attributes and dependency indexes in the candidate, bound
+   historical projections by fingerprint, and stop admission/reconstruct from
+   committed facts if post-commit activation fails. The full evidence and failure matrix are in
    [[research/malli-runtime-schema-authority-audit-2026-07-13]].
 5. Use one analyzer/program snapshot and one exact add/change/remove
    transaction. Verify the ghost-pruning builder and every stale compatibility

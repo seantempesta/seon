@@ -620,7 +620,8 @@ only the identities and core refs matter here.
 
 The entity identity/required/render catalog is derived once per validated Malli
 registry generation from those canonical forms. It is process-local projection
-data, not a second append-only schema decomposition in Datahike.
+data consumed directly by the renderer, not a second append-only schema
+decomposition in Datahike.
 
 **Index compiled declarations; tee authored declarations.** At boot, the
 analyzer-derived snapshot reconciles every compiled namespace, public function,

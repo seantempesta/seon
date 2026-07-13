@@ -1733,7 +1733,6 @@
 ;; transact) recomputes. NB the key is the LIVE `@*conn*` head, NOT the turn's
 ;; frozen db (the zero-arg accessors carry no db) — a transact landing mid-turn
 ;; means later accessor reads see the newer singleton; acceptable for dials.
-;; Same sanctioned pattern as `render.cljs` `!schema-cache`.
 (defonce ^:private !config-view-cache (atom {:db nil :view nil}))
 
 (defn- read-config-singleton

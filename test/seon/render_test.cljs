@@ -26,7 +26,6 @@
     [seon.render :as render]
     [seon.render.default :as default]
     [seon.render.canvas :as canvas]
-    [seon.schema :as schema]
     [seon.ui.html :as html]))
 
 ;; The graceful-guard tests below (throwing-renderer → banner / legible line)
@@ -187,13 +186,11 @@
      ::db.id/transaction-builder
      (fn [ids]
        {:seon.db/tx-data
-        (into (vec (schema/entity-schema-tx-data :seon.agent))
-              [(assoc row :seon.agent/id (::render-agent ids))])})
+        [(assoc row :seon.agent/id (::render-agent ids))]})
      :seon.db/conn conn}))
 
 (defn- with-tile-conn
-  "Open a fresh conn, seed the :seon.agent kind schema entity + one
-   agent row, call `body` with the conn bound. Returns a Promise."
+  "Open a fresh conn, seed one agent row, and call `body` with the conn bound."
   [body]
   (-> (client/open-agent-conn!)
       (.then (fn [conn]

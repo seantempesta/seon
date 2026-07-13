@@ -326,8 +326,7 @@
    registered by an AGENT (every agent `register!` eval is teed into a
    `:seon.schema` row by `seon.eval/build-tee-entities`, in an
    agent-origin tx), as opposed to the core's own registrations
-   (boot-seeded by `seon.client/index-schemas` /
-   `all-entity-schemas-tx-data`, always inside the unscoped
+   (boot-seeded by `seon.client/index-schemas`, always inside the unscoped
    root/boot transaction context).
 
    Provenance — not a keyword-namespace pattern — is the rule, so

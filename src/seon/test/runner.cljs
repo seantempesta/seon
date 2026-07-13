@@ -160,7 +160,7 @@
 ;; other attr is `{:optional true}` so BOTH shapes validate + merge on the
 ;; sym identity: detect-and-tee source rows (sym+ns+source+created-at) and
 ;; runner result rows (sym+last-*). Once registered, `:seon.test`
-;; lands in `entity-schema-keys`, decomposes into a `:seon.schema` row at
+;; lands in the derived entity catalog at
 ;; boot, and renders per-kind in render-namespace + the debug view panes.
 (schema/register! :seon.test
   [:map {:seon.db/entity   true

@@ -250,11 +250,9 @@
 ;; on success, projections that may be nil) is `{:optional true}` per
 ;; CLAUDE.md "Optional = absent" rule. Never `[:maybe X]`.
 ;;
-;; These required-sets feed schemas-as-queryable-data: at cold runtime start,
-;; `seon.client/start-runtime!` decomposes each :map into a `:seon.schema`
-;; entity whose `:seon.schema/required-attrs` is the set computed from
-;; entries without `{:optional true}`. Kind-lookup in `seon.render`
-;; queries those entities via datalog.
+;; The runtime schema projection derives each declared shape's required attrs
+;; from entries without `{:optional true}`. `seon.render` matches that catalog
+;; directly; no derived schema decomposition is persisted.
 
 (schema/register! :seon.eval
   [:map {:seon.db/entity   true

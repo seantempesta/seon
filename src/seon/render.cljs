@@ -28,7 +28,6 @@
   (:require
     [cljs.pprint :as pprint]
     [clojure.string :as str]
-    [datahike.api :as d]
     [seon.config :as config]
     [seon.db :as db]
     [seon.error :as err]
@@ -234,119 +233,41 @@
     (default/pretty-html input-map)))
 
 ;; ============================================================
-;; Entity-shape resolution (the `:seon.schema`-driven renderer dispatch).
-;; An entity has no kind — it is its attributes; a renderable SHAPE is a
-;; `:seon.schema` row matched by ATTRIBUTE-PRESENCE.
-;;
-;; Renderable entity SHAPES are `:seon.schema` rows carrying both an
-;; id-attr and a `:seon.schema/render-fn`. `entity-primary-schema` picks
-;; the most-specific schema whose required-attrs are all present on an
-;; entity; `entity-render` / `render-entity-html` / `render-entity-ai`
-;; resolve a render symbol from that schema (or a per-entity override).
+;; Entity-shape resolution from the active schema projection.
+;; An entity has no kind — it is its attributes. `entity-primary-schema`
+;; picks the most-specific catalog row whose required attrs are present;
+;; `entity-render` resolves its renderer or a per-entity override.
 ;;
 ;; Shared by the test-capture-as-data rendering (`render-entity-html`
 ;; etc.); the debug view's right pane mirrors the left's block set
 ;; via these same converters.
 ;; ============================================================
 
-(defn- renderable-schemas
-  "Datalog-driven enumeration of every RENDERABLE entity-shape
-   `:seon.schema` row in the DB — rows carrying BOTH an id-attr and a
-   `:seon.schema/render-fn`. Returns a seq of `{:schema <key> :id-attr <kw>
-   :ai <sym> :html <sym>}` (`:schema` is the `:seon.schema/key`). Each
-   schema entity is materialized at agent
-   boot from `seon.schema/all-entity-schemas-tx-data` (and on every
-   subsequent `register!`), so the renderer reads schemas from
-   core state instead of walking the in-memory
-   `seon.schema/*schemas` atom.
-
-   The render-fn clause is load-bearing, not cosmetic: a row WITHOUT a
-   renderer has no symbol for `entity-render` to resolve, and its
-   id-attr could still be registered-but-never-transacted — `d/datoms`
-   THROWS (\"Bad entity attribute … not defined in current schema\") on
-   such an attr, e.g. the request/response envelopes the registry's
-   id-attr derivation over-matches (context-v3 unit 2; same gate as
-   `seon.agent/schema-catalog-section`).
-
-   `:seon.schema/render-html-fn` stays optional — a side query merged
-   in Clojure rather than datahike-cljs's `get-else` (avoids
-   per-backend quirks)."
-  [db]
-  (let [base  (d/q '[:find ?key ?id-attr ?ai
-                     :where
-                     [?s :seon.schema/key ?key]
-                     [?s :seon.schema/id-attr ?id-attr]
-                     [?s :seon.schema/render-fn ?ai]]
-                   db)
-        htmls (into {} (d/q '[:find ?key ?html
-                              :where
-                              [?s :seon.schema/key ?key]
-                              [?s :seon.schema/render-html-fn ?html]]
-                            db))]
-    (map (fn [[k id-attr ai]]
-           {:schema  k
-            :id-attr id-attr
-            :ai      ai
-            :html    (get htmls k)})
-         base)))
-
-;; Single-slot cache for the schema lookup tables, keyed by db value
-;; identity. `entity-primary-schema` used to run one datalog query
-;; PER ENTITY through the FilteredDB (each datom access re-runs the
-;; filter pred) — the dominant cost of a web UI render on the
-;; file-backed store. The tables derive purely from `:seon.schema`
-;; rows, which are immutable for a given db value, so one slot keyed
-;; by `identical?` is correct and survives exactly as long as the
-;; render that's using it.
-(defonce ^:private !schema-cache (atom nil))
-
-(defn- schema-tables
-  "Return `{:schemas <renderable-schemas seq> :schemas-by-key {<key> <info>}
-   :required-by-schema {<key> #{<attr> …}}}` for `db`, computed once per
-   db value (single-slot identity-keyed cache)."
-  [db]
-  (let [c @!schema-cache]
-    (if (and c (identical? (:db c) db))
-      (:tables c)
-      (let [schemas  (renderable-schemas db)
-            req-rows (d/q '[:find ?key ?req
-                            :where
-                            [?s :seon.schema/key ?key]
-                            [?s :seon.schema/required-attrs ?req]]
-                          db)
-            required (reduce (fn [m [k req]]
-                               (update m k (fnil conj #{}) req))
-                             {} req-rows)
-            tables   {:schemas            schemas
-                      :schemas-by-key     (into {} (map (juxt :schema identity) schemas))
-                      :required-by-schema required}]
-        (reset! !schema-cache {:db db :tables tables})
-        tables))))
-
 (defn- entity-primary-schema
-  "Pick the most-specific `:seon.schema` shape whose required-attrs are
+  "Pick the most-specific catalog shape whose required attrs are
    ALL present on `entity` (attribute-presence — an entity has no kind).
-   Pure in-memory subset test against the per-db cached
-   `:required-by-schema` table ([[schema-tables]]) — the former
-   per-entity datalog query was the web UI's render bottleneck on the
-   file store.
+   Pure in-memory subset test against the active immutable projection.
 
    A schema 'fully matches' when every required attr is present on the
    entity. Among full matches, the schema with the most required attrs
    wins (specificity). Tie-broken alphabetically by `:seon.schema/key`
    for stable output (research §D)."
-  [db entity]
+  [entity]
   (let [present (set (filter keyword? (keys entity)))]
     (when (seq present)
-      (let [{:keys [required-by-schema]} (schema-tables db)
-            full (keep (fn [[k req]]
-                         (when (and (seq req)
-                                    (every? #(contains? present %) req))
-                           [k (count req)]))
-                       required-by-schema)]
+      (let [full (keep
+                   (fn [catalog-row]
+                     (let [req (:seon.schema.catalog/required-attrs
+                                 catalog-row)]
+                       (when (and (seq req)
+                                  (every? #(contains? present %) req))
+                         [catalog-row (count req)])))
+                   (schema/entity-catalog))]
         (when (seq full)
           (->> full
-               (sort-by (juxt (comp - second) (comp str first)))
+               (sort-by
+                 (juxt (comp - second)
+                       (comp str :seon.schema.catalog/key first)))
                ffirst))))))
 
 (defn- entity-render
@@ -359,13 +280,11 @@
   (let [attr (case render :html :seon.render/html :ai :seon.render/ai)]
     (or (some->> (get entity attr)
                  (db/decode-edn-value attr))
-        (let [{:keys [schemas-by-key]} (schema-tables db)
-              schema (entity-primary-schema db entity)]
-          ;; NOTE: `(get schemas-by-key schema)`, NOT
-          ;; `(some-> schemas-by-key schema …)` — the latter invokes
-          ;; `schema` as a fn and throws a TypeError when
-          ;; entity-primary-schema returns nil (no schema matched).
-          (get (get schemas-by-key schema) render)))))
+        (let [catalog-row (entity-primary-schema entity)
+              render-key (case render
+                           :html :seon.schema.catalog/render-html
+                           :ai   :seon.schema.catalog/render-ai)]
+          (get catalog-row render-key)))))
 
 ;; ============================================================
 ;; The ONE envelope-unwrap — every render path consumes the SAME

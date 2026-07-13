@@ -354,8 +354,7 @@
    :seon.render/ai     "3 workouts this week: Mon, Wed, Fri — trending up."})
 
 (defn- with-agent-conn
-  "Open a fresh conn, seed the :seon.agent kind schema entity + one
-   agent row, call `body` with the conn HELD via set! for the WHOLE
+  "Open a fresh conn, seed one agent row, and call `body` with the conn HELD via set! for the WHOLE
    promise chain (restored in .finally) — `binding` unwinds before an
    async body's awaits run (the *conn*-unbound trap chat_test's
    with-conn already dodges). Returns a Promise."
@@ -366,8 +365,7 @@
                  (set! db/*conn* conn)
                  (-> (db/transact!
                        {:seon.db/tx-data
-                        (into (vec (schema/entity-schema-tx-data :seon.agent))
-                              [{:seon.agent/id    agent-id}])})
+                        [{:seon.agent/id agent-id}]})
                      (.then (fn [_] (body conn)))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 

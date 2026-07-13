@@ -27,6 +27,10 @@
 (defn- unregister! [& ks]
   (swap! @#'schema/*schemas #(apply dissoc % ks)))
 
+(defn- candidate-catalog []
+  (:seon.schema.projection/catalog
+    (schema/build-projection (schema/snapshot))))
+
 (deftest single-segment-keyword-namespace-is-refused-with-guidance
   (testing "the S-21 defect shape — :workout/date"
     (let [e (try (schema/register! :workout/date :string)
@@ -107,40 +111,15 @@
       (is (not (contains? props :seon.entity/id-attr))
           "derived catalog metadata is not written into the canonical form")))
   (testing "declared kind enters the catalog"
-    (is (contains? (set (schema/entity-schema-keys)) :schematest.entity))
-    (is (some #(= [:db/add "schema-:schematest.entity"
-                    :seon.schema/id-attr :schematest.entity/id]
-                  %)
-              (schema/entity-schema-tx-data :schematest.entity))
-        "the disposable catalog derives the identity attribute"))
+    (let [row (some #(when (= :schematest.entity
+                              (:seon.schema.catalog/key %)) %)
+                    (candidate-catalog))]
+      (is (some? row))
+      (is (= :schematest.entity/id
+             (:seon.schema.catalog/id-attr row))
+          "the disposable catalog derives the identity attribute")))
   (unregister! :schematest.entity/id :schematest.entity/label
                :schematest.entity))
-
-(deftest entity-schema-tempids-carry-the-full-keyword
-  ;; downstream boot-fatal repro 2026-06-11: two kinds sharing a NAME segment
-  ;; (:a.b/person + :c.d/person) collided on the tempid "schema-person"
-  ;; in one seed tx → :transact/upsert conflict → pod exit, no resume.
-  ;; Tempids must carry the FULL keyword; they are tx-local and never
-  ;; stored, so this is identity-free to change.
-  (schema/register! :schematest.one.person/id [:string {:seon.db/identity true}])
-  (schema/register! :schematest.two.person/id [:string {:seon.db/identity true}])
-  (schema/register! :schematest.one/person
-    [:map {:seon.db/entity true}
-     [:schematest.one.person/id :schematest.one.person/id]])
-  (schema/register! :schematest.two/person
-    [:map {:seon.db/entity true}
-     [:schematest.two.person/id :schematest.two.person/id]])
-  (let [tids (fn [k] (->> (schema/entity-schema-tx-data k)
-                          (map second)   ; [:db/add TID attr v]
-                          set))
-        one  (tids :schematest.one/person)
-        two  (tids :schematest.two/person)]
-    (is (= 1 (count one)))
-    (is (= 1 (count two)))
-    (is (not (some one two))
-        "same name segment must NOT share a tempid (boot-fatal upsert)"))
-  (unregister! :schematest.one.person/id :schematest.two.person/id
-               :schematest.one/person :schematest.two/person))
 
 (deftest unmarked-map-with-id-key-does-not-derive-and-is-silent
   ;; The old register!-time warn was a false-positive generator by
@@ -166,14 +145,16 @@
                 (second (schema/schema-definition
                           :schematest.envelope/lookup-shape))))
         "no id-attr derived — entity-kind-ness is declared, not inferred")
-    (is (not (contains? (set (schema/entity-schema-keys))
-                        :schematest.envelope/lookup-shape))
+    (is (not (some #(= :schematest.envelope/lookup-shape
+                        (:seon.schema.catalog/key %))
+                   (candidate-catalog)))
         "unmarked map never enters the catalog"))
   (unregister! :schematest.envelope/id
                :schematest.envelope/lookup-shape))
 
 (deftest catalog-surfaces-only-declared-kinds
-  (let [kinds (set (schema/entity-schema-keys))]
+  (let [kinds (into #{} (map :seon.schema.catalog/key)
+                    (schema/entity-catalog))]
     (testing "the genuine entity kinds are declared and present"
       (doseq [k [:seon.agent :seon.eval :seon.agent.message :seon.fn
                  :seon.ns :seon.schema :my.plan/step :seon.test]]

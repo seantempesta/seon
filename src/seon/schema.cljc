@@ -93,22 +93,6 @@
 ;; older bootstrap copy here let namespace load order silently restore the
 ;; retired timestamp grammar, so there is deliberately no second definition.
 
-;; Schemas-as-queryable-data meta-schema. Every DECLARED entity-kind :map
-;; (one carrying {:seon.db/entity true} → derived :seon.entity/id-attr) ALSO
-;; transacts a :seon.schema entity carrying its required-attrs, id-attr, and
-;; render-fn symbol; render's kind-lookup queries those entities via datalog.
-;; These leaf-scalar attrs are registered here so they exist before any
-;; entity ns loads. Research:
-;; docs/prds/agent-runtime/research/schemas-as-queryable-data-2026-05-26.md.
-(defonce ^:private _schema-required-attrs
-  (swap! *schemas assoc :seon.schema/required-attrs [:vector :keyword]))
-(defonce ^:private _schema-id-attr
-  (swap! *schemas assoc :seon.schema/id-attr :keyword))
-(defonce ^:private _schema-render-fn
-  (swap! *schemas assoc :seon.schema/render-fn :symbol))
-(defonce ^:private _schema-render-html-fn
-  (swap! *schemas assoc :seon.schema/render-html-fn :symbol))
-
 ;; Positional-arg slot shapes for this ns's register/introspection fns — each
 ;; named-positional `:catn` slot in a `:malli/schema` below references one of
 ;; these (db.cljs's `::conn`/`::tx-data` slot-schema pattern). A Malli schema
@@ -282,6 +266,17 @@
   []
   @!projection)
 
+(defn entity-catalog
+  "Derived renderable entity catalog for the active schema projection.
+
+   During initial module loading, before database activation, derives once from
+   the declaration snapshot on demand. After activation this is the immutable
+   catalog built from canonical database forms. No catalog facts are stored."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
+  (or (:seon.schema.projection/catalog @!projection)
+      (:seon.schema.projection/catalog (build-projection @*schemas))))
+
 (defn current-keys
   "Snapshot of all currently-registered schema keywords.
 
@@ -336,78 +331,6 @@
     (doseq [[k v] pairs]
       (register! k v))
     (set (map first pairs))))
-
-;;; ---------------------------------------------------------------------------
-;;; Schemas-as-queryable-data — entity-schema decomposition into DB datoms.
-;;;
-;;; Every entity-shape `:map` schema with a derived `:seon.entity/id-attr`
-;;; ALSO becomes a `:seon.schema` entity:
-;;;   :seon.schema/key            <kw>       (identity)
-;;;   :seon.schema/required-attrs [<kw> ...] (cardinality-many keyword)
-;;;   :seon.schema/id-attr        <kw>
-;;;   :seon.schema/render-fn      <symbol>   (the :seon.render/ai symbol)
-;;;
-;;; This ns MUST NOT require seon.db (cycle: db→schema). Instead
-;;; `entity-schema-tx-data` returns the tx-data vector; the conn-owning
-;;; caller (seon.client/start-agent!) transacts via seon.db/transact!.
-;;; ---------------------------------------------------------------------------
-
-(defn entity-schema-tx-data
-  "Return the tx-data vector for one entity-shape `:map` schema.
-
-   One `:db/add` per required-attr, plus the key/id-attr/render-fn datoms.
-   Caller transacts via `seon.db/transact!`. Returns `nil` when `k` does
-   not refer to an entity-shape :map (no id-attr derivable)."
-  {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
-  [k]
-  (let [v (some->> (get @*schemas k)
-                   (internal/with-entity-id-attr @*schemas))]
-    (when (and v (internal/map-shape? v))
-      (let [props       (internal/schema-properties v)
-            id-attr     (:seon.entity/id-attr props)
-            render-ai   (:seon.render/ai props)
-            render-html (:seon.render/html props)]
-        (when id-attr
-          (let [reqs (vec (remove #{id-attr} (internal/map-required-attrs v)))
-                ;; id-attr is always required — listed separately so it's
-                ;; not duplicated when the entry has no {:optional true}.
-                reqs (vec (distinct (cons id-attr reqs)))
-                ;; FULL keyword in the tempid — (name k) alone collides when
-                ;; two kinds share a name segment (:a.b/person + :c.d/person
-                ;; → one tempid → boot-fatal :transact/upsert). Tempids are
-                ;; tx-local, never stored — identity is :seon.schema/key.
-                tid  (str "schema-" k)]
-            (cond-> [[:db/add tid :seon.schema/key k]
-                     [:db/add tid :seon.schema/id-attr id-attr]]
-              render-ai   (conj [:db/add tid :seon.schema/render-fn render-ai])
-              render-html (conj [:db/add tid :seon.schema/render-html-fn render-html])
-              :always     (into (map (fn [r] [:db/add tid :seon.schema/required-attrs r]))
-                                reqs))))))))
-
-(defn entity-schema-keys
-  "Every registered keyword pointing at an entity-shape `:map` schema.
-
-   Sorted, one per entity with a derived `:seon.entity/id-attr`. Used by
-   `seon.client/start-agent!` to seed `:seon.schema` entities at boot."
-  {:malli/schema [:=> [:cat] [:vector :keyword]]}
-  []
-  (->> @*schemas
-       (keep (fn [[k raw]]
-               (let [v (internal/with-entity-id-attr @*schemas raw)]
-                 (when (and (internal/map-shape? v)
-                            (:seon.entity/id-attr (internal/schema-properties v)))
-                   k))))
-       sort
-       vec))
-
-(defn all-entity-schemas-tx-data
-  "Tx-data vector for every currently-registered entity-shape :map schema.
-   Concatenates `entity-schema-tx-data` over `entity-schema-keys`.
-   Idempotent — identity-attr upsert on `:seon.schema/key` replaces prior
-   decompositions in place."
-  {:malli/schema [:=> [:cat] [:vector :any]]}
-  []
-  (into [] (mapcat entity-schema-tx-data) (entity-schema-keys)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Introspection

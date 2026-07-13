@@ -3,23 +3,20 @@
    PRD, Step 3) and its render handler `seon.handlers.test`.
 
    Step 3 promoted `:seon.test` from a bag of registered attrs to a real
-   renderable entity kind: it now lands in `seon.schema/entity-schema-keys`,
-   decomposes into a `:seon.schema` row at boot, and renders per-kind via
+   renderable entity shape: it enters the derived schema projection and renders via
    `seon.handlers.test/render-ai` / `render-html` — the same mechanism the
    `:seon.fn` / `:seon.schema` kinds use.
 
    These tests pin:
-     - `:seon.test` IS in `entity-schema-keys` (the kind exists)
+     - `:seon.test` is in the derived entity catalog
      - the handler renders a seeded test entity (ai text + html hiccup),
        showing the sym, the source, and a pass/fail/no-run status
      - `seon.render/render-entity-ai` / `-html` route a `:seon.test` entity
-       through the handler (kind resolution end-to-end), once the schema
-       decomposition row is in the conn
+       through the handler (shape resolution end-to-end)
      - `seon.agent/render-namespace` shows a ns's tests under that ns
 
-   The seed transacts `:seon.test` rows directly + the entity-schema
-   decomposition (so kind-resolution has a `:seon.schema` row to read) —
-   nothing here drives the agent loop.
+   The seed transacts `:seon.test` rows directly; the renderer consumes the
+   already-validated runtime projection. Nothing here drives the agent loop.
 
    Run interactively via MCP eval:
      (require 'seon.handlers.test-test :reload)
@@ -42,17 +39,12 @@
 (deftest seon-test-is-an-entity-kind
   (is (schema/registered? :seon.test)
       ":seon.test is registered as an entity-shape :map schema")
-  (is (contains? (set (schema/entity-schema-keys)) :seon.test)
-      ":seon.test appears in entity-schema-keys")
-  ;; Required-attrs count: only :seon.test/sym is non-optional. Assert it
-  ;; from the deterministic decomposition (entity-schema-tx-data), the same
-  ;; builder the boot seed runs.
-  (let [txd  (schema/entity-schema-tx-data :seon.test)
-        reqs (->> txd
-                  (filter (fn [[_ _ a _]] (= a :seon.schema/required-attrs)))
-                  (mapv (fn [[_ _ _ v]] v)))]
-    (is (= [:seon.test/sym] reqs)
-        "only :seon.test/sym is a required attr in the decomposition")))
+  (let [row (some #(when (= :seon.test (:seon.schema.catalog/key %)) %)
+                  (schema/entity-catalog))]
+    (is (some? row) ":seon.test appears in the derived catalog")
+    (is (= #{:seon.test/sym}
+           (:seon.schema.catalog/required-attrs row))
+        "only :seon.test/sym is required")))
 
 ;; ---------------------------------------------------------------------------
 ;; Handler renders a seeded entity — synchronous, the handler reads only
@@ -109,14 +101,12 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Kind resolution end-to-end — render-entity-ai/-html route a :seon.test
-;; entity through the handler via the :seon.schema decomposition row.
-;; Needs a conn carrying that row, so this is the async/DB-backed test.
+;; entity through the handler via the active schema projection.
 ;; ---------------------------------------------------------------------------
 
 (defn- with-test-kind-conn
-  "Open a fresh conn, transact the entity-schema decomposition (so
-   render kind-resolution has a `:seon.schema` row for `:seon.test`) +
-   a small ns graph with a test attached, then run `body` (1-arg conn)
+  "Open a fresh conn, transact a small ns graph with a test attached,
+   then run `body` (1-arg conn)
    with `db/*conn*` bound. Returns a Promise.
 
    NOTE: the conn is passed EXPLICITLY (`:seon.db/conn conn`) to every
@@ -127,10 +117,7 @@
   [body]
   (-> (client/open-agent-conn!)
       (.then (fn [conn]
-               (-> (db/transact! {:seon.db/conn conn
-                                  :seon.db/tx-data (schema/all-entity-schemas-tx-data)})
-                   (.then (fn [_]
-                            (db/transact!
+               (-> (db/transact!
                               {:seon.db/conn conn
                                :seon.db/tx-data
                                ;; A REALISTIC full-file source — a body form
@@ -147,7 +134,7 @@
                                  :seon.test/ns [:seon.ns/name :demo.ns]
                                  :seon.test/source
                                  "(deftest t-attached (is (= 4 (+ 2 2))))"
-                                 :seon.test/last-passed-at (js/Date.)}]})))
+                                 :seon.test/last-passed-at (js/Date.)}]})
                    (.then (fn [_]
                             (binding [db/*conn* conn]
                               (body conn)))))))))

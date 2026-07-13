@@ -553,16 +553,6 @@
    :seon.schema/ns
    :seon.schema/form
    :seon.schema/created-at
-   ;; Meta-schema attrs (schemas-as-queryable-data, 2026-05-27). Every
-   ;; entity-shape :map schema is decomposed at boot into a :seon.schema
-   ;; entity carrying these. The renderer's kind-lookup queries them via
-   ;; datalog instead of walking the in-memory *schemas atom.
-   ;; :seon.schema/required-attrs is :db.cardinality/many keyword via
-   ;; the [:vector :keyword] Malli bridge.
-   :seon.schema/required-attrs
-   :seon.schema/id-attr
-   :seon.schema/render-fn
-   :seon.schema/render-html-fn
    :seon.db.id/generator
 
    ;; --- Log (A-6) ---
@@ -1005,10 +995,8 @@
 ;; so replay-from-tx-0 starts on a fully-seeded core, not mid-air.
 ;;
 ;; Transaction ordering at cold start (in start-runtime!):
-;;   1. Entity-schema decomposition (schema/all-entity-schemas-tx-data)
-;;      — already shipped, Item 4 commit 35035d8.
-;;   2. seed-core!    — user entity + my.kb.shared singleton
-;;   3. index-core!   — :seon.ns + :seon.fn rows from REAL runtime
+;;   1. seed-core!    — user entity + my.kb.shared singleton
+;;   2. index-core!   — :seon.ns + :seon.fn + canonical schema rows from REAL runtime
 ;;                           introspection (var meta + source file-read)
 ;;
 ;; Each transaction carries root/boot provenance refs, so audit queries can
@@ -1797,9 +1785,7 @@
 (defn index-schemas
   "Tx-data for a `:seon.schema` row per REGISTERED schema — every key in
    `seon.schema/registered-schemas`, attr-level and request/response shapes
-   included, not just the entity `:map` kinds (`all-entity-schemas-tx-data`
-   covers those separately with id-attr/required-attrs; identity upsert on
-   `:seon.schema/key` merges the two). `:seon.schema/form` is the full,
+   included, not just the entity `:map` shapes. `:seon.schema/form` is the full,
    canonical registered Malli form, so the complete shape of every attr is one
    entity-read away for the agent. It is never display-truncated.
 
@@ -2120,9 +2106,8 @@
 
    Steps, in boot order. TWO provenance layers:
 
-   BOOT-MANAGED (process `:seon.db.process/boot`) — three transactions, each
+   BOOT-MANAGED (process `:seon.db.process/boot`) — two transactions, each
    with its own tx so the startup sequence remains observable:
-          :entity-schemas  — `schema/all-entity-schemas-tx-data`.
           :core-seed  — `seed-core!` (user entity +
                              my.kb.shared instruction singleton).
           :core-index — `core-program-tx` (`:seon.ns` /
@@ -2180,11 +2165,6 @@
                    :seon.db/process
                    (db.process/lookup-ref :seon.db.process/boot)}
                   (fn ^:async seed! []
-                    (check! :entity-schemas
-                            (await (db/transact!
-                                     {:seon.db/conn conn
-                                      :seon.db/tx-data
-                                      (schema/all-entity-schemas-tx-data)})))
                     (check! :core-seed
                             (await (db/transact!
                                      {:seon.db/conn conn
