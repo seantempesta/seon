@@ -100,8 +100,12 @@ The new agent view rendered its canvas, plan, and transcript surfaces without a
 browser console error; its gzip feed delivered an immediate Datastar patch. A
 single-process mutation proof observed a 307 ms POST-to-patch interval, including
 a 68 ms targeted render. All three long-lived processes returned to 0% sampled
-CPU after agent work stopped. Entity-scoped invalidation between different open
-agent views remains an active performance gap.
+CPU after agent work stopped. The cross-agent invalidation gap found by that
+proof is now closed through the existing database-read observer: each rendered
+surface and header owns immutable query/pull/entity observations, the normalized
+subscription learns them on its shared first paint, and later candidate changes
+replay results before entering Hiccup or SCI. A behavioral test proves the same
+attribute changing on agent B does not materialize agent A's surface.
 
 The canonical live-feed cut now includes `/data`: its separate connection atom,
 listener flag, coalescer, uncompressed `/data/sse`, and the unused generic
@@ -861,9 +865,12 @@ agents idle and one exact notice visible to root.
 13. Keep `my.canvas` as the permanent API, make its leaf encodings
    browser-portable, and ensure its docstrings/Malli errors make buttons,
    inputs, selects, toggles, forms, state, save, pin, and clear self-explanatory.
-14. Complete stable render-unit membership, runtime database-read observation,
-   changed-result invalidation, bounded compositional caches, and identical
-   output suppression in the existing Datastar feed.
+14. **Agent surface observation complete:** materialized agent surfaces and both
+   headers capture runtime database reads, normalized subscriptions learn those
+   observations from the shared first paint, and changed-result replay suppresses
+   unrelated cross-agent Hiccup/SCI work. Remaining: carry the same unit contract
+   through data/debug/root units, add the measured bounded compositional output
+   cache, and suppress identical serialized output in the existing Datastar feed.
 15. Pay only for open/visible work: debug remains an empty shell until opened;
    offscreen/closed bodies are stubs; hidden source/result/error trees are not
    constructed.

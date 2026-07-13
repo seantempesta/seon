@@ -385,11 +385,13 @@
                        (fn [{renderer :seon.render/html}]
                          (is (= 'my.agent.view/canvas renderer))
                          {:seon.agent.ctx.render-fns/attrs
-                          [:my.agent.view/state]})]
+                          [:my.agent.view/state]})
+                       render/render-agent-canvas
+                       (fn [_] {:seon.render/hiccup [:div]})]
                       (let [deps
                             (:seon.ui.agent-view/surface-attrs
-                              (agent-view/agent-view-dependencies
-                                @conn agent-a))]
+                              (::agent-view/dependencies
+                                (agent-view/render-agent-view @conn agent-a)))]
                         (is (contains? deps :my.agent.view/state)))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
@@ -401,8 +403,64 @@
           (fn [conn]
             (let [deps
                   (:seon.ui.agent-view/surface-attrs
-                    (agent-view/agent-view-dependencies @conn agent-a))]
+                    (::agent-view/dependencies
+                      (agent-view/render-agent-view @conn agent-a)))]
               (is (contains? deps :seon.render.canvas/content)))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest unrelated-agent-result-does-not-materialize-a-surface
+  (async done
+    (-> (with-agents
+          [[agent-a []] [agent-b []]]
+          (fn [conn]
+            (let [db-before @conn
+                  observation
+                  (first
+                    (:seon.db/read-observations
+                      (db/capture-reads
+                        {:seon.db/db db-before
+                         :seon.db/thunk
+                         #(db/query
+                            {:seon.db/db db-before
+                             :seon.db/query
+                             '[:find ?purpose .
+                               :in $ ?aid
+                               :where
+                               [?agent :seon.agent/id ?aid]
+                               [?agent :seon.agent/purpose ?purpose]]
+                             :seon.db/args [agent-a]})})))
+                  initial (agent-view/render-agent-view db-before agent-a)
+                  dependencies
+                  (-> (::agent-view/dependencies initial)
+                      (assoc ::agent-view/surface-attrs
+                             #{:seon.agent/purpose})
+                      (assoc ::agent-view/surface-read-attrs
+                             {"canvas" #{:seon.agent/purpose}})
+                      (assoc ::agent-view/surface-read-observations
+                             {"canvas" [observation]}))]
+              (-> (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data
+                     [{:seon.agent/id agent-b
+                       :seon.agent/purpose "another agent changed"}]})
+                  (.then
+                    (fn [_]
+                      (with-redefs
+                        [surface/materialize-surfaces
+                         (fn [_]
+                           (throw
+                             (js/Error.
+                               "unchanged observed surface was materialized")))]
+                        (let [transition
+                              (agent-view/transition
+                                {:seon.db/db @conn
+                                 :seon.agent/id agent-a
+                                 ::agent-view/changed-attrs
+                                 #{:seon.agent/purpose}
+                                 ::agent-view/dependencies dependencies})]
+                          (is (empty? (::agent-view/elements transition))
+                              "the same attr on another entity is not dirty")))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 
@@ -421,14 +479,21 @@
                                  :seon.agent.run/closed-reason
                                  :seon.agent.run/closed-at}]
               (set! db/*conn* conn)
-              (-> (run/open-run!
+              (let [initial (agent-view/render-agent-view @conn agent-a)]
+                (-> (run/open-run!
                     {:seon.agent/id agent-a
                      :seon.agent.run/trigger :message})
                   (.then
                     (fn [opened]
-                      (let [deps (agent-view/agent-view-dependencies @conn agent-a)
-                            changes (agent-view/agent-view-changes
-                                      @conn agent-a open-attrs)
+                      (let [transition
+                            (agent-view/transition
+                              {:seon.db/db @conn
+                               :seon.agent/id agent-a
+                               ::agent-view/changed-attrs open-attrs
+                               ::agent-view/dependencies
+                               (::agent-view/dependencies initial)})
+                            deps (::agent-view/dependencies transition)
+                            changes (::agent-view/elements transition)
                             fleet-header (element-by-id changes "system-header")
                             agent-header (element-by-id changes "agent-view-header")]
                         (is (contains?
@@ -440,19 +505,25 @@
                         (is (vector? agent-header)
                             "running transition patches the local agent header")
                         (is (= 1 (:data-running-agents (second fleet-header))))
-                        (is (= "running" (:data-agent-state (second agent-header)))))
-                      (run/close-run!
-                        {:seon.agent.run/id (:seon.agent.run/id opened)
-                         :seon.agent.run/closed-reason :completed})))
+                        (is (= "running" (:data-agent-state (second agent-header))))
+                        (-> (run/close-run!
+                              {:seon.agent.run/id (:seon.agent.run/id opened)
+                               :seon.agent.run/closed-reason :completed})
+                            (.then (fn [_] deps))))))
                   (.then
-                    (fn [_closed]
-                      (let [changes (agent-view/agent-view-changes
-                                      @conn agent-a closed-attrs)
+                    (fn [deps]
+                      (let [changes
+                            (::agent-view/elements
+                              (agent-view/transition
+                                {:seon.db/db @conn
+                                 :seon.agent/id agent-a
+                                 ::agent-view/changed-attrs closed-attrs
+                                 ::agent-view/dependencies deps}))
                             fleet-header (element-by-id changes "system-header")
                             agent-header (element-by-id changes "agent-view-header")]
                         (is (zero? (:data-running-agents (second fleet-header))))
                         (is (= "idle" (:data-agent-state (second agent-header)))))))
-                  (.finally (fn [] (set! db/*conn* prior-conn)))))))
+                  (.finally (fn [] (set! db/*conn* prior-conn))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 
@@ -479,9 +550,11 @@
                   (fn [_]
                     (let [recorded (atom nil)]
                       (with-redefs [err/record! #(reset! recorded %)]
-                        (is (thrown? js/Error
-                              (agent-view/agent-view-dependencies
-                                @conn agent-a)))
+                        (is (str/includes?
+                              (html/->string
+                                (::agent-view/element
+                                  (agent-view/render-agent-view @conn agent-a)))
+                              "render error"))
                         (is (= :core
                               (:seon.error/fault @recorded))))))))))
         (.then (fn [_] (done)))

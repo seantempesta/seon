@@ -42,6 +42,7 @@
    [::read-attrs ::read-attrs]
    [::touch ::touch]
    [::focus-touch ::focus-touch]
+   [:seon.db/read-observations :seon.db/read-observations]
    [::compact ::compact]
    [::expanded ::expanded]])
 (schema/register! ::materialized-surfaces [:vector ::materialized-surface])
@@ -468,13 +469,18 @@
   "Render one source once, then project its compact and expanded faces."
   [dbv agent-id source]
   (let [selection (::selection source)
-        rendered (render-surface-hiccup dbv agent-id source)
+        capture (db/capture-reads
+                  {:seon.db/db dbv
+                   :seon.db/thunk #(render-surface-hiccup dbv agent-id source)})
+        rendered (:seon.db/result capture)
         rendered (if (= selection "canvas")
                    (or rendered [:div {:class "p-2 text-text-500 text-xs"}
                                  "No canvas render yet."])
                    rendered)]
     (when rendered
       (assoc (select-keys source catalog-keys)
+             :seon.db/read-observations
+             (:seon.db/read-observations capture)
              ::compact (face rendered :compact)
              ::expanded (face rendered :expanded)))))
 

@@ -3,9 +3,10 @@
    ported into the pod.
 
    Each route derives a view from the database. Initial paint sends the whole
-   `#app-view`; later commits use renderer read-sets to send only complete,
-   ID-addressed elements affected by the transaction. Equivalent open feeds
-   share that render and receive the same gzip-compressed event.
+   `#app-view`; later commits replay each unit's runtime-observed database reads
+   and send only complete, ID-addressed elements whose result changed.
+   Equivalent open feeds share that render and receive the same gzip-compressed
+   event.
 
    ## The surfaces (seeded `:seon.route/*` datoms → this ns's handlers)
 
@@ -97,7 +98,11 @@
 (schema/register! ::view-id [:string {:min 1 :max 128}])
 (schema/register! ::optional-view-id [:maybe ::view-id])
 (schema/register! ::dependencies
-  [:map-of :qualified-keyword [:set :qualified-keyword]])
+                  [:or
+                   :seon.ui.agent-view/dependencies
+                   [:map-of :qualified-keyword [:set :qualified-keyword]]])
+(schema/register! ::element :seon.render.canvas/hiccup)
+(schema/register! ::event :string)
 (schema/register! ::view-state
   [:map
    [::view-id ::view-id]
@@ -246,18 +251,25 @@
 ;; ============================================================
 
 (defn- view-fn-patch
-  "Render a connection's bound 0-arg `view-fn` → its `#app-view` SSE morph
-   string. GUARDED: a throwing view degrades to a visible `#app-view-error`
-   morph so one bad view never aborts the whole broadcast."
+  "Render a bound full-view fn into one event plus learned dependencies.
+
+   A plain hiccup result remains valid. A database-observed view returns
+   `::element` and `::dependencies`; the normalized subscription owns both."
   [view-fn]
-  (-> (try
-        (view-fn)
-        (catch :default e
-          [:main {:id "app-view"}
-           [:div {:id "app-error" :class "text-error text-xs font-mono"}
-            (str "render error: " (.-message e))]]))
-      html/->string
-      patch-elements))
+  (try
+    (let [rendered (view-fn)
+          observed? (and (map? rendered) (contains? rendered ::element))
+          element (if observed? (::element rendered) rendered)]
+      (cond-> {::event (-> element html/->string patch-elements)}
+        (and observed? (contains? rendered ::dependencies))
+        (assoc ::dependencies (::dependencies rendered))))
+    (catch :default e
+      {::event
+       (-> [:main {:id "app-view"}
+            [:div {:id "app-error" :class "text-error text-xs font-mono"}
+             (str "render error: " (.-message e))]]
+           html/->string
+           patch-elements)})))
 
 ;; ============================================================
 ;; Per-connection push + broadcast. Equivalent feeds share a render; each
@@ -356,16 +368,22 @@
     subscription-key ::subscription-key}]
   (let [subscription (get-in @!feeds [::subscriptions subscription-key])]
     (or (::full-event subscription)
-        (let [event (view-fn-patch render-full)
+        (let [rendered (view-fn-patch render-full)
+              event (::event rendered)
               subscription-id (::subscription-id subscription)]
           (swap! !feeds
                  (fn [registry]
                    (if (= subscription-id
                           (get-in registry [::subscriptions subscription-key
                                             ::subscription-id]))
-                     (assoc-in registry [::subscriptions subscription-key
-                                         ::full-event]
-                               event)
+                     (cond-> (assoc-in registry
+                                       [::subscriptions subscription-key
+                                        ::full-event]
+                                       event)
+                       (contains? rendered ::dependencies)
+                       (assoc-in [::subscriptions subscription-key
+                                  ::dependencies]
+                                 (::dependencies rendered)))
                      registry)))
           event))))
 
@@ -1256,31 +1274,20 @@
               {:seon.web.feed/key [:seon.web.feed/agent id]
                :seon.web.feed/live? true
                :seon.web.feed/render-full
-               #(agent-view/agent-view @db/*conn* id)
-               ::dependencies
-               (agent-view/agent-view-dependencies @db/*conn* id)
+               #(let [rendered (agent-view/render-agent-view @db/*conn* id)]
+                  {::element (::agent-view/element rendered)
+                   ::dependencies (::agent-view/dependencies rendered)})
                :seon.web.feed/render-change
                (fn [{dependencies ::dependencies}
                     {dbv :seon.db/db attrs :seon.db/changed-attrs}]
-                 (let [{surface :seon.ui.agent-view/surface-attrs
-                        structural :seon.ui.agent-view/structural-attrs
-                        header :seon.ui.agent-view/header-attrs
-                        agent-state :seon.ui.agent-view/agent-state-attrs}
-                       dependencies]
-                   (cond
-                     (seq (set/intersection attrs structural))
-                     {::elements (agent-view/agent-view-changes dbv id attrs)
-                      ::dependencies
-                      (agent-view/agent-view-dependencies dbv id)}
-
-                     (or (seq (set/intersection attrs surface))
-                         (seq (set/intersection attrs agent-state)))
-                     {::elements (agent-view/agent-view-changes dbv id attrs)}
-
-                     (seq (set/intersection attrs header))
-                     {::elements [(header/system-header dbv)]}
-
-                     :else {::elements []})))}
+                 (let [transition
+                       (agent-view/transition
+                         {:seon.db/db dbv
+                          :seon.agent/id id
+                          ::agent-view/changed-attrs attrs
+                          ::agent-view/dependencies dependencies})]
+                   {::elements (::agent-view/elements transition)
+                    ::dependencies (::agent-view/dependencies transition)}))}
               view-id (assoc ::view-id view-id)))))
       (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"
                                    "Cache-Control" "no-store"})

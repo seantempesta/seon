@@ -647,12 +647,16 @@
 (deftest equivalent-open-views-share-first-paint-until-a-transaction
   (let [renders (atom 0)
         pushes (atom [])
+        learned-dependencies
+        {:seon.web.datastar-test/value-attrs #{:example/value}}
         feed-a (test-feed
                  "first-paint-a"
                  {:seon.web.feed/render-full
                   (fn []
                     (swap! renders inc)
-                    [:main {:id "app-view"} "current"])})
+                    {::datastar/element
+                     [:main {:id "app-view"} "current"]
+                     ::datastar/dependencies learned-dependencies})})
         feed-b (assoc feed-a ::datastar/view-id "first-paint-b")
         registry (atom (feed-registry [feed-a feed-b]))
         conn-a (registry-view @registry "first-paint-a")
@@ -668,6 +672,10 @@
           "equivalent sockets render one shared initial database view")
       (is (= 2 (count @pushes))
           "each socket receives the shared first paint")
+      (is (= learned-dependencies
+             (::datastar/dependencies
+               (first (vals (::datastar/subscriptions @registry)))))
+          "the shared first paint installs its observed dependency authority")
       (@#'datastar/on-tx {:seon.db/changed-attrs #{:example/value}})
       (@#'datastar/push-full! conn-b)
       (is (= 2 @renders)
@@ -1287,20 +1295,28 @@
 
 (deftest view-fn-patch-renders-the-bound-view-and-is-guarded
   (testing "a connection's bound view-fn is rendered into its OWN morph patch"
-    (let [patch (@#'datastar/view-fn-patch
-                 (fn [] [:main {:id "app-view"} [:div {:id "x"} "BOUND-VIEW"]]))]
+    (let [patch (::datastar/event
+                  (@#'datastar/view-fn-patch
+                    (fn [] [:main {:id "app-view"}
+                            [:div {:id "x"} "BOUND-VIEW"]])))]
       (is (str/starts-with? patch "event: datastar-patch-elements\n")
           "the bound view is framed as a datastar-patch-elements morph")
       (is (str/includes? patch "BOUND-VIEW")
           "the connection's OWN view content rides in its patch")))
   (testing "two connections' views differ — each renders its own bound thunk"
-    (let [pa (@#'datastar/view-fn-patch (fn [] [:main {:id "app-view"} "VIEW-A"]))
-          pb (@#'datastar/view-fn-patch (fn [] [:main {:id "app-view"} "VIEW-B"]))]
+    (let [pa (::datastar/event
+               (@#'datastar/view-fn-patch
+                 (fn [] [:main {:id "app-view"} "VIEW-A"])))
+          pb (::datastar/event
+               (@#'datastar/view-fn-patch
+                 (fn [] [:main {:id "app-view"} "VIEW-B"])))]
       (is (and (str/includes? pa "VIEW-A") (not (str/includes? pa "VIEW-B")))
           "connection A's patch carries only A's view")
       (is (and (str/includes? pb "VIEW-B") (not (str/includes? pb "VIEW-A")))
           "connection B's patch carries only B's view")))
   (testing "a throwing view-fn degrades to a #app-error morph — never throws"
-    (let [patch (@#'datastar/view-fn-patch (fn [] (throw (js/Error. "view boom"))))]
+    (let [patch (::datastar/event
+                  (@#'datastar/view-fn-patch
+                    (fn [] (throw (js/Error. "view boom")))))]
       (is (str/includes? patch "app-error")
           "a per-connection render failure degrades to a visible error, not a crash"))))

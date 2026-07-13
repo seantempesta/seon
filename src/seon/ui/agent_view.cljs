@@ -6,9 +6,11 @@
    context block with a nonblank HTML render appears as a compact card in the
    right rail; selecting one shows the same rendered hiccup in the primary
    panel. AI-only blocks are absent. Surface recency derives from database
-   transactions and renderer read-sets; selection is browser-local state."
+   transactions and runtime-observed database reads; selection is browser-local
+   state."
   (:require
     [clojure.set :as set]
+    [seon.db :as db]
     [seon.derive :as derive]
     [seon.render.surface :as surface]
     [seon.schema :as schema]
@@ -19,13 +21,35 @@
 (schema/register! ::structural-attrs [:set :qualified-keyword])
 (schema/register! ::header-attrs [:set :qualified-keyword])
 (schema/register! ::agent-state-attrs [:set :qualified-keyword])
+(schema/register! ::surface-read-attrs
+                  [:map-of :seon.render.surface/selection
+                   :seon.render.surface/read-attrs])
+(schema/register! ::surface-read-observations
+                  [:map-of :seon.render.surface/selection
+                   :seon.db/read-observations])
 (schema/register! ::dependencies
   [:map
    [::surface-attrs ::surface-attrs]
    [::structural-attrs ::structural-attrs]
    [::header-attrs ::header-attrs]
-   [::agent-state-attrs ::agent-state-attrs]])
-(declare agent-view)
+   [::agent-state-attrs ::agent-state-attrs]
+   [::surface-read-attrs ::surface-read-attrs]
+   [::surface-read-observations ::surface-read-observations]
+   [::system-header-read-observations :seon.db/read-observations]
+   [::agent-header-read-observations :seon.db/read-observations]])
+(schema/register! ::element :seon.render.canvas/hiccup)
+(schema/register! ::elements [:vector :seon.render.canvas/hiccup])
+(schema/register! ::render-result
+                  [:map [::element ::element] [::dependencies ::dependencies]])
+(schema/register! ::transition-request
+                  [:map
+                   [:seon.db/db :seon.db/db-val]
+                   [:seon.agent/id :seon.agent/id]
+                   [::changed-attrs ::changed-attrs]
+                   [::dependencies ::dependencies]])
+(schema/register! ::transition-result
+                  [:map [::elements ::elements] [::dependencies ::dependencies]])
+(declare render-agent-view)
 
 (def ^:private state-display
   {:running    {:dot "●" :class "text-signal"   :label "running"}
@@ -146,22 +170,40 @@
       :seon.eval/id
       :seon.eval/ok?}))
 
-(defn agent-view-dependencies
-  "Cached-gradient dependency projection for one live agent feed.
+(defn- captured-hiccup
+  "Render one database-derived unit and retain only immutable read facts."
+  [dbv thunk]
+  (let [capture (db/capture-reads
+                  {:seon.db/db dbv :seon.db/thunk thunk})]
+    {::element (:seon.db/result capture)
+     :seon.db/read-observations (:seon.db/read-observations capture)}))
 
-   Values come from the same database-owned context root and analyzer-produced
-   renderer read-sets as rendering. The feed refreshes this projection after a
-   structural change; ordinary transactions can then be classified without
-   rendering or rebuilding the context graph."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
-                             [:seon.agent/id :string]]
-                  ::dependencies]}
-  [dbv agent-id]
-  (let [catalog (surface/surface-catalog dbv agent-id)]
-    {::surface-attrs (into #{} (mapcat ::surface/read-attrs) catalog)
-     ::structural-attrs structural-attrs
-     ::header-attrs header-attrs
-     ::agent-state-attrs derive/agent-state-read-attrs}))
+(defn- dependencies-for
+  [catalog surfaces system-header-capture agent-header-capture]
+  {::surface-attrs (into #{} (mapcat ::surface/read-attrs) catalog)
+   ::structural-attrs structural-attrs
+   ::header-attrs header-attrs
+   ::agent-state-attrs derive/agent-state-read-attrs
+   ::surface-read-attrs
+   (into {} (map (juxt ::surface/selection ::surface/read-attrs)) catalog)
+   ::surface-read-observations
+   (into {} (map (juxt ::surface/selection
+                       :seon.db/read-observations)) surfaces)
+   ::system-header-read-observations
+   (:seon.db/read-observations system-header-capture)
+   ::agent-header-read-observations
+   (:seon.db/read-observations agent-header-capture)})
+
+(defn- reads-changed?
+  "Whether a unit's captured semantic reads differ at `dbv`.
+
+   An empty capture is conservative: its analyzer attr gate earned the check,
+   but there is no exact observation capable of proving the unit unchanged."
+  [dbv observations]
+  (or (empty? observations)
+      (some #(db/read-observation-changed?
+               {:seon.db/db dbv :seon.db/read-observation %})
+            observations)))
 
 (defn- focus-marker [selection touch]
   [:div {:id "agent-view-focus-revision"
@@ -179,56 +221,50 @@
     [(primary-panel selection block-name (::surface/expanded surface) touch)
      (rail-button selection block-name label (::surface/compact surface) touch)]))
 
-(defn agent-view-changes
-  "Complete ID-addressed elements affected by one coalesced transaction batch.
+(defn- view-element
+  [surfaces latest-selection latest-touch system-header agent-header*]
+  [:main {:id "app-view"
+          :class "flex flex-col gap-2 w-full min-h-0 flex-1 overflow-hidden"
+          :data-signals__ifmissing
+          (str "{selected: '" latest-selection
+               "', seenrevision: " latest-touch
+               ", manualselection: false}")
+          :data-effect (str "if ($selected !== 'canvas' && "
+                            "!document.querySelector('[data-agent-primary=\"' + "
+                            "$selected + '\"]')) { $selected = 'canvas'; "
+                            "$manualselection = false }")}
+   system-header
+   header/header-spacer
+   (focus-marker latest-selection latest-touch)
+   agent-header*
+   [:div {:id "agent-view-layout"
+          :class "grid grid-cols-3 gap-2 min-h-0 flex-1"}
+    [:div {:id "agent-view-primary"
+           :class "col-span-2 min-h-0 h-full overflow-hidden"}
+     (doall
+       (map (fn [surface]
+              (primary-panel (::surface/selection surface)
+                             (:seon.agent.ctx/name surface)
+                             (::surface/expanded surface)
+                             (::surface/touch surface)))
+            surfaces))]
+    [:aside {:id "agent-view-context"
+             :class (str "agent-view-rail col-span-1 flex flex-col gap-2 "
+                         "min-h-0 h-full overflow-y-auto")}
+     (doall
+       (map (fn [surface]
+              (rail-button (::surface/selection surface)
+                           (:seon.agent.ctx/name surface)
+                           (::surface/label surface)
+                           (::surface/compact surface)
+                           (::surface/touch surface)))
+            surfaces))]]])
 
-   Structural program/context changes return the full `#app-view`. Ordinary
-   data changes render only intersecting surface read-sets plus the header and
-   focus-revision controller. Unknown/unrelated attrs never rerender a surface."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
-                             [:seon.agent/id :string]
-                             [::changed-attrs ::changed-attrs]]
-                  [:vector :any]]}
-  [dbv agent-id changed-attrs]
-  (if (structural-change? changed-attrs)
-    [(agent-view dbv agent-id)]
-    (let [catalog (surface/surface-catalog dbv agent-id)
-          affected-selections
-          (into #{}
-                (comp
-                  (filter #(seq (set/intersection
-                                  changed-attrs
-                                  (::surface/read-attrs %))))
-                  (map ::surface/selection))
-                catalog)
-          affected
-          (surface/materialize-surfaces
-            {:seon.db/db dbv
-             :seon.agent/id agent-id
-             ::surface/selections affected-selections})
-          latest-selection (surface/latest-focus-selection catalog)
-          latest (some #(when (= latest-selection (::surface/selection %)) %)
-                       catalog)]
-      ;; A formerly-present conditional renderer returning nil requires a shell
-      ;; morph so Datastar removes both of its old faces. Ordinary updates stay
-      ;; on the small, ID-addressed path.
-      (if (< (count affected) (count affected-selections))
-        [(agent-view dbv agent-id)]
-        (into (cond-> [(focus-marker (::surface/selection latest)
-                                      (::surface/focus-touch latest))]
-                (seq (set/intersection header-attrs changed-attrs))
-                (conj (header/system-header dbv))
-                (seq (set/intersection derive/agent-state-read-attrs
-                                       changed-attrs))
-                (conj (agent-header dbv agent-id)))
-              (mapcat surface-elements)
-              affected)))))
-
-(defn agent-view
-  "Render one agent's canvas and HTML context blocks from `db`."
+(defn render-agent-view
+  "Render one agent view plus its runtime-only exact database dependencies."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
                              [:seon.agent/id :string]]
-                  :any]}
+                  ::render-result]}
   [db agent-id]
   (try
     (let [catalog (surface/surface-catalog db agent-id)
@@ -244,44 +280,117 @@
           latest-selection (surface/latest-focus-selection present-catalog)
           latest (some #(when (= latest-selection (::surface/selection %)) %)
                        present-catalog)
-          latest-touch (::surface/focus-touch latest)]
-      [:main {:id "app-view"
-              :class "flex flex-col gap-2 w-full min-h-0 flex-1 overflow-hidden"
-              :data-signals__ifmissing
-              (str "{selected: '" latest-selection
-                   "', seenrevision: " latest-touch
-                   ", manualselection: false}")
-              :data-effect (str "if ($selected !== 'canvas' && "
-                                "!document.querySelector('[data-agent-primary=\"' + "
-                                "$selected + '\"]')) { $selected = 'canvas'; "
-                                "$manualselection = false }")}
-       (header/system-header db)
-       header/header-spacer
-       (focus-marker latest-selection latest-touch)
-       (agent-header db agent-id)
-       [:div {:id "agent-view-layout"
-              :class "grid grid-cols-3 gap-2 min-h-0 flex-1"}
-        [:div {:id "agent-view-primary"
-               :class "col-span-2 min-h-0 h-full overflow-hidden"}
-         (doall
-           (map (fn [surface]
-                  (primary-panel (::surface/selection surface)
-                                 (:seon.agent.ctx/name surface)
-                                 (::surface/expanded surface)
-                                 (::surface/touch surface)))
-                surfaces))]
-        [:aside {:id "agent-view-context"
-                 :class (str "agent-view-rail col-span-1 flex flex-col gap-2 "
-                             "min-h-0 h-full overflow-y-auto")}
-         (doall
-           (map (fn [surface]
-                  (rail-button (::surface/selection surface)
-                               (:seon.agent.ctx/name surface)
-                               (::surface/label surface)
-                               (::surface/compact surface)
-                               (::surface/touch surface)))
-                surfaces))]]])
+          latest-touch (::surface/focus-touch latest)
+          system-header-capture
+          (captured-hiccup db #(header/system-header db))
+          agent-header-capture
+          (captured-hiccup db #(agent-header db agent-id))]
+      {::element
+       (view-element surfaces latest-selection latest-touch
+                     (::element system-header-capture)
+                     (::element agent-header-capture))
+       ::dependencies
+       (dependencies-for catalog surfaces system-header-capture
+                         agent-header-capture)})
     (catch :default e
-      [:main {:id "app-view" :class "flex flex-col gap-3 w-full"}
-       [:div {:id "agent-view-error" :class "text-error text-xs font-mono"}
-        (str "render error: " (.-message e))]])))
+      {::element
+       [:main {:id "app-view" :class "flex flex-col gap-3 w-full"}
+        [:div {:id "agent-view-error" :class "text-error text-xs font-mono"}
+         (str "render error: " (.-message e))]]
+       ::dependencies
+       {::surface-attrs #{:seon.render.canvas/content}
+        ::structural-attrs structural-attrs
+        ::header-attrs header-attrs
+        ::agent-state-attrs derive/agent-state-read-attrs
+        ::surface-read-attrs {"canvas" #{:seon.render.canvas/content}}
+        ::surface-read-observations {}
+        ::system-header-read-observations []
+        ::agent-header-read-observations []}})))
+
+(defn agent-view
+  "Render one agent's canvas and HTML context blocks from `db`."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/id :string]]
+                  ::element]}
+  [db agent-id]
+  (::element (render-agent-view db agent-id)))
+
+(defn transition
+  "Render only units whose captured database results changed."
+  {:malli/schema [:=> [:cat ::transition-request] ::transition-result]}
+  [{dbv :seon.db/db agent-id :seon.agent/id changed-attrs ::changed-attrs
+    dependencies ::dependencies}]
+  (if (structural-change? changed-attrs)
+    (let [rendered (render-agent-view dbv agent-id)]
+      {::elements [(::element rendered)]
+       ::dependencies (::dependencies rendered)})
+    (let [surface-read-attrs (::surface-read-attrs dependencies)
+          surface-observations (::surface-read-observations dependencies)
+          affected-selections
+          (into #{}
+                (keep (fn [[selection attrs]]
+                        (when (and (seq (set/intersection changed-attrs attrs))
+                                   (reads-changed?
+                                     dbv (get surface-observations selection [])))
+                          selection)))
+                surface-read-attrs)
+          system-header-dirty?
+          (and (seq (set/intersection changed-attrs header-attrs))
+               (reads-changed?
+                 dbv (::system-header-read-observations dependencies)))
+          agent-header-dirty?
+          (and (seq (set/intersection changed-attrs
+                                      derive/agent-state-read-attrs))
+               (reads-changed?
+                 dbv (::agent-header-read-observations dependencies)))
+          affected
+          (if (seq affected-selections)
+            (surface/materialize-surfaces
+              {:seon.db/db dbv
+               :seon.agent/id agent-id
+               ::surface/selections affected-selections})
+            [])]
+      ;; A conditional surface disappearing requires a complete shell morph.
+      (if (< (count affected) (count affected-selections))
+        (let [rendered (render-agent-view dbv agent-id)]
+          {::elements [(::element rendered)]
+           ::dependencies (::dependencies rendered)})
+        (let [catalog (when (seq affected-selections)
+                        (surface/surface-catalog dbv agent-id))
+              latest-selection (when catalog
+                                 (surface/latest-focus-selection catalog))
+              latest (when catalog
+                       (some #(when (= latest-selection
+                                        (::surface/selection %)) %)
+                             catalog))
+              system-header-capture
+              (when system-header-dirty?
+                (captured-hiccup dbv #(header/system-header dbv)))
+              agent-header-capture
+              (when agent-header-dirty?
+                (captured-hiccup dbv #(agent-header dbv agent-id)))
+              next-dependencies
+              (cond-> dependencies
+                system-header-capture
+                (assoc ::system-header-read-observations
+                       (:seon.db/read-observations system-header-capture))
+                agent-header-capture
+                (assoc ::agent-header-read-observations
+                       (:seon.db/read-observations agent-header-capture))
+                (seq affected)
+                (update ::surface-read-observations
+                        into
+                        (map (juxt ::surface/selection
+                                   :seon.db/read-observations) affected)))
+              elements
+              (into (cond-> []
+                      catalog
+                      (conj (focus-marker (::surface/selection latest)
+                                          (::surface/focus-touch latest)))
+                      system-header-capture
+                      (conj (::element system-header-capture))
+                      agent-header-capture
+                      (conj (::element agent-header-capture)))
+                    (mapcat surface-elements)
+                    affected)]
+          {::elements elements ::dependencies next-dependencies})))))
