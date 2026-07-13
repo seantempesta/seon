@@ -3,8 +3,8 @@
    write-result envelope mapper, the shared Datalog rule set, the derived
    work-queue queries (ready leaves, roll-up, blocked/ready), the position
    ANCHOR derivation, the reverse-ref tree pull, the ONE document compiler
-   behind plan! AND reconcile! (plus the lenient markdown parse),
-   the drop! subtree walk, the derived stuck×N → frontier re-plan
+   behind plan! AND reconcile!, the drop! subtree walk, the derived
+   stuck×N → frontier re-plan
    ESCALATION (flag query + STUCK band + once-per-episode planner
    consult), and the WINDOWED plan-block context render (anchor + open
    frontier + recently-completed tail; the completed interior stays in
@@ -770,123 +770,6 @@
    namespaced compiler contract as [[compile-reconcile]]."
   [agent root ids now]
   (compile-reconcile nil "plan!" agent [root] ids now))
-
-;; --- Lenient markdown → document forest (reconcile!'s ::markdown path). ---
-
-(def ^:private md-heading-re #"^(#{1,6})\s+(.+)$")
-(def ^:private md-item-re    #"^(\s*)(?:[-*+]|\d+[.)])\s+(.+)$")
-(def ^:private md-goal-re    #"(?i)^\s*goal\s*[:—–-]\s*(.+)$")
-(def ^:private md-id-re      #"^\[([^\[\]\s]+)\]\s*(.+)$")
-(def ^:private md-checkbox-re #"^\[[ xX]\]\s+(.+)$")
-(def ^:private md-enum-re     #"^\d+[.)]\s+(.+)$")
-(def ^:private md-expect-re  #"(?i)^(.+?)\s*[—–-]+\s*expect:?\s+(.+)$")
-
-(defn- md-node
-  "One markdown item/heading text → a doc node: a leading `[id]` keeps
-   identity; an explicit `— expect: …` suffix (or, for a list item, a
-   trailing second sentence) becomes `:my.plan/expect`. Cosmetic frontier
-   markers — a task-list checkbox (`[ ]`/`[x]`) and a redundant `N.`
-   enumerator inside a bullet — are stripped, never part of the title
-   (and a checked box never closes a step: reconcile edits no status)."
-  [text sentence-expect?]
-  (let [text           (or (second (re-find md-checkbox-re text)) text)
-        text           (or (second (re-find md-enum-re text)) text)
-        [id text]      (if-let [[_ i r] (re-find md-id-re text)]
-                         [i r] [nil text])
-        [title expect] (if-let [[_ t e] (re-find md-expect-re text)]
-                         [t e]
-                         (let [sents (when sentence-expect?
-                                       (str/split text #"(?<=[.!?])\s+"))]
-                           (if (> (count sents) 1)
-                             [(str/join " " (butlast sents)) (last sents)]
-                             [text nil])))]
-    (cond-> {:my.plan/title (str/trim title)}
-      id     (assoc :my.plan/id id)
-      expect (assoc :my.plan/expect (str/trim expect)))))
-
-(defn- fold-entries
-  "Flat namespaced parser entries in document order → a nested forest under
-   `:my.plan/children` — a deeper entry nests under its nearest shallower
-   predecessor (a skipped level still attaches to the previous node)."
-  [entries]
-  (letfn [(build [items depth]
-            (loop [items items nodes []]
-              (let [{d ::depth node ::node :as it} (first items)]
-                (cond
-                  (nil? it)   [nodes nil]
-                  (< d depth) [nodes items]
-                  (= d depth)
-                  (let [[kids remaining-items]
-                        (build (next items) (inc depth))]
-                    (recur remaining-items
-                           (conj nodes (cond-> node
-                                         (seq kids)
-                                         (assoc :my.plan/children kids)))))
-                  :else
-                  (let [[kids remaining-items] (build items (inc depth))]
-                    (if (seq nodes)
-                      (recur remaining-items
-                             (conj (pop nodes)
-                                   (update (peek nodes) :my.plan/children
-                                           (fnil into []) kids)))
-                      (recur remaining-items (into nodes kids))))))))]
-    (first (build (seq entries) (reduce min (map ::depth entries))))))
-
-(defn parse-markdown
-  "Parse lenient plan text into a namespaced document result.
-
-   Accepted shapes: `#`-headings nest by level; `-`/`*`/`1.` list items
-   nest by indent under the nearest heading; a flat numbered list is
-   valid; with no heading, a plain first line titles (and a `Goal: …`
-   line goals) ONE synthesized root holding every item. Per item: a
-   leading `[id]` keeps identity; `— expect: …` (or a trailing second
-   sentence) becomes the step's `:my.plan/expect`."
-  [text]
-  (let [st (reduce
-             (fn [{::keys [heading-depth indents] :as st} raw]
-               (let [line (str/trimr raw)]
-                 (cond
-                   (str/blank? line) st
-
-                   :else
-                   (if-let [[_ hashes t] (re-find md-heading-re line)]
-                     (let [d (dec (count hashes))]
-                       (-> st
-                           (update ::entries conj {::depth d ::node (md-node t false)})
-                           (assoc ::heading-depth d ::indents []
-                                  ::had-heading? true)))
-                     (if-let [[_ ind t] (re-find md-item-re line)]
-                       (let [w       (count ind)
-                             indents (loop [is indents]
-                                       (cond
-                                         (and (seq is) (< w (peek is))) (recur (pop is))
-                                         (or (empty? is) (> w (peek is))) (conj is w)
-                                         :else is))]
-                         (-> st
-                             (update ::entries conj
-                                     {::depth (+ heading-depth (count indents))
-                                      ::node  (md-node t true)})
-                             (assoc ::indents indents)))
-                       (if-let [[_ g] (re-find md-goal-re line)]
-                         (update st ::goal #(or % (str/trim g)))
-                         (if (and (nil? (::title st)) (empty? (::entries st)))
-                           (assoc st ::title (str/trim line))
-                           st)))))))
-             {::entries [] ::indents [] ::heading-depth -1
-              ::title nil ::goal nil ::had-heading? false}
-             (str/split-lines text))
-        {::keys [entries title goal had-heading?]} st]
-    (if (empty? entries)
-      {::error (str "reconcile!: no plan steps found in the markdown — "
-                    "write headings or list items.")}
-      (let [forest (fold-entries entries)]
-        {::nodes
-         (if had-heading?
-           (cond-> forest
-             goal (update 0 (fn [r] (update r :my.plan/goal #(or % goal)))))
-           [(cond-> {:my.plan/title    (or title goal "Plan")
-                     :my.plan/children forest}
-              goal (assoc :my.plan/goal goal))])}))))
 
 (defn ^:async retract-subtree!
   "Retract `id` AND its whole subtree (the plain `parent` ref does NOT

@@ -1349,123 +1349,17 @@
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
-(deftest reconcile-markdown-rehand-keeps-root-identity
-  (async done
-    (let [st (atom {})]
-      (-> (with-agent-conn
-            (fn []
-              (-> (plan/plan! {:my.plan/title "Ship the tracker"
-                               :my.plan/children
-                               [{:my.plan/title "design the schema"
-                                 :my.plan/ref "d"}]})
-                  (.then
-                    (fn [{:my.plan/keys [ok? root ids]}]
-                      (is (true? ok?))
-                      (reset! st {:root root :d (get ids "d")})
-                      ;; the pilot's exact shape: a markdown re-hand whose
-                      ;; heading root carries no [id], children keep theirs
-                      (plan/reconcile!
-                        {:my.plan/markdown
-                         (str "# Ship the tracker\n"
-                              "- [" (get ids "d") "] design the schema\n"
-                              "- write the tests\n")})))
-                  (.then
-                    (fn [{:my.plan/keys [ok? root resolved-root diff]}]
-                      (let [{orig :root} @st]
-                        (is (true? ok?))
-                        (is (= orig root)
-                            "the markdown re-hand kept the root's identity")
-                        (is (true? resolved-root))
-                        (is (= {:my.plan/added 1 :my.plan/dropped 0
-                                :my.plan/updated 0}
-                               diff)
-                            "only the genuinely new step minted")))))))
-          (.then (fn [_] (done)))
-          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
-
-(deftest reconcile-parses-markdown-heading-and-nested-list
+(deftest reconcile-requires-a-tree-document
   (async done
     (-> (with-agent-conn
           (fn []
-            (-> (plan/reconcile!
-                  {:my.plan/markdown
-                   ;; frontier-real markup (live F1 sample 2026-07-11): task-
-                   ;; list checkboxes + redundant enumerators inside bullets
-                   ;; are cosmetic and must never leak into titles.
-                   (str "# Ship the tracker\n"
-                        "Goal: a tracker my human keeps using\n"
-                        "- [ ] 1. design the schema — expect: register! returns and a row transacts\n"
-                        "- [ ] 2. store seed rows. The three rows read back.\n"
-                        "  - backfill the old rows\n"
-                        "- summary tile\n")})
-                (.then
-                  (fn [{:my.plan/keys [ok? root diff]}]
-                    (is (true? ok?))
-                    (is (= 5 (:my.plan/added diff))
-                        "root + 3 steps + 1 nested substep minted")
-                    (let [sub   (plan/tree {:my.plan/root root})
-                          kids  (:my.plan/_parent sub)
-                          k     (fn [t] (some #(when (str/starts-with?
-                                                       (:my.plan/title %) t) %)
-                                              kids))]
-                      (is (= "Ship the tracker" (:my.plan/title sub))
-                          "the heading titles the root")
-                      (is (= "a tracker my human keeps using"
-                             (:my.plan/goal sub))
-                          "the Goal: line goals the root")
-                      (is (= 3 (count kids)))
-                      (is (= "register! returns and a row transacts"
-                             (:my.plan/expect (k "design the schema")))
-                          "an explicit — expect: suffix becomes ::expect")
-                      (is (= "The three rows read back."
-                             (:my.plan/expect (k "store seed rows")))
-                          "a trailing second sentence becomes ::expect")
-                      (is (= 1 (count (:my.plan/_parent (k "store seed rows"))))
-                          "the indented item nested under its parent"))))))
-          )
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest reconcile-parses-a-flat-numbered-list
-  (async done
-    (-> (with-agent-conn
-          (fn []
-            (-> (plan/reconcile!
-                  {:my.plan/markdown
-                   (str "Goal: recall beats re-derivation\n"
-                        "1. design a schema for findings\n"
-                        "2. store the findings — expect: a query returns them\n"
-                        "3. answer from the store\n")})
-                (.then
-                  (fn [{:my.plan/keys [ok? root diff]}]
-                    (is (true? ok?) "a flat numbered list is a valid document")
-                    (is (= 4 (:my.plan/added diff))
-                        "a synthesized root + the 3 steps")
-                    (let [sub (plan/tree {:my.plan/root root})]
-                      (is (= "recall beats re-derivation" (:my.plan/title sub))
-                          "no heading → the goal line titles the root")
-                      (is (= 3 (count (:my.plan/_parent sub))))
-                      (is (some #(= "a query returns them" (:my.plan/expect %))
-                                (:my.plan/_parent sub))))))))
-          )
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest reconcile-requires-exactly-one-document-argument
-  (async done
-    (-> (with-agent-conn
-          (fn []
-            (-> (plan/reconcile! {:my.plan/tree {:my.plan/title "t"}
-                                  :my.plan/markdown "- t"})
+            (-> (plan/reconcile! {})
                 (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
-                         (is (false? ok?))
-                         (is (re-find #"both" error) "both args refused")
-                         (plan/reconcile! {})))
-                (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
-                         (is (false? ok?))
-                         (is (re-find #"neither" error) "neither arg refused")
+                         (is (false? ok?) "no :my.plan/tree refused")
+                         (is (re-find #":my.plan/tree" error)
+                             "the error names the required argument")
                          (is (empty? (:my.plan/steps (plan/list-open {})))
-                             "nothing minted on either failure"))))))
+                             "nothing minted on failure"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

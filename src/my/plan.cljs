@@ -188,7 +188,6 @@
                                  [:vector [:ref ::dnode]]]]}}
    [:ref ::dnode]])
 
-(schema/register! ::markdown [:string {:min 1}])
 (schema/register! ::added :int)
 (schema/register! ::updated :int)
 (schema/register! ::resolved-root :boolean)  ; id-less root resolved onto the open root
@@ -196,7 +195,7 @@
   [:map [::added ::added] [::dropped ::dropped] [::updated ::updated]])
 
 ;; ::tree stays structurally permissive at the boundary — a malformed
-;; document is EXPECTED input (frontier markdown, model edits) and must come
+;; document is EXPECTED input (hand-authored or model edits) and must come
 ;; back as a guiding fail envelope, never an instrumentation throw. The
 ;; `:seon.render/prefill-fn` PROPERTY names the projection of this argument's
 ;; CURRENT value (`document`) — the registry-driven draft-head affordance:
@@ -207,7 +206,6 @@
    [::tree         {:optional true
                     :seon.render/prefill-fn 'my.plan/document}
     [:or :map [:vector :map]]]
-   [::markdown     {:optional true} ::markdown]
    [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
 
 (schema/register! ::reconcile-response
@@ -326,15 +324,19 @@
           (internal/write-result "step!" id env))))))
 
 (defn ^:async plan!
-  "Create a whole plan at once: goal, pace, nested steps, and deps.
+  "Create your plan ONCE: goal, pace, nested steps, and deps.
 
-   One transact authors the tree. The root carries `:goal` (why — it
-   outlives your transcript) and
-   `:pace` (`:multi-session` = don't race it to done in one run).
-   `:children` nests (`:parent` edges); `:ref` labels a node; `:after`
-   names labels it runs after (`needs` edges — earlier OR later labels);
-   any node may carry `:expect`. → {::ok? true ::root <root-id>
-   ::ids <label→id>} or a fail envelope."
+   CREATE only — author the whole tree in ONE call. To REVISE it later use
+   `reconcile!` (edits a `document`, diffing by id); add a step with `step!`;
+   close one with `done!`. A second `plan!` with the same title is REFUSED
+   (it would duplicate) — and you never need it: the result
+   ({::ok? true ::root <root-id> ::ids <label→id>}) arrives on your NEXT turn
+   and your plan renders in the `:plan` block, so read it there — do not
+   re-call `plan!` to \"check the response\". `:children` nests (`:parent`
+   edges); `:ref` labels a node; `:after` names labels it runs after (`needs`
+   edges — earlier OR later labels); the root's `:goal` outlives your
+   transcript, `:pace :multi-session` means don't race it done in one run;
+   any node may carry `:expect`. Or a fail envelope."
   {:malli/schema [:=> [:cat ::plan-request] ::plan-response]}
   [{::keys [title] agent-id :seon.agent/id :as request}]
   (or
@@ -533,45 +535,34 @@
     (await (internal/retract-subtree! id))))
 
 (defn ^:async reconcile!
-  "Reconcile your OPEN plan against ONE edited whole-plan document.
+  "Revise your existing OPEN plan from ONE edited whole-plan document.
 
-   Pass exactly one of `:my.plan/tree` (an edited `document` value — the
-   same nested shape; `:my.plan/children` also accepted when authoring by
-   hand) or `:my.plan/markdown` (lenient plain text: `#`-headings and/or
-   nested `-`/`1.` list items — a flat numbered list is valid; with no
-   heading a plain first line titles, and a `Goal: …` line goals, one
-   synthesized root; a leading `[id]` on an item keeps identity; a
-   `— expect: …` suffix or a trailing second sentence becomes the step's
-   `:my.plan/expect`; cosmetic `[ ]`/`[x]` checkboxes and redundant `N.`
-   enumerators are stripped — a checked box never closes a step). Identity: a node WITH `:my.plan/id` updates in
-   place (title/description/expect/goal/pace/parent/needs — never status:
-   `active!`/`done!` own that); a node WITHOUT one resolves to the open
-   step it re-states when that is unambiguous — an id-less ROOT resolves
-   to your one open root (the receipt says `::resolved-root true`), an
-   id-less child to a title-identical open sibling; an AMBIGUOUS match
-   fails naming the candidate ids (identity is never re-minted by an
-   omitted id) — and only a genuinely new node is minted; an open
-   step ABSENT from the document is dropped (`drop!` semantics); `:done`
-   steps are immune — absent from the document by construction, and
-   submitting one fails. `:ref`/`:after` label deps work as in `plan!`.
-   ONE transaction for the whole delta. Against an EMPTY tree this IS
-   plan authoring — one code path with `plan!`.
+   This is the UPDATE door (`plan!` is create-once). Pass `:my.plan/tree` —
+   an edited `document` value (the same nested EDN shape `document` returns;
+   `:my.plan/children` also accepted when authoring by hand). It diffs by
+   `:my.plan/id` and keeps your progress: a node WITH an id updates in place
+   (title/description/expect/goal/pace/parent/needs — never status:
+   `active!`/`done!` own that); a node WITHOUT one resolves to the open step
+   it re-states when unambiguous — an id-less ROOT resolves to your one open
+   root (`::resolved-root true`), an id-less child to a title-identical open
+   sibling; an AMBIGUOUS match fails naming the candidate ids (identity is
+   never re-minted by an omitted id); a genuinely new node is minted; an open
+   step ABSENT from the document is dropped (`drop!` semantics); `:done` steps
+   are immune (absent by construction; submitting one fails). `:ref`/`:after`
+   label deps work as in `plan!`. ONE transaction for the whole delta. Against
+   an EMPTY tree this IS plan authoring — one code path with `plan!`.
    → {::ok? true ::root _ ::ids _ ::diff {::added _ ::dropped _
    ::updated _}} or a fail envelope."
   {:malli/schema [:=> [:cat ::reconcile-request] ::reconcile-response]}
-  [{::keys [tree markdown] agent-id :seon.agent/id :as request}]
+  [{::keys [tree] agent-id :seon.agent/id :as request}]
   (or
     (internal/check-request-keys "reconcile!" request ::reconcile-request)
     (let [agent (internal/agent-ref agent-id)]
       (cond
-        (and tree markdown)
-        (internal/fail (str "reconcile!: pass exactly ONE of :my.plan/tree "
-                            "or :my.plan/markdown — got both."))
-
-        (and (nil? tree) (nil? markdown))
+        (nil? tree)
         (internal/fail (str "reconcile!: pass the edited document as "
-                            ":my.plan/tree (EDN) or :my.plan/markdown (text) "
-                            "— got neither."))
+                            ":my.plan/tree (EDN) — get it from "
+                            "(my.plan/document {})."))
 
         (nil? agent)
         (internal/fail (str "reconcile!: no :seon.agent/id resolved — pass "
@@ -579,21 +570,14 @@
                             "boundary fills in you)."))
 
         :else
-        (let [doc (if markdown
-                    (internal/parse-markdown markdown)
-                    {::internal/nodes
-                     (if (map? tree) [tree] (vec tree))})]
-          (if (::internal/error doc)
-            (internal/fail (::internal/error doc))
-            (or
-              (when tree
-                (internal/check-doc-keys "reconcile!"
-                                         (::internal/nodes doc)))
-              (let [db-value @db/*conn*
-                    now      (js/Date.)
-                    preview  (internal/compile-reconcile
-                               db-value "reconcile!" agent
-                               (::internal/nodes doc) {} now)
+        (let [nodes (if (map? tree) [tree] (vec tree))]
+          (or
+            (internal/check-doc-keys "reconcile!" nodes)
+            (let [db-value @db/*conn*
+                  now      (js/Date.)
+                  preview  (internal/compile-reconcile
+                             db-value "reconcile!" agent
+                             nodes {} now)
                     tx       (::internal/transaction-data preview)
                     labels   (::internal/labels preview)
                     root-id  (::internal/root-id preview)
@@ -618,7 +602,7 @@
                                  (let [compiled
                                        (internal/compile-reconcile
                                          db-value "reconcile!" agent
-                                         (::internal/nodes doc) ids now)]
+                                         nodes ids now)]
                                    (when-let [compile-error
                                               (::internal/error compiled)]
                                      (throw
@@ -635,7 +619,7 @@
                             (if (seq allocation-keys)
                               (internal/compile-reconcile
                                 db-value "reconcile!" agent
-                                (::internal/nodes doc)
+                                nodes
                                 (::db.id/ids env) now)
                               preview)]
                         (cond-> {::ok? true
@@ -647,7 +631,7 @@
                       (internal/fail
                         (str "reconcile!: store failed — "
                              (get-in env [:seon.db/error
-                                          :seon.error/message]))))))))))))))
+                                          :seon.error/message])))))))))))))
 
 (defn next
   "Get the next plan steps to work on.
