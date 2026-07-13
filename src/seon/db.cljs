@@ -361,17 +361,7 @@
 ;; the scope (`'fn?` — the pure-data predicate form, like `::handler`).
 (schema/register! ::thunk      'fn?)
 (schema/register! ::tx-context :map)
-(schema/register! ::read-operation
-  [:enum
-   :seon.db.read.operation/query
-   :seon.db.read.operation/installed-schema
-   :seon.db.read.operation/pull
-   :seon.db.read.operation/entity
-   :seon.db.read.operation/entity-lazy
-   :seon.db.read.operation/history
-   :seon.db.read.operation/as-of
-   :seon.db.read.operation/since
-   :seon.db.read.operation/basis-t])
+(schema/register! ::read-operation :qualified-keyword)
 (schema/register! ::read-source
   [:enum :seon.db.read.source/captured :seon.db.read.source/foreign])
 (schema/register! ::read-request :map)
@@ -394,6 +384,11 @@
   [:map
    [::result ::result]
    [::read-observations ::read-observations]])
+(schema/register! ::read-observation-changed-request
+  [:map
+   [::db ::db-val]
+   [::read-observation ::read-observation]])
+(schema/register! ::read-observation-changed? :boolean)
 
 (defn with-agent
   "Establish an agent-id scope for the dynamic extent of `f`.
@@ -698,11 +693,16 @@
 
 (declare assert-known-query-attrs!)
 
+(defn- raw-query
+  "Run one guarded query without crossing the read-observation boundary."
+  [db q inputs]
+  (assert-known-query-attrs! db q)
+  (apply d/q q db inputs))
+
 (defn- execute-query
   "Run one normalized query and record it only when a capture scope is active."
   [db q inputs]
-  (assert-known-query-attrs! db q)
-  (let [result (apply d/q q db inputs)]
+  (let [result (raw-query db q inputs)]
     (when-let [captures (internal/current-read-captures)]
       (internal/record-read!
         captures :seon.db.read.operation/query db
@@ -1297,6 +1297,13 @@
    domain. `(as-of … origin-t)` is the empty database before the first user tx."}
   origin-t dconst/tx0)
 
+(defn- basis-t*
+  "Read a db coordinate without crossing the read-observation boundary."
+  [db]
+  (if (instance? AsOfDB db)
+    (dbi/-time-point db)
+    (dbi/-max-tx db)))
+
 (defn basis-t
   "The selected tx coordinate of a db value.
 
@@ -1309,13 +1316,77 @@
                   [:=> [:catn [::db ::db-val]] ::time-point]]}
   ([] (basis-t @(internal/resolve-conn *conn*)))
   ([db]
-   (let [result (if (instance? AsOfDB db)
-                  (dbi/-time-point db)
-                  (dbi/-max-tx db))]
+   (let [result (basis-t* db)]
      (when-let [captures (internal/current-read-captures)]
        (internal/record-read!
          captures :seon.db.read.operation/basis-t db {} result true))
      result)))
+
+(def ^:private replayable-read-operations
+  #{:seon.db.read.operation/query
+    :seon.db.read.operation/installed-schema
+    :seon.db.read.operation/pull
+    :seon.db.read.operation/entity
+    :seon.db.read.operation/basis-t})
+
+(defn- replay-read-result
+  "Replay one known semantic read without recording another observation."
+  [db operation request]
+  (case operation
+    :seon.db.read.operation/query
+    (raw-query db (::query request) (or (::args request) []))
+
+    :seon.db.read.operation/installed-schema
+    (installed-schema* db)
+
+    :seon.db.read.operation/pull
+    (guarded-pull db (::pull-pattern request) (::ref request))
+
+    :seon.db.read.operation/entity
+    (touch->map (raw-entity db (::ref request)))
+
+    :seon.db.read.operation/basis-t
+    (basis-t* db)))
+
+(defn read-observation-changed?
+  "True when a captured database read can no longer produce its result.
+
+   Replays the same normalized semantic read against the supplied current db
+   value. Query, guarded pull, touched entity, installed-schema, and basis-t
+   observations use their private raw helpers, so calling this function inside
+   [[capture-reads]] never creates observations of its own.
+
+   Returns true conservatively when the observation is foreign,
+   non-replayable, temporal, lazy, unknown, malformed, or produces a runtime
+   value the observer cannot normalize. No database or Entity handle is stored
+   or reconstructed from the observation. This is an invalidation predicate,
+   not a result cache."
+  {:malli/schema [:=> [:cat ::read-observation-changed-request]
+                  ::read-observation-changed?]}
+  [{::keys [db read-observation]}]
+  (let [{::keys [read-operation read-source read-request read-result
+                 read-replayable?]} read-observation]
+    (if-not (and read-replayable?
+                 (= :seon.db.read.source/captured read-source)
+                 (contains? replayable-read-operations read-operation))
+      true
+      (let [[stored-result stored-result-safe?]
+            (internal/normalize-read-value db read-result)]
+        (if-not (and stored-result-safe? (= stored-result read-result))
+          true
+          (let [[request request-safe?]
+                (internal/denormalize-read-value read-request)]
+            (if-not request-safe?
+              true
+              (try
+                (let [current-result
+                      (replay-read-result db read-operation request)
+                      [normalized-current current-safe?]
+                      (internal/normalize-read-value db current-result)]
+                  (or (not current-safe?)
+                      (not= read-result normalized-current)))
+                (catch :default _
+                  true)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Listeners

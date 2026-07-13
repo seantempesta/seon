@@ -922,7 +922,7 @@
 ;; Runtime read capture — normalized request/result facts, never db handles.
 ;; ---------------------------------------------------------------------------
 
-(defn- normalize-read-value
+(defn normalize-read-value
   "Normalize a captured request/result value relative to `captured-db`.
 
    Returns `[immutable-value replayable?]`. Database handles become source
@@ -944,7 +944,12 @@
               [(if (identical? captured-db x)
                  :seon.db.read.value/captured-db
                  :seon.db.read.value/foreign-db)
-               (identical? captured-db x)]
+               ;; A DB sentinel documents what was observed but cannot be
+               ;; reconstructed from immutable request data. This is false
+               ;; even for the captured db when it appears as an explicit
+               ;; multi-source query input; replay receives the current db
+               ;; separately and must never invent an opaque handle argument.
+               false]
 
               (dentity/entity? x)
               ;; A touched entity can still contain lazy non-component ref
@@ -1002,6 +1007,93 @@
               :else
               [:seon.db.read.value/opaque false]))]
     (normalize value)))
+
+(defn denormalize-read-value
+  "Restore observer-owned immutable request tags to Datahike input values.
+
+   Returns `[value safe?]`. Only the exact instant, UUID, bigint, and bytes
+   tags emitted by `normalize-read-value` are restored. Database/opaque
+   sentinels, functions, host objects, malformed tags, and collection shapes
+   outside the observer's normalized data vocabulary return `safe? false` so
+   replay can conservatively invalidate without passing them to Datahike."
+  [value]
+  (letfn [(restore-coll [empty-value values add]
+            (reduce (fn [[acc safe?] item]
+                      (let [[item' item-safe?] (restore item)]
+                        [(add acc item') (and safe? item-safe?)]))
+                    [empty-value true]
+                    values))
+          (owned-tag [x]
+            (when (and (vector? x) (= 2 (count x)))
+              (let [[tag payload] x]
+                (case tag
+                  :seon.db.read.value/instant
+                  (when (number? payload)
+                    [(js/Date. payload) true])
+
+                  :seon.db.read.value/uuid
+                  (when (string? payload)
+                    (try
+                      [(uuid payload) true]
+                      (catch :default _ nil)))
+
+                  :seon.db.read.value/bigint
+                  (when (string? payload)
+                    (try
+                      [(js/BigInt payload) true]
+                      (catch :default _ nil)))
+
+                  :seon.db.read.value/bytes
+                  (when (and (vector? payload)
+                             (every? #(and (int? %) (<= 0 % 255)) payload))
+                    [(js/Uint8Array. (clj->js payload)) true])
+
+                  nil))))
+          (restore [x]
+            (if-let [tagged (owned-tag x)]
+              tagged
+              (cond
+                (#{:seon.db.read.value/captured-db
+                   :seon.db.read.value/foreign-db
+                   :seon.db.read.value/opaque} x)
+                [nil false]
+
+                (map? x)
+                (reduce-kv
+                  (fn [[m safe?] k v]
+                    (let [[k' key-safe?] (restore k)
+                          [v' value-safe?] (restore v)]
+                      [(assoc m k' v')
+                       (and safe? key-safe? value-safe?)]))
+                  [{} true]
+                  x)
+
+                (vector? x)
+                ;; A vector beginning with an observer-owned tag but carrying
+                ;; a malformed payload must not fall through as ordinary query
+                ;; data. It could otherwise invoke Datahike with a value the
+                ;; capture mechanism never emitted.
+                (if (#{:seon.db.read.value/instant
+                       :seon.db.read.value/uuid
+                       :seon.db.read.value/bigint
+                       :seon.db.read.value/bytes} (first x))
+                  [nil false]
+                  (restore-coll [] x conj))
+
+                (set? x)
+                (restore-coll #{} x conj)
+
+                (seq? x)
+                (let [[items safe?] (restore-coll [] x conj)]
+                  [(apply list items) safe?])
+
+                (or (nil? x) (string? x) (number? x) (boolean? x)
+                    (keyword? x) (symbol? x))
+                [x true]
+
+                :else
+                [nil false])))]
+    (restore value)))
 
 (defn record-read!
   "Append one normalized read fact to every active capture bucket.

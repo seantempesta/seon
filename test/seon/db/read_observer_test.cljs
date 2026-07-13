@@ -69,6 +69,22 @@
   (filterv #(= operation (:seon.db/read-operation %))
            (:seon.db/read-observations capture)))
 
+(defn- capture-event
+  "Capture one expected semantic read and return its observation."
+  [db-value operation thunk]
+  (let [capture (db/capture-reads
+                  {:seon.db/db db-value
+                   :seon.db/thunk thunk})
+        events (observations-for capture operation)]
+    (is (= 1 (count events))
+        (str "expected one " operation " observation"))
+    (first events)))
+
+(defn- changed? [db-value observation]
+  (db/read-observation-changed?
+    {:seon.db/db db-value
+     :seon.db/read-observation observation}))
+
 (defn- runtime-handle?
   "True when normalized output retained a DB handle or lazy Entity."
   [value]
@@ -216,4 +232,168 @@
                 (is (some? error))
                 (is (= :seon.db/asynchronous-read-capture
                        (:seon.db/error (ex-data error))))))))
+        (settle! done))))
+
+(deftest semantic-read-replay-invalidates-only-changed-results
+  (async done
+    (-> (fresh-seeded)
+        (.then
+          (fn [{conn :conn db-value :db}]
+            (let [query-event
+                  (capture-event
+                    db-value :seon.db.read.operation/query
+                    #(helper-query db-value "child"))
+                  pull-event
+                  (capture-event
+                    db-value :seon.db.read.operation/pull
+                    #(db/pull db-value
+                              [::id ::value ::at ::token]
+                              [::id "child"]))
+                  entity-event
+                  (capture-event
+                    db-value :seon.db.read.operation/entity
+                    #(db/entity db-value [::id "child"]))
+                  schema-event
+                  (capture-event
+                    db-value :seon.db.read.operation/installed-schema
+                    #(db/installed-schema db-value))
+                  basis-event
+                  (capture-event
+                    db-value :seon.db.read.operation/basis-t
+                    #(db/basis-t db-value))
+                  observations
+                  [query-event pull-event entity-event schema-event basis-event]
+                  replay-capture
+                  (db/capture-reads
+                    {:seon.db/db db-value
+                     :seon.db/thunk
+                     #(mapv (partial changed? db-value) observations)})]
+              (is (every? true? (map :seon.db/read-replayable? observations))
+                  "all five semantic reads are replayable")
+              (is (= [false false false false false]
+                     (:seon.db/result replay-capture))
+                  "unchanged reads preserve their normalized results")
+              (is (empty? (:seon.db/read-observations replay-capture))
+                  "raw replay helpers do not recursively record reads")
+
+              (-> (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data [{::id "child" ::value 7}]})
+                  (.then
+                    (fn [{ok? :seon.db/ok? error :seon.db/error}]
+                      (is ok? (str "equal assertion succeeds: " (pr-str error)))
+                      (let [same-db @conn]
+                        (is (every? false?
+                                    (map (partial changed? same-db)
+                                         [query-event pull-event entity-event
+                                          schema-event]))
+                            "an equal assertion preserves every equal result"))))
+                  (.then
+                    (fn [_]
+                      (db/transact!
+                        {:seon.db/conn conn
+                         :seon.db/tx-data [{::id "parent" ::value 99}]})))
+                  (.then
+                    (fn [{ok? :seon.db/ok? error :seon.db/error}]
+                      (is ok? (str "unrelated transaction succeeds: "
+                                   (pr-str error)))
+                      (let [unrelated-db @conn]
+                        (is (false? (changed? unrelated-db query-event)))
+                        (is (false? (changed? unrelated-db pull-event)))
+                        (is (false? (changed? unrelated-db entity-event)))
+                        (is (false? (changed? unrelated-db schema-event)))
+                        (is (true? (changed? unrelated-db basis-event))
+                            "basis reads intentionally depend on every tx"))))
+                  (.then
+                    (fn [_]
+                      (db/transact!
+                        {:seon.db/conn conn
+                         :seon.db/tx-data [{::id "child" ::value 8}]})))
+                  (.then
+                    (fn [{ok? :seon.db/ok? error :seon.db/error}]
+                      (is ok? (str "relevant transaction succeeds: "
+                                   (pr-str error)))
+                      (let [changed-db @conn]
+                        (is (true? (changed? changed-db query-event)))
+                        (is (true? (changed? changed-db pull-event)))
+                        (is (true? (changed? changed-db entity-event)))
+                        (is (false? (changed? changed-db schema-event)))
+                        (is (true? (changed? changed-db basis-event))))))))))
+        (settle! done))))
+
+(deftest tagged-request-values-round-trip-through-replay
+  (async done
+    (-> (fresh-seeded)
+        (.then
+          (fn [{db-value :db at :at token :token}]
+            (let [bigint (js/BigInt "9007199254740993")
+                  byte-value (js/Uint8Array. #js [1 2 255])
+                  query-form
+                  '[:find ?at ?token ?bigint ?bytes
+                    :in $ ?at ?token ?bigint ?bytes
+                    :where [(= 1 1)]]
+                  event
+                  (capture-event
+                    db-value :seon.db.read.operation/query
+                    #(db/query query-form db-value at token bigint byte-value))
+                  args (:seon.db/args (:seon.db/read-request event))
+                  replay
+                  (db/capture-reads
+                    {:seon.db/db db-value
+                     :seon.db/thunk #(changed? db-value event)})]
+              (is (= [[:seon.db.read.value/instant 1720000000123]
+                      [:seon.db.read.value/uuid
+                       "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"]
+                      [:seon.db.read.value/bigint "9007199254740993"]
+                      [:seon.db.read.value/bytes [1 2 255]]]
+                     args)
+                  "all observer-owned request tags are immutable data")
+              (is (false? (:seon.db/result replay))
+                  "denormalized request tags reproduce the captured result")
+              (is (empty? (:seon.db/read-observations replay))
+                  "tag replay does not emit another observation"))))
+        (settle! done))))
+
+(deftest unsafe-or-unknown-observations-conservatively-change
+  (async done
+    (-> (fresh-seeded)
+        (.then
+          (fn [{db-value :db}]
+            (let [query-event
+                  (capture-event
+                    db-value :seon.db.read.operation/query
+                    #(helper-query db-value "child"))
+                  t (db/basis-t db-value)
+                  non-replayable-events
+                  [(assoc query-event
+                          :seon.db/read-source :seon.db.read.source/foreign
+                          :seon.db/read-replayable? false)
+                   (capture-event
+                     db-value :seon.db.read.operation/entity-lazy
+                     #(db/entity-lazy db-value [::id "child"]))
+                   (capture-event
+                     db-value :seon.db.read.operation/history
+                     #(db/history db-value))
+                   (capture-event
+                     db-value :seon.db.read.operation/as-of
+                     #(db/as-of db-value t))
+                   (capture-event
+                     db-value :seon.db.read.operation/since
+                     #(db/since db-value t))
+                   (assoc query-event
+                          :seon.db/read-operation
+                          :seon.db.read.operation/future-unknown)
+                   (assoc-in query-event
+                             [:seon.db/read-request :seon.db/args]
+                             [[:seon.db.read.value/instant "not-ms"]])]
+                  replay
+                  (db/capture-reads
+                    {:seon.db/db db-value
+                     :seon.db/thunk
+                     #(mapv (partial changed? db-value)
+                            non-replayable-events)})]
+              (is (every? true? (:seon.db/result replay))
+                  "foreign, lazy, temporal, unknown, and malformed reads miss")
+              (is (empty? (:seon.db/read-observations replay))
+                  "conservative misses do not invoke public read paths"))))
         (settle! done))))
