@@ -22,7 +22,7 @@ Routing: `seon.web.serve` hosts the HTTP front door and supplies handlers to `se
 
 ## SSE morphing
 
-- `seon.web.datastar/install!` owns the gzip feed listener for `/`, `/agents`, and `/agent/<id>`. A 50 ms trailing window coalesces transaction bursts. Equivalent tabs share one derived render; each gzip stream has latest-wins backpressure.
+- `seon.web.datastar/install!` owns the one stable-keyed Datahike listener for `/`, `/agents`, and `/agent/<id>`. One lifecycle-owned coalescer retains the complete effective change window, settles ordinary work at 16 ms and structural work at 300 ms, and caps continuous bursts at 500 ms. Equivalent tabs share one derived render; each gzip stream has latest-wins backpressure.
 - Agent feeds keep renderer read-sets. Ordinary transactions send only complete, ID-addressed surfaces whose read attributes changed; structural context/program changes send the full `#app-view`.
 - Per-agent debug uses the same `seon.web.datastar` gzip registry, listener, unit activation door, reconnect fencing, and backpressure as ordinary pages. The final feed close removes the listener; no open feed means no transaction callback work.
 - The debug left pane comes from one AI-only `seon.agent.debug/ctx-preview`: the same system-message and context producers used by the LLM call, rendered from one unfiltered database snapshot. One lazy unit exposes the exact assembled prompt; the other sections break down the retained source-block bodies without rerendering them.

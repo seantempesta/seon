@@ -718,6 +718,7 @@
            ::datastar/dependencies initial-dependencies
            ::datastar/view-id view-id})]
     (with-redefs [datastar/!feeds (atom @#'datastar/empty-feed-registry)
+                  datastar/install! (fn [] nil)
                   datastar/uninstall! (fn [] nil)
                   datastar/push-full! (fn [_] nil)
                   datastar/push-event!
@@ -789,6 +790,164 @@
                (registry-view @datastar/!feeds "rebound-view")))
           "the replacement view remains bound to its new subscription"))))
 
+(deftest coalesced-change-preserves-the-complete-effective-window
+  (let [structural-datom {:seon.db/e 1
+                          :seon.db/a :example/structure
+                          :seon.db/v :first
+                          :seon.db/tx 10
+                          :seon.db/added? true}
+        first-value-datom {:seon.db/e 1
+                           :seon.db/a :example/value
+                           :seon.db/v 1
+                           :seon.db/tx 10
+                           :seon.db/added? true}
+        latest-value-datom {:seon.db/e 1
+                            :seon.db/a :example/value
+                            :seon.db/v 2
+                            :seon.db/tx 11
+                            :seon.db/added? true}
+        first-change {:seon.db/db-before :example.db/zero
+                      :seon.db/db :example.db/one
+                      :seon.db/datoms [structural-datom first-value-datom]
+                      :seon.db/attr-index
+                      {:example/structure [structural-datom]
+                       :example/value [first-value-datom]}
+                      :seon.db/changed-attrs #{:example/explicit-first}}
+        latest-change {:seon.db/db-before :example.db/one
+                       :seon.db/db :example.db/two
+                       :seon.db/datoms [latest-value-datom]
+                       :seon.db/attr-index
+                       {:example/value [latest-value-datom]}
+                       :seon.db/changed-attrs #{:example/explicit-latest}}]
+    (with-redefs [agent-view/structural-change?
+                  #(contains? % :example/structure)]
+      (let [merged (@#'datastar/merge-change
+                     (@#'datastar/merge-change nil first-change)
+                     latest-change)]
+        (is (= :example.db/zero (:seon.db/db-before merged))
+            "the first available pre-commit value bounds the change window")
+        (is (= :example.db/two (:seon.db/db merged))
+            "the newest post-commit value is the render input")
+        (is (= [structural-datom first-value-datom latest-value-datom]
+               (:seon.db/datoms merged))
+            "effective datoms remain ordered across the complete window")
+        (is (= [first-value-datom latest-value-datom]
+               (get-in merged [:seon.db/attr-index :example/value]))
+            "per-attribute evidence composes rather than overwrites")
+        (is (= #{:example/structure :example/value
+                 :example/explicit-first :example/explicit-latest}
+               (:seon.db/changed-attrs merged))
+            "explicit and datom-derived changed attributes are unioned")
+        (is (true? (:seon.web.broadcast/structural? merged))
+            "a later ordinary commit cannot downgrade structural work")))))
+
+(deftest continuous-structural-commits-cannot-move-the-maximum-deadline
+  (let [clock (atom 0)
+        next-handle (atom 0)
+        scheduled (atom [])
+        cleared (atom [])
+        broadcasts (atom [])
+        change (fn [n attr]
+                 {:seon.db/db-before (keyword "example.db" (str "before-" n))
+                  :seon.db/db (keyword "example.db" (str "after-" n))
+                  :seon.db/attr-index {attr []}})]
+    (with-redefs [datastar/!coalescer
+                  (atom @#'datastar/empty-coalescer)
+                  datastar/monotonic-ms (fn [] @clock)
+                  datastar/set-broadcast-timeout!
+                  (fn [callback delay-ms]
+                    (let [handle (swap! next-handle inc)]
+                      (swap! scheduled conj [handle delay-ms callback])
+                      handle))
+                  datastar/clear-broadcast-timeout!
+                  #(swap! cleared conj %)
+                  datastar/broadcast! #(swap! broadcasts conj %)
+                  agent-view/structural-change? (constantly true)]
+      (@#'datastar/schedule-broadcast! (change 1 :example/first))
+      (is (= 300 (second (first @scheduled)))
+          "the first structural commit gets the normal trailing delay")
+      (is (= 0 (::datastar/enqueued-at @datastar/!coalescer))
+          "the first enqueue fixes the origin of one maximum deadline")
+      (is (= 300 (::datastar/due-at @datastar/!coalescer))
+          "the initial timer remains a trailing debounce inside that bound")
+
+      (reset! clock 250)
+      (@#'datastar/schedule-broadcast! (change 2 :example/second))
+      (is (= [300 250] (mapv second @scheduled))
+          "the trailing timer may move later, but only to the fixed deadline")
+      (is (= 500 (::datastar/due-at @datastar/!coalescer))
+          "the rescheduled timer reaches, but never exceeds, the maximum")
+      (is (= [1] @cleared) "the replaced timer is cancelled exactly once")
+
+      (reset! clock 490)
+      (@#'datastar/schedule-broadcast! (change 3 :example/third))
+      (is (= 2 (count @scheduled))
+          "continuous work at the cap keeps, rather than recreates, its timer")
+      (is (= [1] @cleared)
+          "the maximum-deadline timer cannot be cleared into starvation")
+
+      ((nth (first @scheduled) 2))
+      (is (empty? @broadcasts) "a queued stale timer cannot drain new work")
+      (is (= 2 (::datastar/timer @datastar/!coalescer))
+          "stale callbacks leave current timer ownership intact")
+
+      ((nth (second @scheduled) 2))
+      (is (= 1 (count @broadcasts))
+          "the current deadline drains the whole burst exactly once")
+      (is (= #{:example/first :example/second :example/third}
+             (:seon.db/changed-attrs (first @broadcasts)))
+          "the drained render sees evidence from every coalesced commit")
+      (is (= :example.db/before-1
+             (:seon.db/db-before (first @broadcasts)))
+          "the drained window keeps the earliest pre-commit value")
+      (is (= :example.db/after-3 (:seon.db/db (first @broadcasts)))
+          "the drained window renders the latest post-commit value")
+      (is (= @#'datastar/empty-coalescer @datastar/!coalescer)
+          "draining atomically returns the lifecycle state to idle"))))
+
+(deftest listener-lifecycle-uses-the-datahike-key-and-cleans-owned-time
+  (let [listen-requests (atom [])
+        unlisten-requests (atom [])
+        cleared (atom [])
+        pending-state {::datastar/pending-change
+                       {:seon.db/db :example.db/pending}
+                       ::datastar/timer :example.timer/pending
+                       ::datastar/timer-token #uuid "00000000-0000-0000-0000-000000000099"
+                       ::datastar/enqueued-at 0
+                       ::datastar/due-at 500}]
+    (with-redefs [datastar/!feeds
+                  (atom @#'datastar/empty-feed-registry)
+                  datastar/!coalescer (atom pending-state)
+                  db/listen! #(do (swap! listen-requests conj %) {:seon.db/key ::datastar/views})
+                  db/unlisten! #(do (swap! unlisten-requests conj %) {:seon.db/ok? true})
+                  datastar/clear-broadcast-timeout! #(swap! cleared conj %)]
+      (datastar/install!)
+      (datastar/install!)
+      (is (= [::datastar/views ::datastar/views]
+             (mapv :seon.db/key @listen-requests))
+          "reinstallation delegates idempotence to one stable Datahike key")
+
+      (datastar/before-reload)
+      (is (= [{:seon.db/key ::datastar/views}] @unlisten-requests)
+          "reload removes that same connection-owned listener")
+      (is (= [:example.timer/pending] @cleared)
+          "uninstall cancels the timer owned by the pending state")
+      (is (= @#'datastar/empty-coalescer @datastar/!coalescer)
+          "uninstall cannot leave pending evidence without a timer")
+
+      (datastar/after-reload)
+      (is (= 2 (count @listen-requests))
+          "an empty feed registry does no work after reload")
+
+      (reset! datastar/!feeds
+              (feed-registry [(test-feed "surviving-view" {})]))
+      (datastar/after-reload)
+      (is (= 3 (count @listen-requests))
+          "a surviving feed restores the stable listener after reload")
+      (is (= ::datastar/views
+             (:seon.db/key (last @listen-requests)))
+          "hot reload does not create a second listener identity"))))
+
 (deftest backpressured-feed-retains-only-latest-event
   (let [writes (atom [])
         on-drain (atom nil)
@@ -838,6 +997,7 @@
               (fn [_subscription _change] {::datastar/elements []})
               ::datastar/view-id view-id}]
     (with-redefs [datastar/!feeds (atom @#'datastar/empty-feed-registry)
+                  datastar/install! (fn [] nil)
                   datastar/uninstall! (fn [] (swap! uninstalls inc))
                   datastar/push-full! (fn [_] nil)]
       (@#'datastar/open-feed!

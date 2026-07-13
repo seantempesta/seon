@@ -55,9 +55,12 @@ assertions, 15 replica tests with 87 assertions, and 5 route tests with 74
 assertions. Writer database initialization, transaction transformation, KNN,
 and publication now enter through one immutable boot-composed runtime; the
 load-order callback registries are deleted, and initialization failure can no
-longer publish a half-initialized connection. The atomic database-protocol
-vocabulary cut, typed administration, live transition proof, and a published
-artifact manifest remain outstanding.
+longer publish a half-initialized connection. The live web channel now also has
+one lifecycle-owned, lossless bounded coalescer: Datahike's stable listener key
+is the installation authority, a coalesced window retains its complete database
+evidence, and continuous structural commits cannot postpone a render past 500
+ms. The atomic database-protocol vocabulary cut, typed administration, live
+transition proof, and a published artifact manifest remain outstanding.
 
 The source-grounded system audits are complete and committed:
 

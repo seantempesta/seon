@@ -1,6 +1,6 @@
 ---
 name: datastar-web-ui
-description: "The ACTIVE pod web UI — Datastar SSE over a gzip whole-element morph, hiccup in .cljs, reitit routes from :seon.route/* datoms, the seon.render/block + slot renderer, and the Phosphor Terminal theme. Use when editing seon.web.serve / seon.web.datastar / seon.web.router / seon.web.debug, the seon.ui.* layout/tiles (agent view, header, markdown, clojure), or seon.render. Use when working with data-init / data-bind / data-on:submit / data-effect / data-signals / data-text signal attributes, the /agents + /agent/{id} pages and their /feed SSE streams, tiles/slots, time-travel as-of feeds, or styling (warm blacks / cream / amber / monospace / dot+text status). Use when a live UI doesn't update on a tx, an SSE stream won't verify in the browser, or a human input bar loses focus on morph."
+description: "The ACTIVE pod web UI — Datastar SSE over gzip element morphs, hiccup in .cljs, reitit routes from :seon.route/* datoms, the seon.render/block + slot renderer, and the Phosphor Terminal theme. Use when editing seon.web.serve / seon.web.datastar / seon.web.router / seon.web.debug, the seon.ui.* agent view/header/markdown/clojure layout, or seon.render. Use when working with data-init / data-bind / data-on:submit / data-effect / data-signals / data-text signal attributes, the /agents + /agent/{id} pages and their /feed SSE streams, surfaces/slots, time-travel as-of feeds, or styling (warm blacks / cream / amber / monospace / dot+text status). Use when a live UI doesn't update on a tx, an SSE stream won't verify in the browser, or a human input bar loses focus on morph."
 ---
 
 # Datastar Web UI — the active pod surface
@@ -20,31 +20,35 @@ datahike commit re-renders a whole element and morphs it in place.
 > async) → **`clojurescript`**; data-oriented mindset → **`data-oriented-clojure`**;
 > verifying a page in a real browser → **`browser-automation`**.
 
-## The whole model: `view = f(db)`, gzip-morphed on every tx
+## The one live model: `view = f(db)`, gzip-morphed from database changes
 
 `seon.web.datastar` ports the hyperlith pattern into the pod. There is no
-per-fragment update, no `refresh-all!`, no signal-diffing handler-per-action:
+action-specific refresh path, no `refresh-all!`, and no second signal-diffing
+channel:
 
-1. ONE render fn produces the **whole** `#app-view` element (`agents-view` for
-   `/agents`, or `seon.ui.agent-view/agent-view` for `/agent/{id}`).
+1. One pure route view compiles into stable, ID-addressed render units. Its
+   initial paint is the complete `#app-view`; a structural change also falls
+   back to that complete element.
 2. Each page is **two routes**: a tiny **shim page** (GET) and a **separate
    long-lived `/feed` GET** that is a gzip-compressed SSE stream. The shim's
    `<main id="app-view">` opens the feed via `data-init="@get('/agents/feed')"`.
-3. The feed registers in `!feeds` with its OWN bound `view-fn` thunk. A
-   `db/listen!` tx-listener (`on-tx`) fires `schedule-broadcast!` — a 50 ms
-   trailing coalesce so an agent turn's many datoms become ONE morph — which
-   re-renders each connection's `view-fn` and writes a `datastar-patch-elements`
-   event, then `gz.flush(Z_SYNC_FLUSH)` so bytes hit the wire immediately.
-4. Datastar's client-side `idiomorph` diffs the pushed whole element against the
-   live DOM and patches only what changed. Default patch mode is `outer` (morph
-   the element whose `id` matches), so a whole-element morph needs no
-   selector/mode dataline — just `data: elements <line>` per HTML line, blank
-   line terminates.
+3. `!feeds` normalizes equivalent views into one subscription. One stable
+   Datahike listener key receives transaction reports and a single coalescer
+   retains the earliest `db-before`, latest `db`, effective datoms, and changed
+   attributes. Ordinary work settles near a frame (16 ms), structural work at
+   300 ms, with a hard 500 ms bound under continuous commits.
+4. Recorded database reads select the dirty units. Each read runs once against
+   the immutable before/after values; equal results and equal serialized output
+   are suppressed. Complete dirty elements are combined into one
+   `datastar-patch-elements` event and sync-flushed through gzip.
+5. Datastar's client-side `idiomorph` morphs each complete pushed element into
+   the live DOM. Default patch mode is `outer`, so the stable element ID is the
+   unit boundary.
 
 The render fn is **pure of external state** and **NEVER throws** — a render
-error degrades to a visible `#app-view-error` tile inside the same element, because
+error degrades to a visible `#app-view-error` card inside the same element, because
 the morph engine must be crash-proof. Source: `src/seon/web/datastar.cljs`
-(`patch-elements`, `agents-view`, `push-conn!`, `broadcast!`, `open-feed!`).
+(`patch-elements`, `agents-view`, `push-full!`, `broadcast!`, `open-feed!`).
 
 ### Time-travel falls out for free
 
@@ -68,7 +72,7 @@ browser side and its limits.
 
 ## Human input bars live OUTSIDE the morphed element
 
-A whole-`#app-view` morph **replaces** everything inside `#app-view` on every tx — so
+A structural whole-`#app-view` morph can replace everything inside `#app-view`, so
 a `<form>`/`<input>` placed inside it loses focus/value mid-typing. Every human
 affordance (chat bar, new-agent bar, time-travel slider) is a **sibling of
 `<main id="app-view">` in `<body>`**, spliced via the shim's `extra-body`, so the
@@ -101,13 +105,13 @@ is morph-safe by construction.
 
 ## Hiccup, in `.cljs`
 
-Tiles are hiccup vectors built in `.cljs` and serialized by
+Surfaces are hiccup vectors built in `.cljs` and serialized by
 `seon.ui.html/->string` (`html.cljc`). The layout pieces:
 
 | ns | Role |
 |---|---|
 | `seon.ui.agent-view` | `agent-view = f(db, agent-id)` — primary canvas + selectable HTML context-block rail |
-| `seon.ui.header` | `system-header = f(db)` — the fixed fleet status bar (agents/throughput/store/health) |
+| `seon.ui.header` | `system-header = f(db)` — the fixed agent/database health bar |
 | `seon.ui.markdown` | `md->hiccup` — LLM markdown replies → styled hiccup, no client JS |
 | `seon.ui.clojure` | `clj->hiccup` — server-side Clojure syntax highlight (`.hljs-*` palette) |
 
@@ -120,19 +124,19 @@ Tiles are hiccup vectors built in `.cljs` and serialized by
   carries (the tagged-value contract — never a stored `:kind`):
   `{:seon.render/markdown "…"}` → `md->hiccup`; `{:seon.render/source "…"}` →
   `clj->hiccup`; a `:seon.render.value/tree` projection → the collapsible data
-  panel; a `:seon.error/message` value → an error tile; a literal hiccup vector
+  panel; a `:seon.error/message` value → an error card; a literal hiccup vector
   → passthrough; anything else → the data panel. GUARDED — a throwing render
   becomes an error card, siblings intact, never an exception.
 - **`(slot ctx :name)`** — place the agent's `:seon.agent/ctx` block named
-  `:name` into a tile hole, rendered through the guarded engine and wrapped as
-  `[:div#tile-<name> {:data-slot "<name>"} …]` — a stable DOM id so idiomorph
-  anchors it across morphs. Injected into every render ctx as
+  `:name` into a layout slot, rendered through the guarded engine and wrapped
+  in a stable ID-addressed element so idiomorph anchors it across morphs.
+  Injected into every render ctx as
   `:seon.render/slot`, so a layout calls `((:seon.render/slot in) :canvas)`.
 
 Renders are **functions resolved late** (`seon.eval/lookup-value` over a
 qualified symbol), never stored output — a redefine takes effect on the next
-render with no wiring. A tile that THROWS degrades to a calm "updating this
-tile" placeholder; the agent learns its tile is broken via a DERIVED context
+render with no wiring. A surface that throws degrades to a calm updating
+placeholder; the agent learns its surface is broken via a derived context
 section (no stored error flag — self-heals on the next clean render).
 
 ## Routes are `:seon.route/*` datoms (reitit)

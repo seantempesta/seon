@@ -553,35 +553,114 @@
                             (str "broadcast failed for " subscription-key) e)))))
 
 ;; ============================================================
-;; Coalescing — one trailing timer collapses a tx burst into one morph
-;; (an agent turn commits many datoms; the human sees ONE re-render).
+;; Coalescing — one lifecycle-owned state collapses a tx burst into one
+;; morph. The first enqueue fixes a maximum deadline; later commits may move
+;; the trailing edge toward that deadline, but never beyond it.
 ;; ============================================================
 
-(defonce ^:private !pending-change (atom nil))
-(defonce ^:private !broadcast-timer (atom nil))
+(def ^:private normal-settle-ms 16)
+(def ^:private structural-settle-ms 300)
+(def ^:private maximum-coalesce-ms 500)
+
+(def ^:private empty-coalescer {})
+
+(defonce ^{:private true
+           :doc "One pending Datastar broadcast and its owned timer."}
+  !coalescer (atom empty-coalescer))
+
+(defn- monotonic-ms [] (.now js/performance))
+
+(defn- set-broadcast-timeout! [callback delay-ms]
+  (js/setTimeout callback delay-ms))
+
+(defn- clear-broadcast-timeout! [timer]
+  (js/clearTimeout timer))
+
+(defn- change-attrs [change]
+  (into (or (:seon.db/changed-attrs change) #{})
+        (keys (:seon.db/attr-index change))))
+
+(defn- merge-attr-index [pending change]
+  (merge-with into
+              (or (:seon.db/attr-index pending) {})
+              (or (:seon.db/attr-index change) {})))
 
 (defn- merge-change [pending change]
-  {:seon.db/db (:seon.db/db change)
-   :seon.db/changed-attrs
-   (into (or (:seon.db/changed-attrs pending) #{})
-         (keys (:seon.db/attr-index change)))
-   :seon.web.broadcast/structural?
-   (or (:seon.web.broadcast/structural? pending)
-       (agent-view/structural-change?
-         (set (keys (:seon.db/attr-index change)))))})
+  (let [attrs (set/union (or (:seon.db/changed-attrs pending) #{})
+                         (change-attrs change))
+        attr-index (merge-attr-index pending change)
+        db-before (or (:seon.db/db-before pending)
+                      (:seon.db/db-before change))
+        latest-db (if (contains? change :seon.db/db)
+                    (:seon.db/db change)
+                    (:seon.db/db pending))
+        datoms (into (vec (or (:seon.db/datoms pending) []))
+                     (or (:seon.db/datoms change) []))]
+    (cond->
+      {:seon.db/db latest-db
+       :seon.db/changed-attrs attrs
+       :seon.db/attr-index attr-index
+       :seon.db/datoms datoms
+       :seon.web.broadcast/structural?
+       (or (:seon.web.broadcast/structural? pending)
+           (agent-view/structural-change? (change-attrs change)))}
+      (some? db-before) (assoc :seon.db/db-before db-before))))
+
+(defn- broadcast-due-at
+  [enqueued-at now structural?]
+  (min (+ enqueued-at maximum-coalesce-ms)
+       (+ now (if structural? structural-settle-ms normal-settle-ms))))
+
+(declare drain-coalescer!)
 
 (defn- schedule-broadcast! [change]
-  (let [pending (swap! !pending-change merge-change change)
-        delay-ms (if (:seon.web.broadcast/structural? pending) 300 16)]
-    (when-let [timer @!broadcast-timer] (js/clearTimeout timer))
-    (reset! !broadcast-timer
-            (js/setTimeout
-              (fn []
-                (let [ready @!pending-change]
-                  (reset! !pending-change nil)
-                  (reset! !broadcast-timer nil)
-                  (when ready (broadcast! ready))))
-              delay-ms))))
+  (let [now (monotonic-ms)
+        current @!coalescer
+        pending (merge-change (::pending-change current) change)
+        enqueued-at (or (::enqueued-at current) now)
+        due-at (broadcast-due-at
+                 enqueued-at now
+                 (:seon.web.broadcast/structural? pending))]
+    (if (and (::timer current) (= due-at (::due-at current)))
+      ;; Once the maximum deadline is reached, keep its already-owned timer.
+      ;; Clearing and recreating a zero-delay timer here would let continuous
+      ;; transaction callbacks starve the render indefinitely.
+      (reset! !coalescer
+              (assoc current
+                     ::pending-change pending
+                     ::enqueued-at enqueued-at))
+      (let [timer-token (random-uuid)
+            delay-ms (max 0 (- due-at now))
+            timer (set-broadcast-timeout!
+                    #(drain-coalescer! timer-token)
+                    delay-ms)]
+        ;; Publish pending data + timer ownership as one value. Node cannot run
+        ;; the new timeout until this stack returns; a queued old callback is
+        ;; fenced by timer-token and becomes inert after this reset.
+        (reset! !coalescer
+                {::pending-change pending
+                 ::timer timer
+                 ::timer-token timer-token
+                 ::enqueued-at enqueued-at
+                 ::due-at due-at})
+        (when-let [old-timer (::timer current)]
+          (clear-broadcast-timeout! old-timer))))))
+
+(defn- drain-coalescer! [timer-token]
+  (let [[before _]
+        (swap-vals! !coalescer
+                    (fn [state]
+                      (if (= timer-token (::timer-token state))
+                        empty-coalescer
+                        state)))
+        ready (when (= timer-token (::timer-token before))
+                (::pending-change before))]
+    (when ready (broadcast! ready))))
+
+(defn- clear-coalescer! []
+  (let [[before _] (reset-vals! !coalescer empty-coalescer)]
+    (when-let [timer (::timer before)]
+      (clear-broadcast-timeout! timer))))
 
 ;; ============================================================
 ;; Lifecycle — db/listen! IS the refresh signal.
@@ -589,22 +668,18 @@
 
 (defn- on-tx [change] (schedule-broadcast! change))
 
-(defonce ^:private !installed? (atom false))
-
 (defn install!
   "Install the view tx-listener. Idempotent — same key replaces."
   []
-  (db/listen! {:seon.db/key ::views :seon.db/handler on-tx})
-  (reset! !installed? true))
+  (db/listen! {:seon.db/key ::views :seon.db/handler on-tx}))
 
 (defn uninstall!
-  "Remove the view tx-listener."
+  "Remove the view tx-listener and cancel its pending broadcast."
   []
-  (db/unlisten! {:seon.db/key ::views})
-  (reset! !installed? false))
-
-(defn- ensure-installed! []
-  (when-not @!installed? (install!)))
+  (try
+    (db/unlisten! {:seon.db/key ::views})
+    (finally
+      (clear-coalescer!))))
 
 (defn ^:dev/before-load before-reload
   "Uninstall the view tx-listener before a hot reload."
@@ -852,6 +927,9 @@
 (defn- open-feed!
   "Open a long-lived gzip SSE stream from one derived-view descriptor."
   [^js req ^js res feed]
+  ;; Datahike owns listener membership. The stable key makes this idempotent
+  ;; and replaces a pre-reload callback with the current definition.
+  (install!)
   (.writeHead res 200 #js {"Content-Type"      "text/event-stream; charset=utf-8"
                            "Content-Encoding"  "gzip"
                            "Cache-Control"     "no-store"
@@ -1029,7 +1107,6 @@
                              [::feed-definition ::feed-definition]]
                   ::view-id]}
   [r feed]
-  (ensure-installed!)
   (open-feed! (:seon.http/node-req r) (:seon.http/node-res r) feed))
 
 ;; ============================================================
@@ -1137,7 +1214,6 @@
    the broadcast harmlessly re-pushes the same #app-view). With NO `t` it is the
    current auto-morphing feed, UNCHANGED. A bad/absent `t` falls back to live."
   [r]
-  (ensure-installed!)
   (let [^js req (:seon.http/node-req r)
         ^js res (:seon.http/node-res r)
         id      (get-in r [:path-params :id])
@@ -1210,7 +1286,6 @@
    live. A Ring handler: self-extracts node-req/node-res; lazily installs the
    tx-listener. Public — db->routes resolves its symbol."
   [r]
-  (ensure-installed!)
   (let [^js req (:seon.http/node-req r)
         ^js res (:seon.http/node-res r)
         view-id (requested-view-id req)]
