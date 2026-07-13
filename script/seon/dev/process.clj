@@ -259,9 +259,9 @@
 (defn- watcher-ready? [record]
   (let [log (:seon.dev.process/log record)
         text (tail-text log)
-        completed (last-index text "[client] Build completed.")
-        failed (last-index text "[client] Build failure:")
-        compiling (last-index text "[client] Compiling ...")]
+        completed (last-index text "[:client] Build completed.")
+        failed (last-index text "[:client] Build failure:")
+        compiling (last-index text "[:client] Compiling ...")]
     (and (not (neg? completed)) (> completed failed) (> completed compiling))))
 
 (defn- pod-ready? [config record]
@@ -287,7 +287,7 @@
   (let [log (:seon.dev.process/log record)
         text (tail-text log)]
     (or (some->> (str/split-lines text)
-                 (filter #(or (str/includes? % "Build failure:")
+                 (filter #(or (str/includes? % "[:client] Build failure:")
                               (str/includes? % "auto-boot FAILED")
                               (str/includes? % "SEON-CORE-FAULT ")))
                  last)
