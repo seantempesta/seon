@@ -235,7 +235,7 @@
       (str "~" token-est " tokens")]
      [:a {:href (str "/agent/" agent-id)
           :class "text-xs text-amber-500 hover:text-amber-300"} "← agent"]
-     [:a {:href "/agents"
+     [:a {:href "/"
           :class "text-xs text-amber-500 hover:text-amber-300"} "← all agents"]]))
 
 (defn- fmt-int
@@ -857,7 +857,7 @@
          "what this cluster stored after bootstrap")]
       [:div {:class "ml-auto flex items-baseline gap-4"}
        (data-toggle-link params)
-       [:a {:href "/agents"
+       [:a {:href "/"
             :class "text-xs font-mono text-amber-500 hover:text-amber-300"}
         "← all agents"]]]
      (if data-ns
@@ -928,7 +928,7 @@
             (str "agent " agent-id " is not in this cluster store")]
            [:div {:class "text-text-500 text-xs mb-4"}
             "it belonged to a previous store — this tab is stale"]
-           [:a {:href "/agents"
+           [:a {:href "/"
                 :class "text-amber-500 hover:text-amber-300 text-xs underline"}
             "← all live agents"]]]]))))
 

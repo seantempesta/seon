@@ -20,8 +20,9 @@
   "name → [pattern method] — the authoritative seeded core route set. `/`
    is the root agent and fleet view. The seed is `/` +
    the generic unit door + the per-agent page + its separate `…/feed` SSE
-   stream + the one POST door."
+   stream + the two POST action doors."
   {:seon.route/root        ["/" :get]
+   :seon.route/agents-create ["/agents" :post]
    :seon.route/view-unit   ["/view/unit" :get]
    :seon.route/agent       ["/agent/{id}" :get]
    :seon.route/agent-feed  ["/agent/{id}/feed" :get]
@@ -42,11 +43,13 @@
     (testing "the per-agent feeds stay on separate GET paths"
       (is (contains? by-nm :seon.route/agent-feed))
       (is (contains? by-nm :seon.route/agent-debug-feed)))
-    (testing "the one action door is the per-agent POST /call (no per-ns/per-fn routes)"
-      (is (= [:seon.route/agent-call]
-             (mapv :seon.route/name (filter #(= :post (:seon.route/method %)) rows))))
-      (is (= :seon.route/same-origin
-             (:seon.route/middleware (by-nm :seon.route/agent-call)))))))
+    (testing "both state-changing doors are database routes and same-origin gated"
+      (is (= #{:seon.route/agents-create :seon.route/agent-call}
+             (into #{} (map :seon.route/name)
+                   (filter #(= :post (:seon.route/method %)) rows))))
+      (doseq [route-name [:seon.route/agents-create :seon.route/agent-call]]
+        (is (= :seon.route/same-origin
+               (:seon.route/middleware (by-nm route-name))))))))
 
 (deftest handlers-are-qualified-symbol-data
   (doseq [{:keys [:seon.route/name :seon.route/handler]} (route/core-routes-tx)]
@@ -104,7 +107,8 @@
                                                           [?e :seon.route/name :seon.route/agent]
                                                           [?e :seon.route/handler ?h]]
                                                         :seon.db/conn conn}))]
-                           (is (= 7 (count names)) "seven entities after a double seed — no duplicates")
+                           (is (= (count expected) (count names))
+                               "double seed creates no duplicate route entities")
                            (is (= (set (keys expected)) (set names)))
                            (is (symbol? h) "handler reads back as a native symbol")
                            (is (= 'seon.web.datastar/serve-agent-page! h))))))))

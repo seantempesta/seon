@@ -125,7 +125,7 @@
                              "border-base-700 px-2 py-0.5 rounded text-xs font-mono")}
       "+ new agent"]
      [:a {:href "/" :class "text-text-400 hover:text-amber-300"} "home"]
-     [:a {:href "/agents" :class "text-text-400 hover:text-amber-300"} "agents"]
+     [:a {:href "/" :class "text-text-400 hover:text-amber-300"} "agents"]
      [:span {:class (if running? "text-amber-400" "text-text-600")
              :title (if running? "an agent is running" "fleet idle")}
       "●"]]))

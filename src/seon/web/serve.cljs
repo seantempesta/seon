@@ -291,6 +291,18 @@
           (write-status! res 500 "text/plain; charset=utf-8"
                          (str "create agent failed: " err))))))
 
+(schema/register! ::ring-request :any)
+
+(defn create-agent!
+  "Database-routed POST `/agents` handler.
+
+   Extracts the opaque Node request/response pair from the canonical Ring
+   adapter and delegates to the single agent-creation transition above."
+  {:malli/schema [:=> [:catn [::ring-request ::ring-request]] :any]}
+  [ring-request]
+  (handle-create-agent! (:seon.http/node-req ring-request)
+                        (:seon.http/node-res ring-request)))
+
 (defn- handle-complete-agent!
   "POST /agent/<id>/complete — external control: CLOSE the agent's open run
    `:completed` (derived state falls to `:idle`, the single wakeable parked
@@ -695,7 +707,7 @@
 ;; ============================================================
 ;; Reitit front door — `seon.web.router` owns the route vector + the
 ;; Node↔Ring adapter; serve keeps the handler fns (they touch serve-state:
-;; the SSE registry, the create-agent closure) and the same-origin? gate (a
+;; the SSE registry) and the same-origin? gate (a
 ;; test pins it). We INJECT both into router here. This call re-runs on
 ;; hot-reload, so the cached router always holds the freshly-reloaded
 ;; handler fns. createServer (below) dispatches every request through
@@ -713,7 +725,6 @@
    :seon.web.router/resume        handle-resume!
    :seon.web.router/clear         handle-clear!
    :seon.web.router/log           handle-log!
-   :seon.web.router/create-agent  handle-create-agent!
    :seon.web.router/complete      handle-complete-agent!
    :seon.web.router/agent-run     handle-agent-run!
    :seon.web.router/same-origin?  same-origin?})

@@ -823,8 +823,9 @@ agents idle and one exact notice visible to root.
     `/agents` GET/feed; keep `POST /agents` as the sole HTTP birth action, and
     canonicalize `/agent/root` to `/` before opening a feed.
     **Route cut complete:** the duplicate fleet renderer, shim, feed, route
-    datoms, and display-only tests are deleted; the shared header now calls
-    `POST /agents`, and `/agent/root` redirects to `/`. Remaining work in this
+    datoms, and display-only tests are deleted; agent birth is now a canonical
+    database route at `POST /agents` instead of a conflicting static
+    supplement entry, the shared header calls it, and `/agent/root` redirects to `/`. Remaining work in this
     step is the concise root role block, bounded lazy card detail, and session-
     aware navigation.
 12. Add one fully specified database-backed UI-session model owned by its web

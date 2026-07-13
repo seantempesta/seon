@@ -42,8 +42,8 @@
 
    ## Cycle-free wiring — serve injects, router routes
 
-   `seon.web.serve` keeps its handler fns (they touch serve-state: the SSE
-   registry, the create-agent closure) and the same-origin? gate (a test pins
+   `seon.web.serve` keeps its handler fns that touch serve-state and the
+   same-origin? gate (a test pins
    it). serve `:require`s router and calls [[install!]] with its handler set +
    the same-origin predicate; router requires only the leaf handlers
    (`datastar`/`debug`/`reactive.call`, none of which require serve).
@@ -273,7 +273,7 @@
   "The non-core reitit routes, built from the injected handler set `h`
    (serve's handlers) + the directly-required `call` leaf handler."
   [h]
-  (let [{::keys [static chat stop resume clear log create-agent
+  (let [{::keys [static chat stop resume clear log
                  complete agent-run]} h]
     [["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/js/{*path}"  {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
@@ -288,7 +288,6 @@
      ["/resume"      {:post {:middleware [:seon.route/same-origin] :handler (post-handler resume)}}]
      ["/clear"       {:post {:middleware [:seon.route/same-origin] :handler (post-handler clear)}}]
      ["/log"         {:post {:middleware [:seon.route/same-origin] :handler (post-handler log)}}]
-     ["/agents"      {:post {:middleware [:seon.route/same-origin] :handler (post-handler create-agent)}}]
      ;; The one-shot composition door: start-or-reuse an agent in THE pod's
      ;; own cluster, deliver the input via the real wake path, run its OWN
      ;; FSM to idle, return the truthful reply + turn/eval metadata as JSON.
@@ -399,7 +398,7 @@
    cached router from the current route datoms. serve calls this
    at load (re-runs on hot-reload, so the cached router tracks reloaded
    handlers + the latest route datoms). `config` keys:
-   `:seon.web.router/{sse static chat stop resume clear log create-agent
+   `:seon.web.router/{sse static chat stop resume clear log
    complete}` (the serve handler fns) + `:seon.web.router/same-origin?` (the
    predicate). The CORE routes are NOT in `config` — they project from the
    `:seon.route/*` datoms via [[db->routes]]."

@@ -293,11 +293,12 @@ the route datoms rebuilt on tx via a reloading thunk. This replaces hand-rolled
 `case`/`cond`/`re-matches` dispatch. (The `:seon.route/*` attributes are
 registered per [[data-model]].)
 
-- **Seeded core routes:** `/` + `/feed` (root agent’s view) and
+- **Seeded core routes:** `/` + `/feed` (root agent’s view), `POST /agents`, and
   `/agent/{id}` + `/agent/{id}/feed` — GET. Each view is TWO GET routes: the
   shim page and its long-lived SSE stream at a `…/feed` sibling path (the shim's
   `data-init="@get('…/feed')"` opens the stream). The one action door is
-  `/agent/{id}/call` (POST); `POST /agents` is the sole agent-birth HTTP door.
+  `/agent/{id}/call` (POST); `POST /agents` is the sole agent-birth HTTP door
+  and shares the same database route projection.
   Agents add `/agent/{id}/app/{x}` rows
   (capability-gated, handler in the agent's own `my.agent.<id>` ns).
 - **Nested routes ARE nested layouts** — reitit meta-merges route-data parent →
