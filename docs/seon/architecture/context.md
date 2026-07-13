@@ -300,8 +300,9 @@ contract:
 This rides the **one instrumentation layer** (every schema'd fn whose shape
 takes a wrapper is Malli-instrumented off the program graph—once after runtime
 boot/declaration loading, immediately for a newly evaluated/redefined fn, and
-only for changed or currently unwrapped fn objects after hot reload; agent birth
-never runs global instrumentation. The structural
+after hot reload only for unwrapped fn objects in the exact namespace resources
+Shadow loaded; unrelated program rows are not queried and agent birth never
+runs global instrumentation. The structural
 exception is `^:async` non-simple shapes like `transact!`/`eval`, which
 validate in their own body — and coverage is itself a derived invariant:
 the root view's `:instrumentation-gaps` section recomputes the census per

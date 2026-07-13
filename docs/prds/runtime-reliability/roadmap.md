@@ -378,8 +378,9 @@ is evaluated behaviorally, not by asserting prose.
 - A fresh writable database receives one explicit genesis/config floor, the
   reserved root, and one ordinary initial agent. This one-time birth is not a
   config-managed population on later boots.
-- Malli runtime state is rebuilt from canonical database facts and changed
-  incrementally after committed schema/program changes.
+- Malli runtime state is rebuilt once from canonical database facts. Committed
+  eval changes carry exact symbol deltas; Shadow reloads query only the namespace
+  resources Shadow actually loaded and restore only wrappers that are absent.
 - Arbitrary evals and external effects are never replayed.
 - After an unexpected runtime crash, every interrupted nonterminated agent is
   fenced back to derived `:idle`; the supervisor records one recovery anchor in

@@ -36,11 +36,6 @@
     ;; explicitly so the :file backend is guaranteed registered in the
     ;; :client bundle regardless of that conditional's timing.
     [konserve.node-filestore]
-    ;; Phase A item 6 — bundle malli.instrument so Phase A item 7's
-    ;; install! call resolves at runtime. Pulled in here (the :client
-    ;; entry) rather than seon.repl/seon.eval so reload churn in those
-    ;; namespaces doesn't drag instrumentation init into the hot path.
-    [malli.instrument :as mi]
     ;; malli.core/form round-trips a fn's `:malli/schema` to the stable
     ;; `:seon.fn/spec` string in index-core! (the runtime-introspection
     ;; core indexer — coherent-bootstrap-indexing Step 2).
@@ -230,6 +225,9 @@
     ;; Local reads plus the sole-writer transaction and feed attachment.
     [seon.db.protocol :as db.protocol]
     [seon.db.replica :as replica]
+    ;; Use Shadow's own reload-source selection for build notifications;
+    ;; this must stay identical to the files its Node client actually loaded.
+    [shadow.cljs.devtools.client.env :as shadow-env]
     ;; Pure MCP runtime-addressing values. The pod advertisement below queries
     ;; its database on demand; there is no second hosted-agent registry.
     [seon.dev.runtime-id :as runtime-id])
@@ -316,16 +314,32 @@
   ;; Re-arm the ONE ticker so a hot reload doesn't stack timers and the tick
   ;; body runs just-reloaded code (idempotent — clears the prior interval).
   (agent-loop/install-ticker!)
-  ;; Shadow re-emits changed namespaces and dependents as fresh unwrapped
-  ;; functions, but its zero-argument after-load hook does not identify those
-  ;; sources. Derive the live gaps once and pass ONLY those definitions through
-  ;; the exact delta boundary. Healthy wrappers retain object identity.
-  (when-let [conn db/*conn*]
-    (let [stats (instrument/refresh-live-coverage! @conn)]
-      (log/info-console! "seon.client"
-                         (str "reload: instrumentation gaps refreshed "
-                              (pr-str (instrumentation-summary stats))))))
   (start-heartbeat!))
+
+(defn- shadow-reloaded-namespaces
+  "Namespace symbols Shadow loaded in one build-complete message."
+  [message]
+  (into #{}
+        (keep :ns)
+        (shadow-env/filter-reload-sources
+          (:info message) (:reload-info message))))
+
+(defn shadow-build-notify!
+  "Apply exact instrumentation after Shadow loads changed namespaces."
+  {:malli/schema [:=> [:catn [::message :any]] :boolean]}
+  [message]
+  (when (and (= :build-complete (:type message))
+             (db/attached?))
+    (let [namespace-syms (shadow-reloaded-namespaces message)
+          stats
+          (instrument/instrument-namespaces-from-db!
+            {::instrument/db @db/*conn*
+             ::instrument/namespace-syms namespace-syms})]
+      (log/info-console!
+        "seon.client"
+        (str "reload: exact instrumentation "
+             (pr-str (instrumentation-summary stats))))))
+  true)
 
 (defn ^:async mem-db
   "REPL convenience — open a fresh :memory datahike-cljs DB with optional

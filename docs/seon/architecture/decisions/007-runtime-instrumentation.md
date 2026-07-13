@@ -13,11 +13,12 @@ tags: [decision, architecture, schema]
 > A committed program/schema change then unstruments/instruments only directly
 > changed/spec-removed/deleted functions plus the union of old/new transitive
 > schema dependents. Agent mint/resume do no instrumentation work. Agent evals
-> supply their accepted definitions directly. Until the deterministic program
-> snapshot owns Shadow publication, Shadow's zero-argument `after-load` hook
-> derives live unwrapped gaps from the canonical rows once and feeds only those
-> symbols through the same delta; healthy wrappers are never replaced. Seon
-> does not populate Malli's process-global function-schema atom as a second registry.
+> supply their accepted definitions directly. Shadow's custom build notification
+> uses Shadow's own reload-source selection, queries canonical contracts only in
+> the namespaces actually loaded, and feeds only their live unwrapped vars
+> through the same delta. It never scans the complete program graph, and a
+> wrapper that survived the reload keeps object identity. Seon does not populate
+> Malli's process-global function-schema atom as a second registry.
 > The implementation/deletion proof is tracked in
 > `docs/prds/runtime-reliability/roadmap.md` Phase 8.
 

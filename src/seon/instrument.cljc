@@ -654,6 +654,60 @@
      (into [] (keep coverage-gap) rows)))
 
 #?(:cljs
+   (defn instrument-namespaces-from-db!
+     "Restore wrappers lost by one Shadow namespace reload.
+
+      `::namespace-syms` is the exact resource set from Shadow's build
+      notification. The database query is restricted to those namespaces;
+      [[coverage-gap]] then reduces their persisted contracts to the exact
+      live function vars whose wrappers were replaced. A build that changed
+      no function definitions performs no Malli mutation, and unrelated
+      program rows are never read."
+     {:malli/schema
+      [:=>
+       [:cat
+        [:map
+         [::db :any]
+         [::namespace-syms [:set :symbol]]]]
+       :map]}
+     [{::keys [db namespace-syms]}]
+     (if-not (enabled?)
+       {::enabled? false ::n-namespaces (count namespace-syms)
+        ::n-inspected 0 ::n-gaps 0
+        ::n-unstrumented 0 ::n-instrumented 0}
+       (let [namespace-names (mapv keyword (sort namespace-syms))
+             rows
+             (if (seq namespace-names)
+               (db/query
+                 '[:find ?sym ?spec
+                   :in $ [?ns-name ...]
+                   :where
+                   [?n :seon.ns/name ?ns-name]
+                   [?e :seon.fn/ns ?n]
+                   [?e :seon.fn/sym ?sym]
+                   [?e :seon.fn/spec ?spec]]
+                 db namespace-names)
+               #{})
+             gaps (coverage-gaps-for-rows rows)
+             changed-syms (into #{} (map ::target-sym) gaps)
+             targets
+             (into []
+                   (keep (fn [{::keys [target-sym schema-form]}]
+                           (when schema-form
+                             {::sym target-sym ::schema-form schema-form})))
+                   gaps)
+             result
+             (if (seq changed-syms)
+               (instrument-delta!
+                 {::changed-syms changed-syms ::targets targets})
+               {::enabled? true ::n-unstrumented 0 ::n-instrumented 0
+                ::accepted-syms #{} ::rejected []})]
+         (assoc result
+                ::n-namespaces (count namespace-syms)
+                ::n-inspected (count rows)
+                ::n-gaps (count gaps))))))
+
+#?(:cljs
    (defn coverage-gaps
      "Specced program-graph fns whose live var has no Malli wrapper.
 
@@ -670,38 +724,3 @@
        []
        (mapv #(select-keys % [::sym ::reason])
              (coverage-gaps-for-rows (program-schema-rows db))))))
-
-#?(:cljs
-   (defn refresh-live-coverage!
-     "Instrument only wrappers lost since cold reconstruction.
-
-      Agent evals call [[instrument-delta!]] with their accepted definitions
-      directly. Shadow hot reload does not pass changed sources to its
-      zero-argument `after-load` hook, so this correctness fallback scans the
-      canonical rows once, performs schema work only for live unwrapped vars,
-      and sends precisely those symbols through the same delta boundary.
-      Healthy wrapped functions are never unstrumented or re-instrumented.
-      No gaps means no Malli mutation."
-     {:malli/schema [:=> [:catn [::db :any]] :map]}
-     [db]
-     (if-not (enabled?)
-       {::enabled? false ::n-scanned 0 ::n-gaps 0
-        ::n-unstrumented 0 ::n-instrumented 0}
-       (let [rows (program-schema-rows db)
-             gaps (coverage-gaps-for-rows rows)
-             changed-syms (into #{} (map ::target-sym) gaps)
-             targets (into []
-                           (keep (fn [{::keys [target-sym schema-form]}]
-                                   (when schema-form
-                                     {::sym target-sym
-                                      ::schema-form schema-form})))
-                           gaps)
-             result (if (seq changed-syms)
-                      (instrument-delta!
-                        {::changed-syms changed-syms ::targets targets})
-                      {::enabled? true ::n-unstrumented 0 ::n-instrumented 0
-                       ::accepted-syms #{} ::rejected []})]
-         (assoc result
-                ::n-scanned (count rows)
-                ::n-gaps (count gaps)
-                ::gaps (mapv #(select-keys % [::sym ::reason]) gaps))))))

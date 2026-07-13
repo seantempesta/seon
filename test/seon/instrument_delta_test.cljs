@@ -92,7 +92,7 @@
              :seon.instrument/unresolvable-schema}]
            (:seon.instrument/rejected result)))))
 
-(deftest reload-refresh-instruments-only-new-live-gaps-once
+(deftest reload-refresh-is-namespace-scoped-and-mutates-only-live-gaps
   (let [schema-form [:=> [:cat :int] :int]
         rows [[(str a-sym) (pr-str schema-form)]
               [(str b-sym) (pr-str schema-form)]]
@@ -102,27 +102,72 @@
       (instrument/instrument-targets!
         [(target a-sym schema-form) (target b-sym schema-form)])
       (when (instrument/enabled?)
-        (let [b-wrapper (live-fn b-sym)]
-          ;; Model Shadow replacing exactly one compiled var with a fresh raw
-          ;; function. Its after-load hook does not tell application hooks
-          ;; which source files were imported.
+        (let [a-wrapper (live-fn a-sym)
+              b-wrapper (live-fn b-sym)
+              queries (atom [])
+              query! (fn [& args]
+                       (swap! queries conj args)
+                       rows)]
+          (testing "no loaded namespace performs no program query"
+            (with-redefs [db/query (fn [& _]
+                                     (throw (js/Error. "unexpected query")))]
+              (let [result
+                    (instrument/instrument-namespaces-from-db!
+                      {::instrument/db ::fake-db
+                       ::instrument/namespace-syms #{}})]
+                (is (= 0 (::instrument/n-inspected result)))
+                (is (= 0 (::instrument/n-gaps result)))
+                (is (= 0 (::instrument/n-instrumented result))))))
+
+          (testing "unchanged definitions inspect only the loaded namespace"
+            (with-redefs [db/query query!]
+              (let [result
+                    (instrument/instrument-namespaces-from-db!
+                      {::instrument/db ::fake-db
+                       ::instrument/namespace-syms
+                       #{'seon.instrument-delta-test}})]
+                (is (= 2 (::instrument/n-inspected result)))
+                (is (= 0 (::instrument/n-gaps result)))
+                (is (= 0 (::instrument/n-instrumented result)))
+                (is (= [:seon.instrument-delta-test]
+                       (nth (first @queries) 2)))
+                (is (identical? a-wrapper (live-fn a-sym)))
+                (is (identical? b-wrapper (live-fn b-sym))))))
+
+          ;; Model Shadow replacing one definition while loading its owning
+          ;; namespace. The peer definition remains wrapped.
           (set-live-fn! a-sym (fn [x] x))
           (with-redefs [db/query (fn [& _] rows)]
-            (let [first-refresh (instrument/refresh-live-coverage! ::fake-db)
-                  a-wrapper (live-fn a-sym)]
-              (is (= 2 (:seon.instrument/n-scanned first-refresh)))
-              (is (= 1 (:seon.instrument/n-gaps first-refresh)))
-              (is (= 1 (:seon.instrument/n-instrumented first-refresh)))
+            (let [first-refresh
+                  (instrument/instrument-namespaces-from-db!
+                    {::instrument/db ::fake-db
+                     ::instrument/namespace-syms
+                     #{'seon.instrument-delta-test}})
+                  a-wrapper-after (live-fn a-sym)]
+              (is (= 2 (::instrument/n-inspected first-refresh)))
+              (is (= 1 (::instrument/n-gaps first-refresh)))
+              (is (= 1 (::instrument/n-unstrumented first-refresh)))
+              (is (= 1 (::instrument/n-instrumented first-refresh)))
               (is (trapped? #(probe-a "wrong"))
                   "the freshly emitted raw function is wrapped again")
               (is (identical? b-wrapper (live-fn b-sym))
                   "the healthy peer wrapper is never replaced")
+              (is (some? (gobj/get a-wrapper-after
+                                   "malli$instrument$original")))
+              (is (nil? (gobj/get
+                          (gobj/get a-wrapper-after
+                                    "malli$instrument$original")
+                          "malli$instrument$original"))
+                  "the changed definition has one wrapper, not a stack")
               (let [second-refresh
-                    (instrument/refresh-live-coverage! ::fake-db)]
+                    (instrument/instrument-namespaces-from-db!
+                      {::instrument/db ::fake-db
+                       ::instrument/namespace-syms
+                       #{'seon.instrument-delta-test}})]
                 (is (= 0 (:seon.instrument/n-gaps second-refresh)))
                 (is (= 0 (:seon.instrument/n-instrumented second-refresh)))
-                (is (identical? a-wrapper (live-fn a-sym))
-                    "one definition is instrumented once, not on every scan")
+                (is (identical? a-wrapper-after (live-fn a-sym))
+                    "one definition is instrumented once")
                 (is (identical? b-wrapper (live-fn b-sym))))))))
       (finally
         (instrument/instrument-delta!
