@@ -116,6 +116,16 @@
 (schema/register! :seon.agent.ctx/token-cap [:int {:min 0}])
 (schema/register! :seon.agent.ctx/cap-keep  [:enum :head :tail])
 
+;; Per-BLOCK decoration-strip dial (repl-autosuggest display v3, owner
+;; 2026-07-12). ABSENT/false (every default block) → byte-parity.
+;; PRESENT true → the block's rendered+bracketed :ai text has its
+;; DECORATION glyphs mapped to ASCII ([[ascii-text]]) — box-drawing
+;; frames, «» quoting, ellipses, em-dashes, arrows. The eval GRAMMAR
+;; sentinels (⟹ ⟸ ⋘ ⋙ ✗ ✓ ↻ ⚠ ⟨⟩ ‹›) and the taught plan/transcript
+;; marks (▶ ◀ ☐) are NEVER touched — grammar stays, decoration goes.
+;; Consumer: the `seon.repl.autocomplete` projection profile.
+(schema/register! :seon.agent.ctx/ascii? :boolean)
+
 ;; The block map contract (validated at seon.agent.ctx/install! AND
 ;; at transact! like everything else). :seon.render/ai is the ONE slot:
 ;; a string renders verbatim (doctrine — content as source); a
@@ -127,6 +137,7 @@
    [:seon.agent.ctx/priority :seon.agent.ctx/priority]
    [:seon.agent.ctx/token-cap {:optional true} :seon.agent.ctx/token-cap]
    [:seon.agent.ctx/cap-keep  {:optional true} :seon.agent.ctx/cap-keep]
+   [:seon.agent.ctx/ascii?    {:optional true} :seon.agent.ctx/ascii?]
    [:seon.render/ai    {:optional true} :seon.render/ai]
    [:seon.render/html  {:optional true} :seon.render/html]])
 
@@ -2492,6 +2503,39 @@
   [block]
   (contains? block :seon.render/ai))
 
+(def ^:private ascii-decor-map
+  ;; The DECORATION-strip table (owner scope ruling 2026-07-12: grammar
+  ;; stays, decoration goes). Deliberately ABSENT — the kept grammar:
+  ;;   ⟹ ⟸ ⋘ ⋙   eval result/status sentinels (anti-fabrication keys on
+  ;;              them; owner: intentional)
+  ;;   ✗ ✓ ↻ ⚠    eval error/ok + repair/warning breadcrumbs (carry meaning)
+  ;;   ▶ ◀ ☐      taught plan/transcript marks (the block legend teaches them)
+  ;;   ⟨ ⟩ ‹ ›    value-display micro-markers (⟨N tok⟩ · ‹partial› · #‹fn›)
+  ;; `…⟨` (the truncation-marker head) is grammar — the lookahead skips it;
+  ;; every other … is a decoration ellipsis.
+  [[#"…(?!⟨)" "..."]
+   ["─" "-"] ["┌" "-"] ["└" "-"] ["┐" "-"] ["┘" "-"] ["├" "-"] ["┤" "-"]
+   ["│" "|"]
+   ["«" "\""] ["»" "\""]
+   ["—" "--"] ["–" "-"]
+   ["→" "->"] ["←" "<-"]
+   ["✉" "[msg]"]
+   ["·" "|"] ["×" "x"] ["§" "#"] ["▸" ">"]])
+
+(defn ascii-text
+  "Map decoration glyphs in rendered text `s` to ASCII equivalents.
+
+   The `:seon.agent.ctx/ascii?` block dial's transform (repl-autosuggest
+   display v3): box-drawing frames, `«»` quoting, ellipses, em-dashes,
+   arrows, the `✉` envelope become plain ASCII; the eval GRAMMAR
+   sentinels (`⟹ ⟸ ⋘ ⋙ ✗ ✓ ↻ ⚠ ⟨⟩ ‹›`) and taught plan/transcript marks
+   (`▶ ◀ ☐`) pass through untouched — a decoration strip, not a glyph
+   purge. Pure string fn; also applied by the `seon.repl.autocomplete`
+   exporter to its fn cards."
+  {:malli/schema [:=> [:catn [::text :string]] :string]}
+  [s]
+  (reduce (fn [acc [from to]] (str/replace acc from to)) s ascii-decor-map))
+
 (defn- cap-block-text
   "Clip a rendered block's :ai text to its `:seon.agent.ctx/token-cap`.
 
@@ -2526,8 +2570,13 @@
   (->> children
        (keep
          (fn [child]
-           (let [base {:seon.agent.ctx/name     (:seon.agent.ctx/name child)
-                       :seon.agent.ctx/priority (:seon.agent.ctx/priority child)}
+           (let [base (cond-> {:seon.agent.ctx/name     (:seon.agent.ctx/name child)
+                               :seon.agent.ctx/priority (:seon.agent.ctx/priority child)}
+                        ;; the decoration-strip dial rides through so the
+                        ;; root renderer can apply it to the BRACKETED text
+                        ;; (frame lines included); absent → byte-parity.
+                        (:seon.agent.ctx/ascii? child)
+                        (assoc :seon.agent.ctx/ascii? true))
                  text (when (and (contains? formats :ai)
                                  (block-renders-ai? child))
                         (cap-block-text child (render-ai child)))
@@ -2581,9 +2630,16 @@
   (let [rendered  (rendered-child-blocks
                     (:seon.agent.ctx/children node) #{:ai} render (constantly nil))
         bracketed (mapv (fn [s]
-                          (assoc s :seon.render/bracketed
-                                 (block-bracket-ai (:seon.agent.ctx/name s)
-                                                     (:seon.render/text s))))
+                          (let [b (block-bracket-ai (:seon.agent.ctx/name s)
+                                                    (:seon.render/text s))]
+                            (assoc s :seon.render/bracketed
+                                   ;; decoration-strip dial: applied to the
+                                   ;; BRACKETED text so the ┌─/└─ frame lines
+                                   ;; go ASCII with the body; absent (every
+                                   ;; default block) → byte-parity.
+                                   (if (:seon.agent.ctx/ascii? s)
+                                     (ascii-text b)
+                                     b))))
                         rendered)]
     ;; PROFILE render (the root node is flagged by [[context-root]]): a
     ;; curated-subset render has no provider cache line — no breakpoint

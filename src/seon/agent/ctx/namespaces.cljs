@@ -602,6 +602,197 @@
    [:seon.fn/doc      {:optional true} :string]
    [:seon.fn/spec     {:optional true} :string]])
 
+;; ============================================================
+;; The SPEC FACE (repl-autosuggest display v3, owner 2026-07-12): the
+;; exporter/tools-slot variant of [[compact-fn-head]] — registered shape
+;; REFS in the `:malli/schema` are expanded so arg keys and types are
+;; literally visible on the card (`::done-request` → its
+;; `[:map [:my.plan/id :string]]`), and the body-elision `…` marker is
+;; dropped (a card needn't announce its elided body). Tight by design:
+;; types + optionality, never prose. DEFAULT OFF — the live
+;; `:namespaces` block renders the 1-arity face byte-identically.
+;; ============================================================
+
+(def ^:private composite-heads
+  "Schema-vector heads too big to inline in a VALUE position — a ref
+   chain that lands on one keeps its most specific NAME instead (the
+   name is the compact semantic; `:seon.db/ref` beats its or-of-three)."
+  #{:map :map-of :or :tuple :catn :cat :=> :function :merge :multi
+    :schema :ref :fn})
+
+(defn- registered-def
+  "The live registry definition for `kw`, or nil (never throws)."
+  [kw]
+  (when (qualified-keyword? kw)
+    (try (schema/schema-definition kw) (catch :default _ nil))))
+
+(defn- split-schema-vec
+  "[head props children] of a malli schema vector (props map optional)."
+  [v]
+  (let [head  (first v)
+        props (when (map? (second v)) (second v))]
+    [head props (if props (drop 2 v) (rest v))]))
+
+(defn- resolve-value-type
+  "A schema VALUE form reduced to its visible base type.
+
+   Keyword refs follow the registry (`:my.plan/id` → `:string`); a chain
+   landing on a COMPOSITE ([[composite-heads]]) keeps the most specific
+   ref NAME. `[:and …]` unwraps to its subject; wrapper vectors
+   (`:maybe`/`:vector`/`:set`/`:sequential`/`:tuple`) resolve their
+   children; `[:enum …]` and primitive-headed vectors pass through with
+   only `:min`/`:max` props kept (types + optionality, not prose).
+   `seen` breaks ref cycles."
+  [form seen]
+  (cond
+    (keyword? form)
+    (if-let [d (and (not (contains? seen form)) (registered-def form))]
+      (let [r (resolve-value-type d (conj seen form))]
+        (if (and (vector? r) (contains? composite-heads (first r)))
+          form
+          r))
+      form)
+
+    (vector? form)
+    (let [[head _props children] (split-schema-vec form)]
+      (cond
+        ;; :and = subject + predicate constraints — the SUBJECT (first
+        ;; child) is the type ([:and :string [:re …]] → :string).
+        (= :and head)
+        (if (seq children)
+          (resolve-value-type (first children) seen)
+          form)
+
+        ;; :or whose branches all share ONE primitive base collapses to
+        ;; it ([:or [:string {:min 14 :max 14}] [:and :string [:re …]]]
+        ;; → :string — per-branch constraints diverge, the TYPE is what
+        ;; the card must show); mixed-type branches stay composite (the
+        ;; ref NAME wins upstream).
+        (= :or head)
+        (let [base (fn [r]
+                     (cond
+                       (and (keyword? r) (nil? (namespace r))) r
+                       (and (vector? r) (keyword? (first r))
+                            (nil? (namespace (first r)))
+                            (not (contains? composite-heads (first r))))
+                       (first r)))
+              rs   (mapv #(base (resolve-value-type % seen)) children)]
+          (if (and (seq rs) (every? keyword? rs) (apply = rs))
+            (first rs)
+            form))
+
+        (contains? #{:maybe :vector :set :sequential} head)
+        (if (= 1 (count children))
+          [head (resolve-value-type (first children) seen)]
+          form)
+
+        (= :tuple head)
+        (into [:tuple] (map #(resolve-value-type % seen)) children)
+
+        (= :enum head)
+        form
+
+        ;; primitive-headed with props — keep only the type constraints
+        (and (keyword? head) (nil? (namespace head)) (map? (second form)))
+        (let [kept (select-keys (second form) [:min :max])]
+          (if (seq kept)
+            (into [head kept] (drop 2 form))
+            (if (= 2 (count form)) head (into [head] (drop 2 form)))))
+
+        :else form))
+
+    :else form))
+
+(defn- expand-map-entries
+  "A resolved `[:map …]` def with each entry's value type made visible.
+
+   Entries render `[k vtype]` / `[k {:optional true} vtype]` — every
+   other entry prop and all map-level props are dropped (types +
+   optionality, not prose)."
+  [map-form seen]
+  (let [[_ _props entries] (split-schema-vec map-form)]
+    (into [:map]
+          (keep (fn [entry]
+                  (when (vector? entry)
+                    (let [k      (first entry)
+                          eprops (when (map? (second entry)) (second entry))
+                          v      (if eprops (nth entry 2 nil) (second entry))
+                          vtype  (resolve-value-type (if (nil? v) k v) seen)]
+                      (if (:optional eprops)
+                        [k {:optional true} vtype]
+                        [k vtype])))))
+          entries)))
+
+(defn- expand-arg-form
+  "One arg/return POSITION of a fn spec, registered refs expanded.
+
+   A ref whose chain lands on `[:map …]` expands to that map with
+   visible entry types ([[expand-map-entries]]); everything else
+   resolves through [[resolve-value-type]]."
+  [form]
+  (let [;; follow a keyword ref chain to its first structural def
+        structural (loop [f form s #{}]
+                     (if-let [d (and (keyword? f) (not (contains? s f))
+                                     (registered-def f))]
+                       (recur d (conj s f))
+                       f))
+        structural (if (and (vector? structural) (= :and (first structural)))
+                     (let [[_ _ children] (split-schema-vec structural)]
+                       (if (seq children) (first children) structural))
+                     structural)
+        structural (if-let [d (and (keyword? structural)
+                                   (registered-def structural))]
+                     d structural)
+        seen       (cond-> #{} (keyword? form) (conj form))]
+    (if (and (vector? structural) (= :map (first structural)))
+      (expand-map-entries structural seen)
+      (resolve-value-type form #{}))))
+
+(defn- expand-arity
+  "One `[:=> args ret]` arity with every position expanded."
+  [arity]
+  (if-not (and (vector? arity) (= :=> (first arity)) (<= 3 (count arity)))
+    arity
+    (let [args (nth arity 1)
+          args' (cond
+                  (and (vector? args) (= :cat (first args)))
+                  (into [:cat] (map expand-arg-form) (rest args))
+
+                  (and (vector? args) (= :catn (first args)))
+                  (into [:catn]
+                        (map (fn [slot]
+                               (if (and (vector? slot) (= 2 (count slot)))
+                                 [(first slot) (expand-arg-form (second slot))]
+                                 slot)))
+                        (rest args))
+
+                  :else args)]
+      (-> (vec arity) (assoc 1 args') (assoc 2 (expand-arg-form (nth arity 2)))))))
+
+(defn- expand-spec-str
+  "The spec STRING with registered shape refs expanded, or the original.
+
+   Reads the pr-str'd `:malli/schema` form, expands each arity's arg and
+   return positions, and re-prints. Errors-as-values: an unreadable spec
+   (regex/tagged literals) returns unchanged — the card degrades to the
+   1-arity face's verbatim spec, never throws."
+  [spec]
+  (try
+    (let [form (edn/read-string spec)]
+      (cond
+        (and (vector? form) (= :function (first form)))
+        (pr-str (into [:function] (map expand-arity) (rest form)))
+
+        (and (vector? form) (= :=> (first form)))
+        (pr-str (expand-arity form))
+
+        :else spec))
+    (catch :default _ spec)))
+
+(schema/register! ::spec-face? :boolean)
+(schema/register! ::compact-fn-head-opts
+  [:map [::spec-face? {:optional true} ::spec-face?]])
+
 (defn compact-fn-head
   "One fn condensed to a single-line `defn` head with the body elided.
 
@@ -613,19 +804,34 @@
    the fn's own namespace (drives the `::` abbreviation); the row is the
    indexed `:seon.fn` map. PUBLIC: the ONE per-fn card renderer — the
    compact ns cards below and the `seon.repl.autocomplete` exporter's
-   fn cards both render through it."
-  {:malli/schema [:=> [:catn [::ns-str ::ns-str] [::fn-row ::fn-row]] :string]}
-  [ns-str {:seon.fn/keys [sym arglists doc spec]}]
-  (let [nm      (if-let [i (str/index-of sym "/")] (subs sym (inc i)) sym)
-        doc-1   (when (and doc (not (str/blank? doc)))
-                  (soft-clip (str/trim (first (str/split-lines doc))) 78))
-        docpart (if doc-1 (str " " (pr-str doc-1)) "")
-        specpart (if (and spec (not (str/blank? spec)))
-                   (str " {:malli/schema " spec "}")
-                   "")
-        arities (compact-arities arglists)
-        head    (str "(defn " nm docpart specpart " " arities ")")]
-    (abbrev-ns-kws head ns-str)))
+   fn cards both render through it.
+
+   The 3-arity adds the exporter/tools-slot OPTS face: `::spec-face?`
+   expands registered shape refs in the spec ([[expand-spec-str]] — arg
+   keys/types literally visible) and drops the body-elision `…` marker.
+   No opts (or `{}`) is byte-identical to the 2-arity — the live
+   `:namespaces` block's face is untouched."
+  {:malli/schema [:function
+                  [:=> [:catn [::ns-str ::ns-str] [::fn-row ::fn-row]] :string]
+                  [:=> [:catn [::ns-str ::ns-str] [::fn-row ::fn-row]
+                        [::opts ::compact-fn-head-opts]] :string]]}
+  ([ns-str row] (compact-fn-head ns-str row {}))
+  ([ns-str {:seon.fn/keys [sym arglists doc spec]} opts]
+   (let [spec-face? (::spec-face? opts)
+         nm      (if-let [i (str/index-of sym "/")] (subs sym (inc i)) sym)
+         doc-1   (when (and doc (not (str/blank? doc)))
+                   (soft-clip (str/trim (first (str/split-lines doc))) 78))
+         docpart (if doc-1 (str " " (pr-str doc-1)) "")
+         spec    (if (and spec-face? spec (not (str/blank? spec)))
+                   (expand-spec-str spec)
+                   spec)
+         specpart (if (and spec (not (str/blank? spec)))
+                    (str " {:malli/schema " spec "}")
+                    "")
+         arities (cond-> (compact-arities arglists)
+                   spec-face? (str/replace " …" ""))
+         head    (str "(defn " nm docpart specpart " " arities ")")]
+     (abbrev-ns-kws head ns-str))))
 
 (schema/register! ::render-one-ns-compact-request
   [:map

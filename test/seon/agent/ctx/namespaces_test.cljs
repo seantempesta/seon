@@ -23,7 +23,8 @@
     [seon.ai.tokens :as tokens]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.db.id :as db.id]))
+    [seon.db.id :as db.id]
+    [seon.schema :as schema]))
 
 ;; A valid agent id (`:seon.agent/id` is a strict shape) and its home ns —
 ;; a fresh agent's current ns falls back to `(home-ns id)`.
@@ -174,3 +175,71 @@
               (is (contains? (section-nses card) "ktest.absent")
                   "an un-indexed ns still renders a bracketed note, never throws"))))
         (.then (fn [_] (done)) (fn [e] (is false (str "threw: " (.-message e))) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; The SPEC FACE (display v3, owner 2026-07-12) — compact-fn-head's
+;; exporter/tools-slot variant: registered shape refs in the
+;; `:malli/schema` expand so arg keys/types are literally visible; the
+;; body-elision `…` marker drops. Default face stays byte-identical.
+;; Test-local registered shapes (keyword namespaces = THIS ns).
+;; ---------------------------------------------------------------------------
+
+(schema/register! ::tid :string)
+(schema/register! ::note :string)
+(schema/register! ::vid-chain ::tid)             ;; ref CHAIN → :string
+(schema/register! ::ref-ish [:or :int :string])  ;; composite → keeps its NAME
+(schema/register! ::face-request
+  [:map
+   [::tid ::tid]
+   [::parent ::ref-ish]
+   [::note {:optional true} ::note]])
+(schema/register! ::face-response
+  [:map [::ok? :boolean] [::vid {:optional true} ::vid-chain]])
+
+(def ^:private face-ns "seon.agent.ctx.namespaces-test")
+
+(def ^:private face-row
+  {:seon.fn/sym      (str face-ns "/face!")
+   :seon.fn/doc      "Do the thing durably."
+   :seon.fn/spec     (str "[:=> [:cat :" face-ns "/face-request] "
+                          ":" face-ns "/face-response]")
+   :seon.fn/arglists "([request])"})
+
+(deftest compact-fn-head-default-face-is-byte-stable
+  (let [one (nss/compact-fn-head face-ns face-row)
+        two (nss/compact-fn-head face-ns face-row {})]
+    (is (= one two)
+        "2-arity ≡ 3-arity with empty opts — the live block face untouched")
+    (is (str/includes? one "::face-request")
+        "the default face keeps the spec REF verbatim")
+    (is (str/includes? one "…")
+        "the default face keeps the body-elision marker")))
+
+(deftest compact-fn-head-spec-face-expands-refs-and-drops-marker
+  (let [out (nss/compact-fn-head
+              face-ns face-row
+              {:seon.agent.ctx.namespaces/spec-face? true})]
+    (is (str/includes? out "[:map [::tid :string]")
+        "the request ref expands to its [:map …] shape with visible types")
+    (is (str/includes? out "[::note {:optional true} :string]")
+        "optionality survives the expansion")
+    (is (str/includes? out "[::parent ::ref-ish]")
+        "a value chain landing on a COMPOSITE keeps its semantic name")
+    (is (str/includes? out "[::ok? :boolean]")
+        "the response ref expands too")
+    (is (str/includes? out "[::vid {:optional true} :string]")
+        "a keyword ref CHAIN resolves through to its base type")
+    (is (not (str/includes? out "face-request"))
+        "no opaque request ref survives on the spec face")
+    (is (not (str/includes? out "…"))
+        "the body-elision marker is dropped on the spec face")
+    (is (str/ends-with? out "[request])")
+        "the arglist stays, marker-free")))
+
+(deftest compact-fn-head-spec-face-degrades-on-unreadable-spec
+  (let [row (assoc face-row :seon.fn/spec "[:=> [:cat #\"re\"] :string]")
+        out (nss/compact-fn-head
+              face-ns row
+              {:seon.agent.ctx.namespaces/spec-face? true})]
+    (is (str/includes? out "[:=> [:cat #\"re\"] :string]")
+        "an unreadable spec passes through verbatim — errors-as-values")))

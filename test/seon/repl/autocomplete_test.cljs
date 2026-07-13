@@ -32,6 +32,7 @@
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.repl.autocomplete :as auto]
+    [seon.schema :as schema]
     [seon.test-seed :as test-seed]))
 
 ;; ---------------------------------------------------------------------------
@@ -249,4 +250,96 @@
           (is (false? (:seon.repl.autocomplete/ok? r)))
           (is (str/includes? (str (:seon.repl.autocomplete/error r)) "no turn")
               "unknown id is a guiding value, never a throw")))
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; 4. Display v3 — the decoration-strip dial + spec-face cards + the
+;;    stale/DEPRECATED card filters.
+;; ---------------------------------------------------------------------------
+
+(deftest ascii-text-strips-decoration-keeps-grammar
+  (is (= "-- x - \"q\" ... -- -> [msg] ⟹ ✗ ▶ ☐ …⟨3 tok⟩"
+         (ctx/ascii-text "┌─ x ─ «q» … — → ✉ ⟹ ✗ ▶ ☐ …⟨3 tok⟩"))
+      "decorations map to ASCII; grammar sentinels + the …⟨ marker head survive"))
+
+(deftest context-ascii-dial-strips-decoration-default-path-untouched
+  (async done
+    (run-test
+      (fn ^:async run []
+        (let [a    (await (fresh-agent!))
+              aid  (:seon.agent/id a)
+              _    (await (drive-turn! a "(+ 11 22)\n"))
+              t2   (await (drive-turn! a "(* 3 4)\n"))
+              t    (:seon.agent.turn/rendered-as-of t2)
+              aodb (db/as-of @db/*conn* t)
+              c    (auto/context {:seon.agent/id aid :seon.db/db aodb})
+              d    (ctx/render-context {:seon.agent/id aid :seon.db/db @db/*conn*})]
+          (is (str/includes? c ";;; -- ")
+              "the block frame lines render as plain ASCII dashes")
+          (doseq [g ["┌" "└" "─" "«" "»" "—" "→" "✉"]]
+            (is (not (str/includes? c g))
+                (str "no decoration glyph " g " in the ascii? profile render")))
+          (is (str/includes? d "┌─")
+              "the DEFAULT prompt path keeps its frames — the dial never leaks")))
+      done)))
+
+;; Test-local registered request shape for the spec-face card assertion
+;; (keyword namespaces = THIS ns).
+(schema/register! ::qid :string)
+(schema/register! ::q-request [:map [::qid ::qid]])
+
+(deftest export-spec-face-cards-and-stale-deprecated-filters
+  (async done
+    (run-test
+      (fn ^:async run []
+        (await (db/transact!
+                 {:seon.db/tx-data
+                  [{:seon.fn/sym      "seon.db/query"
+                    :seon.fn/doc      "Run a Datalog query — against the db."
+                    :seon.fn/spec     "[:=> [:cat :seon.repl.autocomplete-test/q-request] :string]"
+                    :seon.fn/arglists "([request])"}
+                   {:seon.fn/sym      "my.old/thing!"
+                    :seon.fn/doc      "DEPRECATED — reference only; retired."
+                    :seon.fn/arglists "([x])"}
+                   {:seon.fn/sym      "my.live/extra"
+                    :seon.fn/doc      "A live extra fn."
+                    :seon.fn/arglists "([x])"}]}))
+        (let [a     (await (fresh-agent!))
+              _     (await (drive-turn!
+                             a "(db/query {:seon.db/query '[:find ?id :where [_ :seon.agent/id ?id]]})\n"))
+              out   (str fixture-dir "/v3rows.jsonl")
+              res   (auto/export! {:seon.repl.autocomplete/out-path out
+                                   :seon.repl.autocomplete/projection-sha "t"
+                                   :seon.repl.autocomplete/distractors 10
+                                   :seon.db/db @db/*conn*})
+              rows  (read-rows out)
+              cards (mapcat #(get % "cards") rows)]
+          (is (true? (:seon.repl.autocomplete/ok? res)))
+          (is (zero? (:seon.repl.autocomplete/stale-called res))
+              "every called fn still lives in the current index")
+          (is (some #(str/includes? % "defn query") cards)
+              "the called fn cards out")
+          (is (some #(str/includes? % "[:map [:seon.repl.autocomplete-test/qid :string]]") cards)
+              "the SPEC FACE expands the registered request shape on the card")
+          (is (some #(str/includes? % "Datalog query -- against") cards)
+              "card docstring decorations (em-dash) go ASCII")
+          (is (not-any? #(str/includes? % "…") cards)
+              "no body-elision marker, no glyph ellipsis on any card")
+          (is (not-any? #(str/includes? % "DEPRECATED") cards)
+              "a DEPRECATED-docstring'd fn never rides as a distractor (k=10 would have picked it)")
+          ;; STALE: retract the called fn from the CURRENT index — its as-of
+          ;; row must no longer card out, counted honestly.
+          (await (db/transact!
+                   {:seon.db/tx-data
+                    [[:db/retractEntity [:seon.fn/sym "seon.db/query"]]]}))
+          (let [res2   (auto/export! {:seon.repl.autocomplete/out-path out
+                                      :seon.repl.autocomplete/projection-sha "t"
+                                      :seon.repl.autocomplete/distractors 10
+                                      :seon.db/db @db/*conn*})
+                rows2  (read-rows out)
+                cards2 (mapcat #(get % "cards") rows2)]
+            (is (= 1 (:seon.repl.autocomplete/stale-called res2))
+                "the deleted called fn is counted")
+            (is (not-any? #(str/includes? % "defn query") cards2)
+                "a fn deleted from the current index loses its card"))))
       done)))

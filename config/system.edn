@@ -244,16 +244,22 @@
  ;; excluded — impure over a db value). KEEP IN SYNC with the code default
  ;; `seon.repl.autocomplete/context-blocks` (used when this section or the
  ;; singleton datom is absent — fresh stores, hermetic test conns).
+ ;; :seon.agent.ctx/ascii? (display v3, owner 2026-07-12): per-block
+ ;; DECORATION-strip — box frames/«»/ellipses/em-dashes/arrows go ASCII
+ ;; (seon.agent.ctx/ascii-text); eval grammar sentinels + taught plan
+ ;; marks untouched. Profile-scoped only — never on the default prompt.
  :seon.config/context-profiles
  {:autocomplete
   [{:seon.agent.ctx/name      :plan
     :seon.agent.ctx/priority  45
     :seon.agent.ctx/token-cap 200
+    :seon.agent.ctx/ascii?    true
     :seon.render/ai           my.plan.internal/plan-block}
    {:seon.agent.ctx/name      :transcript
     :seon.agent.ctx/priority  100
     :seon.agent.ctx/token-cap 440
     :seon.agent.ctx/cap-keep  :tail
+    :seon.agent.ctx/ascii?    true
     :seon.render/ai           seon.agent.ctx.transcript/transcript-block
     :seon.agent.ctx.transcript/turns-retained 1
     :seon.agent.ctx.transcript/tiers

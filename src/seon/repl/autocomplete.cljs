@@ -108,15 +108,23 @@
    value). Per-block `:seon.agent.ctx/token-cap` bounds each band. The
    CODE default for the config-through-DB `:seon.config/context-profiles`
    `:autocomplete` entry — a db-stored profile (the one in force at an
-   as-of t) always wins ([[context]])."
+   as-of t) always wins ([[context]]).
+
+   `:seon.agent.ctx/ascii?` (display v3, owner 2026-07-12) strips
+   DECORATION glyphs to ASCII per block (`seon.agent.ctx/ascii-text` —
+   box frames, `«»`, ellipses, em-dashes, arrows); the eval grammar
+   sentinels and taught plan marks are untouched. Profile-scoped: the
+   default prompt path never carries the dial."
   [{:seon.agent.ctx/name      :plan
     :seon.agent.ctx/priority  45
     :seon.agent.ctx/token-cap 200
+    :seon.agent.ctx/ascii?    true
     :seon.render/ai           'my.plan.internal/plan-block}
    {:seon.agent.ctx/name      :transcript
     :seon.agent.ctx/priority  100
     :seon.agent.ctx/token-cap 440
     :seon.agent.ctx/cap-keep  :tail
+    :seon.agent.ctx/ascii?    true
     :seon.render/ai           'seon.agent.ctx.transcript/transcript-block
     ;; recent tail only: last turn verbatim, older evals evicted (a
     ;; zero-budget tier covers every older offset); messages always render
@@ -218,6 +226,23 @@
         (db/query {:seon.db/db db
                    :seon.db/query '[:find ?s :where [_ :seon.fn/sym ?s]]})))
 
+(defn- deprecated-fn-syms
+  "The `:seon.fn/sym` strings whose docstring line 1 starts \"DEPRECATED\"
+   in db value `db` — refused as distractor picks (display v3): a retired
+   fn's card is a pure distractor-trap, never a useful suggestion."
+  [db]
+  (into #{}
+        (keep (fn [[s doc]]
+                (when (str/starts-with?
+                        (str/trim (first (str/split-lines (or doc ""))))
+                        "DEPRECATED")
+                  s)))
+        (db/query {:seon.db/db db
+                   :seon.db/query '[:find ?s ?doc
+                                    :where
+                                    [?e :seon.fn/sym ?s]
+                                    [?e :seon.fn/doc ?doc]]})))
+
 (defn- called-syms
   "Full `:seon.fn/sym` strings referenced by `target` source text.
 
@@ -249,7 +274,10 @@
 
    ONE mechanism with the `:namespaces` compact cards —
    `seon.agent.ctx.namespaces/compact-fn-head` over the indexed
-   `:seon.fn` row."
+   `:seon.fn` row, on its SPEC FACE (display v3: registered shape refs
+   expanded so arg keys/types are visible, body-elision marker dropped)
+   with decoration glyphs stripped (`seon.agent.ctx/ascii-text` — the
+   same table the profile's `:seon.agent.ctx/ascii?` dial applies)."
   [db sym-str]
   (when (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.fn/sym sym-str]})
     (let [row (db/pull {:seon.db/db db
@@ -257,7 +285,10 @@
                         :seon.db/pull-pattern '[:seon.fn/sym :seon.fn/arglists
                                                 :seon.fn/doc :seon.fn/spec]})
           ns-str (subs sym-str 0 (or (str/index-of sym-str "/") 0))]
-      (ns-cards/compact-fn-head ns-str row))))
+      (ctx/ascii-text
+        (ns-cards/compact-fn-head
+          ns-str row
+          {:seon.agent.ctx.namespaces/spec-face? true})))))
 
 (def ^:private keyword-token-re
   "Keyword tokens in Clojure source — `:kw`, `:ns/kw`, `::kw` (the `::`
@@ -368,6 +399,9 @@
    [::skipped-no-basis {:optional true} ::count]
    [::skipped-excluded {:optional true} ::count]
    [::cards-missed     {:optional true} ::count]
+   ;; Called fns whose card was dropped by the display-v3 stale filter
+   ;; (the fn no longer exists in the export db's CURRENT index).
+   [::stale-called     {:optional true} ::count]
    ;; Byte-exactness self-check: every row's context is rendered TWICE
    ;; over the same as-of db value; a mismatch is a determinism bug.
    [::determinism-mismatches {:optional true} ::count]
@@ -386,9 +420,14 @@
      context — [[context]] rendered against `(db/as-of db rendered-as-of)`
                (the pre-turn world the model actually saw)
      target  — the turn's ok eval sources, in order, newline-joined
-     cards   — compact fn cards for the fns the target CALLS (direct +
-               home-alias + refer resolution) plus `::distractors`
-               (default 3) deterministic distractor cards
+     cards   — SPEC-FACE compact fn cards ([[fn-card]] — registered shape
+               refs expanded, decoration glyphs stripped) for the fns the
+               target CALLS (direct + home-alias + refer resolution) plus
+               `::distractors` (default 3) deterministic distractor cards.
+               Display v3: a fn absent from the export db's CURRENT index
+               gets no card (stale filter, `::stale-called` counts the
+               called ones); DEPRECATED-docstring'd fns are refused as
+               distractor picks
      meta    — turn-id, agent, basis-t, store, projection-sha (git HEAD
                unless `::projection-sha` is passed), rating when present
 
@@ -402,6 +441,12 @@
           sha   (or projection-sha (git-head-sha))
           k     (or distractors 3)
           store (store-name)
+          ;; Display-v3 card filters, both against the EXPORT db head (the
+          ;; CURRENT fn index), never the per-row as-of value: a fn deleted
+          ;; since the turn ran gets no card (stale filter), and a
+          ;; DEPRECATED-docstring'd fn is refused as a distractor pick.
+          live-syms  (indexed-fn-syms db)
+          deprecated (deprecated-fn-syms db)
           out   (or out-path
                     (str "data/tune/" store "-"
                          (subs (.toISOString (js/Date.)) 0 10) ".jsonl"))
@@ -452,11 +497,22 @@
                                                       :seon.db/db aodb})
                                     target  (str/join "\n" sources)
                                     fn-syms (indexed-fn-syms aodb)
-                                    called  (called-syms target fn-syms
-                                                         aliases refers)
+                                    called-all (called-syms target fn-syms
+                                                            aliases refers)
+                                    ;; stale filter: a called fn deleted from
+                                    ;; the current index loses its card (the
+                                    ;; row keeps its target; coverage stays
+                                    ;; honest about the gap).
+                                    called  (filterv live-syms called-all)
                                     turn-id (:seon.agent.turn/id turn)
+                                    ;; distractor pool: current-index fns
+                                    ;; only, DEPRECATED-docstring'd refused.
+                                    pool    (into #{}
+                                                  (comp (filter live-syms)
+                                                        (remove deprecated))
+                                                  fn-syms)
                                     syms    (into called
-                                                  (distractor-syms fn-syms called
+                                                  (distractor-syms pool called
                                                                    turn-id k))
                                     cards   (vec (keep #(fn-card aodb %) syms))
                                     missed  (- (count syms) (count cards))
@@ -470,6 +526,9 @@
                                 (-> acc
                                     (update ::rows inc)
                                     (update ::cards-missed + missed)
+                                    (update ::stale-called
+                                            + (- (count called-all)
+                                                 (count called)))
                                     (update ::determinism-mismatches
                                             + (if (= ctext ctext2) 0 1))
                                     (update ::ctx-tokens conj
@@ -491,7 +550,8 @@
                         (ctx/agent-turns agent-id db))))
                   {::turns-walked 0 ::rows 0 ::skipped-no-evals 0
                    ::skipped-no-basis 0 ::skipped-excluded 0
-                   ::cards-missed 0 ::determinism-mismatches 0
+                   ::cards-missed 0 ::stale-called 0
+                   ::determinism-mismatches 0
                    ::ctx-tokens [] ::target-tokens [] ::lines []}
                   agent-ids)
           summary (fn [xs]
@@ -511,6 +571,7 @@
        ::skipped-no-basis (::skipped-no-basis acc)
        ::skipped-excluded (::skipped-excluded acc)
        ::cards-missed     (::cards-missed acc)
+       ::stale-called     (::stale-called acc)
        ::determinism-mismatches (::determinism-mismatches acc)
        ::context-tokens   (summary (::ctx-tokens acc))
        ::target-tokens    (summary (::target-tokens acc))})
