@@ -14,6 +14,7 @@
    in-memory store (the bug that `wire/store-config`'s hardcoded id
    caused before consolidation)."
   (:require [seon.server.client :as client]
+            [seon.server.boot :as boot]
             [seon.server.registry :as registry]
             [seon.server.wire :as wire]
             [seon.server.broadcast :as bcast])
@@ -47,18 +48,22 @@
   (let [req-sock (unique-sock "req")
         pub-sock (unique-sock "pub")
         db-name  (keyword "test" (str (gensym "wire")))
+        runtime  (assoc (boot/writer-runtime)
+                        :seon.server.wire/ambient-db-name (name db-name))
         ;; The registry is the ONE open mechanism (same path -main uses):
         ;; ensure-db! creates the :memory store, connects, and fires the
         ;; on-ensure-db hooks (::raw-broadcast + base schema).
         entry    (registry/ensure-db!
                   {:seon.server.registry/db-name db-name
-                   :seon.server.registry/backend :memory})
+                   :seon.server.registry/backend :memory
+                   :seon.server.registry/initialize-connection!
+                   (partial wire/initialize-connection! runtime)})
         conn     (:seon.server.registry/conn entry)
         pub-srv  (bcast/start-pub-server! pub-sock)
-        req-srv  (#'wire/start-req-server! conn req-sock)]
+        req-srv  (#'wire/start-req-server! runtime conn req-sock)]
     (wait-for-socket! req-sock 60000)
     (wait-for-socket! pub-sock 60000)
-    {:req-sock req-sock :pub-sock pub-sock :db-name db-name
+    {:req-sock req-sock :pub-sock pub-sock :db-name db-name :runtime runtime
      :conn conn :req-srv req-srv :pub-srv pub-srv}))
 
 (defn teardown-writer! [{:keys [db-name req-srv pub-srv req-sock pub-sock]}]

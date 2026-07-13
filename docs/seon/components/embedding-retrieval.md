@@ -57,7 +57,7 @@ semantically relevant entities".
 
 For each turn the system embeds a query derived from the agent's latest inbound
 request, runs k-nearest-neighbour search over per-entity source embeddings, and
-renders the nearest hits (full body, char-capped) in a `<relevant-source>`
+renders the nearest hits (full body, token-bounded) in a `<relevant-source>`
 section. Retrieval is attribute-anchored: the attribute an entity carries IS its
 type (idiomatic Datomic). There is NO `:seon/kind` enum.
 
@@ -72,21 +72,22 @@ Two processes, one switch.
     lives only in Proximum's konserve file store (a sibling of the cluster's
     primary store); the primary AEVT holds a content hash. The index restores
     from konserve on conn reopen (it is not rebuilt from AEVT).
-  - `register-embeddable!` makes any entity carrying a chosen TRIGGER attribute
-    embeddable, with an optional compose-fn `(fn [entity-map] -> str)` that
-    builds the document to embed.
-  - Embed-on-write: `augment-tx-with-embeddings` is installed into the
-    wire-server's transact path. It scans each tx for entities carrying a
-    registered trigger attribute whose composed-document SHA-256 changed, embeds
+  - `default-embeddables` returns immutable trigger-attribute → compose-function
+    pipeline data. Writer boot supplies that value explicitly; there is no
+    process-global registration API.
+  - Embed-on-write: writer boot composes `augment-tx-with-embeddings` into its
+    immutable transaction runtime. It scans each tx for entities carrying a
+    configured trigger attribute whose composed-document SHA-256 changed, embeds
     them with Gemini (`gemini-embedding-2`, dim 1536, L2-normalized) BEFORE the
     `d/transact`, and appends `:seon/embedding` + `:seon.embed/source-hash`
     assertions. The SHA cache (`:seon.embed/source-hash`, a plain string in the
     primary store) means an unchanged document never pays a Gemini call.
-  - The `knn-search` wire function embeds an NL query (with a retrieval-instruction
-    prefix — v2 has no `task_type`) and runs KNN, optionally scoped to an eid
-    set, returning `[{eid distance} …]`.
-  - A bounded backfill (`backfill-cap` = 64 per boot) embeds already-stored
-    entities that lack a current embedding, on each cluster-conn open.
+  - The runtime's KNN function embeds an NL query (with a
+    retrieval-instruction prefix — v2 has no `task_type`) and runs KNN,
+    optionally scoped to an eid set, returning `[{eid distance} …]`.
+  - The explicit database initializer installs the index and drains bounded
+    backfill passes (`backfill-cap` = 64 per pass) for already-stored entities
+    that lack a current embedding.
 - Pod (CLJS, read-only agents) — `src/seon/embed.cljs`:
   - `search` / `search-pull` are the pod's thin client over the `knn-search`
     wire function. The pod never embeds — it sends the query text over the Unix
@@ -96,12 +97,14 @@ Two processes, one switch.
   - `seon.agent/prefetch-and-render-prompt!` awaits the KNN prefetch and stashes
     the hits; the synchronous `seon.ctx.relevant/relevant-source-section` reads
     the stash. The section is volatile (kept out of the cacheable stable prefix)
-    and self-bounded (top-5, 1500 chars per hit). When no prefetch ran it
+    and self-bounded (top-5 with a per-hit token budget). When no prefetch ran it
     renders blank and the composer drops it.
 
-The write-path and query-side are SEAMS pointing one way: `seon.embed` requires
-`seon.server.wire` / `seon.server.registry` (never the reverse), so those
-namespaces stay loadable on a plain JVM without the Proximum/Gemini classpath.
+`seon.server.boot` is the composition root: it resolves embedding functions and
+passes one immutable runtime containing database initialization, transaction
+transformation, KNN, and committed-transaction publication to the writer. The
+wire and registry namespaces have no load-time callback registries, and merely
+requiring `seon.embed` cannot change a running writer.
 
 ## How to enable
 
@@ -117,8 +120,8 @@ export GEMINI_API_KEY=...  # the embeddings provider key
 (`seon.embed/embed-feature-enabled?` on the wire-server,
 `seon.agent/embed-retrieval-on?` on the pod). With it unset:
 
-- the wire-server's `::embed` on-ensure-db hook does nothing — NO Proximum index
-  is ever declared on the store, no `:seon/embedding` attr, no backfill;
+- the explicit embedding initializer declares no Proximum index or
+  `:seon/embedding` attribute and performs no backfill;
 - `augment-tx-with-embeddings` returns the tx unchanged (pass-through);
 - `backfill!` is a no-op;
 - the pod's prefetch never fires, so the assembled prompt is byte-identical to
@@ -135,47 +138,24 @@ later backfill pass. Retrieval quality grows as the corpus embeds.
 
 ## What is indexed
 
-By default, exactly ONE kind: functions, via the `:seon.fn/source` trigger
-attribute. The composed document is `<sym>\n<doc>\n<source>` (the FQ
+By default, exactly one attribute: `:seon.fn/source`. The composed document is
+`<sym>\n<doc>\n<source>` (the FQ
 `<ns>/<name>` symbol is the semantic anchor).
 
-## How to add a kind
+## How to add an attribute
 
-The mechanism is general — any entity carrying a registered trigger attribute is
-embedded and searchable. `seon.embed` ships an INACTIVE `my.kb` knowledge-base
-EXAMPLE (in a `comment` form) as the template a consumer copies. To make your
-own attribute searchable, do two things in your consumer namespace:
-
-1. Register your attribute schema(s):
-
-   ```clojure
-   (schema/register! :my.kb/id    [:string {:seon.db/identity true}])
-   (schema/register! :my.kb/title :string)
-   (schema/register! :my.kb/body  :string)
-   ```
-
-2. Point the embedder at the TRIGGER attribute, optionally with a compose-fn
-   `(fn [entity-map] -> str)` (defaults to the string value of the trigger
-   attribute when omitted):
-
-   ```clojure
-   (defn compose-kb-body
-     [{:my.kb/keys [title body]}]
-     (str (when (seq title) (str title "\n")) body))
-
-   (seon.embed/register-embeddable!
-     {:seon.embed/trigger-attr :my.kb/body
-      :seon.embed/compose-fn    compose-kb-body})
-   ```
-
-After that, any entity carrying `:my.kb/body` is embedded on write and
-searchable over the SAME single `:seon/embedding` attribute + single Proximum
-index. Scope a search to only that kind by passing a datalog `:where`:
+The mechanism is general: immutable pipeline data maps any string-valued
+trigger attribute to a qualified compose function. The shipped writer currently
+configures only `:seon.fn/source`. The lifecycle refactor will project additional
+trigger/symbol facts from the database before boot resolves them into functions;
+it must not restore a load-time registration atom. Every configured attribute
+shares the same `:seon/embedding` attribute and Proximum index. Scope a search
+to one domain by passing a Datalog `:where`:
 
 ```clojure
 (seon.embed/search-pull
   {:seon.embed/query "how do I open a cluster store"
-   :seon.embed/where '[[?e :my.kb/body]]})   ; type-scope: only kb rows
+   :seon.embed/where '[[?e :my.kb/body]]})
 ```
 
 `search` and `search-pull` accept `:seon.embed/where` (resolved to an eid set on
@@ -194,8 +174,9 @@ the embeddings provider.
 ## Anchors
 
 - Wire-server: `src/seon/embed.clj` (`embed-feature-enabled?`,
-  `register-embeddable!`, `augment-tx-with-embeddings`, `backfill!`, `install!`,
-  `knn-search`, the `::embed` on-ensure-db hook)
+  `default-embeddables`, `augment-tx-with-embeddings`, `backfill!`, `install!`,
+  `initialize-database!`, `knn-search`) and `src/seon/server/boot.clj`
+  (`writer-runtime`)
 - Pod: `src/seon/embed.cljs` (`search`, `search-pull`),
   `src/seon/ctx/relevant.cljs` (the `<relevant-source>` section),
   `src/seon/agent.cljs` (`embed-retrieval-on?`, `prefetch-and-render-prompt!`)

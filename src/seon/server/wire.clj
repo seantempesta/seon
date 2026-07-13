@@ -20,9 +20,11 @@
             [datahike.db.interface :as dbi]
             [hasch.core :as hasch]
             [seon.db.id :as id]
+            [seon.schema :as schema]
             [seon.server.codec :as codec]
             [seon.server.registry :as registry]
-            [seon.server.broadcast :as bcast])
+            [seon.server.broadcast :as bcast]
+            [taoensso.timbre :as log])
   (:import [datahike.db AsOfDB]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels ServerSocketChannel SocketChannel Channels])
@@ -32,7 +34,22 @@
 
 (defonce ^:private state (atom nil))
 
-(declare ambient-db-name)
+;;; --- Explicit writer runtime -----------------------------------------------
+
+(schema/register! ::database-initializer [:fn fn?])
+(schema/register! ::transaction-transform [:fn fn?])
+(schema/register! ::knn-search [:fn fn?])
+(schema/register! ::transaction-publisher [:fn fn?])
+(schema/register! ::ambient-db-name :string)
+(schema/register! ::connection-initialized? :boolean)
+(schema/register! ::writer-stopped? :boolean)
+(schema/register! ::runtime
+                  [:map
+                   [::database-initializer ::database-initializer]
+                   [::transaction-transform ::transaction-transform]
+                   [::knn-search ::knn-search]
+                   [::transaction-publisher ::transaction-publisher]
+                   [::ambient-db-name {:optional true} ::ambient-db-name]])
 
 ;; ---------- Configuration ----------
 
@@ -61,8 +78,6 @@
       (do (println "Unknown arg:" (first xs)) (System/exit 2)))))
 
 ;; ---------- DB lifecycle ----------
-
-(declare raw-broadcast-listener-fn)
 
 (def ^:private base-schema
   [{:db/ident       :seon.store.wire/id
@@ -220,44 +235,19 @@
           (range)
           tempids)))
 
-;; ---------- Embed-on-write seam ----------
+;; ---------- Explicit transaction transformation ----------
 ;;
-;; A tx-augmenter `(fn [db tx-data] -> tx-data')` that `seon.embed` installs at
-;; load time (via `register-tx-augmenter!`) to embed-on-write any entity
-;; carrying a registered trigger-attr. It scans the incoming tx-data, embeds the
-;; changed docs through Gemini BEFORE this handler's `d/transact` (off the write
-;; lock — the per-conn request thread, not the listener), and appends
-;; `:seon/embedding` + `:seon.embed/source-hash` assertions.
-;;
-;; Kept as a seam (not a hard `seon.embed` require) so `wire.clj` still loads on
-;; the plain :test/:dev JVM WITHOUT the Proximum `--add-modules
-;; jdk.incubator.vector` classpath. On the :writer classpath, `seon.server.boot`
-;; loads `seon.embed`, which installs the real augmenter here. When absent, the
-;; default is identity — transact is unchanged. Exceptions in the augmenter are
-;; swallowed (embedding must never wedge a write): a failed embed falls back to
-;; the un-augmented tx so the primary write still commits.
+;; Boot supplies one immutable `(fn [db tx-data] -> tx-data')` in `::runtime`.
+;; Nothing registers at namespace load, and a later require cannot change the
+;; transaction path under a running writer.
 
-(defonce ^:private !tx-augmenter (atom (fn [_db tx-data] tx-data)))
-
-(defn register-tx-augmenter!
-  "Install the embed-on-write tx-augmenter `(fn [db tx-data] -> tx-data')`.
-   Idempotent — the latest registration wins (a reload of `seon.embed`
-   re-installs in place). Returns nil."
-  [augment-fn]
-  (reset! !tx-augmenter augment-fn)
-  nil)
-
-(defn- augment-tx
-  "Run the registered tx-augmenter over `tx*` with the conn's current db. Embed
-   failures fall back to the un-augmented tx so the primary write still
-   commits."
-  [conn tx*]
+(defn- transform-transaction
+  "Apply the runtime transaction transform without blocking primary writes."
+  [runtime conn tx*]
   (try
-    (@!tx-augmenter (d/db conn) (vec tx*))
+    ((::transaction-transform runtime) (d/db conn) (vec tx*))
     (catch Throwable t
-      (binding [*out* *err*]
-        (println "[embed] tx-augmenter failed; transacting un-augmented:"
-                 (.getMessage t)))
+      (log/error t "writer transaction transform failed; committing primary facts without derived additions")
       tx*)))
 
 (defn- resolve-db-with-basis-t [conn basis-t-or-nil]
@@ -268,22 +258,19 @@
 
 ;; ---------- Request handlers ----------
 
-(defmulti handle-op (fn [_conn req] (:seon.store.wire/op req)))
+(declare initialize-connection!)
 
-(defmethod handle-op :default [_ req]
-  (err "protocol" (str "unknown op: " (pr-str (:seon.store.wire/op req)))))
-
-(defmethod handle-op "ping" [_ _]
+(defn- handle-ping [_runtime _conn _req]
   (ok {:seon.store.wire/pong true}))
 
-(defmethod handle-op "ensure-db" [_conn req]
+(defn- handle-ensure-db [runtime _conn req]
   ;; Materialize (or look up) a cluster's DB. Idempotent — a re-ensure of the
   ;; same db-name returns the existing conn's current basis-t without
   ;; reseeding. db-name's VALUE is a string on the wire (the CLUSTER name);
   ;; default backend :file (the settled pod-attachable default — pass
   ;; `backend "memory"` explicitly for a JVM-side ephemeral). On open,
-  ;; registry's on-ensure-db hooks install this conn's base schema,
-  ;; ::raw-broadcast listener, and optional embedding index.
+  ;; the runtime's fixed initializer installs this conn's base schema,
+  ;; raw transaction listener, and optional embedding index.
   (let [db-name (some-> (:seon.store.wire/db-name req) keyword)
         backend (some-> (:seon.store.wire/backend req) keyword)
         path    (:seon.store.wire/path req)]
@@ -291,7 +278,9 @@
       (err "protocol" "ensure-db requires :seon.store.wire/db-name")
       (let [entry (registry/ensure-db!
                    (cond-> {:seon.server.registry/db-name db-name
-                            :seon.server.registry/backend (or backend :file)}
+                            :seon.server.registry/backend (or backend :file)
+                            :seon.server.registry/initialize-connection!
+                            (partial initialize-connection! runtime)}
                      path (assoc :seon.server.registry/path path)))
             conn  (:seon.server.registry/conn entry)]
         (ok {:seon.store.wire/db-name (subs (str db-name) 1)
@@ -305,7 +294,7 @@
 ;; sees them, so an agent's capability surface stays one-cluster by
 ;; construction. `bin/seon cluster destroy` is the caller.
 
-(defmethod handle-op "list-dbs" [_conn _req]
+(defn- handle-list-dbs [_runtime _conn _req]
   (let [{:seon.server.registry/keys [sessions]} (registry/list-sessions {})]
     (ok {:seon.store.wire/dbs
          (mapv (fn [{:seon.server.registry/keys [db-name backend path]}]
@@ -314,7 +303,7 @@
                    path (assoc :seon.store.wire/path path)))
                sessions)})))
 
-(defmethod handle-op "remove-db" [_conn req]
+(defn- handle-remove-db [runtime _conn req]
   ;; Release the conn, drop the registry entry, and DELETE the database in
   ;; its store (`registry/delete-db!`). The process's own ambient cluster is
   ;; refused — removing the db under the ambient conn would wedge every
@@ -324,7 +313,7 @@
       (nil? db-name)
       (err "protocol" "remove-db requires :seon.store.wire/db-name")
 
-      (= (name db-name) (ambient-db-name))
+      (= (name db-name) (or (::ambient-db-name runtime) "default"))
       (err "protocol" (str "refusing to remove the ambient cluster db: "
                            (name db-name)))
 
@@ -335,7 +324,7 @@
              :seon.store.wire/removed removed?
              :seon.store.wire/deleted deleted?})))))
 
-(defmethod handle-op "q" [conn req]
+(defn- handle-query [_runtime conn req]
   (let [query   (:seon.store.wire/query req)
         args    (vec (:seon.store.wire/args req))
         basis-t (:seon.store.wire/basis-t req)
@@ -626,7 +615,7 @@
   [conn db-name since-t through-t]
   (replay-tx-page* conn db-name since-t through-t replay-page-size))
 
-;; ---------- ::raw-broadcast listener (the P1 hook) ----------
+;; ---------- Raw committed-transaction listener ----------
 ;;
 ;; Broadcast is no longer imperative at the transact call sites. Each conn
 ;; carries a `d/listen!`-registered `::raw-broadcast` callback that fires
@@ -636,31 +625,33 @@
 
 (defn raw-broadcast-listener-fn
   "Return a `d/listen!` callback `(fn [tx-report])` that emits the raw
-   db-name-tagged `tx` event for `db-name` via `bcast/broadcast!`. READ-ONLY;
-   never transacts. Exceptions are swallowed so a broadcast failure can't wedge
-   the writer."
-  [db-name]
+   db-name-tagged `tx` event through `publish-transaction!`. READ-ONLY; never
+   transacts. Publisher failures are logged without wedging the writer."
+  [publish-transaction! db-name]
   (let [db-name-str (if (keyword? db-name) (subs (str db-name) 1) (str db-name))]
     (fn [report]
       (try
         (let [wire-id (:seon.store.wire/id (:tx-meta report))
               r       (assoc (tx-report->ok-map report nil) ::wire-id wire-id)]
-          (bcast/broadcast! (ok-event-from-report db-name-str r)))
-        (catch Throwable _)))))
+          (publish-transaction! (ok-event-from-report db-name-str r)))
+        (catch Throwable throwable
+          (log/error throwable "writer transaction publication failed"
+                     {:seon.server.registry/db-name db-name}))))))
 
-;; Register the wire-server's ::raw-broadcast listener as an on-ensure-db hook,
-;; so EVERY conn the registry opens gets broadcast wired — without the registry
-;; requiring this ns. Runs at every ns load — registration is key-based idempotent
-;; (re-registering ::raw-broadcast replaces in place), so reloads can't
-;; accumulate copies AND can't strand an emptied hook vector (the 2026-06-10
-;; hook-loss bug: a defonce guard here blocked re-registration until JVM
-;; restart). Hook failures are caught + logged by `run-on-ensure-db-hooks!`.
-(registry/register-on-ensure-db-hook!
- {:seon.server.registry/hook-key ::raw-broadcast
-  :seon.server.registry/hook-fn
-  (fn [conn db-name]
-    (seed-base-schema! conn)
-    (d/listen conn ::raw-broadcast (raw-broadcast-listener-fn db-name)))})
+(defn initialize-connection!
+  "Initialize one connection from the immutable writer runtime."
+  {:malli/schema [:=> [:catn
+                       [::runtime ::runtime]
+                       [::connection :any]
+                       [:seon.server.registry/db-name :seon.server.registry/db-name]]
+                  [:map [::connection-initialized? ::connection-initialized?]]]}
+  [runtime conn db-name]
+  (seed-base-schema! conn)
+  (d/listen conn ::raw-broadcast
+            (raw-broadcast-listener-fn (::transaction-publisher runtime)
+                                       db-name))
+  ((::database-initializer runtime) conn db-name)
+  {::connection-initialized? true})
 
 (defn- ok-response-from-report
   [{wire-data ::wire-data
@@ -768,7 +759,7 @@
 
 (defn- transact-once!
   "Commit or recover one logical wire transaction under its durable id."
-  [conn request]
+  [runtime conn request]
   (locking conn
     (let [tx-data     (:seon.store.wire/tx-data request)
           tx-meta     (:seon.store.wire/tx-meta request)
@@ -797,7 +788,7 @@
           (let [caller-tempids (id/transaction-tempids
                                 {::id/db-value db-value
                                  ::id/transaction-data tx0})
-                tx*            (augment-tx conn tx0)
+                tx*            (transform-transaction runtime conn tx0)
                 tx-with-receipt (into (vec tx*)
                                       (tempid-receipts wire-id caller-tempids))
                 tx-meta*       (cond-> (or tx-meta {})
@@ -835,7 +826,7 @@
               "a generated identity candidate is already in use")
          :seon.store.wire/generated-candidate candidate))
 
-(defmethod handle-op "transact" [conn req]
+(defn- handle-transact [runtime conn req]
   (let [wire-id     (let [candidate (:seon.store.wire/id req)]
                       (when (and (string? candidate)
                                  (not (str/blank? candidate)))
@@ -849,7 +840,7 @@
       (try
         (when generated?
           (id/assert-allocation-writer! conn))
-        (ok (transact-once! conn transaction-request))
+        (ok (transact-once! runtime conn transaction-request))
         (catch Throwable throwable
           (let [server-error (:seon.server.wire/error (ex-data throwable))]
             (cond
@@ -877,7 +868,7 @@
               :else
               (throw throwable))))))))
 
-(defmethod handle-op "pull" [conn req]
+(defn- handle-pull [_runtime conn req]
   (let [selector (:seon.store.wire/selector req)
         eid      (:seon.store.wire/eid req)
         basis-t  (:seon.store.wire/basis-t req)
@@ -885,10 +876,68 @@
     (ok {:seon.store.wire/basis-t (basis-t-of db)
          :seon.store.wire/result  (d/pull db selector eid)})))
 
-(defmethod handle-op "schema" [conn _req]
+(defn- handle-schema [_runtime conn _req]
   (let [db (d/db conn)]
     (ok {:seon.store.wire/basis-t (basis-t-of db)
          :seon.store.wire/result  (:schema db)})))
+
+(defn- request-db-name
+  "Resolve the transaction-feed database name for one request."
+  [runtime req]
+  (let [db-name (some-> (:seon.store.wire/db-name req) keyword)
+        resolved (registry/resolve-conn
+                  (cond-> {}
+                    db-name (assoc :seon.server.registry/db-name db-name)))]
+    (if-let [resolved-name (:seon.server.registry/db-name resolved)]
+      (name resolved-name)
+      (or (::ambient-db-name runtime) "default"))))
+
+(defn- handle-replay-tx [runtime conn req]
+  (let [since-t   (:seon.store.wire/since-t req)
+        through-t (:seon.store.wire/through-t req)]
+    (if-not (some? since-t)
+      (err "protocol" "replay-tx requires :seon.store.wire/since-t")
+      (try
+        (let [db-name (request-db-name runtime req)
+              page    (replay-tx-page conn db-name since-t through-t)]
+          (assoc page
+                 :seon.store.wire/ok true
+                 :seon.store.wire/db-name db-name))
+        (catch clojure.lang.ExceptionInfo error
+          (err (or (:seon.store.wire/error-kind (ex-data error)) "protocol")
+               (.getMessage error)))))))
+
+(defn- handle-knn-search [runtime conn req]
+  (let [query (:seon.store.wire/query req)
+        k     (long (or (:seon.store.wire/k req) 10))
+        eids  (:seon.store.wire/eids req)
+        search-request
+        (cond-> {:seon.embed/query query :seon.embed/k k}
+          (seq eids) (assoc :seon.embed/eids (set eids)))
+        result ((::knn-search runtime) (d/db conn) search-request)]
+    (ok {:seon.store.wire/result (:seon.embed/hits result)})))
+
+(defn handle-op
+  "Handle one writer request through the explicit immutable runtime."
+  {:malli/schema [:=> [:catn
+                       [::runtime ::runtime]
+                       [::connection :any]
+                       [::request :map]]
+                  :map]}
+  [runtime conn req]
+  (case (:seon.store.wire/op req)
+    "ping"       (handle-ping runtime conn req)
+    "ensure-db"  (handle-ensure-db runtime conn req)
+    "list-dbs"   (handle-list-dbs runtime conn req)
+    "remove-db"  (handle-remove-db runtime conn req)
+    "q"          (handle-query runtime conn req)
+    "transact"   (handle-transact runtime conn req)
+    "pull"       (handle-pull runtime conn req)
+    "schema"     (handle-schema runtime conn req)
+    "replay-tx"  (handle-replay-tx runtime conn req)
+    "knn-search" (handle-knn-search runtime conn req)
+    (err "protocol" (str "unknown op: "
+                         (pr-str (:seon.store.wire/op req))))))
 
 (defn- resolve-conn-for-req
   "Resolve a request's target connection by `db-name`.
@@ -908,15 +957,15 @@
       ;; ::unresolved? — neither key present → ambient single-DB conn.
       :else {:conn ambient-conn})))
 
-(defn- handle-req [conn req]
+(defn- handle-req [runtime conn req]
   (try
     ;; `ensure-db` is a cluster-lifecycle op with no pre-existing target conn —
     ;; it resolves/creates its own conn from the registry. Everything else
     ;; routes to a conn resolved by db-name (or the ambient conn).
     (if (= "ensure-db" (:seon.store.wire/op req))
-      (handle-op conn req)
+      (handle-op runtime conn req)
       (let [{:keys [conn error]} (resolve-conn-for-req conn req)]
-        (or error (handle-op conn req))))
+        (or error (handle-op runtime conn req))))
     (catch clojure.lang.ExceptionInfo e
       (err "datahike" (str (.getMessage e) " " (pr-str (ex-data e)))))
     (catch Throwable t
@@ -924,7 +973,7 @@
 
 ;; ---------- Req server ----------
 
-(defn- start-req-server! [conn ^String path]
+(defn- start-req-server! [runtime conn ^String path]
   (try (.. (java.io.File. path) delete) (catch Throwable _))
   (let [addr (UnixDomainSocketAddress/of path)
         server (ServerSocketChannel/open StandardProtocolFamily/UNIX)]
@@ -941,7 +990,7 @@
                             (try
                               (loop []
                                 (when-let [req (codec/read-frame in)]
-                                  (let [resp (handle-req conn req)]
+                                  (let [resp (handle-req runtime conn req)]
                                     (codec/write-frame! out resp))
                                   (recur)))
                               (catch Throwable t
@@ -997,18 +1046,14 @@
     (.deleteOnExit (io/file port-file))
     server))
 
-;; ---------- Main ----------
+;; ---------- Main lifecycle ----------
 
-(defn ambient-db-name
-  "The db-name string the ambient conn broadcasts under (the same value
-   `ensure-db!` passed to its `::raw-broadcast` listener). The tx-feed ops
-   (`seon.server.boot`) use this to route a `replay-tx` with
-   no db-name to the ambient conn's pub events. Defaults to \"default\" when not
-   yet booted (matches `ensure-db!`'s fallback)."
-  []
-  (or (:ambient-db-name @state) "default"))
-
-(defn -main [& args]
+(defn start!
+  "Start the database writer from one immutable runtime and argument vector."
+  {:malli/schema [:=> [:catn [::runtime ::runtime]
+                       [::arguments [:sequential :string]]]
+                  [:map [::writer-stopped? ::writer-stopped?]]]}
+  [runtime args]
   ;; VERY FIRST statement (consumer ask 37): a breadcrumb before any other
   ;; work, so even a pre-`-main` death (e.g. a make-classpath2 hiccup in the
   ;; downstream launcher's pre-exec window) is distinguishable from a writer
@@ -1020,22 +1065,25 @@
         ;; default "default". Never a socket-path artifact.
         db-name-kw (keyword (or (:db-name opts) "default"))
         db-name    (name db-name-kw)
+        runtime    (assoc runtime ::ambient-db-name db-name)
         _    (println "[writer] starting with" opts)
         ;; The ambient conn is a REGISTRY entry like every other cluster db —
-        ;; one open mechanism. ensure-db! creates/connects and fires the
-        ;; on-ensure-db hooks (::raw-broadcast + schema/index seeds),
+        ;; one open mechanism. ensure-db! creates/connects and invokes the
+        ;; fixed runtime initializer (raw listener + schema/index seeds),
         ;; and db-name-routed requests to this cluster resolve to the SAME
         ;; conn the unrouted (ambient) path uses.
         entry (registry/ensure-db!
                (cond-> {:seon.server.registry/db-name db-name-kw
-                        :seon.server.registry/backend (keyword (:backend opts))}
+                        :seon.server.registry/backend (keyword (:backend opts))
+                        :seon.server.registry/initialize-connection!
+                        (partial initialize-connection! runtime)}
                  (and (:path opts) (not= "memory" (:backend opts)))
                  (assoc :seon.server.registry/path (:path opts))))
         conn  (:seon.server.registry/conn entry)
         _    (println "[writer] datahike ready; basis-t=" (basis-t-of (d/db conn)))
         pub-server (bcast/start-pub-server! (:pub-sock opts))
         _    (println "[writer] pub socket:" (:pub-sock opts))
-        req-server (start-req-server! conn (:req-sock opts))
+        req-server (start-req-server! runtime conn (:req-sock opts))
         _    (println "[writer] req socket:" (:req-sock opts))
         repl-server (when-let [p (:repl-port opts)]
                       (let [pf (repl-port-file {:opts opts :db-name db-name})
@@ -1043,9 +1091,7 @@
                         (println "[writer] dev REPL (127.0.0.1):" p "port-file:" pf)
                         s))]
     (reset! state {:conn conn :req-server req-server :pub-server pub-server
-                   :repl-server repl-server
-                   ;; the cluster name — the tx-feed replay op and the
-                   ;; remove-db ambient guard route/compare against it.
-                   :ambient-db-name db-name})
+                   :repl-server repl-server})
     (println "[writer] ready. PID=" (.pid (java.lang.ProcessHandle/current)))
-    (.. (Thread/currentThread) join)))
+    (.. (Thread/currentThread) join)
+    {::writer-stopped? true}))

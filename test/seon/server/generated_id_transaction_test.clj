@@ -5,7 +5,10 @@
             [datahike.api :as d]
             [datahike.datom :as dh.datom]
             [seon.db.id :as id]
+            [seon.server.boot :as boot]
             [seon.server.wire :as wire]))
+
+(def ^:private runtime (boot/writer-runtime))
 
 (def schema-tx
   [{:db/ident :thing/id
@@ -106,6 +109,7 @@
 (defn- allocate-op
   [conn tx-data candidates]
   (wire/handle-op
+   runtime
    conn
    {:seon.store.wire/op "transact"
     :seon.store.wire/id (str (random-uuid))
@@ -117,6 +121,7 @@
    (raw-transact-response conn tx-data nil))
   ([conn tx-data tx-meta]
    (#'wire/handle-req
+    runtime
     conn
     (cond-> {:seon.store.wire/op "transact"
              :seon.store.wire/id (str (random-uuid))
@@ -144,6 +149,7 @@
         value (compact-fixture "must-not-land")
         attempted (candidate :allocation/thing :thing/id value)
         response (#'wire/handle-req
+                  runtime
                   conn
                   {:seon.store.wire/op "transact"
                    :seon.store.wire/id "unconfigured-allocation"
@@ -549,6 +555,7 @@
         value (compact-fixture "fresh-candidate")
         attempted (candidate :allocation/thing :thing/id value)
         response (#'wire/handle-req
+                  runtime
                   conn
                   {:seon.store.wire/op "transact"
                    :seon.store.wire/id "unrelated-unique-conflict"
@@ -582,7 +589,7 @@
                               {:error :transact/upsert
                                :assertion [1 :thing/id value]}))
             response (with-redefs [d/transact (fn [& _] (throw failure))]
-                       (wire/handle-op conn request))]
+                       (wire/handle-op runtime conn request))]
         (is (= "generated-candidate-conflict"
                (:seon.store.wire/error-kind response)))
         (is (= attempted (:seon.store.wire/generated-candidate response)))))
@@ -596,7 +603,7 @@
                                :datom (dh.datom/datom
                                        1 :thing/id value 2)}))
             response (with-redefs [d/transact (fn [& _] (throw failure))]
-                       (wire/handle-op conn request))]
+                       (wire/handle-op runtime conn request))]
         (is (= "generated-candidate-conflict"
                (:seon.store.wire/error-kind response)))
         (is (= attempted (:seon.store.wire/generated-candidate response)))))))
@@ -628,9 +635,9 @@
                    :seon.store.wire/id wire-id
                    :seon.store.wire/tx-data [{:thing/id value}]
                    :seon.store.wire/generated-candidates manifest})
-        first-response (wire/handle-op conn (request [candidate-a]))
-        recovered-response (wire/handle-op conn (request [candidate-a]))
-        reused-response (wire/handle-op conn (request [candidate-b]))
+        first-response (wire/handle-op runtime conn (request [candidate-a]))
+        recovered-response (wire/handle-op runtime conn (request [candidate-a]))
+        reused-response (wire/handle-op runtime conn (request [candidate-b]))
         tx-entity (d/entity (d/db conn) [:seon.store.wire/id wire-id])]
     (is (true? (:seon.store.wire/ok first-response)))
     (is (true? (:seon.store.wire/recovered? recovered-response))
@@ -643,6 +650,7 @@
 (deftest manifest-less-transact-keeps-the-original-wire-contract
   (let [conn (mem-conn)
         response (wire/handle-op
+                  runtime
                   conn
                   {:seon.store.wire/op "transact"
                    :seon.store.wire/id "manifestless-contract"

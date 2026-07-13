@@ -18,17 +18,10 @@
    its store. Concurrent ensures on the same name race exactly once —
    losers see the winner's conn.
 
-   ## On-ensure-db extension point
-
-   `ensure-db!` invokes a per-conn extension point — an atom of keyed
-   `{::hook-key k ::hook-fn (fn [conn db-name])}` entries registered via
-   `register-on-ensure-db-hook!` (idempotent by key: re-registration
-   replaces in place) — after opening (and BEFORE handing back) a conn.
-   The wire-server registers its `::raw-broadcast` `d/listen!` here, and
-   optional database features register their initialization hooks without
-   coupling this namespace to their implementations. See
-   `docs/prds/agent-runtime/clusters-and-multi-db-wiring-2026-06-03.md` §5
-   and the platform-review hook-mechanism section."
+   Connection setup is an explicit dependency of `ensure-db!`, not a global
+   callback registry. The writer assembles one fixed initializer at boot and
+   passes it on every open. A failed initializer releases the new connection
+   and leaves no half-initialized registry entry."
   (:require [clojure.set :as set]
             [datahike.api :as d]
             [seon.db.id :as id]
@@ -56,7 +49,8 @@
                   [:map
                    [::db-name ::db-name]
                    [::backend {:optional true} ::backend]
-                   [::path {:optional true} ::path]])
+                   [::path {:optional true} ::path]
+                   [::initialize-connection! [:fn fn?]]])
 
 (schema/register! ::ensure-db!-response ::entry)
 
@@ -103,36 +97,12 @@
 (schema/register! ::get-conn-response
                   [:map [::conn {:optional true} ::conn]])
 
-;; On-ensure-db hook entries. `::hook-key` is the registration identity —
-;; re-registering the same key REPLACES the fn in place (idempotent across
-;; ns reloads, no defonce guard needed at call sites). The key doubles as
-;; the conventional `d/listen!` key the hook installs (for example,
-;; `::raw-broadcast`).
-(schema/register! ::hook-key :qualified-keyword)
-(schema/register! ::hook-fn [:fn fn?])
-(schema/register! ::hook-entry
-                  [:map
-                   [::hook-key ::hook-key]
-                   [::hook-fn ::hook-fn]])
-
-(schema/register! ::register-on-ensure-db-hook!-request ::hook-entry)
-(schema/register! ::register-on-ensure-db-hook!-response
-                  [:map [::hook-count :int]])
-
-;; `db-name` is a keyword for registry-opened conns, but the wire-server's
-;; ambient conn calls `run-on-ensure-db-hooks!` with its STRING name
-;; (`wire/-main`). Spec'd as reality until that mismatch is unified.
-(schema/register! ::hook-db-name [:or ::db-name :string])
-
-;; The ONE snapshot shape (test seam) — registry map + the on-ensure-db hook
-;; vector, captured together. In-memory only (it
-;; holds live conns/fns); never persisted, so there is no legacy on-disk
-;; shape to migrate — the old bare-map / hookless reader branches are gone
-;; (registry M22).
+;; The snapshot is an in-memory test seam over opaque connection resources.
+;; Connection initialization is immutable boot composition and therefore is
+;; deliberately not snapshot state.
 (schema/register! ::snapshot
                   [:map
-                   [::registry :map]
-                   [::hooks [:vector ::hook-entry]]])
+                   [::registry :map]])
 
 (schema/register! ::snapshot-registry-request [:map])
 (schema/register! ::snapshot-registry-response [:map [::snapshot ::snapshot]])
@@ -194,73 +164,6 @@
                ::backend backend}
         store-path (assoc ::path store-path)))))
 
-;;; --- On-ensure-db extension point ------------------------------------------
-;;;
-;;; A vector of `{::hook-key k ::hook-fn (fn [conn db-name])}` entries invoked
-;;; by `ensure-db!` exactly once per newly-opened conn, after `d/connect` and
-;;; before the entry is handed back. The wire-server registers its
-;;; `::raw-broadcast` `d/listen!` here; optional database features register
-;;; their own setup without `wire.clj` or this namespace requiring them.
-;;; Hooks fire on the create-winner's thread, under the `!registry` lock —
-;;; idempotent ensures fire hooks ONCE.
-;;;
-;;; Registration is KEY-BASED and idempotent: re-registering an existing
-;;; `::hook-key` replaces the fn in place. Call sites register at ns load with
-;;; NO defonce guard — every reload of the registering ns re-runs the
-;;; registration, so the hook set self-heals even if this ns is reloaded and
-;;; the vector were ever lost (the 2026-06-10 hook-loss bug: defonce guards in
-;;; wire/boot blocked re-registration until JVM restart).
-
-(defonce ^:private !on-ensure-db-hooks
-  ;; vector of ::hook-entry, in first-registration order
-  (atom []))
-
-(defn register-on-ensure-db-hook!
-  "Register a `(fn [conn db-name])` under `::hook-key`, invoked once per
-   newly-opened conn by `ensure-db!`. Idempotent by key: re-registering an
-   existing key replaces the fn in place (same position). Hooks run in
-   first-registration order. A hook typically calls
-   `(d/listen! conn <key> <callback>)` under its own distinct key. Datahike
-   fires every distinct-keyed listener. Returns `{::hook-count n}`."
-  {:malli/schema [:=> [:cat ::register-on-ensure-db-hook!-request]
-                  ::register-on-ensure-db-hook!-response]}
-  [{::keys [hook-key hook-fn]}]
-  (let [entry  {::hook-key hook-key ::hook-fn hook-fn}
-        hooks' (swap! !on-ensure-db-hooks
-                      (fn [hooks]
-                        (if (some #(= hook-key (::hook-key %)) hooks)
-                          (mapv #(if (= hook-key (::hook-key %)) entry %) hooks)
-                          (conj hooks entry))))]
-    {::hook-count (count hooks')}))
-
-(defn ^:no-doc reset-on-ensure-db-hooks!
-  "Test seam: drop all on-ensure-db hooks."
-  {:malli/schema [:=> [:cat] :nil]}
-  []
-  (reset! !on-ensure-db-hooks [])
-  nil)
-
-(defn run-on-ensure-db-hooks!
-  "Fire every registered on-ensure-db hook for `conn`/`db-name`. `ensure-db!`
-   calls this once per newly-opened registry conn (the ambient conn included —
-   `wire/-main` opens it through the registry). Test fixtures that build a
-   conn outside the registry call it directly to install the same listeners.
-   A hook exception is caught so one bad hook can't wedge the caller, but it
-   is LOGGED LOUDLY (never swallowed) — a failed hook means the conn is
-   missing its listener/schema and downstream ops will misbehave."
-  {:malli/schema [:=> [:catn
-                       [::conn ::conn]
-                       [::hook-db-name ::hook-db-name]]
-                  :nil]}
-  [conn db-name]
-  (doseq [{::keys [hook-key hook-fn]} @!on-ensure-db-hooks]
-    (try
-      (hook-fn conn db-name)
-      (catch Throwable t
-        (log/error t "on-ensure-db hook failed — conn is missing this hook's listener/schema"
-                   {::hook-key hook-key ::db-name db-name}))))
-  nil)
-
 ;;; --- Public API ------------------------------------------------------------
 
 (defn ensure-db!
@@ -271,9 +174,14 @@
    same entry.
 
    `backend` defaults to `:file`. `path` is optional; the store
-   layer derives a default from `db-name` when absent."
+   layer derives a default from `db-name` when absent.
+
+   `::initialize-connection!` is the writer's fixed boot-composed initializer.
+   It runs exactly once for a newly opened connection, before publication. A
+   failure releases the connection and is rethrown; no broken entry survives."
   {:malli/schema [:=> [:cat ::ensure-db!-request] ::ensure-db!-response]}
-  [{::keys [db-name backend path] :or {backend :file}}]
+  [{::keys [db-name backend path initialize-connection!]
+    :or {backend :file}}]
   ;; First check without locking — fast path for the common "already
   ;; registered" case. Avoids paying the create-entry! cost in the
   ;; swap! retry closure.
@@ -287,15 +195,15 @@
       ;; db-name's lifetime.
       (locking !registry
         (or (get @!registry db-name)
-            (let [entry (create-entry! db-name backend path)]
-              (swap! !registry assoc db-name entry)
-              ;; Fire the extension point ONCE for this newly-opened conn —
-              ;; inside the lock + create branch, so an idempotent re-ensure
-              ;; (fast path above) never re-runs hooks. This is where the
-              ;; wire-server's base schema/listener and optional feature setup
-              ;; get installed.
-              (run-on-ensure-db-hooks! (::conn entry) db-name)
-              entry)))))
+            (let [entry (create-entry! db-name backend path)
+                  conn  (::conn entry)]
+              (try
+                (initialize-connection! conn db-name)
+                (swap! !registry assoc db-name entry)
+                entry
+                (catch Throwable throwable
+                  (try (d/release conn) (catch Throwable _))
+                  (throw throwable))))))))
 
 (defn remove-db!
   "Release the registered conn for `db-name` and drop the entry.
@@ -491,30 +399,21 @@
 ;;; --- Test seam -------------------------------------------------------------
 
 (defn ^:no-doc snapshot-registry
-  "Test helper: capture the registry + on-ensure-db hooks for restoration.
-   Used by test fixtures to isolate test state.
-   Hooks are included so a fixture that resets them for isolation puts
-   the live JVM's hooks (such as ::raw-broadcast and ::embed) back on
-   restore instead of stranding an empty hook vector."
+  "Capture the live connection registry for isolated test restoration."
   {:malli/schema [:=> [:cat ::snapshot-registry-request] ::snapshot-registry-response]}
   [{}]
-  {::snapshot {::registry @!registry
-               ::hooks @!on-ensure-db-hooks}})
+  {::snapshot {::registry @!registry}})
 
 (defn ^:no-doc restore-registry!
-  "Test helper: replace the registry + hooks with `::snapshot`.
+  "Replace the connection registry from an isolated test snapshot.
 
-   Releases any conns that were added since the snapshot was taken, then
-   restores both atoms — a fixture that resets hooks for isolation
-   puts the live JVM's hooks (such as ::raw-broadcast and ::embed) back.
-   Speaks the ONE `::snapshot` shape `snapshot-registry` produces (M22:
-   the legacy bare-map and hookless reader branches are deleted —
-   snapshots are in-memory values, never persisted, so no old shape can
-   arrive from disk)."
+   Releases connections added since capture, then restores the exact opaque
+   registry entries. Initializer functions are boot dependencies, not registry
+   state, so they are neither captured nor restored."
   {:malli/schema [:=> [:cat ::restore-registry-request] ::restore-registry-response]}
   [{::keys [snapshot]}]
   (locking !registry
-    (let [{::keys [registry hooks]} snapshot
+    (let [{::keys [registry]} snapshot
           current     @!registry
           extra-names (set/difference (set (keys current))
                                       (set (keys registry)))]
@@ -522,5 +421,4 @@
         (when-let [{::keys [conn]} (get current n)]
           (try (d/release conn) (catch Throwable _))))
       (reset! !registry registry)
-      (reset! !on-ensure-db-hooks hooks)
       {::restored? true})))

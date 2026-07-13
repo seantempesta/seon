@@ -52,8 +52,11 @@ from the runtime namespace. The web host now has one normalized feed registry,
 database-fact-driven route invalidation, and one explicitly owned replica-feed
 attachment lifecycle. Focused proofs cover 46 evaluator/feed tests with 179
 assertions, 15 replica tests with 87 assertions, and 5 route tests with 74
-assertions. The atomic database-protocol vocabulary cut, remaining JVM callback
-registries, typed administration, live transition proof, and a published
+assertions. Writer database initialization, transaction transformation, KNN,
+and publication now enter through one immutable boot-composed runtime; the
+load-order callback registries are deleted, and initialization failure can no
+longer publish a half-initialized connection. The atomic database-protocol
+vocabulary cut, typed administration, live transition proof, and a published
 artifact manifest remain outstanding.
 
 The source-grounded system audits are complete and committed:

@@ -104,10 +104,11 @@ Search runs at two ends, one door each, and nothing in between:
 - **Literal** — `grep-graph` targets every text-carrying attr: fns, schemas,
   evals, messages, turns, and blob-backed prompts/replies; filterable by
   agent, time range, and attr.
-- **Semantic** — the ONE `:seon/embedding` index. `register-embeddable!`
-  points it at message bodies and eval narrations alongside fns and `my.kb`;
-  `search-pull` scopes KNN by a datalog `:where`. No second index, no
-  separate FTS engine — exact regex and semantic KNN cover the spectrum.
+- **Semantic** — the ONE `:seon/embedding` index. Writer boot resolves the
+  configured trigger attributes and compose symbols into one immutable
+  embedding pipeline; requiring a namespace never mutates it. `search-pull`
+  scopes KNN by a datalog `:where`. No second index or separate FTS engine —
+  exact regex and semantic KNN cover the spectrum.
 
 ## Error recording — fault-tagged datoms + the strict gate
 

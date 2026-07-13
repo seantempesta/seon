@@ -31,9 +31,11 @@ maintained Datahike/Konserve SHAs, and one SLF4J provider. `bin/test-writer`
 proves the twelve retained suites (107 tests/596 assertions). The unused query
 subscription engine and its second in-process subscriber bus are deleted; raw
 transaction fanout plus bounded replay is the one retained update channel.
-Protocol/database vocabulary convergence, remaining dead operation/backend
-pruning, typed administration, live transition proof, profiling, and
-artifact-manifest truth remain. The exact starting evidence is
+Protocol/database vocabulary convergence, typed administration, live transition
+proof, profiling, and artifact-manifest truth remain. Dead writer routing and
+load-order callback registries are gone; boot now supplies one immutable writer
+runtime, and a failed database initializer cannot publish a broken connection.
+The exact starting evidence is
 [[research/phase-1-baseline-2026-07-13]].
 
 Foundational gains already landed and are the baseline:

@@ -51,7 +51,7 @@
 (defn- op!
   "Run one direct handler call through the shared current request builder."
   [conn op extra]
-  (wire/handle-op conn (tu/request op extra)))
+  (wire/handle-op (:runtime *ctx*) conn (tu/request op extra)))
 
 (defn- with-wire-conn
   "Run one test against an isolated fixture with its schema installed once."

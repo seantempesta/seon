@@ -25,6 +25,12 @@
 
 (use-fixtures :each isolate-registry)
 
+(defn- ensure-db!
+  "Open a test database with an explicit no-op initializer."
+  [request]
+  (ss/ensure-db!
+   (assoc request ::ss/initialize-connection! (fn [_conn _db-name] nil))))
+
 (defn- session-count
   "Current registry size. Tests assert DELTAS against a baseline captured at
    test start — the live JVM's registry may legitimately hold ambient entries
@@ -45,7 +51,7 @@
 (deftest happy-path-create-get-transact-query-remove
   (testing "full lifecycle: ensure, get-conn, transact, query, remove"
     (let [db-name :test/happy
-          entry   (ss/ensure-db! {::ss/db-name db-name ::ss/backend :memory})
+          entry   (ensure-db! {::ss/db-name db-name ::ss/backend :memory})
           conn    (::ss/conn (ss/get-conn {::ss/db-name db-name}))]
       (is (some? entry))
       (is (= :memory (::ss/backend entry)))
@@ -66,7 +72,7 @@
 (deftest ensure-db-installs-the-canonical-allocation-writer
   (let [db-name :test/allocation-writer
         conn (::ss/conn
-              (ss/ensure-db! {::ss/db-name db-name ::ss/backend :memory}))]
+              (ensure-db! {::ss/db-name db-name ::ss/backend :memory}))]
     (is (nil? (id/assert-allocation-writer! conn)))
     (ss/remove-db! {::ss/db-name db-name})))
 
@@ -74,8 +80,8 @@
   (testing "calling ensure-db! twice with same db-name returns same conn"
     (let [baseline (session-count)
           name     :test/idem
-          e1       (ss/ensure-db! {::ss/db-name name ::ss/backend :memory})
-          e2       (ss/ensure-db! {::ss/db-name name ::ss/backend :memory})]
+          e1       (ensure-db! {::ss/db-name name ::ss/backend :memory})
+          e2       (ensure-db! {::ss/db-name name ::ss/backend :memory})]
       (is (identical? (::ss/conn e1) (::ss/conn e2))
           "second ensure must return the same identical conn")
       (is (= (inc baseline) (session-count))
@@ -92,7 +98,7 @@
                      (for [_ (range n)]
                        (future
                          @latch
-                         (ss/ensure-db! {::ss/db-name name
+                         (ensure-db! {::ss/db-name name
                                          ::ss/backend :memory}))))
           _         (deliver latch :go)
           entries   (mapv deref fs)
@@ -106,8 +112,8 @@
 
 (deftest list-sessions-reflects-state
   (testing "list-sessions returns all registered names; remove drops"
-    (ss/ensure-db! {::ss/db-name :test/a ::ss/backend :memory})
-    (ss/ensure-db! {::ss/db-name :test/b ::ss/backend :memory})
+    (ensure-db! {::ss/db-name :test/a ::ss/backend :memory})
+    (ensure-db! {::ss/db-name :test/b ::ss/backend :memory})
     (let [names (->> (::ss/sessions (ss/list-sessions {}))
                      (map ::ss/db-name)
                      set)]
@@ -140,9 +146,9 @@
 (deftest sessions-are-independent
   (testing "two registered DBs are isolated — datom in A invisible in B"
     (let [ca (::ss/conn
-              (ss/ensure-db! {::ss/db-name :test/iso-a ::ss/backend :memory}))
+              (ensure-db! {::ss/db-name :test/iso-a ::ss/backend :memory}))
           cb (::ss/conn
-              (ss/ensure-db! {::ss/db-name :test/iso-b ::ss/backend :memory}))]
+              (ensure-db! {::ss/db-name :test/iso-b ::ss/backend :memory}))]
       (d/transact ca [{:db/ident :test/k
                        :db/valueType :db.type/string
                        :db/cardinality :db.cardinality/one}])
@@ -165,7 +171,7 @@
           source-path (str root "/source")
           fork-path   (str root "/fork")]
       (try
-        (let [source-entry (ss/ensure-db! {::ss/db-name source-name
+        (let [source-entry (ensure-db! {::ss/db-name source-name
                                            ::ss/backend :file
                                            ::ss/path source-path})
               source-conn  (::ss/conn source-entry)
@@ -179,7 +185,7 @@
                                           ::ss/fork-name fork-name
                                           ::ss/at basis-t
                                           ::ss/path fork-path})
-              fork-entry   (ss/ensure-db! {::ss/db-name fork-name
+              fork-entry   (ensure-db! {::ss/db-name fork-name
                                            ::ss/backend :file
                                            ::ss/path fork-path})
               fork-conn    (::ss/conn fork-entry)]

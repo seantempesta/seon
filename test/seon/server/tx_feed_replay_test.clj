@@ -7,9 +7,8 @@
    - boot's `replay-tx` op exposes the same continuation facts and routing."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
-            [seon.server.boot]                 ; registers the raw tx-feed ops
-            [seon.server.wire :as wire]
-            [seon.server.registry :as registry]))
+            [seon.server.boot :as boot]
+            [seon.server.wire :as wire]))
 
 (set! *warn-on-reflection* true)
 
@@ -179,19 +178,16 @@
 
 (def ^:dynamic *conn* nil)
 (def ^:dynamic *ambient* nil)
+(def ^:dynamic *runtime* nil)
 
 (use-fixtures :each
   (fn [tfn]
     (let [conn    (mem-conn)
-          ambient (str "replay-wire-" (System/nanoTime))]
-      ;; Pin wire's ambient-db-name + install ::raw-broadcast under it, so a
-      ;; replay-tx with no agent-id/db-name resolves to the same db-name the
-      ;; commit broadcasts under (mirrors a cold wire-server boot).
-      (reset! @#'wire/state {:conn conn :ambient-db-name ambient})
-      (d/listen conn :seon.server.wire/raw-broadcast
-                (#'wire/raw-broadcast-listener-fn ambient))
-      (registry/run-on-ensure-db-hooks! conn ambient)
-      (binding [*conn* conn *ambient* ambient] (tfn)))))
+          ambient (str "replay-wire-" (System/nanoTime))
+          runtime (assoc (boot/writer-runtime)
+                         :seon.server.wire/ambient-db-name ambient)]
+      (wire/initialize-connection! runtime conn (keyword ambient))
+      (binding [*conn* conn *ambient* ambient *runtime* runtime] (tfn)))))
 
 (deftest replay-tx-op-returns-gap-directly
   ;; The pod's pub-socket adapter calls "replay-tx" on every (re)connect and
@@ -200,7 +196,7 @@
                                :db/cardinality :db.cardinality/one}])
         t1   (commit! *conn* [{:u3/n "a"}])
         t2   (commit! *conn* [{:u3/n "b"}])
-        resp (wire/handle-op *conn* {:seon.store.wire/op "replay-tx"
+        resp (wire/handle-op *runtime* *conn* {:seon.store.wire/op "replay-tx"
                                      :seon.store.wire/since-t t0})]
     (is (true? (:seon.store.wire/ok resp)))
     (is (= *ambient* (:seon.store.wire/db-name resp))
@@ -215,13 +211,13 @@
         "each replayed event is shaped like a live tx event")))
 
 (deftest replay-tx-op-requires-since-t
-  (let [resp (wire/handle-op *conn* {:seon.store.wire/op "replay-tx"})]
+  (let [resp (wire/handle-op *runtime* *conn* {:seon.store.wire/op "replay-tx"})]
     (is (false? (:seon.store.wire/ok resp)))
     (is (= "protocol" (:seon.store.wire/error-kind resp)))))
 
 (deftest replay-tx-op-rejects-an-impossible-watermark
   (let [current (bt *conn*)
-        resp    (wire/handle-op *conn* {:seon.store.wire/op "replay-tx"
+        resp    (wire/handle-op *runtime* *conn* {:seon.store.wire/op "replay-tx"
                                         :seon.store.wire/since-t (inc current)})]
     (is (false? (:seon.store.wire/ok resp)))
     (is (= "protocol" (:seon.store.wire/error-kind resp)))))

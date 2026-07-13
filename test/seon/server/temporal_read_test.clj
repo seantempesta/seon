@@ -3,9 +3,11 @@
   (:require
     [clojure.test :refer [deftest is]]
     [datahike.api :as d]
+    [seon.server.boot :as boot]
     [seon.server.wire :as wire]))
 
 (def ^:private value-attr :seon.server.temporal-read-test/value)
+(def ^:private runtime (boot/writer-runtime))
 
 (defn- with-history-conn
   "Call `f` with a fresh historical connection, then release it."
@@ -31,6 +33,7 @@
             first-t (-> first-report :db-after :max-tx)
             _ (d/transact conn [{value-attr "second"}])
             response (wire/handle-op
+                       runtime
                        conn
                        {:seon.store.wire/op "q"
                         :seon.store.wire/query

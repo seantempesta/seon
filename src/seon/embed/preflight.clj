@@ -71,7 +71,7 @@
 
 (defn- check-seon-embed
   "The SEON_EMBED master switch must be set, or the entire feature is inert
-   (no index declared, write-path augmenter is a pass-through, backfill no-ops)."
+   (no index declared, transaction transform passes through, backfill no-ops)."
   []
   (when-not (embed/embed-feature-enabled?)
     {:code :seon-embed-unset
@@ -106,9 +106,10 @@
 
 (defn- check-knn-selftest
   "Full-stack self-test against a THROWAWAY `:memory` datahike conn (never the
-   durable cluster store): install! the attr + Proximum index, register a
-   throwaway embeddable kind, write ONE row, then KNN-search for that row's own
-   text and assert the top-1 hit is the seeded entity. This is the only check
+   durable cluster store): install! the attr + Proximum index, add one
+   throwaway trigger to immutable pipeline data, write ONE row, then KNN-search
+   for that row's own text and assert the top-1 hit is the seeded entity. This
+   is the only check
    that proves the WHOLE chain — Gemini embed-on-write, the :proximum index
    registration, durable-vector restore-skeleton path, and KNN — actually
    works at jar runtime (it is the oracle for the research doc's gate that
@@ -128,16 +129,19 @@
       (d/create-database cfg)
       (let [conn (d/connect cfg)]
         (try
-          ;; register a throwaway embeddable kind so the one row embeds on write
-          (embed/register-embeddable! {:seon.embed/trigger-attr trigger})
           (embed/install! conn)
           ;; declare the trigger attr on the conn's :write schema
           (d/transact conn [{:db/ident       trigger
                              :db/valueType   :db.type/string
                              :db/cardinality :db.cardinality/one}])
           (let [probe   "the quick brown fox jumps over the lazy dog"
-                ;; embed-on-write via the registered tx-augmenter
-                augment (#'embed/augment-tx-with-embeddings (d/db conn)
+                embeddables
+                (assoc (embed/default-embeddables)
+                       trigger
+                       (fn [entity] (some-> (get entity trigger) str)))
+                ;; Run the same explicit transform writer boot composes.
+                augment (embed/augment-tx-with-embeddings
+                         embeddables (d/db conn)
                          [{:db/id "probe" trigger probe}])
                 report  (d/transact conn augment)
                 eid     (get-in report [:tempids "probe"])

@@ -12,7 +12,19 @@
    conn), the same harness style as `wire_props_test`."
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.server.boot :as boot]
             [seon.server.wire :as wire]))
+
+(def ^:private runtime (boot/writer-runtime))
+
+(defn- runtime-with
+  "Build an isolated writer runtime for one behavior under test."
+  [overrides]
+  (merge runtime
+         {::wire/database-initializer (fn [_conn _db-name] nil)
+          ::wire/transaction-transform (fn [_db tx-data] tx-data)
+          ::wire/transaction-publisher (fn [_event] nil)}
+         overrides))
 
 (defn- mem-conn
   "Fresh :memory conn. `flex` is :read or :write."
@@ -35,7 +47,7 @@
   "Call wire's `handle-op` \"transact\" directly. tx-data is native data,
    wire-id is the durable idempotency identity."
   [conn tx-data wire-id]
-  (wire/handle-op conn (cond-> {:seon.store.wire/op "transact"
+  (wire/handle-op runtime conn (cond-> {:seon.store.wire/op "transact"
                                 :seon.store.wire/tx-data tx-data}
                          wire-id (assoc :seon.store.wire/id wire-id))))
 
@@ -144,3 +156,60 @@
     (#'wire/seed-base-schema! conn)
     (is (= before (:max-tx (d/db conn)))
         "re-seeding an exact wire schema is a structural no-op")))
+
+(deftest transaction-transform-is-owned-by-the-passed-runtime
+  (let [conn-a    (mem-conn :read)
+        conn-b    (mem-conn :read)
+        runtime-a (runtime-with
+                   {::wire/transaction-transform
+                    (fn [_db tx-data]
+                      (conj tx-data {::derived-value "runtime-a"}))})
+        runtime-b (runtime-with
+                   {::wire/transaction-transform
+                    (fn [_db tx-data]
+                      (conj tx-data {::derived-value "runtime-b"}))})
+        request   (fn [wire-id value]
+                    {:seon.store.wire/op "transact"
+                     :seon.store.wire/id wire-id
+                     :seon.store.wire/tx-data [{::source-value value}]})]
+    (is (true? (:seon.store.wire/ok
+                (wire/handle-op runtime-a conn-a (request "runtime-a" "a")))))
+    (is (true? (:seon.store.wire/ok
+                (wire/handle-op runtime-b conn-b (request "runtime-b" "b")))))
+    (is (= #{"runtime-a"}
+           (set (d/q '[:find [?value ...]
+                       :where [_ :seon.server.wire-request-id-test/derived-value ?value]]
+                     (d/db conn-a)))))
+    (is (= #{"runtime-b"}
+           (set (d/q '[:find [?value ...]
+                       :where [_ :seon.server.wire-request-id-test/derived-value ?value]]
+                     (d/db conn-b)))))
+    (is (nil? (d/q '[:find ?entity .
+                     :where
+                     [?entity :seon.server.wire-request-id-test/derived-value "runtime-b"]]
+                   (d/db conn-a)))
+        "one writer runtime cannot change another runtime's transaction path")))
+
+(deftest connection-initialization-wires-the-runtime-publisher
+  (let [conn        (mem-conn :read)
+        initialized (atom [])
+        events      (atom [])
+        runtime*    (runtime-with
+                     {::wire/database-initializer
+                      (fn [_conn db-name] (swap! initialized conj db-name))
+                      ::wire/transaction-publisher #(swap! events conj %)})]
+    (is (= {::wire/connection-initialized? true}
+           (wire/initialize-connection! runtime* conn :cluster/publisher)))
+    (is (= [:cluster/publisher] @initialized))
+    (let [response (wire/handle-op
+                    runtime*
+                    conn
+                    {:seon.store.wire/op "transact"
+                     :seon.store.wire/id "published-once"
+                     :seon.store.wire/tx-data [{::source-value "published"}]})]
+      (is (true? (:seon.store.wire/ok response)))
+      (is (= 1 (count @events)))
+      (is (= "cluster/publisher"
+             (:seon.store.wire/db-name (first @events))))
+      (is (= "published-once"
+             (:seon.store.wire/id (first @events)))))))
