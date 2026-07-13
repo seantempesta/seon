@@ -10,7 +10,7 @@
      GET /data                  — the live datom browser: the kinds the
                                   cluster stored with row counts, drill-down
                                   to a kind's attrs + paginated rows.
-     GET /data/sse              — SSE stream that re-morphs `#data-browser`.
+     GET /data/feed             — shared gzip Datastar feed for the data view.
 
    These are the operator/developer introspection surfaces (raw prompt,
    cache-line audit, stored datoms) — distinct from the agent-view renderers
@@ -24,8 +24,7 @@
    Debug is dormant until its route is opened. It uses the same view-unit
    catalog, gzip feed registry, tx listener, backpressure, and morph framing as
    every normal page. Raw AI bodies and HTML twins are inactive stubs until the
-   operator expands them. The legacy data browser keeps a lazy listener only
-   while `/data` is open; it is the remaining page awaiting unit cutover."
+   operator expands them."
   (:require
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
@@ -42,23 +41,6 @@
     [seon.ui.html :as html]
     [seon.web.brand :as brand]
     [seon.web.datastar :as datastar]))
-
-;; ============================================================
-;; Remaining legacy /data connections. Agent debug has no registry here: it
-;; rides seon.web.datastar's one feed registry. The data listener installs on
-;; first open and uninstalls after the last close, so closed operator tools cost
-;; no per-transaction work.
-;; ============================================================
-
-(defonce ^:private !data-connections (atom []))
-(defonce ^:private !data-listener-installed? (atom false))
-
-(defn- add-data-conn! [conn]
-  (swap! !data-connections conj conn))
-
-(defn- remove-data-conn! [conn-id]
-  (swap! !data-connections
-         (fn [conns] (vec (remove #(= conn-id (:id %)) conns)))))
 
 (schema/register! ::ring-request :map)
 (schema/register! ::debug-format [:enum :ai :html])
@@ -863,9 +845,8 @@
 (defn- data-browser-fragment
   "The whole /data surface — ONE morph target (`#data-browser`),
    derived 100% from the DB at render time."
-  [{::keys [data-ns data-system?] :as params}]
-  (let [db (deref db/*conn*)
-        {::keys [ns-groups attr-counts]} (data-scan db data-system?)]
+  [db {::keys [data-ns data-system?] :as params}]
+  (let [{::keys [ns-groups attr-counts]} (data-scan db data-system?)]
     [:div {:id "data-browser" :class "flex flex-col gap-3"}
      [:div {:class "flex items-baseline gap-4 flex-wrap"}
       [:h1 {:class "text-sm font-mono font-semibold text-text-100"}
@@ -887,9 +868,8 @@
        (data-ns-index ns-groups params))]))
 
 (defn- data-page-html
-  "Full page for GET /data — the SSE stream carries this view's params so
-   every commit re-morphs the exact view the tab is on."
-  [params]
+  "Cheap shell for GET /data. The shared feed owns first paint and updates."
+  [params view-id]
   (let [b (brand/info)]
     (str
       "<!DOCTYPE html>"
@@ -907,13 +887,19 @@
           ;; snapshot) + scroll spacer under it.
           (header/system-header (deref db/*conn*))
           header/header-spacer
-          [:div {:data-init (str "@get('/data/sse" (data-qs params) "')")
+          [:div {:data-init (str "@get('/data/feed" (data-qs params)
+                                 (if (str/blank? (data-qs params)) "?" "&")
+                                 "view=" view-id "')")
                  :data-on:online__window
-                 (str "@get('/data/sse" (data-qs params) "')")}]
-          (data-browser-fragment params)]]))))
+                 (str "@get('/data/feed" (data-qs params)
+                      (if (str/blank? (data-qs params)) "?" "&")
+                      "view=" view-id "')")}]
+          [:div {:id "data-browser"
+                 :class "text-xs font-mono text-text-500"}
+           "loading data…"]]]))))
 
 ;; ============================================================
-;; SSE wire + the per-agent / per-data tx-listener.
+;; HTTP response helpers.
 ;; ============================================================
 
 (defn- write-status! [^js res code mime body]
@@ -946,73 +932,8 @@
                 :class "text-amber-500 hover:text-amber-300 text-xs underline"}
             "← all live agents"]]]]))))
 
-(defn- patch-fragment
-  "Wrap a hiccup fragment in a datastar-patch-elements SSE payload."
-  [hiccup]
-  (let [html-str (html/->string hiccup)]
-    (str "event: datastar-patch-elements\n"
-         "data: elements " (str/replace html-str "\n" "\ndata: elements ")
-         "\n\n")))
-
-(defn- push-data!
-  "Re-render and write the `#data-browser` morph fragment to every
-   connection watching /data. Each conn carries ITS view's params
-   (kind/page/system) — identical param sets render once."
-  []
-  (try
-    (doseq [[params cs] (group-by :params @!data-connections)]
-      (let [payload (patch-fragment (data-browser-fragment params))]
-        (doseq [{:keys [res]} cs]
-          (try (.write res payload)
-               (catch :default e
-                 (log/error-console! "seon.web.debug" "data write failed" e))))))
-    (catch :default e
-      (log/error-console! "seon.web.debug" "push-data! threw" e))))
-
-(defonce ^:private !data-pending? (atom false))
-
-(defn- schedule-data-push! []
-  (when (compare-and-set! !data-pending? false true)
-      (js/setTimeout
-        (fn []
-          (reset! !data-pending? false)
-          (when (seq @!data-connections) (push-data!)))
-        100)))
-
-(defn- on-data-tx [{:seon.db/keys [datoms]}]
-  (when (and (seq datoms) (seq @!data-connections))
-    (schedule-data-push!)))
-
-(defn- ensure-data-listener! []
-  (when (compare-and-set! !data-listener-installed? false true)
-    (db/listen! {:seon.db/key ::data-view :seon.db/handler on-data-tx})))
-
-(defn- release-data-listener! []
-  (when (and (empty? @!data-connections)
-             (compare-and-set! !data-listener-installed? true false))
-    (db/unlisten! {:seon.db/key ::data-view})))
-
-(defn uninstall!
-  "Remove the data browser's lazy listener, when present."
-  []
-  (when (compare-and-set! !data-listener-installed? true false)
-    (db/unlisten! {:seon.db/key ::data-view})))
-
-(defn ^:dev/before-load before-reload
-  "Uninstall the data browser's lazy listener before a hot reload."
-  []
-  (try (uninstall!) (catch :default _ nil)))
-
-(defn ^:dev/after-load after-reload
-  "Restore only the listener required by an already-open data browser."
-  []
-  (try
-    (when (seq @!data-connections) (ensure-data-listener!))
-    (catch :default _ nil)))
-
 ;; ============================================================
-;; HTTP handlers. Debug page/feed are database-derived core routes; /data is
-;; the one remaining static operator surface until its unit cutover.
+;; HTTP handlers.
 ;; ============================================================
 
 (defn- debug-feed-definition
@@ -1042,29 +963,20 @@
                            (:seon.web.debug/snapshot projection)
                            catalog active)]}))}))
 
-(defn- open-data-sse!
-  "SSE stream for the /data browser. The connection pins ITS view's query
-   params (kind/page/system) — `push-data!` re-renders exactly that view
-   on every commit. Registered under the `::data` pseudo-agent key."
-  [^js req ^js res]
-  (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
-                           "Cache-Control"     "no-cache"
-                           "Connection"        "keep-alive"
-                           "X-Accel-Buffering" "no"})
-  (.write res ": connected\n\n")
-  (let [params (data-params req)
-        conn   {:id (random-uuid) :res res :params params
-                :opened-at (js/Date.)}]
-    (add-data-conn! conn)
-    (ensure-data-listener!)
-    (.on req "close"
-         (fn []
-           (remove-data-conn! (:id conn))
-           (release-data-listener!)))
-    (try
-      (.write res (patch-fragment (data-browser-fragment params)))
-      (catch :default e
-        (log/error-console! "seon.web.debug" "data initial render failed" e)))))
+(defn- data-feed-definition
+  "One normalized render authority for an exact /data query projection."
+  [params view-id]
+  {:seon.web.feed/key [:seon.web.feed/data
+                       (some-> (::data-ns params) str)
+                       (::data-page params)
+                       (::data-system? params)]
+   :seon.web.feed/live? true
+   ::datastar/view-id view-id
+   :seon.web.feed/render-full
+   #(data-browser-fragment @db/*conn* params)
+   :seon.web.feed/render-change
+   (fn [_subscription {dbv :seon.db/db}]
+     {::datastar/elements [(data-browser-fragment dbv params)]})})
 
 (defn debug-page!
   "GET /agent/<id>/debug — serve a cheap shell with no debug projection.
@@ -1101,9 +1013,13 @@
   "GET /data — the live datom browser."
   [^js req ^js res]
   (write-status! res 200 "text/html; charset=utf-8"
-                 (data-page-html (data-params req))))
+                 (data-page-html (data-params req) (datastar/new-view-id))))
 
-(defn data-sse!
-  "GET /data/sse — the /data browser's SSE stream."
-  [^js req ^js res]
-  (open-data-sse! req res))
+(defn data-feed!
+  "GET /data/feed — open the shared gzip Datastar data-browser view."
+  {:malli/schema [:=> [:cat ::ring-request] :any]}
+  [r]
+  (let [params (data-params (:seon.http/node-req r))
+        view-id (or (datastar/request-view-id r)
+                    (datastar/new-view-id))]
+    (datastar/open-view-feed! r (data-feed-definition params view-id))))

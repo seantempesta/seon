@@ -8,7 +8,7 @@
    `/agent/{id}`, `/agent/{id}/feed`, `/agent/{id}/call`), and the static
    supplement carries
    the routes NOT yet seeded as datoms (static assets, the secondary POST
-   doors, `/sse`, the flat `/call`). The compiled router is a discardable
+   doors and the flat `/call`). The compiled router is a discardable
    cache keyed by the exact route projection plus the static supplement
    config. [[attach!]] installs one stable listener on the database connection;
    route transactions reconcile that cache synchronously, while unrelated
@@ -256,7 +256,7 @@
 ;; ============================================================
 ;; The static supplement — the routes NOT (yet) seeded as `:seon.route/*`
 ;; datoms, so nothing 404s: static assets, the secondary state-changing POST
-;; doors (each `:seon.route/same-origin`-gated), `/sse`, the back-compat
+;; doors (each `:seon.route/same-origin`-gated), the back-compat
 ;; flat `/call`, and the operator dev tools (`/data` + `/agent/{id}/debug`,
 ;; `seon.web.debug`). db->routes supplies the core routes; this supplies
 ;; the rest. FLAG (coordination → Core): the secondary POST doors below should
@@ -273,16 +273,15 @@
   "The non-core reitit routes, built from the injected handler set `h`
    (serve's handlers) + the directly-required `call` leaf handler."
   [h]
-  (let [{::keys [sse static chat stop resume clear log create-agent
+  (let [{::keys [static chat stop resume clear log create-agent
                  complete agent-run]} h]
     [["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/js/{*path}"  {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
-     ["/sse"         {:get {:handler (fn [r] (sse (node-req r) (node-res r)) hijacked)}}]
 
-     ;; The data browser is the remaining static operator route. Per-agent
-     ;; debug page/feed routes are ordinary database-derived core routes.
+     ;; The data browser is a static operator route, but its live projection
+     ;; rides the same canonical Datastar feed registry as every seeded view.
      ["/data"     {:get {:handler (fn [r] (debug/data-page! (node-req r) (node-res r)) hijacked)}}]
-     ["/data/sse" {:get {:handler (fn [r] (debug/data-sse! (node-req r) (node-res r)) hijacked)}}]
+     ["/data/feed" {:get {:handler debug/data-feed!}}]
 
      ["/chat"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler chat)}}]
      ["/stop"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler stop)}}]

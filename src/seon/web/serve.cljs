@@ -9,7 +9,6 @@
      GET  /                  → root.s agent view (seeded :seon.route/root → datastar)
      GET  /css/output.css    → resources/public/css/output.css
      GET  /js/datastar.js    → resources/public/js/datastar.js
-     GET  /sse               → SSE stream
      POST /chat              → A-8 (user message → message! with from = the user ref)
 
    ## Port discovery
@@ -19,15 +18,8 @@
    actually-bound port to `$SEON_PORT_FILE` (default
    `tmp/seon-port` — project-local per CLAUDE.md). External tooling
    reads this file rather than
-   parsing logs.
-
-   ## SSE connection registry
-
-   A-6 will register each open SSE stream's `response` object in
-   `!sse-connections` so the broadcast tx-listener can write
-   `datastar-patch-elements` events. Today A-5 ships the registry +
-   the connection-add-on-open + connection-remove-on-close lifecycle;
-   broadcast.cljs gets to assume the registry exists."
+   parsing logs. Live views use the one normalized gzip feed registry in
+   `seon.web.datastar`."
   (:require
     ["node:http" :as http]
     ["node:fs" :as fs]
@@ -53,19 +45,6 @@
 
 (defonce ^{:doc "The bound HTTP server, or nil before start!."}
   !server (atom nil))
-
-(defonce ^{:doc "Connection registry — atom of vector of
-                  `{:id <uuid> :res <http.ServerResponse>}` for every
-                  open SSE stream. A-6 reads this to fan out
-                  datastar-patch-elements events per tx."}
-  !sse-connections (atom []))
-
-(defn open-sse-connections
-  "The current vector of open SSE connections.
-
-   A-6 will close over this via `seon.db/listen!`."
-  []
-  @!sse-connections)
 
 ;; ============================================================
 ;; Agent creation — POST /agents/new
@@ -131,29 +110,6 @@
 ;; ============================================================
 ;; Route handlers
 ;; ============================================================
-
-(defn- open-sse! [^js req ^js res]
-  (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
-                           "Cache-Control"     "no-cache"
-                           "Connection"        "keep-alive"
-                           "X-Accel-Buffering" "no"})
-  ;; Flush headers immediately so the browser registers the stream.
-  ;; SSE-spec comment lines (begin with `:`) are ignored by clients.
-  (.write res ": connected\n\n")
-  ;; Register the connection so A-6's broadcast can write into it.
-  (let [conn {:id (random-uuid) :res res :opened-at (js/Date.)}]
-    (swap! !sse-connections conj conn)
-    (log/info-console! "seon.web.serve" "SSE OPEN"
-                       {:conn-id (str (:id conn))
-                        :total   (count @!sse-connections)
-                        :ua      (some-> req .-headers (aget "user-agent"))})
-    (.on req "close"
-         (fn []
-           (swap! !sse-connections
-                  (fn [conns] (vec (remove #(= (:id %) (:id conn)) conns))))
-           (log/info-console! "seon.web.serve" "SSE CLOSE"
-                              {:conn-id (str (:id conn))
-                               :remaining (count @!sse-connections)})))))
 
 ;; ============================================================
 ;; POST /chat — inject a user message into the named agent's log.
@@ -751,8 +707,7 @@
 ;; resolved late by the router's db->routes. Only the non-core supplement
 ;; handlers are injected here.
 (router/install!
-  {:seon.web.router/sse           open-sse!
-   :seon.web.router/static        serve-static!
+  {:seon.web.router/static        serve-static!
    :seon.web.router/chat          handle-chat!
    :seon.web.router/stop          handle-stop!
    :seon.web.router/resume        handle-resume!
@@ -846,8 +801,7 @@
           (when-let [old @!server]
             ;; Exists but not listening (closed/dead) — replace it.
             (try (.close old) (catch :default _ nil))
-            (reset! !server nil)
-            (reset! !sse-connections []))
+            (reset! !server nil))
           (let [;; LATE-BINDING wrapper: createServer captures the fn OBJECT,
                 ;; so the wrapper re-reads `router/handle-request` on every
                 ;; request. `handle-request` derefs the cached reitit
@@ -874,11 +828,10 @@
                                    :seon.web/port-file port-file}))))))))))
 
 (defn stop!
-  "Close the HTTP server, clear the connection registry. Returns nil."
+  "Close the HTTP server. Returns nil."
   []
   (router/detach!)
   (when-let [server @!server]
     (.close server)
     (reset! !server nil))
-  (reset! !sse-connections [])
   nil)
