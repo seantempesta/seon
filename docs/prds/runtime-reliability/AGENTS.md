@@ -118,9 +118,10 @@ process verbs are not primary UX.
   Datastar patch. Downstream ACME/Inspect caller migration remains before phase
   3 closes.
 - The direct Babashka hook has no runtime/nREPL dependency. It ignores events
-  outside this checkout before resolving paths, keeps syntax/Markdown/docstring
-  checks local, leaves Gemini review explicitly disabled by default, and bounds
-  its diagnostic log.
+  outside this checkout before loading config or writing artifacts, keeps
+  syntax/Markdown/docstring checks local, and bounds its diagnostic log under a
+  cross-process file lock. The automatic Gemini queue/retry mechanism is
+  deleted; model review is an explicit operator action.
 - The UDS writer has the stronger transaction contract: durable request
   receipts, same-ID recovery, bounded replay, overlap deduplication, and
   read-your-own-write. Datahike/Kabel has useful immutable-root sync but needs

@@ -7,7 +7,7 @@
 ;; 2. Loads configuration from .claude/seon-hook.edn
 ;; 3. Validates prospective Clojure syntax before an edit
 ;; 4. Runs the canonical Markdown/docstring linters after an edit
-;; 5. Runs the bounded optional review and live core-fault gate
+;; 5. Runs the live core-fault gate
 ;;
 ;; It has no running Seon-process dependency. Pure linter namespaces load
 ;; directly into Babashka only for the file type that needs them.
@@ -17,7 +17,6 @@
          '[clojure.edn :as edn]
          '[clojure.java.io :as io]
          '[clojure.string :as str]
-         '[babashka.process :as process]
 
          '[edamame.core :as edamame])
 
@@ -38,18 +37,6 @@
 
 (def config-path (root-file ".claude/seon-hook.edn"))
 
-;; bb-direct Gemini review (runtime-independent — needs no server or pod):
-;; the conventions rubric + a file-based rate-limit timestamp.
-(def conventions-path (root-file "docs/conventions.md"))
-(def last-review-path (root-file "tmp/.last-review"))
-;; Batch accumulator: absolute file-paths edited since the last review, one per
-;; line, deduped. A review covers this whole batch then clears it. bb is a fresh
-;; process per invocation, so this lives on disk (no in-memory atom possible).
-(def pending-review-path (root-file "tmp/.pending-review"))
-;; Hard cap so a permanently-failing agy call can't grow the batch unbounded:
-;; when the pending list exceeds this, the oldest entries are dropped.
-(def max-pending-files 50)
-
 ;;; ---------------------------------------------------------------------------
 ;;; Logging
 ;;; ---------------------------------------------------------------------------
@@ -57,22 +44,25 @@
 (def hook-log-path (root-file "logs/hook-debug.log"))
 (def hook-log-cap (* 1024 1024))
 
-(defn- bound-hook-log! []
-  (let [obsolete (root-file "logs/hook-debug.log.1")]
-    (when (.exists obsolete) (.delete obsolete)))
-  (when (and (.exists hook-log-path)
-             (> (.length hook-log-path) hook-log-cap))
-    (spit hook-log-path "")))
-
 (defn- log!
-  "Append one line to the bounded hook diagnostic log."
+  "Append one line to the bounded hook diagnostic log. Never throws."
   [& parts]
-  (let [log-dir (root-file "logs")]
-    (when-not (.exists log-dir) (.mkdirs log-dir))
-    (bound-hook-log!)
-    (spit hook-log-path
-          (str (java.util.Date.) " | " (clojure.string/join " | " parts) "\n")
-          :append true)))
+  (try
+    (let [log-dir (root-file "logs")
+          obsolete (root-file "logs/hook-debug.log.1")
+          line (.getBytes
+                (str (java.util.Date.) " | " (str/join " | " parts) "\n")
+                "UTF-8")]
+      (when-not (.exists log-dir) (.mkdirs log-dir))
+      (when (.exists obsolete) (.delete obsolete))
+      (with-open [raf (java.io.RandomAccessFile. hook-log-path "rw")
+                  channel (.getChannel raf)
+                  lock (.lock channel)]
+        (when (> (.size channel) hook-log-cap)
+          (.truncate channel 0))
+        (.position channel (.size channel))
+        (.write channel (java.nio.ByteBuffer/wrap line))))
+    (catch Exception _ nil)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Configuration
@@ -103,10 +93,12 @@
       (get-in event [:tool_input :filePath])))
 
 (defn- absolute-file-path [file-path]
-  (when file-path
-    (let [file (io/file file-path)]
-      (.getPath (.getCanonicalFile
-                  (if (.isAbsolute file) file (root-file file-path)))))))
+  (try
+    (when file-path
+      (let [file (io/file file-path)]
+        (.getPath (.getCanonicalFile
+                    (if (.isAbsolute file) file (root-file file-path))))))
+    (catch Exception _ nil)))
 
 (defn- repository-file?
   "True when the canonical event path is inside this script's checkout."
@@ -254,243 +246,6 @@
 
 
 ;;; ---------------------------------------------------------------------------
-;;; bb-direct Gemini review (runtime-independent)
-;;; ---------------------------------------------------------------------------
-;;;
-;;; A code review is an LLM call over the edited source + the conventions
-;;; rubric. It needs no running Seon process. We shell to the project's `agy`
-;;; Gemini CLI directly from bb for every supported source/Markdown edit.
-
-(defn- reviewable-file?
-  "True for source/test/markdown files worth an AI review."
-  [file-path]
-  (when file-path
-    (let [lower (str/lower-case file-path)]
-      (or (clojure-file? file-path)
-          (str/ends-with? lower ".md")))))
-
-(defn- review-rate-limited?
-  "File-based interval gate. bb is a fresh process per invocation, so the
-   last-review timestamp lives on disk (tmp/.last-review). Returns true if a
-   review happened within interval-seconds."
-  [interval-seconds]
-  (let [f (io/file last-review-path)]
-    (and (.exists f)
-         (try
-           (let [last-ms (Long/parseLong (str/trim (slurp f)))
-                 elapsed (- (System/currentTimeMillis) last-ms)]
-             (< elapsed (* 1000 interval-seconds)))
-           (catch Exception _ false)))))
-
-(defn- touch-last-review! []
-  (try
-    (let [f (io/file last-review-path)]
-      (when-not (.exists (.getParentFile f)) (.mkdirs (.getParentFile f)))
-      (spit f (str (System/currentTimeMillis))))
-    (catch Exception _ nil)))
-
-(defn- read-pending
-  "Read the pending-review accumulator as a vector of absolute paths (in edit
-   order, deduped on write). Never throws — returns [] on any problem."
-  []
-  (try
-    (let [f (io/file pending-review-path)]
-      (if (.exists f)
-        (->> (str/split-lines (slurp f))
-             (map str/trim)
-             (remove str/blank?)
-             (vec))
-        []))
-    (catch Exception _ [])))
-
-(defn- write-pending!
-  "Overwrite the accumulator with `paths` (already deduped/ordered)."
-  [paths]
-  (try
-    (let [f (io/file pending-review-path)]
-      (when-not (.exists (.getParentFile f)) (.mkdirs (.getParentFile f)))
-      (spit f (str (str/join "\n" paths) (when (seq paths) "\n"))))
-    (catch Exception _ nil)))
-
-(defn- accumulate-pending!
-  "Append `file-path` to the pending-review accumulator, deduped, preserving
-   edit order (an existing path moves to the most-recent position so the latest
-   edit isn't the one dropped under the cap). Drops oldest entries beyond
-   max-pending-files. Wrapped so a failure here NEVER blocks the edit."
-  [file-path]
-  (try
-    (when (seq file-path)
-      (let [current (vec (remove #(= % file-path) (read-pending)))
-            appended (conj current file-path)
-            capped (if (> (count appended) max-pending-files)
-                     (let [dropped (- (count appended) max-pending-files)]
-                       (log! "REVIEW_PENDING_CAP" (str "dropped=" dropped))
-                       (vec (drop dropped appended)))
-                     appended)]
-        (write-pending! capped)))
-    (catch Exception e
-      (log! "REVIEW_PENDING_ERROR" (.getMessage e))
-      nil)))
-
-(defn- clear-pending! []
-  (try
-    (let [f (io/file pending-review-path)]
-      (when (.exists f) (.delete f)))
-    (catch Exception _ nil)))
-
-(defn- load-conventions
-  "Load the conventions rubric, truncated."
-  [max-len]
-  (let [f (io/file conventions-path)]
-    (when (.exists f)
-      (let [s (slurp f)]
-        (if (> (count s) max-len)
-          (str (subs s 0 max-len) "\n[truncated]")
-          s)))))
-
-(defn- file-lang
-  [file-path]
-  (if (str/ends-with? (str/lower-case file-path) ".md") "markdown" "clojure"))
-
-(defn- render-file-block
-  "Render one delimited, fenced file block for the review prompt, truncating the
-   content to `max-code-length`."
-  [{:keys [path content]} max-code-length]
-  (let [code (if (> (count content) max-code-length)
-               (str (subs content 0 max-code-length) "\n[truncated]")
-               content)]
-    (str "=== EDITED FILE: " path " ===\n"
-         "```" (file-lang path) "\n" code "\n```\n")))
-
-(defn- build-review-prompt
-  "Build the Gemini review prompt: instruction + conventions rubric (once) + one
-   delimited, fenced block per edited file. `files` is a seq of {:path :content}.
-   The conventions rubric is emitted once at the top; each file is truncated to
-   max-code-length, and the whole batch is bounded to roughly max-code-length
-   total — once the running total is exceeded, remaining (oldest-first) files are
-   dropped with a log line so the batch can't blow the context.
-
-   Single-file arity [path content opts] delegates to the batch arity."
-  ([file-path content opts]
-   (build-review-prompt [{:path file-path :content content}] opts))
-  ([files {:keys [max-code-length max-conventions-length]
-           ;; The conventions rubric is the STANDARD being checked — the review
-           ;; must see ALL of it (a conformance check on 13% of the rules is
-           ;; useless). gemini-3.5-flash has a huge context window, so send the
-           ;; whole doc; the cap is pure safety headroom over its current ~30K.
-           :or {max-code-length 12000 max-conventions-length 60000}}]
-   (let [conventions (load-conventions max-conventions-length)
-         files (vec files)
-         ;; Keep the most-recent files (tail) when the batch overflows the total
-         ;; cap; drop oldest. Walk newest-first; once the running total would
-         ;; exceed max-code-length, stop and count the rest as dropped. Always
-         ;; keep at least the newest block.
-         {:keys [kept]}
-         (reduce (fn [{:keys [kept total]} f]
-                   (let [block-len (count (render-file-block f max-code-length))]
-                     (if (or (empty? kept) (<= (+ total block-len) max-code-length))
-                       {:kept (conj kept f) :total (+ total block-len)}
-                       (reduced {:kept kept :total total}))))
-                 {:kept [] :total 0}
-                 (reverse files))
-         dropped (- (count files) (count kept))
-         ordered (reverse kept)]
-     (when (pos? dropped)
-       (log! "REVIEW_BATCH_TRUNCATED" (str "dropped-oldest=" dropped)))
-     (str "You are a code reviewer for the Seon project. Review the edited "
-          "file(s) below for CORRECTNESS and CONVENTION CONFORMANCE. Be terse "
-          "and high-signal: point out only real issues (bugs, schema/spec gaps, "
-          "convention violations), not style preferences. Review each file "
-          "separately, naming it. If a file is fine, say so in one line.\n\n"
-          (when conventions
-            (str "=== PROJECT CONVENTIONS (rubric) ===\n" conventions "\n\n"))
-          (str/join "\n" (map #(render-file-block % max-code-length) ordered))))))
-
-(defn- call-agy
-  "Shell to the `agy` Gemini CLI, prompt via stdin. Bounded by timeout-ms;
-   returns review text on success, nil on failure/timeout. NEVER throws."
-  [prompt timeout-ms]
-  (try
-    (let [proc (process/process ["agy" "-p" ""]
-                                {:in prompt :out :string :err :string})
-          finished (deref proc timeout-ms ::timeout)]
-      (if (= finished ::timeout)
-        (do (process/destroy-tree proc)
-            (log! "REVIEW_TIMEOUT" (str timeout-ms "ms"))
-            nil)
-        (let [{:keys [exit out]} finished]
-          (if (and (zero? exit) (seq (str/trim (or out ""))))
-            (str/trim out)
-            (do (log! "REVIEW_AGY_FAIL" (str "exit=" exit)) nil)))))
-    (catch Exception e
-      (log! "REVIEW_AGY_EXCEPTION" (.getMessage e))
-      nil)))
-
-(defn- bb-review!
-  "bb-direct Gemini review (PostToolUse). Accumulates the just-edited file into
-   the pending-review batch, then — if not rate-limited — reviews the WHOLE batch
-   (every reviewable file edited since the last review) in ONE agy call.
-
-   Batch semantics: every reviewable edit appends to tmp/.pending-review (deduped,
-   bounded by max-pending-files). When the interval has elapsed, the pending list
-   is re-slurped (latest content) and reviewed as one prompt; on a SUCCESSFUL
-   review the accumulator is cleared. Rate-limited edits stay pending. A
-   timeout/failure leaves the batch pending (retried next interval) so no edit is
-   lost; the max-pending-files cap prevents a permatimeout from growing it
-   unbounded.
-
-   Honors :review config (enabled, interval-seconds, max lengths) and the
-   :feedback :max-length cap. Returns a feedback string or nil. Advisory — never
-   blocks the edit, never throws out."
-  [event config]
-  (try
-    (let [review-cfg (:review config)
-          file-path (absolute-file-path (get-file-path event))]
-      (when (and (= (:hook_event_name event) "PostToolUse")
-                 (get review-cfg :enabled false)
-                 (reviewable-file? file-path))
-        ;; 1. Accumulate BEFORE the rate-limit check — never lose an edit.
-        (accumulate-pending! file-path)
-        (let [interval (get review-cfg :interval-seconds 60)]
-          (if (review-rate-limited? interval)
-            (do (log! "REVIEW_RATE_LIMITED"
-                      (str "interval=" interval "s")
-                      (str "pending=" (count (read-pending))))
-                nil)
-            ;; 2. Not rate-limited → review the whole accumulated batch.
-            (let [pending (read-pending)
-                  files (->> pending
-                             (keep (fn [p]
-                                     (when-let [c (try (slurp p) (catch Exception _ nil))]
-                                       (when (seq c) {:path p :content c}))))
-                             (vec))]
-              (when (seq files)
-                (let [max-code (get review-cfg :max-code-length 12000)
-                      max-out (get-in config [:feedback :max-length] 1000)
-                      timeout-ms 60000
-                      prompt (build-review-prompt files {:max-code-length max-code})]
-                  (log! "REVIEW_BATCH"
-                        (str "count=" (count files))
-                        (str "files=" (str/join "," (map #(last (str/split (:path %) #"/")) files))))
-                  ;; Stamp BEFORE the (slow) call so concurrent edits within the
-                  ;; interval don't all fire reviews (they accumulate instead).
-                  (touch-last-review!)
-                  (let [text (call-agy prompt timeout-ms)]
-                    (if (seq text)
-                      (do
-                        ;; Clear ONLY on a successful review.
-                        (clear-pending!)
-                        (let [capped (if (> (count text) max-out)
-                                       (str (subs text 0 max-out) "\n[truncated]")
-                                       text)
-                              names (str/join ", " (map #(last (str/split (:path %) #"/")) files))]
-                          (str "Gemini review (" names "):\n" capped)))
-                      nil)))))))))
-    (catch Exception e
-      (log! "REVIEW_ERROR" (.getMessage e))
-      nil)))
-
-;;; ---------------------------------------------------------------------------
 ;;; Core-fault strict gate (error-blame-strict-gate, RULED 2026-07-04).
 ;;; seon.error/record! prints one `SEON-CORE-FAULT …` line into logs/pod.log
 ;;; per :seon.error/fault :core error (CORE bugs only — :agent faults never
@@ -572,47 +327,39 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn -main []
-  (try
-    (let [event (try
-                  (json/parse-string (slurp *in*) true)
-                  (catch Exception _ nil))
-          file-path (get-file-path event)
-          config (load-config)
-          event-name (:hook_event_name event)
-          tool-name (:tool_name event)
-          edit-event? (and (#{"PreToolUse" "PostToolUse"} event-name)
-                           (#{"Edit" "Write"} tool-name))
-          local-edit? (and edit-event? (repository-file? file-path))]
-      (when local-edit?
-        (log! event-name
-              (str "tool=" tool-name)
-              (str "session=" (or (:session_id event) "orchestrator"))
-              (str "file=" file-path)))
-
-      (cond
-        (not local-edit?)
-        (output! {:continue true})
-
-        (= event-name "PreToolUse")
-        (if (get-in config [:lint :enabled] true)
-          (if-let [blocked (validate-clojure-edit event)]
-            (do
-              (log! "CLOJURE_BLOCK" (:reason blocked))
-              (output! blocked))
-            (output! {:continue true}))
-          (output! {:continue true}))
-
-        :else
-        (let [feedback [(markdown-feedback event config)
-                        (docstring-feedback event config)
-                        (bb-review! event config)]
-              gate (core-fault-gate! event)]
-          (output! (or gate (feedback-response feedback))))))
-
-    (catch Exception e
-      (log! "ERROR" (.getMessage e))
-      (binding [*out* *err*]
-        (println "HOOK ERROR:" (.getMessage e)))
-      (output! {:continue true}))))
+  (let [event (try
+                (json/parse-string (slurp *in*) true)
+                (catch Exception _ nil))
+        file-path (get-file-path event)
+        event-name (:hook_event_name event)
+        tool-name (:tool_name event)
+        edit-event? (and (#{"PreToolUse" "PostToolUse"} event-name)
+                         (#{"Edit" "Write"} tool-name))
+        local-edit? (and edit-event? (repository-file? file-path))]
+    (if-not local-edit?
+      (output! {:continue true})
+      (try
+        (let [config (load-config)]
+          (log! event-name
+                (str "tool=" tool-name)
+                (str "session=" (or (:session_id event) "orchestrator"))
+                (str "file=" file-path))
+          (if (= event-name "PreToolUse")
+            (if (get-in config [:lint :enabled] true)
+              (if-let [blocked (validate-clojure-edit event)]
+                (do
+                  (log! "CLOJURE_BLOCK" (:reason blocked))
+                  (output! blocked))
+                (output! {:continue true}))
+              (output! {:continue true}))
+            (let [feedback [(markdown-feedback event config)
+                            (docstring-feedback event config)]
+                  gate (core-fault-gate! event)]
+              (output! (or gate (feedback-response feedback))))))
+        (catch Exception e
+          (log! "ERROR" (.getMessage e))
+          (binding [*out* *err*]
+            (println "HOOK ERROR:" (.getMessage e)))
+          (output! {:continue true}))))))
 
 (-main)
