@@ -49,24 +49,29 @@ def main():
     tool_pool = {}  # tool name -> tokens of its compact JSON def (+1 comma)
 
     for r in rows:
+        # v2 rows carry next-form target splits + json_target; v3 rows are
+        # export pass-throughs (target = the whole-turn bundle) + json_tools.
+        # Every column beyond context/cards/target is optional here.
         c = len(tok.encode(r["context"]))
         cards_text = "\n".join(r["cards"])
         k = len(tok.encode(cards_text)) if cards_text else 0
-        jt = json.dumps(r["json_tools"], separators=(",", ":"))
         enc_ctx.append(c)
         enc_total.append(c + 1 + k)
-        enc_json.append(c + 1 + len(tok.encode(jt)))
+        if "json_tools" in r:
+            jt = json.dumps(r["json_tools"], separators=(",", ":"))
+            enc_json.append(c + 1 + len(tok.encode(jt)))
         tgt.append(len(tok.encode(r["target"])))
         if "target_substantive" in r:
             tgt_sub.append(len(tok.encode(r["target_substantive"])))
-        tgt_bundle.append(len(tok.encode(r["target_bundle"])))
-        if r["json_target"] is not None:
+        if "target_bundle" in r:
+            tgt_bundle.append(len(tok.encode(r["target_bundle"])))
+        if r.get("json_target") is not None:
             tgt_json.append(len(tok.encode(
                 json.dumps(r["json_target"], separators=(",", ":")))))
         for card in r["cards"]:
             if card not in card_pool:
                 card_pool[card] = len(tok.encode(card + "\n"))
-        for tool in r["json_tools"]:
+        for tool in r.get("json_tools", []):
             if tool["name"] not in tool_pool:
                 tool_pool[tool["name"]] = len(tok.encode(
                     json.dumps(tool, separators=(",", ":")) + ","))
@@ -74,20 +79,20 @@ def main():
     n = len(rows)
     card_costs = sorted(card_pool.values())
     card_median = card_costs[len(card_costs) // 2]
-    tool_costs = sorted(tool_pool.values())
-    tool_median = tool_costs[len(tool_costs) // 2]
 
     def fit(budget, totals):
         fitting = sum(1 for x in totals if x <= budget)
-        return {"fits": fitting, "frac": round(fitting / n, 4)}
+        return {"fits": fitting, "frac": round(fitting / max(len(totals), 1), 4)}
 
     def unit_budget(budget, totals, unit_cost):
         extra = [max(0, budget - x) // unit_cost for x in totals]
         return {"dist": dist(extra),
-                "mean": round(sum(extra) / n, 1),
+                "mean": round(sum(extra) / max(len(extra), 1), 1),
                 "rows_with_zero": sum(1 for e in extra if e == 0)}
 
     def tgt_stats(xs):
+        if not xs:
+            return {"n": 0}
         over = sum(1 for x in xs if x > DEFAULT_MAX_DEC_LEN)
         return {"n": len(xs), "dist": dist(xs), "over_512": over,
                 "frac_over": round(over / len(xs), 4)}
@@ -98,9 +103,7 @@ def main():
         "encoder": {
             "context_alone": {"dist": dist(enc_ctx)},
             "context_sep_compact_cards": {"dist": dist(enc_total)},
-            "context_sep_json_tools": {"dist": dist(enc_json)},
             "fit_compact_cards": {str(b): fit(b, enc_total) for b in BUDGETS},
-            "fit_json_tools": {str(b): fit(b, enc_json) for b in BUDGETS},
         },
         "cards": {
             "distinct": len(card_pool),
@@ -109,20 +112,26 @@ def main():
             "additional_cards": {str(b): unit_budget(b, enc_total, card_median)
                                  for b in BUDGETS},
         },
-        "json_tools": {
-            "distinct": len(tool_pool),
-            "per_tool_tokens_dist": dist(tool_costs),
-            "median_tool_cost": tool_median,
-            "additional_tools": {str(b): unit_budget(b, enc_json, tool_median)
-                                 for b in BUDGETS},
-        },
         "decoder": {
-            "target_next_form": tgt_stats(tgt),
+            "target": tgt_stats(tgt),
             "target_substantive": tgt_stats(tgt_sub),
             "target_bundle": tgt_stats(tgt_bundle),
             "json_target_compact": tgt_stats(tgt_json),
         },
     }
+    if enc_json:
+        tool_costs = sorted(tool_pool.values())
+        tool_median = tool_costs[len(tool_costs) // 2]
+        results["encoder"]["context_sep_json_tools"] = {"dist": dist(enc_json)}
+        results["encoder"]["fit_json_tools"] = {
+            str(b): fit(b, enc_json) for b in BUDGETS}
+        results["json_tools"] = {
+            "distinct": len(tool_pool),
+            "per_tool_tokens_dist": dist(tool_costs),
+            "median_tool_cost": tool_median,
+            "additional_tools": {str(b): unit_budget(b, enc_json, tool_median)
+                                 for b in BUDGETS},
+        }
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out = OUT_DIR / "extended_fit.json"

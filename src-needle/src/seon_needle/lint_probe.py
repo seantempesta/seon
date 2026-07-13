@@ -314,6 +314,85 @@ def _map_entries(form):
     return out
 
 
+# Description-level primitive names — richer than the JSON-type mapping
+# (a keyword rides as a ":kw" string on the wire, but SAYING "keyword"
+# is the information the bare "string" type hides).
+_DESC_PRIMITIVES = dict(_PRIMITIVES)
+_DESC_PRIMITIVES.update({
+    ":keyword": "keyword", ":qualified-keyword": "qualified keyword",
+    ":symbol": "symbol", ":qualified-symbol": "qualified symbol",
+    ":inst": "timestamp", ":uuid": "uuid",
+})
+
+
+def _constraint_str(props):
+    parts = []
+    if ":min" in props:
+        parts.append(f"min {props[':min']}")
+    if ":max" in props:
+        parts.append(f"max {props[':max']}")
+    return f" ({', '.join(parts)})" if parts else ""
+
+
+def describe_schema(form, registry, depth=0):
+    """Compact type/constraint description of a malli form (display v3).
+
+    The enriched param description: the REGISTERED key schema's shape —
+    enum values, element types, min/max, or-branches, map keys — instead
+    of the bare keyword the sweep measured as dead weight. Returns the
+    plain JSON-type word when the shape adds nothing beyond it (the
+    caller drops that case, sweep-proven ≥ keyword descriptions)."""
+    if depth > 3:
+        return "value"
+    form = registry.resolve(form)
+    if isinstance(form, Kw):
+        if form in _DESC_PRIMITIVES:
+            return _DESC_PRIMITIVES[form]
+        if form == ":map":
+            return "map"
+        if form == ":any":
+            return "any value"
+        return str(form).lstrip(":").split("/")[-1]  # opaque ref — its name
+    if isinstance(form, list) and form:
+        head = form[0]
+        props = next((c for c in form[1:] if isinstance(c, dict)), {})
+        children = [c for c in form[1:] if not isinstance(c, dict)]
+        if head == ":enum":
+            return "one of: " + ", ".join(str(v) for v in children)
+        if head in _ARRAYISH:
+            inner = describe_schema(children[0], registry, depth + 1) if children else "value"
+            return f"array of {inner}"
+        if head == ":maybe":
+            inner = describe_schema(children[0], registry, depth + 1) if children else "value"
+            return f"{inner} or nil"
+        if head == ":and":
+            base = describe_schema(children[0], registry, depth + 1) if children else "value"
+            return base + _constraint_str(props)
+        if head == ":or":
+            return " | ".join(describe_schema(c, registry, depth + 1)
+                              for c in children[:4])
+        if head == ":tuple":
+            return ("tuple ["
+                    + ", ".join(describe_schema(c, registry, depth + 1)
+                                for c in children) + "]")
+        if head in (":map", ":map-of"):
+            keys = [str(k) for k, _o, _s in _map_entries(form)] if head == ":map" else []
+            if keys:
+                shown = ", ".join(keys[:6]) + (", ..." if len(keys) > 6 else "")
+                return f"map with keys {shown}"
+            return "map"
+        if head == ":=":
+            return f"always {children[0]}" if children else "fixed value"
+        if head == ":re":
+            pat = str(children[0])[:40] if children else ""
+            return f"string matching {pat}" if pat else "string"
+        if isinstance(head, Kw) and head in _DESC_PRIMITIVES:
+            return _DESC_PRIMITIVES[head] + _constraint_str(props)
+        if head in (":fn", ":function", ":=>"):
+            return "function"
+    return "value"
+
+
 def fn_to_tool(fn_row, registry):
     """Translate one :seon.fn row -> (needle tool dict, gap notes)."""
     sym = fn_row["seon.fn/sym"]
@@ -349,7 +428,12 @@ def fn_to_tool(fn_row, registry):
         jtype, note = registry.json_type(schema if schema is not None else orig_key)
         if note and note.startswith(("untranslated", "unresolved", "malli :any")):
             notes.append(f"{orig_key}: {note}")
-        desc = str(orig_key) + (f" — {note}" if note and note.startswith("one of") else "")
+        # Enriched description (display v3): the registered key schema's
+        # type/constraints — never the bare keyword (sweep: dead weight).
+        # A description that merely repeats the JSON type is dropped.
+        desc = describe_schema(schema if schema is not None else orig_key, registry)
+        if desc == jtype:
+            desc = ""
         p = {"type": jtype, "description": desc}
         if not optional:
             p["required"] = True
