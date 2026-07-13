@@ -345,6 +345,39 @@
 ;; scope — an opaque closure, hence :any.
 (schema/register! ::thunk      :any)
 (schema/register! ::tx-context :map)
+(schema/register! ::read-operation
+  [:enum
+   :seon.db.read.operation/query
+   :seon.db.read.operation/installed-schema
+   :seon.db.read.operation/pull
+   :seon.db.read.operation/entity
+   :seon.db.read.operation/entity-lazy
+   :seon.db.read.operation/history
+   :seon.db.read.operation/as-of
+   :seon.db.read.operation/since
+   :seon.db.read.operation/basis-t])
+(schema/register! ::read-source
+  [:enum :seon.db.read.source/captured :seon.db.read.source/foreign])
+(schema/register! ::read-request :map)
+(schema/register! ::read-result :any)
+(schema/register! ::read-replayable? :boolean)
+(schema/register! ::read-observation
+  [:map
+   [::read-operation ::read-operation]
+   [::read-source ::read-source]
+   [::read-request ::read-request]
+   [::read-result ::read-result]
+   [::read-replayable? ::read-replayable?]])
+(schema/register! ::read-observations [:vector ::read-observation])
+(schema/register! ::result :any)
+(schema/register! ::capture-reads-request
+  [:map
+   [::db ::db-val]
+   [::thunk 'fn?]])
+(schema/register! ::capture-reads-response
+  [:map
+   [::result ::result]
+   [::read-observations ::read-observations]])
 
 (defn with-agent
   "Establish an agent-id scope for the dynamic extent of `f`.
@@ -394,6 +427,32 @@
   {:malli/schema [:=> [:catn [::tx-context ::tx-context] [::thunk ::thunk]] :any]}
   [ctx-map f]
   (internal/run-with-tx-context ctx-map f))
+
+(defn capture-reads
+  "Run a synchronous thunk and return its result plus actual database reads.
+
+   The captured `:seon.db/read-observations` contain normalized immutable
+   request/result facts and never retain a database handle. A read against
+   `:seon.db/db` is replayable; lazy, temporal, foreign-db, function-valued, or
+   opaque host reads are recorded conservatively with
+   `:seon.db/read-replayable? false`.
+
+   Nested captures compose: the inner scope records its extent and every outer
+   scope also sees those reads. Promise-returning thunks are rejected because
+   this boundary is deliberately synchronous; returning before reads finish
+   would make the capture incomplete."
+  {:malli/schema [:=> [:cat ::capture-reads-request]
+                  ::capture-reads-response]}
+  [{::keys [db thunk]}]
+  (let [bucket (atom [])
+        result (internal/run-with-read-capture db bucket thunk)]
+    (when (instance? js/Promise result)
+      (throw (ex-info
+               "seon.db/capture-reads requires a synchronous thunk"
+               {::error :seon.db/asynchronous-read-capture
+                :seon.error/kind :user-input})))
+    {::result result
+     ::read-observations @bucket}))
 
 ;; ---------------------------------------------------------------------------
 ;; Write path
@@ -623,6 +682,17 @@
 
 (declare assert-known-query-attrs!)
 
+(defn- execute-query
+  "Run one normalized query and record it only when a capture scope is active."
+  [db q inputs]
+  (assert-known-query-attrs! db q)
+  (let [result (apply d/q q db inputs)]
+    (when-let [captures (internal/current-read-captures)]
+      (internal/record-read!
+        captures :seon.db.read.operation/query db
+        {::query q ::args (vec inputs)} result true))
+    result))
+
 (defn query
   "Ask the database a question: find, count, or sum stored facts.
 
@@ -698,20 +768,24 @@
       ;; map-in request: a map that CONTAINS ::query
       (let [{::keys [query args db conn] :or {conn *conn* args []}} a0
             db (or db @(internal/resolve-conn conn))]
-        (assert-known-query-attrs! db query)
-        (apply d/q query db args))
+        (execute-query db query args))
       ;; positional: a0 IS the query (vector / string / raw map-form query).
       ;; If the next arg is a db VALUE it's the explicit db; otherwise the
       ;; db auto-injects from *conn* and all trailing args are :in inputs.
       (let [q a0]
         (if (internal/db-value? (second args))
           (let [[_ db & inputs] args]
-            (assert-known-query-attrs! db q)
-            (apply d/q q db inputs))
+            (execute-query db q inputs))
           (let [db     @(internal/resolve-conn *conn*)
                 inputs (rest args)]
-            (assert-known-query-attrs! db q)
-            (apply d/q q db inputs)))))))
+            (execute-query db q inputs)))))))
+
+(defn- installed-schema*
+  "Read installed schema without crossing the public observation boundary."
+  [db]
+  (or (when (some? db)
+        (try (dbi/-schema db) (catch :default _ nil)))
+      {}))
 
 (defn installed-schema
   "The datahike schema map actually INSTALLED on `db`.
@@ -755,9 +829,11 @@
      ;   — registered, queryable, just no rows yet. Reuse it; don't fork."
   {:malli/schema [:=> [:catn [::db :any]] :map]}
   [db]
-  (or (when (some? db)
-        (try (dbi/-schema db) (catch :default _ nil)))
-      {}))
+  (let [result (installed-schema* db)]
+    (when-let [captures (internal/current-read-captures)]
+      (internal/record-read!
+        captures :seon.db.read.operation/installed-schema db {} result true))
+    result))
 
 ;; --- pull-pattern guard -----------------------------------------------------
 ;; datahike-cljs throws the cryptic resolve-datom error above when an
@@ -858,7 +934,7 @@
   [db q]
   (when-let [clauses (query-where-clauses q)]
     (let [named     (distinct (mapcat where-clause-attrs clauses))
-          installed (installed-schema db)
+          installed (installed-schema* db)
           unknown   (->> named
                          (remove system-pull-attr?)
                          (remove #(contains? installed %))
@@ -936,7 +1012,7 @@
    installed-but-absent attrs)."
   [db pattern ref]
   (let [named       (pull-pattern-attrs pattern)
-        installed   (installed-schema db)
+        installed   (installed-schema* db)
         uninstalled (->> named
                          (map forward-attr)
                          (remove system-pull-attr?)
@@ -965,6 +1041,16 @@
       (let [pattern' (filter-pull-pattern pattern (set registered))]
         (when (seq pattern')
           (d/pull db pattern' ref))))))
+
+(defn- execute-pull
+  "Run one guarded pull and capture its normalized request/result when bound."
+  [db pattern ref]
+  (let [result (guarded-pull db pattern ref)]
+    (when-let [captures (internal/current-read-captures)]
+      (internal/record-read!
+        captures :seon.db.read.operation/pull db
+        {::pull-pattern pattern ::ref ref} result true))
+    result))
 
 (defn pull
   "Pull an entity by ref using a pull pattern (sync).
@@ -1011,11 +1097,26 @@
   ([req]
    (let [{::keys [pull-pattern ref db conn] :or {conn *conn*}} req
          db (or db @(internal/resolve-conn conn))]
-     (guarded-pull db pull-pattern ref)))
+     (execute-pull db pull-pattern ref)))
   ([selector eid]
-   (guarded-pull @(internal/resolve-conn *conn*) selector eid))
+   (execute-pull @(internal/resolve-conn *conn*) selector eid))
   ([db selector eid]
-   (guarded-pull db selector eid)))
+   (execute-pull db selector eid)))
+
+(defn- raw-entity
+  "Resolve a Datahike Entity without crossing the public observation boundary."
+  [db ref]
+  (d/entity db ref))
+
+(defn- execute-entity-lazy
+  "Resolve a lazy Entity and record a deliberately non-replayable read."
+  [db ref]
+  (let [result (raw-entity db ref)]
+    (when-let [captures (internal/current-read-captures)]
+      (internal/record-read!
+        captures :seon.db.read.operation/entity-lazy db
+        {::ref ref} result false))
+    result))
 
 (defn entity-lazy
   "INTERNAL: return the RAW datahike Entity for a ref (lazy, map-like).
@@ -1034,10 +1135,10 @@
    (if (map? req)
      (let [{::keys [ref db conn] :or {conn *conn*}} req
            db (or db @(internal/resolve-conn conn))]
-       (d/entity db ref))
-     (d/entity @(internal/resolve-conn *conn*) req)))
+       (execute-entity-lazy db ref))
+     (execute-entity-lazy @(internal/resolve-conn *conn*) req)))
   ([db eid]
-   (d/entity db eid)))
+   (execute-entity-lazy db eid)))
 
 (defn- touch->map
   "Touch a datahike Entity and return a PLAIN map — `:db/id` plus every
@@ -1049,6 +1150,15 @@
   (when e
     (dentity/touch e)
     (into {:db/id (:db/id e)} e)))
+
+(defn- execute-entity
+  "Resolve and touch an entity under one public read observation."
+  [db ref]
+  (let [result (touch->map (raw-entity db ref))]
+    (when-let [captures (internal/current-read-captures)]
+      (internal/record-read!
+        captures :seon.db.read.operation/entity db {::ref ref} result true))
+    result))
 
 (defn entity
   "Fetch one stored record by its id, with all its fields.
@@ -1078,8 +1188,14 @@
    [:function
     [:=> [:cat [:or ::entity-request :any]] :any]
     [:=> [:catn [::db ::db-val] [::eid :any]] :any]]}
-  ([req]      (touch->map (entity-lazy req)))
-  ([db eid]   (touch->map (entity-lazy db eid))))
+  ([req]
+   (if (map? req)
+     (let [{::keys [ref db conn] :or {conn *conn*}} req
+           db (or db @(internal/resolve-conn conn))]
+       (execute-entity db ref))
+     (execute-entity @(internal/resolve-conn *conn*) req)))
+  ([db eid]
+   (execute-entity db eid)))
 
 ;; ---------------------------------------------------------------------------
 ;; Temporal — derive a db VALUE at another point in time. Reads normally run
@@ -1094,9 +1210,10 @@
 (schema/register! ::time-point :any)
 
 (defn history
-  "A db value spanning ALL of time — assertions and retractions.
+  "Get a db value spanning all of time, retractions included.
 
-   Every datom ever, not just the now-true view. Read it with a 5-tuple `:where` so the tx and
+   Every datom ever asserted or retracted, not just the now-true view.
+   Read it with a 5-tuple `:where` so the tx and
    the add/retract flag bind. The db is injected from your one connection;
    omit it:
 
@@ -1108,11 +1225,16 @@
   {:malli/schema [:function
                   [:=> [:cat] :any]
                   [:=> [:catn [::db ::db-val]] :any]]}
-  ([]   (history @(internal/resolve-conn *conn*)))
-  ([db] (d/history db)))
+  ([] (history @(internal/resolve-conn *conn*)))
+  ([db]
+   (let [result (d/history db)]
+     (when-let [captures (internal/current-read-captures)]
+       (internal/record-read!
+         captures :seon.db.read.operation/history db {} result false))
+     result)))
 
 (defn as-of
-  "A db value as it was AT `t` — time-travel for reads.
+  "Get the database as it was at time `t`, for time-travel reads.
 
    `t` is a tx-id, Date, or txInstant. query/pull/entity against it see only what was true then:
 
@@ -1123,13 +1245,20 @@
   {:malli/schema [:function
                   [:=> [:cat ::time-point] :any]
                   [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]}
-  ([t]    (as-of @(internal/resolve-conn *conn*) t))
-  ([db t] (d/as-of db t)))
+  ([t] (as-of @(internal/resolve-conn *conn*) t))
+  ([db t]
+   (let [result (d/as-of db t)]
+     (when-let [captures (internal/current-read-captures)]
+       (internal/record-read!
+         captures :seon.db.read.operation/as-of db
+         {::time-point t} result false))
+     result)))
 
 (defn since
-  "The complement of [[as-of]] — a db value of datoms added after `t`.
+  "Get a db value of only the datoms added after time `t`.
 
-   Diff \"what changed since\" a tx you remembered:
+   The complement of [[as-of]] — diff \"what changed since\" a tx you
+   remembered:
 
      (db/query '[:find ?e :where [?e ::status :done]] (db/since last-seen-tx))
 
@@ -1137,8 +1266,14 @@
   {:malli/schema [:function
                   [:=> [:cat ::time-point] :any]
                   [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]}
-  ([t]    (since @(internal/resolve-conn *conn*) t))
-  ([db t] (d/since db t)))
+  ([t] (since @(internal/resolve-conn *conn*) t))
+  ([db t]
+   (let [result (d/since db t)]
+     (when-let [captures (internal/current-read-captures)]
+       (internal/record-read!
+         captures :seon.db.read.operation/since db
+         {::time-point t} result false))
+     result)))
 
 ;; The two ENDS of a time-travel domain (the `as-of`/`since` `t` range).
 ;; `basis-t` is the latest tx reflected in a db value — the \"now\" end of a
@@ -1160,10 +1295,15 @@
   {:malli/schema [:function
                   [:=> [:cat] ::time-point]
                   [:=> [:catn [::db ::db-val]] ::time-point]]}
-  ([]   (basis-t @(internal/resolve-conn *conn*)))
-  ([db] (if (instance? AsOfDB db)
-          (dbi/-time-point db)
-          (dbi/-max-tx db))))
+  ([] (basis-t @(internal/resolve-conn *conn*)))
+  ([db]
+   (let [result (if (instance? AsOfDB db)
+                  (dbi/-time-point db)
+                  (dbi/-max-tx db))]
+     (when-let [captures (internal/current-read-captures)]
+       (internal/record-read!
+         captures :seon.db.read.operation/basis-t db {} result true))
+     result)))
 
 ;; ---------------------------------------------------------------------------
 ;; Listeners

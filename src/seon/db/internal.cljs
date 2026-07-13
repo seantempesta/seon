@@ -17,6 +17,7 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [datahike.db.interface :as dbi]
+    [datahike.impl.entity :as dentity]
     [malli.core :as m]
     [seon.ai.tokens :as tokens]
     [seon.db :as-alias db]
@@ -55,6 +56,15 @@
     (AsyncLocalStorage.)))
 
 (defonce agent-id-als
+  (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
+    (AsyncLocalStorage.)))
+
+(defonce read-capture-als
+  ;; Runtime-only stack of `[captured-db bucket-atom]` pairs. Separate from
+  ;; transaction/agent context: read capture is a synchronous render concern,
+  ;; not durable provenance or identity. AsyncLocalStorage makes nested scopes
+  ;; compositional and prevents a future Promise fiber from sharing a global
+  ;; collector accidentally.
   (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
     (AsyncLocalStorage.)))
 
@@ -97,6 +107,26 @@
    (ALS `.exit`). The outer scope restores on return."
   [f]
   (.exit agent-id-als f))
+
+(defn current-read-captures
+  "The active read-capture stack, or nil outside a capture scope.
+
+   Kept internal so an unobserved `seon.db` read pays one `getStore` and
+   allocates no request/event data."
+  []
+  (let [captures (.getStore read-capture-als)]
+    (when (some? captures) captures)))
+
+(defn run-with-read-capture
+  "Run synchronous `f` with a fresh read bucket relative to `captured-db`.
+
+   Nested scopes append to the active stack. A read is therefore recorded in
+   both the inner bucket and every enclosing bucket; each normalizes database
+   source relative to its own captured value."
+  [captured-db bucket f]
+  (.run read-capture-als
+        (conj (vec (or (current-read-captures) [])) [captured-db bucket])
+        f))
 
 ;; ---------------------------------------------------------------------------
 ;; Persisted transaction provenance. The generic ALS map remains useful to
@@ -525,10 +555,12 @@
   (tokens/bounded-pr-str v 25))
 
 (defn normalize-entity-ref-keys
-  "Rewrite the taught entity-identity shorthand — an entity map keyed by
+  "Rewrite `:seon.db/ref`-keyed entity maps into datahike `:db/id` slots.
+
+   The taught entity-identity shorthand — an entity map keyed by
    `:seon.db/ref` (`{:seon.db/ref [:seon.agent/id \"…\"] :attr v}`, the
-   transact-onto-your-own-entity pattern) — into datahike's native `:db/id`
-   slot, recursively through nested entity maps and tx vectors.
+   transact-onto-your-own-entity pattern) — becomes datahike's native
+   `:db/id` slot, recursively through nested entity maps and tx vectors.
 
    `:seon.db/ref` is a registered Malli SHAPE, not an installed datahike
    attribute. Left in the entity map it reaches the store as a junk attr
@@ -885,6 +917,119 @@
    a clean malli form, so the two faces are intentionally distinct."
   [x]
   (satisfies? dbi/IDB x))
+
+;; ---------------------------------------------------------------------------
+;; Runtime read capture — normalized request/result facts, never db handles.
+;; ---------------------------------------------------------------------------
+
+(defn- normalize-read-value
+  "Normalize a captured request/result value relative to `captured-db`.
+
+   Returns `[immutable-value replayable?]`. Database handles become source
+   sentinels, Datahike Entities become lookup-neutral `{:db/id ...}` facts,
+   and unknown host objects become an opaque sentinel that forces a cache miss.
+   No observation can retain a DB, Entity cache, function, or mutable JS
+   object."
+  [captured-db value]
+  (letfn [(normalize-coll [empty-value values add]
+            (reduce (fn [[acc replayable?] item]
+                      (let [[item' item-replayable?] (normalize item)]
+                        [(add acc item')
+                         (and replayable? item-replayable?)]))
+                    [empty-value true]
+                    values))
+          (normalize [x]
+            (cond
+              (db-value? x)
+              [(if (identical? captured-db x)
+                 :seon.db.read.value/captured-db
+                 :seon.db.read.value/foreign-db)
+               (identical? captured-db x)]
+
+              (dentity/entity? x)
+              ;; A touched entity can still contain lazy non-component ref
+              ;; Entities. Keep only the immutable identity fact and force a
+              ;; conservative miss until the caller uses an explicit pull.
+              [{:db/id (:db/id x)} false]
+
+              (inst? x)
+              [[:seon.db.read.value/instant (inst-ms x)] true]
+
+              (uuid? x)
+              [[:seon.db.read.value/uuid (str x)] true]
+
+              (= js/BigInt (type x))
+              [[:seon.db.read.value/bigint (str x)] true]
+
+              (and (some? x)
+                   (some? (.-buffer x))
+                   (instance? js/ArrayBuffer (.-buffer x))
+                   (number? (.-byteLength x)))
+              [[:seon.db.read.value/bytes (vec (array-seq x))] true]
+
+              (map? x)
+              (reduce-kv
+                (fn [[m replayable?] k v]
+                  (let [[k' key-replayable?] (normalize k)
+                        [v' value-replayable?] (normalize v)]
+                    [(assoc m k' v')
+                     (and replayable? key-replayable? value-replayable?)]))
+                [{} true]
+                x)
+
+              (vector? x)
+              (normalize-coll [] x conj)
+
+              (set? x)
+              (normalize-coll #{} x conj)
+
+              (seq? x)
+              (let [[items replayable?] (normalize-coll [] x conj)]
+                [(apply list items) replayable?])
+
+              ;; Preserve simple immutable EDN scalars exactly. Other CLJS
+              ;; collection implementations are normalized to a vector but
+              ;; conservatively non-replayable because their concrete
+              ;; semantics changed. Mutable/host objects never escape.
+              (or (nil? x) (string? x) (number? x) (boolean? x)
+                  (keyword? x) (symbol? x))
+              [x true]
+
+              (coll? x)
+              (let [[items _] (normalize-coll [] x conj)]
+                [items false])
+
+              :else
+              [:seon.db.read.value/opaque false]))]
+    (normalize value)))
+
+(defn record-read!
+  "Append one normalized read fact to every active capture bucket.
+
+   `captures` is the already-read ALS stack, so an unbound read never calls
+   this function or allocates request/event data. `operation-replayable?` is
+   false for lazy/temporal operations whose returned handle cannot be replayed
+   as a synchronous immutable read."
+  [captures operation actual-db request result operation-replayable?]
+  (doseq [[captured-db bucket] captures]
+    (let [captured-source? (identical? captured-db actual-db)
+          [request' request-replayable?]
+          (normalize-read-value captured-db request)
+          [result' result-replayable?]
+          (normalize-read-value captured-db result)]
+      (swap! bucket conj
+             {::db/read-operation operation
+              ::db/read-source
+              (if captured-source?
+                :seon.db.read.source/captured
+                :seon.db.read.source/foreign)
+              ::db/read-request request'
+              ::db/read-result result'
+              ::db/read-replayable?
+              (boolean (and operation-replayable?
+                            captured-source?
+                            request-replayable?
+                            result-replayable?))}))))
 
 (defn normalize-transact-args
   "Normalize `transact!`'s variadic args into the canonical map-in
