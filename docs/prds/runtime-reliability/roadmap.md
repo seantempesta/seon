@@ -109,6 +109,13 @@ comparable run. The optional Caddy edge served the same gzip feed over HTTP/2
 with immediate flushing; it remains outside the default development process
 graph.
 
+The CLJS test process now installs the pod's existing third-party log gate as a
+Shadow preload before any test namespace. A representative database run fell
+from about 1.85M estimated tokens of trace-heavy output to about 43 estimated
+tokens with the same 43 tests/329 assertions passing. Canonical timestamped
+test logs are bounded to the newest 20, and normal client/ACME/bench bundles no
+longer preload the platform test graph.
+
 The source-grounded system audits are complete and committed:
 
 - [[research/database-runtime-responsiveness-audit-2026-07-13]]

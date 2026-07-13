@@ -58,14 +58,10 @@
   {:target           :node-script
    :output-to        "out/client/main.js"
    :main             seon.client/-main
-   ;; `:preloads` pulls dev-only namespaces (notably test code under
-   ;; `test/`) into the build without affecting `:main` or release
-   ;; output. `seon.dev.test-preload` requires every CLJS test ns that
-   ;; needs to be runnable via `(seon.test.runner/run! {::ns 'foo})`
-   ;; against the live `:client` pod. See:
-   ;; docs/prds/agent-runtime/research/cljs-testing-infrastructure-2026-05-25.md §6 Phase 1.
+   ;; Normal pods ship runtime code, not the platform test graph. Agent-authored
+   ;; tests still run through seon.test.runner once their vars are defined.
    :devtools         {:enabled      true
-                      :preloads     [seon.dev.test-preload seon.demo]
+                      :preloads     [seon.demo]
                       :build-notify seon.client/shadow-build-notify!}
    ;; externs/node_fs.js declares `fs.existsSync` etc. so Closure's
    ;; :advanced pass doesn't rename them to `fs.g_(...)` and crash
@@ -100,7 +96,7 @@
    ;; (bin/acme injects SEON_EXTRA_SRC=acme/ as a :local/root dep), so
    ;; this is safe. The :client build is left untouched (no acme there).
    :devtools         {:enabled  true
-                      :preloads [seon.dev.test-preload seon.demo acme.pod]}
+                      :preloads [seon.demo acme.pod]}
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
@@ -122,7 +118,7 @@
    :output-to        "out-bench/client/main.js"
    :main             seon.client/-main
    :devtools         {:enabled  true
-                      :preloads [seon.dev.test-preload seon.demo]}
+                      :preloads [seon.demo]}
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
@@ -238,6 +234,7 @@
   {:target    :node-test
    :output-to "out/test/test.js"
    :ns-regexp "-test$"
+   :devtools  {:preloads [seon.test.node-preload]}
    :compiler-options {:warnings-as-errors false
                       :optimizations      :simple
                       :externs            ["externs/node_fs.js"]}}
@@ -250,6 +247,7 @@
   {:target    :node-test
    :output-to "out/lora-audit/test.js"
    :ns-regexp "needle-lora-audit-test$"
+   :devtools  {:preloads [seon.test.node-preload]}
    :compiler-options {:warnings-as-errors false
                       :optimizations      :simple
                       :externs            ["externs/node_fs.js"]}}

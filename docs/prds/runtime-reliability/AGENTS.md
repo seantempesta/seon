@@ -55,6 +55,9 @@ Foundational gains already landed and are the baseline:
 - one bounded normal transcript and partly unitized/lazy web rendering;
 - no homegrown gym/evaluator—Inspect AI is the sole agent/model harness; and
 - PID+OS-start/process-group/lock protections in the current supervisor.
+- Node tests install the existing library-log gate before any test namespace;
+  focused runs no longer serialize Datahike/Konserve trace payloads, and the
+  canonical timestamped test-log tail is bounded to 20 files.
 
 The authoritative ordered plan is [[roadmap]]. The durable provenance and
 lifecycle semantics remain [[provenance-and-lifecycle-design]] until phase 4

@@ -76,6 +76,18 @@ done
 mkdir -p tmp out/test
 TMPOUT="tmp/test-cljs-$(date +%Y%m%d-%H%M%S)-$$.log"
 
+# Timestamped names sort newest-first. Keep a small bounded diagnostic tail;
+# the latest symlink remains the stable human/tool entrypoint.
+prune_test_logs() {
+  local n=0
+  while IFS= read -r log; do
+    n=$((n + 1))
+    if [ "$n" -gt 20 ]; then
+      rm -f -- "$log"
+    fi
+  done < <(find tmp -maxdepth 1 -type f -name 'test-cljs-[0-9]*.log' -print | sort -r)
+}
+
 START=$(date +%s)
 COMPILE_ELAPSED=0
 COMPILE_STATUS="skipped (--no-build)"
@@ -263,6 +275,7 @@ fi
 echo "========================================"
 
 ln -sf "$(basename "$TMPOUT")" tmp/test-cljs-latest.log
+prune_test_logs
 echo "Full output: $TMPOUT (or tmp/test-cljs-latest.log)"
 
 if [ "$VERDICT_FAIL" -eq 0 ]; then exit 0; else exit 1; fi
