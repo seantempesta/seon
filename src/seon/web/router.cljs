@@ -23,7 +23,7 @@
    seeded handler is a Ring handler that takes the Ring request `r` and
    self-extracts `(:seon.http/node-req r)` / `(:seon.http/node-res r)` /
    `(get-in r [:path-params :id])`, so [[db->routes]] wraps every one
-   uniformly. `:seon.route/middleware` keywords resolve through reitit's
+   uniformly. An optional `:seon.route/middleware` keyword resolves through reitit's
    `:reitit.middleware/registry` ([[mw-registry]]).
 
    ## The Node↔Ring adapter + the hijack sentinel
@@ -236,8 +236,8 @@
                 (into {}
                       (map (fn [{:seon.route/keys [method handler middleware]}]
                              [method (cond-> {:handler (route-handler handler)}
-                                       (seq middleware)
-                                       (assoc :middleware middleware))]))
+                                       (some? middleware)
+                                       (assoc :middleware [middleware]))]))
                       rows)]))))
 
 (defn db->routes
@@ -245,7 +245,7 @@
 
    GROUP the route entities by `:seon.route/pattern`, nest per
    `:seon.route/method`, wrap `:seon.route/handler` (the late-bound symbol)
-   via [[route-handler]], pass `:seon.route/middleware` keywords through to
+   via [[route-handler]], wrap the optional `:seon.route/middleware` keyword for
    [[mw-registry]]. A pure value of the route datoms — a nil/route-less `db`
    yields `[]` (the static supplement keeps the pod serving until the seed
    lands)."

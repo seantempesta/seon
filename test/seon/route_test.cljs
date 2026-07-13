@@ -51,7 +51,7 @@
     (testing "the one action door is the per-agent POST /call (no per-ns/per-fn routes)"
       (is (= [:seon.route/agent-call]
              (mapv :seon.route/name (filter #(= :post (:seon.route/method %)) rows))))
-      (is (= [:seon.route/same-origin]
+      (is (= :seon.route/same-origin
              (:seon.route/middleware (by-nm :seon.route/agent-call)))))))
 
 (deftest handlers-are-symbols-that-resolve
@@ -74,7 +74,7 @@
         "handler is a NATIVE symbol, not an EDN string")
     (let [mw (facet :seon.route/middleware)]
       (is (= :db.type/keyword (:db/valueType mw)))
-      (is (= :db.cardinality/many (:db/cardinality mw))))))
+      (is (= :db.cardinality/one (:db/cardinality mw))))))
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn. `d/create-database`/`d/connect` is the

@@ -582,14 +582,16 @@ schema lives here; reitit, `db->routes`, the capability gate, and the root-agent
 | `:seon.route/name` | `[:keyword {:seon.db/identity true}]` | keyword / one / identity | reverse-routing key; agent app routes namespace per-agent (e.g. `:agent.abc/app-x`) so identities never collide |
 | `:seon.route/owner` | `:seon.db/ref` | ref / one | → owning agent; rides as opaque route-data, meta-merges parent→child for auth |
 | `:seon.route/handler` | `:symbol` | **symbol** / one | the layout symbol → resolved via `lookup-value`; symbol-as-value (§2.3) |
-| `:seon.route/middleware` | `[:vector :keyword]` | keyword / **many** | optional; middleware keywords resolved through reitit's registry |
+| `:seon.route/middleware` | `:keyword` | keyword / one | optional; one middleware key resolved through reitit's registry and wrapped as reitit middleware data at projection time |
 
 The `seon.route` entity map (`{:seon.db/entity true}`) requires
 `pattern`/`method`/`name`/`handler`, with `owner`/`middleware` optional.
 `:seon.route/handler` is a native `:db.type/symbol` (a route handler is always a
 layout symbol, never literal hiccup) — "a route handler IS a layout" holds at the
 value level; it simply stores as a pure symbol rather than the EDN-encoded
-mixed-`:or` of `:seon.render/html`. **Ground in** reitit `trie.cljc:60`
+mixed-`:or` of `:seon.render/html`. A middleware chain is not stored as a
+cardinality-many value because Datahike sets cannot preserve order; the current
+model stores the one required gate as one fact. **Ground in** reitit `trie.cljc:60`
 (`split-path` accepts both `{id}` and `:id`) + `reitit-ring/.../ring.cljc:14-16`
 (`http-methods` + `Endpoint`): one `{pattern, method, handler, middleware}` row
 maps to `["/agent/{id}" {:get {:handler <sym> :middleware […]}}]`. `db->routes`

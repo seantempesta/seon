@@ -243,8 +243,9 @@ Read: `reference-code/reitit/modules/reitit-core/src/reitit/trie.cljc:60`
   sound.
 - ⚠ **Build-note (db->routes, Phase 8/UI):** GROUP rows by `:seon.route/pattern`,
   nest per `:seon.route/method`, resolve `:seon.route/handler` via
-  `eval/lookup-value`, map `:seon.route/middleware` keywords through reitit's
-  registry. One pattern + N methods = N rows collapsing into one reitit path.
+  `eval/lookup-value`, and wrap the optional `:seon.route/middleware` keyword
+  through reitit's registry. One pattern + N methods = N rows collapsing into
+  one reitit path.
 
 ## Phase 1-2 keystone — ctx merge→seed-copy + the render engine
 

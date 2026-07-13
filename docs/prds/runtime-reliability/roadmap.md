@@ -28,11 +28,12 @@ compensate for unclear functions.
 
 ## Current position
 
-**Current phase: isolate the permanent JVM server (phase 2 of 6).** The owner
-decisions are resolved and the coordinated clean-base proof is tagged. Remote
-replication, cloud topology, browser replicas, offline mutation, mobile
-packaging, and the full paid Inspect AI battery are explicit follow-on work
-rather than completion gates for this branch.
+**Current phase: remove duplicate runtime authority and isolate the permanent
+JVM server (phase 2 of 6).** The owner decisions are resolved and the
+coordinated clean-base proof is tagged. Remote replication, cloud topology,
+browser replicas, offline mutation, mobile packaging, and the full paid Inspect
+AI battery are explicit follow-on work rather than completion gates for this
+branch.
 
 The shared ACME/plan/REPL work is checkpointed at `3e0e0bff`; the directly
 affected schema, plan, and AI dispatch CLJS namespaces pass their focused tests,
@@ -42,12 +43,18 @@ and `runtime-reliability-pre-refactor-2026-07-13` anchors the complete
 source launch have converged on one complete `:writer` basis. The writer closure
 is down from 188 libraries/194 classpath roots to 111/117, resolves the exact
 maintained Datahike/Konserve SHAs, and has one SLF4J provider. `bin/test-writer`
-runs only the twelve retained writer suites; its current proof is 107 tests and
-596 assertions. The unused query-subscription engine and its second in-process
-subscriber bus are deleted, leaving raw committed-transaction fanout plus
-bounded replay. The atomic database-protocol vocabulary cut, remaining dead
-operation/backend pruning, typed administration, live transition proof, and a
-published artifact manifest remain outstanding.
+runs only the retained writer suites. The unused query-subscription engine,
+second in-process subscriber bus, dead writer operations, and alternate backend
+routing are deleted, leaving raw committed-transaction fanout plus bounded
+replay. The evaluator's global timeout and duplicate result-membership registry
+are gone; timeout ownership follows the value and result membership is derived
+from the runtime namespace. The web host now has one normalized feed registry,
+database-fact-driven route invalidation, and one explicitly owned replica-feed
+attachment lifecycle. Focused proofs cover 46 evaluator/feed tests with 179
+assertions, 15 replica tests with 87 assertions, and 5 route tests with 74
+assertions. The atomic database-protocol vocabulary cut, remaining JVM callback
+registries, typed administration, live transition proof, and a published
+artifact manifest remain outstanding.
 
 The source-grounded system audits are complete and committed:
 
@@ -82,6 +89,11 @@ Several foundational corrections have already landed:
 - stable render units and the lazy debug web UI are partly cut over; and
 - the external shell supervisor now protects against PID reuse, lifecycle
   races, and orphan process groups.
+
+The route schema also now records its one same-origin middleware gate as one
+keyword fact. The previous vector schema became unordered cardinality-many data
+in Datahike and falsely promised middleware-chain ordering that the database
+could not preserve.
 
 Those gains are the base. The remaining work is not a restart from scratch.
 

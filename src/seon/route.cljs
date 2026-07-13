@@ -4,8 +4,8 @@
    Each `:seon.route` entity is a datom a `db->routes` fn (the UI lane,
    `seon.web.router`) projects into a reitit route vector — GROUP rows by
    `:seon.route/pattern`, nest per `:seon.route/method`, resolve
-   `:seon.route/handler` via `seon.eval/lookup-value`, map
-   `:seon.route/middleware` keywords through reitit's registry. The router is a
+   `:seon.route/handler` via `seon.eval/lookup-value`, and map the optional
+   `:seon.route/middleware` keyword through reitit's registry. The router is a
    pure derived value of these datoms, rebuilt on tx. This replaces the
    hand-rolled `case`/`cond`/`re-matches` dispatch.
 
@@ -45,7 +45,7 @@
 (schema/register! ::name [:keyword {:seon.db/identity true}]) ; reverse-routing key (identity ⇒ idempotent upsert)
 (schema/register! ::owner :seon.db/ref)                       ; → owning agent; rides as route-data, meta-merges parent→child
 (schema/register! ::handler :symbol)                          ; the handler/layout symbol → resolved via lookup-value
-(schema/register! ::middleware [:vector :keyword])            ; middleware keys → reitit's registry
+(schema/register! ::middleware :keyword)                      ; one middleware key → reitit's registry
 
 ;; The entity map: an entity's KIND is the attrs it carries (no stored
 ;; `:kind`). A `:seon.route` row is identified by `:seon.route/name`
@@ -120,4 +120,4 @@
     ::handler 'seon.web.debug/debug-feed!}
    {::pattern "/agent/{id}/call" ::method :post ::name ::agent-call
     ::handler    'seon.web.reactive.call/handle!
-    ::middleware [::same-origin]}])
+    ::middleware ::same-origin}])
