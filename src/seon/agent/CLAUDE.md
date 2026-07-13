@@ -23,9 +23,8 @@ context-rebuild plan of record). Skills: `datahike`, `clojurescript`,
   the agent's own `:seon.agent/ctx` at creation; `render-context` reads that
   complete set by `:seon.agent.ctx/priority` and stops. Override =
   `install!`/`remove!`, period. No render-merge, no default set, no provider.
-  Each `ctx/*` file is one block family (namespaces, transcript, warnings,
-  canvas, usage, findings, inventory, jobs, menu, subagents, testrun,
-  typeahead-steps).
+  Each `ctx/*` file is one installed block family (namespaces, transcript,
+  warnings, canvas, menu, subagents, typeahead-steps).
 - **`inspect.cljs`** — `ctx-preview` renders the agent's context through the
   SAME `render-context` path (byte-identical to the real prompt). Extend
   inspection here (`turn`, `turn-diff`), never as a second render path.

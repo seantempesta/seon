@@ -28,7 +28,6 @@
     ["node:path" :as npath]
     [cljs.test :refer [deftest is async use-fixtures]]
     [clojure.string :as str]
-    [seon.agent.ctx.jobs]
     [seon.agent.fs :as fs]
     [seon.agent.fs.internal :as fs-int]
     [seon.agent.lifecycle :as lifecycle]
@@ -317,7 +316,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; 9. Background jobs — run-bg! / job-status / job-output (full + ::since) /
-;;    job-stop!, plus the derived :jobs context section. Volatile table.
+;;    job-stop!. Volatile table.
 ;; ---------------------------------------------------------------------------
 
 (defn- poll-until
@@ -346,25 +345,20 @@
       (is (string? id))
       (is (= :running state) "starts running")
       (-> (poll-until id #(= :exited (:seon.agent.shell/state %)))
-          (.then (fn [st]
-                   (is (= :exited (:seon.agent.shell/state st)))
-                   (is (= 0 (:seon.agent.shell/exit st)) "exit code captured")
-                   ;; full output
-                   (let [full (shell/job-output {:seon.agent.shell/job-id id})]
-                     (is (= "l1\nl2\n" (:seon.agent.shell/content full))
-                         "FULL captured stdout, uncapped")
-                     (is (false? (:seon.agent.shell/truncated? full)))
-                     ;; ::since returns only new output past the offset
-                     (let [tail (shell/job-output {:seon.agent.shell/job-id id
-                                                   :seon.agent.shell/since 3})]
-                       (is (= "l2\n" (:seon.agent.shell/content tail))
-                           "::since 3 skips the first line already seen")
-                       (is (= 6 (:seon.agent.shell/next-since tail))
-                           "next-since = end offset for the next poll")))
-                   ;; the derived :jobs section renders this job with the handle
-                   (let [blk (seon.agent.ctx.jobs/jobs-block {})]
-                     (is (str/includes? blk id) "section names the job")
-                     (is (str/includes? blk "job-output") "…with the read-more handle"))))
+          (.then
+            (fn [st]
+              (is (= :exited (:seon.agent.shell/state st)))
+              (is (= 0 (:seon.agent.shell/exit st)) "exit code captured")
+              (let [full (shell/job-output {:seon.agent.shell/job-id id})]
+                (is (= "l1\nl2\n" (:seon.agent.shell/content full))
+                    "FULL captured stdout, uncapped")
+                (is (false? (:seon.agent.shell/truncated? full)))
+                (let [tail (shell/job-output {:seon.agent.shell/job-id id
+                                              :seon.agent.shell/since 3})]
+                  (is (= "l2\n" (:seon.agent.shell/content tail))
+                      "::since 3 skips the first line already seen")
+                  (is (= 6 (:seon.agent.shell/next-since tail))
+                      "next-since = end offset for the next poll")))))
           (settle! done)))))
 
 (deftest job-stop-sigterms-a-running-job
@@ -387,7 +381,6 @@
       (doseq [r [(shell/job-status bad) (shell/job-output bad) (shell/job-stop! bad)]]
         (is (false? (:seon.agent.shell/ok? r)))
         (is (re-find #"no background job" (:seon.error/message r))))
-      ;; empty section renders nothing
       (done))))
 
 (deftest bg-jobs-are-scoped-per-agent-no-cross-agent-leak
@@ -422,11 +415,7 @@
                 "isolation: identical to a truly-unknown id, no distinct 'not yours'"))
           ;; 3. A's OWN id still works for A.
           (is (true? (:seon.agent.shell/ok? (shell/job-status {:seon.agent.shell/job-id a-id})))
-              "A's own job is fully readable by A")
-          ;; 4. the derived section is scoped too — A's render names a-id, not b-id.
-          (let [blk (seon.agent.ctx.jobs/jobs-block {})]
-            (is (str/includes? blk a-id) "A's :jobs section shows A's job")
-            (is (not (str/includes? blk b-id)) "A's :jobs section HIDES B's job"))))
+              "A's own job is fully readable by A")))
       ;; B's job is still alive (A's stop was a no-op on a job it can't see).
       (is (= :running (db/with-agent B (fn [] (:seon.agent.shell/state
                                                (shell/job-status {:seon.agent.shell/job-id b-id})))))

@@ -150,8 +150,8 @@
 
    Covers the three identity shapes Seon uses
    (plain `:string`/`:keyword` with the prop, and the `:and` id wrap).
-   PUBLIC: the single identity-attr predicate — callers (the inventory
-   section, etc.) reuse it rather than re-deriving the props lookup."
+   PUBLIC: the single identity-attr predicate — callers reuse it rather than
+   re-deriving the props lookup."
   {:malli/schema [:=> [:cat :keyword] :boolean]}
   [attr-key]
   (internal/identity-attr? @*schemas attr-key))
@@ -160,8 +160,8 @@
   "Members of a registered `:enum` attr schema, or an empty vector.
 
    Empty when the attr is not an enum (absence = empty, never nil). Reads the schema
-   form directly — NO db query. PUBLIC: low-cardinality value surfaces
-   (the inventory section) reuse it. Members are Malli-form contents
+   form directly — NO db query. PUBLIC: low-cardinality value surfaces reuse
+   it. Members are Malli-form contents
    (keywords/strings/ints) — a third-party-structure boundary, hence `:any`."
   {:malli/schema [:=> [:cat :keyword] [:vector :any]]}
   [attr-key]

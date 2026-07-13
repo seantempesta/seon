@@ -514,7 +514,7 @@ is evaluated behaviorally, not by asserting prose.
 | Developer hooks | The direct Babashka hook is repository-contained before config/artifact access, runtime-independent, locally deterministic, and log-bounded under a cross-process lock. Automatic model review is deleted. The operator gate includes its Markdown/docstring checks. |
 | Operator | The Babashka graph and thin launcher are built and focused-tested; active caller migration plus default/ACME/Inspect live proof remain. |
 | Tests | Public pod/database/operator doors delegate to one runner each; focused pod builds use compile-time namespace selection, one bundle lock, and exact freshness fingerprints. Disabled/paused-application tests and remaining intentional expected-failure noise still need removal. |
-| UI | Surface/focus machinery exists, but active symbols, CSS, DOM, docs, and ACME still say tile; four dead context renderers still load. Skill teaching is converged on canvas/surface/card vocabulary. |
+| UI | The four dormant context renderers and their unconditional boot load are deleted. Active symbols, CSS, DOM, docs, and ACME still need the tile-to-surface/card vocabulary cut; skill teaching is already converged. |
 | Live rendering | Agent view unitization/read-observation is incomplete; legitimate work still needs bounded caching, layout/focus/browser proof, and grown-database profiling. |
 | Recent activity reads | `seon.render.default/recent-messages`, `seon.agent.ctx/messages`, transcript/activity queries, `seon.derive/real-eval-oks`, and the function menu independently scan and sort growing message/eval history before taking a small tail. Root's current cross-agent activity does the same over the whole database. |
 | Root/UI presence | `/` already renders root's system canvas, but first-run routing, concise root role context, originating-tab identity, database-backed current location, and feed-driven agent navigation are not one finished path. |
@@ -715,10 +715,12 @@ agents idle and one exact notice visible to root.
    `#surface-*`, and `.seon-card*`.
 2. Update every producer/consumer/schema/test and regenerate CSS atomically.
    Do not leave forwarding vars or old selectors.
-3. **Complete:** the dormant inventory context renderer, `db/store-inventory`,
-   `my.kb/inventory`, warning coupling, teaching references, and brittle tests
-   are deleted. The header keeps its cheap database link and `/data` is the only
-   exploration surface.
+3. **Complete:** the dormant findings, inventory, jobs, and test-run display
+   adapters, their unconditional boot requires, display-only tests,
+   `db/store-inventory`, `my.kb/inventory`, warning coupling, and teaching
+   references are deleted. Durable KB facts, job controls, parsed test-run
+   facts, and lifecycle tests remain. The header keeps its cheap database link
+   and `/data` is the only exploration surface.
 4. Port `/data` in place to the canonical render-unit and shared gzip Datastar
    feed lifecycle. **Feed cut complete:** `/data/sse`, `!data-connections`, its
    listener flag, broadcast loop, and the generic `/sse` registry are deleted;

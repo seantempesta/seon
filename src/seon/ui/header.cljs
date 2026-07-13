@@ -12,7 +12,7 @@
                   ALL agents (`seon.derive/derive-state`, surfaced through
                   `seon.render.system/fleet-summary` — DRY, one counter).
      DATABASE   — the current index's maintained datom count (links `/data`)
-                  + embeddings on/off (`SEON_EMBED`). No inventory scan.
+                  + embeddings on/off (`SEON_EMBED`). No broad database scan.
      ACTIONS    — a `+ new agent` button (POSTs `/agents/new`, then SWITCHES
                   to the new `/agent/{id}`) + small `/` and `⛁ data` links +
                   a subtle system-health dot.

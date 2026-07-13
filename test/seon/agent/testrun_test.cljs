@@ -1,10 +1,10 @@
 (ns seon.agent.testrun-test
   "Tests for `seon.agent.testrun` — the pytest parser, argv detection,
-   persistence, and the `:test-failures` derived section.
+   and persistence.
 
    The parser tests run on CAPTURED real pytest output (pytest 9.x, default
    / `-q` / collection-error / green / no-tests variants) — hermetic, no
-   subprocess, no network. The persist+section tests use a fresh :memory
+   subprocess, no network. The persistence tests use a fresh :memory
    conn `set!` as the root db/*conn* (CLJS bindings don't survive awaits —
    the my.plan-test / turn-capture-test pattern).
 
@@ -14,7 +14,6 @@
   (:require
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
-    [seon.agent.ctx.testrun :as ctx-testrun]
     [seon.agent.testrun :as testrun]
     [seon.client :as client]
     [seon.db :as db]))
@@ -154,40 +153,6 @@
                  (-> (db/transact! {:seon.db/tx-data [{:seon.agent/id agent-id}]})
                      (.then (fn [_] (body conn)))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
-
-(defn- section [conn]
-  (ctx-testrun/testrun-block {:seon.db/db @conn :seon.agent/id agent-id}))
-
-(deftest section-renders-latest-failures-then-vanishes-on-green
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            (is (= "" (section conn)) "no run yet → empty section")
-            (-> (testrun/record!
-                  {:seon.agent.testrun/agent-id agent-id
-                   :seon.agent.testrun/result
-                   (testrun/parse {:seon.agent.testrun/stdout out-failures-default})})
-                (.then
-                  (fn [rec]
-                    (is (true? (:seon.agent.testrun/ok? rec)) "persist ok")
-                    (let [txt (section conn)]
-                      (is (str/includes? txt "TEST FAILURES") "header renders")
-                      (is (str/includes? txt "2 failed") "failed count renders")
-                      (is (str/includes? txt "test_fail_math") "names a failing test")
-                      (is (str/includes? txt "test_fail_str") "names the other one"))))
-                ;; A LATER green run supersedes → the section self-heals to empty.
-                (.then
-                  (fn [_]
-                    (testrun/record!
-                      {:seon.agent.testrun/agent-id agent-id
-                       :seon.agent.testrun/result
-                       (testrun/parse {:seon.agent.testrun/stdout out-green-default})})))
-                (.then
-                  (fn [_]
-                    (is (= "" (section conn))
-                        "latest run is green → section vanishes (no stored flag)"))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest record-without-agent-scope-persists-nothing
   (async done

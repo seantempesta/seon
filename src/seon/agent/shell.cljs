@@ -101,8 +101,8 @@
     [:seon.agent.shell/truncated? :seon.agent.shell/truncated?]
     [:seon.agent.shell/hint       {:optional true} :seon.agent.shell/hint]
     ;; Parsed test results — present only when the argv was pytest-shaped AND
-    ;; the output was recognized (seon.agent.testrun/parse). Persisted too, so
-    ;; the :test-failures context section renders the latest failing set.
+    ;; the output was recognized (seon.agent.testrun/parse). Persisted for
+    ;; lifecycle checks and direct database queries.
     [:seon.agent.testrun/result   {:optional true} :seon.agent.testrun/result]]
    ;; COULD-NOT-RUN — gate/spawn failure. Shared error map, never a bare
    ;; string.
@@ -440,9 +440,9 @@
 
    Scoped to the CURRENT agent (the reactive :seon.agent/id filter): background
    jobs are volatile per-agent runtime artifacts, so an agent sees only the
-   jobs IT launched — never another agent's. The reactive :jobs context section
-   renders from this. Sizes are TOKENS. The table is process-volatile (running
-   + recently-finished jobs; oldest finished pruned past a cap)."
+   jobs IT launched — never another agent's. Sizes are TOKENS. The table is
+   process-volatile (running + recently-finished jobs; oldest finished pruned
+   past a cap)."
   {:malli/schema [:=> [:cat] :seon.agent.shell/list-response]}
   []
   {:seon.agent.shell/ok?  true

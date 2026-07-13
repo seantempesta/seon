@@ -207,9 +207,6 @@
     [seon.agent.ctx.canvas]
     [seon.agent.ctx.warnings]
     [seon.agent.ctx.transcript]
-    [seon.agent.ctx.findings]
-    [seon.agent.ctx.jobs]
-    [seon.agent.ctx.testrun]
     [seon.agent.ctx.subagents]
     [seon.agent.ctx.menu]
     ;; The :typeahead-steps block family (NOT seeded by default — installed
@@ -2407,7 +2404,7 @@
                                         ;; inspect the exact reconstruction.
                                         ;; Printing that payload made one cold
                                         ;; boot log hundreds of tokens of
-                                        ;; redundant program inventory. Boot
+                                        ;; redundant program-graph detail. Boot
                                         ;; status needs the counts and the few
                                         ;; rejected rows; the database remains
                                         ;; the detailed source of truth.

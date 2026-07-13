@@ -684,7 +684,7 @@
    the no-mixed-references lint (`seon.dev.docstring`) flags a literal outside
    the constant defs. Distinct from the value-VOCABULARY glyphs
    (`⟨N tok⟩` · `‹partial›` · `#‹…›` · `{…N keys}` · `«…»`) which are NOT
-   reserved and appear legitimately elsewhere (inventory / `my.plan`)."
+   reserved and appear legitimately elsewhere (compacted values / `my.plan`)."
   #{result-marker result-close status-open status-close prompt})
 
 (def ^:private result-claim-re
@@ -2276,8 +2276,7 @@
   "The in-band cache-boundary line the composer joins between the
    STABLE prefix (every section through :namespaces — byte-stable
    within a session given the deterministic rendering) and the
-   VOLATILE tail (everything after: canvas, warnings,
-   plan, inventory, transcript).
+   VOLATILE tail (everything after: canvas, warnings, plan, transcript).
 
    In-band because the agent loop hands providers ONE assembled
    string (`llm-fn` is fn-of-ctx-string): [[split-context]] recovers

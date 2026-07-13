@@ -132,7 +132,7 @@
 (def ^:private header-attrs
   "Stored inputs that materially change the fleet status header.
 
-   The datom inventory is intentionally sampled on these meaningful changes,
+   The datom set is intentionally sampled on these meaningful changes,
    not on every program-graph bookkeeping transaction."
   (set/union
     derive/agent-state-read-attrs

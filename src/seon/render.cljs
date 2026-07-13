@@ -501,7 +501,7 @@
 ;; /debug) "just displays the block." It is NOT a new mechanism: it
 ;; GENERALIZES the same unwrap/guard seam `render-entity-html` centralizes
 ;; (the ONE `unwrap-response`) from "dispatch on the entity's render symbol"
-;; to "dispatch on the value's KIND," reusing the inventory of renderers that
+;; to "dispatch on the value's KIND," reusing the existing renderers that
 ;; already exist (md->hiccup, the value panel, clj->hiccup, the error-tile
 ;; seam). The converters (`handlers/*/render-html`) become THIN — each tags
 ;; its fields and hands them to `block`.

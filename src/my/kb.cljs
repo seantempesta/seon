@@ -364,8 +364,8 @@
 
    Each item is the FULL pulled row (claim + provenance + domain attrs)
    plus the derived `::match`/`::matched-tokens` labels; `::matched` is
-   the honest total before the cap. No matches is SUCCESS (empty items) —
-   check [[inventory]] before concluding nothing is known."
+   the honest total before the cap. No matches is SUCCESS (empty items); use
+   direct database queries or `/data` before concluding nothing is known."
   {:malli/schema [:=> [:cat ::recall-request] ::recall-response]}
   [{::keys [about limit]}]
   (try
