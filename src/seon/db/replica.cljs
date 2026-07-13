@@ -1,42 +1,13 @@
-(ns seon.store.wire
-  "THE pod↔cluster-store seam (unit 2.2e — the flip).
+(ns seon.db.replica
+  "The pod's local Datahike replica of the authoritative JVM database.
 
-   The pod runs datahike-cljs as a DIS PEER on the JVM wire-server's
-   `:file` cluster store:
+   Reads dereference the shared immutable Konserve files locally. Writes use
+   `seon.db.protocol` over the UDS transport and materialize the acknowledged
+   database basis before returning. One persistent transaction feed advances
+   native Datahike listeners; bounded history replay closes reconnect gaps.
 
-   - READS are local + sync: the `:seon-wire` writer below reports
-     `-streaming?` false, which flips `deref-conn` into follow-the-store
-     mode — every `@conn` re-reads the branch root from konserve and
-     reconstitutes a fresh db value with lazy LRU node fetch
-     (connector.cljc:69-78). No API change anywhere in `seon.db`.
-   - WRITES go over the wire: `d/transact!` dispatches to the
-     `SeonWireWriter`, which forwards the op over the existing UDS
-     `transact` op (`seon.store.internal.wire-node` → `seon.server.wire`) and
-     synthesizes the tx-report from the ack + a local RYOW re-deref.
-     The JVM is the SOLE writer on the store.
-   - CHANGE NOTIFICATION: `start-listen-adapter!` subscribes to the
-     wire tx feed; on each FOREIGN tx event (own wire ids skipped —
-     own txs already fire the conn's native listeners via
-     `datahike.writer/transact!`) it re-derefs and fires the conn's
-     NATIVE `d/listen` listeners with a synthesized raw tx-report. So
-     every `seon.db/listen!` handler (user-message triggers, web UI
-     SSE) fires identically for own and foreign writes.
-   - PUSH, NOT POLL: the feed is ONE persistent pub-socket connection
-     (`seon.server.broadcast/start-pub-server!` writes every committed
-     tx event to each subscriber); a streaming frame reader feeds
-     `handle-feed-event!` directly. The pub stream is db-agnostic, so
-     the adapter filters frames by its cluster's db-name client-side.
-   - LOSSLESS WAKE (DE-2): a connection drop would lose a wake (the
-     event IS the trigger to act). The adapter tracks the last-applied
-     basis-t watermark and, on every (re)connect, fetches the gap via
-     the req-socket `replay-tx` op — every missed tx, in commit order,
-     applied ahead of buffered live frames. Feed application is
-     idempotent on the watermark (a tx ≤ it is a no-op), so the
-     replay↔live overlap fires each listener at most once.
-
-   Proven off-pod by the Stage A/B replica probe/peer oracles (10/10 + 14/14;
-   harness since retired — findings + retirement note in
-   docs/prds/agent-runtime/research/datahike-native-replica-2026-06-09.md)."
+   This namespace owns replica lifecycle and recovery policy. It does not
+   invent protocol maps or transport framing."
   (:require
    [cljs.core.async :refer [promise-chan put! <! go]]
    [clojure.string :as str]
@@ -44,29 +15,29 @@
    [datahike.connector :as connector]
    [datahike.datom :as dd]
    [datahike.writer :as w]
-   [seon.store.internal.wire-node :as wire]
+   [seon.db.protocol :as protocol]
+   [seon.db.transport.uds :as uds]
    [seon.platform :as platform]
    [seon.log :as log]
    [seon.schema :as schema]))
-
-(def ^:private node-crypto (js/require "crypto"))
 
 ;; ---------------------------------------------------------------------------
 ;; Schemas
 ;; ---------------------------------------------------------------------------
 
-(schema/register! ::sock-path [:string {:min 1}])
-(schema/register! ::store-path [:string {:min 1}])
-(schema/register! ::db-name [:string {:min 1}])
-(schema/register! ::store-id :uuid)
+(schema/register! ::socket-path [:string {:min 1}])
+(schema/register! ::request-socket-path ::socket-path)
+(schema/register! ::publish-socket-path ::socket-path)
+(schema/register! ::database-name [:string {:min 1}])
+(schema/register! ::database-id :uuid)
 (schema/register! ::branch :keyword)
 (schema/register! ::writer-backend :keyword)
 (schema/register! ::basis-t [:int {:min 0}])
 (schema/register!
  ::database-coordinate
  [:map
-  [::db-name ::db-name]
-  [::store-id ::store-id]
+  [::database-name ::database-name]
+  [::database-id ::database-id]
   [::branch ::branch]
   [::writer-backend ::writer-backend]])
 (schema/register!
@@ -74,80 +45,55 @@
  [:map
   [::database-coordinate ::database-coordinate]
   [::basis-t ::basis-t]])
-;; The pod's datahike conn handle the listen adapter subscribes for — an
+;; The pod's datahike conn handle the listen attachment subscribes for — an
 ;; opaque runtime value (third-party boundary), hence :any.
 (schema/register! ::conn :any)
 
-(schema/register! ::store-id-request [:map [::db-name ::db-name]])
 ;; A datahike config map — third-party boundary shape.
-(schema/register! ::cluster-config-response :map)
+(schema/register! ::database-config-response :map)
+(schema/register!
+ ::database-config-request
+ [:map [::database-id ::database-id]])
+(schema/register!
+ ::knn-search-request
+ [:map
+  [::protocol/query ::protocol/query]
+  [::protocol/limit ::protocol/limit]
+  [::protocol/entity-ids {:optional true} ::protocol/entity-ids]
+  [::request-socket-path {:optional true} ::request-socket-path]])
 
 ;; ---------------------------------------------------------------------------
-;; Cluster store identity + config
+;; Cluster database identity and private Datahike config
 ;; ---------------------------------------------------------------------------
 
-(def default-sock-path
-  "The cluster's UDS request socket — inherits `wire/default-req-sock`,
-   which is itself cluster-isolation-aware (reads `SEON_REQ_SOCK`, falls
-   back to the live-default constant). Matches bin/seon's wire-server
-   --req-sock for the default cluster and bin/acme's exported override."
-  wire/default-req-sock)
+(def default-request-socket-path
+  uds/default-request-socket-path)
 
-(def default-pub-sock-path
-  "The cluster's UDS publish socket — the persistent broadcast stream the
-   tx-feed adapter subscribes to. Inherits `wire/default-pub-sock`
-   (cluster-isolation-aware via `SEON_PUB_SOCK`). Matches bin/seon's
-   wire-server --pub-sock for the default cluster and bin/acme's export."
-  wire/default-pub-sock)
+(def default-publish-socket-path
+  uds/default-publish-socket-path)
 
 (def cluster-dir
   "The cluster's data dir — `SEON_CLUSTER_DIR`, default the live cluster.
 
-   Everything per-cluster on disk (store, blobs) lives under it; the
+   Everything per-cluster on disk (database, blobs) lives under it; the
    launcher (`bin/seon`, `bin/acme`, `bin/seon cluster create`) exports it."
   (or (platform/env-val "SEON_CLUSTER_DIR") "data/clusters/default"))
 
-(def cluster-name
+(def database-name
   "The pod's cluster name — the basename of [[cluster-dir]].
 
-   The ONE derivation (registry C15): this name IS the wire db-name every
-   pod op carries, the feed label, and the konserve store `:id` seed on
-   BOTH sides. A socket-path artifact never enters the identity."
+   One derivation supplies operation routing and transaction-feed filtering."
   (last (remove str/blank? (str/split cluster-dir #"/"))))
 
-(def default-store-path
-  "The cluster's konserve `:file` store dir: `[[cluster-dir]]/store`.
+(def default-database-path
+  (str cluster-dir "/db"))
 
-   Matches the wire-server's `--path $SEON_CLUSTER_DIR/store` under
-   `bin/seon` and the per-name path `ensure-cluster-db!` registers."
-  (str cluster-dir "/store"))
+(defn database-config
+  "Build the private Datahike config for this read replica.
 
-(defn store-id
-  "The cluster store's konserve `:id`, replicated from the JVM side.
-
-   `seon.server.store/name->uuid` = `UUID/nameUUIDFromBytes` (md5
-   name-based v3 UUID) of the db-name keyword's `str` — so cluster
-   \"default\" hashes as \":default\". The db-name is the CLUSTER NAME on
-   both sides (the one derivation). Verified against the live
-   wire-server's `(:id (:store (:config @conn)))`."
-  {:malli/schema [:=> [:cat ::store-id-request] :uuid]}
-  [{::keys [db-name]}]
-  (let [nm       (str ":" db-name)
-        b        (-> (.createHash node-crypto "md5")
-                     (.update (js/Buffer.from nm "utf8"))
-                     (.digest))]
-    ;; nameUUIDFromBytes: md5 digest with version 3 + IETF variant bits.
-    (aset b 6 (bit-or (bit-and (aget b 6) 0x0f) 0x30))
-    (aset b 8 (bit-or (bit-and (aget b 8) 0x3f) 0x80))
-    (let [hex (.toString b "hex")]
-      (uuid (str (subs hex 0 8) "-" (subs hex 8 12) "-" (subs hex 12 16)
-                 "-" (subs hex 16 20) "-" (subs hex 20 32))))))
-
-(defn cluster-config
-  "datahike config for the pod's DIS-peer connection to the default store.
-
-   The default cluster store. Reads are local konserve; writes route through the
-   `:seon-wire` writer (the JVM wire-server is the sole writer).
+   The writer returns `database-id`; this process never duplicates its identity
+   algorithm. Reads use the shared immutable file tree and writes route through
+   the sole JVM authority.
 
    `:lock-blob? false` is REQUIRED for readers: konserve's sync read
    path takes a `.ksv.LOCK` by default and two sync readers race on the
@@ -156,26 +102,26 @@
    replaced by atomic rename, index nodes are content-addressed and
    immutable, and this peer's writes go over the wire, never through
    local konserve."
-  {:malli/schema [:=> [:cat] ::cluster-config-response]}
-  []
+  {:malli/schema [:=> [:cat ::database-config-request]
+                  ::database-config-response]}
+  [{::keys [database-id]}]
   {:store               {:backend :file
-                         :path    default-store-path
-                         :id      (store-id {::db-name cluster-name})
+                         :path    default-database-path
+                         :id      database-id
                          :config  {:lock-blob? false}}
    :keep-history?       true
    :schema-flexibility  :write
-   :writer              {:backend   :seon-wire
-                         :sock-path default-sock-path}
+   :writer              {:backend :seon.db.writer/remote
+                         :socket-path default-request-socket-path}
    :allow-unsafe-config true})
 
 ;; ---------------------------------------------------------------------------
-;; Boot gate — fail LOUD if the wire-server is down. No dual backend: a
-;; pod that can't reach its writer must not boot against a local store.
+;; Boot gate — fail LOUD if the database writer is down. No dual backend: a
+;; pod that can't reach its writer must not boot against a local writer.
 ;;
-;; The ping retries (budget: the wire-node timing block) before the
-;; fail-loud throw: `bin/seon
-;; start all` brings the wire-server and pod up in order, but the pod
-;; can exec before the writer's UDS socket accepts (or while a freshly
+;; The ping retries within a fixed budget before the fail-loud throw:
+;; `bin/seon start all` brings the database server and pod up in order, but
+;; the pod can exec before the writer's UDS socket accepts (or while a freshly
 ;; sha-bumped JVM warms up). Boot stays fail-loud, just not
 ;; fail-instant — after the budget the same error throws.
 ;; ---------------------------------------------------------------------------
@@ -183,29 +129,32 @@
 (defn- sleep [ms]
   (js/Promise. (fn [res] (js/setTimeout res ms))))
 
-;; Wire timing constants (ping budget/backoff, transact/ensure-db/replay
-;; timeouts, feed reconnect delay) live in ONE place: `seon.store.internal.
-;; wire-node`'s "wire timing" block. Reference `wire/…`, never inline a value.
+(def ^:private ping-attempts 5)
+(def ^:private ping-timeout-ms 2000)
+(def ^:private ping-retry-delay-ms 500)
+(def ^:private ensure-database-timeout-ms 15000)
+(def ^:private transaction-timeout-ms 30000)
+(def ^:private transaction-attempts 3)
+(def ^:private replay-timeout-ms 30000)
+(def ^:private feed-reconnect-delay-ms 2000)
 
 (defn ^:async ^:private ping-once!
   "One ping rpc. Resolves to the reply map; throws on not-ok/transport."
   []
-  (let [resp (await (wire/rpc default-sock-path {:seon.store.wire/op "ping"}
-                              {:timeout-ms wire/ping-timeout-ms}))]
-    (when-not (:seon.store.wire/ok resp)
-      (throw (ex-info "wire-server ping returned not-ok"
+  (let [resp (await (uds/rpc {::uds/socket-path default-request-socket-path
+                              ::uds/message (protocol/ping-request)
+                              ::uds/timeout-ms ping-timeout-ms}))]
+    (when-not (::protocol/success? resp)
+      (throw (ex-info "Database writer ping failed."
                       {::resp resp})))
     resp))
 
 (defn ^:async ping!
-  "Ping the wire-server, retrying up to `wire/ping-attempts` times.
+  "Ping the database writer with a fixed, bounded retry budget.
 
-   Worst case ~attempts × (rpc timeout + backoff) — see the wire timing
-   block in `seon.store.internal.wire-node` for the values.
    Resolves to the reply map on success; throws a clear, actionable
    error once the budget is exhausted."
-  ;; Resolves to the wire-server reply map (a wire/rpc return — third-party
-  ;; boundary), hence the :any return.
+  ;; Resolves to a protocol response crossing the transport boundary.
   {:malli/schema [:=> [:cat] :any]}
   []
   (await
@@ -213,64 +162,89 @@
       (try
         (await (ping-once!))
         (catch :default e
-          (if (< n wire/ping-attempts)
+          (if (< n ping-attempts)
             (do (js/console.warn
-                 (str "[seon.store.wire] ping attempt " n "/" wire/ping-attempts
+                 (str "[seon.db.replica] writer ping attempt " n "/" ping-attempts
                       " failed (" (or (.-message e) (str e))
-                      ") — retrying in " wire/ping-retry-delay-ms "ms"))
-                (await (sleep wire/ping-retry-delay-ms))
+                      ") — retrying in " ping-retry-delay-ms "ms"))
+                (await (sleep ping-retry-delay-ms))
                 (await (attempt (inc n))))
             (throw (ex-info
-                    (str "seon.store.wire: the cluster wire-server is UNREACHABLE at "
-                         default-sock-path " (" (or (.-message e) (str e)) ") "
+                    (str "The authoritative database writer is unreachable at "
+                         default-request-socket-path " ("
+                         (or (.-message e) (str e)) ") "
                          "after " n " attempts. "
-                         "The pod boots ONLY against the cluster store — there is "
-                         "no local fallback. Start it with: bin/seon start wire-server")
-                    {::sock-path default-sock-path
+                         "The pod boots only against the cluster database — there is "
+                         "no local fallback. Start the database server with: "
+                         "bin/seon start wire-server")
+                    {::socket-path default-request-socket-path
                      ::attempts  n
                      :seon.error/kind :core-bug}))))))
     1)))
 
-(defn ^:async ensure-cluster-db!
-  "Ensure this pod's cluster db is registered on the wire-server.
+(defn ^:async ensure-database!
+  "Ensure this pod's database is open on the authoritative writer.
 
-   Sends the `ensure-db` wire op with [[cluster-name]] as the db-name,
-   backend `:file`, and [[default-store-path]] — idempotent on the
-   registry (a re-ensure returns the existing conn's basis-t), so a
-   freshly created cluster's store exists BEFORE the pod attaches its
-   DIS-peer conn. Runs at boot between the ping gate and `d/connect`.
+   A freshly created database exists before the pod attaches its read replica.
    Throws on a not-ok reply (fail-loud, same posture as [[ping!]])."
-  ;; Resolves to the wire-server reply map (third-party boundary) — :any.
+  ;; Resolves to a protocol response crossing the transport boundary.
   {:malli/schema [:=> [:cat] :any]}
   []
-  (let [resp (await (wire/rpc default-sock-path
-                              {:seon.store.wire/op      "ensure-db"
-                               :seon.store.wire/db-name cluster-name
-                               :seon.store.wire/backend "file"
-                               :seon.store.wire/path    default-store-path}
-                              {:timeout-ms wire/ensure-db-timeout-ms}))]
-    (when-not (:seon.store.wire/ok resp)
-      (throw (ex-info (str "seon.store.wire: ensure-db failed for cluster "
-                           cluster-name " — " (:seon.store.wire/error resp))
-                      {::db-name cluster-name
+  (let [resp
+        (await
+         (uds/rpc
+          {::uds/socket-path default-request-socket-path
+           ::uds/message
+           (protocol/ensure-database-request
+            {::protocol/database-name database-name
+             ::protocol/backend :file
+             ::protocol/database-path default-database-path})
+           ::uds/timeout-ms ensure-database-timeout-ms}))]
+    (when-not (::protocol/success? resp)
+      (throw (ex-info (str "Opening database " database-name " failed: "
+                           (::protocol/error resp))
+                      {::database-name database-name
                        ::resp resp
                        :seon.error/kind :core-bug})))
     resp))
 
+(defn ^:async knn-search!
+  "Ask the JVM database authority for nearest embedding neighbors.
+
+   Returns the hits vector on success or the canonical failed protocol map.
+   Query embedding and index access remain on the JVM."
+  {:malli/schema [:=> [:cat ::knn-search-request] :any]}
+  [{::protocol/keys [query limit entity-ids]
+    ::keys [request-socket-path]
+    :or {request-socket-path default-request-socket-path}}]
+  (let [response
+        (await
+         (uds/rpc
+          {::uds/socket-path request-socket-path
+           ::uds/message
+           (protocol/knn-search-request
+            (cond-> {::protocol/database-name database-name
+                     ::protocol/query query
+                     ::protocol/limit limit}
+              (seq entity-ids)
+              (assoc ::protocol/entity-ids (vec entity-ids))))}))]
+    (if (::protocol/success? response)
+      (::protocol/hits response)
+      response)))
+
 ;; ---------------------------------------------------------------------------
-;; Wire datom decode — server datom shape is the native 5-vector [e a v t op]
-;; (seon.server.wire/datom->wire). Under the uniform Transit frame a/v arrive
-;; native (keyword attr, any value), so we reconstitute REAL datahike Datoms
-;; directly — no inner decode.
+;; Protocol datom decode — transaction data is the native 5-vector
+;; [e a v t added]. Under the uniform Transit frame a/v arrive native
+;; (keyword attr, any value), so we reconstitute real Datahike datoms directly.
 ;; ---------------------------------------------------------------------------
 
-(defn- wire-datoms->datoms [wire-data]
+(defn- transaction-datoms->datoms [transaction-data]
   (mapv (fn [[e a v t added]]
           (dd/datom e a v t added))
-        wire-data))
+        transaction-data))
 
 ;; ---------------------------------------------------------------------------
-;; RYOW deref — resolve a db value at-or-past `basis-t` from the store.
+;; RYOW deref — resolve a database value at-or-past `basis-t` from the replica.
 ;; Flush-before-ack (writer.cljc:108-134, probe-confirmed) makes attempt
 ;; #1 succeed; the bounded retry exists to FALSIFY that loudly, not hang.
 ;; ---------------------------------------------------------------------------
@@ -282,14 +256,14 @@
         (>= (:max-tx db) basis-t) db
         (< attempt 10)            (recur (inc attempt))
         :else (throw (ex-info
-                      "seon.store.wire: RYOW violated — deref never reached ack basis-t"
+                      "seon.db.replica: RYOW violated — deref never reached ack basis-t"
                       {::basis-t basis-t
                        ::max-tx  (:max-tx db)}))))))
 
 ;; ---------------------------------------------------------------------------
-;; The `:seon-wire` PWriter. Mirrors datahike.http.writer/
+;; The `:seon.db.writer/remote` PWriter. Mirrors datahike.http.writer/
 ;; DatahikeServerWriter: non-streaming (flips deref-conn into
-;; follow-the-store mode), dispatches `transact!` over the UDS wire,
+;; follow-the-database mode), dispatches `transact!` over the UDS transport,
 ;; returns a promise-chan the writer go-loop consumes.
 ;; ---------------------------------------------------------------------------
 
@@ -301,7 +275,7 @@
    explicit bound instead of growing process memory without limit."
   4096)
 
-(declare !adapter fire-own-tx-listeners!)
+(declare !attachment fire-own-tx-listeners!)
 
 (defn- attachment-active-for-conn?
   [state conn]
@@ -310,9 +284,9 @@
 
 (defn- begin-transaction!
   "Admit one own-write correlation for the attached connection."
-  [conn wire-id]
+  [conn request-id]
   (let [result (volatile! ::untracked)]
-    (swap! !adapter
+    (swap! !attachment
            (fn [state]
              (if-not (attachment-active-for-conn? state conn)
                state
@@ -320,7 +294,7 @@
                  (if (< (count correlations) max-own-write-correlations)
                    (do
                      (vreset! result ::tracked)
-                     (assoc-in state [::correlations wire-id]
+                     (assoc-in state [::correlations request-id]
                                {::status ::pending}))
                    (do
                      (vreset! result ::saturated)
@@ -328,32 +302,32 @@
     @result))
 
 (defn- correlation-for
-  [conn wire-id]
-  (let [state @!adapter]
+  [conn request-id]
+  (let [state @!attachment]
     (when (attachment-active-for-conn? state conn)
-      (get-in state [::correlations wire-id]))))
+      (get-in state [::correlations request-id]))))
 
 (defn- reject-transaction!
-  [conn wire-id]
-  (swap! !adapter
+  [conn request-id]
+  (swap! !attachment
          (fn [state]
            (if (attachment-active-for-conn? state conn)
-             (update state ::correlations dissoc wire-id)
+             (update state ::correlations dissoc request-id)
              state))))
 
 (defn- resolve-transaction!
   "Mark a successful response. Returns true when its feed was already skipped."
-  [conn wire-id basis-t]
+  [conn request-id basis-t]
   (let [feed? (volatile! false)]
-    (swap! !adapter
+    (swap! !attachment
            (fn [state]
              (if-let [entry (when (attachment-active-for-conn? state conn)
-                              (get-in state [::correlations wire-id]))]
+                              (get-in state [::correlations request-id]))]
                (if (::feed-coordinate entry)
                  (do
                    (vreset! feed? true)
-                   (update state ::correlations dissoc wire-id))
-                 (assoc-in state [::correlations wire-id]
+                   (update state ::correlations dissoc request-id))
+                 (assoc-in state [::correlations request-id]
                            (assoc entry ::status ::resolved ::basis-t basis-t)))
                state)))
     @feed?))
@@ -368,62 +342,65 @@
         correlations))
 
 (defn- correlation-capacity-error
-  [wire-id]
+  [request-id]
   (ex-info
    "The transaction feed is too far behind to correlate another own write."
-   {:seon.store.wire/id wire-id
-    :seon.store.wire/status :seon.store.wire.status/feed-behind
+   {::protocol/request-id request-id
+    ::protocol/status protocol/feed-behind-status
     ::correlation-limit max-own-write-correlations
     :seon.error/kind :core-bug}))
 
 (defn- ambiguous-transaction-error
-  [conn wire-id attempts error]
-  (let [feed-coordinate (::feed-coordinate (correlation-for conn wire-id))]
-    (reject-transaction! conn wire-id)
+  [conn request-id attempts error]
+  (let [feed-coordinate (::feed-coordinate (correlation-for conn request-id))]
+    (reject-transaction! conn request-id)
     (when feed-coordinate
       (fire-own-tx-listeners! conn (::basis-t feed-coordinate)))
     (ex-info
-     (str "wire transaction lost every reply after " attempts
+     (str "Database transaction lost every reply after " attempts
           " idempotent attempt(s); commit status remains unknown. "
-          "The transaction must only be retried with the same wire id.")
-     {:seon.store.wire/id wire-id
-      :seon.store.wire/status :seon.store.wire.status/unknown
-      :seon.store.wire/attempts attempts
-      :seon.store.wire/basis-t (:max-tx @conn)
-      :seon.store.wire/rpc-failure
-      (:seon.store.wire/rpc-failure (ex-data error))
+          "The transaction must only be retried with the same request id.")
+     {::protocol/request-id request-id
+      ::protocol/status protocol/unknown-status
+      ::protocol/attempts attempts
+      ::protocol/basis-t (:max-tx @conn)
+      ::protocol/transport-failure
+      (::uds/failure (ex-data error))
       :seon.error/kind :core-bug}
      error)))
 
 (defn- transact-rpc!
   "Send one frozen request, resubmitting the same durable id on reply loss."
-  [sock-path request attempt]
-  (-> (wire/rpc sock-path request {:timeout-ms wire/transact-timeout-ms})
+  [request-socket-path request attempt]
+  (-> (uds/rpc {::uds/socket-path request-socket-path
+                ::uds/message request
+                ::uds/timeout-ms transaction-timeout-ms})
       (.catch
        (fn [error]
-         (if (< attempt wire/transact-attempts)
+         (if (< attempt transaction-attempts)
            (do
              (js/console.warn
-              (str "[seon.store.wire] transaction reply lost; retrying the same id "
-                   (:seon.store.wire/id request) " (attempt " (inc attempt)
-                   "/" wire/transact-attempts ")"))
-             (transact-rpc! sock-path request (inc attempt)))
+              (str "[seon.db.replica] transaction reply lost; retrying request "
+                   (::protocol/request-id request) " (attempt " (inc attempt)
+                   "/" transaction-attempts ")"))
+             (transact-rpc! request-socket-path request (inc attempt)))
            (js/Promise.reject error))))))
 
 (defn- rejected-response-error
   [response generated?]
-  (let [error-kind (:seon.store.wire/error-kind response)
-        candidate  (:seon.store.wire/generated-candidate response)
-        allocator-protocol? (and generated? (= "protocol" error-kind))]
+  (let [error-kind (::protocol/error-kind response)
+        candidate  (::protocol/generated-candidate response)
+        allocator-protocol? (and generated?
+                                 (= protocol/protocol-error error-kind))]
     (ex-info
-     (str "wire transaction failed: " (:seon.store.wire/error response))
+     (str "Database transaction failed: " (::protocol/error response))
      (cond->
       {::error-kind error-kind
        :seon.error/kind
-       (if (= "generated-candidate-conflict" error-kind)
+       (if (= protocol/generated-candidate-conflict-error error-kind)
          :user-input
          :core-bug)}
-       (= "generated-candidate-conflict" error-kind)
+       (= protocol/generated-candidate-conflict-error error-kind)
        (assoc :seon.db.id/error :seon.db.id.error/candidate-conflict)
        candidate
        (assoc :seon.db.id/generated-candidate candidate)
@@ -432,16 +409,16 @@
               :seon.db.id.error/invalid-allocation-transaction)))))
 
 (defn- response-processing-error
-  [conn wire-id response error]
-  (let [feed-coordinate (::feed-coordinate (correlation-for conn wire-id))]
-    (reject-transaction! conn wire-id)
+  [conn request-id response error]
+  (let [feed-coordinate (::feed-coordinate (correlation-for conn request-id))]
+    (reject-transaction! conn request-id)
     (when feed-coordinate
       (fire-own-tx-listeners! conn (::basis-t feed-coordinate)))
     (ex-info
-     "A committed wire transaction reply could not be materialized locally."
-     {:seon.store.wire/id wire-id
-      :seon.store.wire/status :seon.store.wire.status/committed
-      :seon.store.wire/basis-t (:seon.store.wire/basis-t response)
+     "A committed database transaction could not be materialized locally."
+     {::protocol/request-id request-id
+      ::protocol/status protocol/committed-status
+      ::protocol/basis-t (::protocol/basis-t response)
       :seon.error/kind :core-bug}
      error)))
 
@@ -474,18 +451,19 @@
       (put! done true))
     done))
 
-(defrecord SeonWireWriter [sock-path conn lifecycle]
+(defrecord RemoteWriter [request-socket-path conn lifecycle]
   w/PWriter
   (-dispatch! [_ {:keys [op args]}]
     (let [p (promise-chan)]
       (if-not (register-writer-operation! lifecycle p)
-        (put! p (ex-info "seon-wire writer is shut down."
+        (put! p (ex-info "The remote database writer is shut down."
                          {::op op
                           :seon.error/kind :core-bug}))
         (if (not= op 'transact!)
           (finish-writer-operation!
             lifecycle p
-            (ex-info "seon-wire writer supports only transact!" {::op op}))
+            (ex-info "The remote database writer supports only transact!"
+                     {::op op}))
           (let [arg-map    (first args)
                 tx-data    (if (map? arg-map) (:tx-data arg-map) arg-map)
                 tx-meta    (when (map? arg-map) (:tx-meta arg-map))
@@ -495,33 +473,31 @@
               generated-candidates
               (when (map? arg-map)
                 (:seon.db.id/generated-candidates arg-map))
-              wire-id    (str (random-uuid))
-              ;; Every write is db-name-routed to THIS pod's cluster db —
-              ;; N pods can share one wire-server without ambient-conn
-              ;; cross-talk (the registry resolves the conn per request).
-              req        (cond-> {:seon.store.wire/op       "transact"
-                                  :seon.store.wire/db-name  cluster-name
-                                  :seon.store.wire/tx-data  tx-data
-                                  :seon.store.wire/id       wire-id}
-                           (seq tx-meta)
-                           (assoc :seon.store.wire/tx-meta tx-meta)
-                           generated?
-                           (assoc :seon.store.wire/generated-candidates
-                                  generated-candidates))
-              tracking   (begin-transaction! conn wire-id)]
+              request-id    (str (random-uuid))
+              request-input
+              (cond-> {::protocol/database-name database-name
+                       ::protocol/transaction-data (vec tx-data)
+                       ::protocol/request-id request-id}
+                (seq tx-meta)
+                (assoc ::protocol/transaction-meta tx-meta)
+                generated?
+                (assoc ::protocol/generated-candidates
+                       (vec generated-candidates)))
+              req (protocol/transaction-request request-input)
+              tracking   (begin-transaction! conn request-id)]
           (if (= ::saturated tracking)
             (finish-writer-operation!
-             lifecycle p (correlation-capacity-error wire-id))
-            (-> (transact-rpc! sock-path req 1)
+             lifecycle p (correlation-capacity-error request-id))
+            (-> (transact-rpc! request-socket-path req 1)
               (.then
                (fn [resp]
                  ;; A reply WAS read — no commit ambiguity from here on. Any
                  ;; throw in this post-reply processing (e.g. the RYOW guard)
                  ;; is put directly, so the .catch below stays rpc-layer-only.
                  (try
-                   (if-not (:seon.store.wire/ok resp)
+                   (if-not (::protocol/success? resp)
                      (do
-                       (reject-transaction! conn wire-id)
+                       (reject-transaction! conn request-id)
                        (finish-writer-operation!
                         lifecycle p
                         (rejected-response-error resp generated?)))
@@ -529,18 +505,18 @@
                      ;; the ack'd basis-t. The synthesized report carries
                      ;; the MATERIALIZED post-tx db value, so straight-line
                      ;; transact!-then-read code just works.
-                     (let [bt      (:seon.store.wire/basis-t resp)
+                     (let [bt      (::protocol/basis-t resp)
                            db      (ryow-deref! conn bt)
-                           tempids (:seon.store.wire/tempids resp)
-                           tx-meta (:seon.store.wire/tx-meta resp)
+                           tempids (::protocol/temporary-ids resp)
+                           tx-meta (::protocol/transaction-meta resp)
                            generated-eids
-                           (:seon.store.wire/generated-eids resp)
+                           (::protocol/generated-entity-ids resp)
                            report
                            (cond-> {:db-after db
-                                    :tx-data  (wire-datoms->datoms
-                                               (:seon.store.wire/tx-data resp))
+                                    :tx-data  (transaction-datoms->datoms
+                                               (::protocol/transaction-data resp))
                                     :tempids  (or tempids {})
-                                        ;; The sole writer (JVM wire-server)
+                                        ;; The sole JVM writer
                                         ;; computes the honest added/retracted
                                         ;; split over the REAL :added flags
                                         ;; (`tx-report->ok-map`). Carry those
@@ -548,30 +524,30 @@
                                         ;; `transact-success-envelope` reports
                                         ;; them verbatim instead of re-deriving
                                         ;; from reconstituted datoms.
-                                    :datoms-added     (:seon.store.wire/datoms-added resp)
-                                    :datoms-retracted (:seon.store.wire/datoms-retracted resp)}
+                                    :datoms-added     (::protocol/datoms-added resp)
+                                    :datoms-retracted (::protocol/datoms-retracted resp)}
                              (seq generated-eids)
                              (assoc :seon.db.id/generated-eids generated-eids)
-                             (:seon.store.wire/recovered? resp)
-                             (assoc :seon.store.wire/recovered? true)
+                             (::protocol/recovered? resp)
+                             (assoc ::protocol/recovered? true)
                              (some? tx-meta) (assoc :tx-meta tx-meta)
-                             (:seon.store.wire/basis-t-before resp)
+                             (::protocol/basis-t-before resp)
                              (assoc :db-before
                                     (d/as-of db
-                                             (:seon.store.wire/basis-t-before
+                                             (::protocol/basis-t-before
                                               resp))))]
-                       (resolve-transaction! conn wire-id bt)
+                       (resolve-transaction! conn request-id bt)
                        (finish-writer-operation! lifecycle p report)))
                    (catch :default e
                      (finish-writer-operation!
                        lifecycle p
-                       (response-processing-error conn wire-id resp e))))))
+                       (response-processing-error conn request-id resp e))))))
               (.catch
                (fn [e]
                  (finish-writer-operation!
                    lifecycle p
                    (ambiguous-transaction-error
-                     conn wire-id wire/transact-attempts
+                     conn request-id transaction-attempts
                      (if (instance? js/Error e)
                        e
                        (js/Error. (str e))))))))))))
@@ -579,37 +555,37 @@
   (-shutdown [_] (shutdown-writer! lifecycle))
   (-streaming? [_] false))
 
-(defmethod w/create-writer :seon-wire
-  [{:keys [sock-path]} connection]
-  (->SeonWireWriter (or sock-path default-sock-path)
-                    connection
-                    (atom {::writer-open? true
-                           ::writer-pending #{}})))
+(defmethod w/create-writer :seon.db.writer/remote
+  [{:keys [socket-path]} connection]
+  (->RemoteWriter (or socket-path default-request-socket-path)
+                  connection
+                  (atom {::writer-open? true
+                         ::writer-pending #{}})))
 
-(defmethod connector/-connect* :seon-wire [config opts]
+(defmethod connector/-connect* :seon.db.writer/remote [config opts]
   (connector/-connect-impl* config opts))
 
 ;; ---------------------------------------------------------------------------
-;; listen! adapter — foreign writes fire the pod's native conn listeners.
+;; listen! attachment — foreign writes fire the pod's native conn listeners.
 ;;
 ;; `seon.db/listen!` installs handlers via `d/listen` on the conn, which
 ;; stores them in `(:listeners (meta conn))` (the Connection proxies meta
 ;; to its wrapped-atom; connector.cljc:32,84). Own txs fire them via
 ;; `datahike.writer/transact!` (writer.cljc:247). For FOREIGN txs we
-;; synthesize the same raw tx-report shape from the wire feed event and
+;; synthesize the same raw tx-report shape from the transaction event and
 ;; fire the same listener atom — ONE bus, two tx origins.
 ;; ---------------------------------------------------------------------------
 
-(defn- stopped-adapter-state
+(defn- stopped-attachment-state
   [generation]
   {::phase ::stopped
    ::generation generation
    ::correlations {}})
 
-(defonce ^:private !adapter
+(defonce ^:private !attachment
   ;; One lifecycle owner for the feed attachment and own-write correlation.
   ;; It contains only live resources and pure coordinates — never a db value.
-  (atom (stopped-adapter-state 0)))
+  (atom (stopped-attachment-state 0)))
 
 (defn- connection-coordinate
   "Derive the branch-qualified identity of one Datahike connection."
@@ -619,8 +595,8 @@
         branch         (:branch config)
         writer-backend (get-in config [:writer :backend])]
     (when-not (uuid? database-id)
-      (throw (ex-info "The attached database has no UUID store identity."
-                      {::store-id database-id
+      (throw (ex-info "The attached database has no UUID identity."
+                      {::database-id database-id
                        :seon.error/kind :core-bug})))
     (when-not (keyword? branch)
       (throw (ex-info "The attached database has no branch identity."
@@ -630,8 +606,8 @@
       (throw (ex-info "The attached database has no writer backend identity."
                       {::writer-backend writer-backend
                        :seon.error/kind :core-bug})))
-    {::db-name cluster-name
-     ::store-id database-id
+    {::database-name database-name
+     ::database-id database-id
      ::branch branch
      ::writer-backend writer-backend}))
 
@@ -658,39 +634,39 @@
   (when timer
     (js/clearTimeout timer)))
 
-(defn- cleanup-adapter-resources!
+(defn- cleanup-attachment-resources!
   [state]
   (clear-reconnect-timer! (::reconnect-timer state))
   (destroy-socket! (::socket state)))
 
-(defn- stop-active-adapter!
+(defn- stop-active-attachment!
   "Stop one active generation and dispose every resource it owns."
-  ([] (stop-active-adapter! nil))
+  ([] (stop-active-attachment! nil))
   ([expected-generation]
    (let [stopped? (volatile! false)
          [before _]
          (swap-vals!
-          !adapter
+          !attachment
           (fn [state]
             (if (and (not= ::stopped (::phase state))
                      (or (nil? expected-generation)
                          (= expected-generation (::generation state))))
               (do
                 (vreset! stopped? true)
-                (stopped-adapter-state (inc (::generation state))))
+                (stopped-attachment-state (inc (::generation state))))
               state)))]
      (when @stopped?
-       (cleanup-adapter-resources! before))
+       (cleanup-attachment-resources! before))
      @stopped?)))
 
-(defn stop-listen-adapter!
+(defn detach!
   "Stop the transaction feed and dispose its socket, timer, and correlations."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (stop-active-adapter!))
+  (stop-active-attachment!))
 
-(defn adapter-status
-  "Live adapter state for diagnostics.
+(defn status
+  "Live attachment state for diagnostics.
 
    Reports only bounded diagnostics and the full database coordinate. It never
    exposes or retains a database value, socket, timer, or connection handle."
@@ -706,7 +682,7 @@
      [::last-applied-coordinate {:optional true} ::progress-coordinate]
      [::own-skips {:optional true} [:int {:min 0}]]]]}
   []
-  (let [state @!adapter]
+  (let [state @!attachment]
     (cond-> {::started? (not= ::stopped (::phase state))
              ::connected? (= ::live (::phase state))
              ::phase (::phase state)
@@ -736,7 +712,7 @@
         (try
           (callback report)
           (catch :default e
-            (js/console.warn "[seon.store.wire adapter]" (pr-str k)
+            (js/console.warn "[seon.db.replica]" (pr-str k)
                              "listener threw:" (str e)))))
       0)))
 
@@ -755,7 +731,7 @@
                                     :db-before (d/as-of db (dec tx-t))
                                     :tx-data   ds}))
     (catch :default e
-      (js/console.warn "[seon.store.wire] fire-own-tx-listeners! failed for tx"
+      (js/console.warn "[seon.db.replica] own transaction listener failed for tx"
                        tx-t ":" (str e)))))
 
 (defn- advance-progress
@@ -766,20 +742,20 @@
       (update ::correlations prune-resolved-correlations basis-t)))
 
 (defn- apply-own-feed-event!
-  [generation conn wire-id basis-t]
+  [generation conn request-id basis-t]
   ;; Materialize before advancing. A stale generation is checked again inside
   ;; the atomic update so an A→B reattach during the deref cannot mutate B.
   (ryow-deref! conn basis-t)
-  (swap! !adapter
+  (swap! !attachment
          (fn [state]
            (if-not (active-generation? state generation conn)
              state
-             (let [correlation (get-in state [::correlations wire-id])
+             (let [correlation (get-in state [::correlations request-id])
                    feed-coordinate
                    (progress-coordinate (::database-coordinate state) basis-t)]
                (-> (if (= ::resolved (::status correlation))
-                     (update state ::correlations dissoc wire-id)
-                     (assoc-in state [::correlations wire-id ::feed-coordinate]
+                     (update state ::correlations dissoc request-id)
+                     (assoc-in state [::correlations request-id ::feed-coordinate]
                                feed-coordinate))
                    (update ::own-skips (fnil inc 0))
                    (advance-progress basis-t)))))))
@@ -794,12 +770,12 @@
   (let [db      (ryow-deref! conn basis-t)
         report  (cond-> {:db-after  db
                          :db-before (d/as-of db basis-t-before)
-                         :tx-data   (wire-datoms->datoms
-                                     (:seon.store.wire/tx-data ev))}
-                  (some? (:seon.store.wire/tx-meta ev))
-                  (assoc :tx-meta (:seon.store.wire/tx-meta ev)))
+                         :tx-data   (transaction-datoms->datoms
+                                     (::protocol/transaction-data ev))}
+                  (some? (::protocol/transaction-meta ev))
+                  (assoc :tx-meta (::protocol/transaction-meta ev)))
         applied? (volatile! false)]
-    (swap! !adapter
+    (swap! !attachment
            (fn [state]
              (let [last-applied
                    (get-in state [::last-applied-coordinate ::basis-t])]
@@ -813,10 +789,10 @@
       (fire-native-listeners! conn report))))
 
 (defn- handle-feed-event! [generation conn ev]
-  (let [state        @!adapter
-        wire-id      (:seon.store.wire/id ev)
-        basis-t      (:seon.store.wire/basis-t ev)
-        basis-before (:seon.store.wire/basis-t-before ev)
+  (let [state        @!attachment
+        request-id      (::protocol/request-id ev)
+        basis-t      (::protocol/basis-t ev)
+        basis-before (::protocol/basis-t-before ev)
         last-applied (get-in state [::last-applied-coordinate ::basis-t])]
     (when-not (integer? basis-t)
       (throw (ex-info "A transaction feed event has no integer basis-t."
@@ -836,26 +812,23 @@
 
       ;; The response-side Datahike writer fires own listeners. The feed only
       ;; advances its full cursor and resolves correlation ordering.
-      (and wire-id (get-in state [::correlations wire-id]))
-      (apply-own-feed-event! generation conn wire-id basis-t)
+      (and request-id (get-in state [::correlations request-id]))
+      (apply-own-feed-event! generation conn request-id basis-t)
 
       :else
       (apply-foreign-feed-event!
        generation conn basis-t basis-before ev))))
 
 (defn- feed-event-dispatch!
-  ;; Apply one pub frame: `tx` events for this pod's cluster route into
-  ;; handle-feed-event!; other clusters' transactions are ignored. The pub
-  ;; stream is db-agnostic — this is the client-side db-name demux the
-  ;; replay-tx reply keys.
-  [generation conn db-name ev]
-  (when (and (= "tx" (:seon.store.wire/event ev))
-             (= db-name (:seon.store.wire/db-name ev)))
+  "Apply one transaction event for the attached database."
+  [generation conn expected-database-name ev]
+  (when (and (= protocol/transaction-event (::protocol/event ev))
+             (= expected-database-name (::protocol/database-name ev)))
     (handle-feed-event! generation conn ev)))
 
 (defn- replay-page-error
   [message data]
-  (throw (ex-info (str "seon.store.wire: invalid replay page — " message)
+  (throw (ex-info (str "Invalid database replay page: " message)
                   (assoc data :seon.error/kind :core-bug))))
 
 (defn- validated-replay-page
@@ -865,18 +838,18 @@
    a reconnectable feed failure, never permission to skip a range. The first
    page establishes db-name and through-t; later pages must retain both."
   [cursor expected-through expected-db-name response]
-  (when-not (:seon.store.wire/ok response)
+  (when-not (::protocol/success? response)
     (replay-page-error "writer returned not-ok"
                        {::response response ::cursor cursor}))
-  (let [response-since (:seon.store.wire/since-t response)
-        through       (:seon.store.wire/through-t response)
-        continuation  (:seon.store.wire/continuation-t response)
-        done?         (:seon.store.wire/done? response)
-        db-name       (:seon.store.wire/db-name response)
-        events        (:seon.store.wire/events response)
-        replayed      (:seon.store.wire/replayed response)
-        basis-ts      (mapv :seon.store.wire/basis-t events)
-        before-ts     (mapv :seon.store.wire/basis-t-before events)
+  (let [response-since (::protocol/since-t response)
+        through       (::protocol/through-t response)
+        continuation  (::protocol/continuation-t response)
+        done?         (::protocol/complete? response)
+        response-database-name (::protocol/database-name response)
+        events        (::protocol/events response)
+        replayed      (::protocol/replayed-count response)
+        basis-ts      (mapv ::protocol/basis-t events)
+        before-ts     (mapv ::protocol/basis-t-before events)
         expected-before-ts (if (seq basis-ts)
                              (vec (cons cursor (butlast basis-ts)))
                              [])]
@@ -890,11 +863,13 @@
       (replay-page-error "through-t changed between pages"
                          {::expected-through expected-through
                           ::response response}))
-    (when-not (and (string? db-name) (not (str/blank? db-name)))
-      (replay-page-error "db-name is missing"
+    (when-not (and (string? response-database-name)
+                   (not (str/blank? response-database-name)))
+      (replay-page-error "database-name is missing"
                          {::response response}))
-    (when (and (some? expected-db-name) (not= expected-db-name db-name))
-      (replay-page-error "db-name changed between pages"
+    (when (and (some? expected-db-name)
+               (not= expected-db-name response-database-name))
+      (replay-page-error "database-name changed between pages"
                          {::expected-db-name expected-db-name
                           ::response response}))
     (when-not (vector? events)
@@ -924,8 +899,10 @@
       (replay-page-error "basis-t-before does not form one cursor chain"
                          {::cursor cursor ::response response}))
     (when-not (every? (fn [event]
-                        (and (= "tx" (:seon.store.wire/event event))
-                             (= db-name (:seon.store.wire/db-name event))))
+                        (and (= protocol/transaction-event
+                                (::protocol/event event))
+                             (= response-database-name
+                                (::protocol/database-name event))))
                       events)
       (replay-page-error "an event is not a tx for the resolved database"
                          {::response response}))
@@ -943,7 +920,7 @@
                 (<= continuation cursor))
         (replay-page-error "a continuation page made no progress"
                            {::cursor cursor ::response response})))
-    {::db-name db-name
+    {::database-name response-database-name
      ::through-t through
      ::continuation-t continuation
      ::done? done?
@@ -957,13 +934,13 @@
 (defn- throw-if-feed-dropped!
   [connection-state]
   (when-let [reason (::drop-reason @connection-state)]
-    (throw (ex-info "seon.store.wire: pub socket dropped during replay"
+    (throw (ex-info "The transaction publisher dropped during replay."
                     {::drop-reason reason}))))
 
 (defn- register-feed-socket!
   [generation conn socket]
   (let [registered? (volatile! false)]
-    (swap! !adapter
+    (swap! !attachment
            (fn [state]
              (if (active-generation? state generation conn)
                (do
@@ -978,7 +955,7 @@
 
 (defn- clear-feed-socket!
   [generation conn socket]
-  (swap! !adapter
+  (swap! !attachment
          (fn [state]
            (if (and (active-generation? state generation conn)
                     (identical? socket (::socket state)))
@@ -1003,81 +980,88 @@
 (defn ^:async ^:private connect-feed!
   ;; One pub-socket feed connection: connect, walk bounded replay pages under
   ;; one fixed upper watermark, drain live frames buffered throughout, go live.
-  ;; Resolves to {::db-name ::replayed}; throws on connect/replay failure (the
+  ;; Resolves to {::database-name ::replayed}; throws on connect/replay failure (the
   ;; caller owns retry). Once live, `on-drop` fires ONCE if the connection dies;
   ;; a drop during replay rejects this connect attempt directly.
-  [generation conn database-coordinate sock-path pub-sock-path on-drop]
+  [generation conn database-coordinate request-socket-path publish-socket-path on-drop]
   (let [!connection  (atom {::buffer []
                             ::live? false
-                            ::db-name (::db-name database-coordinate)
+                            ::database-name (::database-name database-coordinate)
                             ::closing? false})
         drop-promise (js/Promise.
                       (fn [_resolve reject]
                         (swap! !connection assoc ::reject-drop reject)))
-        sock          (await
-                       (wire/connect-pub
-                        pub-sock-path
-                        {:on-event (fn [event]
-                                     (if (::live? @!connection)
-                                       (feed-event-dispatch!
-                                        generation conn
-                                        (::db-name @!connection) event)
-                                       (buffer-live-event! !connection event)))
-                         :on-close (fn [reason]
-                                     (let [before @!connection]
-                                       (swap! !connection assoc ::drop-reason reason)
-                                       (cond
-                                         (::live? before)
-                                         (when on-drop (on-drop reason))
+        sock
+        (await
+         (uds/connect-publisher!
+          {::uds/socket-path publish-socket-path
+           ::uds/on-message
+           (fn [event]
+             (if (::live? @!connection)
+               (feed-event-dispatch!
+                generation conn (::database-name @!connection) event)
+               (buffer-live-event! !connection event)))
+           ::uds/on-close
+           (fn [reason]
+             (let [before @!connection]
+               (swap! !connection assoc ::drop-reason reason)
+               (cond
+                 (::live? before)
+                 (when on-drop (on-drop reason))
 
-                                         (not (::closing? before))
-                                         ((::reject-drop before)
-                                          (ex-info
-                                           "seon.store.wire: pub socket dropped during replay"
-                                           {::drop-reason reason})))))}))]
+                 (not (::closing? before))
+                 ((::reject-drop before)
+                  (ex-info "The transaction publisher dropped during replay."
+                           {::drop-reason reason})))))}))]
     (register-feed-socket! generation conn sock)
     (try
       ;; Replay every tx after the watermark. Pages are applied as they arrive,
-      ;; so a failed later page reconnects from the advanced adapter watermark.
+      ;; so a failed later page reconnects from the advanced attachment watermark.
       ;; The pub socket remains open and buffers frames for the entire walk.
-      (let [adapter-state @!adapter
-            _ (when-not (active-generation? adapter-state generation conn)
+      (let [attachment-state @!attachment
+            _ (when-not (active-generation? attachment-state generation conn)
                 (throw (ex-info "The transaction feed attachment was stopped."
                                 {::generation generation
                                  :seon.error/kind :core-bug})))
             initial-cursor
-            (or (get-in adapter-state
+            (or (get-in attachment-state
                         [::last-applied-coordinate ::basis-t])
                 0)
-            expected-db-name (::db-name database-coordinate)
+            expected-database-name (::database-name database-coordinate)
             replay-result
             (loop [cursor initial-cursor
                    through nil
                    replayed 0]
               (throw-if-feed-dropped! !connection)
-              (let [response (await
-                              (js/Promise.race
-                               #js [(wire/replay-tx
-                                     sock-path
-                                     (cond-> {:since-t cursor
-                                              :db-name expected-db-name}
-                                       (some? through)
-                                       (assoc :through-t through)))
-                                    drop-promise]))
+              (let [replay-request
+                    (protocol/replay-transactions-request
+                     (cond->
+                      {::protocol/database-name expected-database-name
+                       ::protocol/since-t cursor}
+                       (some? through)
+                       (assoc ::protocol/through-t through)))
+                    response
+                    (await
+                     (js/Promise.race
+                      #js [(uds/rpc
+                            {::uds/socket-path request-socket-path
+                             ::uds/message replay-request
+                             ::uds/timeout-ms replay-timeout-ms})
+                           drop-promise]))
                     _        (throw-if-feed-dropped! !connection)
                     page     (validated-replay-page
-                              cursor through expected-db-name response)
-                    next-db  (::db-name page)
+                              cursor through expected-database-name response)
+                    next-db  (::database-name page)
                     total    (+ replayed (::replayed page))]
                 (doseq [event (::events page)]
                   (feed-event-dispatch! generation conn next-db event))
                 (if (::done? page)
-                  {::db-name next-db ::replayed total}
+                  {::database-name next-db ::replayed total}
                   (recur (::continuation-t page)
                          (::through-t page)
                          total))))]
         (throw-if-feed-dropped! !connection)
-        (when-not (active-generation? @!adapter generation conn)
+        (when-not (active-generation? @!attachment generation conn)
           (throw (ex-info "The transaction feed attachment was stopped."
                           {::generation generation
                            :seon.error/kind :core-bug})))
@@ -1088,7 +1072,7 @@
           (swap! !connection assoc ::live? true ::buffer [])
           (doseq [event buffered]
             (feed-event-dispatch!
-             generation conn (::db-name @!connection) event)))
+             generation conn (::database-name @!connection) event)))
         (assoc replay-result ::socket sock))
       (catch :default error
         (swap! !connection assoc ::closing? true)
@@ -1101,14 +1085,14 @@
 (defn- activate-feed!
   [generation result reconnected?]
   (let [activated? (volatile! false)]
-    (swap! !adapter
+    (swap! !attachment
            (fn [state]
              (if (active-generation? state generation)
                (do
                  (vreset! activated? true)
                  (-> state
                      (assoc ::phase ::live
-                            ::db-name (::db-name result)
+                            ::database-name (::database-name result)
                             ::socket (::socket result))
                      (dissoc ::reconnect-timer ::ready)))
                state)))
@@ -1118,15 +1102,15 @@
                       {::generation generation
                        :seon.error/kind :core-bug})))
     (log/info-console!
-     "seon.store.wire"
+     "seon.db.replica"
      (str "tx-feed " (if reconnected? "re-connected" "live")
-          " (pub socket, db " (::db-name result)
+          " (pub socket, db " (::database-name result)
           ", replayed " (::replayed result) ")"))
-    (::db-name result)))
+    (::database-name result)))
 
 (defn- connect-current-attachment!
   [generation]
-  (let [state @!adapter]
+  (let [state @!attachment]
     (if-not (active-generation? state generation)
       (js/Promise.reject
        (ex-info "The transaction feed attachment is no longer active."
@@ -1136,18 +1120,18 @@
        generation
        (::conn state)
        (::database-coordinate state)
-       (::sock-path state)
-       (::pub-sock-path state)
+       (::request-socket-path state)
+       (::publish-socket-path state)
        #(schedule-reconnect! generation %)))))
 
 (defn- launch-reconnect!
   [generation]
-  (when (active-generation? @!adapter generation)
+  (when (active-generation? @!attachment generation)
     (-> (connect-current-attachment! generation)
         (.then #(activate-feed! generation % true))
         (.catch
          (fn [error]
-           (when (active-generation? @!adapter generation)
+           (when (active-generation? @!attachment generation)
              (schedule-reconnect!
               generation (or (.-message error) (str error)))))))))
 
@@ -1158,7 +1142,7 @@
         scheduled? (volatile! false)
         fire! (fn []
                 (let [claimed? (volatile! false)]
-                  (swap! !adapter
+                  (swap! !attachment
                          (fn [state]
                            (if (and (active-generation? state generation)
                                     (identical? @!timer
@@ -1169,9 +1153,9 @@
                              state)))
                   (when @claimed?
                     (launch-reconnect! generation))))
-        timer (js/setTimeout fire! wire/feed-reconnect-delay-ms)]
+        timer (js/setTimeout fire! feed-reconnect-delay-ms)]
     (vreset! !timer timer)
-    (swap! !adapter
+    (swap! !attachment
            (fn [state]
              (if (and (active-generation? state generation)
                       (nil? (::reconnect-timer state)))
@@ -1184,53 +1168,53 @@
                state)))
     (if @scheduled?
       (log/error-console!
-       "seon.store.wire"
+       "seon.db.replica"
        (str "tx-feed pub connection lost (" reason ") — reconnecting in "
-            wire/feed-reconnect-delay-ms "ms"))
+            feed-reconnect-delay-ms "ms"))
       (js/clearTimeout timer))))
 
 (defn- same-attachment?
-  [state conn database-coordinate sock-path pub-sock-path]
+  [state conn database-coordinate request-socket-path publish-socket-path]
   (and (attachment-active-for-conn? state conn)
        (= database-coordinate (::database-coordinate state))
-       (= sock-path (::sock-path state))
-       (= pub-sock-path (::pub-sock-path state))))
+       (= request-socket-path (::request-socket-path state))
+       (= publish-socket-path (::publish-socket-path state))))
 
-(defn ^:async start-listen-adapter!
+(defn ^:async attach!
   "Connect the persistent pub-socket tx feed and pump FOREIGN tx into the conn.
 
    ONE streaming pub-socket connection (push) replaces the old req-socket
-   poll pump: the wire-server writes every committed tx event down the
+   poll pump: the database server writes every committed tx event down the
    stream, and the frame reader feeds the conn's native listeners directly.
    Idempotent for the same connection and coordinate. A different connection,
    branch, or transport path atomically disposes the old attachment before the
    new one connects. Resilient: a
    drop logs LOUDLY, reconnects after `wire/feed-reconnect-delay-ms`, and recovers the gap via the
    req-socket `replay-tx` from the basis-t watermark (DE-2 lossless wake) —
-   the adapter never dies silently. The FIRST connect is fail-loud (boot is
+   the attachment never dies silently. The FIRST connect is fail-loud (boot is
    ping-gated; a pod that can't reach its feed must not run).
 
-   Map-in: `{::conn <conn> ::sock-path <path>? ::pub-sock-path <path>?}`.
+   Map-in: `{::conn <conn> ::request-socket-path <path>? ::publish-socket-path <path>?}`.
    Returns a Promise of the feed's db-name once a new attachment is live. An
    already-active identical attachment returns its db-name without opening a
    second socket."
   {:malli/schema [:=> [:cat [:map [::conn ::conn]
-                                  [::sock-path {:optional true} ::sock-path]
-                                  [::pub-sock-path {:optional true} ::sock-path]]] :any]}
-  [{::keys [conn sock-path pub-sock-path]
-    :or {sock-path default-sock-path pub-sock-path default-pub-sock-path}}]
+                                  [::request-socket-path {:optional true} ::request-socket-path]
+                                  [::publish-socket-path {:optional true} ::request-socket-path]]] :any]}
+  [{::keys [conn request-socket-path publish-socket-path]
+    :or {request-socket-path default-request-socket-path publish-socket-path default-publish-socket-path}}]
   (let [db                  @conn
         database-coordinate (connection-coordinate db)
         basis-t             (:max-tx db)
-        current             @!adapter]
+        current             @!attachment]
     (when-not (integer? basis-t)
       (throw (ex-info "The attached database has no integer basis-t."
                       {::basis-t basis-t
                        :seon.error/kind :core-bug})))
     (if (same-attachment?
-         current conn database-coordinate sock-path pub-sock-path)
+         current conn database-coordinate request-socket-path publish-socket-path)
       (await (or (::ready current)
-                 (js/Promise.resolve (::db-name database-coordinate))))
+                 (js/Promise.resolve (::database-name database-coordinate))))
       (let [generation (inc (::generation current))
             state {::phase ::connecting
                    ::generation generation
@@ -1238,23 +1222,23 @@
                    ::database-coordinate database-coordinate
                    ::last-applied-coordinate
                    (progress-coordinate database-coordinate basis-t)
-                   ::sock-path sock-path
-                   ::pub-sock-path pub-sock-path
+                   ::request-socket-path request-socket-path
+                   ::publish-socket-path publish-socket-path
                    ::own-skips 0
                    ::correlations {}}]
         ;; Publish the new generation before destroying old resources. Any old
         ;; socket callback caused by `.destroy` then observes itself as stale.
-        (reset! !adapter state)
-        (cleanup-adapter-resources! current)
+        (reset! !attachment state)
+        (cleanup-attachment-resources! current)
         (let [ready (-> (connect-current-attachment! generation)
                         (.then #(activate-feed! generation % false))
                         (.catch
                          (fn [error]
-                           (stop-active-adapter! generation)
+                           (stop-active-attachment! generation)
                            (throw error))))]
-          (swap! !adapter
-                 (fn [adapter]
-                   (if (active-generation? adapter generation conn)
-                     (assoc adapter ::ready ready)
-                     adapter)))
+          (swap! !attachment
+                 (fn [attachment]
+                   (if (active-generation? attachment generation conn)
+                     (assoc attachment ::ready ready)
+                     attachment)))
           (await ready))))))

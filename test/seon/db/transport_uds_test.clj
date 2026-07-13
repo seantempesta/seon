@@ -1,0 +1,78 @@
+(ns seon.db.transport-uds-test
+  "Protocol validation and Unix-socket transport tests."
+  (:require [clojure.test :refer [deftest is]]
+            [seon.db.protocol :as protocol]
+            [seon.db.transport.uds :as uds])
+  (:import [java.io File]
+           [java.util Date UUID]))
+
+(defn- socket-path
+  [label]
+  (str "/tmp/seon-" label "-" (random-uuid) ".sock"))
+
+(deftest canonical-request-validation-is-structural
+  (let [ping (protocol/ping-request)
+        ensure (protocol/ensure-database-request
+                {::protocol/database-name "alpha"
+                 ::protocol/backend :memory})
+        transact (protocol/transaction-request
+                  {::protocol/database-name "alpha"
+                   ::protocol/request-id "request-1"
+                   ::protocol/transaction-data [{:example/value :ready}]})]
+    (is (every? protocol/valid-request? [ping ensure transact]))
+    (is (false? (protocol/valid-request?
+                 (dissoc transact ::protocol/database-name)))
+        "every database-scoped operation requires explicit routing")
+    (is (false? (protocol/valid-request?
+                 (assoc transact ::protocol/operation :transact)))
+        "bare operation vocabulary is not accepted")
+    (is (= protocol/protocol-error
+           (::protocol/error-kind
+            (protocol/failure
+             {::protocol/error-kind protocol/protocol-error
+              ::protocol/error "invalid"}))))))
+
+(deftest transit-roundtrip-preserves-native-protocol-values
+  (let [request-id (str (UUID/randomUUID))
+        instant (Date. 1720000000000)
+        message
+        (protocol/transaction-request
+         {::protocol/database-name "alpha"
+          ::protocol/request-id request-id
+          ::protocol/transaction-data
+          [{:db/id "entity"
+            :example/status :example.status/ready
+            :example/at instant}]
+          ::protocol/transaction-meta
+          {:seon.db/process :seon.db.process/repl}})
+        decoded (uds/decode (uds/encode message))]
+    (is (= message decoded))
+    (is (keyword? (::protocol/operation decoded)))
+    (is (= :example.status/ready
+           (get-in decoded [::protocol/transaction-data 0
+                            :example/status])))
+    (is (instance? Date
+                   (get-in decoded [::protocol/transaction-data 0
+                                    :example/at])))))
+
+(deftest request-server-delivers-maps-without-interpreting-them
+  (let [path (socket-path "transport-request")
+        seen (atom [])
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/handler
+          (fn [request]
+            (swap! seen conj request)
+            (protocol/success {::protocol/pong? true}))})]
+    (try
+      (with-open [channel (uds/connect! path)]
+        (let [request (protocol/ping-request)
+              response (uds/call! {::uds/channel channel
+                                   ::uds/message request})]
+          (is (= [request] @seen))
+          (is (= {::protocol/success? true ::protocol/pong? true}
+                 response))))
+      (finally
+        (uds/close-request-server! server)
+        (.delete (File. path))))))

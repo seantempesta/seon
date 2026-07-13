@@ -240,8 +240,9 @@ enough to run on every puzzling drive.
 Isolation is the CLUSTER: one shared db + its agents, one Node pod per
 cluster, all databases hosted by the one JVM database server (the registry). From
 inside a cluster there is ONE conn and ONE database — agents never know
-other clusters exist (`list-dbs`/`remove-db` are supervisor-facing database
-protocol operations, never agent-exposed). The supervisor owns the lifecycle:
+other clusters exist. Database enumeration, fork, release, and deletion are
+typed root/supervisor operations in `seon.db.registry`, never agent protocol
+operations. The supervisor owns the lifecycle:
 
 - `bin/seon cluster create <name> [--ephemeral]` — a db entry (`:file`,
   ensured at pod boot) + a pod on its own ephemeral HTTP port. ~10s warm,
@@ -254,7 +255,8 @@ protocol operations, never agent-exposed). The supervisor owns the lifecycle:
   its pod/conn, `delete-branch!`, and remove only its overlay; never delete the
   shared source-database blobs.
 - `bin/seon cluster destroy <name>` — stop the pod, delete the db from the
-  registry (`registry/delete-db!`), remove `data/clusters/<name>/`
+  registry (`seon.db.registry/delete-database!`), remove
+  `data/clusters/<name>/`
   including `blobs/` (turn capture is per-cluster).
 
 `POST /agents/run` is the one-shot composition door on EVERY pod, built

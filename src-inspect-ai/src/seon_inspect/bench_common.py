@@ -89,8 +89,8 @@ def run_bounds_form(turn_limit: int, deadline_ms: int,
     return (
         "(do (require (quote [cheshire.core :as json])"
         " (quote [datahike.api :as d]))"
-        " (let [conn (:seon.server.registry/conn (seon.server.registry/get-conn"
-        f" {{:seon.server.registry/db-name :{db_name}}}))"
+        " (let [conn (:seon.db.registry/conn (seon.db.registry/lookup-connection"
+        f" {{:seon.db.registry/database-name :{db_name}}}))"
         " installed (set (keys (d/schema @conn)))"
         " schema-tx (into [] (remove (fn [s] (installed (:db/ident s)))) "
         + _RUN_BOUND_SCHEMA_EDN + ")"

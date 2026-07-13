@@ -4,8 +4,8 @@
    a runtime answers the probe with its `advertisement` — the CLUSTER it
    belongs to plus the VECTOR of ids it hosts — core `:seon.agent/id`
    strings for agent-hosting processes (the pod hosts every agent it
-   resumed or minted), or `proc:<name>` for non-agent infrastructure
-   runtimes (wire-node = `proc:wire`). `bin/mcp-server-cljs` resolves an
+   resumed or minted), or `proc:<name>` for an explicitly advertised
+   non-agent runtime. `bin/mcp-server-cljs` resolves an
    `agent_id` eval by MEMBERSHIP: it enumerates shadow runtimes, evals
    `(seon.dev.runtime-id/advertisement)` in each, and applies
    [[select-runtime]] — the ONE decision rule. Every cluster hosts a
@@ -18,11 +18,10 @@
    contain `/` (`bin/seon valid_cluster_name`), so the qualified grammar
    splits unambiguously on the FIRST `/`.
 
-   CLJC + zero requires by design: this ns is compiled into every build
-   that wants to be MCP-addressable (`:client`, `:wire-node`,
-   `:node-agent`) and must cost nothing beyond two atoms — the slim
-   `:wire-node` build must not drag the bootstrap compiler or the store
-   layer. The CLJC half exists so `bin/mcp-server-cljs` (babashka) loads
+   CLJC + zero platform-specific requires by design: this ns is compiled into
+   every build that wants to be MCP-addressable (`:client`, `:node-agent`)
+   and must cost nothing beyond two atoms. The CLJC half exists so
+   `bin/mcp-server-cljs` (babashka) loads
    the SAME [[parse-id]]/[[select-runtime]] grammar the CLJS suite
    tests — one resolution rule, zero mirrored logic."
   (:require [clojure.string :as str]))
@@ -61,8 +60,8 @@
 (defn cluster!
   "Declare the cluster THIS process belongs to; idempotent.
 
-   The pod calls it at boot with `seon.store.wire/cluster-name` (the ONE
-   name derivation, registry C15). Blank names are refused — a runtime
+   The pod calls it at boot with `seon.db.replica/database-name`, the one
+   database-name derivation. Blank names are refused — a runtime
    that never declares advertises WITHOUT a cluster (legacy shape) and
    can only be pinned by an unambiguous bare id."
   {:malli/schema [:=> [:catn [:seon.dev.runtime-id/cluster :string]] :string]}
@@ -74,9 +73,9 @@
 (defn dir->cluster-name
   "Cluster name from a cluster dir — its basename; blank dir → `default`.
 
-   The same rule as `seon.store.wire/cluster-name` (basename of
-   `SEON_CLUSTER_DIR`), exposed here so the babashka resolver can derive
-   its OWN cluster without loading the store layer."
+   The same rule as `seon.db.replica/database-name` (basename of
+   `SEON_CLUSTER_DIR`), exposed here so the Babashka resolver can derive
+   its own cluster without loading the replica."
   {:malli/schema [:=> [:catn [:seon.dev.runtime-id/dir :string]] :string]}
   [dir]
   (or (last (remove str/blank? (str/split dir #"/"))) "default"))
@@ -104,7 +103,7 @@
   "Split an MCP `agent_id` into its optional cluster qualifier + bare id.
 
    `\"default/root\"` → `{::cluster \"default\" ::id \"root\"}`;
-   `\"root\"` / `\"proc:wire\"` → `{::id …}` (no qualifier). Splits on the
+   `\"root\"` / `\"proc:worker\"` → `{::id …}` (no qualifier). Splits on the
    FIRST `/` — safe because cluster names can't contain `/` and the canonical
    agent-id grammar excludes it (human-facing agents use joined words)."
   {:malli/schema [:=> [:catn [:seon.dev.runtime-id/agent-id :string]]

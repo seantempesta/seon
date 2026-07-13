@@ -166,7 +166,7 @@
   #{:db/txInstant
     :seon.db/user
     :seon.db/process
-    :seon.store.wire/id})
+    :seon.db.protocol/request-id})
 
 (defn- source-attrs
   "LEGACY fallback: regex-scan `src` for qualified keyword literals.

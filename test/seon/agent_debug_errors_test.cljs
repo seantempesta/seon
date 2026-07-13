@@ -18,7 +18,7 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.error :as error]
-    [seon.store.wire :as store.wire]))
+    [seon.db.replica :as replica]))
 
 ;; ---------------------------------------------------------------------------
 ;; Pure piece — the deepest-message helper (moved from seon.eval).
@@ -166,7 +166,7 @@
       (is (str/includes? (:seon.agent.debug/repro-expr r)
                          "(apply (resolve 'my.probe/f)"))
       (testing "the error→fork bridge: the exact supervisor command for this at"
-        (is (= (str "bin/seon cluster fork " store.wire/cluster-name " "
+        (is (= (str "bin/seon cluster fork " replica/database-name " "
                     (:seon.error/at r))
                (:seon.agent.debug/fork-hint r))))
       (is (not (contains? r :seon.agent.debug/note)))

@@ -100,7 +100,7 @@ Two processes, one switch.
     and self-bounded (top-5 with a per-hit token budget). When no prefetch ran it
     renders blank and the composer drops it.
 
-`seon.server.boot` is the composition root: it resolves embedding functions and
+`seon.db.server` is the composition root: it resolves embedding functions and
 passes one immutable runtime containing database initialization, transaction
 transformation, KNN, and committed-transaction publication to the writer. The
 wire and registry namespaces have no load-time callback registries, and merely

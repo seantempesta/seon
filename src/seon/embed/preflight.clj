@@ -1,5 +1,5 @@
 (ns seon.embed.preflight
-  "Loud, third-party-facing self-check for the embedding-backed wire-server.
+  "Loud self-check for the embedding-backed database server.
 
    The embedding feature has FOUR independent silent-degrade-to-no-hits modes
    (research embeddings-packaging-2026-06-21 §E): Java < 22 / no
@@ -11,13 +11,13 @@
 
    `run!` converts those four modes into ONE explicit pass/fail with DISTINCT
    non-zero exit codes, so `java -jar … --preflight` is a real gate a third
-   party can script against. It is invoked from `seon.server.boot/-main` when
-   `--preflight` is passed; it NEVER touches the durable cluster store (the
+   party can script against. It is invoked from `seon.db.server/-main` when
+   `--preflight` is passed; it NEVER touches the durable cluster database (the
    install!/KNN self-test runs against a throwaway `:memory` datahike conn)."
   (:require [clojure.string :as str]
             [datahike.api :as d]
             ;; Loading this require-chain registers the :proximum secondary
-            ;; index type at runtime (the same require boot.clj does), so the
+            ;; index type at runtime (the same require seon.db.server does), so
             ;; self-test's install! can declare a :proximum index.
             [datahike.index.secondary.proximum]
             [seon.embed :as embed]))
@@ -82,7 +82,7 @@
   []
   (when (str/blank? (System/getenv "GEMINI_API_KEY"))
     {:code :gemini-key-blank
-     :msg  "GEMINI_API_KEY is unset/blank. The wire-server boots and accepts writes, but no text is ever embedded (silent no-hits). Export GEMINI_API_KEY=<your key> and re-run."}))
+     :msg  "GEMINI_API_KEY is unset/blank. The database server boots and accepts writes, but no text is ever embedded (silent no-hits). Export GEMINI_API_KEY=<your key> and re-run."}))
 
 (defn- check-embed-roundtrip
   "A REAL `embed-text` round-trip must return a vector of length
@@ -192,7 +192,7 @@
    on first failure. Does NOT call System/exit — the caller (boot/-main) does,
    so this stays testable."
   []
-  (println "[preflight] embedding-backed wire-server self-check")
+  (println "[preflight] embedding-backed database-server self-check")
   (loop [[c & more] checks]
     (if (nil? c)
       (do (println "[preflight] PASS — all checks green; embeddings are live.")

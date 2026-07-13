@@ -89,8 +89,8 @@ _AI_ATTR_SCHEMA_EDN = (
 # %s slots: db-name keyword, config-row map EDN (merged over :seon.ai/id).
 _AI_CONFIG_FORM = (
     "(do (require (quote [cheshire.core :as json]) (quote [datahike.api :as d]))"
-    " (let [conn (:seon.server.registry/conn (seon.server.registry/get-conn"
-    " {:seon.server.registry/db-name :%s}))"
+    " (let [conn (:seon.db.registry/conn (seon.db.registry/lookup-connection"
+    " {:seon.db.registry/database-name :%s}))"
     " installed (set (keys (d/schema @conn)))"
     " schema-tx (into [] (remove (fn [s] (installed (:db/ident s)))) " + _AI_ATTR_SCHEMA_EDN + ")"
     " _ (when (seq schema-tx) (d/transact conn {:tx-data schema-tx}))"

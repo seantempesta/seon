@@ -170,6 +170,15 @@ second lock or transaction path. This supplies database-wide generated-value
 uniqueness without a global identity entity; lookup refs remain
 attribute-qualified. The protocol request UUID is a separate idempotency
 receipt, not a domain identity.
+
+That receipt is one transaction-metadata identity plus its content hash and
+protocol version. Caller tempids that must survive a lost reply receive
+same-transaction marker refs. These are durable recovery facts, but they are
+private to `seon.db.protocol`: public transaction reports, replay events,
+changed-attribute routing, and domain datom counts omit every reserved receipt
+attribute. The request ID travels separately on the protocol event solely to
+correlate a replica's own commit with its response.
+
 `:seon.agent.ctx/name` is NOT an identity (see §4.2): it is a plain `:keyword`, a
 per-agent upsert key, not a global identity.
 

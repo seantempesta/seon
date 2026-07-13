@@ -41,7 +41,7 @@
     [seon.db :as db]
     [seon.error]
     [seon.schema :as schema]
-    [seon.store.wire :as store.wire]))
+    [seon.db.replica :as replica]))
 
 ;; Shared success/error envelope keys — registered ONCE up front; every
 ;; response schema in this ns references them (errors are values: an
@@ -589,7 +589,7 @@
                    :seon.error/at at
                    ::repro-expr (repro-expr-str at fn-sym args-edn)
                    ::fork-hint (str "bin/seon cluster fork "
-                                    store.wire/cluster-name " " at)}
+                                    replica/database-name " " at)}
             fn-sym   (assoc ::fn-sym fn-sym)
             args-edn (assoc :seon.error/args-edn args-edn)
             teid     (assoc ::turn-eid teid :seon.agent.turn/id tid)

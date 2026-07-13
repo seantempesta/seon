@@ -748,7 +748,7 @@
          "</head>\n"
          "<body class=\"" body-class "\">\n"
          ;; `retryMaxCount: Infinity` keeps the long-lived stream reconnecting
-         ;; forever (survives a pod/wire-server restart, a network blip, a
+         ;; forever (survives a pod/database-server restart, a network blip, a
          ;; laptop sleep→wake) with datastar's backoff; `openWhenHidden: false`
          ;; drops the stream while the tab is hidden and REOPENS on return —
          ;; cheap, and reopen = a fresh full `view=f(db)` repaint (no since-t

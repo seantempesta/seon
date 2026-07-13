@@ -527,7 +527,7 @@
                    :keep-history? true})
                  (d/with (allocation-schema-transaction))
                  :db-after
-                 (assoc-in [:config :writer :backend] :seon-wire))]
+                 (assoc-in [:config :writer :backend] :seon.db.writer/remote))]
          (reify
            IDeref
            (-deref [_] db-value))))
@@ -550,13 +550,13 @@
        (testing "a non-streaming remote deref exposes the authority's config"
          (is (nil?
                (id/assert-allocation-writer!
-                 (split-view-conn :seon-wire
+                 (split-view-conn :seon.db.writer/remote
                                   :seon.db.id.writer/serialized)))))
        (testing "persisted config cannot disguise an unsafe live writer"
          (let [failure
                (try
                  (id/assert-allocation-writer!
-                   (split-view-conn :self :seon-wire))
+                   (split-view-conn :self :seon.db.writer/remote))
                  nil
                  (catch :default error error))]
            (is (= :seon.db.id.error/unconfigured-allocation-writer
@@ -856,7 +856,8 @@
                              {:seon.error/message "unrelated unique conflict"
                               :seon.error/kind :user-input
                               :seon.error/data
-                              {:seon.store.wire/error-kind "datahike"}}}))
+                              {:seon.db.protocol/error-kind
+                               :seon.db.protocol.error/database}}}))
                          #(id/allocate! (allocation-request builder)))))
                     (.then
                      (fn [response]

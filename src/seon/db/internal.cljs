@@ -131,8 +131,8 @@
 ;; ---------------------------------------------------------------------------
 ;; Persisted transaction provenance. The generic ALS map remains useful to
 ;; runtime control (turn/eval/replay/test state), but only these two facts cross
-;; the transaction boundary. Wire request correlation is stamped separately by
-;; the sole writer under `:seon.store.wire/*`.
+;; the transaction boundary. Protocol request correlation is stamped separately
+;; by the sole writer under `:seon.db.protocol/*`.
 ;; ---------------------------------------------------------------------------
 
 (def tx-meta-attrs
@@ -1748,15 +1748,16 @@
       :seon.db/added     <datoms added>
       :seon.db/retracted <datoms retracted>}
 
-   The wire success report's shape: `:db-after`
+   The writer success report's shape: `:db-after`
    (a datahike DB value whose `:max-tx` IS the committed tx id), `:tx-data`
    (a vector of Datoms, each `:added` true/false), `:tempids`, `:tx-meta`,
-   and — on the wire path — `:datoms-added` / `:datoms-retracted`, the
+   and — on the remote-writer path — `:datoms-added` /
+   `:datoms-retracted`, the
    honest add/retract split the sole writer computed over the REAL `:added`
-   flags (`seon.server.wire/tx-report->ok-map`).
+   flags (`seon.db.writer/response-from-report-data`).
 
    The counts are taken from `:datoms-added` / `:datoms-retracted` when the
-   report carries them (the wire path), else counted directly off the
+   report carries them (the remote-writer path), else counted directly off the
    datoms' `:added` flags. NEVER inferred by `tx-count - added`
    subtraction — a single `[:db/retract …]` adds tx-meta datoms whose count
    masks the retraction, so subtraction reports retracted 0 (#16).
@@ -1765,7 +1766,7 @@
    caller passes `:seon.db/return-report? true` (escape hatch for code that
    needs `:db-after` / `:db-before`). Listeners are UNAFFECTED — they
    project off the raw report independently via [[build-handler-input]],
-   and the wire's `tx-report->ok-map` stays on the raw report."
+   and the writer's transaction projection stays on the raw report."
   [report return-report?]
   (let [datoms    (:tx-data report)
         added     (or (:datoms-added report)

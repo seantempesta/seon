@@ -61,6 +61,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.db.id :as db.id]
+            [seon.db.protocol :as db.protocol]
             [seon.db.process :as db.process]
             [seon.diffusion.grammar :as grammar]
             [seon.error :as error]
@@ -2965,11 +2966,11 @@
   [envelope]
   (let [data (get-in envelope [:seon.db/error :seon.error/data])
         error-tag (::db.id/error data)
-        wire-status (:seon.store.wire/status data)]
+        transaction-status (::db.protocol/status data)]
     (or (= "seon.db.id.error" (some-> error-tag namespace))
-        (contains? #{:seon.store.wire.status/unknown
-                     :seon.store.wire.status/committed}
-                   wire-status))))
+        (contains? #{db.protocol/unknown-status
+                     db.protocol/committed-status}
+                   transaction-status))))
 
 (defn ^:async record-eval!
   "Allocate and transact one eval as a component child of its turn.

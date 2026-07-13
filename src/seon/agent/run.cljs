@@ -284,7 +284,7 @@
    agent had NO
    open run (the `:seon.agent/run` attr ABSENT). Idle→running is one
    serialized step: when two wakes (a message + a schedule fire, or two
-   messages) race, the wire-server serializes the txs and the SECOND CAS sees
+   messages) race, the database writer serializes the transactions and the second CAS sees
    the first's pointer, so its WHOLE tx fails — no duplicate `:open` run is
    ever committed (the loser gets the db error envelope; the wake handler
    renews instead). Seeds `turn-limit` from `:seon.agent/default-turn-limit`

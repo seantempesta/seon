@@ -40,11 +40,11 @@
            :main 'seon.core}))
 
 ;; ---------------------------------------------------------------------------
-;; writer-uber — the self-contained embedding-backed WIRE-SERVER uberjar.
+;; writer-uber — the self-contained embedding-backed database-server uberjar.
 ;;
 ;; This is the artifact a third party runs with NO Seon source checkout:
 ;;   java --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED \
-;;        -XX:+UseG1GC -Xmx2g -jar target/seon-wire-server-standalone.jar --preflight
+;;        -XX:+UseG1GC -Xmx2g -jar target/seon-database-server-standalone.jar --preflight
 ;;
 ;; It is built from the same complete `:writer` basis as the source launcher
 ;; (NOT the default `basis` the `uber` target above uses — that one is the
@@ -64,29 +64,29 @@
 (defn writer-uber [_]
   (let [writer-basis (b/create-basis {:project "deps.edn"
                                       :aliases writer-aliases})
-        wclass-dir   "target/wire-classes"
-        wuber-file   "target/seon-wire-server-standalone.jar"]
-    (b/delete {:path wclass-dir})
-    (b/delete {:path wuber-file})
+        server-class-dir "target/database-server-classes"
+        server-uber-file "target/seon-database-server-standalone.jar"]
+    (b/delete {:path server-class-dir})
+    (b/delete {:path server-uber-file})
     ;; src + resources + the :writer src-secondary Proximum source →
     ;; class-dir → jar. Konserve's real version resource comes from its
     ;; pinned dependency and is included by the uber dependency basis.
     (b/copy-dir {:src-dirs ["src" "resources"
                             "reference-code/datahike/src-secondary"]
-                 :target-dir wclass-dir})
-    ;; AOT the secondary-index impl + the embed + boot namespaces. AOT itself
-    ;; does NOT register :proximum (that swap! runs when boot.clj REQUIRES the
-    ;; proximum ns at runtime); it only precompiles bytecode and surfaces a
-    ;; missing optional dep at build time instead of first-call.
+                 :target-dir server-class-dir})
+    ;; AOT the secondary-index impl + the embed + server namespaces. AOT itself
+    ;; does NOT register :proximum (that swap! runs when seon.db.server
+    ;; REQUIRES the proximum ns at runtime); it only precompiles bytecode and
+    ;; surfaces a missing optional dep at build time instead of first-call.
     (b/compile-clj {:basis writer-basis
                     :src-dirs ["src" "reference-code/datahike/src-secondary"]
-                    :class-dir wclass-dir
+                    :class-dir server-class-dir
                     :ns-compile '[datahike.index.secondary.proximum
                                   seon.embed
                                   seon.embed.preflight
-                                  seon.server.boot]})
-    (b/uber {:class-dir wclass-dir
-             :uber-file wuber-file
+                                  seon.db.server]})
+    (b/uber {:class-dir server-class-dir
+             :uber-file server-uber-file
              :basis writer-basis
-             :main 'seon.server.boot})    ; boot.clj has (:gen-class)
-    (println "writer-uber → " wuber-file)))
+             :main 'seon.db.server})
+    (println "writer-uber → " server-uber-file)))

@@ -1,5 +1,5 @@
 (ns seon.embed
-  "Embedding-index FOUNDATION for the wire-server (JVM, sole datahike writer).
+  "Embedding-index foundation for the JVM database server.
 
    This namespace owns the LOCKED facts of the embedding-based retrieval
    substrate (PRD agent-runtime/embeddings-fn-retrieval-2026-06-18, Phase-2).
@@ -35,12 +35,12 @@
    dance, no rebuild.
 
    SHIP CONFIG — OFF by default behind ONE switch. The whole feature is inert
-   unless `SEON_EMBED` is set in the wire-server's env (see
+   unless `SEON_EMBED` is set in the database server's env (see
    `embed-feature-enabled?`): with it UNSET the explicit database initializer
    installs NO index, the transaction transform is a pass-through, and
    `backfill!` no-ops — a fresh consumer pays ZERO cost (no index, no Gemini
    call, byte-identical behavior). Set `SEON_EMBED=1` (+ `GEMINI_API_KEY`)
-   before starting the wire-server to enable it. By default exactly ONE trigger
+   before starting the database server to enable it. By default exactly ONE trigger
    is indexed: `:seon.fn/source`.
 
    P2-B — the embedding WRITE side (this ns, below the foundation). A
@@ -65,7 +65,7 @@
    Runs on the WIRE-SERVER classpath (the `:writer` alias), which exposes
    `reference-code/datahike/src-secondary` + the `org.replikativ/proximum`
    dep + the required `--add-modules jdk.incubator.vector` JVM flags. The
-   wire-server transacts ALL writes as RAW datahike maps through its single
+   database server transacts all writes as raw Datahike maps through its single
    conn (it does NOT route through `seon.db/transact!`); `install!` follows
    the same convention — it transacts directly via `datahike.api/transact`."
   (:require
@@ -125,7 +125,7 @@
 ;;; --- Master feature switch (SHIP CONFIG: OFF by default) --------------------
 ;;;
 ;;; The WHOLE embedding-retrieval feature is OFF unless `SEON_EMBED` is set in
-;;; the wire-server's env. This is the load-bearing "zero cost when not opted
+;;; the database server's env. This is the load-bearing "zero cost when not opted
 ;;; in" gate: with `SEON_EMBED` UNSET the explicit initializer does
 ;;; NOTHING (no `install!`, no `backfill!`), so NO Proximum index is ever
 ;;; declared on a fresh consumer's store; `augment-tx-with-embeddings` is a
@@ -142,7 +142,7 @@
 
 (defn embed-feature-enabled?
   "True iff the embedding-retrieval feature is opted in — the `SEON_EMBED` env
-   var is PRESENT (any value, incl. empty string) on the wire-server. UNSET ⇒
+   var is PRESENT (any value, incl. empty string) on the database server. UNSET ⇒
    the entire feature is inert: initialization installs no index, the
    transaction transform passes tx-data through untouched, and `backfill!`
    no-ops. This is the master switch; the GEMINI_API_KEY check (`gemini-client`)
@@ -176,7 +176,7 @@
 ;;;
 ;;; `:seon.embed/source-hash` is the SHA-256 (hex) of the COMPOSED document
 ;;; string an entity's trigger-attr produced when its `:seon/embedding` was
-;;; last computed. It lives in the PRIMARY datahike store (a plain string,
+;;; last computed. It lives in the primary Datahike database (a plain string,
 ;;; queryable/pullable — unlike the secondary-only embedding), so the
 ;;; embed-on-write path can read it back and SKIP the paid Gemini call when the
 ;;; composed text is unchanged. A docstring/source/title edit changes the
@@ -191,13 +191,13 @@
 ;;;
 ;;; The `:seon/embedding` attr is `:db.secondary/only`: the full vector lives
 ;;; ONLY in this Proximum konserve store, NOT in the primary AEVT. So the store
-;;; MUST survive a wire-server restart, or the vectors are lost. A `:file`
+;;; MUST survive a database-server restart, or the vectors are lost. A `:file`
 ;;; konserve store sibling of the primary LMDB store satisfies that with no
 ;;; lock contention (separate directories, separate konserve backends).
 ;;;
 ;;; The path is derived from the live conn's own primary `:store` config so the
 ;;; index store always lands beside whichever cluster store the conn opened
-;;; (e.g. primary `data/clusters/default/store` →
+;;; (e.g. primary `data/clusters/default/db` →
 ;;; `data/clusters/default/embedding-index`). A `:memory`-backed primary conn
 ;;; (tests) falls back to a `:memory` index store whose `:id` mixes the index
 ;;; ident WITH the conn's primary :memory store id — non-durable (tests don't
@@ -222,7 +222,7 @@
 ;;; an old-schema file — VERIFIED live, ClassCastException in migrate-file-v1),
 ;;; and (b) be swept as a non-reachable key by `d/gc-storage!`. Sibling layout
 ;;; keeps the two konserve keyspaces disjoint. The cost of the sibling layout —
-;;; `bin/seon cluster reset` wipes only `<cluster>/store`, leaving the sibling
+;;; `bin/seon cluster reset` wipes only `<cluster>/db`, leaving the sibling
 ;;; `<cluster>/embedding-index` behind as a STALE orphan — is handled in
 ;;; `install!`: a fresh declare against a committed-but-orphaned store deletes
 ;;; the orphan before declaring (see `committed-index-store-exists?` /
@@ -249,7 +249,7 @@
 
    File-backed (`:file`) at a directory SIBLING of `conn`'s primary store
    (`<primary-parent>/embedding-index`), so the committed HNSW survives a
-   wire-server restart and `-sec-restore` can `load-commit` it on reopen. When
+   database-server restart and `-sec-restore` can `load-commit` it on reopen. When
    `conn`'s primary store is NOT file-backed (a `:memory` test conn), falls back
    to a `:memory` store keyed by the index id (non-durable; tests don't reopen).
    Deterministic `:id` either way."
@@ -269,7 +269,7 @@
    attrs — `:seon/embedding` (secondary-only; AEVT holds the hash) AND
    `:seon.embed/source-hash` (the plain-string cache key). Both DERIVED from
    their registered Malli schemas via the bridge (never hand-written). Under
-   the wire-server's `:schema-flexibility :write` conn, the hash attr must be
+   the database server's `:schema-flexibility :write` conn, the hash attr must be
    declared before any embed-on-write tx asserts it. Returns a vector ready for
    `datahike.api/transact`."
   {:malli/schema [:=> [:cat] [:vector [:map-of :keyword :any]]]}
@@ -319,8 +319,9 @@
 ;;;
 ;;; The index store is a SIBLING of the primary store (it cannot be nested —
 ;;; see the index-store-config docstring). `bin/seon cluster reset` wipes only
-;;; the primary store dir, so it leaves the sibling proximum store behind. On
-;;; the next boot `install!` declares the index FRESH (the primary store, being
+;;; the primary database directory, so it leaves the sibling Proximum store
+;;; behind. On the next boot `install!` declares the index FRESH (the primary
+;;; database, being
 ;;; wiped, has no record of it) against that leftover COMMITTED store — and the
 ;;; fork's connect-if-exists factory returns a passive restore-skeleton (it sees
 ;;; a committed store, expects a `-sec-restore` that never comes on a declare).
@@ -376,7 +377,7 @@
 
 (defn install!
   "Declare the `:seon/embedding` attr + the `:seon.embed/index` Proximum index
-   on datahike `conn` (a wire-server conn handle — third-party datahike value,
+   on datahike `conn` (a database-server connection — third-party Datahike value,
    hence `:any`).
 
    Idempotent, restore-safe, AND cluster-reset-safe by construction:
@@ -390,7 +391,7 @@
      so silently re-declaring would lose them. Surface, never paper over.
    - FRESH declare (index not yet on the conn's schema): if a committed-but-
      ORPHANED Proximum store already exists at the index's sibling path (the
-     `bin/seon cluster reset` case — primary store wiped, sibling proximum
+     `bin/seon cluster reset` case — primary database wiped, sibling Proximum
      store left behind), DELETE that stale store first. Otherwise the fork's
      connect-if-exists factory returns a passive restore-skeleton that becomes
      the live index and crashes on the next commit's `-sec-flush`. With a clean
@@ -489,7 +490,7 @@
 ;;; Custom embedding triggers are immutable writer-pipeline data. A future
 ;;; database projection may extend `default-embeddables` before boot.
 
-;;; --- Gemini embedding (java-genai, on the wire-server) ---------------------
+;;; --- Gemini embedding (java-genai, on the database server) ----------------
 ;;;
 ;;; Model `gemini-embedding-2`, outputDimensionality 1536, NO taskType (v2
 ;;; dropped it — the retrieval instruction goes in the QUERY text, which is the
@@ -503,7 +504,7 @@
   "gemini-embedding-2")
 
 ;;; The Gemini client is built LAZILY so merely LOADING this namespace never
-;;; reads GEMINI_API_KEY. A wire-server with no key boots and serves normally;
+;;; reads GEMINI_API_KEY. A database server with no key boots and serves normally;
 ;;; embedding is simply inactive (the transaction transform and boot backfill
 ;;; no-op below). The client is heavyweight + connection-pool-backed, so it is
 ;;; built ONCE on the first real embed call when a key is present, then cached.
@@ -512,7 +513,7 @@
 (defn- gemini-client
   "The shared Gemini client, or nil when GEMINI_API_KEY is unset/blank. Built
    lazily + cached on the first call that finds a key — never at ns-load, so a
-   key-less wire-server boots fine."
+   key-less database server boots fine."
   ^Client []
   (or @!client
       (let [k (System/getenv "GEMINI_API_KEY")]
@@ -1057,7 +1058,7 @@
 ;;; ===========================================================================
 ;;;
 ;;; The pod is READ-ONLY and has NO Proximum/Gemini — query embedding + KNN
-;;; happen HERE, on the wire-server (it owns the key + the index). The pod sends
+;;; happen HERE, on the database server (it owns the key + the index). The pod sends
 ;;; query TEXT (+ an optional eid set for type-scoping); this side embeds the
 ;;; query WITH a retrieval-instruction PREFIX (v2 has no taskType, so the
 ;;; instruction goes in the text — DOCUMENTS get no prefix, only queries do),
@@ -1109,7 +1110,7 @@
   "Embed the NL `:seon.embed/query` (with the retrieval prefix) and run KNN over
    the live Proximum index on `db`, scoped to `:seon.embed/eids` when present.
    Returns `{:seon.embed/hits [{:seon.embed/eid e :seon.embed/distance d} …]}`,
-   distance-ascending. The Gemini call happens HERE (the wire-server owns the
+   distance-ascending. The Gemini call happens HERE (the database server owns the
    key); the pod sends only the query TEXT + the optional eid scope.
 
    `db` is the conn's current db value (third-party datahike handle, hence

@@ -2,11 +2,10 @@
   "Embedding SEARCH API for the pod (P2-C, the agent-facing query side).
 
    The pod is READ-ONLY and carries NO Proximum/Gemini — query embedding + KNN
-   live on the JVM wire-server (it owns the embeddings key + the HNSW index).
-   This sibling of `seon.embed` (clj — the wire-server FOUNDATION + WRITE +
-   query-side function) is the pod's thin client over the `knn-search` wire function:
+   live on the JVM database writer (it owns the embeddings key + HNSW index).
+   This sibling of `seon.embed` is the pod's thin client for that operation:
 
-     pod                                wire-server (JVM)
+     pod                                database server (JVM)
      ───                                ─────────────────
      search {query, k, where?, eids?}
        │  resolve :where → eids on the LOCAL db value
@@ -25,17 +24,17 @@
    (default pattern covers `:seon.fn/*` source + the kb shape; pass your own).
 
    TYPE-SCOPING (`:where`): the pod resolves a datalog `:where` to an eid set on
-   its LOCAL db and sends those eids; the wire-server restricts KNN to them via a
+   its local db and sends those eids; the database server restricts KNN to them via a
    Proximum entity-filter. A new scope is just a different `:where` — no schema
    change. `:eids` may also be passed directly (already-resolved).
 
-   Native `^:async`/`await` throughout (the pod is core.async-free). The wire
-   transport is `seon.store.internal.wire-node/knn-search`."
+   Native `^:async`/`await` throughout (the pod is core.async-free)."
   (:require
     [datahike.api :as d]
     [seon.db :as db]
-    [seon.schema :as schema]
-    [seon.store.internal.wire-node :as wire-node]))
+    [seon.db.protocol :as protocol]
+    [seon.db.replica :as replica]
+    [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
 ;; Schemas — request/response shapes for the pod-facing surface.
@@ -111,7 +110,7 @@
 (defn enabled?
   "True when embedding features are enabled (`SEON_EMBED` is present).
 
-   Present = any value. The SAME single switch the wire-server reads, so one
+   Present = any value. The same single switch the database server reads, so one
    env var gates the feature across both processes. UNSET ⇒ every semantic
    surface (`my.kb` recall, diffusion `+semantic`, the header's embed
    indicator) stays off."
@@ -137,7 +136,7 @@
 
    The LOCAL pod db value. The clauses bind `?e`; we wrap them in a
    `[:find ?e :where …]` query. Returns the matched eids (possibly empty).
-   This is the type-scope the wire-server restricts KNN to."
+   This is the type-scope the database server restricts KNN to."
   {:malli/schema [:=> [:catn [:db ::db] [:where ::where]] ::eids]}
   [db where]
   (into #{} (map first) (db/query (into '[:find ?e :where] where) db)))
@@ -151,7 +150,7 @@
 
    Embedding KNN search. Resolves `:seon.embed/where` (datalog clauses
    binding `?e`) to an eid type-scope on the LOCAL db, then sends the query TEXT
-   + `k` + the eid scope over the wire — the wire-server embeds the query (with
+   + `k` + the eid scope over the protocol — the database server embeds the query (with
    the retrieval instruction) and runs KNN, returning the nearest eids. The pod
    does NOT embed.
 
@@ -168,20 +167,25 @@
         ldb   (local-db db)
         scope (cond-> (or eids #{})
                 (seq where) (into (where->eids ldb where)))
-        hits  (await (if sock-path
-                       (wire-node/knn-search sock-path query k scope {})
-                       (wire-node/knn-search query k)))]
-    ;; `knn-search` resolves to the decoded value: the hits vector on ok, or the
-    ;; raw not-ok envelope (a map with "ok" false) on error. A wire failure
+        hits
+        (await
+         (replica/knn-search!
+          (cond-> {::protocol/query query
+                   ::protocol/limit k}
+            (seq scope)
+            (assoc ::protocol/entity-ids (vec scope))
+            sock-path
+            (assoc ::replica/request-socket-path sock-path))))]
+    ;; `knn-search!` resolves to the hits vector or the canonical failed
+    ;; protocol map. A writer failure
     ;; (server down, embeddings disabled, index error) is an EXPECTED error and
     ;; rides the VALUE channel — a specced ^:async fn must never reject with an
     ;; expected error (docs/conventions.md "Errors Are Values", consequence 3).
-    (if (and (map? hits) (false? (get hits "ok")))
+    (if (and (map? hits) (false? (::protocol/success? hits)))
       {::hits []
        :seon/error {:seon.error/kind    :core-bug
-                    :seon.error/message (str "seon.embed/search: wire knn-search failed — "
-                                             (or (get hits "error")
-                                                 (:seon.store.wire/error hits)
+                    :seon.error/message (str "seon.embed/search: knn-search failed — "
+                                             (or (::protocol/error hits)
                                                  (pr-str hits)))}}
       {::hits (vec hits)})))
 

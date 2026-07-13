@@ -149,25 +149,6 @@
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
-  ;; Plain-Node UDS transport to the JVM wire-server, as a REPL-addressable
-  ;; shadow runtime (the CLJ-pivot's missing transport piece). Built OUTSIDE
-  ;; :client — its own :node-script build, its own :main. `:devtools {:enabled
-  ;; true}` so the process registers as a shadow runtime addressable over MCP
-  ;; (`mcp__seon_cljs__eval` agent_id "proc:wire"). Uses the uniform
-  ;; Transit-JSON frame codec + length framing inlined in
-  ;; seon.store.internal.wire-node (matches seon.server.codec).
-  ;;
-  ;; Build:  clj -M:cljs watch wire-node
-  ;; Run:    node out/wire-node/main.js --process-name wire
-  ;; REPL:   mcp__seon_cljs__eval agent_id="proc:wire"
-  :wire-node
-  {:target           :node-script
-   :output-to        "out/wire-node/main.js"
-   :main             seon.store.internal.wire-node/-main
-   :devtools         {:enabled true}
-   :compiler-options {:warnings-as-errors false
-                      :externs           ["externs/node_fs.js"]}}
-
   ;; LEAN worker-side PARSE/SYNTACTIC oracle — CO-LOCATED on the diffusion
   ;; GPU worker (diffusion-dynamic-context). The eval-renoise loop
   ;; validates a partial canvas every checkpoint; co-located this is a

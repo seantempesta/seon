@@ -133,7 +133,7 @@
   :prod {:extra-paths ["env/prod/clj" "env/prod/resources"]}
 
   ;; The kaocha suite includes the embedding/secondary-index tests, which need
-  ;; the SAME fork datahike + proximum the live wire-server runs (the mvn
+  ;; the SAME fork Datahike + Proximum the live database server runs (the mvn
   ;; upstream had neither, so tests used to run against DIFFERENT code than
   ;; production). Compose the fork + native launch surface:
   ;;   clojure -M:simd:fork-deps:test -m kaocha.runner unit
@@ -211,7 +211,7 @@
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
               "-XX:+UseG1GC" "-Xmx2g"]
-   :main-opts ["-m" "seon.server.boot"]}
+   :main-opts ["-m" "seon.db.server"]}
 
   ;; Focused writer tests add source only; clojure.test already rides Clojure.
   ;; Clearing :main-opts lets bin/test-writer select the exact retained test
@@ -220,11 +220,12 @@
   {:extra-paths ["test"]
    :main-opts []}
 
-  ;; The server-wire test nses load against the fork datahike + proximum via
+  ;; The database-writer test namespaces load against the fork datahike +
+  ;; proximum via
   ;; the shared :simd + :fork-deps + :test (kaocha + proximum + transit + genai
-  ;; + test paths) — there is no separate :server-wire-test alias anymore.
+  ;; + test paths); there is no second writer-test dependency graph.
   ;; Usage (JDK 25+, pinned via bin/_java-home-resolver):
-  ;;   clojure -M:simd:fork-deps:test -m kaocha.runner unit --focus seon.server.wire-types-test …
+  ;;   bin/test-writer seon.db.transport-uds-test
 
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
           :ns-default build}
@@ -302,10 +303,10 @@
                          org.babashka/sci                     {:mvn/version "0.13.53"}
                          org.replikativ/datahike              {:mvn/version "0.8.1681"}
                          org.replikativ/persistent-sorted-set {:mvn/version "0.4.137"}
-                         ;; Transit-JSON for wire value payloads
+                         ;; Transit-JSON for protocol values
                          ;; (keywords, sets, instants, ratios) crossing the
-                         ;; CLJS guest <-> JVM wire-server boundary. Mirrored by
-                         ;; com.cognitect/transit-clj on the server (seon.server.codec).
+                         ;; CLJS replica <-> JVM database-server boundary. Mirrored by
+                         ;; com.cognitect/transit-clj in seon.db.transport.uds.
                          com.cognitect/transit-cljs           {:mvn/version "0.8.280"}
                          ;; reitit — the pod's HTTP front door (seon.web.router).
                          ;; The published CLJS artifact is clean: reitit's trie

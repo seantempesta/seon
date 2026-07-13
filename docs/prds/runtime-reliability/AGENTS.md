@@ -28,11 +28,15 @@ tree was clean immediately afterward. Focused `seon.schema-test`,
 `b4efd4f5` handoff. The writer now has one complete `:writer` basis for source
 launch and `writer-uber`: 111 libraries/117 roots instead of 188/194, the exact
 maintained Datahike/Konserve SHAs, and one SLF4J provider. `bin/test-writer`
-proves the twelve retained suites (107 tests/596 assertions). The unused query
-subscription engine and its second in-process subscriber bus are deleted; raw
-transaction fanout plus bounded replay is the one retained update channel.
-Protocol/database vocabulary convergence, typed administration, live transition
-proof, profiling, and artifact-manifest truth remain. Dead writer routing and
+proves the eleven retained namespaces (47 tests/295 assertions in about ten
+seconds). The unused query-subscription engine and its second in-process
+subscriber bus are deleted; raw transaction fanout plus bounded replay is the
+one retained update channel. The active database boundary now has one shared
+`seon.db.protocol`, one `seon.db.replica`, one JVM writer/server, and transport-
+only UDS adapters. Legacy server/store namespaces and 14 legacy writer suites
+are deleted; public transaction updates omit the durable internal receipt
+datoms and metadata. Typed administration, cold live transition proof,
+profiling, and artifact-manifest truth remain. Dead writer routing and
 load-order callback registries are gone; boot now supplies one immutable writer
 runtime, and a failed database initializer cannot publish a broken connection.
 The exact starting evidence is

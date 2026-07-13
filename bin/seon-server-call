@@ -9,14 +9,14 @@
 ;; pattern-matching it. Owner directive: the moment structure crosses a
 ;; boundary it is parsed as data — bash never greps printed EDN (the grep
 ;; approach broke once already: the REPL prints namespaced-map literals
-;; `#:seon.server.registry{:forked? true …}`, so a grep for the fully
+;; `#:seon.db.registry{:forked? true …}`, so a grep for the fully
 ;; qualified keyword never matched; 7c83cec9 papered over it).
 ;;
 ;; Usage:
 ;;   bin/seon-server-call [--port N] [--timeout SECS] [--get KEY] EXPR [SUCCESS-KEY]
 ;;
 ;;   EXPR         one Clojure expression; its VALUE must be a map (the
-;;                registry fns' errors-as-values contract).
+;;                database lifecycle functions' errors-as-values contract).
 ;;   SUCCESS-KEY  optional fully-qualified keyword (with or without the
 ;;                leading ':'); exit 0 iff (get result key) is truthy.
 ;;                Omitted = any map reply is success.
@@ -49,7 +49,7 @@
   (or (some-> *file* io/file .getCanonicalFile .getParentFile .getParentFile .getPath)
       (System/getProperty "user.dir")))
 
-;; Per-supervisor port file (registry C48): $SEON_WRITER_REPL_PORT_FILE (repo-
+;; Per-supervisor port file: $SEON_WRITER_REPL_PORT_FILE (repo-
 ;; root-relative unless absolute; bin/seon exports it), defaulting to the
 ;; default cluster's file. NEVER the old shared tmp/seon-writer-repl-port —
 ;; a second supervisor's wire-server (bin/acme) clobbered that.

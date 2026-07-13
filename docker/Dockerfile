@@ -1,6 +1,6 @@
 # The canonical Seon image — one container running the full cluster:
-# wire-server (JVM datahike writer) + pod (Node CLJS runtime), UDS between
-# them, durable store on /seon-data (volume), pod HTTP published.
+# database server (JVM Datahike writer) + pod (Node CLJS runtime), UDS between
+# them, durable database on /seon-data (volume), pod HTTP published.
 #
 # Design: docs/prds/agent-ctx/research/result-driven-benchmark-suite-design-2026-07-05.md
 # §2a. This is the user-facing distribution artifact AND the bench substrate.
@@ -135,7 +135,7 @@ RUN mkdir -p /tmp/keep \
  && mv /tmp/keep/out .shadow-cljs/builds/client/dev/out
 
 # Bake the resolved writer classpath (ABSOLUTE paths — the entrypoint runs
-# `java -cp $(cat cp.txt) clojure.main -m seon.server.boot` from /seon-data,
+# `java -cp $(cat cp.txt) clojure.main -m seon.db.server` from /seon-data,
 # so repo-relative entries must be rooted under /opt/seon).
 RUN clojure -Spath -M:simd:fork-deps:writer > /tmp/cp.raw \
  && tr ':' '\n' < /tmp/cp.raw \

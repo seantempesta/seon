@@ -3,20 +3,20 @@
 # seon-entrypoint — foreground supervisor for the canonical Seon container.
 #
 # Contract (design §9, prototyped by the eval lane in slice 1; the tooling
-# lane owns the final shape): boot wire-server + pod in FOREGROUND from the
+# lane owns the final shape): boot the database server + pod in FOREGROUND from
 # immutable /opt/seon tree (no compile at boot, no nohup, no locks), gate the
 # pod on the wire req-socket ACCEPTING (the same readiness definition as
 # bin/seon's ready_check), forward signals, exit non-zero when either process
 # dies. `seon-entrypoint pod` runs ONLY the pod stage (the restart-resume
-# choreography: kill the pod process, re-exec this stage — the wire-server
-# and the store survive).
+# choreography: kill the pod process, re-exec this stage — the database server
+# and database survive).
 #
 # It is deliberately NOT bin/seon: no nohup, no mkdir-mutex, no cljs-watch,
 # no jvm track — those are host-dev concerns.
 #
 # Layout: /opt/seon = the immutable runtime tree (jre/, node/, src/, out/,
-# node_modules/, cp.txt). /seon-data = the mutable world (cwd for both
-# processes — store, sockets, port file, logs all land here, matching
+# node_modules/, cp.txt). /seon-data = the mutable data root (cwd for both
+# processes — database, sockets, port file, logs all land here, matching
 # seon.platform's artifact/data split).
 
 set -euo pipefail
@@ -37,32 +37,32 @@ PORT_FILE="${SEON_PORT_FILE:-$SEON_DATA/tmp/seon-port}"
 mkdir -p "$CLUSTER_DIR" "$SEON_DATA/tmp" "$SEON_DATA/logs"
 cd "$SEON_DATA"
 
-# ── wire-server (JVM datahike writer — the sole writer) ─────────────────
+# Database server (JVM Datahike writer — the sole writer).
 # Same launch as bin/seon's `clojure -M:simd:fork-deps:writer …`, with the
 # :simd alias's jvm-opts inlined (the clojure CLI stays in the builder; the
 # classpath was baked to cp.txt at image build).
-start_wire() {
+start_database() {
   "$JAVA" \
     --add-modules jdk.incubator.vector \
     --enable-native-access=ALL-UNNAMED \
-    -XX:+UseG1GC -Xmx"${SEON_WIRE_XMX:-2g}" \
+    -XX:+UseG1GC -Xmx"${SEON_DATABASE_XMX:-2g}" \
     -cp "$(cat "$SEON_HOME/cp.txt")" \
-    clojure.main -m seon.server.boot \
+    clojure.main -m seon.db.server \
     --backend file \
     --db-name "$CLUSTER" \
-    --path "$CLUSTER_DIR/store" \
+    --path "$CLUSTER_DIR/db" \
     --req-sock "$REQ_SOCK" \
     --pub-sock "$PUB_SOCK" \
     --repl-port "$WRITER_REPL_PORT" \
-    >> "$SEON_DATA/logs/wire-server.log" 2>&1 &
-  WIRE_PID=$!
-  echo "[seon-entrypoint] wire-server started (pid $WIRE_PID)"
+    >> "$SEON_DATA/logs/database-server.log" 2>&1 &
+  DATABASE_PID=$!
+  echo "[seon-entrypoint] database server started (pid $DATABASE_PID)"
 }
 
 # Readiness = the req socket ACCEPTING a real connect (bin/seon ready_check
-# semantics: the writer binds the socket only after "[writer] datahike
-# ready"). Probe with the bundled node — no nc dependency in the image.
-wire_ready() {
+# semantics: the writer binds the socket only after its database is ready).
+# Probe with the bundled Node runtime — no nc dependency in the image.
+database_ready() {
   [ -S "$REQ_SOCK" ] || return 1
   "$NODE" -e '
     const s = require("net").connect(process.argv[1]);
@@ -71,23 +71,23 @@ wire_ready() {
     setTimeout(() => process.exit(1), 1000);' "$REQ_SOCK" >/dev/null 2>&1
 }
 
-wait_wire_ready() {
-  local bound="${SEON_WIRE_READY_BOUND_S:-180}" waited=0
-  echo "[seon-entrypoint] waiting for wire-server ready (bound ${bound}s)"
-  until wire_ready; do
-    if ! kill -0 "$WIRE_PID" 2>/dev/null; then
-      echo "[seon-entrypoint] wire-server DIED during boot — last log lines:" >&2
-      tail -n 40 "$SEON_DATA/logs/wire-server.log" >&2 || true
+wait_database_ready() {
+  local bound="${SEON_DATABASE_READY_BOUND_S:-180}" waited=0
+  echo "[seon-entrypoint] waiting for database server ready (bound ${bound}s)"
+  until database_ready; do
+    if ! kill -0 "$DATABASE_PID" 2>/dev/null; then
+      echo "[seon-entrypoint] database server DIED during boot — last log lines:" >&2
+      tail -n 40 "$SEON_DATA/logs/database-server.log" >&2 || true
       exit 1
     fi
     if [ "$waited" -ge "$bound" ]; then
-      echo "[seon-entrypoint] wire-server not ready after ${bound}s" >&2
-      tail -n 40 "$SEON_DATA/logs/wire-server.log" >&2 || true
+      echo "[seon-entrypoint] database server not ready after ${bound}s" >&2
+      tail -n 40 "$SEON_DATA/logs/database-server.log" >&2 || true
       exit 1
     fi
     sleep 1; waited=$((waited + 1))
   done
-  echo "[seon-entrypoint] wire-server ready (${waited}s)"
+  echo "[seon-entrypoint] database server ready (${waited}s)"
 }
 
 # ── pod (Node CLJS runtime — agent loop + HTTP door) ────────────────────
@@ -119,9 +119,9 @@ start_pod() {
 }
 
 shutdown() {
-  echo "[seon-entrypoint] signal received — stopping pod + wire-server"
+  echo "[seon-entrypoint] signal received — stopping pod + database server"
   [ -n "${POD_PID:-}" ]  && kill "$POD_PID"  2>/dev/null || true
-  [ -n "${WIRE_PID:-}" ] && kill "$WIRE_PID" 2>/dev/null || true
+  [ -n "${DATABASE_PID:-}" ] && kill "$DATABASE_PID" 2>/dev/null || true
   wait || true
   exit 0
 }
@@ -132,7 +132,7 @@ STAGE="${1:-all}"
 
 case "$STAGE" in
   pod)
-    # Pod stage only (restart-resume choreography — wire-server + store
+    # Pod stage only (restart-resume choreography — database server + database
     # stay up; foreground on the pod alone).
     start_pod
     code=0
@@ -141,17 +141,17 @@ case "$STAGE" in
     exit "$code"
     ;;
   all)
-    start_wire
-    wait_wire_ready
+    start_database
+    wait_database_ready
     start_pod
     # Supervise both: exit non-zero the moment EITHER dies (`wait -n`
     # returns on the first child to exit; a clean signal path goes through
     # the trap above instead).
     code=0
-    wait -n "$WIRE_PID" "$POD_PID" || code=$?
-    if ! kill -0 "$WIRE_PID" 2>/dev/null; then which=wire-server; else which=pod; fi
+    wait -n "$DATABASE_PID" "$POD_PID" || code=$?
+    if ! kill -0 "$DATABASE_PID" 2>/dev/null; then which="database server"; else which=pod; fi
     echo "[seon-entrypoint] $which exited ($code) — stopping the other" >&2
-    kill "$WIRE_PID" "$POD_PID" 2>/dev/null || true
+    kill "$DATABASE_PID" "$POD_PID" 2>/dev/null || true
     wait || true
     [ "$code" -eq 0 ] && code=1
     exit "$code"

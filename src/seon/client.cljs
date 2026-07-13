@@ -226,10 +226,9 @@
     ;; state. Required here so the build includes it; item 10's
     ;; detect-and-tee in seon.eval/eval-batch! consumes it.
     [seon.analyzer-info :as analyzer-info]
-    ;; THE FLIP (unit 2.2e): the cluster-store DIS-peer seam — the
-    ;; :seon-wire PWriter, cluster connect config, and the foreign-tx
-    ;; listen adapter. open-cluster-conn! below builds on it.
-    [seon.store.wire :as store.wire]
+    ;; Local reads plus the sole-writer transaction and feed attachment.
+    [seon.db.protocol :as db.protocol]
+    [seon.db.replica :as replica]
     ;; MCP runtime-addressing probe (mcp-agent-id-unification PRD):
     ;; the pod `host!`s every agent id it resumes/mints/re-arms so
     ;; `mcp__seon_cljs__eval agent_id=<id>` pins THIS runtime.
@@ -255,7 +254,7 @@
 ;; bare "root" across several pods fails loud instead of mis-pinning.
 ;; Top level (not -main) so a hot reload arms an already-running pod;
 ;; idempotent. `cluster-name` is the ONE derivation (registry C15).
-(runtime-id/cluster! store.wire/cluster-name)
+(runtime-id/cluster! replica/database-name)
 
 (defn start-heartbeat!
   "Holds the Node event loop open with a minute-cadence heartbeat. The
@@ -590,18 +589,11 @@
    :seon.agent.testrun/message])
 
 ;; ---------------------------------------------------------------------------
-;; Cluster-store agent conn (unit 2.2e — THE FLIP, 2026-06-10).
+;; Cluster database connection.
 ;;
-;; The pod no longer mints a per-run `data/seon-pod/<run-id>` store. It
-;; connects to the SHARED cluster store (`data/clusters/default/store`)
-;; as a DIS peer: reads are local sync konserve (lazy LRU node fetch),
-;; writes route through the `:seon-wire` PWriter over the UDS wire to
-;; the JVM wire-server — the SOLE writer. See `seon.store.wire`.
-;;
-;; Legacy per-run dirs under `data/seon-pod/` stay readable (the
-;; konserve header sniff handles their 1-byte meta-size encoding) but
-;; are never created again. No dual backend: if the wire-server is down
-;; at boot, the pod FAILS LOUD — it never falls back to a local store.
+;; Reads use shared immutable Konserve files; writes use the remote Datahike
+;; writer over UDS. There is no local-write fallback: boot fails loudly when
+;; the authoritative writer is unavailable.
 ;; ---------------------------------------------------------------------------
 
 (defn- pod-full-schema
@@ -651,9 +643,9 @@
 (defn ^:async open-agent-conn!
   "Open a FRESH ISOLATED `:memory` conn carrying the pod's full
    bootstrap schema. Test/diagnostic surface ONLY — the pod itself
-   boots on the shared cluster store via [[open-cluster-conn!]].
+   boots through its local replica via [[open-database-connection!]].
    Isolated-by-construction: tests that build agents on this conn can
-   never touch the cluster store."
+   never touch the cluster database."
   {:malli/schema [:=> [:cat] :any]}
   []
   (let [cfg {:store              {:backend :memory
@@ -672,39 +664,40 @@
       (await (install-runtime-schema! conn true))
       conn)))
 
-(defn ^:async open-cluster-conn!
-  "Open the pod's DIS-peer conn on the shared cluster store and start
-   the foreign-tx listen adapter.
+(defn ^:async open-database-connection!
+  "Open the pod's local database replica and attach its transaction feed.
 
    Order is load-bearing:
-     1. `ping!` — FAIL LOUD if the wire-server is down (no local
+     1. `ping!` — FAIL LOUD if the database writer is down (no local
         fallback, no dual backend).
-     2. `ensure-cluster-db!` — register/create this cluster's db on the
-        wire-server (idempotent), so a freshly created cluster's store
-        exists before the peer attaches.
+     2. `ensure-database!` — idempotently open the authoritative database and
+        return its writer-owned identity.
      3. `d/connect` — reads go local from here; writes dispatch to the
-        `:seon-wire` writer (db-name-routed to this cluster).
+        remote writer, explicitly routed to this database.
      4. provenance genesis/migration — ensure the minimal root/process attrs
         and refs before any ordinary transaction can be submitted.
      5. schema transact — the full Malli-derived attr schema goes OVER
-        THE WIRE to the JVM writer as root/boot; `:db/ident` upserts make
+        the protocol to the JVM writer as root/boot; `:db/ident` upserts make
         repeated installation safe. Exact no-write reconciliation is a
         later boot-state step, not an implied property of upsert.
-     6. listen adapter — foreign writers' txs fire this conn's native
+     6. feed attachment — foreign writers' txs fire this conn's native
         listeners (wake triggers + web UI SSE)."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (await (store.wire/ping!))
-  (await (store.wire/ensure-cluster-db!))
-  (let [conn (await (d/connect (store.wire/cluster-config)))]
+  (await (replica/ping!))
+  (let [opened (await (replica/ensure-database!))
+        conn (await
+              (d/connect
+               (replica/database-config
+                {::replica/database-id (::db.protocol/database-id opened)})))]
     (id/assert-allocation-writer! conn)
-    (log/info-console! "seon.client/open-cluster-conn!"
-                       (str "cluster " store.wire/cluster-name
-                            ": " store.wire/default-store-path
-                            " (writer: " store.wire/default-sock-path ")"))
+    (log/info-console! "seon.client/open-database-connection!"
+                       (str "database " replica/database-name
+                            ": " replica/default-database-path
+                            " (writer: " replica/default-request-socket-path ")"))
     (await (db/ensure-provenance! {:seon.db/conn conn}))
     (await (install-runtime-schema! conn false))
-    (await (store.wire/start-listen-adapter! {:seon.store.wire/conn conn}))
+    (await (replica/attach! {::replica/conn conn}))
     conn))
 
 ;; ---------------------------------------------------------------------------
@@ -2360,15 +2353,14 @@
   (if (db/attached?)
     (let [conn db/*conn*
           ids (agent/resumable-agent-ids {:seon.db/db @conn})
-          _ (await (store.wire/start-listen-adapter!
-                    {:seon.store.wire/conn conn}))
+          _ (await (replica/attach! {::replica/conn conn}))
           {:seon.web/keys [port port-file]} (await (web.serve/start!))]
       {:seon.agent/id (first ids)
        :seon.client/resumed-ids ids
        :seon.client/created-ids []
        :seon.web/port port
        :seon.web/port-file port-file})
-    (let [conn (await (open-cluster-conn!))
+    (let [conn (await (open-database-connection!))
           _ (set! db/*conn* conn)
           _ (db/assert-preconditions! {:seon.db/conn conn})
           ;; Bootstrap compilation can overlap the independent writer seed.
@@ -2575,8 +2567,8 @@
                     ;; FAIL LOUD (2.2e): the pod is useless without its
                     ;; agent + cluster conn, and a half-up pod that looks
                     ;; healthy is worse than a dead one. Most common
-                    ;; cause: wire-server down (the error says exactly
-                    ;; that). No local-store fallback, by design.
+                    ;; cause: the database server is unavailable (the error says
+                    ;; exactly that). No local database fallback, by design.
                     (log/error-console! "seon.client"
                                         "auto-boot FAILED — exiting (no local fallback)"
                                         err)

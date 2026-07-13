@@ -1,60 +1,65 @@
-(ns seon.store.wire-test
-  "Unit tests for `seon.store.wire/ping!`'s bounded retry (unit 5 —
+(ns seon.db.replica-test
+  "Unit tests for `seon.db.replica/ping!`'s bounded retry (unit 5 —
    the `bin/seon start all` race): the pod's boot ping retries the
    wire rpc up to 5 times (~10s) before the existing fail-loud throw.
    Boot stays fail-loud, just not fail-instant.
 
-   `seon.store.internal.wire-node/rpc` is stubbed via root `set!` (same rationale
+   `seon.db.transport.uds/rpc` is stubbed via root `set!` (same rationale
    as `seon.agent.message-test/with-conn`: dynamic `binding` is popped at the
    first microtask boundary inside `^:async` bodies; the root swap is
    visible across microtasks, tests run serially, restore in
    `.finally`). No real socket is touched.
 
    Run interactively via MCP eval:
-     (require 'seon.store.wire-test :reload)
-     (cljs.test/run-tests 'seon.store.wire-test)"
+     (require 'seon.db.replica-test :reload)
+     (cljs.test/run-tests 'seon.db.replica-test)"
   (:require
    [cljs.core.async :refer [take! poll!]]
    [cljs.test :refer [deftest is async]]
    [datahike.api :as d]
    [datahike.writer :as writer]
-   [seon.store.internal.wire-node :as wire]
-   [seon.store.wire :as store.wire]))
+   [seon.db.protocol :as protocol]
+   [seon.db.transport.uds :as uds]
+   [seon.db.replica :as replica]))
 
 (defn- with-rpc-stub
-  "Run `body` (no-arg fn → Promise) with `wire/rpc` replaced by `stub`
-   (called as sock-path req opts → Promise). Restores the original rpc
-   in `.finally`.
-
-   The replacement must be MULTI-ARITY: `rpc` is a multi-arity defn, so
-   call sites compile to direct `.cljs$core$IFn$_invoke$arity$3` calls
-   — a single-arity stub set! onto the var lacks that property and the
-   compiled call throws 'arity$3 is not a function'."
+  "Run `body` with the map-in UDS request function replaced by `stub`."
   [stub body]
-  (let [orig    wire/rpc
-        wrapped (fn wrapped-rpc
-                  ([req] (stub nil req nil))
-                  ([sock-path req] (stub sock-path req nil))
-                  ([sock-path req opts] (stub sock-path req opts)))]
-    (set! wire/rpc wrapped)
+  (let [orig uds/rpc
+        wrapped
+        (fn [{::uds/keys [socket-path message timeout-ms]}]
+          (stub socket-path message {::uds/timeout-ms timeout-ms}))]
+    (set! uds/rpc wrapped)
     (-> (js/Promise.resolve (body))
-        (.finally (fn [] (set! wire/rpc orig))))))
+        (.finally (fn [] (set! uds/rpc orig))))))
 
 (declare with-as-of-stub)
 
 (defn- with-feed-stubs
   "Run an async body with the pub connector and paginated replay stubbed."
   [connect-stub replay-stub body]
-  (let [original-connect wire/connect-pub
-        original-replay  wire/replay-tx
-        wrapped-replay   (fn wrapped-replay-tx
-                           ([opts] (replay-stub nil opts))
-                           ([sock-path opts] (replay-stub sock-path opts)))
-        restore!         (fn []
-                           (set! wire/connect-pub original-connect)
-                           (set! wire/replay-tx original-replay))]
-    (set! wire/connect-pub connect-stub)
-    (set! wire/replay-tx wrapped-replay)
+  (let [original-connect uds/connect-publisher!
+        original-rpc uds/rpc
+        wrapped-connect
+        (fn [{::uds/keys [socket-path on-message on-close]}]
+          (connect-stub socket-path {:on-event on-message
+                                     :on-close on-close}))
+        wrapped-rpc
+        (fn [{::uds/keys [socket-path message] :as request}]
+          (if (= protocol/replay-transactions-operation
+                 (::protocol/operation message))
+            (replay-stub
+             socket-path
+             (cond-> {:since-t (::protocol/since-t message)
+                      :db-name (::protocol/database-name message)}
+               (some? (::protocol/through-t message))
+               (assoc :through-t (::protocol/through-t message))))
+            (original-rpc request)))
+        restore! (fn []
+                   (set! uds/connect-publisher! original-connect)
+                   (set! uds/rpc original-rpc))]
+    (set! uds/connect-publisher! wrapped-connect)
+    (set! uds/rpc wrapped-rpc)
     (try
       (-> (with-as-of-stub body)
           (.finally restore!))
@@ -69,16 +74,18 @@
    (fn [deliver _reject]
      (take! channel deliver))))
 
-(def ^:private fake-store-id
+(def ^:private fake-database-id
   #uuid "9dcfa740-5f7f-4ff5-ac08-a9c8b605a8aa")
+
+(def ^:private expected-transaction-attempts 3)
 
 (defn- fake-db
   ([basis-t] (fake-db basis-t :db))
   ([basis-t branch]
    {:max-tx basis-t
-    :config {:store {:id fake-store-id}
+    :config {:store {:id fake-database-id}
              :branch branch
-             :writer {:backend :seon-wire}}}))
+             :writer {:backend :seon.db.writer/remote}}}))
 
 (defn- fake-conn
   "Minimal conn surface used by the wire writer and native listeners."
@@ -105,35 +112,35 @@
   [conn arg-map]
   (channel->promise
    (writer/-dispatch!
-    (store.wire/->SeonWireWriter
+    (replica/->RemoteWriter
      "stub.sock" conn
-     (atom {:seon.store.wire/writer-open? true
-            :seon.store.wire/writer-pending #{}}))
+     (atom {:seon.db.replica/writer-open? true
+            :seon.db.replica/writer-pending #{}}))
     {:op 'transact! :args [arg-map]})))
 
 (defn- test-writer
   [conn]
-  (store.wire/->SeonWireWriter
+  (replica/->RemoteWriter
    "stub.sock" conn
-   (atom {:seon.store.wire/writer-open? true
-          :seon.store.wire/writer-pending #{}})))
+   (atom {:seon.db.replica/writer-open? true
+          :seon.db.replica/writer-pending #{}})))
 
 (defn- success-response
   [basis-t]
-  {:seon.store.wire/ok true
-   :seon.store.wire/basis-t basis-t
-   :seon.store.wire/tempids {}
-   :seon.store.wire/tx-data []
-   :seon.store.wire/datoms-added 0
-   :seon.store.wire/datoms-retracted 0})
+  {::protocol/success? true
+   ::protocol/basis-t basis-t
+   ::protocol/temporary-ids {}
+   ::protocol/transaction-data []
+   ::protocol/datoms-added 0
+   ::protocol/datoms-retracted 0})
 
 (defn- with-wire-state
   "Install hermetic attachment state for an async body, then restore."
   [adapter-state body]
-  (let [adapter           @#'store.wire/!adapter
+  (let [adapter           @#'replica/!attachment
         saved-adapter     @adapter
         restore!          (fn []
-                            (store.wire/stop-listen-adapter!)
+                            (replica/detach!)
                             (reset! adapter saved-adapter))]
     (reset! adapter adapter-state)
     (try
@@ -145,49 +152,49 @@
 
 (defn- stopped-state
   []
-  {::store.wire/phase ::store.wire/stopped
-   ::store.wire/generation 0
-   ::store.wire/correlations {}})
+  {::replica/phase ::replica/stopped
+   ::replica/generation 0
+   ::replica/correlations {}})
 
 (defn- attached-state
-  ([conn basis-t] (attached-state conn basis-t ::store.wire/live))
+  ([conn basis-t] (attached-state conn basis-t ::replica/live))
   ([conn basis-t phase]
-   (let [coordinate (#'store.wire/connection-coordinate @conn)]
-     {::store.wire/phase phase
-      ::store.wire/generation 1
-      ::store.wire/conn conn
-      ::store.wire/database-coordinate coordinate
-      ::store.wire/last-applied-coordinate
-      (#'store.wire/progress-coordinate coordinate basis-t)
-      ::store.wire/sock-path "req.sock"
-      ::store.wire/pub-sock-path "pub.sock"
-      ::store.wire/own-skips 0
-      ::store.wire/correlations {}})))
+   (let [coordinate (#'replica/connection-coordinate @conn)]
+     {::replica/phase phase
+      ::replica/generation 1
+      ::replica/conn conn
+      ::replica/database-coordinate coordinate
+      ::replica/last-applied-coordinate
+      (#'replica/progress-coordinate coordinate basis-t)
+      ::replica/request-socket-path "req.sock"
+      ::replica/publish-socket-path "pub.sock"
+      ::replica/own-skips 0
+      ::replica/correlations {}})))
 
 (defn- adapter-state
   []
-  @(deref #'store.wire/!adapter))
+  @(deref #'replica/!attachment))
 
 (defn- adapter-generation
   []
-  (::store.wire/generation (adapter-state)))
+  (::replica/generation (adapter-state)))
 
 (defn- adapter-basis-t
   []
   (get-in (adapter-state)
-          [::store.wire/last-applied-coordinate ::store.wire/basis-t]))
+          [::replica/last-applied-coordinate ::replica/basis-t]))
 
 (defn- correlations
   []
-  (::store.wire/correlations (adapter-state)))
+  (::replica/correlations (adapter-state)))
 
 (defn- connect-feed!
   [conn sock-path pub-sock-path on-drop]
   (let [state (adapter-state)]
-    (#'store.wire/connect-feed!
-     (::store.wire/generation state)
+    (#'replica/connect-feed!
+     (::replica/generation state)
      conn
-     (::store.wire/database-coordinate state)
+     (::replica/database-coordinate state)
      sock-path
      pub-sock-path
      on-drop)))
@@ -212,23 +219,23 @@
 
 (defn- replay-event
   [db-name basis-t basis-t-before]
-  {:seon.store.wire/event "tx"
-   :seon.store.wire/db-name db-name
-   :seon.store.wire/basis-t basis-t
-   :seon.store.wire/basis-t-before basis-t-before
-   :seon.store.wire/tx-data
-   [[basis-t :seon.store.wire-test/value basis-t basis-t true]]})
+  {::protocol/event protocol/transaction-event
+   ::protocol/database-name db-name
+   ::protocol/basis-t basis-t
+   ::protocol/basis-t-before basis-t-before
+   ::protocol/transaction-data
+   [[basis-t :seon.db.replica-test/value basis-t basis-t true]]})
 
 (defn- replay-page
   [db-name since-t through-t continuation-t done? events]
-  {:seon.store.wire/ok true
-   :seon.store.wire/db-name db-name
-   :seon.store.wire/since-t since-t
-   :seon.store.wire/through-t through-t
-   :seon.store.wire/continuation-t continuation-t
-   :seon.store.wire/done? done?
-   :seon.store.wire/events events
-   :seon.store.wire/replayed (count events)})
+  {::protocol/success? true
+   ::protocol/database-name db-name
+   ::protocol/since-t since-t
+   ::protocol/through-t through-t
+   ::protocol/continuation-t continuation-t
+   ::protocol/complete? done?
+   ::protocol/events events
+   ::protocol/replayed-count (count events)})
 
 (deftest wire-writer-shutdown-closes-admission-and-drains-accepted-rpcs
   (async done
@@ -248,7 +255,7 @@
                               wire-writer
                               {:op 'transact!
                                :args [{:tx-data
-                                       [{:seon.store.wire-test/value
+                                       [{:seon.db.replica-test/value
                                          "accepted"}]}]})
                       shutdown (writer/-shutdown wire-writer)]
                   (is (nil? (poll! shutdown))
@@ -284,10 +291,10 @@
             (fn [_sock-path _req _opts]
               (if (< (swap! !calls inc) 3)
                 (js/Promise.reject (js/Error. "connect ECONNREFUSED (stub)"))
-                (js/Promise.resolve {:seon.store.wire/ok true})))
-            (fn [] (store.wire/ping!)))
+                (js/Promise.resolve {::protocol/success? true})))
+            (fn [] (replica/ping!)))
           (.then (fn [resp]
-                   (is (true? (:seon.store.wire/ok resp))
+                   (is (true? (::protocol/success? resp))
                        "resolves to the reply map once an attempt succeeds")
                    (is (= 3 @!calls)
                        "two failed attempts consumed, third succeeded")))
@@ -305,15 +312,14 @@
             (fn [_sock-path _req _opts]
               (swap! !calls inc)
               (js/Promise.reject (js/Error. "connect ECONNREFUSED (stub)")))
-            (fn [] (store.wire/ping!)))
+            (fn [] (replica/ping!)))
           (.then (fn [_]
                    (is false "ping! must throw once the retry budget is exhausted")))
           (.catch (fn [e]
                     (is (= 5 @!calls) "all 5 attempts consumed")
-                    (is (re-find #"UNREACHABLE" (.-message e))
-                        "fail-loud message preserved")
-                    (is (re-find #"after 5 attempts" (.-message e))
-                        "message names the exhausted retry budget")
+                    (is (= 5 (::replica/attempts (ex-data e))))
+                    (is (= replica/default-request-socket-path
+                           (::replica/socket-path (ex-data e))))
                     (is (= :core-bug (:seon.error/kind (ex-data e)))
                         "error kind unchanged")))
           (.finally done)))))
@@ -332,7 +338,7 @@
           throw-cb (fn [_report] (throw (js/Error. "boom — a slow/bad listener")))
           ok-cb    (fn [_report] (swap! fired conj :ok))
           conn     (with-meta {} {:listeners (atom {:k1 throw-cb :k2 ok-cb})})]
-      (#'store.wire/fire-native-listeners! conn {:tx-data []})
+      (#'replica/fire-native-listeners! conn {:tx-data []})
       (is (empty? @fired)
           "listeners are dispatched on a later macrotask, NOT inline (pump never blocks)")
       (js/setTimeout
@@ -355,22 +361,22 @@
     (let [fired      (atom [])
           listeners  (atom {:k (fn [report] (swap! fired conj (count (:tx-data report))))})
           conn       (fake-conn 100 listeners)
-          ev         (fn [bt] {:seon.store.wire/event   "tx"
-                               :seon.store.wire/basis-t bt
-                               :seon.store.wire/basis-t-before (dec bt)
-                               :seon.store.wire/tx-data [[1 :a "v" bt true]]})]
+          ev         (fn [bt] {::protocol/event protocol/transaction-event
+                               ::protocol/basis-t bt
+                               ::protocol/basis-t-before (dec bt)
+                               ::protocol/transaction-data [[1 :a "v" bt true]]})]
       (-> (with-wire-state
            (attached-state conn 99)
            (fn []
              (with-as-of-stub
               (fn []
                 ;; foreign tx, bt=100 > watermark 99 → fire + advance.
-                (#'store.wire/handle-feed-event!
+                (#'replica/handle-feed-event!
                  (adapter-generation) conn (ev 100))
                 ;; replay/live overlap and a stale event are both no-ops.
-                (#'store.wire/handle-feed-event!
+                (#'replica/handle-feed-event!
                  (adapter-generation) conn (ev 100))
-                (#'store.wire/handle-feed-event!
+                (#'replica/handle-feed-event!
                  (adapter-generation) conn (ev 95))
                 (is (= 100 (adapter-basis-t))
                     "the branch-qualified watermark advanced")
@@ -385,7 +391,7 @@
 
 (deftest connect-feed!-walks-pages-then-dedups-the-buffered-live-overlap
   (async done
-    (let [db-name       store.wire/cluster-name
+    (let [db-name       replica/database-name
           !requests     (atom [])
           !callbacks    (atom nil)
           !destroyed?   (atom false)
@@ -419,7 +425,7 @@
                                 [(replay-event db-name 103 102)
                                  (replay-event db-name 104 103)]))))]
       (-> (with-wire-state
-           (attached-state conn 100 ::store.wire/connecting)
+           (attached-state conn 100 ::replica/connecting)
            (fn []
              (with-feed-stubs
               connect-stub replay-stub
@@ -427,8 +433,8 @@
                 (-> (connect-feed! conn "req.sock" "pub.sock" (fn [_] nil))
                     (.then
                      (fn [result]
-                       (is (= 4 (::store.wire/replayed result)))
-                       (is (= db-name (::store.wire/db-name result)))
+                       (is (= 4 (::replica/replayed result)))
+                       (is (= db-name (::replica/database-name result)))
                        (is (= [{:since-t 100 :db-name db-name}
                                {:since-t 102 :through-t 104 :db-name db-name}]
                               (mapv #(select-keys % [:since-t :through-t :db-name])
@@ -448,7 +454,7 @@
 
 (deftest connect-feed!-rejects-a-non-final-empty-page-without-advancing
   (async done
-    (let [db-name      store.wire/cluster-name
+    (let [db-name      replica/database-name
           !destroyed?  (atom false)
           !calls       (atom 0)
           conn         (fake-conn 102)
@@ -459,7 +465,7 @@
                          (js/Promise.resolve
                           (replay-page db-name 100 102 100 false [])))]
       (-> (with-wire-state
-           (attached-state conn 100 ::store.wire/connecting)
+           (attached-state conn 100 ::replica/connecting)
            (fn []
              (with-feed-stubs
               connect-stub replay-stub
@@ -480,7 +486,7 @@
 
 (deftest reconnect-during-replay-resumes-from-the-last-complete-page
   (async done
-    (let [db-name       store.wire/cluster-name
+    (let [db-name       replica/database-name
           !connects     (atom 0)
           !replays      (atom 0)
           !callbacks    (atom nil)
@@ -521,7 +527,7 @@
                                   [(replay-event db-name 103 102)
                                    (replay-event db-name 104 103)])))))]
       (-> (with-wire-state
-           (attached-state conn 100 ::store.wire/connecting)
+           (attached-state conn 100 ::replica/connecting)
            (fn []
              (with-feed-stubs
               connect-stub replay-stub
@@ -533,14 +539,14 @@
                     (.catch
                      (fn [error]
                        (is (= "drop during replay"
-                              (::store.wire/drop-reason (ex-data error))))
+                              (::replica/drop-reason (ex-data error))))
                        (is (= 102 (adapter-basis-t))
                            "only the fully applied page advances the watermark")
                        (connect-feed!
                         conn "req.sock" "pub.sock" #(swap! !drops conj %))))
                     (.then
                      (fn [result]
-                       (is (= 2 (::store.wire/replayed result)))
+                       (is (= 2 (::replica/replayed result)))
                        (is (= 2 @!connects))
                        (is (empty? @!drops)
                            "a pre-live drop rejects the attempt; only a live feed calls on-drop")
@@ -556,7 +562,7 @@
 
 (deftest listen-adapter-attaches-stops-and-reattaches-with-branch-qualified-progress
   (async done
-    (let [db-name         store.wire/cluster-name
+    (let [db-name         replica/database-name
           !connections    (atom [])
           !replays        (atom [])
           !a-destroyed    (atom 0)
@@ -587,10 +593,10 @@
                              (replay-page db-name since-t since-t since-t
                                           true [])))
           start!          (fn [conn]
-                            (store.wire/start-listen-adapter!
-                             {::store.wire/conn conn
-                              ::store.wire/sock-path "req.sock"
-                              ::store.wire/pub-sock-path "pub.sock"}))
+                            (replica/attach!
+                             {::replica/conn conn
+                              ::replica/request-socket-path "req.sock"
+                              ::replica/publish-socket-path "pub.sock"}))
           lifecycle!      (fn []
                             (-> (start! conn-a)
                                 (.then
@@ -599,34 +605,34 @@
                                    (is (= 1 (count @!connections)))
                                    (is (= :branch/a
                                           (get-in
-                                           (store.wire/adapter-status)
-                                           [::store.wire/database-coordinate
-                                            ::store.wire/branch])))
+                                           (replica/status)
+                                           [::replica/database-coordinate
+                                            ::replica/branch])))
                                    (start! conn-a)))
                                 (.then
                                  (fn [_]
                                    (is (= 1 (count @!connections))
                                        "starting the same attachment is idempotent")
-                                   (is (= ::store.wire/tracked
-                                          (#'store.wire/begin-transaction!
+                                   (is (= ::replica/tracked
+                                          (#'replica/begin-transaction!
                                            conn-a "pending-a")))
-                                   (is (= 1 (::store.wire/correlation-count
-                                             (store.wire/adapter-status))))
+                                   (is (= 1 (::replica/correlation-count
+                                             (replica/status))))
                                    (is (true?
-                                        (store.wire/stop-listen-adapter!)))
+                                        (replica/detach!)))
                                    (is (false?
-                                        (store.wire/stop-listen-adapter!))
+                                        (replica/detach!))
                                        "stopping an already stopped adapter is idempotent")
                                    (is (= 1 @!a-destroyed)
                                        "stopping closes the old pub socket once")
                                    (is (zero?
-                                        (::store.wire/correlation-count
-                                         (store.wire/adapter-status)))
+                                        (::replica/correlation-count
+                                         (replica/status)))
                                        "attachment-owned correlations are disposed")
                                    (start! conn-b)))
                                 (.then
                                  (fn [_]
-                                   (let [status      (store.wire/adapter-status)
+                                   (let [status      (replica/status)
                                          a-callbacks (first @!connections)
                                          b-callbacks (second @!connections)]
                                      (is (= 2 (count @!connections)))
@@ -634,19 +640,19 @@
                                      (is (= :branch/b
                                             (get-in
                                              status
-                                             [::store.wire/database-coordinate
-                                              ::store.wire/branch])))
+                                             [::replica/database-coordinate
+                                              ::replica/branch])))
                                      (is (= :branch/b
                                             (get-in
                                              status
-                                             [::store.wire/last-applied-coordinate
-                                              ::store.wire/database-coordinate
-                                              ::store.wire/branch])))
+                                             [::replica/last-applied-coordinate
+                                              ::replica/database-coordinate
+                                              ::replica/branch])))
                                      (is (= 50
                                             (get-in
                                              status
-                                             [::store.wire/last-applied-coordinate
-                                              ::store.wire/basis-t]))
+                                             [::replica/last-applied-coordinate
+                                              ::replica/basis-t]))
                                          "branch B starts from its own t=50, not A's cursor")
                                      (reset! a-database
                                              (fake-db 51 :branch/a))
@@ -667,7 +673,7 @@
                                                 "B applies its commit exactly once")
                                             (is (= 51 (adapter-basis-t)))
                                             (is (true?
-                                                 (store.wire/stop-listen-adapter!)))
+                                                 (replica/detach!)))
                                             (is (= 1 @!b-destroyed))))))))))]
       (-> (with-wire-state
            (stopped-state)
@@ -690,23 +696,24 @@
              (with-rpc-stub
                (fn [_sock-path request _opts]
                  (swap! !requests conj request)
-                 (if (< (swap! !attempts inc) wire/transact-attempts)
+                 (if (< (swap! !attempts inc) expected-transaction-attempts)
                    (js/Promise.reject
                     (ex-info "ambiguous reply loss"
-                             {:seon.store.wire/rpc-failure :timeout}))
+                             {::uds/failure
+                              :seon.db.transport.uds.failure/timeout}))
                    (js/Promise.resolve (success-response 17))))
                (fn []
                  (-> (dispatch-transaction
                       conn
-                      {:tx-data [{:seon.store.wire-test/value "probe"}]})
+                      {:tx-data [{:seon.db.replica-test/value "probe"}]})
                      (.then
                       (fn [report]
-                        (is (= wire/transact-attempts (count @!requests))
+                        (is (= expected-transaction-attempts (count @!requests))
                             "the bounded retry budget reached the successful attempt")
                         (is (= 1
                                (count
                                 (set
-                                 (map :seon.store.wire/id @!requests))))
+                                 (map ::protocol/request-id @!requests))))
                             "every ambiguous retry retained one durable wire id")
                         (is (apply = @!requests)
                             "the complete request stayed frozen across retries")
@@ -729,16 +736,16 @@
                (fn [_sock-path request _opts]
                  (reset! !request request)
                  (js/Promise.resolve
-                  {:seon.store.wire/ok false
-                   :seon.store.wire/error-kind "protocol"
-                   :seon.store.wire/error :invalid-allocation-shape}))
+                  {::protocol/success? false
+                   ::protocol/error-kind protocol/protocol-error
+                   ::protocol/error "invalid allocation shape"}))
                (fn []
                  (-> (dispatch-transaction
                       conn
                       {:tx-data []
                        :seon.db.id/generated-candidates ["mint-ember-otter"]
                        :seon.db.id/generated-identity-attrs
-                       #{:seon.store.wire-test/id}})
+                       #{:seon.db.replica-test/id}})
                      (.then
                       (fn [error]
                         (let [data (ex-data error)]
@@ -748,17 +755,17 @@
                           (is (= :core-bug (:seon.error/kind data))
                               "malformed allocator protocol is blamed on core")
                           (is (= ["mint-ember-otter"]
-                                 (:seon.store.wire/generated-candidates
+                                 (::protocol/generated-candidates
                                   @!request))
                               "the candidate manifest crosses the wire unchanged")
                           (is (not (contains?
                                    @!request
-                                   :seon.store.wire/generated-identity-attrs))
+                                   :seon.db.id/generated-identity-attrs))
                               "the client-side identity catalog never crosses the wire")
                           (is (nil?
                                (get (correlations)
-                                    (:seon.store.wire/id @!request)))
-                              "a definite rejection removes its wire-id state")))))))))
+                                    (::protocol/request-id @!request)))
+                              "a definite rejection removes its request-id state")))))))))
           (.catch (fn [error]
                     (is false (str "allocator protocol rejection test threw: "
                                    error))))
@@ -767,20 +774,20 @@
 (deftest definite-candidate-conflict-cleans-state-and-identifies-candidate
   (async done
     (let [candidate "mint-ember-otter"
-          !wire-id  (atom nil)
+          !request-id  (atom nil)
           conn      (fake-conn 29)]
       (-> (with-wire-state
            (stopped-state)
            (fn []
              (with-rpc-stub
                (fn [_sock-path request _opts]
-                 (reset! !wire-id (:seon.store.wire/id request))
+                 (reset! !request-id (::protocol/request-id request))
                  (js/Promise.resolve
-                  {:seon.store.wire/ok false
-                   :seon.store.wire/error-kind
-                   "generated-candidate-conflict"
-                   :seon.store.wire/generated-candidate candidate
-                   :seon.store.wire/error :candidate-already-present}))
+                  {::protocol/success? false
+                   ::protocol/error-kind
+                   protocol/generated-candidate-conflict-error
+                   ::protocol/generated-candidate candidate
+                   ::protocol/error "candidate already present"}))
                (fn []
                  (-> (dispatch-transaction
                       conn
@@ -797,7 +804,7 @@
                               "the rejected candidate remains inspectable")
                           (is (= :user-input (:seon.error/kind data))
                               "a caller-provided collision is structurally distinct")
-                          (is (nil? (get (correlations) @!wire-id))
+                          (is (nil? (get (correlations) @!request-id))
                               "a definite candidate conflict removes per-id state")))))))))
           (.catch (fn [error]
                     (is false (str "candidate-conflict test threw: " error))))
@@ -815,32 +822,33 @@
                  (swap! !requests conj request)
                  (js/Promise.reject
                   (ex-info "ambiguous reply loss"
-                           {:seon.store.wire/rpc-failure :timeout})))
+                           {::uds/failure
+                            :seon.db.transport.uds.failure/timeout})))
                (fn []
                  (-> (dispatch-transaction
                       conn
-                      {:tx-data [{:seon.store.wire-test/value "unknown"}]})
+                      {:tx-data [{:seon.db.replica-test/value "unknown"}]})
                      (.then
                       (fn [error]
                         (let [data (ex-data error)]
-                          (is (= wire/transact-attempts
-                                 (:seon.store.wire/attempts data))
+                          (is (= expected-transaction-attempts
+                                 (::protocol/attempts data))
                               "unknown is returned only after the retry budget")
-                          (is (= :seon.store.wire.status/unknown
-                                 (:seon.store.wire/status data))
+                          (is (= protocol/unknown-status
+                                 (::protocol/status data))
                               "reply exhaustion reports commit ambiguity")
-                          (is (= :timeout
-                                 (:seon.store.wire/rpc-failure data))
+                          (is (= :seon.db.transport.uds.failure/timeout
+                                 (::protocol/transport-failure data))
                               "the transport failure remains structured")
                           (is (= :core-bug (:seon.error/kind data))
                               "exhausted infrastructure ambiguity is a core fault")
                           (is (not (contains? data
-                                              :seon.store.wire/committed?))
+                                              :seon.db.replica/committed?))
                               "unknown never falsely claims the transaction did not commit")
                           (is (= 1
                                  (count
                                   (set
-                                   (map :seon.store.wire/id @!requests))))
+                                   (map ::protocol/request-id @!requests))))
                               "reply exhaustion still used one durable wire id")
                           (is (apply = @!requests)
                               "every exhausted attempt resent the frozen request")
@@ -870,18 +878,18 @@
                  (let [result-promise
                        (dispatch-transaction
                         conn
-                        {:tx-data [{:seon.store.wire-test/value "feed-first"}]})
-                       wire-id (:seon.store.wire/id @!request)
-                       event   {:seon.store.wire/event "tx"
-                                :seon.store.wire/id wire-id
-                                :seon.store.wire/basis-t 37
-                                :seon.store.wire/basis-t-before 36
-                                :seon.store.wire/tx-data
-                                [[1 :seon.store.wire-test/value
+                        {:tx-data [{:seon.db.replica-test/value "feed-first"}]})
+                       request-id (::protocol/request-id @!request)
+                       event   {::protocol/event protocol/transaction-event
+                                ::protocol/request-id request-id
+                                ::protocol/basis-t 37
+                                ::protocol/basis-t-before 36
+                                ::protocol/transaction-data
+                                [[1 :seon.db.replica-test/value
                                   "feed-first" 37 true]]}]
-                   (#'store.wire/handle-feed-event!
+                   (#'replica/handle-feed-event!
                     (adapter-generation) conn event)
-                   (is (contains? (correlations) wire-id)
+                   (is (contains? (correlations) request-id)
                        "feed-first remains recoverable until the response arrives")
                    (is (empty? @!deliveries)
                        "the own feed never delivers inline")
@@ -891,7 +899,7 @@
                         (fn [report]
                           ;; Datahike's outer writer loop performs this step in
                           ;; production after it receives a successful report.
-                          (#'store.wire/fire-native-listeners! conn report)
+                          (#'replica/fire-native-listeners! conn report)
                           (is (empty? (correlations))
                               "the matching response consumes feed-first state")
                           (-> (after-macrotask)
@@ -919,24 +927,24 @@
                (fn []
                  (-> (dispatch-transaction
                       conn
-                      {:tx-data [{:seon.store.wire-test/value
+                      {:tx-data [{:seon.db.replica-test/value
                                   "response-first"}]})
                      (.then
                       (fn [report]
-                        (let [wire-id (:seon.store.wire/id @!request)
-                              event   {:seon.store.wire/event "tx"
-                                       :seon.store.wire/id wire-id
-                                       :seon.store.wire/basis-t 41
-                                       :seon.store.wire/basis-t-before 40
-                                       :seon.store.wire/tx-data
-                                       [[1 :seon.store.wire-test/value
+                        (let [request-id (::protocol/request-id @!request)
+                              event   {::protocol/event protocol/transaction-event
+                                       ::protocol/request-id request-id
+                                       ::protocol/basis-t 41
+                                       ::protocol/basis-t-before 40
+                                       ::protocol/transaction-data
+                                       [[1 :seon.db.replica-test/value
                                          "response-first" 41 true]]}]
-                          (is (contains? (correlations) wire-id)
+                          (is (contains? (correlations) request-id)
                               "response-first remains tracked until its feed")
                           ;; Datahike's outer writer loop delivers the response
                           ;; report; the own feed must suppress its duplicate.
-                          (#'store.wire/fire-native-listeners! conn report)
-                          (#'store.wire/handle-feed-event!
+                          (#'replica/fire-native-listeners! conn report)
+                          (#'replica/handle-feed-event!
                            (adapter-generation) conn event)
                           (is (empty? (correlations))
                               "the matching feed consumes response-first state")

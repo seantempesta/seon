@@ -288,8 +288,8 @@ SNAPSHOT_QUERY_NOTE = """
 # the wire-server classpath). %s slots: db-name keyword, agent-id string.
 _SNAPSHOT_FORM = (
     "(do (require (quote [cheshire.core :as json]) (quote [datahike.api :as d]))"
-    " (let [conn (:seon.server.registry/conn (seon.server.registry/get-conn"
-    " {:seon.server.registry/db-name :%s}))"
+    " (let [conn (:seon.db.registry/conn (seon.db.registry/lookup-connection"
+    " {:seon.db.registry/database-name :%s}))"
     " db (deref conn)"
     " a (d/q (quote [:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]]) db %s)"
     " ts (if a (d/q (quote [:find [?t ...] :in $ ?a :where"
@@ -312,8 +312,8 @@ _SNAPSHOT_FORM = (
 # snapshot; survives the pod restart.
 _EVALS_FORM = (
     "(do (require (quote [cheshire.core :as json]) (quote [datahike.api :as d]))"
-    " (let [conn (:seon.server.registry/conn (seon.server.registry/get-conn"
-    " {:seon.server.registry/db-name :%s}))"
+    " (let [conn (:seon.db.registry/conn (seon.db.registry/lookup-connection"
+    " {:seon.db.registry/database-name :%s}))"
     " db (deref conn)"
     " a (d/q (quote [:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]]) db %s)"
     " es (if a (d/q (quote [:find [?e ...] :in $ ?a :where"

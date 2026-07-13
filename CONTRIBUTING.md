@@ -27,8 +27,8 @@ If AGPL-3.0 doesn't fit your use case (e.g., you'd like to use seon in a proprie
 Read [`CLAUDE.md`](CLAUDE.md) first — it is the real contributor orientation
 (conventions, the dev hook, the testing model, and the architecture). The
 active runtime is the **CLJS pod** (a long-running Node process, `src/seon/*.cljs`,
-inspector UI on `http://localhost:7890`) backed by the `wire-server` datahike
-writer; the JVM main-app (`src/seon/*.clj`) is a **paused** track. `bin/seon`
+web UI on `http://localhost:7890`) backed by the JVM Datahike database server;
+the JVM main-app (`src/seon/*.clj`) is a **paused** track. `bin/seon`
 supervises both — `bin/seon start all`, `status`, `tail pod`, `restart pod`.
 For the mental model, see [`docs/seon/architecture/overview.md`](docs/seon/architecture/overview.md).
 

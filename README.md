@@ -42,7 +42,7 @@ The runtime is built on five primitives. Each has a component note in [`docs/seo
 
 - **Multi-agent shared workspace.** Multiple agents work inside the same running runtime, calling each other's functions, transacting into the same graph, and editing each other's code under capability gates. Code is organized into Clojure namespaces wired into a `core.async.flow` topology — typed message envelopes, uniform backpressure, observability — but agents aren't pinned to a single namespace. Any agent can touch any surface the capability layer permits. ([`docs/seon/concepts/namespace-as-process.md`](docs/seon/concepts/namespace-as-process.md))
 - **Schema-as-contract.** Public functions advertise Malli input/output schemas with fully namespaced keywords (`:seon.trading/position`, never `:position`). The schemas land as datoms in a Datalog graph. "Which functions accept this shape?" is a database query. ([`docs/seon/components/schema-system.md`](docs/seon/components/schema-system.md))
-- **Graph-as-source-of-truth.** Datahike (Datomic-style EAV with bitemporal history) holds the program graph, the data graph, and the conversation graph. The active CLJS pod does not embed datahike — it forwards writes over a Unix socket to the central `wire-server` writer (file-backed datahike at `data/clusters/default/store`) and reads local lazy db values; the wire-server also carries a Proximum HNSW vector index for semantic search (see Status). (The paused JVM track embeds datahike in-process — `[JVM track — paused]`.) One pull reconstructs any agent turn. Sessions survive restarts because the database is durable. ([`docs/seon/components/database.md`](docs/seon/components/database.md))
+- **Graph-as-source-of-truth.** Datahike (Datomic-style EAV with bitemporal history) holds the program graph, the data graph, and the conversation graph. The active CLJS pod forwards writes over a Unix socket to the JVM database server (file-backed Datahike at `data/clusters/default/db`) and reads local lazy database values; that server also carries the Proximum HNSW vector index for semantic search. (The paused JVM track embeds Datahike in-process.) One pull reconstructs any agent turn, and durable facts survive restarts. ([`docs/seon/components/database.md`](docs/seon/components/database.md))
 - **REPL-as-interface.** The agent does not edit files. It evals forms in a REPL. The pipeline validates the schema, transacts metadata into the graph, persists the source to disk, and runs the tests the schema selects. Files are a persistence format, not the source of truth. In the live CLJS pod this goes one step further — the agent's *whole context is a render of the database* and its *loop is a function of the database* (see Status). ([`docs/seon/components/dev-tools.md`](docs/seon/components/dev-tools.md))
 - **WASM containment.** The agent's eval surface is moving into a `wasm32-wasip2` Component embedded in a Tauri host process. The capability surface is WIT-typed: `fs`, `http`, `mcp`, `capability-prompt`, `eval`. The Rust host decides what to grant. Wasmtime enforces. ([`docs/prds/agent-runtime/platform.md`](docs/prds/agent-runtime/platform.md))
 
@@ -83,8 +83,8 @@ These licenses (EPL and MIT) are permissive; where Seon ports their code, the up
 
 | Tool | Version | Why |
 |------|---------|-----|
-| **Java (JDK)** | **22+ (25 preferred)** | The wire-server (datahike writer) runs on the JVM; its Proximum vector index ships class-file 66.0 and uses the Foreign Memory API, both Java 22+ only — 22 is the hard floor. `bin/_java-home-resolver` *prefers* JDK 25 (newest that runs the fork + suite, ~7% faster, no behavior change) and falls back to any pinned JDK or to `java` on PATH with a warning. `bin/seon` keeps a `>=22` assert as the safety net; a 22-only machine still runs, just unpinned. Set `JAVA_HOME` to override. |
-| **Clojure CLI** | 1.12+ | Builds the CLJS pod and runs the wire-server. |
+| **Java (JDK)** | **22+ (25 preferred)** | The database server runs on the JVM; its Proximum vector index ships class-file 66.0 and uses the Foreign Memory API, both Java 22+ only — 22 is the hard floor. `bin/_java-home-resolver` *prefers* JDK 25 and falls back to any pinned JDK or to `java` on PATH with a warning. Set `JAVA_HOME` to override. |
+| **Clojure CLI** | 1.12+ | Builds the CLJS pod and runs the database server. |
 | **Babashka** (`bb`) | 1.x | Dev hooks, MCP servers, and datahike's build tasks. |
 | **Node.js** + npm | 22+ (24 recommended) | The agent pod is a long-running Node process. |
 | **Git** | 2.x | Resolves the datahike fork by `:git/sha`. |
@@ -110,7 +110,7 @@ bin/seon prep             # one-time full build prep: clones + Java-preps the
                           #   classpath, builds the bootstrap-CLJS bundle
 cp .env.example .env      # the config surface — edit it for keys/provider/ports
 export DEEPSEEK_API_KEY=sk-...   # (env vars override .env; either works)
-bin/seon start all        # cljs build → wire-server → agent pod, ready-gated
+bin/seon start all        # CLJS build → database server → agent pod
 open http://localhost:7890/agents
 ```
 
@@ -179,12 +179,12 @@ Per-milestone evidence (which commits and branches back which status) is in [`do
 
 ### Where the work has landed — the CLJS pod track (2026-06)
 
-The milestone table above frames the long arc on the original JVM runtime. Since it was written, the center of gravity moved to the **CLJS pod** — a long-running Node process that is the agent's actual home today — paired with a JVM **wire-server** over a Unix socket. Separating what works from what is designed-and-proven but still being wired in:
+The milestone table above frames the long arc on the original JVM runtime. Since it was written, the center of gravity moved to the **CLJS pod** — a long-running Node process that is the agent's actual home today — paired with the JVM database server over a Unix socket.
 
 **Working today.**
 
 - **A live ClojureScript REPL is the agent's entire surface — no fixed tool catalog.** The agent reads, computes, stores, and replies by evaluating Clojure forms against the shared database. Two properties make this tractable and are the newest load-bearing pieces: the agent's **whole context is a render of the database** (every message, eval, todo, namespace, and document is a *renderable* projected from datoms by its schema — one recursive walker, two views: text for the model, HTML for the human), and its **loop is a function of the database** (runnability is a single datom; a datahike tx-listener wakes the agent when a message lands; the stop policy is one `cond` over DB state). Context is *derived*, not accumulated — fix the underlying data and the surface heals itself, with nothing stored that needs clearing.
-- **Dual-track storage that converges at the wire.** The JVM wire-server is the sole authoritative datahike writer and carries a Proximum HNSW vector index; the pod is an on-device read replica that executes functions locally and forwards writes over the socket. Reads are local lazy database values, so **pod memory scales with the working set, not the corpus**.
+- **One writer, local reads.** The JVM database server is the sole authoritative Datahike writer and carries a Proximum HNSW vector index; the pod is a local read replica that executes functions locally and forwards writes over the socket. Reads are lazy database values, so **pod memory scales with the working set, not the corpus**.
 - **Measured scale.** On an isolated benchmark store, point lookups and ref-joins stay sub-millisecond and KNN vector search stays ~5 ms at **100k entities / ~28k vectors**, with the heap at ~**150 MB** after GC and storage at ~**9.5 KB/entity**. Reads scale on a `log(n)` / lazy-paging curve; the one real cost is *bulk write* throughput (HNSW insertion + file commits), a one-time, cache-mitigated batch cost that never touches the read path. Concrete evidence the foundation holds for a six-figure-entity personal corpus. Full numbers: [`docs/prds/embeddings/db-scalability-benchmark-2026-06-25.md`](docs/prds/embeddings/db-scalability-benchmark-2026-06-25.md).
 - **Inspect AI evaluations.** The `src-inspect-ai/` package drives the real
   agent boundary, restarts pods, scores durable facts and trajectories, and

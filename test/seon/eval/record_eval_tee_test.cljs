@@ -207,7 +207,7 @@
            {:seon.error/message "wire reply unavailable"
             :seon.error/kind :core-bug
             :seon.error/data
-            {:seon.store.wire/status :seon.store.wire.status/unknown}}}]
+            {:seon.db.protocol/status :seon.db.protocol.status/unknown}}}]
       (-> (with-allocation-stub
             (fn [_request]
               (swap! !calls inc)

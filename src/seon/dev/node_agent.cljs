@@ -17,7 +17,7 @@
    that is the no-restart survival path.
 
    This ns is intentionally tiny: read id, host! it, print a ready line, idle.
-   No DB, no wire-server — that is out of scope for this probe. It survives
+   No database attachment — that is out of scope for this probe. It survives
    until the per-agent launcher (main PRD §7 item 10a) is verified end-to-end;
    then the reorg DECIDE becomes DELETE."
   (:require [clojure.string :as str]

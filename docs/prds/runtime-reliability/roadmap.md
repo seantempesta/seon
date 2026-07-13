@@ -59,8 +59,15 @@ longer publish a half-initialized connection. The live web channel now also has
 one lifecycle-owned, lossless bounded coalescer: Datahike's stable listener key
 is the installation authority, a coalesced window retains its complete database
 evidence, and continuous structural commits cannot postpone a render past 500
-ms. The atomic database-protocol vocabulary cut, typed administration, live
-transition proof, and a published artifact manifest remain outstanding.
+ms. The atomic database-protocol cut is now implemented: keyword operations and
+fully namespaced maps live once in `seon.db.protocol`; the JVM writer/server,
+CLJS replica, backend adapter, connection registry, and UDS transports have
+single responsibilities; legacy server/store namespaces are deleted; and the
+managed database leaf is `/db`. Fifteen replica tests (87 assertions) and the
+eleven-namespace writer gate (47 tests/295 assertions) cover retry/recovery,
+replay/live overlap, explicit routing, generated identities, durable receipt
+encapsulation, bounded publication, and lifecycle. Typed administration, cold
+live transition proof, and a published artifact manifest remain outstanding.
 
 The source-grounded system audits are complete and committed:
 
@@ -411,12 +418,12 @@ is evaluated behaviorally, not by asserting prose.
 | JVM source | The retained writer reaches twelve namespaces. The old Integrant/core.async/agent/web application remains searchable until the archive cut. |
 | JVM artifact | Source and uberjar use the same complete `:writer` basis with the maintained forks and one SLF4J provider, but no published launch manifest yet records the artifact/runtime contract. |
 | Dependencies | The writer and writer-test closures are honest and narrow. Heavy paused-app dependencies still live in the base graph used by old JVM/tools, and CLJS/tool ownership is not yet fully separated. |
-| Writer protocol | Raw transaction fanout plus bounded replay is now the only live update channel. Duplicate Transit helpers, unused read/filter/batch operations, an unwired agent registry, and a fake SQLite backend remain. |
-| Database vocabulary | `seon.store.wire`, `:seon.store.wire/*`, `{store-id, ...}`, `db/store-inventory`, `seon.server.store`, `/store` paths, and matching docs/UI/skills expose a second name for the database. |
+| Writer protocol | The semantic protocol, JVM writer/server, CLJS replica, and UDS transports are separated and the duplicate operations/helpers are deleted. A typed supervisor administration surface and cold process proof remain. |
+| Database vocabulary | The protocol/backend/replica path is canonical and the managed leaf is `/db`; `db/store-inventory`, root/UI “STORE” labels, skills, paused JVM code, and downstream ACME still expose the remaining obsolete vocabulary. |
 | Database browser | The inventory context block, `db/store-inventory`, `my.kb/inventory`, root-canvas “STORE” panel, header count, and `/data` repeat broad namespace/count scans. `/data` also retains a second legacy SSE connection registry instead of the canonical lazy render-unit feed. |
 | Developer hooks | Active hook config still calls the paused nREPL JVM on port 7888, so several claimed checks silently do not run. |
 | Operator | `bin/seon` is a 2,186-line shell program exposing implementation processes and a destructive global nuke. |
-| Tests | Disabled tests and old JVM application suites remain; focused writer and CLJS doors are not the complete active authority split. |
+| Tests | The retained writer gate is 47 tests/295 assertions after deleting 14 legacy server suites, but disabled and paused-application tests plus noisy expected-failure logging still need removal. |
 | UI | Surface/focus machinery exists, but active symbols, CSS, DOM, docs, skills, and ACME still say tile; four dead context renderers still load. |
 | Live rendering | Agent view unitization/read-observation is incomplete; legitimate work still needs bounded caching, layout/focus/browser proof, and grown-database profiling. |
 | Recent activity reads | `seon.render.default/recent-messages`, `seon.agent.ctx/messages`, transcript/activity queries, `seon.derive/real-eval-oks`, and the function menu independently scan and sort growing message/eval history before taking a small tail. Root's current cross-agent activity does the same over the whole database. |

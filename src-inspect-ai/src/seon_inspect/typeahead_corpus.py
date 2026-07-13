@@ -175,8 +175,8 @@ def offers_from_menu(section: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 _TURNS_FORM = (
     "(do (require (quote [cheshire.core :as json]) (quote [datahike.api :as d]))"
-    " (let [conn (:seon.server.registry/conn (seon.server.registry/get-conn"
-    " {:seon.server.registry/db-name :%s}))"
+    " (let [conn (:seon.db.registry/conn (seon.db.registry/lookup-connection"
+    " {:seon.db.registry/database-name :%s}))"
     " db (deref conn)"
     " a (d/q (quote [:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]]) db %s)"
     " rs (if a (d/q (quote [:find [?r ...] :in $ ?a :where"
@@ -369,8 +369,8 @@ def generate(cluster: str = "acme",
 
 _REPLY_FORM = (
     "(do (require (quote [cheshire.core :as json]) (quote [datahike.api :as d]))"
-    " (let [conn (:seon.server.registry/conn (seon.server.registry/get-conn"
-    " {:seon.server.registry/db-name :%s}))"
+    " (let [conn (:seon.db.registry/conn (seon.db.registry/lookup-connection"
+    " {:seon.db.registry/database-name :%s}))"
     " db (deref conn)"
     " t (d/q (quote [:find ?t . :in $ ?h :where [?b :my.blob/hash ?h]"
     " [?t :seon.agent.turn/prompt-blob ?b]]) db %s)"

@@ -1,0 +1,73 @@
+(ns seon.db.backend-test
+  "Behavioral tests for the Datahike backend adapter."
+  (:require [clojure.test :refer [deftest is testing]]
+            [seon.db.backend :as backend])
+  (:import [java.io File]))
+
+(defn- delete-tree!
+  [path]
+  (let [root (File. ^String path)]
+    (when (.exists root)
+      (run! (fn [^File file] (.delete file))
+            (reverse (file-seq root))))))
+
+(deftest backend-facts-are-stable-and-use-the-database-layout
+  (let [memory-request {::backend/database-name :cluster/alpha
+                        ::backend/backend :memory}
+        file-request {::backend/database-name :cluster/alpha
+                      ::backend/backend :file}]
+    (is (= (backend/backend-facts memory-request)
+           (backend/backend-facts memory-request))
+        "one database name has one deterministic backend identity")
+    (is (uuid? (::backend/database-id
+                (backend/backend-facts memory-request))))
+    (is (= "data/clusters/alpha/db"
+           (::backend/path (backend/backend-facts file-request))))
+    (is (= "data/clusters/bare/db"
+           (::backend/path
+            (backend/backend-facts
+             (assoc file-request ::backend/path "bare"))))
+        "a bare path cannot create backend files in the process directory")
+    (is (= "/tmp/seon-explicit-db"
+           (::backend/path
+            (backend/backend-facts
+             (assoc file-request ::backend/path "/tmp/seon-explicit-db")))))))
+
+(deftest datahike-config-is-pure-and-confines-third-party-shape
+  (let [root (str (System/getProperty "java.io.tmpdir")
+                  "/seon-backend-test-" (random-uuid))
+        path (str root "/database")
+        request {::backend/database-name :test/pure
+                 ::backend/backend :file
+                 ::backend/path path}
+        config (backend/datahike-config request)]
+    (try
+      (is (= {:backend :file
+              :path path
+              :id (::backend/database-id (backend/backend-facts request))}
+             (:store config)))
+      (is (= :write (:schema-flexibility config)))
+      (is (true? (:keep-history? config)))
+      (is (not (.exists (File. root)))
+          "constructing configuration performs no filesystem writes")
+      (is (true? (::backend/created?
+                  (backend/ensure-parent-dir! {::backend/path path}))))
+      (is (false? (::backend/created?
+                   (backend/ensure-parent-dir! {::backend/path path}))))
+      (finally
+        (delete-tree! root)))))
+
+(deftest distinct-database-names-have-distinct-identities
+  (testing "backend identity follows the database fact, not its path"
+    (let [path "/tmp/shared-location-is-not-identity"
+          alpha (backend/backend-facts
+                 {::backend/database-name :cluster/alpha
+                  ::backend/backend :file
+                  ::backend/path path})
+          beta (backend/backend-facts
+                {::backend/database-name :cluster/beta
+                 ::backend/backend :file
+                 ::backend/path path})]
+      (is (not= (::backend/database-id alpha)
+                (::backend/database-id beta)))
+      (is (= (::backend/path alpha) (::backend/path beta))))))

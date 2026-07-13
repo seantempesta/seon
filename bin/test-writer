@@ -10,15 +10,14 @@ WRITER_TESTS=(
   seon.db.id-test
   seon.db.datahike.schema-test
   seon.embed-writer-test
-  seon.server.generated-id-transaction-test
-  seon.server.protocol-integration-test
-  seon.server.registry-routing-test
-  seon.server.registry-test
-  seon.server.store-test
-  seon.server.temporal-read-test
-  seon.server.tx-feed-replay-test
-  seon.server.wire-request-id-test
-  seon.server.wire-types-test
+  seon.db.generated-id-transaction-test
+  seon.db.writer-integration-test
+  seon.db.registry-routing-test
+  seon.db.registry-test
+  seon.db.backend-test
+  seon.db.replay-test
+  seon.db.request-receipt-test
+  seon.db.transport-uds-test
 )
 
 case "${1:-}" in

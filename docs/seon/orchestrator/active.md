@@ -15,7 +15,7 @@ status: active
 
 ## What's Going On
 
-Seon runs two tracks. The active track is the CLJS pod (port 7890), backed by the `wire-server` central datahike writer (file-backed datahike at `data/clusters/default/store`); the pod forwards writes over a Unix socket to `wire-server` and reads are local lazy db values. `[JVM track — paused]` The paused JVM main-app track uses Datahike embedded (in-process LMDB) as its database. PRD set: `docs/prds/datahike-migration/{prd,decisions,notes,phase-3-harness-migration}.md`.
+Seon runs two tracks. The active track is the CLJS pod (port 7890), backed by the JVM database server (file-backed Datahike at `data/clusters/default/db`); the pod forwards writes over a Unix socket and reads local lazy database values. `[JVM track — paused]` The paused JVM main-app track uses embedded Datahike. PRD set: `docs/prds/datahike-migration/{prd,decisions,notes,phase-3-harness-migration}.md`.
 
 Phases shipped:
 

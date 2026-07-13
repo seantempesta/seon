@@ -14,6 +14,7 @@
    [datahike.writer :as writer]
    [datahike.writing :as writing]
    [malli.core :as m]
+   [seon.db.protocol :as protocol]
    [seon.schema :as schema]
    #?@(:cljs [[seon.db.internal :as db.internal]])
    #?@(:cljs [["@paralleldrive/cuid2" :as cuid2]
@@ -1006,7 +1007,7 @@
    first connection for that store and branch. Never pass it to
    `datahike.api/create-database`. The durable backend keyword installs the
    private operation at writer creation without placing a live function in the
-   persisted database config. Remote configs, including `:seon-wire`, already
+   persisted database config. Remote configs already
    have their own serialized writer."
   {:malli/schema [:=> [:cat ::datahike-config] ::datahike-config]}
   [config]
@@ -1181,7 +1182,7 @@
 (defn- attach-dependent-identities!
   "Attach the builder's public candidate-key claims to the private generated
    manifest sent through the existing serialized-writer field. This keeps the
-   wire transaction shape unchanged: `seon.db.internal` already forwards the
+   transaction shape unchanged: `seon.db.internal` already forwards the
    generated manifest, and the writer strips that whole manifest before
    Datahike sees the domain transaction."
   [manifest dependent-identities]
@@ -1234,10 +1235,10 @@
 #?(:cljs
    (defn- committed-write?
      [envelope]
-     (= :seon.store.wire.status/committed
+     (= protocol/committed-status
         (get-in envelope
                 [:seon.db/error :seon.error/data
-                 :seon.store.wire/status]))))
+                 ::protocol/status]))))
 
 #?(:cljs
    (defn- committed-eids
@@ -1282,7 +1283,7 @@
 (defn assert-allocation-writer!
   "Assert that a connection routes allocations through one serialized writer.
 
-   Remote `:seon-wire` connections delegate to the configured JVM authority.
+   Remote connections delegate to the configured JVM authority.
    Local self-writer connections must be the first connection opened with
    `allocation-connect-config`; a later connect cannot upgrade Datahike's
    cached writer for the same store and branch. The check reads Datahike's
@@ -1307,7 +1308,7 @@
                            @conn)
             writer (get-in runtime-db [:config :writer])
             backend (or (:backend writer) :self)]
-        (when-not (or (= :seon-wire backend)
+        (when-not (or (= :seon.db.writer/remote backend)
                       (= allocation-writer-backend backend))
           (throw
            (ex-info "Allocation requires the generated-id writer wrapper."
@@ -1394,7 +1395,7 @@
                  ::ids ids
                  ::eids eids})))
 
-           ;; The durable wire receipt can prove that a reply was
+           ;; The durable request receipt can prove that a reply was
            ;; lost after commit. The candidates are already durable: recover
            ;; their eids from the materialized local db and never mint again.
            (committed-write? envelope)
@@ -1404,7 +1405,7 @@
                 :seon.db/tx
                 (get-in envelope
                         [:seon.db/error :seon.error/data
-                         :seon.store.wire/basis-t])
+                         ::protocol/basis-t])
                 ::ids ids
                 ::eids eids
                 ::recovered-commit? true}

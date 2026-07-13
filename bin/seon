@@ -18,8 +18,8 @@
 # the jvm process hosts nREPL 7888 — the SHARED REPL that every Claude
 # agent's eval, the dev hook's reload+test cycle, and the seon MCP
 # bridge all run through — plus the embedded datahike (data/datahike).
-# It has no dependency on the pod stack (its store is separate from
-# the wire-server's data/clusters/* store), so there is no ordering
+# It has no dependency on the pod stack (its database is separate from
+# the wire-server's data/clusters/* databases), so there is no ordering
 # reason to include it; and because this script is multi-agent (any
 # agent may `restart all` to bounce the pod stack at any time),
 # including the jvm would let one agent silently sever every other
@@ -38,7 +38,7 @@
 #   prep               Idempotent git-dep prep for :writer/:cljs aliases
 #                      (downstream supervisors shell out to this)
 #   nuke --yes         DESTRUCTIVE full clean slate: stop everything, wipe
-#                      ALL cluster stores + transient data, clear ALL logs,
+#                      ALL cluster databases + transient data, clear ALL logs,
 #                      restart the default stack fresh. No undo.
 #
 # State per process: tmp/proc/<name>/{pid,pid-start,session-owned,cmd,started-at,lock}
@@ -85,8 +85,8 @@ mkdir -p "$PROC_DIR" "$LOG_DIR"
 # downstream consumer shells out to bin/seon with env instead of
 # forking the script:
 #
-#   SEON_CLUSTER_DIR        wire-server store parent dir
-#                           (store at $SEON_CLUSTER_DIR/store)
+#   SEON_CLUSTER_DIR        cluster data directory
+#                           (database at $SEON_CLUSTER_DIR/db)
 #   SEON_REQ_SOCK           wire-server request UDS path
 #   SEON_PUB_SOCK           wire-server publish UDS path
 #   SEON_WRITER_REPL_PORT   wire-server loopback socket-REPL port
@@ -113,7 +113,7 @@ SEON_REQ_SOCK="${SEON_REQ_SOCK:-tmp/seon-cluster-default-req.sock}"
 SEON_PUB_SOCK="${SEON_PUB_SOCK:-tmp/seon-cluster-default-pub.sock}"
 SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7891}"
 
-# Per-supervisor wire-server REPL port file (registry C48). The wire-server
+# Per-supervisor wire-server REPL port file. The wire-server
 # writes its bound REPL port here on boot; ready_check and bin/seon-server-call
 # read it. A SINGLE shared file (the old tmp/seon-writer-repl-port) was
 # clobbered by a second supervisor's wire-server (bin/acme), routing file-based
@@ -259,12 +259,12 @@ process_command() {
     pod)         echo "npm run css:build && exec env SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1$(extra_npm_node_path) node \"${SEON_CLIENT_OUT:-out/client/main.js}\"" ;;
     # pod-<cluster> — a NON-default cluster's pod (bin/seon cluster create).
     # Same node process as `pod`, re-pointed per cluster: its OWN
-    # SEON_CLUSTER_DIR (store id / blobs / feed db-name all derive from it —
-    # the ONE cluster-name derivation, seon.store.wire/cluster-name), an
+    # SEON_CLUSTER_DIR (database identity, blobs, and feed name derive from it
+    # through seon.db.replica), an
     # EPHEMERAL HTTP port (SEON_PORT=0; the bound port lands in the
     # per-cluster $SEON_PORT_FILE), and THIS supervisor's wire sockets made
     # explicit (one wire-server JVM hosts every cluster's db; the pod's
-    # boot ensure-db registers/creates its db there). css:build only when
+    # boot ensures and registers its database there). css:build only when
     # the shared artifact is missing (the default pod's start owns it).
     pod-*)
       local cname="${1#pod-}"
@@ -290,11 +290,11 @@ process_command() {
     # V2 platform Host — JVM datahike wire-server (hosts EVERY cluster's db
     # via the registry; extra clusters are ensured onto it at pod boot).
     # --db-name = the CLUSTER NAME (basename of $SEON_CLUSTER_DIR) — the ONE
-    # identity both sides derive the konserve store :id from (registry C15);
+    # identity both sides use to derive the durable database identity;
     # never a socket-path artifact. The --repl-port opens a loopback-only
     # socket REPL on 127.0.0.1 for diagnostics, and the chosen port is
-    # written to the PER-SUPERVISOR $SEON_WRITER_REPL_PORT_FILE (C48).
-    wire-server) echo "clojure -M:simd:fork-deps:writer --backend file --db-name $(basename "$SEON_CLUSTER_DIR") --path $SEON_CLUSTER_DIR/store --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT --repl-port-file $SEON_WRITER_REPL_PORT_FILE" ;;
+    # written to the per-supervisor $SEON_WRITER_REPL_PORT_FILE.
+    wire-server) echo "clojure -M:simd:fork-deps:writer --backend file --db-name $(basename "$SEON_CLUSTER_DIR") --path $SEON_CLUSTER_DIR/db --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT --repl-port-file $SEON_WRITER_REPL_PORT_FILE" ;;
     *) return 1 ;;
   esac
 }
@@ -324,7 +324,7 @@ all_processes() {
 stack_processes() {
   # Dependency-ordered stack for `start all` (stop reverses the order):
   # cljs-watch builds out/client/main.js which the pod execs; the pod's
-  # boot ping is fail-loud (bounded ~10s retry, seon.store.wire/ping!)
+  # boot ping is fail-loud (bounded retry in seon.db.replica)
   # against the wire-server's socket. `jvm` is deliberately NOT in the
   # stack — it hosts the shared nREPL 7888 every agent depends on and
   # has no dependency on these processes; see the header comment.
@@ -348,11 +348,11 @@ ready_check() {
       if nc_supports_uds; then
         # A real connect with immediate EOF. NOT `nc -z -U`: macOS nc's
         # -z returns 1 even against a live, accepting UDS (verified
-        # 2026-06-10). Socket accepting implies datahike is up — the
-        # writer binds the socket only after "[writer] datahike ready".
+        # 2026-06-10). Socket accepting implies Datahike is up because the
+        # database server binds only after its initial database is ready.
         nc -U "$SEON_REQ_SOCK" -w 1 </dev/null >/dev/null 2>&1
       else
-        grep -q '\[writer\] ready' "$(log_file wire-server)" 2>/dev/null
+        grep -q '\[database\] ready' "$(log_file wire-server)" 2>/dev/null
       fi
       ;;
     pod-*)
@@ -995,7 +995,7 @@ legacy_process_matches() {
     cljs-watch)
       case "$command" in *shadow.cljs.devtools.cli*watch*client*) return 0 ;; esac ;;
     wire-server)
-      case "$command" in *seon.server.boot*"--req-sock $SEON_REQ_SOCK"*) return 0 ;; esac ;;
+      case "$command" in *seon.db.server*"--req-sock $SEON_REQ_SOCK"*) return 0 ;; esac ;;
     jvm)
       case "$command" in *clojure.main*seon.runner*) return 0 ;; esac ;;
     diffusion-server)
@@ -1249,8 +1249,8 @@ _stop_unlocked() {
     # CONFIRM the process is ACTUALLY gone before returning. `kill -9` only
     # *sends* SIGKILL — the kernel may still be tearing the process down
     # (the wire-server flushing LMDB, releasing its UDS socket). Callers
-    # that immediately wipe the store (cluster reset / nuke) MUST NOT race
-    # that teardown, or they rm-rf a store dir a dying writer is still
+    # that immediately wipe the database (cluster reset / nuke) MUST NOT race
+    # that teardown, or they rm-rf a database dir a dying writer is still
     # writing → corruption. Block (bounded) until the pid disappears.
     local j
     for j in 1 2 3 4 5 6 7 8 9 10; do
@@ -1269,9 +1269,9 @@ _stop_unlocked() {
     fi
     if [ "$target_alive" = 1 ]; then
       # Pathological — a normal JVM/node never ignores SIGKILL. Fail LOUD
-      # rather than let a caller wipe the store under a live writer.
+      # rather than let a caller wipe the database under a live writer.
       echo "✗ $name (pid/session $pid) survived SIGKILL after 5s — NOT confirmed dead" >&2
-      echo "  a store wipe now could corrupt a live writer; investigate the pid" >&2
+      echo "  a database wipe now could corrupt a live writer; investigate the pid" >&2
       return 1
     fi
     echo "○ $name killed (SIGKILL, process group confirmed drained, was pid $pid)"
@@ -1298,7 +1298,7 @@ with_stack_lock() {
   # Every process mutation participates in this coarse lifecycle mutex. It is
   # intentionally held across multi-process reset/nuke/restart-all sequences,
   # closing the old gap where another invocation could start the writer while
-  # its store was being deleted. Per-process locks remain the narrow identity
+  # its database was being deleted. Per-process locks remain the narrow identity
   # fence; this lock orders whole lifecycle transitions.
   local operation="$1"
   shift
@@ -1496,7 +1496,7 @@ merged_logs() {
 
 cmd_cluster() {
   # Cluster lifecycle.
-  #   reset [name]              wipe + reboot ONE cluster's store (default
+  #   reset [name]              wipe + reboot ONE cluster's database (default
   #                             "default") — see cluster_reset.
   #   create <name> [--ephemeral]  a NEW cluster on THIS supervisor's
   #                             wire-server: db entry + its own pod.
@@ -1565,8 +1565,8 @@ cluster_create() {
   # C16 (pod-after-wire-server warmup): the new cluster's db lives on THIS
   # supervisor's wire-server — bring it up and gate on REAL readiness
   # BEFORE the pod spawns (idempotent no-op when already running). The pod's
-  # own boot then ping-gates the socket AND ensure-db's its cluster db
-  # (backend :file, path data/clusters/<name>/store) before attaching its
+  # own boot then ping-gates the socket and ensures its cluster database
+  # (backend :file, path data/clusters/<name>/db) before attaching its
   # read conn — no bash-side db call needed, one creation path.
   # process_start_locked returns only after the shared readiness fence succeeds;
   # cmd_cluster already holds the lifecycle lock around this whole transition.
@@ -1575,7 +1575,7 @@ cluster_create() {
   mkdir -p "data/clusters/$name"
   # `--ephemeral` records INTENT (this cluster is disposable — a bench
   # sample, a one-shot drive); create/destroy behave identically either
-  # way (the store is :file, destroy always removes everything). The
+  # way (the database is durable, destroy always removes everything). The
   # marker lets sweeps find leftover disposable clusters.
   [ "$ephemeral" = 1 ] && date -u +%FT%TZ > "data/clusters/$name/ephemeral"
   if [ "$frozen" = 1 ]; then
@@ -1595,7 +1595,7 @@ cluster_create() {
   process_start_locked "pod-$name" || exit 1
   local port
   port="$(cat "tmp/seon-port-$name" 2>/dev/null || echo '?')"
-  echo "▶ cluster $name created — pod http://127.0.0.1:$port (db-name $name, store data/clusters/$name/store)"
+  echo "▶ cluster $name created — pod http://127.0.0.1:$port (database $name at data/clusters/$name/db)"
 }
 
 cluster_fork() {
@@ -1604,16 +1604,16 @@ cluster_fork() {
   # :seon.error/at is exactly this t, so the fork boots the database snapshot the
   # failing code SAW. (:seon.error/at is captured at the CATCH site; the
   # error datom itself was recorded in a LATER tx, so it is NOT inside
-  # its own fork.) Mechanism: seon.server.registry/fork-db! over the
+  # its own fork.) Mechanism: seon.db.registry/fork-database! over the
   # loopback socket REPL — the same supervisor channel cluster destroy
-  # uses for delete-db!; never agent-exposed. It wraps
+  # uses for delete-database!; never agent-exposed. It wraps
   # datahike.api/fork-database: konserve-layer copy + head at the :at
-  # commit + a fresh deterministic store identity. eids/tx-eids are
+  # commit + a fresh deterministic database identity. eids/tx-eids are
   # byte-identical, so every stored basis-t means the same thing inside
   # the fork. Boot then follows cluster create exactly: the fork's own
-  # pod (pod-<fork-name>, free port), whose boot ensure-db registers the
-  # fork db on the wire-server — one creation path. The fork store is
-  # fully independent by construction (own dir, own store id):
+  # pod (pod-<fork-name>, free port), whose boot registers the
+  # fork database on the wire-server — one creation path. The fork is
+  # fully independent by construction (own directory and database id):
   # `cluster destroy <fork>` removes it without touching the source.
   local src="${1:?cluster fork requires a source cluster name}"
   shift
@@ -1643,25 +1643,25 @@ cluster_fork() {
   local expr out
   # Port from THIS supervisor's env: $SEON_WRITER_REPL_PORT is exactly what
   # this supervisor passed via --repl-port at wire-server start. (The port
-  # FILE is per-supervisor too since C48 — $SEON_WRITER_REPL_PORT_FILE — but
+  # FILE is per-supervisor too — $SEON_WRITER_REPL_PORT_FILE — but
   # the env port is still the most direct source here.)
-  expr="$(printf '(seon.server.registry/fork-db! {:seon.server.registry/db-name :%s :seon.server.registry/fork-name :%s :seon.server.registry/at %s :seon.server.registry/path "data/clusters/%s/store"})' \
+  expr="$(printf '(seon.db.registry/fork-database! {:seon.db.registry/database-name :%s :seon.db.registry/fork-database-name :%s :seon.db.registry/at %s :seon.db.registry/path "data/clusters/%s/db"})' \
            "$src" "$fork_name" "$t" "$fork_name")"
   # Structured RPC: bin/seon-server-call parses the REPL's printed EDN as
-  # data and keys success on fork-db!'s own namespaced flag — bash never
+  # data and keys success on fork-database!'s own namespaced flag — bash never
   # pattern-matches printed EDN. Nonzero = the reply map (usually carrying
   # ::error) on stdout, or a transport failure explained on stderr.
   if ! out="$(bin/seon-server-call --port "$SEON_WRITER_REPL_PORT" --timeout 60 \
-                "$expr" ':seon.server.registry/forked?')"; then
+                "$expr" ':seon.db.registry/forked?')"; then
     echo "✗ fork failed — wire-server replied:" >&2
     [ -n "$out" ] && printf '  %s\n' "$out" >&2
-    echo "  (an unresolved-symbol reply means the running wire-server predates fork-db! — bin/seon restart wire-server)" >&2
+    echo "  (an unresolved-symbol reply means the running wire-server predates fork-database! — bin/seon restart wire-server)" >&2
     rm -rf "data/clusters/$fork_name"
     exit 1
   fi
 
   # The forensic snapshot includes the source's turn-capture blobs (prompt/
-  # reply content the store only REFERENCES by hash) — copy them alongside
+  # reply content the database only REFERENCES by hash) — copy them alongside
   # so inspect/turn replay works inside the fork.
   [ -d "data/clusters/$src/blobs" ] && cp -R "data/clusters/$src/blobs" "data/clusters/$fork_name/blobs"
   # Forks are disposable by intent (same marker create --ephemeral writes);
@@ -1672,7 +1672,7 @@ cluster_fork() {
   process_start_locked "pod-$fork_name" || exit 1
   local port
   port="$(cat "tmp/seon-port-$fork_name" 2>/dev/null || echo '?')"
-  echo "▶ cluster $fork_name forked from $src @t=$t — pod http://127.0.0.1:$port (store data/clusters/$fork_name/store)"
+  echo "▶ cluster $fork_name forked from $src @t=$t — pod http://127.0.0.1:$port (database data/clusters/$fork_name/db)"
   echo "  triage inside: (seon.agent.inspect/errors) etc. — this snapshot is what the failing code saw at t=$t; done: bin/seon cluster destroy $fork_name"
 }
 
@@ -1698,14 +1698,14 @@ cluster_destroy() {
   # re-registers dbs that are ensured again.
   if is_running wire-server; then
     local out
-    # Structured RPC (bin/seon-server-call): success = delete-db!'s own
+    # Structured RPC (bin/seon-server-call): success = delete-database!'s own
     # ::deleted? flag. A false/failed reply is reported honestly but does
     # not abort — the directory wipe below is the backstop either way.
     # Port from $SEON_WRITER_REPL_PORT (this supervisor's own --repl-port);
-    # the port file is per-supervisor too since C48.
+    # the port file is per-supervisor too.
     if out="$(bin/seon-server-call --port "$SEON_WRITER_REPL_PORT" --timeout 15 \
-                "(seon.server.registry/delete-db! {:seon.server.registry/db-name :$name})" \
-                ':seon.server.registry/deleted?')"; then
+                "(seon.db.registry/delete-database! {:seon.db.registry/database-name :$name})" \
+                ':seon.db.registry/deleted?')"; then
       echo "  registry delete: $out"
     else
       echo "  ⚠ registry delete did not confirm (wiping the dir anyway — that is the backstop)" >&2
@@ -1715,7 +1715,7 @@ cluster_destroy() {
     echo "  (wire-server not running — skipping registry delete; wiping the dir)"
   fi
 
-  # The WHOLE cluster dir — store/ AND blobs/ (per-cluster turn-capture
+  # The WHOLE cluster dir — db/ AND blobs/ (per-cluster turn-capture
   # blobs) AND any future per-cluster artifacts — plus the pod's port file
   # and supervisor state.
   rm -rf "data/clusters/$name"
@@ -1735,32 +1735,32 @@ cluster_reset() {
   # The "default" cluster lives wherever SEON_CLUSTER_DIR points (env-
   # overridable; defaults to data/clusters/default). Other names keep
   # the conventional layout.
-  local store_dir
+  local database_dir
   if [ "$name" = "default" ]; then
-    store_dir="$SEON_CLUSTER_DIR/store"
+    database_dir="$SEON_CLUSTER_DIR/db"
   else
-    store_dir="data/clusters/$name/store"
+    database_dir="data/clusters/$name/db"
   fi
 
   # Bounce processes when the requested cluster is the one THIS supervisor
-  # invocation MANAGES — i.e. its store IS $SEON_CLUSTER_DIR/store and its
+  # invocation MANAGES — i.e. its database IS $SEON_CLUSTER_DIR/db and its
   # pod/wire-server live in $SEON_PROC_DIR. For seon's own usage that's
-  # name=default (unchanged: store_dir was just set to $SEON_CLUSTER_DIR/store
+  # name=default (database_dir was just set to $SEON_CLUSTER_DIR/db
   # above, so this is trivially true). For an ISOLATED second supervisor
   # (bin/acme exports SEON_CLUSTER_DIR=data/clusters/acme +
   # SEON_PROC_DIR=tmp/proc-acme + SEON_REQ_SOCK=tmp/acme-…), `bin/acme cluster
-  # reset acme` now resolves store_dir=data/clusters/acme/store ==
-  # $SEON_CLUSTER_DIR/store, so it bounces ACME's own pod+wire-server in acme's
+  # reset acme` resolves database_dir=data/clusters/acme/db ==
+  # $SEON_CLUSTER_DIR/db, so it bounces ACME's own pod+wire-server in acme's
   # namespace via the race-safe restart below — NEVER the live default cluster.
-  # A name that is NOT this supervisor's cluster gets its store wiped but no
+  # A name that is NOT this supervisor's cluster gets its database wiped but no
   # bounce (we don't manage its processes). Keying off the literal "default"
   # was the bug: under acme's env it left the wire-server holding a deleted
-  # store and printed "no processes registered for it".
+  # database and printed "no processes registered for it".
   local bounce=0
-  [ "$store_dir" = "$SEON_CLUSTER_DIR/store" ] && bounce=1
+  [ "$database_dir" = "$SEON_CLUSTER_DIR/db" ] && bounce=1
 
   # A supervisor-CREATED cluster (pod-<name> + a registry db entry on the
-  # LIVE wire-server) can't be reset by a bare store wipe — the wire-server
+  # LIVE wire-server) can't be reset by a bare database wipe — the wire-server
   # still holds the old conn and would write into the wiped dir. Its
   # lifecycle is destroy + create.
   if [ "$bounce" = 0 ] && [ -d "$(state_dir "pod-$name")" ]; then
@@ -1779,12 +1779,12 @@ cluster_reset() {
     rm -f "$SEON_REQ_SOCK" "$SEON_PUB_SOCK"
   fi
 
-  if [ -d "$store_dir" ]; then
-    # The store dir ONLY — nothing else under data/clusters/<name>/.
-    rm -rf "$store_dir"
-    echo "✗ wiped $store_dir"
+  if [ -d "$database_dir" ]; then
+    # The database dir ONLY — nothing else under data/clusters/<name>/.
+    rm -rf "$database_dir"
+    echo "✗ wiped $database_dir"
   else
-    echo "○ no store at $store_dir (nothing to wipe)"
+    echo "○ no database at $database_dir (nothing to wipe)"
   fi
 
   if [ "$bounce" = 1 ]; then
@@ -1795,20 +1795,20 @@ cluster_reset() {
     process_start_locked pod || exit 1
     echo "▶ cluster $name reset complete — pod boot re-seeds the core"
   else
-    echo "▶ cluster $name store wiped (no processes registered for it)"
+    echo "▶ cluster $name database wiped (no processes registered for it)"
   fi
 }
 
 cmd_nuke() {
-  # DESTRUCTIVE clean slate. `cluster reset` wipes ONE cluster's store and
+  # DESTRUCTIVE clean slate. `cluster reset` wipes ONE cluster's database and
   # bounces the default stack; `nuke` goes further — it tears the whole runtime
   # down to bare metal: stop EVERY managed process (incl. jvm), wipe EVERY
-  # cluster store + all transient runtime data, and clear ALL logs — then
+  # cluster database + all transient runtime data, and clear ALL logs — then
   # bring the default stack back up fresh (pod boot re-seeds the core).
   #
   # What it deletes (unrecoverable — agent fns, soul edits, chat, findings,
-  # the indexed corpus all live in the cluster stores):
-  #   - data/clusters/*/store      every cluster's durable datahike store
+  # the indexed corpus all live in the cluster databases):
+  #   - data/clusters/*/db         every cluster's durable Datahike database
   #   - data/seon-pod/* data/sessions/* data/embeddings/*   transient runtime
   #   - logs/*                     every log file + turns/agents/prompts/archive
   #   - the default cluster's UDS sockets + its pod port file ($SEON_PORT_FILE)
@@ -1816,9 +1816,9 @@ cmd_nuke() {
   #   data/dev-hook (the dev hook's own tooling state, not seon runtime data),
   #   the git tree.
   #
-  # NOTE on acme: this wipes data/clusters/acme/store too. If a bin/acme
+  # NOTE on acme: this wipes data/clusters/acme/db too. If a bin/acme
   # cluster is LIVE, stop it first (bin/acme stop pod && bin/acme stop
-  # wire-server) — nuke does not manage acme's processes, only its store.
+  # wire-server) — nuke does not manage acme's processes, only its database.
   #
   # Guarded: requires --yes/-y (or an interactive "yes") because there is no
   # undo. Usage: bin/seon nuke --yes
@@ -1829,7 +1829,7 @@ cmd_nuke() {
 
   if [ "$confirmed" != 1 ]; then
     echo "▶ bin/seon nuke — DESTRUCTIVE full reset" >&2
-    echo "  wipes ALL cluster stores, ALL transient data, and ALL logs," >&2
+    echo "  wipes ALL cluster databases, ALL transient data, and ALL logs," >&2
     echo "  then restarts the default stack fresh. There is NO undo." >&2
     printf "  Type 'yes' to proceed: " >&2
     local reply
@@ -1851,7 +1851,7 @@ nuke_locked() {
   echo "▶ nuke: tearing the runtime down"
 
   # 1. Stop every managed process (jvm included — full clean slate, unlike
-  #    `start/stop all` which excludes it), cluster pods too (their stores
+  #    `start/stop all` which excludes it), cluster pods too (their databases
   #    are wiped below). Idempotent no-ops if not running.
   for name in pod wire-server cljs-watch jvm; do
     process_stop_locked "$name"
@@ -1867,16 +1867,16 @@ nuke_locked() {
   #    (recreated on the fresh start).
   rm -f "$SEON_REQ_SOCK" "$SEON_PUB_SOCK" "$SEON_PORT_FILE" 2>/dev/null || true
 
-  # 3. Wipe every cluster dir wholesale (store/ AND its siblings — the
-  #    embedding-index/ HNSW store, any future per-cluster artifacts) plus
-  #    transient runtime data. Wiping the whole dir — not just store/ — is
+  # 3. Wipe every cluster dir wholesale (db/ AND its siblings — the
+  #    embedding index and any future per-cluster artifacts) plus transient
+  #    runtime data. Wiping the whole dir — not just db/ — is
   #    what makes this a true clean slate: leaving embedding-index/ behind
   #    forces the wire-server to detect+delete it as a cluster-reset orphan
   #    on boot (a self-heal that shouldn't be load-bearing). Gone for good:
   #    everything agents authored lives in these dirs.
   rm -rf data/clusters/* 2>/dev/null || true
   rm -rf data/seon-pod/* data/sessions/* data/embeddings/* 2>/dev/null || true
-  echo "✗ wiped all cluster dirs (store + embedding-index) + transient data"
+  echo "✗ wiped all cluster dirs (database + embedding index) + transient data"
 
   # 4. Clear ALL logs (files + subdirs: turns/, agents/, prompts/, archive/).
   #    Recreate the bare dir; processes recreate their own logs on boot.
@@ -1951,7 +1951,7 @@ cmd_watch_faults() {
   # EOF without a match (tail killed, watch TERM'd, fifo closed) is NOT a
   # fault — falling through to the alarm here printed a FALSE "✗ CORE FAULT
   # detected" with an EMPTY marker and exit 0 (found by the error-workflow
-  # drill 2026-07-05, registry C52). Report honestly and exit 3 so a
+  # drill 2026-07-05). Report honestly and exit 3 so a
   # background-task harness never triages a ghost.
   if [ -z "$marker" ]; then
     echo ""
@@ -2086,7 +2086,7 @@ Commands:
                      process inherits (SEON_SHELL, SEON_WEB, SEON_EMBED,
                      …) — see docs/seon/components/capability-gates.md
   cluster reset [n]  DESTRUCTIVE: stop pod+wire-server, wipe
-                     data/clusters/<n>/store (default "default"),
+                     data/clusters/<n>/db (default "default"),
                      restart both — fresh DB, core re-seeds
   cluster create <n> [--ephemeral] [--frozen|--watched]
                      NEW cluster on this supervisor's wire-server: one
@@ -2104,7 +2104,7 @@ Commands:
                      --frozen/--watched override either default
   cluster fork <source> <basis-t|--at basis-t> [fork-name]
                      Copy a source cluster at an exact transaction id into
-                     a NEW writable, disposable cluster: its own store,
+                     a NEW writable, disposable cluster: its own database,
                      blobs, pod, and ephemeral HTTP port. Use the
                      `::fork-hint` from seon.agent.inspect/repro for a core
                      fault; the error datom itself is after that basis and
@@ -2112,7 +2112,8 @@ Commands:
                      untouched. Destroy the named fork when done.
   cluster destroy <n>
                      DESTRUCTIVE: stop pod-<n>, delete the db from the
-                     wire-server registry (REPL → registry/delete-db!),
+                     wire-server registry
+                     (REPL → seon.db.registry/delete-database!),
                      remove data/clusters/<n>/ INCLUDING blobs/. Refuses
                      the supervisor's own cluster (use reset)
   watch-faults [--cluster <n>]
@@ -2124,11 +2125,11 @@ Commands:
                      fault re-invokes you; triage via seon.agent.inspect/
                      errors → error → repro
   nuke --yes         DESTRUCTIVE (full clean slate): stop EVERY process
-                     (jvm too), wipe ALL cluster stores + transient data,
+                     (jvm too), wipe ALL cluster databases + transient data,
                      clear ALL logs, restart the default stack fresh.
                      Requires --yes (or interactive 'yes'); no undo —
                      erases every agent fn/soul edit/chat/finding. Wipes
-                     acme's store too (stop bin/acme first if it's live).
+                     acme's database too (stop bin/acme first if it's live).
 
 Processes (registered in script):
   pod          node out/client/main.js
@@ -2144,7 +2145,8 @@ Examples:
   bin/seon restart cljs-watch
 
 Env overrides (downstream parametrization — defaults = today's values):
-  SEON_CLUSTER_DIR        wire-server store parent (default data/clusters/default)
+  SEON_CLUSTER_DIR        cluster data directory (default data/clusters/default;
+                          database at SEON_CLUSTER_DIR/db)
   SEON_REQ_SOCK           wire-server request UDS (default tmp/seon-cluster-default-req.sock)
   SEON_PUB_SOCK           wire-server publish UDS (default tmp/seon-cluster-default-pub.sock)
   SEON_WRITER_REPL_PORT   wire-server loopback REPL port (default 7891)
