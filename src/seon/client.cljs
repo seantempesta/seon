@@ -341,12 +341,10 @@
 ;; Cluster runtime
 ;;
 ;; start-runtime! opens the cluster connection, bootstraps the Datahike schema,
-;; binds seon.db/*conn* at the var root, and resumes the durable roster.
-;; Repeated calls reuse !agent-conn and return status without repeating cold
-;; work; hot reload reconstructs only process-local agent runtimes.
+;; binds seon.db/*conn* at the var root, and resumes the durable agents.
+;; Repeated calls consult that one live attachment and return status without
+;; repeating cold work; hot reload reconstructs only process-local runtimes.
 ;; ---------------------------------------------------------------------------
-
-(defonce !agent-conn (atom nil))
 
 ;; Datahike-side schema. Datahike requires every attribute have a
 ;; declared :db/valueType + :db/cardinality before first use — our
@@ -2170,30 +2168,25 @@
    [[seon.agent/resume!]] per database-derived id. It never runs cluster seed,
    program replay, global instrumentation, or identity allocation."
   []
-  (if-let [conn @!agent-conn]
-    (do
-      ;; Re-assert the root *conn*. set! at boot survives a client.cljs
-      ;; reload, but a reload that touches seon.db re-evaluates the
-      ;; dynamic def and wipes the root — re-arming is the natural
-      ;; place to restore it.
-      (set! db/*conn* conn)
+  (if (db/attached?)
+    (let [conn db/*conn*]
       (-> (repl/ensure-bootstrap!)
           (.then
-            (fn ^:async rehost! [compile-state]
-              (let [ids (agent/resumable-agent-ids {:seon.db/db @conn})]
-                (doseq [id ids]
-                  (await (agent/resume!
-                           {:seon.agent/id id
-                            :seon.agent.runtime/compile-state compile-state})))
-                (log/info-console! "seon.client"
-                                   "reload: agent runtimes rehosted"
-                                   {:seon.client/reinstalled ids})
-                ids)))
+           (fn ^:async rehost! [compile-state]
+             (let [ids (agent/resumable-agent-ids {:seon.db/db @conn})]
+               (doseq [id ids]
+                 (await (agent/resume!
+                         {:seon.agent/id id
+                          :seon.agent.runtime/compile-state compile-state})))
+               (log/info-console! "seon.client"
+                                  "reload: agent runtimes rehosted"
+                                  {:seon.client/reinstalled ids})
+               ids)))
           (.catch
-            (fn [err]
-              (log/error-console! "seon.client"
-                                  "reload: agent runtime rehost FAILED"
-                                  err)))))
+           (fn [err]
+             (log/error-console! "seon.client"
+                                 "reload: agent runtime rehost FAILED"
+                                 err)))))
     (js/Promise.resolve [])))
 
 (schema/register! ::seeded? [:= true])
@@ -2364,8 +2357,11 @@
    same process is a cheap status read and never re-enters cold work."
   {:malli/schema [:=> [:cat ::start-runtime-request] :any]}
   [{::keys [llm-fn]}]
-  (if-let [conn @!agent-conn]
-    (let [ids (agent/resumable-agent-ids {:seon.db/db @conn})
+  (if (db/attached?)
+    (let [conn db/*conn*
+          ids (agent/resumable-agent-ids {:seon.db/db @conn})
+          _ (await (store.wire/start-listen-adapter!
+                    {:seon.store.wire/conn conn}))
           {:seon.web/keys [port port-file]} (await (web.serve/start!))]
       {:seon.agent/id (first ids)
        :seon.client/resumed-ids ids
@@ -2373,7 +2369,6 @@
        :seon.web/port port
        :seon.web/port-file port-file})
     (let [conn (await (open-cluster-conn!))
-          _ (reset! !agent-conn conn)
           _ (set! db/*conn* conn)
           _ (db/assert-preconditions! {:seon.db/conn conn})
           ;; Bootstrap compilation can overlap the independent writer seed.

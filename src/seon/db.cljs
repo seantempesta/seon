@@ -58,6 +58,7 @@
     [clojure.string :as str]
     [cljs.reader :as reader]
     [datahike.api :as d]
+    [datahike.connector :as connector]
     [datahike.constants :as dconst]
     [datahike.db :refer [AsOfDB]]
     [datahike.db.interface :as dbi]
@@ -335,6 +336,18 @@
    `^:dev/after-load` as belt-and-suspenders.)"}
   *conn*
   nil)
+
+(defn attached?
+  "True when this process has one live database attachment."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (let [conn *conn*]
+    ;; Datahike owns the connection lifecycle. Its final `release` changes the
+    ;; connection's wrapped cell to exactly `:released`; this is the same fact
+    ;; its own connection spec uses (`datahike.connector/::connection`). Do not
+    ;; mirror that state in another Seon atom.
+    (and (connector/connection? conn)
+         (not= :released @(:wrapped-atom conn)))))
 
 (defn current-tx-context
   "The active tx-context map, or nil outside [[with-tx-context]].

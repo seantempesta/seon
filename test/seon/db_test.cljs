@@ -116,6 +116,24 @@
   [conn tx-data]
   (db/transact! {::db/tx-data tx-data ::db/conn conn}))
 
+(deftest attached?-follows-the-datahike-connection-lifecycle
+  (async done
+    (let [previous db/*conn*]
+      (set! db/*conn* nil)
+      (is (false? (db/attached?)))
+      (-> (fresh-conn)
+          (.then (fn [conn]
+                   (set! db/*conn* conn)
+                   (is (true? (db/attached?)))
+                   (d/release conn)))
+          (.then (fn [_]
+                   (is (false? (db/attached?)))))
+          (.catch (fn [error]
+                    (is false (str "attachment lifecycle threw: " error))))
+          (.finally (fn []
+                      (set! db/*conn* previous)
+                      (done)))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Schema gate — the validation plumbing, now public fns in
 ;; `seon.db.internal` (the ns boundary is the privacy boundary; the V3-A
