@@ -18,15 +18,15 @@
 
 (schema/register! ::socket-path [:string {:min 1}])
 (schema/register! ::message :map)
-(schema/register! ::handler [:fn fn?])
-(schema/register! ::channel [:fn some?])
-(schema/register! ::output-stream [:fn some?])
-(schema/register! ::subscribers [:fn some?])
-(schema/register! ::connections [:fn some?])
-(schema/register! ::closed? [:fn some?])
-(schema/register! ::queue [:fn some?])
-(schema/register! ::worker [:fn some?])
-(schema/register! ::nil-result [:fn nil?])
+(schema/register! ::handler 'fn?)
+(schema/register! ::channel 'some?)
+(schema/register! ::output-stream 'some?)
+(schema/register! ::subscribers 'some?)
+(schema/register! ::connections 'some?)
+(schema/register! ::closed? 'some?)
+(schema/register! ::queue 'some?)
+(schema/register! ::worker 'some?)
+(schema/register! ::nil-result 'nil?)
 (schema/register!
  ::publisher
  [:map

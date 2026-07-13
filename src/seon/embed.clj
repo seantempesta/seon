@@ -459,7 +459,7 @@
 ;;; requiring a namespace cannot mutate a running writer's behavior.
 
 (schema/register! :seon.embed/trigger-attr :qualified-keyword)
-(schema/register! :seon.embed/compose-fn [:fn fn?])
+(schema/register! :seon.embed/compose-fn 'fn?)
 (schema/register! :seon.embed/embeddables
                   [:map-of :seon.embed/trigger-attr :seon.embed/compose-fn])
 

@@ -38,7 +38,7 @@
 
 ;; A live conn is an opaque clojure.lang.IAtom2 (datahike connection
 ;; type). We don't constrain its shape; the registry hands it out as-is.
-(schema/register! ::conn [:fn some?])
+(schema/register! ::conn 'some?)
 
 (schema/register! ::entry
                   [:map
@@ -51,7 +51,7 @@
                    [::database-name ::database-name]
                    [::backend {:optional true} ::backend]
                    [::path {:optional true} ::path]
-                   [::initialize-connection! [:fn fn?]]])
+                   [::initialize-connection! 'fn?]])
 
 (schema/register! ::ensure-database!-response ::entry)
 

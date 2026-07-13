@@ -24,9 +24,9 @@
 ;;; Runtime and server resources
 
 (schema/register! ::connection :any)
-(schema/register! ::database-initializer [:fn fn?])
-(schema/register! ::transaction-transform [:fn fn?])
-(schema/register! ::knn-search [:fn fn?])
+(schema/register! ::database-initializer 'fn?)
+(schema/register! ::transaction-transform 'fn?)
+(schema/register! ::knn-search 'fn?)
 (schema/register! ::publisher :seon.db.transport.uds/publisher)
 (schema/register!
  ::dependencies

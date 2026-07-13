@@ -28,8 +28,12 @@
 ;;; Syntax and policy
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private word-pattern #"^[a-z0-9]+-[a-z0-9]+-[a-z0-9]+$")
-(def ^:private compact-pattern #"^[a-z][a-z0-9]{11}$")
+(def ^:private word-pattern-source
+  "^[a-z0-9]+-[a-z0-9]+-[a-z0-9]+$")
+(def ^:private compact-pattern-source
+  "^[a-z][a-z0-9]{11}$")
+(def ^:private word-pattern (re-pattern word-pattern-source))
+(def ^:private compact-pattern (re-pattern compact-pattern-source))
 
 ;; The old SCHEMA accepted every 14-character string, which is the durable
 ;; compatibility boundary—not merely the narrower subset the old timestamp
@@ -42,14 +46,14 @@
 ;; The third JVM segment may be numeric. Syntax deliberately does not copy
 ;; either dependency's vocabulary.
 (schema/register! ::word-value
-                  [:string {:min 5 :max 200}])
+                  [:and :string [:re word-pattern-source]])
 
 ;; CUID2's leading letter keeps the value readable as `result/<eval-id>`; the
 ;; remaining alphabet excludes every character whose CLJS munge is ambiguous.
 ;; Non-agent attrs also accept their preserved legacy values during migration.
 (schema/register! ::compact-value
                   [:or ::legacy-value
-                   [:string {:min 12 :max 12}]])
+                   [:and :string [:re compact-pattern-source]]])
 
 (schema/register! ::agent-value
                   [:or [:= "root"] ::legacy-value ::word-value])
