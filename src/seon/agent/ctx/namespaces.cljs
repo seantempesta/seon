@@ -723,12 +723,36 @@
                         [k vtype])))))
           entries)))
 
+(defn- printable-schema-data?
+  "True when `x` is pure printable data — pr-str round-trips it.
+
+   A registered def can carry LIVE values (predicate fns, regexes) that
+   pr-str as unreadable `#object[…]` soup; an expansion containing one
+   must fall back to the ref name."
+  [x]
+  (cond
+    (or (keyword? x) (string? x) (number? x) (boolean? x) (nil? x)
+        (symbol? x))
+    true
+
+    (map? x)
+    (every? (fn [[k v]] (and (printable-schema-data? k)
+                             (printable-schema-data? v)))
+            x)
+
+    (or (vector? x) (set? x) (seq? x))
+    (every? printable-schema-data? x)
+
+    :else false))
+
 (defn- expand-arg-form
   "One arg/return POSITION of a fn spec, registered refs expanded.
 
    A ref whose chain lands on `[:map …]` expands to that map with
    visible entry types ([[expand-map-entries]]); everything else
-   resolves through [[resolve-value-type]]."
+   resolves through [[resolve-value-type]]. An expansion that would
+   print unreadable live values ([[printable-schema-data?]] false —
+   predicate fns, regexes in a def) keeps the ORIGINAL form instead."
   [form]
   (let [;; follow a keyword ref chain to its first structural def
         structural (loop [f form s #{}]
@@ -743,10 +767,11 @@
         structural (if-let [d (and (keyword? structural)
                                    (registered-def structural))]
                      d structural)
-        seen       (cond-> #{} (keyword? form) (conj form))]
-    (if (and (vector? structural) (= :map (first structural)))
-      (expand-map-entries structural seen)
-      (resolve-value-type form #{}))))
+        seen       (cond-> #{} (keyword? form) (conj form))
+        out        (if (and (vector? structural) (= :map (first structural)))
+                     (expand-map-entries structural seen)
+                     (resolve-value-type form #{}))]
+    (if (printable-schema-data? out) out form)))
 
 (defn- expand-arity
   "One `[:=> args ret]` arity with every position expanded."
