@@ -76,15 +76,56 @@
     (println (str "  data:  " base-url "/data"))
     (when open? (open-url! agent-url))))
 
+(defn- parse-start-options [arguments]
+  (loop [remaining (seq arguments)
+         options {:seon.dev.start/open? false}]
+    (if-not remaining
+      options
+      (case (first remaining)
+        "--open"
+        (recur (next remaining) (assoc options :seon.dev.start/open? true))
+
+        "--config"
+        (let [path (second remaining)]
+          (when (or (str/blank? path) (str/starts-with? path "--"))
+            (throw (ex-info "`--config` requires a manifest path."
+                            {:seon.dev.cli/arguments (vec arguments)})))
+          (recur (nnext remaining)
+                 (assoc options :seon.dev.start/config-path path)))
+
+        (throw (ex-info "Unknown start option."
+                        {:seon.dev.cli/arguments (vec arguments)
+                         :seon.dev.cli/option (first remaining)}))))))
+
+(defn- database-born? [configuration]
+  (let [directory (fs/path (:seon.dev.config/cluster-dir configuration) "db")]
+    (boolean
+      (and (fs/directory? directory)
+           (some fs/regular-file? (fs/list-dir directory))))))
+
+(defn- select-config [configuration config-path]
+  (let [root (:seon.dev.config/root configuration)
+        explicit (when config-path
+                   (let [path (fs/path config-path)]
+                     (str (fs/normalize
+                            (if (fs/absolute? path) path (fs/path root path))))))
+        inherited (get-in configuration [:seon.dev.config/environment "SEON_CONFIG"])
+        selected (or explicit inherited
+                     (when-not (database-born? configuration)
+                       (str (fs/path root "config/system.edn"))))]
+    (when (and selected (not (fs/regular-file? selected)))
+      (throw (ex-info "The selected Seon config manifest does not exist."
+                      {:seon.config/path selected})))
+    (cond-> configuration
+      selected (assoc-in [:seon.dev.config/environment "SEON_CONFIG"] selected))))
+
 (defn- up! [configuration arguments]
-  (let [flags (set arguments)
-        unknown (remove #{"--open"} arguments)]
-    (when (seq unknown)
-      (throw (ex-info "Unknown `up` option."
-                      {:seon.dev.cli/arguments (vec unknown)})))
-    (let [target (state/with-lock configuration :stack 1800000
-                                   #(reconcile-development! configuration))]
-      (print-ready! target (contains? flags "--open")))))
+  (let [{:seon.dev.start/keys [open? config-path]}
+        (parse-start-options arguments)
+        configuration (select-config configuration config-path)
+        target (state/with-lock configuration :stack 1800000
+                                #(reconcile-development! configuration))]
+    (print-ready! target open?)))
 
 (defn- down! [configuration arguments]
   (when (seq arguments)
@@ -95,17 +136,26 @@
   (println "○ Seon is down"))
 
 (defn- restart! [configuration arguments]
-  (let [flags (set arguments)
-        unknown (remove #{"--open"} arguments)]
-    (when (seq unknown)
-      (throw (ex-info "Unknown `restart` option."
-                      {:seon.dev.cli/arguments (vec unknown)})))
-    (let [target
-          (state/with-lock
-            configuration :stack 1800000
-            #(do (stop-development! configuration)
-                 (reconcile-development! configuration)))]
-      (print-ready! target (contains? flags "--open")))))
+  (let [{:seon.dev.start/keys [open? config-path]}
+        (parse-start-options arguments)
+        configuration (select-config configuration config-path)
+        target
+        (state/with-lock
+          configuration :stack 1800000
+          #(do (stop-development! configuration)
+               (reconcile-development! configuration)))]
+    (print-ready! target open?)))
+
+(defn- config! [configuration arguments]
+  (when-not (and (= "apply" (first arguments))
+                 (second arguments)
+                 (nil? (nth arguments 2 nil)))
+    (throw (ex-info "Use `config apply <manifest-path>`."
+                    {:seon.dev.cli/arguments (vec arguments)})))
+  (let [configuration (select-config configuration (second arguments))
+        target (state/with-lock configuration :stack 1800000
+                                #(reconcile-development! configuration))]
+    (print-ready! target false)))
 
 (defn- status-value [configuration]
   (if-let [manifest (artifact/read-manifest configuration)]
@@ -251,14 +301,15 @@
                           (throw (ex-info "Run `bin/seon up` before reset."
                                           {:seon.dev.target/failure
                                            :seon.dev.target.failure/missing-artifact})))
-             specs (process/specs configuration manifest)
              database (fs/path (:seon.dev.config/cluster-dir configuration) "db")]
          (process/stop! configuration process/pod-id)
          (process/stop! configuration process/writer-id)
          (when (fs/exists? database) (fs/delete-tree database))
-         (doseq [id (process/start-order specs)]
-           (process/ensure! configuration (get specs id)))
-         (process/status configuration manifest)))
+         (let [configuration (select-config configuration nil)
+               specs (process/specs configuration manifest)]
+           (doseq [id (process/start-order specs)]
+             (process/ensure! configuration (get specs id)))
+           (process/status configuration manifest))))
     (println (str "● cluster " cluster-name " reset and ready"))))
 
 (defn- cluster! [configuration arguments]
@@ -326,10 +377,11 @@
 
 (defn- help! []
   (println
-    (str "Usage: bin/seon [up] [--open]\n\n"
-         "  up [--open]              build and reconcile the complete system\n"
+    (str "Usage: bin/seon [up] [--open] [--config PATH]\n\n"
+         "  up [--open] [--config PATH] build and reconcile the complete system\n"
          "  down                     drain the complete system\n"
-         "  restart [--open]         drain, rebuild, and reconcile\n"
+         "  restart [--open] [--config PATH] drain, rebuild, and reconcile\n"
+         "  config apply PATH        explicitly reconcile database config\n"
          "  status [--edn]           report live health\n"
          "  logs [writer|watcher|pod] [--lines N] [--follow]\n"
          "  doctor [--edn]           check host prerequisites\n"
@@ -355,6 +407,7 @@
           "doctor" (doctor! configuration command-arguments)
           "test" (test! configuration command-arguments)
           "skills" (skills! configuration command-arguments)
+          "config" (config! configuration command-arguments)
           "cluster" (cluster! configuration command-arguments)
           ("help" "--help" "-h") (help!)
           (throw (ex-info "Unknown Seon command."

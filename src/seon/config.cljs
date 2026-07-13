@@ -1,8 +1,9 @@
 (ns seon.config
-  "The pod's config-read layer — ONE consolidated manifest (`config/system.edn`,
-   `SEON_CONFIG` override) that primes an agent's context + the global render
-   bounds WITHOUT a code change. The manifest is a pure OPTIONAL OVERRIDE: absent
-   → no context blocks are seeded. Present → it declares the database state:
+  "The pod's config-read layer — ONE optional manifest explicitly selected by
+   `SEON_CONFIG`. A selected manifest is compiled into database facts; an
+   unselected boot preserves the database and never reads `config/system.edn`
+   implicitly. The shipped file is selected automatically only for a fresh
+   database by the operator. A present manifest declares:
 
      1. the agent CONTEXT — the two-level `:seon.config/agent-context`
         (agent-level scalars + a `:seon.agent/ctx` block tree) the GENERIC loader
@@ -359,6 +360,7 @@
 (schema/register! :seon.config/singleton
   [:map {:seon.db/entity true}
    [:seon.config/id                          :seon.config/id]
+   [:seon.config/skills             {:optional true} :seon.config/skills-spec]
    [:seon.config/repl-mode          {:optional true} :seon.config/repl-mode]
    [:seon.config/current-ns         {:optional true} :seon.config/current-ns]
    [:seon.config/on-core-error      {:optional true} :seon.config/on-core-error]
@@ -366,6 +368,8 @@
    [:seon.config/always             {:optional true} :seon.config/always]
    [:seon.config/system-text        {:optional true} :seon.config/system-text]
    [:seon.config/context-profiles   {:optional true} :seon.config/context-profiles]
+   [:seon.config/agent-context      {:optional true} :seon.config/agent-context]
+   [:seon.config/root-context       {:optional true} :seon.config/root-context]
    [:seon.config.render/store-edn-cap      {:optional true} :seon.config/cap]
    [:seon.config.render/eval-cap           {:optional true} :seon.config/cap]
    [:seon.config.render/message-cap        {:optional true} :seon.config/cap]
@@ -445,11 +449,6 @@
 (schema/register! ::agent-id :string)
 (schema/register! ::routes [:vector :map])
 
-(def ^:private default-config-path
-  "The consolidated manifest, CWD-relative (the pod's cwd is the repo root) —
-   `SEON_CONFIG` overrides the path (the SOUL.md / SEON_SKILLS_DIR precedent)."
-  "config/system.edn")
-
 (defn- env
   "A `process.env` value, nil when unset/blank — `seon.platform/env-val`, the
    ONE env reader."
@@ -526,17 +525,19 @@
   (aero/read-config path {}))
 
 (defn load-manifest
-  "Read the consolidated manifest (`config/system.edn`, `SEON_CONFIG` override).
-   Returns the VALIDATED manifest map, or `{}` when the file is absent (the
-   empty manifest = no overrides = byte-identical to a no-config boot). Throws a
-   LOUD, file-named error when the file is present but invalid (a config typo
-   fails fast, never a silent ignore)."
-  {:malli/schema [:=> [:cat] :seon.config/manifest]}
+  "Read the explicitly selected `SEON_CONFIG` manifest.
+
+   Returns nil when no path is selected: absence means preserve the database,
+   not apply an implicit empty/default desired state. A selected path must
+   exist and validate; missing or invalid explicit input fails loudly."
+  {:malli/schema [:=> [:cat] [:maybe :seon.config/manifest]]}
   []
-  (let [path (or (env "SEON_CONFIG") default-config-path)
-        fs   (js/require "fs")]
-    (if-not (try (.existsSync fs path) (catch :default _ false))
-      {}
+  (when-let [path (env "SEON_CONFIG")]
+    (let [fs (js/require "fs")]
+      (when-not (try (.existsSync fs path) (catch :default _ false))
+        (throw (ex-info (str "seon.config: selected manifest does not exist: " path)
+                        {:seon.config/path path
+                         :seon.error/kind  :user-input})))
       (let [raw (read-config-file path)]
         (if (m/validate :seon.config/manifest raw)
           raw
@@ -690,7 +691,13 @@
       (contains? manifest :seon.config/system-text)
       (assoc :seon.config/system-text (:seon.config/system-text manifest))
       (contains? manifest :seon.config/context-profiles)
-      (assoc :seon.config/context-profiles (:seon.config/context-profiles manifest)))))
+      (assoc :seon.config/context-profiles (:seon.config/context-profiles manifest))
+      (contains? manifest :seon.config/skills)
+      (assoc :seon.config/skills (:seon.config/skills manifest))
+      (contains? manifest :seon.config/agent-context)
+      (assoc :seon.config/agent-context (:seon.config/agent-context manifest))
+      (contains? manifest :seon.config/root-context)
+      (assoc :seon.config/root-context (:seon.config/root-context manifest)))))
 
 (defn stale-singleton-retractions
   "Retract ops for stored singleton attrs absent from `desired`.
@@ -716,19 +723,19 @@
           [:db/retract [:seon.config/id cluster-config-id] k])))
 
 (defn config-view
-  "The live config singleton map — db post-conn, manifest pre-conn.
+  "The live config singleton map — database post-attach, explicit input pre-attach.
 
    The ONE switchover: the injected [[!db-config-view]] seam reads the seeded
    `:seon.config` singleton once the conn is up (config-through-DB); before the
    conn exists (the bootstrap sliver — the `on-core-error` dial can fire during
-   store-connect) it falls back to `(resolve-config-singleton (load-manifest))`,
-   the boot file read. Post-seed the db value is authoritative, so a live
-   `db/transact!` to the singleton (or a manifest edit + restart) reaches every
+   database attach) it resolves an explicitly selected manifest or the code
+   defaults. Post-attach the db value is authoritative, so a live
+   `db/transact!` to the singleton or an explicit config apply reaches every
    accessor. Collections are already decoded by the seam."
   {:malli/schema [:=> [:cat] :map]}
   []
   (or (when-let [f @!db-config-view] (f))
-      (resolve-config-singleton (load-manifest))))
+      (resolve-config-singleton (or (load-manifest) {}))))
 
 (defn namespaces-policy
   "The resolved namespaces render policy — read from the config singleton.
@@ -785,7 +792,7 @@
     (if (and (number? v) (not (js/isNaN v)) (pos? v)) v default)))
 
 (defn skills-dir
-  "The skills corpus directory (manifest, else env, else default).
+  "The skills corpus directory (database config, else env, else default).
 
    The manifest's `:seon.config/skills`
    `:seon.config/dirs` first entry when present, else `SEON_SKILLS_DIR`, else
@@ -798,14 +805,18 @@
    SEON_RUNTIME_ROOT when set (a containerized/downstream pod running from
    its own data root), else CWD-relative (seon's own usage, byte-identical).
    An absolute value is used as-is."
-  {:malli/schema [:=> [:cat] :string]}
-  []
-  (let [dir (or (some-> (load-manifest) :seon.config/skills :seon.config/dirs first)
-                (env "SEON_SKILLS_DIR")
-                ".claude/skills")]
-    (if (.startsWith dir "/")
-      dir
-      (platform/artifact-path dir))))
+  {:malli/schema
+   [:function
+    [:=> [:cat] :string]
+    [:=> [:catn [::manifest :seon.config/manifest]] :string]]}
+  ([] (skills-dir (config-view)))
+  ([manifest]
+   (let [dir (or (some-> manifest :seon.config/skills :seon.config/dirs first)
+                 (env "SEON_SKILLS_DIR")
+                 ".claude/skills")]
+     (if (.startsWith dir "/")
+       dir
+       (platform/artifact-path dir)))))
 
 (defn extra-src
   "`SEON_EXTRA_SRC` — a downstream's compiled-in source root, or nil.
@@ -1334,6 +1345,6 @@
                        [::override [:maybe :map]]]
                   :seon.config/agent-context]}
   [id override]
-  (let [manifest (load-manifest)
+  (let [manifest (config-view)
         merged   (merge (context-config-for id manifest) override)]
     (m/decode :seon.config/agent-context merged ctx-default-transformer)))

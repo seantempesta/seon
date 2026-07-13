@@ -14,6 +14,9 @@
     [cljs.test :refer [deftest is testing async]]
     [datahike.api :as d]
     [malli.core :as m]
+    [seon.agent]
+    [seon.agent.message]
+    [seon.agent.web]
     [seon.config :as config]
     [seon.db :as db]))
 
@@ -287,6 +290,12 @@
   (with-env "SEON_TEST_STR" "x"
     #(is (= "x" (config/env-string "SEON_TEST_STR")))))
 
+(deftest manifest-input-is-explicit
+  (with-env "SEON_CONFIG" nil
+    #(is (nil? (config/load-manifest))))
+  (with-env "SEON_CONFIG" "tmp/no-such-config.edn"
+    #(is (thrown? js/Error (config/load-manifest)))))
+
 (deftest skills-dir-precedence
   (testing "manifest :seon.config/dirs wins over env, which wins over the default"
     (with-redefs [config/load-manifest
@@ -321,13 +330,35 @@
       ;; system-text has NO default — absent from a bare manifest
       (is (not (contains? s :seon.config/system-text)))))
   (testing "a manifest value overrides the resolved knob"
-    (let [s (config/resolve-config-singleton
+    (let [agent-context {:seon.agent/ctx
+                         [{:seon.agent.ctx/name :transcript}]}
+          root-context {:seon.agent/ctx
+                        [{:seon.agent.ctx/name :canvas}]}
+          skills {:seon.config/dirs ["seon-skills"]}
+          s (config/resolve-config-singleton
               {:seon.config/render {:seon.config.render/eval-cap 42}
                :seon.config/on-core-error :log
-               :seon.config/system-text "you are a helpful agent"})]
+               :seon.config/system-text "you are a helpful agent"
+               :seon.config/skills skills
+               :seon.config/agent-context agent-context
+               :seon.config/root-context root-context})]
       (is (= 42 (:seon.config.render/eval-cap s)))
       (is (= :log (:seon.config/on-core-error s)))
-      (is (= "you are a helpful agent" (:seon.config/system-text s))))))
+      (is (= "you are a helpful agent" (:seon.config/system-text s)))
+      (is (= skills (:seon.config/skills s)))
+      (is (= agent-context (:seon.config/agent-context s)))
+      (is (= root-context (:seon.config/root-context s))))))
+
+(deftest agent-context-is-derived-from-the-database-config-view
+  (let [stored {:seon.config/agent-context
+                {:seon.agent/ctx [{:seon.agent.ctx/name :transcript}]}
+                :seon.config/root-context
+                {:seon.agent/ctx [{:seon.agent.ctx/name :canvas}]}}]
+    (with-redefs [config/config-view (fn [] stored)
+                  config/load-manifest
+                  (fn [] (throw (js/Error. "external config must not be read")))]
+      (is (= #{:transcript} (ctx-block-names "worker-x" nil)))
+      (is (= #{:transcript :canvas} (ctx-block-names "root" nil))))))
 
 (deftest repl-mode-default-is-per-model
   ;; The manifest-absent repl-mode default is computed from the model

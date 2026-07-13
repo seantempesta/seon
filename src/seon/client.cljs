@@ -2197,9 +2197,9 @@
           (try
             (let [index-tx (await (core-program-tx conn))
                   ;; The OPTIONAL loadout manifest, read ONCE and threaded to
-                  ;; the route + skills steps below ({} when config/system.edn
-                  ;; is absent ⇒ every resolve-* is the identity ⇒
-                  ;; byte-identical seed).
+                  ;; the route + skills steps below. Nil means preserve the
+                  ;; database's config-managed subset; a map means explicitly
+                  ;; reconcile that subset.
                   manifest (config/load-manifest)
                   check!   (fn [step {ok?   :seon.db/ok?
                                       error :seon.db/error}]
@@ -2248,11 +2248,13 @@
               ;; that process from sweeping unrelated populations it authored.
               ;; reconcile! never rejects; its error-value is checked + thrown
               ;; (surface-errors-loudly).
-              (let [singleton (config/resolve-config-singleton manifest)
+              (when manifest
+                (let [singleton (config/resolve-config-singleton manifest)
                     desired (-> (vec (config/resolve-routes
                                        (route/core-routes-tx)
                                        manifest))
-                                (into (my.skills/seed-skills-tx-data))
+                                (into (my.skills/seed-skills-tx-data
+                                        (config/skills-dir manifest)))
                                 (conj singleton))
                     recon   (await
                               (db/with-tx-context
@@ -2292,7 +2294,7 @@
                                         :seon.db.process/config)}
                                      (fn ^:async heal-config! []
                                        (db/transact! {:seon.db/conn conn
-                                                      :seon.db/tx-data retracts})))))))))
+                                                      :seon.db/tx-data retracts}))))))))))
             {::seeded? true}
             (finally
               (set! db/*conn* prev-conn))))))))

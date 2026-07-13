@@ -33,3 +33,37 @@
                    (#'cli/test-commands config ["all" "extra"]))))
     (is (thrown? Exception
                  (#'cli/test-commands config ["unknown"])))))
+
+(deftest start-options-are-explicit-and-ordered
+  (is (= {:seon.dev.start/open? true
+          :seon.dev.start/config-path "config/system.edn"}
+         (#'cli/parse-start-options ["--config" "config/system.edn" "--open"])))
+  (is (thrown? Exception (#'cli/parse-start-options ["--config"])))
+  (is (thrown? Exception (#'cli/parse-start-options ["--unknown"]))))
+
+(deftest config-is-implicit-only-for-a-fresh-database
+  (let [root (fs/create-temp-dir {:prefix "seon-cli-config-"})
+        cluster (fs/path root "data/clusters/default")
+        default-config (fs/path root "config/system.edn")
+        explicit-config (fs/path root "config/custom.edn")
+        base {:seon.dev.config/root (str root)
+              :seon.dev.config/cluster-dir (str cluster)
+              :seon.dev.config/environment {}}]
+    (try
+      (fs/create-dirs (fs/parent default-config))
+      (spit (str default-config) "{}\n")
+      (spit (str explicit-config) "{}\n")
+      (testing "first-ever boot selects the shipped manifest"
+        (is (= (str default-config)
+               (get-in (#'cli/select-config base nil)
+                       [:seon.dev.config/environment "SEON_CONFIG"]))))
+      (testing "an existing database receives no ambient config apply"
+        (fs/create-dirs (fs/path cluster "db"))
+        (spit (str (fs/path cluster "db/root.ksv")) "database")
+        (is (nil? (get-in (#'cli/select-config base nil)
+                          [:seon.dev.config/environment "SEON_CONFIG"]))))
+      (testing "an explicit relative path is rooted at the checkout"
+        (is (= (str explicit-config)
+               (get-in (#'cli/select-config base "config/custom.edn")
+                       [:seon.dev.config/environment "SEON_CONFIG"]))))
+      (finally (fs/delete-tree root {:force true})))))

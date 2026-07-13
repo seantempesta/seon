@@ -24,7 +24,7 @@ existing one needs strengthening IN PLACE.
 | Rendering | `seon.render` — one guarded walker, ai + html views | a second projection path; renders are NEVER stored |
 | Errors | `:seon/error` value (`seon.error`); catch sites record via `seon.error/record!` (fault-tagged datom, `:agent` never escalates) | throwing into the agent loop; a new error shape; console-only swallows |
 | State seeding/reset | `seon.state/reconcile!` (provenance-scoped diff) | ad-hoc seed/override/restore code paths |
-| Config | ONE manifest `config/system.edn` via `seon.config` (`SEON_CONFIG` picks the file) resolves ONCE at boot into the `:seon.config` DB **singleton** (`resolve-config-singleton`; `:seon.config/system-text` + every dial as datoms); RUNTIME reads the DB via `config/config-view` (accessors keep their names/arities) | env-var reads, per-feature config files, re-reading the manifest at runtime |
+| Config | ONE explicitly selected manifest via `seon.config` resolves into the `:seon.config` DB singleton and its managed route/skill populations. Fresh `bin/seon up` selects `config/system.edn`; later config-free boots preserve DB facts. `bin/seon config apply <path>` is the explicit repair path. Runtime reads `config/config-view`. | ambient config reapply, env-var runtime reads, per-feature config files, re-reading the manifest after apply |
 | Literal search | `seon.agent.search` (`grep` files, `grep-graph` DB) | a new scan/query helper per caller |
 | Semantic search | `seon.embed` — ONE `:seon/embedding` attr + Proximum index (wire-server) | a second index or embedder |
 | Token counts | `seon.ai.tokens/estimate` — sizes shown to anyone are TOKENS | printing char counts; a second estimator |

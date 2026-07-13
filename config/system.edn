@@ -1,20 +1,22 @@
-;; The consolidated pod context manifest — read by seon.config via aero
-;; (`SEON_CONFIG` overrides the path; a per-cluster variant is a SEPARATE file,
+;; The consolidated pod context manifest — read by seon.config via aero when
+;; explicitly selected (`SEON_CONFIG`; a per-cluster variant is a SEPARATE file,
 ;; not a `#profile`). ABSENT → no context blocks are seeded. PRESENT → the
 ;; declared context tree is reconciled into the database. Every key fully
 ;; namespaced. Add a new concern = add
 ;; ONE key here + a resolver in seon.config (the "add more things to it"
 ;; contract).
 ;;
-;; CONFIG → DB (config-db-migration 2026-07-10): this manifest is a SEED FILE,
-;; not a runtime dependency. At boot `seon.config/resolve-config-singleton`
+;; CONFIG → DB: this manifest is an operation input, not a runtime dependency.
+;; Fresh `bin/seon up` selects it once; later boots preserve database facts
+;; unless `--config` or `bin/seon config apply` explicitly selects a manifest.
+;; `seon.config/resolve-config-singleton`
 ;; resolves every knob to its effective value and the `#{:config}` reconcile
 ;; transacts them into the `:seon.config` singleton entity; from then on EVERY
 ;; runtime read is a db query (`seon.config/config-view`). So a knob is a DATOM
 ;; — replay-visible (a `cluster fork` at a past basis-t sees the caps that were
 ;; in force then) and live-tunable (a `db/transact!` to the singleton reaches
-;; every agent with no restart). "Config edit → restart pod" applies a file
-;; edit uniformly; a removed key heals on the next boot reconcile.
+;; every agent with no restart). `bin/seon config apply config/system.edn`
+;; repairs this declared subset; removed managed keys retract on that apply.
 {;; ── PULL-REFERENCE CORPUS ──
  ;; Corpus files remain available for explicit lookup. They do not install
  ;; default context blocks. This section carries only the optional directory:
@@ -50,7 +52,7 @@
  ;; here, read by seon.config's store-edn-cap / eval-render-cap / value-* etc.
  ;; The value below IS the default — the accessor applies the SAME literal as its
  ;; fallback when this section is absent, so a no-manifest boot is byte-identical.
- ;; A cluster tunes a cap by editing the literal (then `bin/seon restart pod`).
+ ;; A cluster tunes a cap by editing the literal, then explicitly applying it.
  ;; An env override on a SPECIFIC cap is available per-knob via aero's tags,
  ;; e.g.:  :seon.config.render/value-width #long #or [#env SEON_RENDER_VALUE_WIDTH 72]
  ;; — not pre-wired (env vars aren't needed when the config is the source).
@@ -74,7 +76,7 @@
 
   ;; EXPLICIT-CHARACTER render knobs (transcript-render redesign). Each value
   ;; below IS the default the accessor applies when absent — so this section is
-  ;; byte-identical to omitting it. Flip a knob then `bin/seon restart pod`.
+  ;; byte-identical to omitting it. Flip a knob, then apply this manifest.
   :seon.config.render/whitespace     :raw          ; :raw | :visible (·/→ glyphs)
   :seon.config.render/tabs           :literal      ; :literal | :arrow (→)
   :seon.config.render/trailing-ws    :off          ; :off | :dot (· on trailing ws)

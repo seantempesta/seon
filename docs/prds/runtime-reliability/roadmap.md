@@ -664,9 +664,13 @@ or discover archived behavior.
 1. Finish one exact desired-population compiler: scalar, cardinality-many,
    component, removal, full-head fence, bounded reread/recompile, and
    transact-if-nonempty.
-2. Make external config operation-scoped and optional. Explicit apply freezes a
-   canonical desired payload and repairs only declared populations; no-input
-   restart preserves database facts.
+2. **Runtime boundary complete:** external config is operation-scoped and
+   optional. A config-free boot preserves database facts, the singleton now
+   stores agent/root context and skill selection needed for later births, fresh
+   `bin/seon up` selects the shipped manifest once, and
+   `bin/seon config apply <path>` is explicit. Remaining: freeze the payload in
+   the supervisor intent and fold singleton attribute removal into the exact
+   desired-state compiler.
 3. Persist full canonical Malli forms and native backend signatures in the
    database. Reopen installed Datahike schema instead of reasserting it.
 4. Build one validated Malli/catalog candidate from the database and swap only

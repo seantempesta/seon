@@ -76,6 +76,17 @@
                             "a route still in the desired set survives")
                         (is (contains? names :seon.route/agent)
                             "…as does the agent page route"))))
+                  ;; BOOT 3 — no selected config means PRESERVE, not silently
+                  ;; reapply config/system.edn or an implicit empty manifest.
+                  (.then (fn [_] (set-config! nil)))
+                  (.then (fn [_] (client/boot-seed! {:seon.db/conn conn})))
+                  (.then
+                    (fn [_]
+                      (let [names (route-names conn)]
+                        (is (not (contains? names :seon.route/agent-call))
+                            "config-free boot preserves the prior desired set")
+                        (is (contains? names :seon.route/root)
+                            "config-free boot preserves retained routes"))))
                   (.then (fn [_] (js/Promise.resolve conn))))))
           (.then (fn [_] (set-config! prev-config) (done)))
           (.catch (fn [e]

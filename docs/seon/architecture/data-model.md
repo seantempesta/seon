@@ -928,7 +928,7 @@ selected by `SEON_CONFIG`, never in-file profiles.
 
 - `SEON_CONFIG=config/test.edn bin/test-cljs` — a test run loads its own
   context / routes / render caps (pins `:batch`).
-- `SEON_CONFIG=config/minimal.edn bin/seon restart pod` — the minimal-tree
+- `bin/seon restart --config config/minimal.edn` — the minimal-tree
   variant (`#include`s `system.edn`, inherits the graduated system-text).
 - `bin/acme` exports `SEON_CONFIG=config/acme.edn` — the isolated cluster
   curates independently.
