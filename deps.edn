@@ -99,7 +99,7 @@
   :fork-deps
   {:extra-deps {org.replikativ/datahike
                 {:git/url "https://github.com/seantempesta/datahike"
-                 :git/sha "30a154838ffcc270d32d03bfca7f6518c9ad9faf"}}
+                 :git/sha "67934f650fae30924ac115c899cd3412d90dcacb"}}
    :override-deps {org.replikativ/konserve
                    {:git/url "https://github.com/seantempesta/konserve"
                     :git/sha "df6818d43ea3363a808cd051c0d68917f1b987a9"}}}
@@ -299,7 +299,7 @@
          ;; PR-shaped pending upstream review.
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
-                          :git/sha "30a154838ffcc270d32d03bfca7f6518c9ad9faf"}
+                          :git/sha "67934f650fae30924ac115c899cd3412d90dcacb"}
                          ;; Konserve 0.9.356 plus the shared CLJ/CLJS legacy
                          ;; one-byte metadata-header reader. The fork publishes
                          ;; its own 0.9.356-seon.1 Maven resource, so no consumer
