@@ -106,8 +106,8 @@ RUN npm ci
 COPY deps.edn shadow-cljs.edn ./
 COPY dev-resources dev-resources
 COPY reference-code/datahike/src-secondary reference-code/datahike/src-secondary
-RUN clojure -X:deps prep :aliases '[:simd :fork-deps :writer]' \
- && clojure -P -M:simd:fork-deps:writer \
+RUN clojure -X:deps prep :aliases '[:writer]' \
+ && clojure -P -M:writer \
  && clojure -X:deps prep :aliases '[:cljs]' \
  && clojure -P -M:cljs
 
@@ -137,7 +137,7 @@ RUN mkdir -p /tmp/keep \
 # Bake the resolved writer classpath (ABSOLUTE paths — the entrypoint runs
 # `java -cp $(cat cp.txt) clojure.main -m seon.db.server` from /seon-data,
 # so repo-relative entries must be rooted under /opt/seon).
-RUN clojure -Spath -M:simd:fork-deps:writer > /tmp/cp.raw \
+RUN clojure -Spath -M:writer > /tmp/cp.raw \
  && tr ':' '\n' < /tmp/cp.raw \
     | sed 's|^\([^/]\)|/opt/seon/\1|' \
     | paste -sd: - > /opt/seon/cp.txt

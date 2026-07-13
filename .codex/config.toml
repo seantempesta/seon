@@ -1,5 +1,2 @@
 [mcp_servers.seon]
-command = "/Users/sean/src/seon/bin/mcp-server"
-
-[mcp_servers.seon_cljs]
 command = "/Users/sean/src/seon/bin/mcp-server-cljs"

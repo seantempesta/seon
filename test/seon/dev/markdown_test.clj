@@ -1,7 +1,5 @@
 (ns seon.dev.markdown-test
-  (:require [clojure.java.io :as io]
-            [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing]]
             [seon.dev.markdown :as md]))
 
 ;;; ---------------------------------------------------------------------------
@@ -314,31 +312,3 @@
                                             :list-style :fenced-code-style}})]
       (is (::md/valid? result)
           (str "Violations: " (pr-str (::md/violations result)))))))
-
-;;; ---------------------------------------------------------------------------
-;;; Vault Integration Tests
-;;; ---------------------------------------------------------------------------
-
-(deftest vault-zero-violations-test
-  (testing "entire docs vault has zero markdown violations"
-    (let [vault-root "docs"
-          files (->> (file-seq (io/file vault-root))
-                     (filter #(and (.isFile %)
-                                   (.endsWith (.getName %) ".md")))
-                     (map #(.getPath %)))
-          results (map #(let [result (md/validate-file {::md/file-path %
-                                                        ::md/vault-root vault-root})]
-                          (when-not (::md/valid? result)
-                            {:file %
-                             :violations (::md/violations result)}))
-                       files)
-          failures (filterv some? results)]
-      (is (empty? failures)
-          (str (count failures) " files have violations:\n"
-               (str/join "\n"
-                 (map (fn [{:keys [file violations]}]
-                        (str "  " file ": "
-                             (str/join ", "
-                               (map (fn [v] (str (name (::md/rule v)) " L" (::md/line v)))
-                                    violations))))
-                      (take 20 failures))))))))

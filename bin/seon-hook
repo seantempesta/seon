@@ -1,17 +1,18 @@
 #!/usr/bin/env bb
 
-;; Thin Babashka hook for Claude Code
+;; Direct Babashka hook for Clojure and Markdown edits.
 ;;
 ;; This script:
 ;; 1. Receives hook events from Claude Code (JSON on stdin)
 ;; 2. Loads configuration from .claude/seon-hook.edn
-;; 3. Communicates with running Seon server via nREPL (bencode)
-;; 4. Calls seon.dev.hook/process-hook-event! with the event
-;; 5. Returns the response as JSON to stdout
+;; 3. Validates prospective Clojure syntax before an edit
+;; 4. Runs the canonical Markdown/docstring linters after an edit
+;; 5. Runs the bounded optional review and live core-fault gate
 ;;
-;; All logic lives in seon.dev.hook - this is just the communication layer.
+;; It has no running Seon-process dependency. Pure linter namespaces load
+;; directly into Babashka only for the file type that needs them.
 
-(require '[bencode.core :as b]
+(require '[babashka.deps :as deps]
          '[cheshire.core :as json]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io]
@@ -21,10 +22,8 @@
          '[edamame.core :as edamame])
 
 ;;; ---------------------------------------------------------------------------
-;;; Constants
+;;; Paths
 ;;; ---------------------------------------------------------------------------
-
-(def orchestrator-port 7888)
 
 ;; Hooks run with cwd set to wherever the session happens to be (often the
 ;; edited file's tree), so EVERY artifact path must resolve from the repo
@@ -44,9 +43,8 @@
   (apply io/file repo-root parts))
 
 (def config-path (root-file ".claude/seon-hook.edn"))
-(def backup-dir (root-file "tmp/hook-backup"))
 
-;; bb-direct Gemini review (runtime-independent — needs no JVM, no pod):
+;; bb-direct Gemini review (runtime-independent — needs no server or pod):
 ;; the conventions rubric + a file-based rate-limit timestamp.
 (def conventions-path (root-file "docs/conventions.md"))
 (def last-review-path (root-file "tmp/.last-review"))
@@ -57,10 +55,6 @@
 ;; Hard cap so a permanently-failing agy call can't grow the batch unbounded:
 ;; when the pending list exceeds this, the oldest entries are dropped.
 (def max-pending-files 50)
-
-(def protected-files
-  "Files that are critical to the hook system."
-  #{"src/seon/dev/hook.clj" "bin/seon-hook"})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Logging
@@ -75,20 +69,6 @@
           (str (java.util.Date.) " | " (clojure.string/join " | " parts) "\n")
           :append true)))
 
-(defn- log-agent!
-  "Write to agent-specific log file if this is an agent session."
-  [seon-session-id tool-name file-path decision feedback]
-  (when (and seon-session-id (re-matches #"[A-Za-z0-9]{4,6}" seon-session-id))
-    (let [agent-log-file (root-file "logs" "agents" (str seon-session-id ".log"))
-          timestamp (.format (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss'Z'")
-                             (.atOffset (java.time.Instant/now) java.time.ZoneOffset/UTC))
-          file-name (when file-path (last (clojure.string/split file-path #"/")))
-          details (if feedback (str decision " | " feedback) decision)
-          log-line (str timestamp " | HOOK     | " (or tool-name "unknown")
-                        " | " (or file-name "unknown") " | " details "\n")]
-      (when (.exists (.getParentFile agent-log-file))
-        (spit agent-log-file log-line :append true)))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Configuration
 ;;; ---------------------------------------------------------------------------
@@ -99,94 +79,9 @@
       (try (edn/read-string (slurp f)) (catch Exception _ {}))
       {})))
 
-;;; ---------------------------------------------------------------------------
-;;; nREPL Communication
-;;; ---------------------------------------------------------------------------
-
-(defn- bytes->str [x]
-  (if (bytes? x) (String. ^bytes x "UTF-8") x))
-
-(defn- decode-msg [msg]
-  (into {}
-        (map (fn [[k v]]
-               [(bytes->str k)
-                (if (coll? v) (mapv bytes->str v) (bytes->str v))]))
-        msg))
-
-(defn- nrepl-eval [port code]
-  (try
-    (with-open [sock (java.net.Socket. "localhost" port)]
-      (let [out (java.io.BufferedOutputStream. (.getOutputStream sock))
-            in (java.io.PushbackInputStream. (.getInputStream sock))
-            id (str (random-uuid))]
-        (b/write-bencode out {"op" "eval" "code" code "id" id})
-        (.flush out)
-        (loop [result nil]
-          (let [msg (decode-msg (b/read-bencode in))
-                status (get msg "status")
-                err (get msg "err")]
-            (when err (binding [*out* *err*] (println "NREPL ERROR:" err)))
-            (if (and status (some #{"done"} status))
-              result
-              (recur (or (get msg "value") result)))))))
-    (catch java.net.ConnectException e
-      (binding [*out* *err*] (println "NREPL CONNECT ERROR:" (.getMessage e)))
-      nil)
-    (catch Exception e
-      (binding [*out* *err*] (println "NREPL EXCEPTION:" (.getMessage e)))
-      nil)))
-
-;;; ---------------------------------------------------------------------------
-;;; Session Resolution
-;;; ---------------------------------------------------------------------------
-
-(defn- lookup-seon-session [session-id]
-  (if (and session-id (> (count session-id) 8))
-    (let [map-file (root-file "logs" "session-map.edn")]
-      (if (.exists map-file)
-        (try
-          (get (edn/read-string (slurp map-file)) session-id session-id)
-          (catch Exception _ session-id))
-        session-id))
-    session-id))
-
-(defn- get-port-for-session [_session-id]
-  ;; All sessions route to the single Seon nREPL. The per-session multi-port
-  ;; routing (seon.orchestrator.session/get-session-port) was XTDB-era
-  ;; JVM-orchestrator machinery and has been retired — there is one nREPL.
-  orchestrator-port)
-
-;;; ---------------------------------------------------------------------------
-;;; Response Formatting
-;;; ---------------------------------------------------------------------------
-
-(defn- format-response [result]
-  (when result
-    (let [continue? (get result :seon.dev.hook/continue)
-          decision (get result :seon.dev.hook/decision)
-          reason (get result :seon.dev.hook/reason)
-          feedback (get result :seon.dev.hook/feedback)]
-      (cond
-        (= decision "block")
-        {:decision "block" :reason (or reason "Blocked by hook")}
-
-        (seq feedback)
-        {:continue true
-         :hookSpecificOutput {:hookEventName "PostToolUse"
-                              :additionalContext (clojure.string/join "\n" feedback)}}
-
-        continue? {:continue true}
-        :else {:continue true}))))
-
 (defn- output! [response]
   (when (seq response)
     (println (json/generate-string response))))
-
-(defn- block! [reason]
-  (output! {:decision "block" :reason reason}))
-
-(defn- continue! []
-  (output! {:continue true}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; File Type Detection
@@ -198,13 +93,14 @@
       (some #(clojure.string/ends-with? lower-path %)
             [".clj" ".cljs" ".cljc" ".bb" ".edn"]))))
 
-(defn- critical-file? [file-path]
-  (when file-path
-    (some #(clojure.string/ends-with? file-path %) protected-files)))
-
 (defn- get-file-path [event]
   (or (get-in event [:tool_input :file_path])
       (get-in event [:tool_input :filePath])))
+
+(defn- absolute-file-path [file-path]
+  (when file-path
+    (let [file (io/file file-path)]
+      (.getPath (if (.isAbsolute file) file (root-file file-path))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Syntax Validation
@@ -238,7 +134,7 @@
             new-string (:new_string tool-input)]
         (when (and file-path old-string)
           (try
-            (let [current (slurp file-path)]
+            (let [current (slurp (absolute-file-path file-path))]
               (if (:replace_all tool-input)
                 (clojure.string/replace current old-string new-string)
                 (clojure.string/replace-first current old-string new-string)))
@@ -268,50 +164,6 @@
                           "3. new_string is complete, valid Clojure\n\n"
                           "TIP: If struggling, try Write to replace the entire function.")}))))))
 
-(defn- validate-critical-edit
-  "Extra validation for critical hook files. Returns block response or nil."
-  [event]
-  (let [file-path (get-file-path event)]
-    (when (and (= (:hook_event_name event) "PreToolUse")
-               (critical-file? file-path)
-               (clojure.string/ends-with? file-path ".clj"))
-      (when-let [new-content (reconstruct-file-content event)]
-        (let [validation (validate-clojure-syntax new-content)]
-          (when-not (:valid validation)
-            {:decision "block"
-             :reason (str "BLOCKED: Syntax error in critical hook file.\n\n"
-                          "Error: " (:error validation) "\n\n"
-                          "This edit would break the hook system.")}))))))
-
-;;; ---------------------------------------------------------------------------
-;;; Backup/Restore for Critical Files
-;;; ---------------------------------------------------------------------------
-
-(defn- backup-critical-files! []
-  (let [backup-dir-file backup-dir]
-    (when-not (.exists backup-dir-file) (.mkdirs backup-dir-file))
-    (doseq [file-path protected-files]
-      (let [file (root-file file-path)]
-        (when (.exists file)
-          (let [content (slurp file)
-                validation (validate-clojure-syntax content)]
-            (when (:valid validation)
-              (let [filename (last (clojure.string/split file-path #"/"))]
-                (spit (io/file backup-dir filename) content)))))))))
-
-(defn- restore-from-backup-if-needed! []
-  (doseq [file-path protected-files]
-    (let [file (root-file file-path)]
-      (when (.exists file)
-        (let [content (slurp file)
-              validation (validate-clojure-syntax content)]
-          (when-not (:valid validation)
-            (let [filename (last (clojure.string/split file-path #"/"))
-                  backup-file (io/file backup-dir filename)]
-              (when (.exists backup-file)
-                (spit file (slurp backup-file))
-                (log! "RESTORED" file-path "Error was:" (:error validation))))))))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Markdown File Detection
 ;;; ---------------------------------------------------------------------------
@@ -325,22 +177,76 @@
            (or (clojure.string/starts-with? lower-path "docs/")
                (clojure.string/includes? lower-path "/docs/"))))))
 
+(defn- clojure-source-file? [file-path]
+  (when file-path
+    (let [lower (str/lower-case file-path)]
+      (some #(str/ends-with? lower %) [".clj" ".cljs" ".cljc"]))))
+
+(defn- load-direct-check! [namespace]
+  ;; The hook itself stays a fast, dependency-free bb script. Malli is needed
+  ;; only because the canonical pure linters carry their public schemas.
+  (deps/add-deps
+   {:paths [(str (root-file "src"))]
+    :deps {'metosin/malli {:mvn/version "0.20.0"}}})
+  (require namespace))
+
+(defn- markdown-feedback [event config]
+  (when (and (= (:hook_event_name event) "PostToolUse")
+             (get-in config [:markdown-lint :enabled] true)
+             (docs-markdown-file? (get-file-path event)))
+    (try
+      (load-direct-check! 'seon.dev.markdown)
+      (let [file-path (absolute-file-path (get-file-path event))
+            validate-file (requiring-resolve 'seon.dev.markdown/validate-file)
+            fix (requiring-resolve 'seon.dev.markdown/fix)
+            format-violations (requiring-resolve 'seon.dev.markdown/format-violations)
+            request {:seon.dev.markdown/file-path file-path
+                     :seon.dev.markdown/vault-root (str (root-file "docs"))}
+            initial (validate-file request)
+            _ (when-not (:seon.dev.markdown/valid? initial)
+                (let [fixed (fix {:seon.dev.markdown/content (slurp file-path)})]
+                  (when (pos? (:seon.dev.markdown/fixed-count fixed))
+                    (spit file-path (:seon.dev.markdown/content fixed)))))
+            final (if (:seon.dev.markdown/valid? initial)
+                    initial
+                    (validate-file request))]
+        (when-not (:seon.dev.markdown/valid? final)
+          (:seon.dev.markdown/formatted
+           (format-violations
+            {:seon.dev.markdown/violations (:seon.dev.markdown/violations final)
+             :seon.dev.markdown/max-length (get-in config [:feedback :max-length] 1000)}))))
+      (catch Exception e
+        (log! "MARKDOWN_LINT_ERROR" (.getMessage e))
+        nil))))
+
+(defn- docstring-feedback [event config]
+  (when (and (= (:hook_event_name event) "PostToolUse")
+             (get-in config [:docstring-lint :enabled] true)
+             (clojure-source-file? (get-file-path event)))
+    (try
+      (load-direct-check! 'seon.dev.docstring)
+      (let [check-file (requiring-resolve 'seon.dev.docstring/check-file)
+            format-findings (requiring-resolve 'seon.dev.docstring/format-findings)
+            result (check-file
+                    {:seon.dev.docstring/file-path
+                     (absolute-file-path (get-file-path event))})]
+        (when-not (:seon.dev.docstring/clean? result)
+          (:seon.dev.docstring/formatted
+           (format-findings
+            {:seon.dev.docstring/findings (:seon.dev.docstring/findings result)
+             :seon.dev.docstring/max-length (get-in config [:feedback :max-length] 1000)}))))
+      (catch Exception e
+        (log! "DOCSTRING_LINT_ERROR" (.getMessage e))
+        nil))))
+
 
 ;;; ---------------------------------------------------------------------------
 ;;; bb-direct Gemini review (runtime-independent)
 ;;; ---------------------------------------------------------------------------
 ;;;
 ;;; A code review is an LLM call over the edited source + the conventions
-;;; rubric. It needs NO Clojure REPL and NO JVM. We shell to the project's
-;;; `agy` Gemini CLI directly from bb, so the review fires for .clj, .cljs,
-;;; .cljc, .bb, .edn AND .md uniformly — including when the JVM nREPL (port
-;;; 7888) is down, which is the normal state on the CLJS-pod track.
-;;;
-;;; Double-review avoidance: the JVM PostToolUse pipeline (process-via-nrepl!)
-;;; ALSO runs a Gemini review, but ONLY for JVM-loadable .clj/.cljc files AND
-;;; ONLY when the JVM nREPL is actually reachable. So we skip the bb review for
-;;; a .clj/.cljc file when the JVM is up (let the in-JVM path own it); for
-;;; everything else (.cljs/.md, or .clj with the JVM down) the bb review runs.
+;;; rubric. It needs no running Seon process. We shell to the project's `agy`
+;;; Gemini CLI directly from bb for every supported source/Markdown edit.
 
 (defn- reviewable-file?
   "True for source/test/markdown files worth an AI review."
@@ -349,24 +255,6 @@
     (let [lower (str/lower-case file-path)]
       (or (clojure-file? file-path)
           (str/ends-with? lower ".md")))))
-
-(defn- jvm-clj-file?
-  "True for .clj/.cljc files the JVM nREPL pipeline can itself review."
-  [file-path]
-  (when file-path
-    (let [lower (str/lower-case file-path)]
-      (or (str/ends-with? lower ".clj")
-          (str/ends-with? lower ".cljc")))))
-
-(defn- jvm-reachable?
-  "Quick socket probe of the JVM nREPL. Used only to avoid double-reviewing
-   .clj/.cljc files when the in-JVM review pipeline is alive."
-  []
-  (try
-    (with-open [sock (java.net.Socket.)]
-      (.connect sock (java.net.InetSocketAddress. "localhost" ^int orchestrator-port) 300)
-      true)
-    (catch Exception _ false)))
 
 (defn- review-rate-limited?
   "File-based interval gate. bb is a fresh process per invocation, so the
@@ -544,12 +432,10 @@
   [event config]
   (try
     (let [review-cfg (:review config)
-          file-path (get-file-path event)]
+          file-path (absolute-file-path (get-file-path event))]
       (when (and (= (:hook_event_name event) "PostToolUse")
                  (get review-cfg :enabled true)
-                 (reviewable-file? file-path)
-                 ;; let the in-JVM pipeline own .clj/.cljc review when it's live
-                 (not (and (jvm-clj-file? file-path) (jvm-reachable?))))
+                 (reviewable-file? file-path))
         ;; 1. Accumulate BEFORE the rate-limit check — never lose an edit.
         (accumulate-pending! file-path)
         (let [interval (get review-cfg :interval-seconds 60)]
@@ -590,66 +476,6 @@
     (catch Exception e
       (log! "REVIEW_ERROR" (.getMessage e))
       nil)))
-
-;;; ---------------------------------------------------------------------------
-;;; Fast Path (skip nREPL for non-Clojure files)
-;;; ---------------------------------------------------------------------------
-
-(defn- should-skip-nrepl?
-  "Returns true if we can skip nREPL entirely (non-Clojure, non-docs-markdown edits)."
-  [event]
-  (let [hook-event (:hook_event_name event)
-        tool-name (:tool_name event)
-        file-path (get-file-path event)]
-    (and (or (= hook-event "PreToolUse") (= hook-event "PostToolUse"))
-         (or (= tool-name "Edit") (= tool-name "Write"))
-         (not (clojure-file? file-path))
-         (not (docs-markdown-file? file-path)))))
-
-;;; ---------------------------------------------------------------------------
-;;; nREPL Processing
-;;; ---------------------------------------------------------------------------
-
-(defn- process-via-nrepl!
-  "Send event to Seon server via nREPL for full processing.
-   Returns the response map (does NOT output) so the caller can merge in
-   bb-direct review feedback before emitting a single JSON object."
-  [event]
-  (let [config (load-config)
-        claude-session-id (:session_id event)
-        seon-session-id (lookup-seon-session claude-session-id)
-        target-port (get-port-for-session claude-session-id)
-        file-path (get-file-path event)]
-
-    (log! "PORT_RESOLVED"
-          (str "claude=" (or claude-session-id "nil"))
-          (str "seon=" (or seon-session-id "nil"))
-          (str "port=" target-port))
-
-    (let [code (format
-                "(do (require 'seon.dev.hook)
-                     (seon.dev.hook/process-hook-event!
-                       {:seon.dev.hook/event %s
-                        :seon.dev.hook/config %s}))"
-                (pr-str event)
-                (pr-str config))
-          result-str (nrepl-eval target-port code)
-          result (when result-str
-                   (try (edn/read-string result-str) (catch Exception _ nil)))
-          response (format-response result)]
-
-      (log! "COMPLETE"
-            (str "session=" (or claude-session-id "orchestrator"))
-            (str "decision=" (or (:decision response) "continue"))
-            (str "has-feedback=" (boolean (get-in response [:hookSpecificOutput :additionalContext]))))
-
-      (log-agent! seon-session-id
-                  (:tool_name event)
-                  file-path
-                  (or (:decision response) "continue")
-                  (get-in response [:hookSpecificOutput :additionalContext]))
-
-      response)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Core-fault strict gate (error-blame-strict-gate, RULED 2026-07-04).
@@ -719,79 +545,60 @@
       (log! "CORE_FAULT_GATE_ERROR" (.getMessage e))
       nil)))
 
-(defn- merge-review-feedback
-  "Merge a bb-direct review string into the (possibly nil) JVM response.
-   If the JVM blocked, leave the block untouched (review is advisory).
-   Otherwise append the review to additionalContext."
-  [response review-text]
-  (cond
-    (nil? review-text) (or response {:continue true})
-    (= (:decision response) "block") response
-    :else
-    (let [existing (get-in response [:hookSpecificOutput :additionalContext])
-          combined (if (seq existing) (str existing "\n\n" review-text) review-text)]
+(defn- feedback-response [feedback]
+  (let [messages (vec (remove str/blank? feedback))]
+    (if (seq messages)
       {:continue true
-       :hookSpecificOutput {:hookEventName "PostToolUse"
-                            :additionalContext combined}})))
+       :hookSpecificOutput
+       {:hookEventName "PostToolUse"
+        :additionalContext (str/join "\n\n" messages)}}
+      {:continue true})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Main Entry Point
 ;;; ---------------------------------------------------------------------------
 
 (defn -main []
-  ;; Initialize logging
   (log! "HOOK INVOKED" (str "cwd=" (System/getProperty "user.dir")))
-
-  ;; Backup/restore critical files
-  (try
-    (restore-from-backup-if-needed!)
-    (backup-critical-files!)
-    (catch Exception e
-      (log! "BACKUP_ERROR" (.getMessage e))))
-
-  ;; Main processing
   (try
     (let [event (try
                   (json/parse-string (slurp *in*) true)
                   (catch Exception _ nil))
-          file-path (get-file-path event)]
-
-      ;; Log the event
+          file-path (get-file-path event)
+          config (load-config)
+          event-name (:hook_event_name event)
+          tool-name (:tool_name event)
+          edit-event? (and (#{"PreToolUse" "PostToolUse"} event-name)
+                           (#{"Edit" "Write"} tool-name))]
       (log! (:hook_event_name event)
-            (str "tool=" (:tool_name event))
+            (str "tool=" tool-name)
             (str "session=" (or (:session_id event) "orchestrator"))
             (str "file=" (or file-path "unknown")))
 
-      (let [config (load-config)]
-        ;; Fast path: skip nREPL for non-Clojure, non-docs-markdown files.
-        ;; The bb-direct review is runtime-independent, so it STILL fires here
-        ;; for reviewable files (e.g. a non-docs .md like SOUL.md/README).
-        (if (should-skip-nrepl? event)
-          (do
-            (log! "SKIP_NON_CLJ" (or file-path "unknown"))
-            (let [review (bb-review! event config)]
-              (output! (merge-review-feedback nil review))))
+      (cond
+        (not edit-event?)
+        (output! {:continue true})
 
-          ;; Clojure file: validate syntax before allowing edit
-          (if-let [block-response (or (validate-clojure-edit event)
-                                      (validate-critical-edit event))]
+        (= event-name "PreToolUse")
+        (if (get-in config [:lint :enabled] true)
+          (if-let [blocked (validate-clojure-edit event)]
             (do
-              (log! "CLOJURE_BLOCK" (:reason block-response))
-              (output! block-response))
+              (log! "CLOJURE_BLOCK" (:reason blocked))
+              (output! blocked))
+            (output! {:continue true}))
+          (output! {:continue true}))
 
-            ;; Valid edit: JVM pipeline (reload/test for .clj/.cljc; no-op for
-            ;; .cljs/.md when the JVM is down) + bb-direct Gemini review, merged
-            ;; into a single response. The core-fault gate (bb-direct, pod-log
-            ;; offset bracket) can BLOCK regardless — a new :core-fault datom
-            ;; fails the run loud under :seon.config/on-core-error :gate.
-            (let [response (process-via-nrepl! event)
-                  review (bb-review! event config)
-                  gate (core-fault-gate! event)]
-              (output! (or gate (merge-review-feedback response review))))))))
+        :else
+        (let [feedback [(markdown-feedback event config)
+                        (docstring-feedback event config)
+                        (bb-review! event config)]
+              gate (core-fault-gate! event)]
+          (output! (or gate (feedback-response feedback))))))
 
     (catch Exception e
       (log! "ERROR" (.getMessage e))
       (binding [*out* *err*]
-        (println "HOOK ERROR:" (.getMessage e))))))
+        (println "HOOK ERROR:" (.getMessage e)))
+      (output! {:continue true}))))
 
 (-main)

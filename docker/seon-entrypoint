@@ -12,7 +12,7 @@
 # and database survive).
 #
 # It is deliberately NOT bin/seon: no nohup, no mkdir-mutex, no cljs-watch,
-# no jvm track — those are host-dev concerns.
+# no retired application process — those are not production concerns.
 #
 # Layout: /opt/seon = the immutable runtime tree (jre/, node/, src/, out/,
 # node_modules/, cp.txt). /seon-data = the mutable data root (cwd for both
@@ -38,8 +38,8 @@ mkdir -p "$CLUSTER_DIR" "$SEON_DATA/tmp" "$SEON_DATA/logs"
 cd "$SEON_DATA"
 
 # Database server (JVM Datahike writer — the sole writer).
-# Same launch as bin/seon's `clojure -M:simd:fork-deps:writer …`, with the
-# :simd alias's jvm-opts inlined (the clojure CLI stays in the builder; the
+# Same launch as bin/seon's `clojure -M:writer -m seon.db.server …`, with the
+# :writer alias's jvm-opts inlined (the clojure CLI stays in the builder; the
 # classpath was baked to cp.txt at image build).
 start_database() {
   "$JAVA" \

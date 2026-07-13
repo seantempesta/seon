@@ -86,25 +86,6 @@
 (defonce ^:private _inst-type
   (swap! *schemas assoc :inst (m/-simple-schema {:type :inst :pred inst?})))
 
-;; :seon.flow/dynamic — a wire-protocol field validated dynamically at the
-;; message boundary (validate-fn-args!/value!/payload! in seon.flow.msg).
-;; Used for ::args, ::value, ::payload, whose type depends on the target;
-;; static schema can only assert non-nil.
-(defonce ^:private _dynamic-type
-  (swap! *schemas assoc :seon.flow/dynamic
-         (m/-simple-schema
-          {:type :seon.flow/dynamic
-           :pred some?
-           :type-properties {:gen/schema [:or :int :string :keyword :boolean
-                                          [:vector :int] [:map-of :keyword :string]]
-                             :gen/fmap identity}})))
-
-;; :seon.db/namespace — the entity-namespace stamp seon.db/transact! attaches
-;; when routing through the datahike flow. Values are db-name keywords.
-;; Registered here so the transact! validation gate treats it as known.
-(defonce ^:private _db-namespace-type
-  (swap! *schemas assoc :seon.db/namespace :keyword))
-
 ;; :seon.db/lookup-ref-value — the value position in a lookup-ref. Datahike
 ;; accepts strings, uuids, keywords, and ints as unique-attr values.
 (defonce ^:private _lookup-ref-value-type
@@ -405,7 +386,7 @@
 (defn schemas-in-namespace
   "The `{keyword definition}` map of schemas registered under `ns-name`.
 
-   `ns-name` is a string, e.g. \"seon.ai.gemini\"."
+   `ns-name` is a string, e.g. \"seon.agent\"."
   {:malli/schema [:=> [:catn [::namespace-name ::namespace-name]] :map]}
   [ns-name]
   (into {}

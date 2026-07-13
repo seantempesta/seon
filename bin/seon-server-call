@@ -2,7 +2,7 @@
 
 ;; bin/seon-server-call — structured RPC helper for the bin/seon supervisor.
 ;;
-;; Sends ONE Clojure expression to the wire-server's loopback socket REPL
+;; Sends ONE Clojure expression to the database server's loopback socket REPL
 ;; (the same supervisor channel `cluster fork`/`cluster destroy` have always
 ;; used — clojure.core.server/repl on 127.0.0.1, port in the per-supervisor
 ;; $SEON_WRITER_REPL_PORT_FILE) and PARSES the printed reply as EDN instead of
@@ -32,7 +32,7 @@
 ;; Exit:  0 = map reply, success-key truthy (or no key given)
 ;;        1 = map reply, success-key falsy/absent (server said no —
 ;;            the map, usually carrying ::error, is on stdout)
-;;        2 = transport/protocol failure: wire-server unreachable, deadline
+;;        2 = transport/protocol failure: database server unreachable, deadline
 ;;            exceeded, or the reply isn't a single EDN map (e.g. the REPL
 ;;            printed an exception) — raw reply dumped to stderr.
 
@@ -52,7 +52,7 @@
 ;; Per-supervisor port file: $SEON_WRITER_REPL_PORT_FILE (repo-
 ;; root-relative unless absolute; bin/seon exports it), defaulting to the
 ;; default cluster's file. NEVER the old shared tmp/seon-writer-repl-port —
-;; a second supervisor's wire-server (bin/acme) clobbered that.
+;; a second supervisor's database server (bin/acme) clobbered that.
 (def port-file
   (let [p (or (System/getenv "SEON_WRITER_REPL_PORT_FILE")
               "tmp/seon-writer-repl-port-default")
@@ -158,12 +158,12 @@
                (when (.exists port-file)
                  (some-> port-file slurp str/trim parse-long))
                (die 2 (str "✗ seon-server-call: no --port and no " port-file
-                           " — is the wire-server running? (bin/seon start wire-server)")))
+                           " — is the database server running? (bin/seon start database-server)")))
       deadline (+ (System/currentTimeMillis) (* 1000 (or timeout-secs 30)))
       raw (try (repl-round-trip port expr deadline)
                (catch ConnectException _
-                 (die 2 (str "✗ seon-server-call: wire-server REPL not reachable on 127.0.0.1:" port
-                             " — is the wire-server running? (bin/seon start wire-server)")))
+                 (die 2 (str "✗ seon-server-call: database-server REPL not reachable on 127.0.0.1:" port
+                             " — is the database server running? (bin/seon start database-server)")))
                (catch SocketTimeoutException _
                  (die 2 (str "✗ seon-server-call: connect to 127.0.0.1:" port " timed out")))
                (catch clojure.lang.ExceptionInfo e

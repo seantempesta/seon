@@ -6,11 +6,9 @@
    now reads cleanly, and — only then — hand the repaired source back so
    the eval pipeline can auto-eval it.
 
-   CLJC so the pod (`seon.eval`) and JVM tests use ONE mechanism. The
-   JVM-only `seon.dev.repair` is the pattern this mirrors; we drop its
-   cljfmt step (the value here is repair, not formatting) and its
-   edamame `delimiter-error?` probe (the caller already knows the form
-   failed to read — that IS the trigger).
+   CLJC so the pod (`seon.eval`) and portable tests use ONE mechanism.
+   Formatting is deliberately separate, and the caller already knows the
+   form failed to read — that failure IS the repair trigger.
 
    ## Why indent-mode only
 

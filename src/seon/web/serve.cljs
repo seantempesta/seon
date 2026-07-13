@@ -21,16 +21,6 @@
    reads this file rather than
    parsing logs.
 
-   ## V0.5 throwaway
-
-   When V1+ lands the JVM seon server takes over HTTP+SSE rendering
-   (it already has a similar pipeline in `seon.web.sse` per the
-   2026-05-19 audit). This namespace becomes dev-mode only — a
-   standalone-pod render path so we can iterate on agent code in
-   Chrome without booting the full server stack. The CLJS pod's role
-   in the V0.5 demo Tauri shell becomes 'eval core', not
-   'HTTP server'.
-
    ## SSE connection registry
 
    A-6 will register each open SSE stream's `response` object in

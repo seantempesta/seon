@@ -1,14 +1,14 @@
 (ns seon.ui.components
-  "Shared UI component library for Phosphor Terminal styling. CLJC port
-   of the JVM `seon.web.components` — zero JVM interop, runs in pod-side
-   CLJS today AND in JVM seon when the cljc-migration-plan converges.
+  "Shared UI component library for Phosphor Terminal styling.
+
+   The pure hiccup functions run in the canonical CLJS renderer and remain
+   portable to any future adapter without a second component library.
 
    Functions return hiccup data structures — they don't render to
-   strings. The render boundary belongs to `seon.ui.html/->string`
-   (pod-side) or `seon.web.html` / chassis (JVM-side); either consumer
+   strings. The render boundary belongs to `seon.ui.html/->string` and
    works against the same hiccup output.
 
-   Design principles (same as JVM sibling):
+   Design principles:
    - Warm blacks (`bg-base-{850,900,950}`) for backgrounds
    - Cream text (`text-{50,200,400}`) not white
    - Monospace everywhere (JetBrains Mono fallback)
@@ -17,11 +17,7 @@
    - Status dots with pulse for active states
 
    The full design system is documented in
-   `docs/prds/namespace-ui/design-system.md` (JVM repo). When the JVM
-   migration plan reaches Stage 3 this file MERGES with the JVM
-   `seon.web.components.clj` into one `.cljc` — most of the body is
-   already byte-identical because the originals were pure hiccup
-   factories."
+   `docs/prds/namespace-ui/design-system.md`."
   (:require [seon.schema :as schema]))
 
 ;; ============================================================

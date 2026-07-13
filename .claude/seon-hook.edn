@@ -1,73 +1,26 @@
-;; Unified development hook configuration
+;; Direct development-hook configuration.
 ;;
-;; Controls the behavior of bin/seon-hook for:
-;; - Syntax repair (delimiter fix, cljfmt)
-;; - Unit test execution
-;; - Generative testing (Malli schema validation)
-;; - AI-assisted code review (Gemini with bounded window model)
-;;
-;; Hook state (recent edits + last-review timestamp, used only for review
-;; rate-limiting within a dev session) lives in in-memory atoms in
-;; seon.dev.context. It is ephemeral and resets when the Seon nREPL restarts.
-;; All processing runs inside the Seon JVM via nREPL (bin/seon-hook is the
-;; thin bencode client); the PreToolUse syntax gate runs in-process in bb.
+;; bin/seon-hook runs entirely in Babashka. It does not require a running
+;; Seon process: syntax validation happens before an edit; the canonical
+;; Markdown and docstring linters run after it; review and the live-pod
+;; core-fault gate are advisory/targeted as described below.
 
-{;; PreToolUse validation - blocks edits BEFORE they're applied
- ;; Catches syntax errors (unbalanced delimiters) before file is modified
- :lint {:enabled true}
+{:lint
+ {:enabled true}
 
- ;; Syntax repair via seon.dev.repair (PostToolUse)
- ;; Key is :repair (not :syntax-repair) to match what hook.clj expects
- :repair {:enabled true
-          :cljfmt true
-          :revert-on-fail true}
+ :markdown-lint
+ {:enabled true}
 
- ;; Test execution
- ;; Generative tests are non-blocking (feedback only): a schema-generation
- ;; gap should surface as advice, not stop an edit.
- :tests {:unit {:enabled true
-                :block-on-fail true}
-         :generative {:enabled true
-                      :num-tests 10
-                      :block-on-fail false}}
+ :docstring-lint
+ {:enabled true}
 
- ;; AI review (Gemini gemini-3.5-flash) — runs bb-DIRECT in the hook via `agy`,
- ;; runtime-independent (no JVM, no pod): fires for .clj/.cljs/.cljc/.md.
- ;; BATCH-since-last-review: every reviewable edit is appended (deduped) to a
- ;; file accumulator (tmp/.pending-review). A review fires at most once per
- ;; :interval-seconds; when it fires it covers the WHOLE pending batch (all
- ;; reviewable files edited since the last review, content re-slurped fresh) in
- ;; ONE agy call against the docs/conventions.md rubric, then clears the
- ;; accumulator. Edits made during the interval pause stay pending for the next
- ;; review — none are lost. Rate-limiting timestamp lives in tmp/.last-review.
- ;; Non-blocking: an agy failure/timeout is logged (REVIEW_* in
- ;; logs/hook-debug.log) and the edit proceeds; the batch stays pending and is
- ;; retried next interval (bounded by an internal max-pending-files cap so a
- ;; permatimeout can't grow it unbounded). For .clj/.cljc it defers to the
- ;; in-JVM review only when a JVM nREPL is reachable (no double Gemini call).
- :review {:enabled true
-          ;; Minimum time between reviews (prevents review spam)
-          :interval-seconds 60
-          ;; Max code length to include in review
-          :max-code-length 12000
-          ;; Max output length for review response
-          :max-output-length 100000}
+ ;; Optional direct Gemini review. Reviewable edits accumulate while the
+ ;; interval gate is closed, then one bounded call reviews the pending batch.
+ ;; A failed review never blocks an edit and remains pending for a later retry.
+ :review
+ {:enabled true
+  :interval-seconds 60
+  :max-code-length 12000}
 
- ;; Convention compliance checking
- ;; - Runs after reload, before tests
- ;; - Currently non-blocking (feedback only)
- :compliance {:enabled true
-              :block false}
-
- ;; Public-fn docstring lint (seon.dev.docstring) — WARN-ONLY, NEVER blocks.
- ;; Runs right after compliance on the edited file: flags any public fn whose
- ;; docstring line 1 is missing, > 78 chars, or lacks terminal punctuation
- ;; (the compact-namespace-card summary). It only APPENDS to hook feedback —
- ;; there is no block path, so an edit always proceeds. There is deliberately
- ;; no :block key: unlike :compliance/:tests, this stage cannot be made
- ;; blocking. See docs/conventions.md "Function Docstrings".
- :docstring-lint {:enabled true}
-
- ;; Feedback formatting
- :feedback {:dense true
-            :max-length 1000}}
+ :feedback
+ {:max-length 1000}}

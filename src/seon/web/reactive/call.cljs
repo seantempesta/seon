@@ -11,11 +11,9 @@
    agent's own eval — which transacts, and the existing reactive feed
    (`listen!` → render → SSE push) updates the UI.
 
-   ## Namespace IS the route (replaces the JVM `seon.*` prefix-whitelist)
+   ## Namespace IS the route
 
-   The JVM `seon.web.reactive.actions/resolve-action` allowed ONLY `seon.*`
-   namespaces — exactly wrong for agent code, which lives in `my.agent.<id>`.
-   Here the name is the route: a fn symbol `my.agent.<id>/foo` resolves to
+   The name is the route: a fn symbol `my.agent.<id>/foo` resolves to
    agent `<id>` (`seon.agent.home/home-ns` is the canonical id↔ns mapping). No
    routing table.
 
