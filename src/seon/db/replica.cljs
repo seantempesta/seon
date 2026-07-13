@@ -720,7 +720,7 @@
   "Fire the conn's native listeners for OWN tx `tx-t` from local history.
 
    Used only when every same-id reply was lost after the feed already
-   suppressed the commit. Reads are local (follow-the-store), so the
+   suppressed the commit. Reads are local to the replica, so the
    committing tx's datoms come straight from the history index."
   [conn tx-t]
   (try
@@ -1189,7 +1189,7 @@
    Idempotent for the same connection and coordinate. A different connection,
    branch, or transport path atomically disposes the old attachment before the
    new one connects. Resilient: a
-   drop logs LOUDLY, reconnects after `wire/feed-reconnect-delay-ms`, and recovers the gap via the
+   drop logs LOUDLY, reconnects after `feed-reconnect-delay-ms`, and recovers the gap via the
    req-socket `replay-tx` from the basis-t watermark (DE-2 lossless wake) —
    the attachment never dies silently. The FIRST connect is fail-loud (boot is
    ping-gated; a pod that can't reach its feed must not run).

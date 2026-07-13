@@ -261,8 +261,8 @@ re-derived); datom count (links `/data`) + `SEON_EMBED` on/off; and a
 `+ new agent` button + home/data links + a health dot. It is one shared stable
   render unit: a relevant database dependency change renders it once and
   fans the same complete element to every subscribed page. It does not recompute
-  inside every whole view and it uses a cheap index count rather than a full-database
-  inventory scan. The `+ new agent` button POSTs the one `/agents` creation door
+  inside every whole view and it uses a cheap index count rather than reconstructing
+  every database entity. The `+ new agent` button POSTs the one `/agents` creation door
   with an empty purpose and switches to the new `/agent/{id}`. The same door
   accepts an optional purpose from a root-fleet form; there is no separate
   creation or agents page.

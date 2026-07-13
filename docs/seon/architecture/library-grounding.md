@@ -172,23 +172,25 @@ Read: `src/seon/render/sci.cljs:335-430` (`invoke-bounded`), `:92`
 
 ## The wire boundary — the CAS fence executes AT the writer ✓ (critical)
 
-Read: `src/seon/db.cljs:399` (`cas-assert`) + `:422` (`transact!`),
-`src/seon/store/wire.cljs:12-21` (the forwarder), `src/seon/server/wire.clj`
-(the JVM writer), `src/seon/db/internal.cljs:1294-1311` (the wire report).
+Read: `src/seon/db.cljs:514` (`cas-assert`) + `:532` (`transact!`),
+`src/seon/db/replica.cljs:372-522` (the remote writer),
+`src/seon/db/writer.clj:401-451` (the authoritative JVM transaction), and
+`src/seon/db/internal.cljs:1294-1311` (the compact report).
 
-- The pod has datahike-cljs but its WRITER is a `:seon-wire` PWriter: `d/transact!`
-  forwards the **raw tx-data** (the `:db.fn/cas` op included — pure data) over the
-  UDS to `seon.server.wire`, which runs `d/transact` against the **authoritative**
-  JVM conn (client.cljs:517 "the SOLE writer"). So **`compare-and-swap` runs at the
+- The pod has datahike-cljs but its PWriter is `seon.db.replica/RemoteWriter`:
+  `d/transact!` forwards the **raw tx-data** (the `:db.fn/cas` op included — pure
+  data) over UDS to `seon.db.writer`, which runs `d/transact` against the
+  **authoritative** JVM connection. So **`compare-and-swap` runs at the
   single writer against total-ordered state, NOT the pod's replica** — the fence is
   sound across the wire. A CAS failure returns as a `{::db/ok? false …}` value.
 - **Use `db/cas-assert`, do NOT hand-write the CAS vector.** It builds the
   no-op fence as data: `(db/cas-assert [:seon.agent/id id] :seon.agent/run
   [:seon.agent.run/id run-id])` → `[:db.fn/cas … V V]`, leading the work-tx
-  (db.cljs:399-420). This is the canonical fence; the docs' `[run R]` was shorthand.
-- The wake `listen!` is PROVEN by current operation: after a wire commit the pod
-  re-derefs and fires native `d/listen` listeners with a synthesized tx-report
-  (store.wire.cljs:20-21); `install-wake-trigger!` already runs in the live pod.
+  (db.cljs:508-530). This is the canonical fence; the docs' `[run R]` was shorthand.
+- Native `listen!` wakeup is part of the same replica path: an acknowledged own
+  write materializes the local database before returning and fires listeners;
+  the persistent transaction feed applies foreign writes and fires the same
+  listeners (`seon.db.replica:698-819`).
 
 ✓ **The open race is SOLVED + live-proven — read it, keep it.** `open-run!`
 (run.cljs:215-274) already opens a run in ONE atomic tx and the inline comment
@@ -356,9 +358,10 @@ Concrete examples (file:line) of the patterns to imitate:
    run-row first, CAS NV = lookup-ref, resolves against the in-tx run. KEEP the run
    lifecycle (`open-run!`/`close-run!`/`run-fence`) — build the seed/`start!` layer
    around it, do NOT rebuild it.
-2a. ✓ Build the fence with `db/cas-assert` (db.cljs:399), never a hand-written
+2a. ✓ Build the fence with `db/cas-assert` (db.cljs:508), never a hand-written
    `:db.fn/cas` vector. The CAS executes at the SOLE writer, so the fence is sound
-   across the wire (store.wire.cljs:12-21).
+   at the authoritative writer (`seon.db.replica:372-522`,
+   `seon.db.writer:401-451`).
 2b. ✓ Instrumentation: write `:malli/schema` normally (collected at compile time,
    instrument.cljc:109); opt-out is STRUCTURAL (`seon.instrument/async-unwrappable?`
    — async fns with no correct wrapper shape), NOT a metadata marker and NOT a
