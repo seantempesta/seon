@@ -140,6 +140,11 @@ Full run values already return through the evaluator's addressable result
 symbols; only durable, queryable per-test outcome facts are projected into the
 database. There is no second process-local result-history authority.
 
+The source-substring test dependency heuristic is also deleted from both auto-
+rerun selection and function status rendering. Newly defined tests still run
+from the exact analyzer diff; existing-test reruns wait for durable analyzer-
+derived reference facts rather than manufacturing relationships from text.
+
 The source-grounded system audits are complete and committed:
 
 - [[research/database-runtime-responsiveness-audit-2026-07-13]]

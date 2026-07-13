@@ -6,17 +6,15 @@
    the eval source that created it (the owning `:seon.eval` already
    shows that text verbatim).
 
-   - AI pane: compact line — glyph + symbol + arglists + status summary.
-     Lead glyph: ✗ schema error, ⚠ specced+no-tests / unspecced, ✓ all
-     good. Docstring on the next line if present.
+   - AI pane: compact line — glyph + symbol + arglists + schema status.
+     Lead glyph: ✗ schema error, ⚠ unspecced, ✓ specced. Docstring on
+     the next line if present.
    - HTML pane: amber `fn` badge, fully-qualified symbol, status pills
-     (specced/private/tested/test-passing — `specced` derived from the
-     presence of `:seon.fn/spec`), schema-error badge when present,
+     (specced/private — `specced` derived from the presence of
+     `:seon.fn/spec`), schema-error badge when present,
      monospace signature, docstring, collapsible source."
   (:require
-    [clojure.string :as str]
-    [datahike.api :as d]
-    [seon.db :as db]))
+    [clojure.string :as str]))
 
 (def ^:private source-inline-threshold 200)
 
@@ -40,74 +38,17 @@
   (when (and doc (not (str/blank? doc)))
     (first (str/split-lines doc))))
 
-(defn- referencing-tests
-  "Pull `:seon.test` rows whose `:seon.test/source` mentions `fn-sym`
-   (substring match, v0 heuristic mirroring
-   `seon.test.runner/tests-referring-to`). Returns a vector of pulled
-   test entity maps. Safe when db is nil (returns []).
-
-   We index via `:aevt :seon.test/source` directly rather than full
-   datalog so we can pull per matched eid only — fewer passes through
-   the registry. The substring scan happens in CLJS.
-
-   The `d/datoms` scan is gated on `seon.db/installed-schema` (same
-   lazy-install trap as every datoms boundary: datahike THROWS on a
-   registered-but-never-transacted attr) and the per-eid pull routes
-   through guarded `seon.db/pull` — no bare try masking typos."
-  [db fn-sym]
-  (if (or (nil? db)
-          (nil? fn-sym)
-          (not (contains? (db/installed-schema db) :seon.test/source)))
-    []
-    (let [needle (str fn-sym)]
-      (->> (d/datoms db :aevt :seon.test/source)
-           (filter (fn [^js dt] (str/includes? (.-v dt) needle)))
-           (map (fn [^js dt] (.-e dt)))
-           distinct
-           (map #(db/pull db '[:seon.test/sym
-                               :seon.test/last-passed-at
-                               :seon.test/last-failed-at
-                               :seon.test/last-failure-summary] %))
-           vec))))
-
-(defn- test-passing?-row
-  "True iff this test row has passed and has not failed more recently."
-  [{:seon.test/keys [last-passed-at last-failed-at]}]
-  (boolean
-    (and last-passed-at
-         (or (nil? last-failed-at)
-             (> (.getTime last-passed-at) (.getTime last-failed-at))))))
-
-(defn- test-status
-  "Returns `{:tested? bool, :test-passing? (bool|nil), :failure-summary str|nil}`.
-   When `:tested?` is false, `:test-passing?` is nil (no signal)."
-  [db fn-sym]
-  (let [rows (referencing-tests db fn-sym)]
-    (cond
-      (empty? rows)
-      {:tested? false :test-passing? nil :failure-summary nil}
-
-      (every? test-passing?-row rows)
-      {:tested? true :test-passing? true :failure-summary nil}
-
-      :else
-      (let [failing (->> rows (remove test-passing?-row))
-            fs      (some :seon.test/last-failure-summary failing)]
-        {:tested? true :test-passing? false :failure-summary fs}))))
-
 (defn render-ai
   "Compact summary with a leading glyph for at-a-glance status.
 
-     ✓ specced ✓ tests passing   for the green path
-     ⚠ specced, no tests          for specced fns without a referring test
+     ✓ specced                   for the green path
      ⚠ unspecced                  for fns missing `:malli/schema`
      ✗ schema error: <reason>     for fns whose schema failed to parse
-     ✗ tests failing: <summary>   for tests that referenced this fn and fail
 
    The glyph is the FIRST char of line 2 so it lands in the LLM's
    peripheral vision; the agent can scan a long ctx for ✗/⚠ quickly."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
-  [{:seon.db/keys [db] :seon.render/keys [node entity]}]
+  [{:seon.render/keys [node entity]}]
   (let [entity    (or node entity)
         sym       (or (:seon.fn/sym entity) "?")
         arglists  (:seon.fn/arglists entity)
@@ -117,19 +58,10 @@
         specced   (some? spec)
         schema-err (:seon.fn/schema-error entity)
         sig       (arglists-str sym arglists)
-        {:keys [tested? test-passing? failure-summary]} (test-status db sym)
         status-line (cond
                       schema-err           (str ";; ✗ schema error: " schema-err)
-                      (and tested? (false? test-passing?))
-                      (str ";; ✗ tests failing"
-                           (when failure-summary (str ": " failure-summary)))
-                      (and specced tested? test-passing?)
-                      ";; ✓ specced  ✓ tests passing"
-                      (and specced (not tested?))
-                      ";; ⚠ specced, no tests"
-                      (and (not specced) tested? test-passing?)
-                      ";; ⚠ unspecced  ✓ tests passing"
-                      (not specced)        ";; ⚠ unspecced, no tests"
+                      specced              ";; ✓ specced"
+                      (not specced)        ";; ⚠ unspecced"
                       :else                ";; ⚠ unknown status")
         header    (str "[fn " sym "]"
                        (when sig (str "  " sig))
@@ -163,13 +95,11 @@
 (defn render-html
   "Interactive card. Header line + signature + doc + collapsible source.
 
-   Status pills: `specced`, `private`, `tested`, `test-passing`. The
-   last two are joined from `:seon.test` rows whose source references
-   this fn (substring heuristic; matches P4 auto-test-run discovery).
-   When `:seon.fn/schema-error` is set, the schema-error badge replaces
-   the `tested` row with a red one-line warning."
+   Status pills: `specced` and `private`. Test outcomes render on their own
+   `:seon.test` facts; this card does not invent fn↔test edges from source
+   substrings. A schema error renders as a red one-line warning."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
-  [{:seon.db/keys [db] :seon.render/keys [node entity]}]
+  [{:seon.render/keys [node entity]}]
   (let [entity   (or node entity)
         sym      (or (:seon.fn/sym entity) "?")
         arglists (:seon.fn/arglists entity)
@@ -181,23 +111,16 @@
         src      (or (:seon.fn/source entity) "")
         sig      (arglists-str sym arglists)
         long?    (> (count src) source-inline-threshold)
-        anchor   (str "seon-fn-" (str/replace (str sym) #"[^A-Za-z0-9_-]" "_"))
-        {:keys [tested? test-passing? failure-summary]} (test-status db sym)]
+        anchor   (str "seon-fn-" (str/replace (str sym) #"[^A-Za-z0-9_-]" "_"))]
     [:div {:id anchor :class "py-1"}
      [:div {:class "flex items-baseline gap-2 flex-wrap"}
       [:span {:class "text-xs font-mono font-semibold text-amber-400"} "fn"]
       [:span {:class "text-xs font-mono text-text-100"} sym]
       (status-pill "specced" (if specced :ok :warn))
-      (when priv (pill "private" true))
-      (status-pill "tested" (if tested? :ok :warn))
-      (when tested?
-        (status-pill "test-passing" (if test-passing? :ok :err)))]
+      (when priv (pill "private" true))]
      (when schema-err
        [:div {:class "mt-1 text-xs font-mono text-error rounded bg-base-900 px-1.5 py-1"}
         (str "✗ schema error: " schema-err)])
-     (when (and tested? (false? test-passing?) failure-summary)
-       [:div {:class "mt-1 text-xs font-mono text-error/80 rounded bg-base-900 px-1.5 py-1"}
-        (str "✗ " failure-summary)])
      (when sig
        [:div {:class "text-xs font-mono text-amber-200/80 mt-0.5"} sig])
      (when-let [d (short-doc doc)]

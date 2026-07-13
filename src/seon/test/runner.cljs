@@ -18,7 +18,6 @@
    roadmap context."
   (:refer-clojure :exclude [run!])
   (:require [cljs.test :as t]
-            [clojure.string :as str]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.db :as db]
@@ -61,7 +60,7 @@
 (schema/register! ::ns   :symbol)
 (schema/register! ::record? :boolean)
 (schema/register! ::trigger
-  [:enum ::manual ::on-fn-redef ::pre-victory ::cli])
+  [:enum ::manual ::on-test-definition ::pre-victory ::cli])
 
 (schema/register! ::recorded-syms [:vector :string])
 
@@ -144,10 +143,9 @@
 (schema/register! :seon.test/last-passed-at :inst)
 (schema/register! :seon.test/last-failed-at :inst)
 (schema/register! :seon.test/last-failure-summary :string)
-;; Phase 4 (mvp-completion-plan 2026-05-27): persist the deftest source
-;; so we can later scan `:seon.test/source` to find tests that reference
-;; a redefined fn (auto-test-on-fn-redef). `:seon.test/ns` is a lookup-ref
-;; for parity with `:seon.fn/ns` and `:seon.schema/ns`.
+;; Persist the deftest source for reconstruction and inspection.
+;; `:seon.test/ns` is a lookup-ref for parity with `:seon.fn/ns` and
+;; `:seon.schema/ns`.
 (schema/register! :seon.test/source :string)
 (schema/register! :seon.test/ns :seon.db/ref)
 (schema/register! :seon.test/created-at :inst)
@@ -821,33 +819,3 @@
   (await (run! (cond-> {::ns ns ::record? record?}
                  trigger (assoc ::trigger trigger)
                  (::db/conn request) (assoc ::db/conn (::db/conn request))))))
-
-;; ============================================================
-;; Phase 4 (mvp-completion-plan 2026-05-27) — auto-test-on-fn-redef.
-;; Find every `:seon.test` row whose source mentions `fn-sym`. Used
-;; by `seon.eval/eval-batch!` after a `:seon.fn` is teed: any test
-;; that references the just-redefined fn re-runs.
-;;
-;; v0 heuristic: substring match on the source string. Fragile (a fn
-;; named `foo` will match comments / docstrings / unrelated symbols
-;; that share the suffix), but the analyzer doesn't carry per-deftest
-;; body fn-ref data we could query, and writing a fresh walker is more
-;; than this MVP slice. Tighter matching is a Phase 4.1 follow-up.
-;; ============================================================
-
-(defn tests-referring-to
-  "The fully-qualified test syms whose `:seon.test/source` mentions `fn-sym`.
-
-   Accepts `fn-sym` as string or symbol. Pure DB
-   read — safe to call inside an eval-batch! tx scope."
-  {:malli/schema [:=> [:catn [::fn-sym [:or :string :symbol]]] [:vector :symbol]]}
-  [fn-sym]
-  (let [needle (str fn-sym)
-        rows   (db/query
-                 {::db/query '[:find ?sym ?source
-                               :where
-                               [?e :seon.test/sym ?sym]
-                               [?e :seon.test/source ?source]]})]
-    (vec (for [[sym source] rows
-               :when (and source (str/includes? source needle))]
-           (symbol sym)))))

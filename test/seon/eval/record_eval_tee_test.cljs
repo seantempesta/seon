@@ -568,7 +568,7 @@
 ;; "remove actual test metadata … cannot be present in analysis cached to
 ;; disk"). build-tee-entities used to check `(:test (:meta var-map))` —
 ;; ALWAYS nil — so agent deftests teed only as :seon.fn rows, never
-;; :seon.test rows: the :seon.test replay lane, tests-referring-to and the
+;; :seon.test rows: the :seon.test replay lane and the
 ;; auto-run never saw agent tests. These tests pin the fix: a deftest evaled
 ;; through the eval surface tees EXACTLY one :seon.test row (core
 ;; index-tests shape: sym/ns/source/created-at) and NO :seon.fn row —

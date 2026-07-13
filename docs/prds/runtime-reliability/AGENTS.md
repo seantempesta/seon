@@ -139,6 +139,9 @@ process verbs are not primary UX.
 - Full test-run values are owned by the evaluator's ordinary addressable result
   symbols. The runner persists only queryable per-test outcome facts; do not
   restore a second atom-backed recent-result history.
+- Test dependencies are facts or they do not exist. Source-substring scans no
+  longer invent fn↔test relationships for reruns or status rendering; newly
+  defined tests still run from the exact analyzer diff.
 - Database-browser pages use EAVT/AEVT/AVET cursors, never Datalog
   offset/limit. Add a general upstreamable Datahike `count-datoms` API over its
   existing O(log n) subtree count-slice; keep transaction bodies lazy/capped

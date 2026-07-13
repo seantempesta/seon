@@ -1740,33 +1740,19 @@
 
 (declare changed-defs)
 
-(defn- collect-auto-test-targets
-  "Phase 4 (mvp-completion-plan 2026-05-27): return the set of FQ test
-   syms to run after a successful eval. Two sources:
+(defn- collect-new-test-targets
+  "Return the FQ test syms newly defined by this successful eval.
 
-   - Tests newly defined in THIS eval (a fresh `(deftest …)` form). The
-     symbol comes from the [[changed-defs]] diff filtered via
-     [[deftest-def?]].
-   - Tests in the DB whose `:seon.test/source` mentions any fn newly
-     defined in THIS eval. Substring match — v0 heuristic, see
-     `seon.test.runner/tests-referring-to`.
-
-   Result is a set so a deftest that also matches the substring scan
-   (the test source mentions its own sym) only runs once."
+   The analyzer snapshot gives this relationship exactly. Existing tests are
+   not guessed from source substrings when an ordinary fn changes; dependency-
+   based reruns resume only when the analyzer emits durable per-test reference
+   facts that the database can query."
   [compile-state defs-before source eval-ns]
   (let [new-defs    (changed-defs compile-state defs-before source eval-ns)
         new-tests   (for [{:seon.analyzer-info/keys [var-map]} new-defs
                           :when (deftest-def? var-map)]
-                      (symbol (str (:name var-map))))
-        new-fn-syms (for [{:seon.analyzer-info/keys [var-map]} new-defs
-                          :when (and (:fn-var var-map)
-                                     ;; deftest's public fn ALSO has
-                                     ;; :fn-var true; skip — already
-                                     ;; in new-tests above.
-                                     (not (deftest-def? var-map)))]
-                      (symbol (str (:name var-map))))
-        referring   (mapcat test-runner/tests-referring-to new-fn-syms)]
-    (set (concat new-tests referring))))
+                      (symbol (str (:name var-map))))]
+    (set new-tests)))
 
 (defn- collect-instrument-targets
   "From the snapshot diff used by `build-tee-entities`, return the seq of
@@ -2326,14 +2312,13 @@
         schema-entities (for [k new-schemas]
                           (schema-tee-row k (schema/schema-definition k)
                                           source at))
-        ;; Phase 4 (mvp-completion-plan 2026-05-27): deftest defs carry
+        ;; Deftest defs carry
         ;; the analyzer's top-level `:test true` marker (see
         ;; [[deftest-def?]] — the old `(:test (:meta var-map))` check was
         ;; ALWAYS nil, the live-resume bug where agent deftests never got
         ;; a :seon.test row). Each gets a `:seon.test` row keyed on the
-        ;; FQ sym (identity attr). Source is the same form text —
-        ;; `tests-referring-to` later substring-scans it to find tests
-        ;; that mention a redefined fn.
+        ;; FQ sym (identity attr). Source is retained for reconstruction and
+        ;; human inspection, never parsed as a dependency index.
         test-entities (for [{:seon.analyzer-info/keys [ns var-map]} new-defs
                             :let [{:seon.analyzer-info/keys [sym]}
                                   (analyzer-info/var-projection var-map)]
@@ -4220,15 +4205,14 @@
                 ;; this fn's instrument aborts, the batch continues.
                 (error/record! {:seon.error/raw e :seon.error/fault :core})))
             ;; Phase 4 (mvp-completion-plan 2026-05-27) —
-            ;; auto-test-run. After the tee tx, any new
-            ;; `:seon.test` rows + any existing `:seon.test`
-            ;; rows whose source mentions a newly-tee'd fn-sym
-            ;; are re-run. Wrapped in :origin :test-run so the
+            ;; auto-test-run. After the tee tx, newly-defined tests run once.
+            ;; Existing tests are never selected by source-substring guessing.
+            ;; Wrapped in :origin :test-run so the
             ;; loop guard below short-circuits if a test body
             ;; itself calls `eval-batch!`. Best-effort: thrown
             ;; runner errors don't abort the batch.
             (when-not outer-test-run?
-              (let [targets (collect-auto-test-targets
+              (let [targets (collect-new-test-targets
                               compile-state defs-before source @current-ns)]
                 (when (seq targets)
                   (try
@@ -4240,7 +4224,7 @@
                                    {:seon.test.runner/vars    (vec targets)
                                     :seon.test.runner/record? true
                                     :seon.test.runner/trigger
-                                    :seon.test.runner/on-fn-redef})))))
+                                    :seon.test.runner/on-test-definition})))))
                     (catch :default e
                       ;; The test RUNNER escaping (individual test failures
                       ;; are captured as :seon.test data upstream) is a core

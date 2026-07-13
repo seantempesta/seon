@@ -564,10 +564,10 @@ not a substitute for clear namespace APIs. See [[data-model]] §5.5 and
 fn I just (re)defined pass its `:test`?" — and score an edit the way every serious
 benchmark does: it fixed the broken case AND didn't break the working ones.
 
-**Floor:** `seon.test.runner` — the engine (cljs.test capture, fixtures, one
-bounded recent-run process cache, and DB summary projection) stays the protected
-floor; `my.test` is the lean wrapper. Full event vectors are volatile drill-down
-data and evict oldest-first; the durable pass/fail projection remains queryable.
+**Floor:** `seon.test.runner` — the engine (cljs.test capture, fixtures, and DB
+summary projection) stays the protected floor; `my.test` is the lean wrapper.
+Full event vectors return through the evaluator's ordinary addressable result
+symbol; the durable pass/fail projection remains queryable.
 Authoring is a COLOCATION convention (`{:test (fn [] (is …))}` meta or `deftest`
 — no "register a test" call).
 
