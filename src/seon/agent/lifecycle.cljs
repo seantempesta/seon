@@ -53,7 +53,7 @@
          "(it is not currently running).")}})
 
 (defn ^:async wait
-  "Park the calling agent: close its open run `:waited` → derived `:idle`.
+  "Park the calling agent: close the open run `:waited`, derive `:idle`.
 
    `:idle` is the single wakeable parked state (a new message opens a fresh
    run). The `note` is informational only — WHY it parked is the run's `:waited`
@@ -194,7 +194,7 @@
      (internal/no-agent-error "complete"))))
 
 (defn ^:async pause
-  "Hold the calling agent WITHOUT killing it — stamp its run `paused-at`.
+  "Hold the calling agent WITHOUT killing it; stamps its run `paused-at`.
 
    Derived `:paused`; banks the remaining wall-clock budget. `resume`
    re-extends the deadline by it. Returns `:paused` on success, the error

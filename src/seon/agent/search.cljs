@@ -305,9 +305,10 @@
                     (or (some-> e .-message) (str e)))))))
 
 (defn grep-graph
-  "Text-search the LIVE PROGRAM GRAPH — the literal counterpart of `grep`.
+  "Search stored code (functions, schemas, namespaces) by regex.
 
-   The literal sibling of SEON_EMBED semantic recall. Where `grep`
+   Text-search over the LIVE PROGRAM GRAPH — the literal counterpart of
+   `grep`, and the literal sibling of SEON_EMBED semantic recall. Where `grep`
    searches file CONTENTS, this searches the CODE stored in seon.db:
    :seon.fn (source + name + docstring), :seon.schema (source), and
    :seon.ns (source) — fns/schemas/namespaces that may exist in NO source

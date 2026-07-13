@@ -171,7 +171,8 @@
   (< (or (:seon.agent.message/hops m) 0) warn/hop-cap))
 
 (defn ^:async message!
-  "Send a message — THE single entry point for `:seon.agent.message` writes.
+  "Send a message; the single entry point for message writes.
+
    Map-in / map-out; returns a CONCISE envelope, never the raw
    tx-report:
      {:seon.agent.message/ok? true :seon.agent.message/id _ :seon.agent.message/hops _}
@@ -323,8 +324,10 @@
 ;; ============================================================
 
 (defn ^:async user
-  "Send a message to your human — `message!` with `to` := THE one user.
-   `from` is you (the ALS agent). Returns `message!`'s concise envelope.
+  "Send a message to your human.
+
+   [[message!]] with `to` := THE one user. `from` is you (the ALS
+   agent). Returns `message!`'s concise envelope.
    This is how you say something to the human watching your REPL:
 
      (message/user \"done — stored 2 rows\")"

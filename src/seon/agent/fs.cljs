@@ -360,9 +360,9 @@
 ;; ============================================================
 
 (defn read-file
-  "Read a file (sync).
+  "Read a file's text, whole or as a paged line window.
 
-   Returns:
+   Sync. Returns:
      {:seon.agent.fs/ok? true  :seon.agent.fs/path <p> :seon.agent.fs/content <s>}    ; ok
      {:seon.agent.fs/ok? false :seon.agent.fs/path <p> :seon.agent.fs/error   <s>}    ; fail
 
@@ -501,7 +501,9 @@
       :wasi (int/wasi-pending path "edit-file"))))
 
 (defn list-dir
-  "List directory entries (filenames only, no recursion) — sync."
+  "List the filenames in one directory, without recursion.
+
+   Sync; entries are names only, not full paths."
   {:malli/schema [:=> [:cat :seon.agent.fs/list-request] :seon.agent.fs/list-response]}
   [{:seon.agent.fs/keys [path]}]
   (case (platform/host)
@@ -516,7 +518,9 @@
     :wasi (int/wasi-pending path "list-dir")))
 
 (defn stat
-  "Stat a path (sync). Returns mtime and dir?/file? booleans."
+  "Check a path's type and mtime without reading it.
+
+   Sync stat: returns `mtime` plus `dir?`/`file?` booleans."
   {:malli/schema [:=> [:cat :seon.agent.fs/stat-request] :seon.agent.fs/stat-response]}
   [{:seon.agent.fs/keys [path]}]
   (case (platform/host)
@@ -533,7 +537,7 @@
     :wasi (int/wasi-pending path "stat")))
 
 (defn file-exists?
-  "True/false convenience — checks via stat, false on any error.
+  "Check whether a path exists; false on any error.
 
    Soft-fails to false. Named to avoid shadowing `cljs.core/exists?`."
   {:malli/schema [:=> [:cat :seon.agent.fs/stat-request] :boolean]}
@@ -732,7 +736,7 @@
       (assoc :seon.agent.fs/normalizations (:seon.agent.fs.match/normalizations decision)))))
 
 (defn replace!
-  "Replace EXACT `:seon.agent.fs/find` text in a file — deterministic only.
+  "Replace exact `:seon.agent.fs/find` text in a file, deterministically.
 
    The safe anchored editor. The pure cascade (seon.agent.fs.match) tries,
    first hit wins: exact text occurring exactly `:seon.agent.fs/expected-count`
@@ -797,7 +801,7 @@
       :wasi (->anchored-fail (int/wasi-pending path "replace!")))))
 
 (defn insert!
-  "Insert `:seon.agent.fs/content` at a line boundary — exactly one anchor.
+  "Insert `:seon.agent.fs/content` into a file at one line anchor.
 
    Pass EXACTLY ONE of `:seon.agent.fs/after-line` / `:seon.agent.fs/before-line`
    (1-based). `after-line 0` prepends; `before-line (inc total)` appends;

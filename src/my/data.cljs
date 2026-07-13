@@ -56,7 +56,7 @@
   [:map [:seon.items/items :seon.items/items] [::group-key ::group-key] [::key ::key]])
 
 (defn rows
-  "Every entity carrying `attr`, pulled to self-describing maps.
+  "Fetch every entity carrying `attr` as self-describing maps.
 
    Attribute-presence as DATA — there are no kinds; you find a set by the
    attr it asserts. The root of every analysis pipeline: once rows are
@@ -77,7 +77,7 @@
      :seon.items/count (count items)}))
 
 (defn sum-by
-  "Total of `key` across the given item maps.
+  "Total a numeric `key` across the given item maps.
 
    Reduces over MAPS, so the datalog `(sum ?x)`/`:with` dedup collapse
    cannot happen — two rows of 5
@@ -92,7 +92,7 @@
   (reduce + 0 (keep key items)))
 
 (defn max-by
-  "The item MAP whose `key` is largest — returns the ENTITY, not the value.
+  "Find the item map whose `key` is largest; the row, not the value.
 
    So 'which one is biggest' is one call, not a `(max ?x)`+rejoin. Ties:
    the FIRST row at the max wins (strict `>`); nil when no items.
@@ -108,9 +108,10 @@
             (first items) (rest items))))
 
 (defn group-sum
-  "Sum `key` per distinct `group-key` value → a `:seon.items/*` envelope.
+  "Sum a numeric field per group, one total row per group value.
 
-   Each row is `{:my.data/group <value> :my.data/total <sum>}`. The
+   Sums `key` per distinct `group-key` value into a `:seon.items/*`
+   envelope. Each row is `{:my.data/group <value> :my.data/total <sum>}`. The
    reusable generalization of x3's filter-then-sum and source-stats'
    per-topic tallies. Emits an envelope (not a bare map) so it threads
    straight into [[max-by]] — group, THEN argmax over the groups:

@@ -251,7 +251,7 @@
            ::message (str "load failed: " (:seon.agent.ctx/error res))})))))
 
 (defn ^:async unload
-  "Unload skill `skill-name` — remove its `:skill/<name>` block.
+  "Unload skill `skill-name`, removing its `:skill/<name>` block.
 
    Its body (and token cost) is gone next render. No-op success if it
    wasn't loaded.
@@ -267,7 +267,7 @@
        ::message (str "unload failed: " (:seon.agent.ctx/error res))})))
 
 (defn list
-  "The skill catalog — every available skill and whether YOU loaded it.
+  "The skill catalog: every available skill and whether YOU loaded it.
 
    Each entry carries its description and `::loaded?` — derived from your
    own `:skill/*` blocks. Read it to discover what you can `(load …)`.

@@ -324,9 +324,10 @@
           (internal/write-result "step!" id env))))))
 
 (defn ^:async plan!
-  "Author a WHOLE plan in ONE transact — goal, pace, nested steps, deps.
+  "Create a whole plan at once: goal, pace, nested steps, and deps.
 
-   The root carries `:goal` (why — it outlives your transcript) and
+   One transact authors the tree. The root carries `:goal` (why — it
+   outlives your transcript) and
    `:pace` (`:multi-session` = don't race it to done in one run).
    `:children` nests (`:parent` edges); `:ref` labels a node; `:after`
    names labels it runs after (`needs` edges — earlier OR later labels);
@@ -381,10 +382,11 @@
                                [:seon.db/error :seon.error/message])))))))))))
 
 (defn ^:async active!
-  "Take a step up: mark it `:active` — your rendered position anchor.
+  "Mark a plan step `:active`, the one you are working on now.
 
-   One position at a time: any other `:active` step of the same agent is
-   demoted back to `:open`. A `:done` step must be `reopen!`ed first."
+   The active step is your rendered position anchor. One position at a
+   time: any other `:active` step of the same agent is demoted back to
+   `:open`. A `:done` step must be `reopen!`ed first."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
   [{::keys [id] :as request}]
   (or
@@ -445,9 +447,9 @@
            (internal/write-result "reopen!" id)))))
 
 (defn ^:async needs!
-  "Add dependency edge(s) — the step is ready only after each `:on` is done.
+  "Add dependency edges; a step is ready only when its needs are done.
 
-   Cardinality-many. Remove one via
+   Each `:on` ref becomes a `::needs` edge. Cardinality-many. Remove one via
    `[:db/retract [:my.plan/id id] :my.plan/needs ref]`."
   {:malli/schema [:=> [:cat ::needs-request] ::write-response]}
   [{::keys [id on] :as request}]
@@ -461,9 +463,10 @@
            (internal/write-result "needs!" id)))))
 
 (defn ^:async move!
-  "Re-parent a step — the new parent replaces the old.
+  "Move a step under a new parent step.
 
-   `:parent` is cardinality-one. Identity, status, and deps unchanged."
+   `:parent` is cardinality-one, so the new parent replaces the old.
+   Identity, status, and deps unchanged."
   {:malli/schema [:=> [:cat ::move-request] ::write-response]}
   [{::keys [id parent] :as request}]
   (or
@@ -474,9 +477,10 @@
            (internal/write-result "move!" id)))))
 
 (defn ^:async drop!
-  "Retract a step AND its whole subtree.
+  "Delete a step and its whole subtree from the plan.
 
-   Plain `parent` ref ⇒ no cascade, so it walks descendants. History keeps
+   Retracts the step and every descendant, without marking anything
+   complete. Plain `parent` ref ⇒ no cascade, so it walks descendants. History keeps
    them (undo via db/as-of). → {::ok? true ::dropped <count>} or a fail
    envelope."
   {:malli/schema [:=> [:cat ::id-request] ::drop-response]}
@@ -609,7 +613,7 @@
     []))
 
 (defn tree
-  "The plan as nested EDN — the structural read you re-plan over.
+  "Get the whole plan as nested EDN, the structural read for re-planning.
 
    Children under `:my.plan/_parent`, dep ids inline. {::root? id} → that
    subtree; {::all? true} → every agent's forest; default → the calling
@@ -627,7 +631,7 @@
               []))))
 
 (defn document
-  "Your OPEN plan as ONE editable document — edit it, then `reconcile!`.
+  "Get your open plan as one document to edit and `reconcile!`.
 
    `tree`'s nested shape (children under `:my.plan/_parent`, dep ids
    inline) with every `:done` step EXCLUDED — history can't be edited
@@ -639,9 +643,9 @@
   (internal/prune-done (tree request)))
 
 (defn status
-  "Derived view of one step — done/blocked/ready + subtree roll-up.
+  "Check one step's status: done, blocked, ready, and progress.
 
-   done? (subtree complete), blocked? (stored :blocked OR an unmet need),
+   Derived view — done? (subtree complete), blocked? (stored :blocked OR an unmet need),
    ready? (open unblocked leaf), and the {::done ::total} subtree roll-up.
    Pass ::id."
   {:malli/schema [:=> [:cat ::id-request] ::status-response]}
@@ -649,9 +653,9 @@
   (internal/status-view @db/*conn* id))
 
 (defn list-open
-  "Unfinished steps (open/active/blocked), oldest first, per agent.
+  "List unfinished steps (open, active, blocked), oldest first.
 
-   Omit `:seon.agent/id` and the boundary fills in YOU; {::all? true}
+   Per agent: omit `:seon.agent/id` and the boundary fills in YOU; {::all? true}
    lists every agent's. Flat — includes parents and blocked steps (use
    `next` for the ready-leaf focus queue)."
   {:malli/schema [:=> [:cat ::list-request] ::list-response]}

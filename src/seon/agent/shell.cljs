@@ -250,8 +250,9 @@
   {:seon.agent.shell/granted? (in/granted?)})
 
 (defn ^:async run
-  "Run a command as argv (never a shell string); result is data.
+  "Run a command; returns its exit code and full output as data.
 
+   The command is argv (`::cmd` + `::args`), never a shell string.
    `^:async` — returns a Promise that ALWAYS resolves to a
    :seon.agent.shell/run-response envelope (never rejects; errors are values).
 
@@ -331,8 +332,9 @@
                     (or (some-> e .-message) (str e)))))))
 
 (defn ^:async py-run
-  "Run Python source via stdin (`python3 -`); result is data.
+  "Run Python source code; returns its exit code and output as data.
 
+   Ships the source via stdin (`python3 -`).
    The thin Python specialization of [[run]] — same gate (SEON_SHELL),
    same :seon.agent.shell/run-response envelope, same full-output rule. The
    load-bearing rule: :seon.agent.shell/source is shipped to the interpreter AS STDIN DATA,
@@ -434,7 +436,7 @@
        (= (:seon.agent.shell/agent-id j) (db/current-agent-id))))
 
 (defn list-jobs
-  "This agent's background jobs in the volatile table, newest-first.
+  "List your background jobs, newest first.
 
    Scoped to the CURRENT agent (the reactive :seon.agent/id filter): background
    jobs are volatile per-agent runtime artifacts, so an agent sees only the
@@ -481,7 +483,7 @@
     (in/unknown-job job-id)))
 
 (defn job-output
-  "A background job's captured output — full-so-far, or only-new via ::since.
+  "Read a background job's captured output, full or only-new.
 
    Reads the chosen :seon.agent.shell/stream (:out default / :err) as an
    ORDINARY eval value (no token cap — display economy is the render layer's;

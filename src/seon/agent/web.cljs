@@ -200,7 +200,7 @@
 ;; ============================================================
 
 (defn grants
-  "What web access do I have? — the SEON_WEB grant + reachability + search.
+  "What web access do I have? The SEON_WEB grant, reachability, search.
 
    Returns the live truth every function enforces: `:seon.agent.web/enabled?`
    (SEON_WEB granted at all), `:seon.agent.web/policy` (the host-owned
@@ -271,7 +271,7 @@
       (::title e) (assoc ::title (::title e)))))
 
 (defn ^:async fetch
-  "Fetch the page at `:seon.agent.web/url` — markdown preview + blob.
+  "Fetch a web page as markdown: a preview now, the full text as a blob.
 
    The request map's keys live in THIS ns: the URL key is
    :seon.agent.web/url (a :seon.web/url or bare :url is NOT a request
@@ -405,7 +405,7 @@
        "fact-lookup query (or retry) if you need citable web sources."))
 
 (defn ^:async search
-  "Search the web — ranked result rows plus a grounded answer.
+  "Search the web; ranked result rows plus a grounded answer.
 
    The request map's keys live in THIS ns: :seon.agent.web/query (required,
    non-blank), :seon.agent.web/max-results (default 10, capped 20),

@@ -792,9 +792,9 @@
                 :seon.error/message msg}})
 
 (defn ^:async run!
-  "Universal entrypoint.
+  "Run tests selected by var symbols or by namespace; returns data.
 
-   Resolves the selector to a vector of FQ test
+   The universal entrypoint: resolves the selector to a vector of FQ test
    symbols, runs them via `run-vars`, optionally records the projection
    to the DB.
 
@@ -840,7 +840,10 @@
         base))))
 
 (defn ^:async run-ns!
-  "Sugar: run every test var defined in `::ns`, recording the projection."
+  "Run every test in one namespace and record the results.
+
+   Sugar over [[run!]]: every test var defined in `::ns`, with the
+   projection recorded by default."
   {:malli/schema [:=> [:cat [:map [::ns ::ns]
                                   [::record? {:optional true} ::record?]
                                   [::trigger {:optional true} ::trigger]

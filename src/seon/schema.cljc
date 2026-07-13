@@ -208,7 +208,7 @@
   (atom nil))
 
 (defn set-tee-fn!
-  "Install the registration self-tee hook — called once at load.
+  "Install the registration self-tee hook, called once at load.
 
    The conn-owning side (seon.eval) installs it. `f` is `(fn [k form] …)`;
    it must never throw (a tee/durability failure must not fail the in-memory
@@ -416,7 +416,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn clear-all!
-  "Clear all registered schemas. USE WITH CAUTION — only for testing."
+  "Clear all registered schemas; testing only, use with caution."
   {:malli/schema [:=> [:cat] :map]}
   []
   (reset! *schemas {}))
