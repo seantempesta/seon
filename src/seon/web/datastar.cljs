@@ -407,10 +407,35 @@
     (catch :default e
       (log/error-console! "seon.web.datastar" "push-event! failed" e))))
 
+(defn- shared-full-event!
+  "Return one current full patch shared by equivalent open views.
+
+   A normalized subscription is already the render authority for equivalent
+   sockets. Its first consumer renders the full view; later consumers reuse
+   those exact bytes until a database transaction invalidates the value. The
+   cache is bounded by live subscriptions and disappears with the final
+   consumer—there is no second cache registry or retained closed view."
+  [{render-full :seon.web.feed/render-full
+    subscription-key ::subscription-key}]
+  (let [subscription (get-in @!feeds [::subscriptions subscription-key])]
+    (or (::full-event subscription)
+        (let [event (view-fn-patch render-full)
+              subscription-id (::subscription-id subscription)]
+          (swap! !feeds
+                 (fn [registry]
+                   (if (= subscription-id
+                          (get-in registry [::subscriptions subscription-key
+                                            ::subscription-id]))
+                     (assoc-in registry [::subscriptions subscription-key
+                                         ::full-event]
+                               event)
+                     registry)))
+          event))))
+
 (defn- push-full!
-  "Render and write one connection's initial full view."
-  [{render-full :seon.web.feed/render-full :as conn}]
-  (push-event! conn (view-fn-patch render-full)))
+  "Write one connection's normalized subscription full view."
+  [conn]
+  (push-event! conn (shared-full-event! conn)))
 
 (defn- subscription-key-for
   "Normalized subscription coordinate for one feed or socket view."
@@ -486,7 +511,8 @@
                              (-> old-subscription
                                  (assoc ::subscription-id (random-uuid)
                                         ::subscription-key next-key
-                                        ::consumer-view-ids #{})))
+                                        ::consumer-view-ids #{})
+                                 (dissoc ::full-event)))
             consumer (assoc updated-view ::subscription-key next-key)]
         (-> detached
             (assoc-in [::views view-id] consumer)
@@ -721,7 +747,22 @@
 ;; Lifecycle — db/listen! IS the refresh signal.
 ;; ============================================================
 
-(defn- on-tx [change] (schedule-broadcast! change))
+(defn- invalidate-full-events
+  "Drop cached first paints after one authoritative database change."
+  [registry]
+  (update registry ::subscriptions
+          (fn [subscriptions]
+            (into {}
+                  (map (fn [[subscription-key subscription]]
+                         [subscription-key (dissoc subscription ::full-event)]))
+                  subscriptions))))
+
+(defn- on-tx [change]
+  ;; Invalidate immediately, even when the coalescer deliberately delays the
+  ;; open sockets' partial morph. A newly opened view must always render from
+  ;; the latest database value rather than reuse a pre-transaction first paint.
+  (swap! !feeds invalidate-full-events)
+  (schedule-broadcast! change))
 
 (defn install!
   "Install the view tx-listener. Idempotent — same key replaces."

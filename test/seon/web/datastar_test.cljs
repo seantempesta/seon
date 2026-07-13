@@ -765,6 +765,35 @@
           "the new dependency produces the expected targeted morph")
       (.emit req-b "close"))))
 
+(deftest equivalent-open-views-share-first-paint-until-a-transaction
+  (let [renders (atom 0)
+        pushes (atom [])
+        feed-a (test-feed
+                 "first-paint-a"
+                 {:seon.web.feed/render-full
+                  (fn []
+                    (swap! renders inc)
+                    [:main {:id "app-view"} "current"])})
+        feed-b (assoc feed-a ::datastar/view-id "first-paint-b")
+        registry (atom (feed-registry [feed-a feed-b]))
+        conn-a (registry-view @registry "first-paint-a")
+        conn-b (registry-view @registry "first-paint-b")]
+    (with-redefs [datastar/!feeds registry
+                  datastar/push-event!
+                  (fn [conn event]
+                    (swap! pushes conj [(::datastar/view-id conn) event]))
+                  datastar/schedule-broadcast! (fn [_] nil)]
+      (@#'datastar/push-full! conn-a)
+      (@#'datastar/push-full! conn-b)
+      (is (= 1 @renders)
+          "equivalent sockets render one shared initial database view")
+      (is (= 2 (count @pushes))
+          "each socket receives the shared first paint")
+      (@#'datastar/on-tx {:seon.db/changed-attrs #{:example/value}})
+      (@#'datastar/push-full! conn-b)
+      (is (= 2 @renders)
+          "a transaction invalidates the shared first paint before reconnect"))))
+
 (deftest obsolete-subscription-does-not-push-into-a-rebound-view
   (let [pushes (atom 0)
         initial-feed
