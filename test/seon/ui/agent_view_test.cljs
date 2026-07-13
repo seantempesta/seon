@@ -4,6 +4,7 @@
     [cljs.test :refer [async deftest is testing]]
     [clojure.string :as str]
     [seon.agent.ctx :as agent-ctx]
+    [seon.agent.ctx.render-fns :as render-fns]
     [seon.client :as client]
     [seon.db :as db]
     [seon.ui.agent-view :as agent-view]
@@ -84,6 +85,32 @@
               (let [s (html/->string (agent-view/agent-view @conn agent-a))]
                 (is (str/includes? s "DERIVED-HTML"))
                 (is (str/includes? s "context-render-fn-live"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest pinned-canvas-renderer-contributes-its-domain-dependencies
+  (async done
+    (-> (with-agents
+          [[agent-a []]]
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   [{:seon.agent/id agent-a
+                     :seon.render.canvas/content 'my.agent.view/canvas}]})
+                (.then
+                  (fn [_]
+                    (with-redefs
+                      [render-fns/renderer-read-attrs
+                       (fn [{renderer :seon.render/html}]
+                         (is (= 'my.agent.view/canvas renderer))
+                         {:seon.agent.ctx.render-fns/attrs
+                          [:my.agent.view/state]})]
+                      (let [deps
+                            (:seon.ui.agent-view/surface-attrs
+                              (agent-view/agent-view-dependencies
+                                @conn agent-a))]
+                        (is (contains? deps :my.agent.view/state)))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 

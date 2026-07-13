@@ -197,7 +197,8 @@
                  (some-> (db/pull dbv [:seon.render.canvas/content]
                                   [:seon.agent/id agent-id])
                          :seon.render.canvas/content
-                         (db/decode-edn-value :seon.render.canvas/content))
+                         (#(db/decode-edn-value
+                             :seon.render.canvas/content %)))
                  (catch :default _ nil))
         derived (when-not (symbol? pinned)
                   (::render-fns/tile-sym
@@ -214,7 +215,8 @@
                  (some-> (db/pull dbv [:seon.render.canvas/content]
                                   [:seon.agent/id agent-id])
                          :seon.render.canvas/content
-                         (db/decode-edn-value :seon.render.canvas/content))
+                         (#(db/decode-edn-value
+                             :seon.render.canvas/content %)))
                  (catch :default _ nil))
         derived (when-not (symbol? pinned)
                   (::render-fns/tile-sym
