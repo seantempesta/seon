@@ -1,143 +1,97 @@
 ---
 name: seon-context-config
-description: "Customize what a seon agent SEES — its context blocks, skill loadout, and render caps. Use when editing config/system.edn or config/acme.edn, adding a manifest section, changing which skills/blocks load per cluster, working in seon.config / the :namespaces block / seon.agent.ctx, tuning a render cap, or chasing why an agent's prompt shows (or omits) something. Carries the durable config/context footguns every Claude Code lane must know."
+description: "Customize the startup manifest that seeds Seon's database-backed context, namespace policy, skill corpus, routes, and render caps. Use when editing config/system.edn or another SEON_CONFIG manifest, changing agent context blocks, or diagnosing why a block or namespace is present."
 ---
 
-# Seon — Context & Config Customization
+# Seon context and config
 
-This is the **propagating channel for durable config/context footguns**. A gotcha
-that bites every lane lives HERE (it auto-loads into every Claude Code session).
-One-off live issues do NOT — they go in `docs/prds/agent-fsm/coordination.md` +
-the task list with `file:line` (see [§ Where issues go](#where-issues-go)).
+The startup manifest is desired-state input. At pod boot, Seon validates it,
+resolves it, and reconciles the corresponding facts into the database. Runtime
+code reads those database facts after the connection is attached.
 
-Source of truth (read before changing): `src/seon/config.cljs`,
-`config/system.edn`, `config/acme.edn`, `src/seon/agent/ctx.cljs`
-(`seed-default-ctx!`), `src/seon/agent/ctx/namespaces.cljs`.
+Read these sources before changing configuration:
 
-## The seam — ONE manifest file, per-cluster by path
+- src/seon/config.cljs
+- config/system.edn
+- src/seon/agent/ctx.cljs
+- src/seon/agent/ctx/namespaces.cljs
 
-- **ONE consolidated manifest** (`config/system.edn` default; `SEON_CONFIG=path`
-  overrides). **A per-cluster variant is a SEPARATE edn file** — there is NO
-  `#profile`, and **`SEON_PROFILE` is INERT in the pod config path** (`bin/seon`
-  still exports it, but nothing in `seon.config` reads it; memoization keys on
-  `SEON_CONFIG` only). `config/acme.edn` = the harness variant (minimal
-  overrides), `config/test.edn` = tests.
-- **Absent/empty manifest → the pod boots byte-identically to a no-config world**
-  (every key optional; defaults live in the schemas + accessors). Present → it
-  overrides only the keys it lists.
-- **Folder = corpus** (`skills-dir`: manifest `:seon.config/skills`
-  `:seon.config/dirs` first entry, else `SEON_SKILLS_DIR`, else `.claude/skills`).
-  The boot scan loads ALL skills it finds — with the default dir that is BOTH the
-  agent skills (symlinks into `seon-skills/`) AND the dev/Claude-Code skills
-  (`browser-automation`, `datastar-web-ui`, this one). There is NO
-  include/exclude curation — a cluster that wants a different corpus points
-  `SEON_SKILLS_DIR` (or `:seon.config/dirs`) at its own dir.
+## Select one manifest
 
-## The manifest sections (`:seon.config/manifest`, config.cljs)
+config/system.edn is the default. SEON_CONFIG selects a different complete EDN
+file. There is no active profile layer in the pod configuration path.
 
-1. `:seon.config/agent-context` — the v3 two-level context config the GENERIC
-   loader (`resolve-agent-context` → `seed-default-ctx!`) decodes and transacts
-   at agent creation. SPARSE: the recursive default-value-transformer fills every
-   absent key, so `{}` reproduces the default tree. Agent-level keys:
-   - `:my.skills/load` — the always-on skill-BODY presence-set (default
-     `[:repl]`), expanded by `expand-skill-blocks` into priority-16
-     `:skill/<name>` blocks (the cached prefix, below cache-breakpoint 20).
-     `[]` seeds no bodies. Consumed at seed, never an agent datom.
-   - `:seon.eval/home-requires` — the home-ns toolbelt (each entry needs
-     `:as`/`:refer`; bare `[ns]` is rejected). These requires ARE the verb
-     surface a fresh agent sees (they render as compact cards — see below).
-   - `:seon.client/wake?` — gates the wake trigger.
-   - Per-agent LLM overlays — `:seon.ai/agent-provider` / `:seon.ai/agent-model`
-     / `:seon.ai/agent-temperature` / `:seon.ai/agent-max-tokens` /
-     `:seon.ai/agent-thinking` (default `:inherit` → the global
-     `:seon.ai/config` env→DB row; an explicit value overrides that ONE agent —
-     read by `seon.ai/effective-config-for`). Example: `config/acme.edn`.
-   - `:seon.agent/ctx` — the block tree (see FOOTGUN below). The transcript
-     block carries the eval-decay + eviction dials:
-     `:seon.agent.ctx.transcript/result-decay` (age-offset → token-cap levels;
-     default 0→16384, 2→1500, 5→200) and `::tiers` (age-band eviction; empty =
-     render-all). Read reactively at render — transact and the next render
-     re-bands, no apply step. `config/acme.edn` sets its own 2-band decay.
-2. `:seon.config/root-context` — a SPARSE override merged over agent-context by
-   IDENTITY (id `"root"`, never a stored kind): scalar keys merge, `:seon.agent/ctx`
-   blocks upsert-by-name. Its `:live-tile` block sets root's canvas =
-   `seon.render.system/system-view`.
-3. `:seon.config/namespaces` — `{:seon.config/always [ns-syms]
-   :seon.config/current-ns :full|:off}` (`resolve-namespaces`, key-level merge
-   over the default). `:always` is the BOOT-STORAGE superset: those nses get
-   their REAL FULL FILE SOURCE stored at boot so they CAN render full. Which
-   nses actually render is per-agent (next section).
-4. `:seon.config/render` — the global display caps (#46) as plain literals
-   (`store-edn-cap` 16384, `eval-cap` 1500, `message-cap` 4000, the `value-*`
-   skeleton bounds…), read via the `seon.config` accessors. An env override per
-   knob is possible via aero's `#long #or [#env …]` tags in the manifest but is
-   NOT pre-wired. (`SEON_RENDER_STRICT` — the fail-loud render dial — is a
-   separate env-only flag.)
-5. `:seon.config/skills` — only the `:seon.config/dirs` corpus-dir override.
-6. `:seon.config/routes` — drop seeded `:seon.route/*` rows per cluster.
+Every manifest key is optional. An absent file resolves as an empty map. Unknown
+keys fail startup validation rather than being ignored.
 
-## What renders in the prompt body — curation, not compression
+## What boot reconciles
 
-`namespaces-block` (compact-everything-except-current) — THREE rules, driven by
-per-agent dials on the agent's `:namespaces` block entity (reactive datoms; a
-`db/transact!` changes the next render, no restart):
+- :seon.config/agent-context is the base configuration copied into a newly
+  created agent.
+- :seon.config/root-context is a sparse override for the agent whose
+  :seon.agent/id is "root". Block maps merge by :seon.agent.ctx/name.
+- :seon.config/namespaces controls which namespace sources are available and
+  whether the current namespace is shown.
+- :seon.config/render supplies cluster-wide rendering limits.
+- :seon.config/skills selects directories scanned into the pull-reference
+  corpus. Corpus entries do not become standing context blocks.
+- :seon.config/routes adds or removes database-backed route facts.
 
-- **FULL** (real whole-file source) — the agent's CURRENT ns
-  (`::current-full?`, default true; policy `:current-ns :off` kills it) + any
-  ns in the per-agent `::full-source` presence-set (default empty).
-- **COMPACT CARD** — every ns the current ns `:require`s (schemas + one-line
-  fn heads, ~3–5× smaller). So `:seon.eval/home-requires` is the lever for a
-  fresh agent's visible toolbelt.
-- **DROPPED** — everything else (still grep/render-namespace reachable);
-  `*.internal` / `*-test` never render. `::with-tests` / `::current-tests?`
-  ride the indexed test source along.
+The boot seed also reconciles the :seon.config singleton. Once the database is
+attached, accessors read that singleton instead of repeatedly treating the file
+as runtime state.
 
-Signature-whitelist rendering is RETIRED — there is no hardcoded ns allow-list
-in the renderer; token budget is bound by CURATION (which nses, via requires +
-`::full-source` pins), never by a compressed rendering of a ns.
+## Agent context is explicit
 
-## Durable footguns (the reason this skill exists)
+:seon.agent/ctx is the complete base block vector. There is no hidden default
+tree and no implicit skills block. The shipped minimal tree currently includes
+namespaces, canvas, plan, and transcript blocks.
 
-- **A manifest that supplies `:seon.agent/ctx` REPLACES the default block tree
-  wholesale** — malli default-fill only fills ABSENT keys; vectors don't merge.
-  To customize ONE block you must re-list EVERY default block you keep, or
-  `:namespaces` and the rest silently vanish (see `config/acme.edn`'s comment).
-  `:seon.config/root-context` blocks are the exception: upsert-by-name.
-- **Config is runtime EDN → NO rebuild.** Edit `config/*.edn`, then
-  `bin/seon restart pod` (or `bin/acme restart pod`). Only `.cljs`/`src` changes
-  need `bin/acme build` first. The agent-context is SEED-COPIED at creation —
-  existing agents keep their blocks; removed manifest rows fully vanish only
-  after `bin/seon cluster reset <name>`.
-- **An unknown manifest key fails LOUD.** `load-manifest` validates against
-  `:seon.config/manifest` and throws a file-named error on a typo. That crash is
-  INTENDED. A new section is the 4-step contract (register a
-  `:seon.config/<section>` shape → add the manifest key → write `resolve-*` →
-  call at the seed point).
-- **Config reads are memoized per `SEON_CONFIG`** (`namespaces-policy`,
-  `render-config`). A dev edit is picked up on the next hot-reload (the caches
-  are `def`, not `defonce`) or a pod restart — not mid-process.
-- **Tokens, never chars.** Any size shown to a human/agent is
-  `seon.ai.tokens/estimate`. Process knobs go through `seon.config`
-  (`env-string`/`env-int`) — never a raw `js/process.env` read elsewhere.
+The other agent-context inputs are:
 
-## How to do common edits
+- :seon.eval/home-requires: the namespaces available in a fresh agent's home
+  namespace. Each entry must use :as or :refer.
+- :seon.agent.runtime/wake?: an optional wake-policy override.
 
-- **Skill bodies always-on per cluster:** set `:my.skills/load` in
-  `:seon.config/agent-context` (acme loads the full set; `[]` = none).
-- **Change a fresh agent's verb surface:** edit `:seon.eval/home-requires`
-  (acme swaps in `acme.helpers`/`acme.notes` with zero src edits).
-- **Lean-context A/B:** a variant = a SEPARATE edn file (override only the
-  keys you change) — `SEON_CONFIG=config/<variant>.edn bin/acme restart pod`.
-- **Pin a ns full for one agent:** transact `::full-source` onto its
-  `:namespaces` block (or agent entity) — reactive, no restart.
-- **Per-agent LLM:** set `:seon.ai/agent-provider` etc. in the agent-context
-  (`:inherit` = the global row) — or transact the datom onto a live agent.
-- **Tune a render cap:** edit the literal in `:seon.config/render`, restart pod.
+A root block with the same :seon.agent.ctx/name updates that base block; a new
+name appends a block. Root is selected by its id, not by an entity kind.
 
-## Where issues go
+## Namespace rendering
 
-- **Durable footgun** (bites every lane, survives across sessions) → add a bullet
-  to [§ Durable footguns](#durable-footguns-the-reason-this-skill-exists) above.
-  This file propagates to every Claude Code lane automatically.
-- **Live cross-lane issue** (a specific bug, a mid-flight casualty) →
-  `docs/prds/agent-fsm/coordination.md` + a tracked task with `file:line`.
+:seon.config/always is the namespace-source storage superset. The agent's current
+namespace and its requires determine what is shown. Per-agent namespace block
+facts can further select full source. Do not add a second namespace allowlist or
+a second renderer.
+
+## Skills stay pull-based
+
+The skills section only chooses corpus directories. A skill is available for
+explicit lookup or import; it is not injected into every prompt. Keep the
+skills context block absent unless a measured use case proves it belongs there.
+
+## Apply and verify
+
+For a manifest-only change:
+
+    bin/seon restart pod
+    bin/seon status
+    bin/seon tail pod
+
+Existing agents retain the block entities copied at creation. Use a cluster
+reset only when the work explicitly requires a completely fresh database:
+
+    bin/seon cluster reset default
+
+Do not use reset merely to hide a reconciliation bug. Query the resulting
+database facts and fix the reconcile path.
+
+## Durable rules
+
+- Use fully namespaced keys.
+- Treat an explicit :seon.agent/ctx vector as the complete base tree.
+- Keep root customization sparse and merge it by block name.
+- Store operational configuration as database facts after boot.
+- Keep skills out of default context.
+- Change context structure through block data and render functions, not by
+  appending prose to the agent's system text.
+- Display sizes as estimated tokens through seon.ai.tokens/estimate.

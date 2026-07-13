@@ -34,7 +34,8 @@ asserting them. Design moves, not tables:
 - **FIND a set** → query by attribute presence (`[?e :my.kb.source/id]`).
 - **IDENTIFY one** → a `{:seon.db/identity true}` attribute (also drives upsert).
 - **RELATE / REMOVE** → refs (`:seon.db/component` cascades the delete).
-- **SCOPE** → provenance (`:seon.db/origin` on the tx), not a kind field.
+- **SCOPE** → the transaction's `:seon.db/user` and `:seon.db/process` refs,
+  not a kind field.
 
 If you write "for each kind" or a `:kind` enum, stop and reframe.
 
@@ -116,10 +117,13 @@ inline-duplicate (duplication guarantees drift). The canonical examples live in
 `seon.schema`: `:seon.db/id` (the 14-char id shape) and `:seon.db/ref`.
 
 ```clojure
-(schema/register! :seon.db/id [:string {:min 14 :max 14}])   ; ONE source of truth
-(schema/register! ::agent-id   :seon.db/id)                  ; reference it
-(schema/register! ::session-id :seon.db/id)
-(schema/register! ::id [:and {:seon.db/identity true} :seon.db/id])  ; identity wrap
+;; Reuse the identity schema already owned by the agent namespace.
+(schema/register! ::agent-id :seon.agent/id)
+
+;; A domain identity owns its value schema locally.
+(schema/register! ::external-id :string)
+(schema/register! ::id
+  [:and {:seon.db/identity true} ::external-id])
 ```
 
 If the bridge can't follow a reference shape you need, FIX the bridge — don't
@@ -128,24 +132,24 @@ duct-tape by inlining.
 ## Provenance is NOT a domain attribute — the tx already records it
 
 Before registering a provenance-ish attr — `created-by`, `created-at`,
-`updated-by`, `source-turn` — STOP. Every `transact!` is auto-stamped with
-`:seon.db/agent-id`/`turn-id`/`origin` (+ friends) on the **transaction
-entity**, and datahike stamps `:db/txInstant`; "who/when wrote this" is a join
-through the datom's tx, not an attribute you model. Register a domain attr
-only for a **pre-event snapshot coordinate** — a fact about a db value observed
-*before* the entity's own tx (e.g. the basis-t a prompt rendered from), which
-no tx records. Join recipe + the seven stamped attrs: the **`datahike`** skill,
-"Transaction metadata".
+`updated-by`, `source-turn` — stop. Every `transact!` carries exactly two
+durable provenance refs on the transaction entity: `:seon.db/user` and
+`:seon.db/process`; Datahike also stamps `:db/txInstant`. "Who, through which
+stable process, and when wrote this?" is a join through the datom's transaction,
+not an attribute duplicated on the domain entity. Turn, eval, replay, and test
+execution details stay runtime-only. Add a domain-specific transaction fact
+only when it records a real source fact that those two refs cannot express.
+See the **`datahike`** skill, "Transaction metadata".
 
 ## Composite map schemas + entity declaration
 
 A `:map` schema names a composite shape — a fn's request/response, or a declared
-entity kind. Reference your attr schemas by keyword (don't re-inline their
+entity schema. Reference your attr schemas by keyword (don't re-inline their
 shapes); mark optional fields `{:optional true}`:
 
 ```clojure
 (schema/register! ::source-entity
-  [:map {:seon.db/entity true}                 ; ← declares a stored entity kind
+  [:map {:seon.db/entity true}                 ; ← declares a stored entity schema
    [::id ::id]                                 ; identity attr (required)
    [::title ::title]
    [::rating {:optional true} ::rating]        ; absent when unknown
@@ -241,10 +245,9 @@ tests. The loop: design schema → generate example data → assert a property.
 
 Use it to round-trip your model before writing real code: generate an entity,
 `transact!` it, query it back, check it matches. On the **active pod (CLJS)**,
-write *example* tests (the schema is still the unit you assert against — see
-`clojure-testing`); the `mg/sample` + `user/run-tests` generative-property idiom
-is the **paused JVM track**. Either way the schema, not a hand-built fixture, is
-the source of test data.
+write `cljs.test` properties through `bin/test-cljs` (see `clojure-testing`).
+The generator remains a data source inside that suite; it is not a separate
+runtime or harness. The schema, not a hand-built fixture, is the test oracle.
 
 ## Worked example — a small domain end to end
 

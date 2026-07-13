@@ -1,114 +1,107 @@
 ---
 type: component
 status: active
-tags: [component, agent, context]
+tags: [component, agent, database]
 ---
 
 # Loadable skills (`my.skills`)
 
-> Knowledge an agent dials INTO its own context only while it needs it, then
-> drops so it stops paying for what it isn't using.
+Skills are optional imported reference material, not a standing context
+subsystem. The default and test agent context trees contain no skills block.
+Normal discovery comes from namespace cards, current source, database-derived
+context blocks, and the manuals those functions point to.
 
-A skill is **not a new subsystem** — a loaded skill IS a
-`:seon.agent.ctx/block`. `my.skills/load` calls
-[[components/context]]-sibling `seon.agent.ctx/install!` to put a `:skill/<name>`
-block on the agent's own `:seon.agent/ctx`; `unload` calls `remove!`. The body
-rides the existing file-block read+quote path, and its token cost is DERIVED at
-render — nothing stored that needs clearing (reactive context).
+## Current database model
 
-## Namespace
+An imported skill row is identified by `:my.skills/name`. Its description is
+stored as `:my.skills/description`; the current checkout-backed importer stores
+`:seon.agent.ctx/file-path` to its `SKILL.md`. A row is recognized by attribute
+presence, not a type or kind field. Import provenance belongs to transaction
+metadata.
 
-| Namespace | File | Role |
-|-----------|------|------|
-| `my.skills` | `src/my/skills.cljs` | corpus scan + seed, `load`/`unload`/`list` functions, L0 catalog + L2 body render fns |
+Pod boot calls `my.skills/seed-skills-tx-data` and reconciles the selected
+directory into the database by identity. Rows absent from the desired import
+set are retracted. The selected directory is, in order:
 
-## The model — attributes, not a `:kind`
+1. the first `:seon.config/dirs` entry under `:seon.config/skills`;
+2. `SEON_SKILLS_DIR`; or
+3. `.claude/skills` when neither is supplied.
 
-A row "is a skill" because it carries `:my.skills/name` (the
-`:db.unique/identity` catalog key AND the load/unload handle). It is
-"file-backed" because it carries `:seon.agent.ctx/file-path` (body stays in the
-SKILL.md, read fresh every render) and "inline/agent-authored" because it
-carries `:my.skills/body` instead. Where it came from is `:seon.db/origin` on
-the seeding tx, not a field. `loaded?` is a pure projection of the agent's own
-`:skill/<name>` blocks, never a stored flag.
+`config/system.edn` explicitly selects `seon-skills/`, so the shipped runtime
+corpus does not depend on either development-tool adapter directory.
 
-## Two disclosure levels
+The importer intentionally reads only `name` and `description` from
+frontmatter. The body is rendered through the existing context file reader when
+explicitly loaded; it is not copied into every agent prompt.
 
-- **L0 catalog** (`catalog-block`, priority 12 — the CACHED prefix) — one
-  always-on `;`-line per skill (name + description + a derived ●/○ loaded
-  marker). Cheap discovery; the body costs nothing until loaded. Drops to `""`
-  when no skill rows exist.
-- **L2 body** (`skill-block`, priority 30 — the VOLATILE band, so load/unload
-  never busts the cacheable static prefix) — the whole SKILL.md (frontmatter
-  stripped), `;`-commented to keep the prompt eval-valid, with a DERIVED
-  token-cost footer + an explicit unload hint. Reactive: if the row is retracted
-  or the file vanishes, the body resolves blank → the block drops.
+## Loading is the normal context-block mechanism
 
-## The corpus — `seon-skills/` (agent) vs `.claude/skills/` (dev)
+`my.skills/load` installs one `:skill/<name>` block on the current agent's
+`:seon.agent/ctx`. `my.skills/unload` removes that block. `my.skills/list`
+queries the catalog and derives whether each name is loaded from block presence;
+there is no stored loaded flag, acknowledgement record, or skill-specific event
+bus.
 
-At boot `seed-skills-tx-data` scans `skills-dir` (env `SEON_SKILLS_DIR`, default
-`seon-skills/`) and emits one identity-upsert row per `SKILL.md`. No YAML/markdown
-parser: a ~10-line scanner pulls only the frontmatter `name` + `description`; the
-body stays in the file. Drop a standard `<name>/SKILL.md` in there and it appears;
-edit it and the agent gets the edit.
+The functions return data envelopes. `load` and `unload` are asynchronous but
+the agent evaluation boundary awaits them, so callers receive the result map.
 
-**ONE corpus, split by consumer on disk.** `seon-skills/` is the dedicated AGENT
-corpus (datahike, clojurescript, repl, data-oriented-clojure, ui-canvas, …);
-`.claude/skills/` holds the Claude-Code/dev skills (browser-automation,
-clojure-testing) that an agent should NOT load, **plus symlinks back to the shared
-seon-skills entries** so Claude Code reads them natively too. The directory split —
-not an exclude list — is what keeps dev skills out of the agent catalog. The shared
-skills were curated seon-current (off the paused-JVM stack onto the active pod):
-datastar-web-ui, clojure-testing, browser-automation, and the authored
-data-oriented-clojure.
+```clojure
+(my.skills/list)
+(my.skills/load :datahike)
+(my.skills/unload :datahike)
+```
 
-`list-skill-files` resolves each entry with **`statSync` (which FOLLOWS
-symlinks)**, not the `readdirSync` Dirent flags — a `<dir>/<name>` that is a
-SYMLINK to a skill directory reports `.isDirectory? = false` on its Dirent and
-would be silently dropped. `.claude/skills` symlinks the shared `seon-skills/*`
-dirs in exactly this shape, so following links is mandatory.
+The loaded block uses the same render, token estimate, ordering, and reactive
+database path as every other context block. Removing it removes its prompt cost
+on the next context render.
 
-## Config override — `seon.config` curates + seeds (no code change)
+## What is disabled by default
 
-`seon.config` (`src/seon/config.cljs`, aero-backed `config/system.edn`,
-`SEON_CONFIG` path + `SEON_PROFILE` #profile + `#env`) is an OPTIONAL manifest that
-overrides the dir scan + the default seed without touching code. ABSENT → the pod
-boots byte-identically (full env-dir scan + `default-seed-blocks`). PRESENT it
-shapes three things:
+There is no always-on catalog block, implicit body load, config loadout, or role
+selector. The manifest's `:seon.agent/ctx` vector is the complete initial block
+tree. `config/system.edn` contains namespaces, canvas, plan, and transcript; it
+does not contain a skills context block.
 
-- **skill corpus** (`:seon.config/skills` `include`/`exclude`) — per-cluster
-  curation over the scanned `seon-skills/` rows (e.g. a test cluster trimming the
-  corpus). Resolved by `resolve-skill-rows`.
-- **per-role loadouts** (`:seon.config/loadouts`, role `:default`/`:root`/`:worker`)
-  — a `default-load` set whose skill BODIES are seeded always-on as `:skill/<name>`
-  blocks at the cached-prefix priority (16, between the L0 catalog and
-  `:namespaces`), merged over `default-seed-blocks` by upsert-on-name; plus extra
-  `:blocks` and `:removes`. Resolved by `resolve-loadout`. The shipped manifest
-  default-loads `:repl` for every agent.
-- **routes** (`:seon.config/routes` `:removes`) — drop seeded `:seon.route/*` rows
-  per cluster. Resolved by `resolve-routes`.
+The system instruction may mention the qualified `my.skills/load` escape hatch,
+but that is a pull reference, not injected skill content.
 
-Role is a config-composition SELECTOR (`:root` for id `"root"`, else `:worker`),
-never a stored `:seon.agent/role`/`:kind`. A new config concern is four mechanical
-steps (register a `:seon.config/<section>` shape, add its manifest key, write one
-`resolve-<section>` fn, call it at the seed point); an unknown manifest key fails
-LOUD at validation. NOTE: there are now two `seon.config` namespaces in different
-lanes — this pod `.cljs` manifest reader and the `[JVM track — paused]` aero
-Integrant loader (`config.clj`); they share the aero + `system.edn` mental model.
+## Corpus and development-tool adapters
 
-## Functions
+The directories currently serve different consumers:
 
-`load`/`unload` are `^:async` (they await the `install!`/`remove!` transact); the
-eval path auto-awaits, so an agent calling `(my.skills/load :datahike)` gets the
-result MAP, not a Promise. `list` is a synchronous derived query — the catalog
-with each skill's `::loaded?` against the agent's own blocks. Functions are
-errors-as-values (`{::ok? false ::message …}` when no such skill / install fails).
+| Directory | Consumer |
+|---|---|
+| `seon-skills/` | runtime import corpus selected by the shipped manifest |
+| `.agents/skills/` | Codex project-skill discovery |
+| `.claude/skills/` | Claude Code project-skill discovery and the unconfigured runtime fallback |
+
+Shared skill bodies in `.agents` and `.claude` are adapter copies today. The two
+trees are synchronized now and are not meant to define independent behavior,
+but there is not yet a checked-in generator or equality gate. A symlink is not
+assumed safe: project-skill discovery is owned by external tools, and their
+directory/link traversal contract is not specified by Seon. Until a generated
+adapter or mechanical validation step lands, edits must update both adapters and
+the runtime corpus deliberately where their audience shares the same contract.
+
+This is a known consolidation gap, not permission to create another corpus.
+
+## Remaining database-ownership gap
+
+The current row points at a checkout file, so a config-free restore cannot
+render that body after the original corpus disappears. The intended refactor is
+to transact canonical name, description, and content (or a content-addressed
+blob reference) at import time. After that transaction, the database is the
+source of truth and the original directory is only an optional future import
+input.
+
+That work must refine `my.skills` in place. Do not introduce a parallel skill
+loader, a second block collection, or an atom-backed registry.
 
 ## Key files
 
-- `src/my/skills.cljs`
-- `seon-skills/**/SKILL.md` (the agent corpus, `SEON_SKILLS_DIR`)
-- `.claude/skills/**/SKILL.md` (Claude-Code/dev skills + symlinks into `seon-skills/`)
-- `src/seon/config.cljs` + `config/system.edn` (the optional curation/loadout override)
-- relies on `seon.agent.ctx/install!`/`remove!` ([[components/context]] CLJS
-  sibling) + `seon.ai.tokens/estimate` (the one token estimator)
+- `src/my/skills.cljs` — scanner, database rows, list/load/unload functions
+- `src/seon/config.cljs` — selected corpus directory
+- `src/seon/client.cljs` — boot desired-state reconciliation
+- `src/seon/agent/ctx.cljs` — shared context file rendering
+- `config/system.edn` — shipped corpus selection and initial context tree
+- `test/my/skills_test.cljs` — current behavioral coverage

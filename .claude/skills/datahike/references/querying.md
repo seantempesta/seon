@@ -115,8 +115,9 @@ to a nested map under `[*]`. Reverse-ref navigation (`::parent` →
 
 ## Inspecting the index (debugging only)
 
-You almost never need raw datoms — `query`/`pull`/`entity` + `store-inventory`/
-`installed-schema` cover normal work. When you genuinely must see the raw EAV
+You almost never need raw datoms — `query`/`pull`/`entity`, the database
+inventory (`store-inventory`), and `installed-schema` cover normal work. When
+you genuinely must see the raw EAV
 shape while debugging, the guarded surface is `seon.db`, not `datahike.api`
 directly (the one-API rule). `installed-schema` answers "what attrs exist on
 this db" without faulting data in:
@@ -144,7 +145,7 @@ that keeps the single-API rule. Do not reach around it into `datahike.api`.
   `@*conn*` per leaf fn — in the pod each deref reconstitutes a fresh value
   (`datahike-primer.md` §1). It's a correctness AND a perf win.
 - **Don't `memoize` on a db value** — `=` on a DB walks the whole EAVT index,
-  faulting every node in off the store on a cache HIT (`datahike-primer.md` §5).
+  faulting every node from durable storage on a cache HIT (`datahike-primer.md` §5).
   Measure before caching; `:memory`/local reads are sub-ms on small datom counts.
 - **Skip history unless you need retractions** — current-db queries carry no
   history overhead; only reach for `db/history` when you want retracted datoms.

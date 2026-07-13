@@ -6,7 +6,7 @@ description: "Verify the Seon pod's OWN web UI in a real browser. Use when eyeba
 # Browser Automation — verifying the Seon pod UI
 
 You have Chrome MCP tools (`mcp__claude-in-chrome__*`) to look at the **pod's own
-web UI** on `http://127.0.0.1:7890` — the `/agents` list, an `/agent/{id}` page,
+web UI** on `http://127.0.0.1:7890` — the `/agents` view, an `/agent/{id}` page,
 the `/data` datom browser. This skill is coordination (don't clobber peer tabs)
 + the one hard limit (SSE doesn't verify in-browser).
 
@@ -57,9 +57,6 @@ invalidate on navigation — re-`find` after navigating.
 | Agent page | `/agent/{id}` |
 | Datom browser | `/data` |
 | Agent debug (exact LLM bytes) | `/agent/{id}/debug` |
-
-(The old `:8080` JVM-track routes — `/flows`, `/logs`, `/ns/...` — are
-the paused track; ignore them for pod work.)
 
 ## Verify a static UI change
 

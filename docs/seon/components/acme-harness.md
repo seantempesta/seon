@@ -1,10 +1,17 @@
 ---
 type: component
-status: active
+status: draft
 tags: [component, agent]
 ---
 
 # Acme third-party harness — an isolated downstream-consumer cluster
+
+> **Deferred during the database-server cutover.** This page records the
+> pre-cutover harness and is not current operator guidance. `bin/acme` still
+> uses the former process names and database layout while another lane depends
+> on its pinned state. Do not operate or update ACME until the default cluster
+> passes cold-start and live-agent proof; then cut the wrapper over to the same
+> `bin/seon` mechanisms and rewrite this page from live evidence.
 
 "Acme" is the codename for a third-party consumer that builds a product on
 Seon. NEVER use a real product name anywhere in the repo — see the naming

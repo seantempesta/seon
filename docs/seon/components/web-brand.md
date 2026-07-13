@@ -6,7 +6,7 @@ tags: [component, web]
 
 # Web Brand Surface
 
-> The product name, tagline, and theme the web UI renders are DATA in the cluster store, not compiled constants. `seon.web.brand` (`src/seon/web/brand.cljs`, CLJS pod lane) lets a downstream consumer rebrand every web UI page — name, tagline, `data-theme`, and a full stylesheet override — without touching `src/`. Shipped as fix-everything PRD C-17 (commit 24671ca).
+> The product name, tagline, and theme the web UI renders are facts in the cluster database, not compiled constants. `seon.web.brand` (`src/seon/web/brand.cljs`, CLJS pod lane) lets a downstream consumer rebrand every web UI page — name, tagline, `data-theme`, and a full stylesheet override — without touching `src/`. Shipped as fix-everything PRD C-17 (commit 24671ca).
 
 ## Data model
 
@@ -37,7 +37,7 @@ All schemas registered via `schema/register!` in the ns. Optional = absent: a mi
 - env unset but row has a value → retract
 - equal, or absent on both → nothing
 
-This deliberately differs from `my.soul`'s seed-only-if-absent: booting WITHOUT the env vars must return the defaults. The brand is the deployment's configuration, not the store's memory. A runtime edit to the row survives within a pod run; the next boot re-syncs from env.
+This deliberately differs from `my.soul`'s seed-only-if-absent: booting WITHOUT the env vars must return the defaults. The brand is deployment configuration, not durable agent memory. A runtime edit to the row survives within a pod run; the next boot re-syncs from env.
 
 ## The CSS hook
 

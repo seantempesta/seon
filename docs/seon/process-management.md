@@ -1,225 +1,227 @@
 ---
 type: reference
 status: active
-tags: [reference, agent, dashboard]
+tags: [reference, agent, database]
 ---
 
-# Process Management — `bin/seon`
+# Process management — `bin/seon`
 
-The supervisor script that owns process lifecycle for the Seon dev stack. Multi-agent-safe by design: any number of agents (Platform, MVP, future tracks, Sean himself) can call any subcommand at any time, and the supervisor arbitrates without conflicts.
+`bin/seon` is the single operator door for the local Seon application. It owns
+process registration, logs, dependency ordering, readiness checks, and cluster
+database lifecycle. Calls are idempotent and serialized, so several development
+agents can inspect or request the same transition without racing each other.
 
-## Why this exists
+## The processes
 
-Before `bin/seon`, processes were "owned" by whichever agent or terminal launched them:
-
-- Two agents both running `node out/client/main.js` → port collision, second one fails opaquely.
-- One agent calling `pkill -f seon.runner` → kills the JVM another agent was using.
-- Logs scattered across terminals → no shared way to tail.
-- "What's running right now?" required `lsof -i :PORT` per port.
-
-The supervisor removes ownership. State (PIDs, start times, logs) lives in known files (`tmp/proc/<name>/`, `logs/<name>.log`); concurrency is guarded by a per-process mkdir mutex; commands are idempotent.
-
-## Subcommands
-
-```text
-bin/seon start <name|all>   Start (idempotent — no-op if already running)
-bin/seon stop <name|all>    Stop (idempotent — no-op if not running)
-bin/seon restart <name|all> stop + start
-bin/seon status [name]      Show one or all (omitted = all)
-bin/seon tail <name>        tail -f logs/<name>.log  (Ctrl-C to exit)
-bin/seon logs <name> [n]    Last n lines (default 200)
-bin/seon adopt <name> <pid> Register a manually-started PID under <name>
-bin/seon cluster reset [n]  DESTRUCTIVE: wipe data/clusters/<n>/store; bounce
-                            wire-server + pod when <n> is the cluster THIS
-                            supervisor manages (store == $SEON_CLUSTER_DIR/store),
-                            else wipe only (fresh DB)
-bin/seon cluster create <n> [--ephemeral] [--frozen|--watched]
-                            NEW cluster on this supervisor's wire-server:
-                            its own store dir + its own pod (pod-<n>, free port)
-bin/seon cluster fork <src> <t|--at t> [fork-name]
-                            NEW cluster = <src>'s world at basis-t <t> —
-                            independent, writable, disposable (see below)
-bin/seon cluster destroy <n> stop pod-<n>, delete the db from the live
-                            wire-server registry, remove data/clusters/<n>/
-
-```
-
-## `cluster fork` — a cluster's world at a basis-t, live and writable
-
-`bin/seon cluster fork <src> <t|--at t> [fork-name]` (default fork-name
-`fork-<src>-<t>`) boots a NEW disposable cluster whose database is `<src>`'s
-world exactly at transaction id `<t>`. The primary consumer is error
-forensics: `seon.agent.inspect/repro` returns this command verbatim as its
-`::fork-hint`, with `t` = the error's `:seon.error/at` (the basis-t the
-failing code saw — the error datom itself commits later, so it is not
-inside the fork).
-
-Mechanism: `seon.server.registry/fork-db!`, invoked over the wire-server's
-loopback socket REPL (7891 — the same supervisor channel `cluster destroy`
-uses; never agent-exposed) via `bin/seon-server-call`, the babashka helper
-that parses the REPL's printed reply as EDN and keys success on the fn's
-own namespaced flag (`::forked?` / `::deleted?`) — the supervisor never
-pattern-matches printed EDN. It wraps `datahike.api/fork-database`: a
-konserve-layer store copy, the fork's head pointed at the commit whose
-`:max-tx` equals `t`, and a fresh deterministic store identity — verified
-after the copy (head at `t` + a full history index scan; one retry covers
-a copy that raced a live write). Entity ids and tx ids are byte-identical,
-so every stored basis-t means the same thing inside the fork. The source's
-`blobs/` (turn prompt/reply content) is copied alongside so turn replay
-works. Boot then follows `cluster create` exactly — the fork pod's own
-`ensure-db` registers the db, so the fork is indistinguishable from a
-normal cluster (feed, replay, inspect functions all work; the pod's boot-seed
-appends its usual idempotent txs, moving the head slightly past `t` while
-the world-state at `t` stays intact). The fork store is independent by
-construction: `bin/seon cluster destroy <fork-name>` removes it without
-touching the source.
-
-## `start all` / `restart all` / `stop all` — the whole stack, ordered + gated
-
-`bin/seon start all` brings the stack up in dependency order — **cljs-watch → wire-server → pod** — and gates each stage on REAL readiness before starting the next (`stop all` reverses: pod → wire-server → cljs-watch). `jvm` is deliberately NOT in `all` — it's an independent lane; start it explicitly.
-
-Ready gates (`wait_ready` in the script — observed signals, not just log lines):
-
-| Process | Ready when | Bound |
-|---|---|---|
-| `cljs-watch` | `out/client/main.js` newer than this start, or `Build completed` in the fresh log | 300s |
-| `wire-server` | `tmp/seon-cluster-default-req.sock` ACCEPTS a connection (real `nc -U` connect — macOS `nc -z -U` is broken) + `$SEON_WRITER_REPL_PORT_FILE` (default `tmp/seon-writer-repl-port-default`) written | 180s |
-| `pod` | `$SEON_PORT_FILE` (default `tmp/seon-port`) written + HTTP answers on `/` | 120s |
-
-On timeout or early death the wait fails LOUD, naming the log to read, and later stages are not started. `bin/seon cluster reset` shares the same `wait_ready` helper.
-
-The pod side cooperates: `seon.store.wire/ping!` (the fail-loud boot gate) retries the wire-server ping for ~10s (5 × 2s rpc timeout, 500ms backoff) before throwing, closing the race where the pod execs before the writer's socket accepts. Boot stays fail-loud — just not fail-instant.
-
-### Auto-prep on dep (git sha) change
-
-Real failure 2026-06-10: a datahike `:git/sha` bump made the first wire-server start download + build the git dep inside its ready window — boot timeouts blew and the pod fail-loud-exited against the missing socket. The supervisor now hashes deps.edn's `:git/url`/`:git/sha` lines into `tmp/proc/<name>/deps-fingerprint` (plus a `~/.gitlibs` presence check) before spawning `wire-server` (`:writer`) or `cljs-watch` (`:cljs`); on change it runs `clojure -P -M:<alias>` + `clojure -X:deps prep :aliases '[:<alias>]'` SYNCHRONOUSLY and loudly (output in `logs/<name>.log`) before the spawn.
-
-## Registered processes
-
-| Name | Command | Log | Ready-when |
+| Name | Responsibility | Default log | Ready when |
 |---|---|---|---|
-| `pod` | `node out/client/main.js` | `logs/pod.log` | `$SEON_PORT_FILE` (default `tmp/seon-port`) written + HTTP answers on `/` |
-| `cljs-watch` | `clj -M:cljs watch client` | `logs/cljs-watch.log` | "Build completed" appears in log |
-| `jvm` | `./bin/run` | `logs/jvm.log` | `logs/app.log` shows "Server started" |
-| `wire-server` | `clojure -M:writer ...` | `logs/wire-server.log` | `tmp/seon-cluster-default-req.sock` accepting + `$SEON_WRITER_REPL_PORT_FILE` (default `tmp/seon-writer-repl-port-default`) written |
+| `cljs-watch` | Builds and hot-reloads `out/client/main.js` | `logs/cljs-watch.log` | the current build completes |
+| `database-server` | Runs `seon.db.server`, the sole Datahike writer and transaction feed/replay source | `logs/database-server.log` | request socket accepts and the diagnostic port file exists |
+| `pod` | Runs the Node agent runtime and web UI | `logs/pod.log` | auto-boot completes and `/` remains healthy |
+| `diffusion-server` | Optional local DiffusionGemma worker | `logs/diffusion-server.log` | its health endpoint answers |
 
-### IMPORTANT — pod ↔ cljs-watch dependency
+`start all` runs `cljs-watch → database-server → pod`; `stop all` reverses that
+order. The optional diffusion worker is registered but is not part of `all`.
+The former embedded JVM application and per-agent JVMs no longer exist.
 
-**`cljs-watch` must be running BEFORE the pod is built or restarted** for MCP eval (`mcp__seon_cljs__eval`) to reach the pod. Reason: shadow-cljs only injects the websocket-based REPL runtime client (`shadow.cljs.devtools.client.node`) into the bundle when compilation runs under a **watcher**. A one-shot `clj -M:cljs compile client` produces a NO-REPL bundle — pod boots and runs, but MCP eval against it fails with "No available JS runtime."
-
-**Don't run `clj -M:cljs compile client` for the pod.** Always go through `bin/seon start cljs-watch` (or restart it after build config changes) and let watch own the bundle. The supervisor enforces this implicitly — `bin/seon start pod` doesn't trigger a build itself.
-
-Recovery if a manual `compile` has overwritten the bundle:
+## Daily commands
 
 ```bash
-bin/seon restart cljs-watch  # forces full rebuild with ws client
-bin/seon restart pod         # pod loads the REPL-able bundle
+bin/seon start all
+bin/seon stop all
+bin/seon restart all
 
-```
-
-Full root-cause analysis: [[../prds/agent-runtime/research/shadow-node-runtime-2026-05-23]].
-
-Add a new process by editing the `process_command` case branch at the top of `bin/seon` (plus `process_ready_hint` and `all_processes` if you want it in default-status output).
-
-## Concurrency model
-
-Each process has a `tmp/proc/<name>/lock/` directory used as an atomic mutex (`mkdir` is atomic on POSIX, works on macOS without `flock`). On entry to `start`/`stop`/`restart`/`adopt`, the script:
-
-1. Acquires the lock (busy-wait up to 10s, then errors with stale-lock recovery hint).
-2. Sets a `trap` to release the lock on EXIT/INT/TERM.
-3. Performs the operation.
-4. Lock auto-released as the script exits.
-
-Two agents calling `bin/seon start pod` simultaneously: one wins the mkdir, starts the process, releases the lock; the second one acquires the lock, sees the pid file + alive PID, no-ops with "already running" message. No collisions.
-
-## State files
-
-```text
-tmp/proc/<name>/
-├── pid           PID of the running process
-├── cmd           Exact command launched (forensics)
-├── started-at    UTC ISO timestamp of start
-└── lock/         Mutex directory (briefly held during operations)
-
-```
-
-PID + start-at survive across `bin/seon` invocations. They're cleared by `stop`.
-
-## Logs
-
-Every supervised process logs to `logs/<name>.log`:
-
-- `bin/seon tail <name>` is `exec tail -f logs/<name>.log` — multiple agents can tail simultaneously.
-- `bin/seon logs <name> [n]` is one-shot last-n.
-- Logs are truncated on each fresh `start` so `tail` doesn't show stale runs. Use `bin/seon logs <name>` if you need history before restart.
-
-The pod's `seon.web.serve` HTTP loopback also writes its bound port to `$SEON_PORT_FILE` (default `tmp/seon-port`, per-cluster — `bin/acme` overrides it to `tmp/seon-port-acme` so a second cluster's pod can't clobber the default's file); `bin/seon status` surfaces the port + reachable URL when the file exists.
-
-## Multi-agent patterns
-
-**Agent A wants the pod up:**
-
-```bash
-bin/seon start pod      # idempotent
-
-```
-
-**Agent B wants to watch what the pod is doing:**
-
-```bash
-bin/seon tail pod       # safe to run alongside any number of agents
-
-```
-
-**Agent A wants a clean pod after changing core code:**
-
-```bash
-bin/seon restart pod    # stop + start, atomic from caller's view
-
-```
-
-**Agent B was tailing while A restarted:**
-
-The `tail -f` follows the truncated-then-appended log — they'll see "log truncated" briefly, then the new pod's output stream in.
-
-**Any agent wants to know the state:**
-
-```bash
 bin/seon status
-# ● pod  pid=12345  started=2026-05-23T18:45:21Z
-# ○ cljs-watch  (not running)
-# ○ jvm  (not running)
-#   pod port: 7890  →  http://127.0.0.1:7890
+bin/seon status pod database-server
+bin/seon logs all 120
+bin/seon logs pod 200
+bin/seon tail database-server
 
+bin/seon restart pod
+bin/seon restart cljs-watch
+bin/seon print-cmd database-server
+bin/seon print-env
 ```
 
-## Adoption — manually started processes
+`logs all` is the default debugging front door: it merges recent process logs,
+labels each source, and orders timestamped lines. `tail` follows one process.
+Every fresh start truncates that process's log, so read useful evidence before a
+restart.
 
-If a process is running in a foreground terminal (e.g., `node out/client/main.js` in a watched tab), the supervisor doesn't know about it. Two options:
+`status` also prints the pod URL from `SEON_PORT_FILE`; the default web UI is
+`http://127.0.0.1:7890`.
 
-1. **Adopt it** — `bin/seon adopt pod <PID>`. From then on, `bin/seon stop pod` works on it. The foreground terminal still owns stdout; no log file is managed.
-2. **Kill it and re-start under supervision** — `bin/seon start pod` will detect the port collision and the underlying node will fail; manually kill, then `start`.
+## Start and readiness behavior
 
-## Stale lock recovery
+Starting a process does more than fork a command:
 
-If `bin/seon` itself is SIGKILLed mid-operation, the lock dir may persist. The supervisor will busy-wait up to 10s on subsequent invocations, then error with a hint. Manual recovery:
+1. Acquire the shared lifecycle lock and the process lock.
+2. Reject an unmanaged listener rather than unlinking a live socket or hiding a
+   port collision.
+3. Prepare changed Git dependencies before the process's readiness window.
+4. Remove readiness files that describe a dead prior lifetime.
+5. Spawn into an owned process group and record its PID identity.
+6. Wait for an observed readiness condition, failing loudly on early exit,
+   timeout, or a core-fault marker.
+
+The current readiness bounds are 300 seconds for `cljs-watch`, 180 seconds for
+`database-server`, and 120 seconds for a pod. A pod must pass three consecutive
+health observations after its auto-boot marker; a briefly serving process that
+is still unwinding toward a crash is not declared ready.
+
+On failure, use the exact log named by the supervisor. Do not follow a failed
+managed start with a manual process invocation; that creates two ownership
+paths.
+
+## Builds and dependency preparation
+
+The watched build must own `out/client/main.js`. A one-shot Shadow compile does
+not include the development runtime used by the CLJS evaluation connection.
+When a manual compile replaced the bundle, recover through the supervisor:
 
 ```bash
-rm -rf tmp/proc/<name>/lock
-
+bin/seon restart cljs-watch
+bin/seon restart pod
 ```
 
-This should be rare. Normal Ctrl-C and most other signals trigger the trap that cleans up.
+Before starting `database-server` or `cljs-watch`, the supervisor fingerprints
+the Git dependencies in `deps.edn` and checks their local preparation output.
+When necessary it runs the alias-specific download and prep synchronously. The
+public reusable door is:
 
-## What `bin/seon` does NOT manage
+```bash
+bin/seon prep
+```
 
-- **Caddy** (port 3030) — separate process, not currently supervised. Run manually if you need HTTPS proxy.
-- **MCP servers** (`bin/mcp-server`, `bin/mcp-server-cljs`) — launched by Claude Code via the MCP integration, not supervised here.
-- **JVM REPL operations** `[JVM track — paused]` (`(user/reload)`, `(user/reset)`, `(user/restart-db!)`) — these are inside-the-JVM functions that operate on Integrant components, not on OS processes. They belong to the paused JVM main-app track; the active track is the CLJS pod (`bin/seon ... pod`). Use them for in-process JVM operations when working that track; use `bin/seon restart jvm` only when you actually need a fresh JVM.
+Downstream launchers should call that command instead of reconstructing the
+`tools.deps` invocation.
 
-## Cross-references
+## Cluster database lifecycle
 
-- Supervisor source: `bin/seon`
+A cluster is one named database, one root agent, task agents, and one Node pod.
+The database server can host several named databases. These operations are
+deliberately destructive where stated and share the same lifecycle lock as
+ordinary process transitions.
+
+### Reset the managed cluster
+
+```bash
+bin/seon cluster reset default
+```
+
+This stops the managed pod and database server, removes only the managed
+cluster's `db/` directory, restarts both through the normal readiness gates, and
+lets pod boot seed the fresh database. It does not preserve prior database
+facts. Never emulate reset by deleting files under a running server.
+
+### Create a separate cluster
+
+```bash
+bin/seon cluster create experiment
+bin/seon cluster create sample --ephemeral
+bin/seon cluster create sample --ephemeral --watched
+```
+
+The database server is started and proven ready first. The new database is
+ensured through the normal pod boot path, and `pod-<name>` gets an ephemeral
+HTTP port recorded in `tmp/seon-port-<name>`.
+
+Durable clusters default to the watched development bundle. Ephemeral clusters
+default to a frozen bench bundle so a source save cannot hot-patch a running
+measurement; `--watched` and `--frozen` explicitly override the default.
+
+### Fork at an exact database basis
+
+```bash
+bin/seon cluster fork default 536870990
+bin/seon cluster fork default --at 536870990 repro-example
+```
+
+Forking creates an independent writable database at that transaction id, copies
+the cluster's referenced turn blobs, starts its own pod, and leaves the source
+untouched. `seon.agent.inspect/repro` returns a ready `:fork-hint` for a recorded
+core fault. The fault datom is later than the captured `:seon.error/at`, so it is
+intentionally absent from its own reproduction database.
+
+The implementation is `seon.db.registry/fork-database!`, invoked through the
+database server's loopback diagnostic channel by `bin/seon-server-call`; agents
+do not receive that capability.
+
+### Destroy a created cluster
+
+```bash
+bin/seon cluster destroy experiment
+```
+
+This stops `pod-experiment`, closes and deletes its registered database, and
+removes `data/clusters/experiment/`, including blobs. The supervisor refuses to
+destroy its own managed cluster; use `cluster reset` for that database.
+
+## Fault monitoring
+
+```bash
+bin/seon watch-faults
+bin/seon watch-faults --cluster experiment
+```
+
+This blocks until a new unexpected `SEON-CORE-FAULT` appears, prints the marker
+and nearby pod log lines, then exits successfully so a supervising task can
+triage it. Expected test markers are ignored. The database workflow after the
+marker is `seon.agent.inspect/errors → error → repro`; the web UI debug page is
+a view of the same facts, not a second error system.
+
+## Registration, locks, and adoption
+
+Each managed process has state under `tmp/proc/<name>/`, including the PID,
+process-start identity, exact command, start time, ownership marker, and lock.
+Locks are owner-PID symlinks: a dead owner is reclaimed automatically while a
+live owner makes a concurrent caller wait.
+
+If a deliberately manual process must become managed:
+
+```bash
+bin/seon adopt pod <pid>
+```
+
+Inspect the PID first. Adoption records lifecycle ownership but cannot recover
+stdout that was never directed to the managed log. After an interrupted
+operator command, use `bin/seon status` before touching a lock; the supervisor
+prints the exact recovery path when manual removal is actually warranted.
+
+## Environment seams
+
+The supervisor exports one coherent environment to both processes. Important
+overrides are:
+
+| Variable | Meaning |
+|---|---|
+| `SEON_CLUSTER_DIR` | managed cluster directory; database lives at `<dir>/db` |
+| `SEON_REQ_SOCK` / `SEON_PUB_SOCK` | database request and committed-transaction sockets |
+| `SEON_WRITER_REPL_PORT` | loopback-only database diagnostic port, default 7891 |
+| `SEON_WRITER_REPL_PORT_FILE` | per-supervisor file containing that port |
+| `SEON_PORT` / `SEON_PORT_FILE` | pod HTTP selection and bound-port record |
+| `SEON_CONFIG` | selected runtime manifest path |
+| `SEON_EXTRA_SRC` / `SEON_EXTRA_PRELOAD` / `SEON_EXTRA_NPM` | downstream CLJS overlay inputs |
+| `SEON_SHELL` / `SEON_WEB` / `SEON_EMBED` | host-owned capability and feature gates |
+
+Use `bin/seon print-cmd <process>` and `bin/seon print-env` to inspect resolved
+values without spawning anything.
+
+## What the supervisor does not manage
+
+- Inspect AI evaluation runs under `src-inspect-ai/`.
+- Browser tabs and the user's browser session.
+- Remote production infrastructure.
+- Arbitrary database calls. The only privileged diagnostic calls used here are
+  the named cluster registry operations in `bin/seon-server-call`.
+
+Keep process operations in this supervisor instead of adding compatibility
+launchers.
+
+## References
+
+- Supervisor implementation: `bin/seon`
+- Database process: `src/seon/db/server.clj`
+- Pod boot: `src/seon/client.cljs`
 - Pod HTTP server: `src/seon/web/serve.cljs`
-- CLAUDE.md "Process Architecture (IMPORTANT)" — high-level intro
-- Logs convention: `logs/<name>.log` (this supervisor) + `logs/app.log` / `logs/error.log` (JVM Timbre/logback)
+- Active runtime roadmap: [[../prds/runtime-reliability/roadmap]]

@@ -28,11 +28,13 @@ compensate for unclear functions.
 
 ## Current position
 
-**Current phase: remove duplicate runtime authority and isolate the permanent
-JVM server (phase 2 of 6).** The owner decisions are resolved and the
-coordinated clean-base proof is tagged. Remote replication, cloud topology,
-browser replicas, offline mutation, mobile packaging, and the full paid Inspect
-AI battery are explicit follow-on work rather than completion gates for this
+**Current phase: replace the operator and cold-prove the reduced runtime
+(phase 3 of 6).** The permanent JVM database server is isolated, duplicate
+runtime authority is removed, and the paused application is archived. The
+remaining phase-3 gate is the Babashka operator plus a clean default-cluster
+start through that one door. Remote replication, cloud topology, browser
+replicas, offline mutation, mobile packaging, and the full paid Inspect AI
+battery are explicit follow-on work rather than completion gates for this
 branch.
 
 The shared ACME/plan/REPL work is checkpointed at `3e0e0bff`; the directly
@@ -68,6 +70,17 @@ eleven-namespace writer gate (47 tests/295 assertions) cover retry/recovery,
 replay/live overlap, explicit routing, generated identities, durable receipt
 encapsulation, bounded publication, and lifecycle. Typed administration, cold
 live transition proof, and a published artifact manifest remain outstanding.
+
+The archival cut is now committed. `38a4dbe8` removes the atom-backed agent
+membership registry and derives MCP addressing from database agent facts;
+`294d47a1` removes the obsolete Rust/WASM and old Datahike prototype trees; and
+`6c1079c8` removes the paused Integrant/core.async application, its entrypoints,
+resources, dependency aliases, and obsolete tests. The surviving writer gate
+passes 47 tests/295 assertions, direct Markdown tooling passes 22/340, and the
+runtime-addressing gate passes 4/16. The shell supervisor has been pruned and
+renamed around `database-server`, but it is still a large Bash implementation;
+phase 3 remains open until the in-place Babashka replacement and cold live proof
+land.
 
 The source-grounded system audits are complete and committed:
 

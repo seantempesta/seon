@@ -73,9 +73,8 @@ Use **dot + text**, not pill badges:
 ## Rendering in the active pod
 
 The pod renders hiccup in `.cljs` and serializes with `seon.ui.html/->string`
-(`src/seon/ui/html.cljc`). There is no `seon.web.components` component library on
-the active track — that is the paused JVM `.clj` web stack. Build tiles directly
-as hiccup and route content through `seon.render/block`:
+(`src/seon/ui/html.cljc`). Build the web UI directly as hiccup and route typed
+content through `seon.render/block`:
 
 ```clojure
 ;; A status chip — dot + label (seon.ui.agent-view/status-chip is the live example)
@@ -94,7 +93,7 @@ LLM replies arrive as markdown and render through `seon.ui.markdown/md->hiccup`
 (a CLJS-native hand-rolled subset — the full markdown-clj lib is JVM-only), or
 via `seon.render/block` with `{:seon.render/markdown "…"}`. The Tailwind
 `@tailwindcss/typography` plugin supplies dark-theme `prose` styling via the CSS
-variables in `input.css` when a tile opts into `prose prose-sm max-w-none`.
+variables in `input.css` when a surface opts into `prose prose-sm max-w-none`.
 
 ## Anti-Patterns
 
@@ -112,6 +111,6 @@ variables in `input.css` when a tile opts into `prose prose-sm max-w-none`.
 | File | Purpose |
 |------|---------|
 | `docs/prds/namespace-ui/design-system.md` | Full design system spec |
-| `src/seon/ui/agent_view.cljs` · `header.cljs` | Live Phosphor hiccup tiles + the status bar (active pod) |
-| `src/seon/render.cljs` | `block`/`slot` — the typed value renderer every tile shares |
+| `src/seon/ui/agent_view.cljs` · `header.cljs` | Live Phosphor agent layout, context surfaces, and status bar |
+| `src/seon/render.cljs` | `block`/`slot` — the shared typed-value renderer |
 | `resources/public/css/input.css` | Tailwind v4 theme source (`@theme` + `@source`) |

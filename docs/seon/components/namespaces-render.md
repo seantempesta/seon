@@ -10,9 +10,8 @@ tags: [component, agent, flow]
 > agent's CURRENT ns FULL, its `:require`s as COMPACT CARDS, and DROPS everything
 > else. Config-driven and third-party override-proven. SHIPPED 2026-07-02.
 
-This is the CLJS-pod (active) feature. The `.clj` notes [[components/context]] and
-[[components/namespace-lifecycle]] describe the PAUSED JVM main-app track — a
-different mechanism.
+This is the active namespace-context feature. The former JVM context and
+namespace-lifecycle mechanisms are archived; they are not alternate paths.
 
 ## Namespace
 

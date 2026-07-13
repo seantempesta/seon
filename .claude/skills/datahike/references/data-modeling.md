@@ -67,15 +67,16 @@ that doesn't exist as code. Use the real nested namespace.
 
 ### Transactions
 
-- **Reify the transaction — attach provenance to the tx entity.** Two paths:
-  - **Idiomatic (auto-stamped):** wrap writes in `db/with-tx-context` /
-    `db/with-agent` and the tx is auto-tagged with `:seon.db/origin`,
-    `:seon.db/agent-id`, etc. The agent loop sets this for you, so your writes
-    already carry provenance. This is what `store-inventory`'s user-vs-system
-    split reads.
-  - **Custom per-tx facts:** include a map keyed `:db/id :db/current-tx` (alias
-    `"datomic.tx"`) in the same tx — datahike resolves it to the current
-    transaction's entity, so your provenance datoms hang off the tx itself:
+- **Every transaction carries two durable provenance refs.** The transaction
+  entity receives `:seon.db/user` and `:seon.db/process`. `db/with-agent`
+  selects the current agent as the user through the REPL process; core boot and
+  config work use `db/with-tx-context` to select root plus the appropriate
+  process. Turn, eval, replay, and test execution values stay runtime-only.
+- **Add a custom transaction fact only when it is a domain fact.** Include a
+  map keyed `:db/id :db/current-tx` (alias
+  `"datomic.tx"`) in the same tx — datahike resolves it to the current
+  transaction entity. For example, an ingest source can be a useful durable
+  fact without duplicating user or process:
 
     ```clojure
     (db/transact! {::db/tx-data
@@ -86,8 +87,8 @@ that doesn't exist as code. Use the real nested namespace.
     ;; => ["inbox-export-2026"]
     ```
 
-    `:acme.ingest.tx/source` is a normal registered attr — nothing special
-    about putting it on the tx entity.
+  `:acme.ingest.tx/source` is a normal registered attr — nothing special about
+  putting it on the tx entity.
 - **Lookup-refs specify EXISTING entities only.** A lookup-ref
   (`[:acme.people.person/email "a@x.com"]`) resolves only against entities
   already committed (or that appear earlier in the same tx and commit first).
@@ -272,7 +273,7 @@ connection.
 - **Derived view** — `deadlines-for` finds every email involving a person via
   the one-directional refs (reverse is free), no stored reverse attr.
 
-(Mirror this as a test the way `my.kb-test` exercises `my.kb` — a fresh world
+(Mirror this as a test the way `my.kb-test` exercises `my.kb` — a fresh database
 via `bin/seon cluster reset default`, then assert read-back. See the
 `clojure-testing` skill.)
 

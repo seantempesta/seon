@@ -8,7 +8,7 @@ tags: [concept, architecture, agent, database]
 
 **Agents see derived views of the database, not accumulated state. Sections are functions of the DB at render time. New ways to surface data are new section functions, not new mechanisms.**
 
-This is the load-bearing architectural principle for how agents experience their world. It's why Seon avoids notification queues, separate event streams, mutable counters, or atom-backed registries: the database is the truth, and **every piece of context an agent should see is computed on demand from current DB state**.
+This is the load-bearing architectural principle for how agents experience their environment. It's why Seon avoids notification queues, separate event streams, mutable counters, or atom-backed registries: the database is the truth, and **every piece of context an agent should see is computed on demand from current DB state**.
 
 ## The principle
 

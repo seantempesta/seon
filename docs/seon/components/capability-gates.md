@@ -26,7 +26,7 @@ without `bin/seon` keeps the deny posture until their launcher opts in.
 | `SEON_FS_ROOT` | `seon.agent.fs.internal/env-bootstrap` — ns load | path-list (`:`-split, like `$PATH`) | **DENY** (no allowed roots) | fs read/write/search + the shell `cwd` gate (shell delegates to fs) |
 | `SEON_FS_READ_ONLY` | `seon.agent.fs.internal` — ns load | `"1"` = read-only | writable | `write-file` on the granted roots |
 | `SEON_FS_LOCK` | `seon.agent.fs.internal/locked?` — live | any value but `"0"` locks | unlocked | makes `(seon.agent.fs/configure! …)` a no-op error |
-| `SEON_EMBED` | `seon.embed/embed-feature-enabled?` (wire-server JVM) + pod reads (`turn`, `render.system`, `diffusion.retrieval`) | **PRESENCE** — ANY value (even `""`/`"0"`) = ON | **OFF** | the whole embedding-retrieval feature (index, backfill, per-turn semantic recall) |
+| `SEON_EMBED` | `seon.embed/embed-feature-enabled?` (JVM database server) + pod reads (`turn`, `render.system`, `diffusion.retrieval`) | **PRESENCE** — ANY value (even `""`/`"0"`) = ON | **OFF** | the whole embedding-retrieval feature (index, backfill, per-turn semantic recall) |
 
 Related feature/kill switches (same env seam, not capability grants):
 

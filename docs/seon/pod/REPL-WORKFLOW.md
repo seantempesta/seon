@@ -207,7 +207,7 @@ DB row carries only the surfaced projection:
 |---|---|
 | `:seon.test/sym` | "cljs.user/mytest" |
 | `:seon.test/last-passed-at` / `:last-failed-at` | timestamps |
-| `:seon.test/last-failure-summary` | ≤50-token rendered failure (for warnings tile) |
+| `:seon.test/last-failure-summary` | ≤50-token rendered failure (for the warnings surface) |
 
 Renderers read those durable facts via Datalog. Live drill-down uses
 `(runner/last-result {})`; there is no generated test-run identity or durable

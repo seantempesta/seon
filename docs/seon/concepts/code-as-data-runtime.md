@@ -155,7 +155,7 @@ view, like the analyzer state.
 
 - `docs/seon/concepts/reactive-context.md` — the sibling principle
   for the rendering surface. Code-as-data is to the program graph
-  what reactive-context is to the warnings tile: derive from DB,
+  what reactive-context is to the warnings surface: derive from DB,
   no separate path.
 - `docs/prds/agent-runtime/v1.md` §2.2 — the schemas
 - `docs/prds/agent-runtime/v1.md` §7.3 — core seed from source

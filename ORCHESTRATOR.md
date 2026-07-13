@@ -8,7 +8,9 @@ tags: [orchestrator]
 
 **This file is for the main Claude Code instance** — the one the human interacts with directly. You coordinate work, delegate to agents via the Task/Agent tool, and protect your context window. Implementation happens in agents, not here.
 
-Read `CLAUDE.md` first — it has the shared principles everyone follows. The current focus lives there too: the **CLJS pod is ACTIVE** (Node runtime, agent loop, web UI on `http://127.0.0.1:7890`, backed by the `wire-server` datahike writer), and the **JVM main-app track is PAUSED**. Assume pod context unless a task is explicitly JVM-track.
+Read `CLAUDE.md` first — it has the shared principles everyone follows. The
+active system is one Node CLJS pod plus the JVM `seon.db.server`; the archived
+JVM application is not a second track.
 
 ---
 
@@ -159,15 +161,17 @@ Each namespace should have a **steward** — see `docs/seon/concepts/namespace-s
 
 **Never blindly kill processes.** The orchestrator owns system restarts via `bin/seon` (idempotent, multi-agent-safe). Agents diagnose and report — they never restart. See `CLAUDE.md` "Process Architecture" for the full process map.
 
-### The Pod + Wire-Server (active track)
+### The pod and database server
 
-The pod does **not** embed datahike. It forwards every write over a Unix socket to the central `wire-server` writer (file-backed datahike at `data/clusters/default/store`) and serves reads as local lazy db values. A **cluster** = one DB + an orchestrator agent + N task agents; all coordination flows through the DB.
+The pod reads a local immutable Datahike replica and forwards every write to
+the JVM `seon.db.server`, the sole writer. A cluster is one database, a root
+agent, and task agents; coordination flows through database facts.
 
 | Process | Role | Endpoint |
 |---------|------|----------|
 | `pod` | CLJS runtime — agent loop + web UI | HTTP `7890` |
 | `cljs-watch` | recompiles `.cljs` on save, feeds the pod's build | `logs/cljs-watch.log` |
-| `wire-server` | central datahike writer (sole writer) | socket REPL `7891` (`nc` only); store `data/clusters/default/store` |
+| database server | `seon.db.server`: sole writer, transaction feed and replay | typed UDS boundary |
 
 ### Supervisor Commands — `bin/seon`
 
@@ -178,28 +182,27 @@ bin/seon restart pod            # wait for "auto-boot ready" in logs/pod.log
 bin/seon restart cljs-watch
 bin/seon stop pod
 bin/seon tail pod               # tail -f logs/pod.log
-bin/seon tail wire-server
+bin/seon logs all
 ```
 
 ### Fresh database — cluster reset
 
 ```bash
-bin/seon cluster reset default  # stop pod + wire-server, WIPE the store, restart both
+bin/seon cluster reset default  # WIPE the cluster database, restart the runtime
 ```
 
-On boot the pod re-seeds the core from the indexed codebase. This wipes agent-authored work in that store (agent fns, soul edits, chat) — the core seed regenerates, that does not. **Gotcha:** a `cljs-watch` restart detaches the pod from shadow — prefer `cluster reset` (it does not restart `cljs-watch`) when you need the pod back in sync.
+On boot the pod reconciles core facts from the indexed codebase. Reset deletes
+agent-authored facts; generated core facts return. A `cljs-watch` restart can
+detach the pod from Shadow, so use the supervisor's coordinated reset when a
+fresh runtime and database are required.
 
 ### Logs for Debugging
 
 ```bash
 bin/seon tail pod               # pod boot + agent activity
 tail -f logs/cljs-watch.log     # CLJS rebuild status
-tail -f logs/wire-server.log    # datahike writer
+bin/seon logs all               # merged supervised logs
 ```
-
-### `[JVM track — paused]`
-
-The embedded-datahike JVM app (`./bin/run`, nREPL 7888 / HTTP 8080, `(user/reset)` / `(user/restart-db!)` / `(user/db-reset!)`) is paused. Don't drive it for active work. If a task is explicitly JVM-track, see `CLAUDE.md` "Code Reloading" and "REPL fns + recovery" rather than duplicating those fns here.
 
 ---
 
@@ -213,7 +216,9 @@ bin/test-cljs                   # fresh :node-test JVM (no live-pod contention),
 
 To verify a single behavior fast, **eval the fn directly against the live pod** rather than running a whole test ns. **Never fire overlapping `cljs.test/run-tests` in the live pod** — it wedges the shared async continuation; restart the pod for a pristine run.
 
-Run the full suite **once**, at the natural checkpoint after a unit of work completes — never after each sub-step (token economy; everything is in git and reverts are cheap). `[JVM track — paused]` test fns (`(user/run-tests …)`) live in `CLAUDE.md`.
+Use `bin/test-cljs --test=…` for focused CLJS checks and `bin/test-writer
+[namespace]` for the retained JVM database server. Run the relevant full gate
+once at the natural unit checkpoint, not after every sub-step.
 
 **Third-party harness:** a fully isolated second cluster (`bin/acme`, pod 7980, wire REPL 7981) reproduces downstream-consumer bugs without touching the live default cluster. Never `bin/seon start/stop/restart` the live cluster to chase a consumer bug — use the harness. See `docs/seon/components/acme-harness.md`.
 

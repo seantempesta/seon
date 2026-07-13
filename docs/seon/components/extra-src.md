@@ -12,8 +12,8 @@ paths, different jobs (research:
 
 ## When to use which
 
-- **Path A — the store** (default; no env, no compile): code the AGENT
-  authors or the operator transacts lives in the cluster store as
+- **Path A — the database** (default; no env, no compile): code the agent
+  authors or the operator transacts lives in the cluster database as
   `my.*` rows, replayed at boot and rendered into context. Use for
   agent-authored/evolving code and per-cluster customization.
 - **Path B — `SEON_EXTRA_SRC`** (this component): the downstream ships
@@ -23,7 +23,7 @@ paths, different jobs (research:
   domain APIs, anything wanting compile-time checking, instrumentation,
   and replay-skip semantics.
 
-## Path A recipe (store)
+## Path A recipe (database)
 
 ```clojure
 ;; render acme.* namespaces into every agent's context
@@ -36,7 +36,7 @@ paths, different jobs (research:
 
 ## Path B recipe (compiled extension)
 
-Downstream world dir (example name "acme"):
+Downstream project directory (example name "acme"):
 `acme/{deps.edn,src/acme/*.cljs,node_modules,package.json}` where
 `deps.edn` is `{:paths ["src"]}` plus any mvn/git deps.
 
@@ -77,7 +77,7 @@ it (mirrors `seon.dev.test-preload`):
   env unset = byte-identical commands (`bin/seon print-cmd <name>`).
 - Boot indexer: registered extra vars get `:seon.fn` rows, their nses
   get FULL-SOURCE `:seon.ns` rows, and they join the core ns-set
-  (replay-skipped — compiled code is never re-evaled from the store).
+  (replay-skipped — compiled code is never re-evaluated from the database).
   `seon.indexing/first-party-file?` and `seon.client/read-src-file`
   both accept the extra root.
 - npm: compile-time via the `#shadow/env ["SEON_EXTRA_NPM"
@@ -85,17 +85,17 @@ it (mirrors `seon.dev.test-preload`):
   runtime via `NODE_PATH=$SEON_EXTRA_NPM` exported by `bin/seon`'s pod
   command (the CJS bundle's `require("pkg")` resolves from `out/`).
 - Index → bound: a `:seon.fn/source` row does double duty. (1) the
-  agent SEES the fn (introspection); (2) because the tile-isolation SCI
+  agent sees the fn (introspection); (2) because the canvas SCI
   bounding ([[components/renderer]]) interprets STORED source, an indexed
-  downstream tile fn becomes BOUNDABLE — an un-indexed compiled
-  downstream tile fn renders on the UNBOUNDED compiled path. This
+  downstream canvas renderer becomes boundable — an unindexed compiled
+  downstream canvas renderer runs on the unbounded compiled path. This
   index→bound link plus the override-flows-through path are covered
   end-to-end by `seon.client.extra-core-test/downstream-fn-is-indexed-and-its-override-flows-through-a-late-bound-caller`.
 
 ## Rules and edges
 
-- **Reserved prefixes:** `seon.*` (core) and `my.*` (the human's
-  store-replayed corpus) are refused at boot-index time — the pod
+- **Reserved prefixes:** `seon.*` (core) and `my.*` (the agent-authored
+  database corpus) are refused at boot-index time — the pod
   fails loudly naming the offending ns. Use your own root prefix.
 - Changing `SEON_EXTRA_SRC` requires `bin/seon restart cljs-watch`
   (classpath fixed at watcher launch); file edits inside the root hot

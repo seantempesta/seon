@@ -26,7 +26,7 @@ out under `reference-code/`, grep-able, the same version we run. The default
 failure mode is writing confident Clojure in a place/mutable mindset while
 *guessing* how a `:malli/schema` validates or what `:db.fn/cas` does — and being
 wrong. Ground the concept→file first, then write. A 30-second REPL experiment
-beats hours of debugging. (`AGENTS.md` "Slow Is Fast".)
+beats hours of debugging. (See the shared instructions, "Slow Is Fast".)
 
 Memory got these wrong recently, the source set them right: an inline tx-fn
 carries a closure and can't cross the wire (use `:db.fn/cas`, pure data);
@@ -46,14 +46,16 @@ type/class/kind — schema attaches to *attributes*, and the namespaced keyword 
 the discriminator. If you catch yourself writing a `:type`/`:kind` field, a kind
 taxonomy, or "for each kind", stop and reframe in attributes + connections +
 provenance. The full four-moves (FIND by attribute presence / IDENTIFY by a
-`:db.unique/identity` attr / RELATE-REMOVE by refs / SCOPE by `:seon.db/origin`)
+`:db.unique/identity` attr / RELATE-REMOVE by refs / SCOPE through the
+transaction's `:seon.db/user` and `:seon.db/process` refs)
 are taught with worked queries in the **`datahike`** skill — read it there.
 
 ### Don't think in tables/rows — think in EAV bags of namespaced attrs
 
 One entity carries attributes from several namespaces; adding a field needs no
-migration. Generic code works on `:seon.ai/*`; provider code adds `:seon.ai.Codex/*`
-to the *same* entity. No "claude_messages table", no join, no migration.
+migration. Generic code works on `:seon.ai/*`; provider code adds its own
+qualified attributes to the *same* entity. No provider-specific table, no
+migration.
 
 ### Every map key is a fully-namespaced keyword
 
@@ -163,7 +165,8 @@ joining the datom's tx. See the **`datahike`** skill, "Transaction metadata".
 `d/q`/`d/pull`/`d/entity` are referentially transparent over a db value — it
 can't change under you, so the "race" you think you have is usually re-reading
 `@*conn*` three times instead of threading one snapshot. On the pod each deref
-*reconstitutes* a fresh value from the store, so re-reading also costs. `db` is
+*reconstitutes* a fresh value from durable database storage, so re-reading also
+costs. `db` is
 the **first** parameter to functions; the live `*conn*` is *bound* for you —
 never thread a connection or other opaque runtime object through agent-facing
 call sites. When you truly need a fence against a concurrent writer, the
@@ -202,18 +205,18 @@ parallel `foo-v2` leaves two versions, doubles the bug surface, and its
 explanatory comment outlives everyone who knew the reason. Same as "register the
 shape once, reference everywhere": duplication guarantees drift.
 
-### In a `my.*` ns you author, `:require` the aliases you use
+### Authored namespaces receive real standard requires
 
-The short aliases `db/`, `todo/`, `message/`, `schema/` are wired into your
-agent's HOME ns. When you author a fn in a `my.<domain>` ns you create ("build
-your environment"), give that ns a real `(ns … (:require …))` head carrying the
-same aliases — then `db/query` etc. resolve there because they are genuinely
-required, not by magic:
+The short aliases `db/`, `plan/`, `message/`, and `schema/` are wired into the
+agent's home namespace. The evaluation boundary augments each new authored
+namespace with those same real requires, so the aliases resolve after an
+`(ns my.<domain>)` or a fresh `in-ns`. Writing them explicitly is still valid
+and makes dependencies obvious:
 
 ```clojure
 (ns my.expense
   (:require [seon.db :as db]
-            [seon.agent.todo :as todo]
+            [my.plan :as plan]
             [seon.agent.message :as message]
             [seon.schema :as schema]))
 

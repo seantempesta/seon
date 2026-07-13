@@ -10,7 +10,7 @@ You write to a database through ONE namespace: `seon.db` (alias it `db`).
 shape — you NEVER hand-write datahike schema. This skill owns the
 database-specific facts: query/pull/transact in the pod, `register!` + the
 Malli→datahike bridge, refs/components/identity, provenance/scope, discovery,
-and the pod↔wire-server read/write split.
+and the pod↔database-server read/write split.
 
 > Hand-offs (single-ownership of facts — don't duplicate them here):
 > the general data-oriented mindset (errors-as-values, derive-don't-store, no
@@ -19,32 +19,27 @@ and the pod↔wire-server read/write split.
 > → **`clojure-testing`**. The Datalog/Datomic mindset, source-grounded, is
 > `docs/prds/agent-fsm/research/datahike-primer.md` — read it once.
 
-## The runtime: one connection, reads local, writes over a wire
+## The runtime: one connection, local reads, typed database writes
 
 The ACTIVE runtime is the **CLJS pod** (a long-running Node process). It does
 **NOT** embed datahike. The picture:
 
-- **Your universe is ONE connection.** `seon.db/*conn*` is bound for you before
+- **Your database is ONE connection.** `seon.db/*conn*` is bound for you before
   your code runs. Never thread it, never open another. Every `db/` fn defaults
   to `*conn*`, so you omit it.
 - **Reads are SYNC and local.** `query`/`pull`/`entity` resolve against the
-  current db value (`@*conn*`) — a lazy, immutable snapshot reconstituted from
-  the store with LRU node fetch (memory ∝ working set, not whole-DB). Compose
+  current db value (`@*conn*`) — a lazy, immutable snapshot backed by shared
+  Konserve data with LRU node fetch (memory follows the working set). Compose
   reads in straight-line code.
-- **Writes return a Promise envelope over a wire.** `transact!` is `^:async`;
-  it forwards the tx over a Unix socket to the **wire-server** (the single JVM
-  writer; durable file-backed store at `data/clusters/default/store`). You get
-  back a data ENVELOPE, never a throw.
+- **Writes return a Promise envelope through the database protocol.**
+  `transact!` is `^:async`; it forwards pure transaction data over a Unix socket
+  to `seon.db.server`, the sole JVM writer for the durable database at
+  `data/clusters/default/db`. You get back a data envelope, never a throw.
 
 A db is a **value, not a place** (`datahike-primer.md` §1). The "race" you
 think you have ("the DB moved between deciding and acting") is almost always
 re-reading `@*conn*` three times instead of threading one value. To act on a
 value the writer can confirm hasn't moved, use a CAS fence (below).
-
-> The embedded-LMDB-in-JVM model — `data/datahike/`, core.async flow,
-> `db/*direct-mode*`, per-db `db-name` keywords — is the **paused JVM track**
-> (`src/seon/db.clj`). It is NOT how the pod works. If you see those, you're in
-> the wrong lane.
 
 ## There are NO entity kinds — only attributes + connections
 
@@ -64,20 +59,21 @@ Applied to datahike, four moves replace every "for each kind":
 - **RELATE / REMOVE** → follow **refs**. Cascade is a property of the
   connection (`:db/isComponent` retracts children), never a kind operation.
 - **SCOPE** is two independent axes, don't conflate them:
-  - **provenance** — `:seon.db/origin` on the *transaction* (`:agent`,
-    `:core-seed`, `:user`, …), auto-stamped via `with-tx-context`/`with-agent`.
-    Answers "where did this fact come from". Drives `store-inventory`'s
-    user-vs-system split.
+  - **provenance** — `:seon.db/user` and `:seon.db/process` refs on the
+    transaction, selected by `with-agent`/`with-tx-context`. They answer who
+    caused the facts and which stable process accepted them. Boot/config facts
+    are derived by joining the process ref.
   - **ownership** — a domain ref like `:seon.agent.todo/owner` pointing at the
     owning entity. Answers "whose row is this". Per-agent filtering.
 
 If you catch yourself writing a `:type`/`:kind` field or a per-kind loop, stop
 and reframe in attributes + connections + provenance.
 
-**ENUMERATE stored data the right way** — `store-inventory`'s actual job is to
-group the live attributes BY THEIR NAMESPACE (a display grouping, not an entity
+**Inspect database contents by attribute** — the currently named
+`store-inventory` function groups live attributes by namespace (a display
+grouping, not an entity
 type) and, when you want the entities themselves, scan one identity attr's index.
-REPL-proven against the live store:
+REPL-proven against the live database:
 
 ```clojure
 ;; "what holds data?" — attr namespaces + counts (no entity kind anywhere)
@@ -89,7 +85,7 @@ REPL-proven against the live store:
 ;; enumerate entities BY ID-ATTR PRESENCE (scan that attr's index)
 (seon.db/query {:seon.db/query '[:find ?id :where [?e :seon.agent/id ?id]]})
 
-;; group the whole store by which identity attr each entity carries
+;; group the whole database by which identity attr each entity carries
 (->> (seon.db/query {:seon.db/query '[:find ?a :where [?s :seon.schema/key ?a]]})
      (map first)
      (filter seon.schema/identity-attr?)
@@ -135,8 +131,8 @@ Inside namespace `my.kb.source` you write `::id` and the reader expands it to
 ```
 
 `my.kb` (`src/my/kb.cljs`) is the runnable, test-exercised manual — every
-recipe compiles. `seon.agent.todo` (`src/seon/agent/todo.cljs`) is the EXEMPLAR
-store/retrieve ns (identity, refs, tree/DAG queries, derived datalog rules).
+recipe compiles. `seon.agent.todo` (`src/seon/agent/todo.cljs`) is the exemplar
+database-backed namespace (identity, refs, tree/DAG queries, derived datalog rules).
 Read those for live idiom.
 
 ## Schema: register! is the single source of truth
@@ -224,7 +220,7 @@ as `{::db/ok? false ::db/error <error-map>}`. Success is COMPACT DATA
 you get the envelope directly; writing `await` at the top level is an error
 (it's a macro, valid only inside an `^:async` body — see `clojurescript`).
 
-### The CAS work-fence (commit iff the world hasn't moved)
+### The CAS work-fence (commit iff the database fact has not moved)
 
 A `[:db.fn/cas ref attr old new]` with **`old == new`** is an in-tx assertion
 "this value is STILL `old`". Lead a work-tx with it and the whole tx commits
@@ -279,10 +275,10 @@ Results are CLIPPED (~50 rows) for context. Want a number? `(count …)` in the
 query, don't list-then-count. Empty `#{}` on a query that should match? The
 attr keyword is almost certainly misspelled (the guard below catches it).
 
-## Discovery — consult the store BEFORE registering a new shape
+## Discovery — inspect the database before registering a new shape
 
 ```clojure
-;; store-inventory: WHICH attribute namespaces hold data RIGHT NOW (so you know
+;; The database inventory: WHICH attribute namespaces hold data RIGHT NOW
 ;; what you can query, and which shapes to REUSE rather than fork). Default
 ;; scope = data added after the core seed.
 (db/store-inventory)
@@ -317,36 +313,35 @@ attr.
 - **Schema evolution** — add attrs any time; you cannot change an existing
   attr's value type, and adding uniqueness fails if duplicates exist.
 
-## Transaction metadata — provenance rides on the tx entity
+## Transaction metadata — two durable provenance refs
 
-Every datom's 4th field names its **transaction**, and the transaction is a
-real entity: datahike turns `:tx-meta` into datoms ON the tx
-(`reference-code/datahike/src/datahike/db/transaction.cljc:802` `flush-tx-meta`)
-and auto-stamps a monotonic `:db/txInstant`. Seon **already auto-merges
-provenance into every `transact!`**: the active `with-agent`/`with-tx-context`
-scope (the agent loop sets it for you) stamps `:seon.db/agent-id`,
-`:seon.db/session-id`, `:seon.db/turn-id`, `:seon.db/eval-id`,
-`:seon.db/origin`, `:seon.db/replay?`, `:seon.db/resume-marker?` — and it
-survives the wire to the JVM writer.
+Every datom's fourth field names its transaction, and the transaction is a real
+entity. Datahike turns `:tx-meta` into datoms on that entity and stamps
+`:db/txInstant`. Seon persists exactly two ordinary provenance facts:
 
-So WHO/WHAT/WHEN-wrote-this is a **join, not an attribute**:
+- `:seon.db/user` — a ref to the existing human/root or agent entity; and
+- `:seon.db/process` — a ref to a stable `:seon.db.process/id` such as
+  `:seon.db.process/repl`, `/boot`, or `/config`.
+
+The active `with-agent`/`with-tx-context` scope selects those refs. Turn, eval,
+test, replay, and other execution values remain process-local unless they are
+real domain facts. Who/process/when wrote a datom is therefore a join:
 
 ```clojure
-;; which agent/turn wrote this entity's title? Bind the datom's ?tx, read the tx entity:
-(db/query '[:find ?agent ?turn
+;; which database user and process wrote this title?
+(db/query '[:find ?user ?process-id ?at
             :where [?e :my.kb.source/id "src-1"]
                    [?e :my.kb.source/title _ ?tx]
-                   [?tx :seon.db/agent-id ?agent]
-                   [?tx :seon.db/turn-id ?turn]])
-;; WHEN is [?tx :db/txInstant ?at] — auto-stamped, no attr of yours needed.
+                   [?tx :seon.db/user ?user]
+                   [?tx :seon.db/process ?process]
+                   [?process :seon.db.process/id ?process-id]
+                   [?tx :db/txInstant ?at]])
 ```
 
-**DON'T register provenance attrs on domain entities** — a
-`:my.thing/created-by-agent`, `/created-at`, `/updated-at`, or `/source-turn`
-duplicates what the tx already records (the derive-don't-store violation in
-temporal form). Custom per-tx facts (an import batch, a source label) also go
-on the tx: include `{:db/id :db/current-tx :my.ingest/source "…"}` in the
-tx-data (`references/data-modeling.md` §Transactions).
+Do not register provenance projections such as `created-by`, `created-at`,
+`updated-at`, or `source-turn` on domain entities. Join the transaction. A real
+custom transaction fact such as an import batch may be written on
+`:db/current-tx`; it is not another Seon provenance mechanism.
 
 **The one exception:** a PRE-event snapshot coordinate — an application fact
 about a db value observed BEFORE the entity's own tx (canonical example:
@@ -390,4 +385,4 @@ reaction is an agent's wake-up on new `:seon.agent.message/to` datoms.
   relationships, reified-tx provenance, intra-tx tempids vs lookup-refs, a
   worked example in pod idiom.
 - `references/datahike-internals.md` — EAV/datoms, value types, schema-as-datoms,
-  history, the pod↔wire-server split, and where to read in the fork.
+  history, the pod↔database-server split, and where to read in the fork.

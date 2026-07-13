@@ -1,32 +1,37 @@
 ---
 name: clojure-testing
-description: "Test patterns for Seon — pod-first (CLJS). Use when writing or debugging .cljs tests, when a test fails with an unexpected error, when an async/Promise test never finishes, when a db-omitted (ambient) read sees the wrong conn, or when setting up a fresh in-memory datahike conn per test. Covers bin/test-cljs, cljs.test/async, awaiting capability-verb envelopes, the root set! of db/*conn* (CLJS has no binding across awaits), and example-tests-as-manual. The JVM mg/sample + user/run-tests generative idiom is the PAUSED track."
+description: "Test patterns for Seon. Use when writing or debugging .cljs tests, when an async/Promise test never finishes, when an ambient database read sees the wrong connection, or when setting up a fresh in-memory Datahike connection. Covers focused bin/test-cljs selection, cljs.test/async, capability-verb envelopes, root set! of db/*conn*, and the separate bin/test-writer database-server gate."
 ---
 
 # Clojure Testing — pod-first
 
-The active suite is **ClojureScript**, run in a fresh `:node-test` JVM via
-`bin/test-cljs` (~160 s). Tests double as the worked manual for the surface they
+The application suite is **ClojureScript**, run in a fresh isolated Node test
+runtime via `bin/test-cljs`. Tests double as the worked manual for the surface they
 cover — read `test/seon/db_test.cljs`, `test/seon/ctx_test.cljs`,
 `test/my/kb_test.cljs`, `test/my/skills_test.cljs` as the canonical examples.
 
 > Hand-offs: `^:async`/`await`/Promise semantics → **`clojurescript`**; what
 > `db/transact!` / `db/query` actually do + the envelope shape →
 > **`datahike`**; errors-as-values / no-bare-keys mindset →
-> **`data-oriented-clojure`**. How to RUN the suite is in `CLAUDE.md` "Testing".
+> **`data-oriented-clojure`**. How to run the suite is in the shared
+> repository instructions under "Testing".
 
 ## Running
 
 ```bash
-bin/test-cljs              # compile (DEV) + run every *-test ns, ~160s
+bin/test-cljs              # compile (DEV) + run every *-test ns
 bin/test-cljs --no-build   # skip compile; rerun out/test/test.js
+bin/test-cljs --test=seon.db-test
+bin/test-cljs --test=seon.db-test/one-behavior
+bin/test-writer            # retained JVM database-server boundary
 ```
 
 It compiles **DEV, not release** on purpose: the core resolves fns by walking
 `goog.global` at munged paths (`seon.eval/lookup-value`, malli's CLJS
 instrument), which Closure `:simple`/`:advanced` would flatten away. Use it as
 the batch checkpoint **once per unit of work**, not after each sub-step
-(`CLAUDE.md` "Test cadence = token economy"). To verify ONE behavior fast, eval
+(`Test cadence = token economy` in the shared instructions). To verify ONE
+behavior fast, eval
 the fn directly against the live pod instead of running a whole ns.
 
 **Never fire overlapping `cljs.test/run-tests` in the LIVE pod** — it wedges the
@@ -35,8 +40,8 @@ shared async continuation. Restart (`bin/seon restart pod`) for a pristine run;
 
 ## Fresh in-memory datahike conn per test
 
-The pod doesn't embed datahike — but a TEST opens a real `:memory` datahike conn
-directly (no wire-server), seeded like the pod boots. Each test gets its own
+The pod doesn't embed Datahike — but a test may open a real `:memory` Datahike
+connection directly (no database server), seeded like the pod boots. Each test gets its own
 instance (a fresh `:id` random-uuid) so they never see each other's data. This
 is a Promise (datahike connect is async):
 
@@ -126,16 +131,13 @@ out. A rejection should fail loudly (`(is false …)`), not silently pass.
 | `:malli.core/invalid-input/output` on a call | args/return don't match `:malli/schema` | read the explain — fix the call or the schema, don't coerce |
 | Empty `#{}` from a query that should match | attr misspelled, type mismatch, or ref-join-as-keyword | see the `datahike` skill's read traps |
 
-## Generative testing — PAUSED JVM track
+## Generative checks stay inside the same suite
 
-The `mg/sample` + `m/validate` property-test idiom and `(user/test-gen 'ns)` /
-`(user/run-tests …)` REPL verbs belong to the **paused JVM track** (run inside
-the embedded-datahike JVM via its REPL). They are NOT the default for pod work.
-Malli generators still attach to a schema the same way
-(`[:string {:gen/elements [...]}]`), and `mg/generate` works in CLJS — but the
-batch path is `bin/test-cljs`, and the boundary you're validating is the
-`schema/register!` + lazy-install + transact roundtrip exercised live in
-`db_test.cljs`, not a JVM pipeline-roundtrip harness.
+Malli generators work in ClojureScript (`mg/generate`, `mg/sample`), but they do
+not create a third test mechanism. Put the property in a normal `cljs.test`
+namespace and run it through `bin/test-cljs`. Database properties should use a
+fresh connection and exercise the same `schema/register!` → lazy install →
+transact → read-back boundary as the application.
 
 ## Key test files
 

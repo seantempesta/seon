@@ -5,27 +5,24 @@ What's underneath `seon.db` — useful when debugging, reading
 `seon.db` + `seon.schema`, never these APIs directly. The full source-grounded
 mindset is `docs/prds/agent-fsm/research/datahike-primer.md` — read it.
 
-## Where datahike actually runs (pod ≠ JVM)
+## Where Datahike runs
 
-The **pod does not embed datahike.** It is a follow-the-store replica:
+The pod does not own a Datahike writer. It maintains a local immutable replica:
 
-- **Writes** forward over a Unix socket (Transit-JSON, values only) to the
-  **wire-server** — the single JVM writer that owns the durable file-backed
-  store (`data/clusters/default/store`). Pure-data tx-ops (`:db/add`,
+- **Writes** forward typed protocol maps over a Unix socket to
+  `seon.db.server`, the sole JVM writer for the durable file-backed database
+  (`data/clusters/default/db`). Pure-data tx-ops (`:db/add`,
   `:db/retract`, `:db.fn/cas`, `:db.fn/retractEntity`) serialize and cross fine;
-  an inline `:db.fn/call` closure CANNOT cross the wire (`datahike-primer.md`
+  an inline `:db.fn/call` closure cannot cross the protocol (`datahike-primer.md`
   §2). That's why the work-fence is `:db.fn/cas`, not a tx-fn.
-- **Reads** are local: `@*conn*` reconstitutes a fresh db VALUE from the store
-  with lazy LRU node fetch, so memory ∝ working set. Two derefs at the same
+- **Reads** are local: `@*conn*` resolves a database value from shared immutable
+  Konserve data with lazy LRU node fetch, so memory follows the working set. Two derefs at the same
   basis-t are equal-by-value but not identical objects.
 
-Store configuration (`:keep-history? true`, `:schema-flexibility :write`,
-`:attribute-refs? false`) is set wire-server-side when the store is created, not
+Database configuration (`:keep-history? true`, `:schema-flexibility :write`,
+`:attribute-refs? false`) is set by the database server when the database is created, not
 in the pod. The pod asserts `:keep-history? true` as a boot precondition
 (`db/assert-preconditions!`).
-
-> The embedded-LMDB-in-process model lives ONLY on the paused JVM track
-> (`src/seon/db.clj`, `src/seon/db/datahike/`). Don't mistake it for the pod.
 
 ## EAV data model
 
@@ -126,15 +123,15 @@ on basis-t alone across db shapes (`datahike-primer.md` §4).
 
 ## How datahike differs from Datomic
 
-- **Embedded** (the wire-server store is file-backed via konserve), not
-  client/server.
+- **Embedded in the database-server process**, with the pod reading shared
+  immutable Konserve data.
 - **History is configurable** (`:keep-history? true` here) — retractions stay
   queryable.
 - **`:db/txInstant`** exists on every tx entity.
 - **Schema-on-write** (`:schema-flexibility :write`) — attrs must be declared
   before use (which the bridge + lazy install handle).
-- **Our fork adds secondary indexes** (incl. Proximum HNSW for embedding KNN),
-  reached via the wire-server's `knn-search` RPC.
+- **Our fork adds secondary indexes** (including Proximum HNSW for embedding
+  KNN), reached through the database protocol's `knn-search` operation.
 
 ## Where to read in the fork (don't reverse-engineer)
 
@@ -144,4 +141,4 @@ on basis-t alone across db shapes (`datahike-primer.md` §4).
 | `:db.fn/cas`, `:db.fn/call`, `:db.fn/retractEntity`, tx expansion, `:db/current-tx` | `…/db/transaction.cljc` |
 | public surface: `with`, `as-of`, `since`, `history`, `tx-range` | `…/api/specification.cljc` |
 | pull (incl. reverse-ref expansion) | `…/pull_api.cljc` |
-| The seon seam | `src/seon/db.cljs`, `src/seon/db/internal.cljs`, `src/seon/store/wire.cljs`, `src/seon/server/wire.clj` |
+| The Seon seam | `src/seon/db.cljs`, `src/seon/db/internal.cljs`, `src/seon/db/replica.cljs`, `src/seon/db/protocol.cljc`, `src/seon/db/transport/uds.{cljs,clj}`, `src/seon/db/writer.clj`, `src/seon/db/server.clj` |

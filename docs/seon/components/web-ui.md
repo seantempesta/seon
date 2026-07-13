@@ -6,7 +6,10 @@ tags: [component, web]
 
 # Web UI (CLJS pod web lane)
 
-> The pod's own browser UI: `seon.web.serve` (`src/seon/web/serve.cljs`) hosts a loopback HTTP+SSE server (default port 7890, `SEON_PORT`/`SEON_PORT_FILE` overrides); `seon.web.router` owns the route vector, and `seon.web.datastar` + `seon.web.debug` render the pages. Distinct from the JVM [[components/web-layer]] — this lane is Node-side, has no `.clj` sibling, and is what the demo browser actually talks to.
+> `seon.web.serve` (`src/seon/web/serve.cljs`) hosts the one loopback HTTP+SSE
+> web UI (default port 7890, with environment overrides). `seon.web.router`
+> owns the route vector; `seon.web.datastar` and `seon.web.debug` render pages.
+> The archived JVM web application is not a second supported renderer.
 
 ## Page shells
 

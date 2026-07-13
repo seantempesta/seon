@@ -3,18 +3,13 @@ name: datastar-web-ui
 description: "The ACTIVE pod web UI — Datastar SSE over gzip element morphs, hiccup in .cljs, reitit routes from :seon.route/* datoms, the seon.render/block + slot renderer, and the Phosphor Terminal theme. Use when editing seon.web.serve / seon.web.datastar / seon.web.router / seon.web.debug, the seon.ui.* agent view/header/markdown/clojure layout, or seon.render. Use when working with data-init / data-bind / data-on:submit / data-effect / data-signals / data-text signal attributes, the /agents + /agent/{id} pages and their /feed SSE streams, surfaces/slots, time-travel as-of feeds, or styling (warm blacks / cream / amber / monospace / dot+text status). Use when a live UI doesn't update on a tx, an SSE stream won't verify in the browser, or a human input bar loses focus on morph."
 ---
 
-# Datastar Web UI — the active pod surface
+# Datastar web UI — the active pod interface
 
-The UI you edit is the **CLJS pod's** loopback web surface on
+The UI you edit is the **CLJS pod's** loopback web UI on
 `http://127.0.0.1:7890` — hiccup rendered in `.cljs`, streamed to the browser
 as Datastar SSE. There is ONE update model: **`view = f(db-as-of t)`** — every
 datahike commit re-renders a whole element and morphs it in place.
 
-> The old `html.clj` / `sse.clj` / `routes.clj` / `components.clj` JVM web stack
-> (Ring + the `refresh-all!` broadcast channel + `data-on:click → @post`-returns-
-> HTML) is the **paused JVM track**. If a file ends in `.clj` under
-> `src/seon/web/`, you are in the wrong lane — the active surface is `.cljs`.
->
 > Hand-offs (don't duplicate): db reads/writes inside a handler →
 > **`datahike`**; `^:async`/`await`/Promise (every handler that writes is
 > async) → **`clojurescript`**; data-oriented mindset → **`data-oriented-clojure`**;
@@ -63,7 +58,7 @@ prior stream so exactly one feed targets `#app-view`. (`open-agent-feed!`,
 
 The in-tool Chrome agent's network layer **503s long-lived
 `text/event-stream`** connections, so you cannot confirm a feed morphs by
-watching it in the browser MCP. Verify the wire server-side: a tiny Node client
+watching it in the browser MCP. Verify the feed server-side: a tiny Node client
 that GETs `/agents/feed`, gunzips the response stream, and prints the
 `datastar-patch-elements` frames — plus a human eyeball on the real page. Don't
 trust "the browser agent saw nothing"; trust the gunzip client + `logs/pod.log`
@@ -120,7 +115,7 @@ Surfaces are hiccup vectors built in `.cljs` and serialized by
 `src/seon/render.cljs` is the typed renderer every surface shares. Two ideas:
 
 - **`(block view x)`** — `view` is `:html` (→ hiccup) or `:ai` (→ prompt
-  String). It DISPATCHES ON THE VALUE'S KIND via the namespaced key the value
+  String). It dispatches on the value's tagged shape via the namespaced key the value
   carries (the tagged-value contract — never a stored `:kind`):
   `{:seon.render/markdown "…"}` → `md->hiccup`; `{:seon.render/source "…"}` →
   `clj->hiccup`; a `:seon.render.value/tree` projection → the collapsible data

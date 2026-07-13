@@ -4,26 +4,22 @@
 
 **If you were spawned as a subagent (via the Task/Agent tool), you EXECUTE your assigned task directly — you do NOT launch, delegate to, or spawn other agents.** Only the single top-level orchestrator delegates. If your task is too large, report back to the orchestrator to re-scope; never decompose by spawning sub-agents. (This prevents runaway multi-level agent recursion. Guidance below about "delegating" / "launching agents" / research-agent policy is ORCHESTRATOR-only.)
 
-## Current focus — two tracks, the CLJS pod is active
+## Current runtime — one application, two processes
 
-**The active work is the CLJS pod + datahike-on-JVM (the `wire-server`
-store).** The broader JVM main-app integration is **PAUSED** — we will
-resume it later (when we do, this section gets updated to "resuming JVM
-core-systems integration"). Until then, assume CLJS-pod context unless a
-task is explicitly JVM-track. Operational sections below that describe the
-paused track are tagged **[JVM track — paused]**.
+The active system is a Node ClojureScript pod plus the JVM
+`seon.db.server`:
 
-- **CLJS pod (ACTIVE)** — `src/seon/*.cljs`, a long-running Node process:
-  agent loop, bootstrap CLJS compiler, loopback HTTP+SSE web UI on
-  `http://127.0.0.1:7890`. Backed by the **central JVM datahike store**
-  (the `wire-server` process; file-backed datahike on
-  `data/clusters/default/store`). The JVM is the sole writer — the pod
-  forwards writes over a Unix socket; reads are local lazy db values
-  (memory ∝ working set). A **cluster** = one DB + an orchestrator agent +
-  N task agents; all coordination flows through the DB.
-- **JVM main-app track (PAUSED)** — the embedded-datahike Integrant system
-  (`./bin/run`, nREPL 7888 / HTTP 8080, `(user/run-tests)`, core.async
-  flow). Still runnable, but NOT the current focus.
+- **CLJS pod** — the agent loop, bootstrap compiler, context and surface
+  derivation, and loopback Datastar web UI on `http://127.0.0.1:7890`.
+- **JVM database server** — the sole Datahike writer, committed-transaction
+  feed and replay source, plus explicitly selected heavy database work.
+
+The pod reads its local immutable replica and forwards writes over the typed
+database protocol. A cluster is one database, a root agent, and task agents;
+coordination is database data. The former embedded-Datahike JVM application,
+Integrant lifecycle, core.async flow topology, JVM renderer/web server, and
+nREPL tooling were removed. Git preserves them at
+`runtime-reliability-pre-refactor-2026-07-13`; they are not a second track.
 
 The idealized system: `docs/seon/architecture/` (read `architecture.md`
 first). Live status: the active PRD's `roadmap.md` on the current branch —
@@ -227,7 +223,6 @@ The personal domains (trading, health, finance) are eventual product domains, no
 
 - **Datahike** - Embedded Datalog database on LMDB. EAV datoms, Datomic-compatible queries, ACID transactions, bitemporal history.
 - **Malli** - Schema validation, generative testing, function contracts. The type system agents actually use.
-- **Integrant** - Component lifecycle. Clean start/stop semantics for the whole system.
 - **Datastar/SSE** - Real-time UI updates. Agents can see their work reflected immediately.
 
 ### Why Clojure?
@@ -414,15 +409,12 @@ rule in `docs/conventions.md` "Comment levels — prose vs code".
 ```
 seon/
 ├── src/seon/
-│   ├── *.cljs                ; CLJS pod (ACTIVE) — client, agent, eval, db,
-│   │                         ;   ctx, render, repl, warn, web/ (serve/debug)
-│   ├── core.clj              ; [JVM track] system entry, protocols
-│   ├── system.clj            ; [JVM track] Integrant system map
-│   ├── config.clj            ; [JVM track] Aero config loading
-│   ├── db/                   ; [JVM track] embedded-datahike layer
-│   └── web/                  ; HTTP/SSE handlers (.clj + .cljs siblings)
+│   ├── *.cljs                ; CLJS pod — agents, context, rendering, web UI
+│   ├── db/*.clj              ; JVM database server, writer, registry, backend
+│   ├── db/*.cljs             ; CLJS database API, replica, UDS transport
+│   └── *.cljc                ; genuinely shared schemas and pure mechanics
 ├── reference-code/           ; Git submodules of dep source (datahike, malli,
-│   │                         ;   integrant, core.async, datastar, nippy, sci…)
+│   │                         ;   datastar, transit, reitit, sci…)
 │   └── ...                   ;   read when stuck — never unzip deployed deps
 └── docs/
     ├── prds/                 ; Feature specifications
@@ -431,14 +423,14 @@ seon/
 
 ### Database Access
 
-`seon.db` is the **sole database API** on both tracks — never touch
+`seon.db` is the **sole application database API** — never touch
 `datahike.api` directly outside `src/seon/db/`. Everything else uses
 `db/transact!`, `db/query`, `db/pull-by-name`, etc.
 
-- **Pod (active):** `seon.db` (`.cljs`) forwards writes over the Unix
-  socket to `wire-server` (sole writer); reads are local lazy db values.
-- **`[JVM track — paused]`:** reader/writer core.async flow processes
-  serialize access; tests bind `db/*direct-mode*` to bypass the flow.
+The pod reads its local immutable database value. `seon.db.replica` forwards
+writes to `seon.db.server`, applies committed transactions in order, and uses
+bounded replay to repair reconnects. The JVM writer alone touches
+`datahike.api` and durable backend resources.
 
 See `docs/conventions.md` "Database Access" for patterns.
 
@@ -446,7 +438,7 @@ See `docs/conventions.md` "Database Access" for patterns.
 
 Semantic search runs on Google **Vertex AI** `gemini-embedding-2` (GA, natively
 multimodal — text/image/audio/video/PDF into ONE unified vector space; 3072-dim
-default, Matryoshka-truncatable to 1536 to match the HNSW index). The wire-server
+default, Matryoshka-truncatable to 1536 to match the HNSW index). The database server
 calls the **global** endpoint with `:embedContent` (NOT a region, NOT the legacy
 `:predict`). Governed: inputs are **not used to train Google's models** (Cloud
 Service Terms §17).
@@ -492,10 +484,6 @@ one wire contract — the SAME `SEON_AI_PROVIDER=diffusiongemma` config runs
 against an A100/H100 on RunPod or the local Mac by swapping `SEON_DG_ENDPOINT`
 alone.
 
-### Flow Topology (routing backbone) `[JVM track — paused]`
-
-In the JVM app, all cross-boundary calls — namespace function calls, database writes, REPL eval — route through `topology/request!` (core.async.flow): register promise → inject → step-fn → reply-router → deliver promise. See `docs/prds/unified-flow/design.md`. The **pod is core.async-free** — it uses native CLJS `^:async`/`await` instead.
-
 ### CLJS `^:async`/`await` (pod eval path)
 
 New CLJS surface that keeps tripping people — read the source before changing it: `docs/prds/agent-fsm/research/cljs-async-await-2026-06-28.md` + `reference-code/clojurescript/` (the `await` macro + `cljs/js.cljs` self-host).
@@ -520,21 +508,20 @@ New CLJS surface that keeps tripping people — read the source before changing 
 
 Any git operation that changes branch, discards files, or modifies history affects all agents. Ask the user before running it — they'll coordinate across agents. The cost of asking is near zero; the cost of destroying another agent's work is high.
 
-### Lane discipline: `.clj` (JVM track) vs `.cljs` (CLJS pod) siblings
+### Runtime boundary: CLJS application and JVM database server
 
-`seon.*` surfaces use **`.cljs` files alongside `.clj` files** — CLJS reads `.cljs`, CLJ reads `.clj`, neither compiler sees the other's. Two lanes:
-
-- **CLJS pod (active):** owns the `.cljs` files (`seon.client`, `seon.db`, `seon.eval`, `seon.ctx`, `seon.agent.*`, `seon.web.serve`/`debug`, …) and the genuinely-shared `.cljc` files.
-- **`[JVM track — paused]`:** owns the `.clj` files under `src/seon/`.
-
-Promote a file to `.cljc` only when it's genuinely platform-portable (e.g. `seon.schema`, `seon.instrument`); don't author a `.cljc` for a namespace that has a live `.clj` sibling on the other track unless both sides converge on its shape.
+CLJS owns agents, eval, context, rendering, routes, and the web UI. JVM source
+under `seon.db.*` owns the authoritative writer and heavy database operations.
+`.cljc` is only for genuinely portable schemas and pure mechanics. Do not add a
+JVM sibling for an application namespace or a second CLJS database path.
 
 
 ---
 
 ## Data Rules
 
-All data flowing through Seon must be safe at every boundary: Malli validation, core.async channels, Nippy serialization, Datahike transact/pull.
+All data flowing through Seon must be safe at every boundary: Malli validation,
+Transit framing, Datahike transact/pull, and browser rendering.
 
 **There are NO entity "kinds" — an entity is its attributes + connections.** Datahike/Datomic
 has no entity type, class, or kind. An entity is just an entity-id with a set of datoms; **what it
@@ -631,31 +618,18 @@ If you repeatedly fail to edit a function, **the function is too complex**. Refa
 
 ## Dev Hook
 
-After every Edit/Write, the hook automatically reloads code, runs affected tests, validates schemas, and provides Gemini AI review. Config in `.claude/seon-hook.edn`. Hook blocks if tests fail. **Read hook feedback** — it catches real problems. Fix warnings before moving on.
+The lightweight edit hook provides immediate syntax and documentation feedback.
+It is not a hidden application runtime or test authority. Read its feedback,
+then run the focused test door for the code you changed.
 
 ---
 
 ## Code Reloading
 
-**CLJS pod (active):** `cljs-watch` recompiles `.cljs` on every save; the
+`cljs-watch` recompiles `.cljs` on every save; the
 running pod picks up the new build. If the pod gets into a bad state,
 `bin/seon restart pod` (wait for `auto-boot ready` in `logs/pod.log`). A
 fresh database is `bin/seon cluster reset default`.
-
-**`[JVM track — paused]`** uses the dev hook + REPL fns (you rarely reload manually):
-
-```clojure
-(user/reload)  ; Fast reload via clj-reload
-(user/reset)   ; Full Integrant restart — use when changing config/components
-(user/status)  ; Check system health
-```
-
-**If the JVM track breaks:**
-1. **Observe first.** `(user/status)`, check logs, query the REPL. Understand what's broken and WHY.
-2. **Diagnose the root cause.** Fix the disease, not the symptoms.
-3. Try `(user/reload)` — often fixes code-level issues.
-4. Try `(user/reset)` — clean Integrant restart. Note: `resume-key` may preserve old state.
-5. **Last resort only:** `(user/restart-db!)` for the database, `bin/seon restart jvm` for the JVM. Document WHY.
 
 ---
 
@@ -665,8 +639,9 @@ fresh database is `bin/seon cluster reset default`.
 are exactly TWO testing surfaces; every test you write or run belongs to
 one of them, and creating a third is a violation:
 
-1. **Code correctness** → `bin/test-cljs` (cljs.test). Unit/integration
-   tests of our Clojure.
+1. **Code correctness** → `bin/test-cljs` for CLJS and `bin/test-writer` for
+   the retained JVM database server. These are two doors into one code-test
+   surface, selected by the runtime boundary.
 2. **Model/agent evaluation** → `src-inspect-ai/` (the Inspect AI bench;
    ledger `evals/scorecard.jsonl`, `pass^k` alarm, dated evidence under
    `evals/runs/<date>/`). A new eval = a new TASK/scorer INSIDE this bench,
@@ -678,38 +653,19 @@ one of them, and creating a third is a violation:
 If a measurement seems to need a mechanism none of these provide, STOP and
 report — extend the bench, don't mint a harness.
 
-**CLJS pod (active):** the full `.cljs` suite runs via `bin/test-cljs` — a
-fresh `:node-test` JVM (no live-pod contention), ~160s. Use it as the
-batch checkpoint. To verify a single behavior fast, eval the fn directly
-against the live pod rather than running a whole test ns. **Never fire
-overlapping `cljs.test/run-tests` in the live pod** — it wedges the shared
-async continuation; restart the pod (`bin/seon restart pod`) for a pristine
-run.
+Use `bin/test-cljs --test=seon.example-test` for one CLJS namespace or
+`--test=seon.example-test/example` for one var; use `--no-build` only when the
+existing test bundle contains the change. `bin/test-cljs` is the full CLJS
+checkpoint. Use `bin/test-writer` for the retained JVM database-server gate, or
+pass one test namespace for a focused writer run. Never run overlapping
+cljs.test suites in the live pod.
 
-**Third-party harness (Acme):** to reproduce/fix downstream-consumer bugs
-against a real third-party shape WITHOUT touching the live deployment, use
-`bin/acme` — a fully isolated second cluster (pod on 7980, wire-server REPL
-7981, store `data/clusters/acme`, its own bundle `out-acme/`, logs
-`logs/acme/`). The consumer's own code lives in `acme/` (compiled in via
-`SEON_EXTRA_SRC`). Boot: `bin/acme build && bin/acme start wire-server &&
-bin/acme start pod`. To verify a seon fix in acme, `bin/acme build` then
-`bin/acme restart pod` (the acme bundle is not watched). NEVER `bin/seon
-start/stop/restart` the live default cluster. Full guide — boot, isolation
-table, what it exercises, the fix→verify loop, inspection (HTTP 7980 / wire
-REPL 7981, not MCP), and warts: `docs/seon/components/acme-harness.md`.
-
-**`[JVM track — paused]`** tests run inside the running JVM via the REPL —
-never by spawning a separate process:
-
-```clojure
-(user/run-tests 'seon.foo-test)                    ;; Single namespace
-(user/run-tests ['seon.foo-test 'seon.bar-test])   ;; Multiple namespaces
-(user/run-tests)                                    ;; All unit tests
-(user/test-affected 'seon.foo)                      ;; Namespace + its dependents
-(user/test-gen 'seon.foo)                           ;; Generative tests (Malli schemas)
-```
-
-Results are **auto-saved** to `@user/repl-<session>`. Dig into stored keys instead of re-running. If the REPL is down, use `bin/test` as a fallback (~30s startup). See `/clojure-testing` skill for fixtures, generators, and debugging patterns.
+**Third-party harness (Acme):** the downstream overlay remains isolated, but its
+operator wrapper is deliberately held at the pre-database-server cutover while
+another lane uses it. Do not operate or update ACME during the default-cluster
+refactor. After the default cluster passes cold-start and live-agent proof,
+update `bin/acme` to delegate to the same `bin/seon` process names and database
+layout, then refresh `docs/seon/components/acme-harness.md` from live evidence.
 
 ### Test cadence = token economy (user directive, 2026-06-10)
 
@@ -726,7 +682,7 @@ checkpoint, not per edit.
 
 ## UI Development
 
-Seon uses a **Phosphor Terminal** theme — warm blacks, cream text, amber accents. Read `docs/prds/namespace-ui/design-system.md`. The pod's web UI is `src/seon/web/serve.cljs` + `debug.cljs` (hiccup); the JVM track uses `src/seon/web/components.clj`. Invoke `/datastar-web-ui` for SSE patterns.
+Seon uses a **Phosphor Terminal** theme — warm blacks, cream text, amber accents. Read `docs/prds/namespace-ui/design-system.md`. The one web UI is `src/seon/web/serve.cljs` + `debug.cljs` (hiccup). Invoke `/datastar-web-ui` for SSE patterns.
 
 Key rules: density over whitespace (`p-3` not `p-6`), small text (`text-xs` primary), warm colors (`bg-base-*`, never `bg-white`), dot+text status (`● running`), monospace everywhere.
 
@@ -768,8 +724,6 @@ Public functions fully spec and validate every argument and the return. Two shap
   [{::keys [id option]}]
   ...)
 ```
-
-`[JVM track — paused]` instrumentation there is separate machinery: managed by Integrant (`:seon.dev/instrumentation`), survives `(user/reset)`, picks up schema changes on reload.
 
 ---
 
@@ -862,27 +816,25 @@ A public fn's docstring **first line is a complete, standalone sentence, ≤72 c
 
 ## Process Architecture (IMPORTANT)
 
-The active runtime is the **CLJS pod**, backed by the **wire-server**
-datahike writer. The JVM main app is the paused track.
+The active application is the **CLJS pod** backed by the JVM
+`seon.db.server`. The process boundary separates application work from
+authoritative database writes; it is not a second application.
 
 | Process | Role | Notes |
 |---------|------|-------|
-| **pod** | CLJS runtime (ACTIVE) — agent loop, web UI | Node `out/client/main.js`; HTTP on 7890 |
+| **pod** | CLJS runtime — agent loop, context/rendering, web UI | Node bundle; HTTP on 7890 |
 | **cljs-watch** | recompiles `.cljs` on change | feeds the pod's build (`logs/cljs-watch.log`) |
-| **wire-server** | central datahike writer — the durable cluster store | UDS + socket REPL on 7891 (`nc` only); store at `$SEON_CLUSTER_DIR/store` (default `data/clusters/default/store`) |
-| **jvm** `[JVM track — paused]` | embedded-datahike Integrant app | `./bin/run`; nREPL 7888, HTTP 8080 |
-| **Caddy** | HTTPS reverse proxy (optional) | 3030 |
+| **database server** | `seon.db.server` — sole Datahike writer, tx feed, replay, heavy database work | typed UDS request/feed boundary; database under the cluster directory |
 
-### Datahike: pod vs JVM
+### Datahike boundary
 
-- **Pod (active):** does NOT embed datahike. It forwards every write over a
-  Unix socket to `wire-server` (the sole writer); reads are local lazy db
-  values. The durable store is `data/clusters/default/store`.
-- **JVM track (paused):** runs its OWN embedded in-process datahike (LMDB),
-  separate from the cluster store. The "embedded, no separate service"
-  model applies to the JVM track ONLY — not the pod.
+- The pod reads a local immutable Datahike replica and never opens the durable
+  writer backend.
+- `seon.db.server` serializes every write, publishes committed transactions,
+  and serves bounded replay. Reconnect uses replay; no second database or
+  invalidation path exists.
 
-### Surgical Process Management — `bin/seon` (both tracks)
+### Process management — `bin/seon`
 
 **Use `bin/seon` as the supervisor.** It's idempotent, multi-agent-safe (mkdir-mutex per process), and replaces ad-hoc `pkill` + `nohup` patterns. Any number of agents can call `start`/`stop`/`restart` simultaneously — the supervisor arbitrates. Logs go to `logs/<process>.log` (consistent path; any agent can `bin/seon tail <process>` from anywhere). See [[docs/seon/process-management]] for the full protocol.
 
@@ -894,14 +846,15 @@ bin/seon restart cljs-watch
 bin/seon stop pod
 ```
 
-Registered processes: `pod` (CLJS pod via Node), `cljs-watch` (CLJS rebuild watcher), `wire-server` (central datahike writer), `jvm` (`./bin/run` — paused track). Add new ones by editing the `process_command` case statement at the top of the script.
+The supervisor owns the pod, database server, and CLJS build watcher. Use
+`bin/seon status` and `bin/seon help` for current process names and commands;
+do not hardcode internal launch commands in another runbook.
 
 ### Cluster reset (active track)
 
-`bin/seon cluster reset [name]` (default `default`) — stops pod + wire-server,
-**wipes the store**, restarts both; the pod re-seeds the core from the indexed
-codebase on boot. Use for a fresh store. Wipes agent-authored work in that
-store (agent fns, soul edits, chat) — the core seed regenerates, that does not.
+`bin/seon cluster reset [name]` (default `default`) stops the cluster runtime,
+**wipes its database**, and restarts it; the pod reconciles core facts from the
+indexed codebase on boot. Agent-authored facts in that database are deleted.
 
 ### Core-fault watch (active track)
 
@@ -923,29 +876,16 @@ a ready-to-eval repro expression). Then `bin/seon restart pod`.
 ```bash
 bin/seon tail pod                                # pod boot + agent activity
 tail -f logs/cljs-watch.log                      # CLJS rebuild status
-tail -f logs/wire-server.log                     # datahike writer
+bin/seon logs all                                # merged supervised logs
 ```
-
-### `[JVM track — paused]` REPL fns + recovery
-
-These apply to the embedded-datahike JVM app (`./bin/run`), NOT the pod:
-
-| Want to... | Do this |
-|-----------|---------|
-| Reload code | `(user/reload)` |
-| Restart the whole system (incl. DB connection) | `(user/reset)` |
-| Restart just the DB component | `(user/restart-db!)` |
-| Full data wipe | `(user/db-reset!)` |
-| Restart the JVM from scratch | `bin/seon restart jvm` |
-| Check Integrant components | `(user/status)` |
-
-Recovery (JVM track): datahike connection errors after reload → `(user/restart-db!)` or `(user/reset)`; LMDB lock errors on start → usually self-heals, else `(user/restart-db!)`; data corrupted (rare, from `kill -9` mid-write) → `(user/db-reset!)`. JVM logs: `logs/app.log`, `logs/error.log`, `logs/startup.log`.
 
 ---
 
 ## Logging
 
-Application: `logs/app.log` (Timbre). Errors: `logs/error.log` (logback). Boot: `logs/startup.log`. Libraries: `logs/lib.log` (SLF4J).
+Supervised processes write their own files under `logs/`. Use `bin/seon logs
+all` for a merged view and `bin/seon logs <process>` or `tail <process>` for one
+process. Do not rely on the archived JVM application's log files.
 
 ---
 
