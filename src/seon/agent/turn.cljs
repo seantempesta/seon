@@ -57,9 +57,12 @@
          :seon.db.id/generator :seon.db.id.generator/compact}
    ::db.id/compact-value])
 (schema/register! :seon.agent.turn/at           :inst)
-;; A turn is running/done/error — DISTINCT from the agent FSM state
+;; A turn is running/done/error/interrupted — DISTINCT from the agent FSM state
 ;; (idle/running/…): a turn is a single completion, the agent is the actor.
-(schema/register! :seon.agent.turn/status       [:enum :running :done :error])
+;; `:interrupted` is asserted only by unexpected-exit recovery when no runtime
+;; remains to close the committed turn normally.
+(schema/register! :seon.agent.turn/status
+                  [:enum :running :done :error :interrupted])
 ;; The RUN this turn belongs to. Each turn-open STAMPS the agent's current
 ;; open run here, so the run's derived current-turn (`count turns where
 ;; :seon.agent.turn/run = run-eid`) is derivable. STORED — the spine that

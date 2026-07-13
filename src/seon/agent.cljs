@@ -356,6 +356,15 @@
 (schema/register! ::resumable-agent-ids-request
   [:map [:seon.db/db {:optional true} :seon.db/db-val]])
 (schema/register! ::resumable-agent-ids-response [:vector :seon.agent/id])
+(schema/register! ::initial-created? :boolean)
+(schema/register! ::ensure-initial-agent-request [:map])
+(schema/register!
+  ::ensure-initial-agent-response
+  [:or
+   [:map
+    [::initial-created? ::initial-created?]
+    [:seon.agent/id {:optional true} :seon.agent/id]]
+   :seon.db/transact-response])
 
 (defn armable-agent-ids
   "Born agent ids whose DERIVED state is `:idle` — the ones a trigger can WAKE.
@@ -381,6 +390,23 @@
     ::resumable-agent-ids-response]}
   [{:seon.db/keys [db]}]
   (derive/resumable-agent-ids (or db @db/*conn*)))
+
+(defn- ordinary-agent-ever-born?
+  "True when database history proves a non-root agent was ever born.
+
+   History, rather than the current view, is load-bearing: deleting or
+   terminating the initial agent must not make a later restart look like a
+   first boot and silently manufacture a replacement."
+  [database]
+  (boolean
+    (db/query
+      {:seon.db/db (db/history database)
+       :seon.db/query
+       '[:find ?agent .
+         :where
+         [?agent :seon.agent/id ?id _ true]
+         [?agent :seon.eval/home-requires _ _ true]
+         [(not= ?id "root")]]})))
 
 ;; ============================================================
 ;; Derived status — the agent FINGERPRINT. The whole derived state in one map.
@@ -519,6 +545,27 @@
                  (:seon.error/message (:seon.db/error env))))
           env)
       {:seon.agent/id id})))
+
+(defn ^:async ensure-initial-agent!
+  "Create the cluster's one initial ordinary agent only on a true first boot.
+
+   A non-root agent's historical birth fact permanently satisfies this
+   transition, even if that agent is later terminated or retracted. The new
+   agent is allocated through [[mint!]] and parented by root; this function
+   adds no second creation path. Root must already exist as a lookup target.
+
+   Returns `::initial-created?` and, when created, the new agent id. Database
+   failures remain ordinary `seon.db/transact!` error envelopes."
+  {:malli/schema
+   [:=> [:cat ::ensure-initial-agent-request]
+    ::ensure-initial-agent-response]}
+  [_]
+  (if (ordinary-agent-ever-born? @db/*conn*)
+    {::initial-created? false}
+    (let [result (await (mint! {:seon.agent/parent [:seon.agent/id "root"]}))]
+      (if (false? (:seon.db/ok? result))
+        result
+        (assoc result ::initial-created? true)))))
 
 ;; ============================================================
 ;; Spawn depth (multi-agent-context Piece 2) — the DEPTH-CAP backstop. The soft

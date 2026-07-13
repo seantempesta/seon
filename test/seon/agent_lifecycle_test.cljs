@@ -306,6 +306,32 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(deftest initial-agent-is-created-once-across-current-state-retraction
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (await (agent/create! {:seon.agent/id "root"}))
+            (let [first-result (await (agent/ensure-initial-agent! {}))
+                  initial-id (:seon.agent/id first-result)
+                  second-result (await (agent/ensure-initial-agent! {}))]
+              (is (true? (::agent/initial-created? first-result)))
+              (is (and (string? initial-id) (not= "root" initial-id)))
+              (is (= "root"
+                     (get-in (db/entity
+                               {:seon.db/ref [:seon.agent/id initial-id]})
+                             [:seon.agent/parent :seon.agent/id])))
+              (is (= {::agent/initial-created? false} second-result)
+                  "a second startup does not create another ordinary agent")
+              (await (db/transact!
+                       {:seon.db/tx-data
+                        [[:db.fn/retractEntity
+                          [:seon.agent/id initial-id]]]}))
+              (is (= {::agent/initial-created? false}
+                     (await (agent/ensure-initial-agent! {})))
+                  "historical birth prevents replacement after retraction"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 ;; ============================================================
 ;; create! — default-turn-limit pass-through, honest error envelope,
 ;; purpose never defaulted.

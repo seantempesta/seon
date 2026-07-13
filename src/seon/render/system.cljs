@@ -37,6 +37,7 @@
     [seon.derive :as derive]
     [seon.embed :as embed]
     [seon.render :as render]
+    [seon.runtime.recovery :as recovery]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -330,6 +331,35 @@
           :style "grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));"}
     (doall (map #(agent-card-hiccup db %) agents))]])
 
+(defn- recovery-hiccup
+  "Compact unexpected-exit facts still awaiting root's judgment."
+  [notices]
+  [:div {:class (str "border-b border-amber-800/70 bg-amber-950/30 "
+                     "px-3 py-2 text-xs")
+         :data-seon-recovery-notice "true"}
+   [:div {:class "font-semibold text-amber-300"}
+    "Unexpected exit recovered"]
+   (doall
+     (for [{:seon.runtime.recovery/keys [id detail at agents runs turns]}
+           notices]
+       [:div {:key id :class "mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1"}
+        [:span {:class "font-mono text-text-500"} (short-time at)]
+        [:span {:class "text-text-200"}
+         (str (count agents) " agent" (when-not (= 1 (count agents)) "s")
+              " restored to idle")]
+        (doall
+          (for [agent-id agents]
+            [:a {:key agent-id
+                 :href (str "/agent/" agent-id)
+                 :class "font-mono text-amber-400 hover:text-amber-200"}
+             agent-id]))
+        [:span {:class "text-text-500"}
+         (str (count runs) " runs · " (count turns) " interrupted turns")]
+        (when detail
+          [:span {:class "text-text-400"} detail])]))
+   [:div {:class "mt-1 text-text-400"}
+    "Review the affected agents and resume only when appropriate."]])
+
 (defn- store-hiccup [{:seon.db/keys [attr-groups attr-ns-count attr-count datom-count]}]
   [:div {:class "px-3 py-2 border-t border-base-800"}
    [:div {:class "flex items-baseline gap-3 mb-1"}
@@ -423,6 +453,23 @@
             (str "; " (short-time at) " " label " "
                  (if (= :eval kind) "λ" "✉") " " text)))))
 
+(defn- recovery-ai
+  "Database-derived crash facts for root's existing canvas AI twin."
+  [notices]
+  (when (seq notices)
+    (str/join
+      "\n"
+      (concat
+        ["; UNEXPECTED EXIT RECOVERY — these agents were restored to idle"
+         "; Review their interrupted work and decide whether any should resume."]
+        (for [{:seon.runtime.recovery/keys [detail at agents runs turns]}
+              notices]
+          (str "; " (short-time at)
+               " agents=" (pr-str agents)
+               " runs=" (count runs)
+               " interrupted-turns=" (count turns)
+               (when detail (str " detail=" (pr-str detail)))))))))
+
 ;; ============================================================
 ;; The public canvas content fn — root's seeded canvas.
 ;; ============================================================
@@ -445,13 +492,20 @@
   [{:seon.db/keys [db]}]
   (let [db       (or db @db/*conn*)
         fleet    (fleet-summary db)
+        recoveries (recovery/pending-notices {:seon.db/db db})
         store    (store-summary db)
         activity (recent-activity db)]
     {:seon.render/hiccup
      [:div {:class "seon-tile flex flex-col bg-base-950 text-text-200"}
       (vitals-hiccup fleet)
+      (when (seq recoveries) (recovery-hiccup recoveries))
       (grid-hiccup db fleet)
       (store-hiccup store)
       (activity-hiccup activity)]
      :seon.render/ai
-     (str/join "\n;\n" [(fleet-ai fleet) (store-ai store) (activity-ai activity)])}))
+     (->> [(fleet-ai fleet)
+           (recovery-ai recoveries)
+           (store-ai store)
+           (activity-ai activity)]
+          (remove str/blank?)
+          (str/join "\n;\n"))}))

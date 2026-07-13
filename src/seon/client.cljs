@@ -60,7 +60,7 @@
     ;; trigger (seon.agent does NOT, to stay acyclic).
     [seon.agent.loop :as agent-loop]
     ;; The run lifecycle — the bootstrap turn-0 opens a run for its turn.
-    [seon.agent.run :as run]
+    [seon.agent.run]
     ;; Cron-as-data — required so its `:seon.agent.schedule/*` register! calls
     ;; run before `agent-bootstrap-attrs` installs them, and so the ticker's
     ;; `fire-due-schedules!` is in the build.
@@ -104,6 +104,7 @@
     ;; projection + the turn-mining exporter. Required so the build includes
     ;; it (curation attrs registered, export!/context callable + indexed).
     [seon.repl.autocomplete]
+    [seon.runtime.recovery :as recovery]
     ;; Schemas-as-queryable-data (research file
     ;; schemas-as-queryable-data-2026-05-26.md). At boot,
     ;; start-runtime! decomposes every entity-shape :map schema into
@@ -444,6 +445,12 @@
    :seon.agent.run/result
    :seon.agent.run/result-ref
    :seon.agent.run/closed-at
+
+   ;; --- Unexpected-exit recovery anchor (the affected agents/runs/turns are
+   ;; derived by joining this anchor's transaction, never copied here) ---
+   :seon.runtime.recovery/id
+   :seon.runtime.recovery/reason
+   :seon.runtime.recovery/detail
 
    ;; --- Turn (a standalone entity that points UP to its run) ---
    :seon.agent.turn/id
@@ -2364,9 +2371,10 @@
   (if (db/attached?)
     (let [conn db/*conn*
           ids (agent/resumable-agent-ids {:seon.db/db @conn})
+          primary (or (first (remove #{"root"} ids)) (first ids) "root")
           _ (await (replica/attach! {::replica/conn conn}))
           {:seon.web/keys [port port-file]} (await (web.serve/start!))]
-      {:seon.agent/id (first ids)
+      {:seon.agent/id primary
        :seon.client/resumed-ids ids
        :seon.client/created-ids []
        :seon.web/port port
@@ -2377,13 +2385,21 @@
           ;; Bootstrap compilation can overlap the independent writer seed.
           compile-promise (repl/ensure-bootstrap!)]
       (await (boot-seed! {:seon.db/conn conn}))
-      (let [{closed :seon.agent.run/closed}
-            (await (run/recover-crashed-runs!))]
-        (when (seq closed)
+      (let [recovered
+            (await
+              (db/with-tx-context
+                {:seon.db/user [:seon.agent/id "root"]
+                 :seon.db/process
+                 (db.process/lookup-ref :seon.db.process/boot)}
+                (fn [] (recovery/recover! {}))))]
+        (when (false? (:seon.db/ok? recovered))
+          (throw (ex-info "start-runtime!: crash recovery failed" recovered)))
+        (when (::recovery/repaired? recovered)
           (log/info-console! "seon.client/start-runtime!"
-                             (str "crash recovery: closed " (count closed)
-                                  " orphaned run(s) :crashed")
-                             {:seon.agent.run/closed closed})))
+                             (str "crash recovery: restored "
+                                  (count (::recovery/agent-ids recovered))
+                                  " agent(s) to idle")
+                             recovered)))
       (let [root-home [:seon.ns/name (keyword (str (home/home-ns "root")))]
             root-ready-before?
             (string? (:seon.ns/source (db/entity {:seon.db/ref root-home})))
@@ -2400,7 +2416,21 @@
                 (fn [] (agent/create! {:seon.agent/id "root"}))))
             _ (when (false? (:seon.db/ok? root-result))
                 (throw (ex-info "start-runtime!: root birth failed" root-result)))
-            created-ids (if root-ready-before? [] ["root"])
+            initial-result
+            (await
+              (db/with-tx-context
+                {:seon.db/user [:seon.agent/id "root"]
+                 :seon.db/process
+                 (db.process/lookup-ref :seon.db.process/boot)}
+                (fn [] (agent/ensure-initial-agent! {}))))
+            _ (when (false? (:seon.db/ok? initial-result))
+                (throw (ex-info "start-runtime!: initial agent birth failed"
+                                initial-result)))
+            initial-id (when (::agent/initial-created? initial-result)
+                         (:seon.agent/id initial-result))
+            created-ids (cond-> []
+                          (not root-ready-before?) (conj "root")
+                          initial-id (conj initial-id))
             compile-state (await compile-promise)
             resumable-ids (agent/resumable-agent-ids {:seon.db/db @conn})
             all-ids (->> (db/query
@@ -2409,7 +2439,11 @@
                             '[:find [?id ...]
                               :where [?a :seon.agent/id ?id]]})
                          sort vec)
-            primary (or (first resumable-ids) (first all-ids) "root")]
+            primary (or initial-id
+                        (first (remove #{"root"} resumable-ids))
+                        (first resumable-ids)
+                        (first all-ids)
+                        "root")]
         (let [replay-stats
               (await (replay-program-graph!
                        {::conn conn
@@ -2451,7 +2485,9 @@
                                           (:seon.agent.runtime/resumed? %)) %)
                                  results)]
                   (throw (ex-info "start-runtime!: agent resume failed" failed)))
-              {:seon.agent/keys [id ns]} (first results)
+              {:seon.agent/keys [id ns]}
+              (or (some #(when (= primary (:seon.agent/id %)) %) results)
+                  (first results))
               {:seon.web/keys [port port-file]} (await (web.serve/start!))]
           (await (ai/sync!))
           (await (web.brand/sync!))
@@ -2572,7 +2608,9 @@
                                        {:agent id :ns (str ns)
                                         :resumed resumed-ids
                                        :created created-ids
-                                       :url (str "http://127.0.0.1:" port)
+                                       :url (str "http://127.0.0.1:" port
+                                                 "/agent/"
+                                                 (js/encodeURIComponent id))
                                        :port-file port-file})))
           (.catch (fn [err]
                     ;; FAIL LOUD (2.2e): the pod is useless without its

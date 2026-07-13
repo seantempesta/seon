@@ -12,7 +12,8 @@
     [seon.agent :as agent]
     [seon.agent.run :as run]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.runtime.recovery :as recovery]))
 
 (def ^:private a-id "runtest-260625")   ; exactly 14 chars (:seon.db/id)
 (def ^:private a-ref [:seon.agent/id a-id])
@@ -195,7 +196,7 @@
 
 ;; ── FIX 1: crash recovery — close runs orphaned by a prior pod crash ───────
 
-(deftest recover-crashed-runs!-closes-orphaned-runs-and-is-idempotent
+(deftest recover!-closes-orphaned-runs-and-is-idempotent
   (async done
     (let [!rid (atom nil)]
       (-> (with-conn
@@ -208,9 +209,9 @@
                            (is (= :running (:seon.agent/state
                                              (agent/derive-status {:seon.agent/id a-id})))
                                "open run, no driver ⇒ derived :running (crash state)")
-                           (run/recover-crashed-runs!)))
+                           (recovery/recover! {})))
                   (.then (fn [res]
-                           (is (= [@!rid] (:seon.agent.run/closed res))
+                           (is (= [@!rid] (::recovery/run-ids res))
                                "the orphaned run was recovered")
                            (let [r (db/entity {:seon.db/ref [:seon.agent.run/id @!rid]})]
                              (is (= :closed (:seon.agent.run/status r)))
@@ -220,9 +221,9 @@
                            (is (= :idle (:seon.agent/state
                                           (agent/derive-status {:seon.agent/id a-id})))
                                "the recovered agent is wakeable (:idle)")
-                           (run/recover-crashed-runs!)))
+                           (recovery/recover! {})))
                   (.then (fn [res2]
-                           (is (= [] (:seon.agent.run/closed res2))
+                           (is (false? (::recovery/repaired? res2))
                                "idempotent — a clean second pass closes nothing"))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
