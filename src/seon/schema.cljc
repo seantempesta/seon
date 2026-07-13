@@ -24,6 +24,65 @@
             #?(:clj [clojure.edn :as edn]
                :cljs [cljs.reader :as reader])))
 
+(defn- direct-references*
+  "Canonical registry keys directly referenced by one compiled schema.
+
+   Malli's own walker distinguishes references from keyword data. Canonical
+   refs are recorded but not followed; local property-registry refs are
+   followed so canonical refs nested behind them are still visible."
+  [compiled canonical-keys]
+  (let [!references (volatile! #{})]
+    (m/walk
+      compiled
+      (fn [schema _path _children _options]
+        (when (m/-ref-schema? schema)
+          (let [reference (m/-ref schema)]
+            (when (contains? canonical-keys reference)
+              (vswap! !references conj reference))))
+        schema)
+      {::m/walk-schema-refs #(not (contains? canonical-keys %))
+       ::m/walk-refs #(not (contains? canonical-keys %))})
+    @!references))
+
+(defn direct-references
+  "Canonical schema keys directly referenced by `form` in `projection`.
+
+   This is a derived dependency view over Malli schema objects, not a keyword
+   scan and not stored state. It works for value, entity, and function-schema
+   forms and follows local recursive registries without expanding canonical
+   references transitively."
+  {:malli/schema [:=> [:catn [::projection :map] [::definition :any]]
+                  [:set :keyword]]}
+  [projection form]
+  (let [forms (:seon.schema.projection/forms projection)
+        registry (:seon.schema.projection/registry projection)
+        compiled (m/schema form {:registry registry})]
+    (direct-references* compiled (set (keys forms)))))
+
+(defn dependent-schema-keys
+  "Changed schema keys plus their reverse transitive dependents.
+
+   The dependency graph belongs to the immutable projection. The result is
+   derived with a bounded graph walk and is empty when `changed` is empty."
+  {:malli/schema [:=> [:catn [::projection :map]
+                             [::changed [:set :keyword]]]
+                  [:set :keyword]]}
+  [projection changed]
+  (let [reverse-edges
+        (:seon.schema.projection/reverse-schema-dependencies projection)]
+    (loop [frontier (set changed)
+           seen #{}]
+      (if (empty? frontier)
+        seen
+        (let [seen' (into seen frontier)
+              next-frontier
+              (into #{}
+                    (comp
+                      (mapcat #(get reverse-edges % #{}))
+                      (remove seen'))
+                    frontier)]
+          (recur next-frontier seen'))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Registry Setup
 ;;; ---------------------------------------------------------------------------
@@ -219,6 +278,22 @@
         options  {:registry registry}
         _        (doseq [k (sort (keys forms))]
                    (m/schema k options))
+        schema-dependencies
+        (into (sorted-map)
+              (map (fn [[k form]]
+                     [k (direct-references*
+                          (m/schema form options)
+                          (set (keys forms)))]))
+              forms)
+        reverse-schema-dependencies
+        (reduce-kv
+          (fn [reverse-edges dependent dependencies]
+            (reduce (fn [edges dependency]
+                      (update edges dependency (fnil conj #{}) dependent))
+                    reverse-edges
+                    dependencies))
+          {}
+          schema-dependencies)
         catalog  (->> forms
                       (keep
                         (fn [[k raw]]
@@ -244,6 +319,9 @@
         fingerprint (hash (pr-str (sort-by key forms)))]
     {:seon.schema.projection/forms forms
      :seon.schema.projection/registry registry
+     :seon.schema.projection/schema-dependencies schema-dependencies
+     :seon.schema.projection/reverse-schema-dependencies
+     reverse-schema-dependencies
      :seon.schema.projection/catalog catalog
      :seon.schema.projection/fingerprint fingerprint}))
 

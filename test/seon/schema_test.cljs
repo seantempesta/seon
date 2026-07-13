@@ -31,6 +31,45 @@
   (:seon.schema.projection/catalog
     (schema/build-projection (schema/snapshot))))
 
+(deftest projection-derives-exact-transitive-schema-dependencies
+  (let [forms {:schematest.dependency/leaf :int
+               :schematest.dependency/branch
+               [:vector :schematest.dependency/leaf]
+               :schematest.dependency/root
+               [:schema
+                {:registry
+                 {:schematest.dependency/local
+                  [:tuple :schematest.dependency/branch]}}
+                :schematest.dependency/local]
+               :schematest.dependency/unrelated
+               [:enum :schematest.dependency/leaf]}
+        projection (schema/build-projection forms)]
+    (testing "Malli's schema walk follows local refs and records canonical refs"
+      (is (= #{:schematest.dependency/branch}
+             (get-in projection
+                     [:seon.schema.projection/schema-dependencies
+                      :schematest.dependency/root])))
+      (is (= #{:schematest.dependency/leaf}
+             (get-in projection
+                     [:seon.schema.projection/schema-dependencies
+                      :schematest.dependency/branch]))))
+    (testing "keyword enum values are data, not false dependency edges"
+      (is (= #{}
+             (get-in projection
+                     [:seon.schema.projection/schema-dependencies
+                      :schematest.dependency/unrelated]))))
+    (testing "reverse closure includes the changed key and only real dependents"
+      (is (= #{:schematest.dependency/leaf
+               :schematest.dependency/branch
+               :schematest.dependency/root}
+             (schema/dependent-schema-keys
+               projection #{:schematest.dependency/leaf}))))
+    (testing "function forms use the same exact reference mechanism"
+      (is (= #{:schematest.dependency/root}
+             (schema/direct-references
+               projection
+               [:=> [:cat :schematest.dependency/root] :boolean]))))))
+
 (deftest single-segment-keyword-namespace-is-refused-with-guidance
   (testing "the S-21 defect shape — :workout/date"
     (let [e (try (schema/register! :workout/date :string)
