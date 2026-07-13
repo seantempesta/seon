@@ -433,8 +433,8 @@ is evaluated behaviorally, not by asserting prose.
 | JVM artifact | Source and uberjar use the same complete `:writer` basis with the maintained forks and one SLF4J provider, but no published launch manifest yet records the artifact/runtime contract. |
 | Dependencies | The writer and writer-test closures are honest and narrow. Heavy paused-app dependencies still live in the base graph used by old JVM/tools, and CLJS/tool ownership is not yet fully separated. |
 | Writer protocol | The semantic protocol, JVM writer/server, CLJS replica, and UDS transports are separated and the duplicate operations/helpers are deleted. A typed supervisor administration surface and cold process proof remain. |
-| Database vocabulary | The protocol/backend/replica path is canonical and the managed leaf is `/db`; `db/store-inventory`, root/UI “STORE” labels, skills, paused JVM code, and downstream ACME still expose the remaining obsolete vocabulary. |
-| Database browser | The inventory context block, `db/store-inventory`, `my.kb/inventory`, root-canvas “STORE” panel, header count, and `/data` repeat broad namespace/count scans. `/data` also retains a second legacy SSE connection registry instead of the canonical lazy render-unit feed. |
+| Database vocabulary | The protocol/backend/replica path is canonical and the managed leaf is `/db`; the root/header labels are clean, while `db/store-inventory`, skills, paused JVM code, and downstream ACME still expose obsolete vocabulary. |
+| Database browser | The root inventory panel is deleted and the header now reads Datahike's maintained index count without building an inventory. The inventory context block, `db/store-inventory`, `my.kb/inventory`, and `/data` still repeat broad namespace/count scans. `/data` also retains a second legacy SSE connection registry instead of the canonical lazy render-unit feed. |
 | Developer hooks | Active hook config still calls the paused nREPL JVM on port 7888, so several claimed checks silently do not run. |
 | Operator | `bin/seon` is a 2,186-line shell program exposing implementation processes and a destructive global nuke. |
 | Tests | The retained writer gate is 47 tests/295 assertions after deleting 14 legacy server suites, but disabled and paused-application tests plus noisy expected-failure logging still need removal. |
@@ -442,7 +442,7 @@ is evaluated behaviorally, not by asserting prose.
 | Live rendering | Agent view unitization/read-observation is incomplete; legitimate work still needs bounded caching, layout/focus/browser proof, and grown-database profiling. |
 | Recent activity reads | `seon.render.default/recent-messages`, `seon.agent.ctx/messages`, transcript/activity queries, `seon.derive/real-eval-oks`, and the function menu independently scan and sort growing message/eval history before taking a small tail. Root's current cross-agent activity does the same over the whole database. |
 | Root/UI presence | `/` already renders root's system canvas, but first-run routing, concise root role context, originating-tab identity, database-backed current location, and feed-driven agent navigation are not one finished path. |
-| Root context | Root's scalar home-require replacement is the correct way to keep its role smaller, but the manifest comments incorrectly call it “shared plus,” and the no-config fallback in `seon.agent.home` still exposes root orchestration to every ordinary agent. Root's system-canvas override is also intentionally absent during the minimal-context experiment. |
+| Root context | Root's scalar home-require replacement, sparse system-canvas pin, and ordinary-agent fallback are now distinct. Concise root role context and browser-location awareness remain unfinished. |
 | Skills | `.agents/skills`, `.claude/skills`, and `seon-skills` drift; file-backed bodies still depend on source paths after import; one runtime copy teaches deleted `my.tile`, live-tile, and world APIs. |
 | Prototypes | Wasmtime/WIT Tauri, Rust client-runtime, and old libdatahike CLJS spikes remain in the active tree despite settled rejection. |
 
@@ -641,10 +641,10 @@ agents idle and one exact notice visible to root.
    Do not leave forwarding vars or old selectors.
 3. Delete exactly the four dormant context-display namespaces and their display
    tests while preserving their underlying domain/runtime facts. Delete the
-   entire duplicate inventory family: `db/store-inventory`,
-   `my.kb/inventory`, the root-canvas “STORE” panel, header inventory scan,
-   warning coupling, teaching references, and brittle tests. Keep the header's
-   database link, but make `/data` the only database exploration surface.
+   remaining duplicate inventory family: `db/store-inventory`,
+   `my.kb/inventory`, warning coupling, teaching references, and brittle tests.
+   The root panel and header inventory scan are already deleted; keep the
+   header's cheap database link, but make `/data` the only exploration surface.
 4. Port `/data` in place to the canonical render-unit and shared gzip Datastar
    feed lifecycle. Delete `/data/sse`, `!data-connections`, its listener flag,
    broadcast loop, and full `[?e ?a]` rescan. The route returns a cheap shell;

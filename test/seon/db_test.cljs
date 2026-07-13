@@ -116,6 +116,17 @@
   [conn tx-data]
   (db/transact! {::db/tx-data tx-data ::db/conn conn}))
 
+(deftest datom-count-uses-the-current-database-index
+  (async done
+    (with-conn
+      (fn [conn]
+        (-> (tx! conn [{::name "count-probe" ::rank 7}])
+            (.then
+              (fn [_]
+                (is (= (count (d/datoms @conn :eavt))
+                       (db/datom-count @conn)))))))
+      done)))
+
 (deftest attached?-follows-the-datahike-connection-lifecycle
   (async done
     (let [previous db/*conn*]

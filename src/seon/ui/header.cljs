@@ -11,16 +11,8 @@
      AGENTS     — color-coded dots + counts of the DERIVED FSM state across
                   ALL agents (`seon.derive/derive-state`, surfaced through
                   `seon.render.system/fleet-summary` — DRY, one counter).
-     THROUGHPUT — the live token rate + totals. `seon.agent.turn/at` +
-                  `:seon.agent.turn/llm-usage` are the only stored signals;
-                  there is NO per-turn duration, so an instantaneous
-                  tokens/sec is NOT honestly derivable. Instead [[throughput]]
-                  reports a ROLLING rate — tokens from turns STARTED in the
-                  last 60 s ÷ 60 s — beside the all-time token total and the
-                  turn/eval counts. The rolling rate is the honest \"is the
-                  fleet busy right now\" signal; it is 0 when nothing ran
-                  recently.
-     STORE      — datom count (links `/data`) + embeddings on/off (`SEON_EMBED`).
+     DATABASE   — the current index's maintained datom count (links `/data`)
+                  + embeddings on/off (`SEON_EMBED`). No inventory scan.
      ACTIONS    — a `+ new agent` button (POSTs `/agents/new`, then SWITCHES
                   to the new `/agent/{id}`) + small `/` and `⛁ data` links +
                   a subtle system-health dot.
@@ -31,73 +23,11 @@
    agent` button creates immediately without a modal; the agents page owns the
    optional-purpose input outside its live morph target."
   (:require
-    [seon.agent.ctx.usage :as usage]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.render.system :as system]
     [seon.schema :as schema]
     [seon.web.brand :as brand]))
-
-;; ============================================================
-;; Throughput — the honest derivation. No per-turn duration is stored, so a
-;; true instantaneous tokens/sec is impossible; we report a ROLLING-window
-;; rate plus all-time totals. `:total_tokens` (openai/DeepSeek) is the full
-;; call cost; for the Anthropic shape we sum extract's input-total + output.
-;; ============================================================
-
-(def ^:private window-ms
-  "Trailing window for the rolling token rate (60 s)."
-  60000)
-
-(schema/register! ::tokens   :int)
-(schema/register! ::tok-per-sec :double)
-(schema/register! ::throughput
-  [:map
-   [::total-tokens ::tokens]       ; all-time tokens (input incl. cache + output)
-   [::recent-tokens ::tokens]      ; tokens from turns started in the last window
-   [::tok-per-sec   ::tok-per-sec] ; recent-tokens / window-seconds — honest rolling rate
-   [::last-tokens   ::tokens]])    ; the most recent turn's full token cost
-
-(defn- turn-tokens
-  "Full token cost of one turn's persisted `:seon.agent.turn/llm-usage` EDN
-   string — input total (incl. cache) + output — via the shared
-   `seon.agent.ctx.usage/extract` (no duplicate parsing). 0 when usage is
-   absent/unparseable (a stub-LLM turn)."
-  [usage-str]
-  (if-let [{::usage/keys [total output]} (usage/extract usage-str)]
-    (+ (or total 0) (or output 0))
-    0))
-
-(defn throughput
-  "Derive the fleet's token throughput from db `db`.
-
-   Every turn's start instant + usage, reduced to the all-time total, the
-   rolling-window total,
-   the honest rolling tokens/sec (window total ÷ 60 s), and the last turn's
-   cost. Pure read — `:seon.agent.turn/at` + `:seon.agent.turn/llm-usage` are
-   the only inputs."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] ::throughput]}
-  [db]
-  (let [rows (db/query {:seon.db/db db
-                        :seon.db/query
-                        '[:find ?at ?u
-                          :where
-                          [?t :seon.agent.turn/at ?at]
-                          [?t :seon.agent.turn/llm-usage ?u]]})
-        now  (.getTime (js/Date.))
-        cut  (- now window-ms)
-        rows (->> rows
-                  (keep (fn [[at u]]
-                          (when (instance? js/Date at)
-                            [(.getTime ^js at) (turn-tokens u)])))
-                  (sort-by first))
-        total  (reduce + 0 (map second rows))
-        recent (reduce + 0 (->> rows (filter #(>= (first %) cut)) (map second)))
-        last*  (or (some-> (last rows) second) 0)]
-    {::total-tokens  total
-     ::recent-tokens recent
-     ::tok-per-sec   (/ recent (/ window-ms 1000.0))
-     ::last-tokens   last*}))
 
 ;; ============================================================
 ;; State dots — the same Phosphor palette the system view uses (a glance
@@ -128,30 +58,11 @@
           [:span {:class "text-text-300"} (str c)]
           [:span {:class "text-text-600"} (name st)]]))]))
 
-(defn- throughput-chunk
-  "The throughput cluster: the rolling tok/s (amber when the fleet is live),
-   the all-time token total, and the turn/eval counts."
-  [{::system/keys [total-turns total-evals]} {::keys [tok-per-sec total-tokens last-tokens]}]
-  (let [live? (pos? tok-per-sec)
-        fmt-k (fn [n] (if (>= n 1000)
-                        (str (.toFixed (/ n 1000.0) 1) "k")
-                        (str n)))]
-    [:span {:class "flex items-center gap-2"}
-     [:span {:class (if live? "text-amber-400" "text-text-600")
-             :title "rolling tokens/sec over the last 60s (no per-turn duration is stored)"}
-      (str (.toFixed tok-per-sec 1) " tok/s")]
-     [:span {:class "text-text-600"} "·"]
-     [:span {:class "text-text-400" :title "all-time tokens (input incl. cache + output)"}
-      [:span {:class "text-text-200"} (fmt-k total-tokens)] " tok"]
-     [:span {:class "text-text-600"
-             :title (str "last turn " last-tokens " tok")}
-      (str total-turns "t/" total-evals "e")]]))
-
-(defn- store-chunk
+(defn- database-chunk
   "The db + embeddings cluster: datom count (links `/data`) + the
    `SEON_EMBED` indicator."
   [db {::system/keys [embedding?]}]
-  (let [{:seon.db/keys [datom-count]} (db/store-inventory {:seon.db/db db})]
+  (let [datom-count (db/datom-count db)]
     [:span {:class "flex items-center gap-2"}
      [:a {:href  "/data"
           :class "flex items-center gap-1 text-text-400 hover:text-amber-300"
@@ -228,14 +139,13 @@
    Pure of external state (reads only the supplied db value); NEVER throws —
    a render error degrades to a minimal brand-only bar so the bar can sit on
    every page without endangering the page. Composes [[agents-chunk]] (fleet
-   state from `fleet-summary`), [[throughput-chunk]], [[store-chunk]], and
+   state from `fleet-summary`), [[database-chunk]], and
    [[actions-chunk]] (the `+ new agent` switch). Place ONE per page; reserve
    scroll room with a sibling spacer (the bar is `position:fixed`)."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] :any]}
   [db]
   (try
     (let [fleet (system/fleet-summary db)
-          thru  (throughput db)
           brand (brand/info db)
           state-counts (::system/state-counts fleet)]
       [:header {:id    "system-header"
@@ -255,9 +165,7 @@
        [:span {:class "text-text-700"} "│"]
        (agents-chunk fleet)
        [:span {:class "text-text-700"} "│"]
-       (throughput-chunk fleet thru)
-       [:span {:class "text-text-700"} "│"]
-       (store-chunk db fleet)
+       (database-chunk db fleet)
        (storms-chunk (derive/error-storms db))
        [:span {:class "ml-auto"} (actions-chunk fleet)]])
     (catch :default e

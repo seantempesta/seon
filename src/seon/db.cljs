@@ -62,6 +62,7 @@
     [datahike.constants :as dconst]
     [datahike.db :refer [AsOfDB]]
     [datahike.db.interface :as dbi]
+    [datahike.index.interface :as di]
     [datahike.impl.entity :as dentity]
     [malli.core :as m]
     [seon.config :as config]
@@ -1548,6 +1549,23 @@
 (schema/register! ::attr-ns-count :int)
 (schema/register! ::attr-count    :int)
 (schema/register! ::datom-count   :int)
+
+(defn datom-count
+  "Count the current datoms in a database value.
+
+   The normal current-database path reads the persistent index's maintained
+   subtree count instead of walking its datoms. Temporal or filtered database
+   wrappers have no direct `:eavt` field, so they use Datahike's wrapper-aware
+   datom view for correctness. With no argument, reads the ambient database."
+  {:malli/schema
+   [:function
+    [:=> [:cat] ::datom-count]
+    [:=> [:catn [::db ::db-val]] ::datom-count]]}
+  ([] (datom-count @*conn*))
+  ([db]
+   (if-some [eavt (:eavt db)]
+     (di/-count eavt)
+     (count (d/datoms db :eavt)))))
 
 ;; The agent/run/turn/eval ref chain — how to JOIN across the entities the
 ;; inventory lists. Entities have no kind, so the ONLY way across them is a
