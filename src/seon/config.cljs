@@ -204,11 +204,13 @@
 ;; that loads before `seon.eval`/`seon.client`, and the full shape is validated
 ;; downstream at `transact!`, the same rule the block vector uses).
 (schema/register! :seon.config/agent-context
-  [:map
-   ;; Persisted agent datoms — override-only (no default; consumer owns it).
-   [:seon.agent.runtime/wake? {:optional true} :boolean]
-   [:seon.eval/home-requires {:optional true} [:vector :any]]
-   [:seon.agent/ctx {:optional true :default []} [:vector :map]]])
+  [:or
+   [:map
+    ;; Persisted agent datoms — override-only (no default; consumer owns it).
+    [:seon.agent.runtime/wake? {:optional true} :boolean]
+    [:seon.eval/home-requires {:optional true} [:vector :any]]
+    [:seon.agent/ctx {:optional true :default []} [:vector :map]]]
+   :nil])
 
 ;; The ROOT override — a SPARSE agent-context merged over `:seon.config/agent-context`
 ;; by [[context-config-for]] (block upsert-by-name). Its `:canvas` block sets
@@ -216,13 +218,15 @@
 ;; NOT decoded through the transformer directly (it's a partial override layer);
 ;; only the MERGED result is decoded. Same loose `[:vector :map]` leaf shape.
 (schema/register! :seon.config/root-context
-  [:map
-   ;; root can override its home-ns require list (e.g. add `[seon.agent :as agent]`
-   ;; so root additionally shows the orchestration card). Same leaf shape +
-   ;; override-only semantics as `:seon.config/agent-context` — merged by
-   ;; [[context-config-for]] onto the defaulted base for id "root".
-   [:seon.eval/home-requires {:optional true} [:vector :any]]
-   [:seon.agent/ctx {:optional true} [:vector :map]]])
+  [:or
+   [:map
+    ;; root can override its home-ns require list (e.g. add `[seon.agent :as agent]`
+    ;; so root additionally shows the orchestration card). Same leaf shape +
+    ;; override-only semantics as `:seon.config/agent-context` — merged by
+    ;; [[context-config-for]] onto the defaulted base for id "root".
+    [:seon.eval/home-requires {:optional true} [:vector :any]]
+    [:seon.agent/ctx {:optional true} [:vector :map]]]
+   :nil])
 
 ;; The core-fault escalation dial (error-blame-strict-gate, RULED
 ;; 2026-07-04): what a `:core`-fault `seon.error/record!` does BEYOND

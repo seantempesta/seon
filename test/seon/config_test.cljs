@@ -18,7 +18,8 @@
     [seon.agent.message]
     [seon.agent.web]
     [seon.config :as config]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.schema :as schema]))
 
 (def ^:private routes
   [{:seon.route/name :seon.route/root  :seon.route/pattern "/"}
@@ -46,6 +47,15 @@
                      {:seon.agent/ctx [{:seon.agent.ctx/name :transcript
                                         :seon.agent.ctx/priority 100}]}
                      :seon.config/root-context {}}))))
+
+(deftest every-config-singleton-attribute-has-a-datahike-shape
+  (let [form  (schema/schema-definition :seon.config/singleton)
+        attrs (->> (rest form)
+                   (remove map?)
+                   (mapv first))
+        facets (db/malli->datahike-schema attrs)]
+    (is (= (set attrs) (into #{} (map :db/ident) facets))
+        "every config fact written at cold boot bridges to one database attr")))
 
 (deftest config-absent-is-identity
   (testing "the {} manifest leaves the route seed untouched"
