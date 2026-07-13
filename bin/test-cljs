@@ -4,7 +4,10 @@
 # Usage:
 #   bin/test-cljs                 # compile + run all CLJS tests (~-test$ ns regexp)
 #   bin/test-cljs --no-build      # skip compile; just run out/test/test.js
-#   bin/test-cljs --watch         # shadow-cljs watch + auto-rerun (TODO: detached path)
+#   bin/test-cljs --test=seon.db-test
+#                                 # compile, then run one namespace or test var
+#   bin/test-cljs --no-build --test=seon.db-test/query-roundtrip
+#                                 # reuse the current bundle for one test var
 #
 # Config seam (per-test manifest): the node test process inherits this shell's
 # env, so a run names its own manifest via SEON_CONFIG / SEON_PROFILE — the SAME
@@ -56,12 +59,14 @@ export SEON_RENDER_STRICT="${SEON_RENDER_STRICT:-1}"
 export SEON_CONFIG="${SEON_CONFIG:-config/test.edn}"
 
 BUILD=1
+TEST_ARGS=()
 
 for arg in "$@"; do
   case "$arg" in
     --no-build) BUILD=0 ;;
+    --test=*) TEST_ARGS+=("$arg") ;;
     --help|-h)
-      sed -n '2,11p' "$0"
+      sed -n '2,15p' "$0"
       exit 0
       ;;
     *) echo "Unknown arg: $arg"; exit 2 ;;
@@ -125,7 +130,7 @@ fi
 echo ""
 echo "== Running tests (node out/test/test.js) =="
 NODE_START=$(date +%s)
-node out/test/test.js 2>&1 | tee -a "$TMPOUT"
+node out/test/test.js "${TEST_ARGS[@]}" 2>&1 | tee -a "$TMPOUT"
 NODE_EXIT=${PIPESTATUS[0]}
 NODE_END=$(date +%s)
 NODE_ELAPSED=$((NODE_END - NODE_START))
