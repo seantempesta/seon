@@ -58,6 +58,22 @@
 (schema/register! ::sock-path [:string {:min 1}])
 (schema/register! ::store-path [:string {:min 1}])
 (schema/register! ::db-name [:string {:min 1}])
+(schema/register! ::store-id :uuid)
+(schema/register! ::branch :keyword)
+(schema/register! ::writer-backend :keyword)
+(schema/register! ::basis-t [:int {:min 0}])
+(schema/register!
+ ::database-coordinate
+ [:map
+  [::db-name ::db-name]
+  [::store-id ::store-id]
+  [::branch ::branch]
+  [::writer-backend ::writer-backend]])
+(schema/register!
+ ::progress-coordinate
+ [:map
+  [::database-coordinate ::database-coordinate]
+  [::basis-t ::basis-t]])
 ;; The pod's datahike conn handle the listen adapter subscribes for — an
 ;; opaque runtime value (third-party boundary), hence :any.
 (schema/register! ::conn :any)
@@ -277,53 +293,95 @@
 ;; returns a promise-chan the writer go-loop consumes.
 ;; ---------------------------------------------------------------------------
 
-(def !transactions
-  "In-flight wire transactions keyed by their durable `:seon.store.wire/id`.
+(def ^:private max-own-write-correlations
+  "Maximum own writes retained while the transaction feed is behind.
 
-   Each entry is pending or response-resolved and may carry the basis-t of an
-   already-suppressed feed event. Keeping this tiny state machine, instead of a
-   bare id set, lets a same-id retry recover a lost reply without either firing
-   native listeners twice or losing the feed event when every reply is lost."
-  (atom {}))
+   A disconnected feed cannot discard response-first ids without later
+   delivering each own transaction twice. Admission therefore stops at this
+   explicit bound instead of growing process memory without limit."
+  4096)
 
 (declare !adapter fire-own-tx-listeners!)
 
+(defn- attachment-active-for-conn?
+  [state conn]
+  (and (not= ::stopped (::phase state))
+       (identical? conn (::conn state))))
+
 (defn- begin-transaction!
-  [wire-id]
-  (swap! !transactions assoc wire-id {::status ::pending}))
+  "Admit one own-write correlation for the attached connection."
+  [conn wire-id]
+  (let [result (volatile! ::untracked)]
+    (swap! !adapter
+           (fn [state]
+             (if-not (attachment-active-for-conn? state conn)
+               state
+               (let [correlations (::correlations state)]
+                 (if (< (count correlations) max-own-write-correlations)
+                   (do
+                     (vreset! result ::tracked)
+                     (assoc-in state [::correlations wire-id]
+                               {::status ::pending}))
+                   (do
+                     (vreset! result ::saturated)
+                     state))))))
+    @result))
+
+(defn- correlation-for
+  [conn wire-id]
+  (let [state @!adapter]
+    (when (attachment-active-for-conn? state conn)
+      (get-in state [::correlations wire-id]))))
+
+(defn- reject-transaction!
+  [conn wire-id]
+  (swap! !adapter
+         (fn [state]
+           (if (attachment-active-for-conn? state conn)
+             (update state ::correlations dissoc wire-id)
+             state))))
 
 (defn- resolve-transaction!
   "Mark a successful response. Returns true when its feed was already skipped."
-  [wire-id basis-t]
-  (let [entry (get @!transactions wire-id)
-        feed? (some? (::feed-t entry))]
-    (if (or feed? (not (:started? @!adapter)))
-      (swap! !transactions dissoc wire-id)
-      (swap! !transactions assoc wire-id
-             (assoc entry ::status ::resolved ::basis-t basis-t)))
-    feed?))
+  [conn wire-id basis-t]
+  (let [feed? (volatile! false)]
+    (swap! !adapter
+           (fn [state]
+             (if-let [entry (when (attachment-active-for-conn? state conn)
+                              (get-in state [::correlations wire-id]))]
+               (if (::feed-coordinate entry)
+                 (do
+                   (vreset! feed? true)
+                   (update state ::correlations dissoc wire-id))
+                 (assoc-in state [::correlations wire-id]
+                           (assoc entry ::status ::resolved ::basis-t basis-t)))
+               state)))
+    @feed?))
 
-(defn- prune-resolved-transactions!
-  [basis-t]
-  (swap! !transactions
-         (fn [transactions]
-           (into {}
-                 (remove (fn [[_ transaction]]
-                           (and (= ::resolved (::status transaction))
-                                (some? (::basis-t transaction))
-                                (<= (::basis-t transaction) basis-t))))
-                 transactions))))
+(defn- prune-resolved-correlations
+  [correlations basis-t]
+  (into {}
+        (remove (fn [[_ correlation]]
+                  (and (= ::resolved (::status correlation))
+                       (some? (::basis-t correlation))
+                       (<= (::basis-t correlation) basis-t))))
+        correlations))
 
-(defn- reject-transaction!
+(defn- correlation-capacity-error
   [wire-id]
-  (swap! !transactions dissoc wire-id))
+  (ex-info
+   "The transaction feed is too far behind to correlate another own write."
+   {:seon.store.wire/id wire-id
+    :seon.store.wire/status :seon.store.wire.status/feed-behind
+    ::correlation-limit max-own-write-correlations
+    :seon.error/kind :core-bug}))
 
 (defn- ambiguous-transaction-error
   [conn wire-id attempts error]
-  (let [feed-t (::feed-t (get @!transactions wire-id))]
-    (swap! !transactions dissoc wire-id)
-    (when feed-t
-      (fire-own-tx-listeners! conn feed-t))
+  (let [feed-coordinate (::feed-coordinate (correlation-for conn wire-id))]
+    (reject-transaction! conn wire-id)
+    (when feed-coordinate
+      (fire-own-tx-listeners! conn (::basis-t feed-coordinate)))
     (ex-info
      (str "wire transaction lost every reply after " attempts
           " idempotent attempt(s); commit status remains unknown. "
@@ -375,10 +433,10 @@
 
 (defn- response-processing-error
   [conn wire-id response error]
-  (let [feed-t (::feed-t (get @!transactions wire-id))]
-    (reject-transaction! wire-id)
-    (when feed-t
-      (fire-own-tx-listeners! conn feed-t))
+  (let [feed-coordinate (::feed-coordinate (correlation-for conn wire-id))]
+    (reject-transaction! conn wire-id)
+    (when feed-coordinate
+      (fire-own-tx-listeners! conn (::basis-t feed-coordinate)))
     (ex-info
      "A committed wire transaction reply could not be materialized locally."
      {:seon.store.wire/id wire-id
@@ -449,9 +507,12 @@
                            (assoc :seon.store.wire/tx-meta tx-meta)
                            generated?
                            (assoc :seon.store.wire/generated-candidates
-                                  generated-candidates))]
-          (begin-transaction! wire-id)
-          (-> (transact-rpc! sock-path req 1)
+                                  generated-candidates))
+              tracking   (begin-transaction! conn wire-id)]
+          (if (= ::saturated tracking)
+            (finish-writer-operation!
+             lifecycle p (correlation-capacity-error wire-id))
+            (-> (transact-rpc! sock-path req 1)
               (.then
                (fn [resp]
                  ;; A reply WAS read — no commit ambiguity from here on. Any
@@ -460,7 +521,7 @@
                  (try
                    (if-not (:seon.store.wire/ok resp)
                      (do
-                       (reject-transaction! wire-id)
+                       (reject-transaction! conn wire-id)
                        (finish-writer-operation!
                         lifecycle p
                         (rejected-response-error resp generated?)))
@@ -499,7 +560,7 @@
                                     (d/as-of db
                                              (:seon.store.wire/basis-t-before
                                               resp))))]
-                       (resolve-transaction! wire-id bt)
+                       (resolve-transaction! conn wire-id bt)
                        (finish-writer-operation! lifecycle p report)))
                    (catch :default e
                      (finish-writer-operation!
@@ -513,7 +574,7 @@
                      conn wire-id wire/transact-attempts
                      (if (instance? js/Error e)
                        e
-                       (js/Error. (str e)))))))))))
+                       (js/Error. (str e))))))))))))
       p))
   (-shutdown [_] (shutdown-writer! lifecycle))
   (-streaming? [_] false))
@@ -539,30 +600,124 @@
 ;; fire the same listener atom — ONE bus, two tx origins.
 ;; ---------------------------------------------------------------------------
 
+(defn- stopped-adapter-state
+  [generation]
+  {::phase ::stopped
+   ::generation generation
+   ::correlations {}})
+
 (defonce ^:private !adapter
-  ;; {:started? bool :connected? bool :db-name str :feed-gen int
-  ;;  :last-db <db> :own-skips int :last-applied-t int}
-  ;; :last-applied-t is the basis-t watermark — the highest tx basis-t already
-  ;; applied (own or foreign). Drives BOTH the (re)connect replay-tx (we replay
-  ;; from it) and feed idempotency (a tx ≤ it is a no-op). :feed-gen guards
-  ;; reconnect scheduling: each failure path consumes the current generation,
-  ;; so a drop AND a connect-attempt error can never schedule two loops.
-  (atom {:started? false}))
+  ;; One lifecycle owner for the feed attachment and own-write correlation.
+  ;; It contains only live resources and pure coordinates — never a db value.
+  (atom (stopped-adapter-state 0)))
+
+(defn- connection-coordinate
+  "Derive the branch-qualified identity of one Datahike connection."
+  [db]
+  (let [config         (:config db)
+        database-id    (get-in config [:store :id])
+        branch         (:branch config)
+        writer-backend (get-in config [:writer :backend])]
+    (when-not (uuid? database-id)
+      (throw (ex-info "The attached database has no UUID store identity."
+                      {::store-id database-id
+                       :seon.error/kind :core-bug})))
+    (when-not (keyword? branch)
+      (throw (ex-info "The attached database has no branch identity."
+                      {::branch branch
+                       :seon.error/kind :core-bug})))
+    (when-not (keyword? writer-backend)
+      (throw (ex-info "The attached database has no writer backend identity."
+                      {::writer-backend writer-backend
+                       :seon.error/kind :core-bug})))
+    {::db-name cluster-name
+     ::store-id database-id
+     ::branch branch
+     ::writer-backend writer-backend}))
+
+(defn- progress-coordinate
+  [database-coordinate basis-t]
+  {::database-coordinate database-coordinate
+   ::basis-t basis-t})
+
+(defn- active-generation?
+  ([state generation]
+   (and (not= ::stopped (::phase state))
+        (= generation (::generation state))))
+  ([state generation conn]
+   (and (active-generation? state generation)
+        (identical? conn (::conn state)))))
+
+(defn- destroy-socket!
+  [socket]
+  (when socket
+    (try (.destroy ^js socket) (catch :default _))))
+
+(defn- clear-reconnect-timer!
+  [timer]
+  (when timer
+    (js/clearTimeout timer)))
+
+(defn- cleanup-adapter-resources!
+  [state]
+  (clear-reconnect-timer! (::reconnect-timer state))
+  (destroy-socket! (::socket state)))
+
+(defn- stop-active-adapter!
+  "Stop one active generation and dispose every resource it owns."
+  ([] (stop-active-adapter! nil))
+  ([expected-generation]
+   (let [stopped? (volatile! false)
+         [before _]
+         (swap-vals!
+          !adapter
+          (fn [state]
+            (if (and (not= ::stopped (::phase state))
+                     (or (nil? expected-generation)
+                         (= expected-generation (::generation state))))
+              (do
+                (vreset! stopped? true)
+                (stopped-adapter-state (inc (::generation state))))
+              state)))]
+     (when @stopped?
+       (cleanup-adapter-resources! before))
+     @stopped?)))
+
+(defn stop-listen-adapter!
+  "Stop the transaction feed and dispose its socket, timer, and correlations."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (stop-active-adapter!))
 
 (defn adapter-status
   "Live adapter state for diagnostics.
 
-   `{::started? ::connected? ::db-name ::own-skips ::last-applied-t}`.
-   `::last-applied-t` is the basis-t watermark the reconnect path replays
-   from (DE-2); `::connected?` is the pub-socket connection's liveness."
-  {:malli/schema [:=> [:cat] [:map [::started? :boolean]]]}
+   Reports only bounded diagnostics and the full database coordinate. It never
+   exposes or retains a database value, socket, timer, or connection handle."
+  {:malli/schema
+   [:=> [:cat]
+    [:map
+     [::started? :boolean]
+     [::connected? :boolean]
+     [::phase [:enum ::stopped ::connecting ::live ::reconnecting]]
+     [::generation :int]
+     [::correlation-count [:int {:min 0}]]
+     [::database-coordinate {:optional true} ::database-coordinate]
+     [::last-applied-coordinate {:optional true} ::progress-coordinate]
+     [::own-skips {:optional true} [:int {:min 0}]]]]}
   []
-  (let [{:keys [started? connected? db-name own-skips last-applied-t]} @!adapter]
-    (cond-> {::started? (boolean started?)}
-      (some? connected?)     (assoc ::connected? (boolean connected?))
-      (some? db-name)        (assoc ::db-name db-name)
-      (some? own-skips)      (assoc ::own-skips own-skips)
-      (some? last-applied-t) (assoc ::last-applied-t last-applied-t))))
+  (let [state @!adapter]
+    (cond-> {::started? (not= ::stopped (::phase state))
+             ::connected? (= ::live (::phase state))
+             ::phase (::phase state)
+             ::generation (::generation state)
+             ::correlation-count (count (::correlations state))}
+      (::database-coordinate state)
+      (assoc ::database-coordinate (::database-coordinate state))
+      (::last-applied-coordinate state)
+      (assoc ::last-applied-coordinate (::last-applied-coordinate state))
+      (some? (::own-skips state))
+      (assoc ::own-skips (::own-skips state)))))
 
 (defn- fire-native-listeners! [conn report]
   ;; Dispatch each listener on its OWN macrotask (`setTimeout 0`) so the
@@ -603,60 +758,100 @@
       (js/console.warn "[seon.store.wire] fire-own-tx-listeners! failed for tx"
                        tx-t ":" (str e)))))
 
-(defn- handle-feed-event! [conn ev]
-  (let [wid          (:seon.store.wire/id ev)
-        bt           (:seon.store.wire/basis-t ev)
-        last-applied (:last-applied-t @!adapter)]
+(defn- advance-progress
+  [state basis-t]
+  (-> state
+      (assoc ::last-applied-coordinate
+             (progress-coordinate (::database-coordinate state) basis-t))
+      (update ::correlations prune-resolved-correlations basis-t)))
+
+(defn- apply-own-feed-event!
+  [generation conn wire-id basis-t]
+  ;; Materialize before advancing. A stale generation is checked again inside
+  ;; the atomic update so an A→B reattach during the deref cannot mutate B.
+  (ryow-deref! conn basis-t)
+  (swap! !adapter
+         (fn [state]
+           (if-not (active-generation? state generation conn)
+             state
+             (let [correlation (get-in state [::correlations wire-id])
+                   feed-coordinate
+                   (progress-coordinate (::database-coordinate state) basis-t)]
+               (-> (if (= ::resolved (::status correlation))
+                     (update state ::correlations dissoc wire-id)
+                     (assoc-in state [::correlations wire-id ::feed-coordinate]
+                               feed-coordinate))
+                   (update ::own-skips (fnil inc 0))
+                   (advance-progress basis-t)))))))
+
+(defn- apply-foreign-feed-event!
+  [generation conn basis-t basis-t-before ev]
+  (when-not (and (integer? basis-t-before) (< basis-t-before basis-t))
+    (throw (ex-info "A transaction feed event has no valid prior coordinate."
+                    {::basis-t basis-t
+                     ::basis-t-before basis-t-before
+                     :seon.error/kind :core-bug})))
+  (let [db      (ryow-deref! conn basis-t)
+        report  (cond-> {:db-after  db
+                         :db-before (d/as-of db basis-t-before)
+                         :tx-data   (wire-datoms->datoms
+                                     (:seon.store.wire/tx-data ev))}
+                  (some? (:seon.store.wire/tx-meta ev))
+                  (assoc :tx-meta (:seon.store.wire/tx-meta ev)))
+        applied? (volatile! false)]
+    (swap! !adapter
+           (fn [state]
+             (let [last-applied
+                   (get-in state [::last-applied-coordinate ::basis-t])]
+               (if (and (active-generation? state generation conn)
+                        (or (nil? last-applied) (< last-applied basis-t)))
+                 (do
+                   (vreset! applied? true)
+                   (advance-progress state basis-t))
+                 state))))
+    (when @applied?
+      (fire-native-listeners! conn report))))
+
+(defn- handle-feed-event! [generation conn ev]
+  (let [state        @!adapter
+        wire-id      (:seon.store.wire/id ev)
+        basis-t      (:seon.store.wire/basis-t ev)
+        basis-before (:seon.store.wire/basis-t-before ev)
+        last-applied (get-in state [::last-applied-coordinate ::basis-t])]
+    (when-not (integer? basis-t)
+      (throw (ex-info "A transaction feed event has no integer basis-t."
+                      {::basis-t basis-t
+                       :seon.error/kind :core-bug})))
     (cond
-      ;; IDEMPOTENT: a tx at or below the last-applied basis-t was already
-      ;; applied — a no-op. This makes the since-t reconnect replay safe: the
-      ;; replay↔live boundary can deliver a tx by BOTH paths (same basis-t), and
-      ;; any duplicate/overlap is dropped here without re-firing listeners.
-      ;; Events arrive in commit order (replay ascending, then live ascending),
-      ;; so a monotonic basis-t watermark is sufficient — no per-tx dedup set.
-      (and (some? bt) (some? last-applied) (<= bt last-applied))
+      ;; A callback from an attachment that has been stopped or replaced is a
+      ;; stale resource completion, never input to the new connection.
+      (not (active-generation? state generation conn))
       nil
 
-      ;; An in-flight or response-resolved own transaction. Pending feed-first
-      ;; state retains the basis-t for terminal recovery; response-first state
-      ;; removes on this matching feed. In both cases the response-side native
-      ;; Datahike wrapper is the one listener delivery.
-      (boolean (and wid (get @!transactions wid)))
-      (let [transaction (get @!transactions wid)
-            db          (ryow-deref! conn bt)]
-        (if (= ::resolved (::status transaction))
-          (swap! !transactions dissoc wid)
-          (swap! !transactions assoc-in [wid ::feed-t] bt))
-        (swap! !adapter #(-> %
-                             (update :own-skips (fnil inc 0))
-                             (assoc :last-db db :last-applied-t bt)))
-        (prune-resolved-transactions! bt))
+      ;; Replay/live overlap is idempotent inside this branch-qualified
+      ;; attachment. A numeric t is never carried from one attachment to the
+      ;; next; start seeds a new full coordinate from the new connection.
+      (and (some? last-applied) (<= basis-t last-applied))
+      nil
 
-      ;; FOREIGN tx (another agent / a human message — incl. every tx that
-      ;; landed during a feed gap, since the pod can't write while the UDS is
-      ;; down): synthesize the raw report and fire the conn's native listeners.
+      ;; The response-side Datahike writer fires own listeners. The feed only
+      ;; advances its full cursor and resolves correlation ordering.
+      (and wire-id (get-in state [::correlations wire-id]))
+      (apply-own-feed-event! generation conn wire-id basis-t)
+
       :else
-      (let [db-before (or (:last-db @!adapter) @conn)
-            db        (ryow-deref! conn bt)
-            tx-meta   (:seon.store.wire/tx-meta ev)
-            report    (cond-> {:db-after  db
-                               :db-before db-before
-                               :tx-data   (wire-datoms->datoms
-                                           (:seon.store.wire/tx-data ev))}
-                        (some? tx-meta) (assoc :tx-meta tx-meta))]
-        (swap! !adapter assoc :last-db db :last-applied-t bt)
-        (prune-resolved-transactions! bt)
-        (fire-native-listeners! conn report)))))
+      (apply-foreign-feed-event!
+       generation conn basis-t basis-before ev))))
 
 (defn- feed-event-dispatch!
   ;; Apply one pub frame: `tx` events for this pod's cluster route into
   ;; handle-feed-event!; other clusters' transactions are ignored. The pub
   ;; stream is db-agnostic — this is the client-side db-name demux the
   ;; replay-tx reply keys.
-  [conn db-name ev]
+  [generation conn db-name ev]
   (when (and (= "tx" (:seon.store.wire/event ev))
              (= db-name (:seon.store.wire/db-name ev)))
-    (handle-feed-event! conn ev)))
+    (handle-feed-event! generation conn ev)))
 
 (defn- replay-page-error
   [message data]
@@ -755,11 +950,55 @@
      ::events events
      ::replayed replayed}))
 
+(def ^:private max-buffered-live-events
+  "Maximum pub frames retained while a bounded replay is in progress."
+  4096)
+
 (defn- throw-if-feed-dropped!
-  [drop-reason]
-  (when-let [reason @drop-reason]
+  [connection-state]
+  (when-let [reason (::drop-reason @connection-state)]
     (throw (ex-info "seon.store.wire: pub socket dropped during replay"
                     {::drop-reason reason}))))
+
+(defn- register-feed-socket!
+  [generation conn socket]
+  (let [registered? (volatile! false)]
+    (swap! !adapter
+           (fn [state]
+             (if (active-generation? state generation conn)
+               (do
+                 (vreset! registered? true)
+                 (assoc state ::socket socket))
+               state)))
+    (when-not @registered?
+      (destroy-socket! socket)
+      (throw (ex-info "The transaction feed attachment was replaced while connecting."
+                      {::generation generation
+                       :seon.error/kind :core-bug})))))
+
+(defn- clear-feed-socket!
+  [generation conn socket]
+  (swap! !adapter
+         (fn [state]
+           (if (and (active-generation? state generation conn)
+                    (identical? socket (::socket state)))
+             (dissoc state ::socket)
+             state))))
+
+(defn- buffer-live-event!
+  [connection-state event]
+  (let [overflow? (volatile! false)]
+    (swap! connection-state
+           (fn [state]
+             (if (< (count (::buffer state)) max-buffered-live-events)
+               (update state ::buffer conj event)
+               (do
+                 (vreset! overflow? true)
+                 state))))
+    (when @overflow?
+      (throw (ex-info "The live transaction buffer reached its fixed bound."
+                      {::buffer-limit max-buffered-live-events
+                       :seon.error/kind :core-bug})))))
 
 (defn ^:async ^:private connect-feed!
   ;; One pub-socket feed connection: connect, walk bounded replay pages under
@@ -767,95 +1006,195 @@
   ;; Resolves to {::db-name ::replayed}; throws on connect/replay failure (the
   ;; caller owns retry). Once live, `on-drop` fires ONCE if the connection dies;
   ;; a drop during replay rejects this connect attempt directly.
-  [conn sock-path pub-sock-path on-drop]
-  (let [!buffer      (atom [])
-        !live?       (atom false)
-        !db-name     (atom nil)
-        !drop-reason (atom nil)
-        !closing?    (atom false)
-        !reject-drop (atom nil)
+  [generation conn database-coordinate sock-path pub-sock-path on-drop]
+  (let [!connection  (atom {::buffer []
+                            ::live? false
+                            ::db-name (::db-name database-coordinate)
+                            ::closing? false})
         drop-promise (js/Promise.
                       (fn [_resolve reject]
-                        (reset! !reject-drop reject)))
+                        (swap! !connection assoc ::reject-drop reject)))
         sock          (await
                        (wire/connect-pub
                         pub-sock-path
                         {:on-event (fn [event]
-                                     (if @!live?
-                                       (feed-event-dispatch! conn @!db-name event)
-                                       (swap! !buffer conj event)))
+                                     (if (::live? @!connection)
+                                       (feed-event-dispatch!
+                                        generation conn
+                                        (::db-name @!connection) event)
+                                       (buffer-live-event! !connection event)))
                          :on-close (fn [reason]
-                                     (reset! !drop-reason reason)
-                                     (cond
-                                       @!live?
-                                       (when on-drop (on-drop reason))
+                                     (let [before @!connection]
+                                       (swap! !connection assoc ::drop-reason reason)
+                                       (cond
+                                         (::live? before)
+                                         (when on-drop (on-drop reason))
 
-                                       (not @!closing?)
-                                       (@!reject-drop
-                                        (ex-info
-                                         "seon.store.wire: pub socket dropped during replay"
-                                         {::drop-reason reason}))))}))]
+                                         (not (::closing? before))
+                                         ((::reject-drop before)
+                                          (ex-info
+                                           "seon.store.wire: pub socket dropped during replay"
+                                           {::drop-reason reason})))))}))]
+    (register-feed-socket! generation conn sock)
     (try
       ;; Replay every tx after the watermark. Pages are applied as they arrive,
       ;; so a failed later page reconnects from the advanced adapter watermark.
       ;; The pub socket remains open and buffers frames for the entire walk.
-      (let [initial-cursor (or (:last-applied-t @!adapter) 0)
+      (let [adapter-state @!adapter
+            _ (when-not (active-generation? adapter-state generation conn)
+                (throw (ex-info "The transaction feed attachment was stopped."
+                                {::generation generation
+                                 :seon.error/kind :core-bug})))
+            initial-cursor
+            (or (get-in adapter-state
+                        [::last-applied-coordinate ::basis-t])
+                0)
+            expected-db-name (::db-name database-coordinate)
             replay-result
             (loop [cursor initial-cursor
                    through nil
-                   db-name nil
                    replayed 0]
-              (throw-if-feed-dropped! !drop-reason)
+              (throw-if-feed-dropped! !connection)
               (let [response (await
                               (js/Promise.race
                                #js [(wire/replay-tx
                                      sock-path
                                      (cond-> {:since-t cursor
-                                              :db-name cluster-name}
+                                              :db-name expected-db-name}
                                        (some? through)
                                        (assoc :through-t through)))
                                     drop-promise]))
-                    _        (throw-if-feed-dropped! !drop-reason)
-                    page     (validated-replay-page cursor through db-name response)
+                    _        (throw-if-feed-dropped! !connection)
+                    page     (validated-replay-page
+                              cursor through expected-db-name response)
                     next-db  (::db-name page)
                     total    (+ replayed (::replayed page))]
-                (reset! !db-name next-db)
                 (doseq [event (::events page)]
-                  (feed-event-dispatch! conn next-db event))
+                  (feed-event-dispatch! generation conn next-db event))
                 (if (::done? page)
                   {::db-name next-db ::replayed total}
                   (recur (::continuation-t page)
                          (::through-t page)
-                         next-db
                          total))))]
-        (throw-if-feed-dropped! !drop-reason)
+        (throw-if-feed-dropped! !connection)
+        (when-not (active-generation? @!adapter generation conn)
+          (throw (ex-info "The transaction feed attachment was stopped."
+                          {::generation generation
+                           :seon.error/kind :core-bug})))
         ;; Go live, then drain — one synchronous block (no await between), so
         ;; no frame can slip between the flip and drain or be applied twice.
         ;; Watermark idempotency removes replay/buffer overlap.
-        (let [buffered @!buffer]
-          (reset! !live? true)
-          (reset! !buffer [])
+        (let [buffered (::buffer @!connection)]
+          (swap! !connection assoc ::live? true ::buffer [])
           (doseq [event buffered]
-            (feed-event-dispatch! conn @!db-name event)))
-        replay-result)
+            (feed-event-dispatch!
+             generation conn (::db-name @!connection) event)))
+        (assoc replay-result ::socket sock))
       (catch :default error
-        (reset! !closing? true)
-        (try (.destroy ^js sock) (catch :default _))
+        (swap! !connection assoc ::closing? true)
+        (clear-feed-socket! generation conn sock)
+        (destroy-socket! sock)
         (throw error)))))
 
-(defn- schedule-reconnect!
-  ;; Consume feed generation `gen` and schedule ONE reconnect after
-  ;; `wire/feed-reconnect-delay-ms`. A no-op when `gen` is stale (the other
-  ;; failure path of the same attempt already consumed it) — a drop and a
-  ;; failed connect can never race two loops.
-  [gen reason reconnect!]
-  (when (= gen (:feed-gen @!adapter))
-    (swap! !adapter #(-> % (update :feed-gen inc) (assoc :connected? false)))
-    (log/error-console!
+(declare schedule-reconnect!)
+
+(defn- activate-feed!
+  [generation result reconnected?]
+  (let [activated? (volatile! false)]
+    (swap! !adapter
+           (fn [state]
+             (if (active-generation? state generation)
+               (do
+                 (vreset! activated? true)
+                 (-> state
+                     (assoc ::phase ::live
+                            ::db-name (::db-name result)
+                            ::socket (::socket result))
+                     (dissoc ::reconnect-timer ::ready)))
+               state)))
+    (when-not @activated?
+      (destroy-socket! (::socket result))
+      (throw (ex-info "The transaction feed attachment was replaced before activation."
+                      {::generation generation
+                       :seon.error/kind :core-bug})))
+    (log/info-console!
      "seon.store.wire"
-     (str "tx-feed pub connection lost (" reason ") — reconnecting in "
-          wire/feed-reconnect-delay-ms "ms"))
-    (js/setTimeout reconnect! wire/feed-reconnect-delay-ms)))
+     (str "tx-feed " (if reconnected? "re-connected" "live")
+          " (pub socket, db " (::db-name result)
+          ", replayed " (::replayed result) ")"))
+    (::db-name result)))
+
+(defn- connect-current-attachment!
+  [generation]
+  (let [state @!adapter]
+    (if-not (active-generation? state generation)
+      (js/Promise.reject
+       (ex-info "The transaction feed attachment is no longer active."
+                {::generation generation
+                 :seon.error/kind :core-bug}))
+      (connect-feed!
+       generation
+       (::conn state)
+       (::database-coordinate state)
+       (::sock-path state)
+       (::pub-sock-path state)
+       #(schedule-reconnect! generation %)))))
+
+(defn- launch-reconnect!
+  [generation]
+  (when (active-generation? @!adapter generation)
+    (-> (connect-current-attachment! generation)
+        (.then #(activate-feed! generation % true))
+        (.catch
+         (fn [error]
+           (when (active-generation? @!adapter generation)
+             (schedule-reconnect!
+              generation (or (.-message error) (str error)))))))))
+
+(defn- schedule-reconnect!
+  "Schedule one reconnect owned by the active attachment generation."
+  [generation reason]
+  (let [!timer (volatile! nil)
+        scheduled? (volatile! false)
+        fire! (fn []
+                (let [claimed? (volatile! false)]
+                  (swap! !adapter
+                         (fn [state]
+                           (if (and (active-generation? state generation)
+                                    (identical? @!timer
+                                                (::reconnect-timer state)))
+                             (do
+                               (vreset! claimed? true)
+                               (dissoc state ::reconnect-timer))
+                             state)))
+                  (when @claimed?
+                    (launch-reconnect! generation))))
+        timer (js/setTimeout fire! wire/feed-reconnect-delay-ms)]
+    (vreset! !timer timer)
+    (swap! !adapter
+           (fn [state]
+             (if (and (active-generation? state generation)
+                      (nil? (::reconnect-timer state)))
+               (do
+                 (vreset! scheduled? true)
+                 (-> state
+                     (assoc ::phase ::reconnecting
+                            ::reconnect-timer timer)
+                     (dissoc ::socket)))
+               state)))
+    (if @scheduled?
+      (log/error-console!
+       "seon.store.wire"
+       (str "tx-feed pub connection lost (" reason ") — reconnecting in "
+            wire/feed-reconnect-delay-ms "ms"))
+      (js/clearTimeout timer))))
+
+(defn- same-attachment?
+  [state conn database-coordinate sock-path pub-sock-path]
+  (and (attachment-active-for-conn? state conn)
+       (= database-coordinate (::database-coordinate state))
+       (= sock-path (::sock-path state))
+       (= pub-sock-path (::pub-sock-path state))))
 
 (defn ^:async start-listen-adapter!
   "Connect the persistent pub-socket tx feed and pump FOREIGN tx into the conn.
@@ -863,48 +1202,59 @@
    ONE streaming pub-socket connection (push) replaces the old req-socket
    poll pump: the wire-server writes every committed tx event down the
    stream, and the frame reader feeds the conn's native listeners directly.
-   Idempotent (defonce-guarded) — a second call is a no-op. Resilient: a
+   Idempotent for the same connection and coordinate. A different connection,
+   branch, or transport path atomically disposes the old attachment before the
+   new one connects. Resilient: a
    drop logs LOUDLY, reconnects after `wire/feed-reconnect-delay-ms`, and recovers the gap via the
    req-socket `replay-tx` from the basis-t watermark (DE-2 lossless wake) —
    the adapter never dies silently. The FIRST connect is fail-loud (boot is
    ping-gated; a pod that can't reach its feed must not run).
 
    Map-in: `{::conn <conn> ::sock-path <path>? ::pub-sock-path <path>?}`.
-   Returns a Promise of the feed's db-name once the first connection is
-   live (nil if already started)."
+   Returns a Promise of the feed's db-name once a new attachment is live. An
+   already-active identical attachment returns its db-name without opening a
+   second socket."
   {:malli/schema [:=> [:cat [:map [::conn ::conn]
                                   [::sock-path {:optional true} ::sock-path]
                                   [::pub-sock-path {:optional true} ::sock-path]]] :any]}
   [{::keys [conn sock-path pub-sock-path]
     :or {sock-path default-sock-path pub-sock-path default-pub-sock-path}}]
-  (if (:started? @!adapter)
-    (do (log/info-console! "seon.store.wire"
-                           "listen adapter already started — no-op")
-        nil)
-    (do
-      ;; Seed the basis-t watermark at the local snapshot's basis-t: the
-      ;; connect-time replay-tx delivers anything committed past it, so
-      ;; nothing between the snapshot read and feed-live is missed.
-      (swap! !adapter assoc :started? true :feed-gen 0
-             :last-db @conn :last-applied-t (:max-tx @conn))
-      (let [go-live!   (fn [{db-name ::db-name replayed ::replayed} re?]
-                         (swap! !adapter assoc :connected? true :db-name db-name)
-                         (log/info-console!
-                          "seon.store.wire"
-                          (str "tx-feed " (if re? "re-connected" "live")
-                               " (pub socket, db " db-name
-                               ", replayed " replayed ")")))
-            reconnect! (fn reconnect! []
-                         (let [gen (:feed-gen @!adapter)]
-                           (-> (connect-feed! conn sock-path pub-sock-path
-                                              (fn [reason]
-                                                (schedule-reconnect! gen reason reconnect!)))
-                               (.then (fn [res] (go-live! res true)))
-                               (.catch (fn [e]
-                                         (schedule-reconnect!
-                                          gen (or (.-message e) (str e)) reconnect!))))))
-            res        (await (connect-feed! conn sock-path pub-sock-path
-                                             (fn [reason]
-                                               (schedule-reconnect! 0 reason reconnect!))))]
-        (go-live! res false)
-        (::db-name res)))))
+  (let [db                  @conn
+        database-coordinate (connection-coordinate db)
+        basis-t             (:max-tx db)
+        current             @!adapter]
+    (when-not (integer? basis-t)
+      (throw (ex-info "The attached database has no integer basis-t."
+                      {::basis-t basis-t
+                       :seon.error/kind :core-bug})))
+    (if (same-attachment?
+         current conn database-coordinate sock-path pub-sock-path)
+      (await (or (::ready current)
+                 (js/Promise.resolve (::db-name database-coordinate))))
+      (let [generation (inc (::generation current))
+            state {::phase ::connecting
+                   ::generation generation
+                   ::conn conn
+                   ::database-coordinate database-coordinate
+                   ::last-applied-coordinate
+                   (progress-coordinate database-coordinate basis-t)
+                   ::sock-path sock-path
+                   ::pub-sock-path pub-sock-path
+                   ::own-skips 0
+                   ::correlations {}}]
+        ;; Publish the new generation before destroying old resources. Any old
+        ;; socket callback caused by `.destroy` then observes itself as stale.
+        (reset! !adapter state)
+        (cleanup-adapter-resources! current)
+        (let [ready (-> (connect-current-attachment! generation)
+                        (.then #(activate-feed! generation % false))
+                        (.catch
+                         (fn [error]
+                           (stop-active-adapter! generation)
+                           (throw error))))]
+          (swap! !adapter
+                 (fn [adapter]
+                   (if (active-generation? adapter generation conn)
+                     (assoc adapter ::ready ready)
+                     adapter)))
+          (await ready))))))
