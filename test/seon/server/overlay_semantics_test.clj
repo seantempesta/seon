@@ -6,7 +6,6 @@
 
    Each test ties an audit-flagged concern to a wire assertion:
      - Reason A (`?->ms` rewrite): query basis-t threading + pure-data preds
-     - Reason B (entity-pull eager): `(:foo/bar entity)` traversal still works
      - Reason C (basis-t threading): multi-query snapshot consistency
      - Reason D (unlisten local): subscribe + tx event shape sufficient"
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
@@ -97,45 +96,6 @@
             texts (set (map first rows))]
         (is (= #{"newer"} texts) "only the 2026-06 message is after 2026-05-01")))))
 
-;; ---------- Reason B — entity-pull shallow access ----------
-
-(deftest reason-b-entity-pull-shallow-access
-  (testing "Audit Reason B: V0 sites like `(:seon.agent/sessions a)` do
-            shallow access on a `d/entity` return. entity-pull returns an
-            eagerly-realized map where reading a top-level attr or a
-            component-ref vector works exactly the same way."
-    ;; Install a parent/child component schema.
-    (transact!
-     "overlay/reason-b/schema"
-     [{:db/ident :agent/id
-       :db/valueType :db.type/string :db/unique :db.unique/identity
-       :db/cardinality :db.cardinality/one}
-      {:db/ident :agent/sessions
-       :db/valueType :db.type/ref :db/isComponent true
-       :db/cardinality :db.cardinality/many}
-      {:db/ident :session/at
-       :db/valueType :db.type/instant
-       :db/cardinality :db.cardinality/one}])
-    (transact!
-     "overlay/reason-b/alpha"
-     [{:agent/id "alpha"
-       :agent/sessions [{:session/at #inst "2026-05-01"}
-                        {:session/at #inst "2026-05-22"}
-                        {:session/at #inst "2026-05-10"}]}])
-    (let [r (req! "entity-pull" {:seon.store.wire/ref [:agent/id "alpha"]})]
-      (is (= true (:seon.store.wire/ok r)))
-      (let [m (result-of r)
-            sessions (get m :agent/sessions)]
-        (is (= "alpha" (get m :agent/id)))
-        (is (vector? sessions))
-        (is (= 3 (count sessions)))
-        ;; Each session map has the :session/at attr realized.
-        (is (every? #(contains? % :session/at) sessions))
-        ;; Sort host-side, same as agent.cljs:494 pattern.
-        (let [sorted (sort-by #(get % :session/at) sessions)
-              last-at (get (last sorted) :session/at)]
-          (is (some? last-at) "shallow access on the realized component map works"))))))
-
 ;; ---------- Reason D — listener tx-data fanout shape ----------
 
 (deftest reason-d-tx-event-handler-shape
@@ -165,32 +125,3 @@
           (let [d (first (:seon.store.wire/tx-data ev))]
             (is (= 5 (count d)) "datom is [e a v t op]")))
         (finally (.close pub-ch))))))
-
-;; ---------- combined: db-filter as a `d/filter` substitute ----------
-
-(deftest filter-as-filter-substitute
-  (testing "The overlay's `d/filter` ships a predicate query (not a fn).
-            This test exercises the canonical 'agents whose role matches X'
-            pattern."
-    (transact!
-     "overlay/filter/schema"
-     [{:db/ident :person/name :db/valueType :db.type/string
-       :db/unique :db.unique/identity :db/cardinality :db.cardinality/one}
-      {:db/ident :person/role :db/valueType :db.type/keyword
-       :db/cardinality :db.cardinality/one}])
-    (transact! "overlay/filter/people"
-               [{:person/name "alice" :person/role :admin}
-                {:person/name "bob"   :person/role :user}
-                {:person/name "carol" :person/role :admin}])
-    (let [f (req! "db-filter"
-                  {:seon.store.wire/pred-query '[:find ?e :where [?e :person/role :admin]]
-                   :seon.store.wire/args []})]
-      (is (= true (:seon.store.wire/ok f)))
-      (is (= 2 (:seon.store.wire/kept f)))
-      (let [h (:seon.store.wire/handle f)
-            r (req! "q-filtered"
-                    {:seon.store.wire/handle h
-                     :seon.store.wire/query '[:find ?n :where [?e :person/name ?n]]
-                     :seon.store.wire/args []})
-            names (set (map first (result-of r)))]
-        (is (= #{"alice" "carol"} names) "filtered db only exposes admins")))))

@@ -124,15 +124,14 @@
 ;; (`wire/-main`). Spec'd as reality until that mismatch is unified.
 (schema/register! ::hook-db-name [:or ::db-name :string])
 
-;; The ONE snapshot shape (test seam) — registry map + agent map + the
-;; on-ensure-db hook vector, all captured together. In-memory only (it
+;; The ONE snapshot shape (test seam) — registry map + the on-ensure-db hook
+;; vector, captured together. In-memory only (it
 ;; holds live conns/fns); never persisted, so there is no legacy on-disk
 ;; shape to migrate — the old bare-map / hookless reader branches are gone
 ;; (registry M22).
 (schema/register! ::snapshot
                   [:map
                    [::registry :map]
-                   [::agents :map]
                    [::hooks [:vector ::hook-entry]]])
 
 (schema/register! ::snapshot-registry-request [:map])
@@ -141,55 +140,14 @@
 (schema/register! ::restore-registry-request [:map [::snapshot ::snapshot]])
 (schema/register! ::restore-registry-response [:map [::restored? :boolean]])
 
-;; Shared agent-id shape. Platform registers it ONCE here (during the
-;; session→registry rename); the reactive engine and any other consumer
-;; REFERENCE `:seon.agent/id` rather than re-registering. It is the
-;; agent entity's identity attr and the registry's `{agent-id → db-name}`
-;; key. A given agent joins exactly one cluster; a cluster has N agents.
-;; See clusters-and-multi-db-wiring §"What to build" item 1 +
-;; reactive-interface-platform-review coordination item 1.
-(schema/register! :seon.agent/id [:string {:min 1 :seon.db/identity true}])
-
-(schema/register! ::register-agent!-request
-                  [:map
-                   [:seon.agent/id :seon.agent/id]
-                   [::db-name ::db-name]])
-
-(schema/register! ::register-agent!-response
-                  [:map [::registered? :boolean]])
-
-(schema/register! ::unregister-agent!-request
-                  [:map [:seon.agent/id :seon.agent/id]])
-
-(schema/register! ::unregister-agent!-response
-                  [:map [::unregistered? :boolean]])
-
-(schema/register! ::resolve-agent-request
-                  [:map [:seon.agent/id :seon.agent/id]])
-
-(schema/register! ::resolve-agent-response
-                  [:map
-                   [::db-name {:optional true} ::db-name]
-                   [::conn {:optional true} ::conn]])
-
-(schema/register! ::list-agents-request [:map])
-(schema/register! ::list-agents-response
-                  [:map [::agents [:vector [:map
-                                            [:seon.agent/id :seon.agent/id]
-                                            [::db-name ::db-name]]]]])
-
 ;; --- Conn resolution (wire-server per-request routing) ---------------------
 ;;
-;; The wire envelope optionally carries `agent-id` and/or `db-name`. The
-;; request-server resolves the conn here BEFORE calling handle-op. Resolution
-;; order: agent-id (→ db-name → conn), then explicit db-name (→ conn). On
-;; success → {::conn ::db-name}; on failure (unknown agent-id/db-name) →
-;; {::error-kind "not-found" ::error <msg>}; on neither key present →
-;; {::unresolved? true} so the caller can fall back to its ambient conn
-;; (single-DB back-compat).
+;; The wire envelope optionally carries `db-name`. The request-server resolves
+;; the conn here BEFORE calling handle-op. On success → {::conn ::db-name}; on
+;; failure (unknown db-name) → {::error-kind "not-found" ::error <msg>}; when
+;; absent → {::unresolved? true} so the caller can use its ambient conn.
 (schema/register! ::resolve-conn-request
                   [:map
-                   [:seon.agent/id {:optional true} :seon.agent/id]
                    [::db-name {:optional true} ::db-name]])
 
 (schema/register! ::resolve-conn-response
@@ -204,14 +162,6 @@
 
 (defonce ^:private !registry
   ;; {db-name -> entry-map}
-  (atom {}))
-
-(defonce ^:private !agents
-  ;; {agent-id -> db-name}
-  ;;
-  ;; A given agent joins exactly one session; a session has N agents.
-  ;; This atom is the agent-id → db-name index. Looking up a conn for
-  ;; an agent is `(get @!registry (get @!agents agent-id))`.
   (atom {}))
 
 (defn- summary
@@ -360,10 +310,6 @@
       (do
         (try (d/release conn) (catch Throwable _))
         (swap! !registry dissoc db-name)
-        ;; Drop any agent mappings that pointed at this db-name to
-        ;; avoid dangling agent-id → db-name references.
-        (swap! !agents
-               (fn [m] (into {} (remove (fn [[_ d]] (= d db-name)) m))))
         {::removed? true})
       {::removed? false})))
 
@@ -524,81 +470,15 @@
   {::sessions (mapv (fn [[db-name entry]] (summary db-name entry))
                     @!registry)})
 
-;;; --- Agent registry -------------------------------------------------------
-;;;
-;;; The agent registry maps `:seon.agent/<id>` strings (or any opaque
-;;; agent-id) to a `db-name` in `!registry`. Used by
-;;; `seon.session/with-agent` to bind the right conn for MCP eval routing.
-
-(defn register-agent!
-  "Bind `:seon.agent/id` to `::db-name`. The db-name must already be
-   registered via `ensure-db!`; otherwise this throws. Idempotent —
-   re-registering the same agent-id to the same db-name is a no-op."
-  {:malli/schema [:=> [:cat ::register-agent!-request]
-                  ::register-agent!-response]}
-  [{:seon.agent/keys [id] ::keys [db-name]}]
-  (when-not (contains? @!registry db-name)
-    (throw (ex-info "Cannot register agent: db-name not in registry"
-                    {:seon.agent/id id ::db-name db-name})))
-  (swap! !agents assoc id db-name)
-  {::registered? true})
-
-(defn unregister-agent!
-  "Drop the agent-id mapping. Idempotent — returns
-   `{::unregistered? false}` if the agent was not registered."
-  {:malli/schema [:=> [:cat ::unregister-agent!-request]
-                  ::unregister-agent!-response]}
-  [{:seon.agent/keys [id]}]
-  (if (contains? @!agents id)
-    (do (swap! !agents dissoc id)
-        {::unregistered? true})
-    {::unregistered? false}))
-
-(defn resolve-agent
-  "Return `{::db-name <name> ::conn <conn>}` for the given agent-id,
-   or `{}` if unknown / the underlying cluster has been removed."
-  {:malli/schema [:=> [:cat ::resolve-agent-request]
-                  ::resolve-agent-response]}
-  [{:seon.agent/keys [id]}]
-  (if-let [db-name (get @!agents id)]
-    (if-let [conn (some-> @!registry (get db-name) ::conn)]
-      {::db-name db-name ::conn conn}
-      {::db-name db-name})
-    {}))
-
-(defn list-agents
-  "Return `{::agents [...]}` — one map per registered agent. Order
-   unspecified."
-  {:malli/schema [:=> [:cat ::list-agents-request] ::list-agents-response]}
-  [{}]
-  {::agents (mapv (fn [[id db-name]]
-                    {:seon.agent/id id ::db-name db-name})
-                  @!agents)})
-
 (defn resolve-conn
-  "Resolve a wire request's target conn from the registry. Resolution order:
+  "Resolve a wire request's target conn by `::db-name`.
 
-   1. `:seon.agent/id` present → `{agent-id → db-name → conn}`. Unknown
-      agent-id (or its cluster removed) → `{::error-kind \"not-found\" ...}`.
-   2. else `::db-name` present → `{db-name → conn}`. Unknown db-name →
-      `{::error-kind \"not-found\" ...}`.
-   3. else neither key → `{::unresolved? true}` — the caller falls back to
-      its single ambient conn (single-DB back-compat / degenerate cluster).
-
-   Success → `{::conn <conn> ::db-name <name>}`."
+   A registered name returns `{::conn <conn> ::db-name <name>}`. An unknown
+   name returns a typed `not-found` value. When the name is absent, return
+   `{::unresolved? true}` so the caller can use its ambient conn."
   {:malli/schema [:=> [:cat ::resolve-conn-request] ::resolve-conn-response]}
-  [{:seon.agent/keys [id] ::keys [db-name]}]
+  [{::keys [db-name]}]
   (cond
-    id
-    (if-let [resolved-name (get @!agents id)]
-      (if-let [conn (some-> @!registry (get resolved-name) ::conn)]
-        {::conn conn ::db-name resolved-name}
-        {::error-kind "not-found"
-         ::error (str "agent " id " maps to db-name " resolved-name
-                      " which is not registered")})
-      {::error-kind "not-found"
-       ::error (str "unknown agent-id: " id)})
-
     db-name
     (if-let [conn (some-> @!registry (get db-name) ::conn)]
       {::conn conn ::db-name db-name}
@@ -611,22 +491,21 @@
 ;;; --- Test seam -------------------------------------------------------------
 
 (defn ^:no-doc snapshot-registry
-  "Test helper: capture the current registry + agent map + on-ensure-db
-   hooks for restoration. Used by test fixtures to isolate test state.
+  "Test helper: capture the registry + on-ensure-db hooks for restoration.
+   Used by test fixtures to isolate test state.
    Hooks are included so a fixture that resets them for isolation puts
    the live JVM's hooks (such as ::raw-broadcast and ::embed) back on
    restore instead of stranding an empty hook vector."
   {:malli/schema [:=> [:cat ::snapshot-registry-request] ::snapshot-registry-response]}
   [{}]
   {::snapshot {::registry @!registry
-               ::agents @!agents
                ::hooks @!on-ensure-db-hooks}})
 
 (defn ^:no-doc restore-registry!
-  "Test helper: replace registry + agents + hooks with `::snapshot`.
+  "Test helper: replace the registry + hooks with `::snapshot`.
 
    Releases any conns that were added since the snapshot was taken, then
-   restores all three atoms — a fixture that resets hooks for isolation
+   restores both atoms — a fixture that resets hooks for isolation
    puts the live JVM's hooks (such as ::raw-broadcast and ::embed) back.
    Speaks the ONE `::snapshot` shape `snapshot-registry` produces (M22:
    the legacy bare-map and hookless reader branches are deleted —
@@ -635,7 +514,7 @@
   {:malli/schema [:=> [:cat ::restore-registry-request] ::restore-registry-response]}
   [{::keys [snapshot]}]
   (locking !registry
-    (let [{::keys [registry agents hooks]} snapshot
+    (let [{::keys [registry hooks]} snapshot
           current     @!registry
           extra-names (set/difference (set (keys current))
                                       (set (keys registry)))]
@@ -643,6 +522,5 @@
         (when-let [{::keys [conn]} (get current n)]
           (try (d/release conn) (catch Throwable _))))
       (reset! !registry registry)
-      (reset! !agents agents)
       (reset! !on-ensure-db-hooks hooks)
       {::restored? true})))

@@ -39,18 +39,16 @@
 
 (defn- db-name-for-req
   "The broadcast db-name a feed op should resolve to, derived the SAME way
-   request routing resolves a conn: agent-id → registry db-name, else explicit
-   db-name, else the ambient conn's db-name. Returns the db-name STRING the
+   request routing resolves a conn: explicit db-name, else the ambient conn's
+   db-name. Returns the db-name STRING the
    `::raw-broadcast` listener tags events with (keyword db-names are stringified
    without the leading colon, matching `raw-broadcast-listener-fn`)."
   [req]
-  (let [agent-id (let [a (:seon.store.wire/agent-id req)] (when (and a (not= "" a)) a))
-        db-name  (some-> (:seon.store.wire/db-name req) keyword)
+  (let [db-name  (some-> (:seon.store.wire/db-name req) keyword)
         kw->str  (fn [kw] (if (keyword? kw) (subs (str kw) 1) (str kw)))
         resolved (registry/resolve-conn
                   (cond-> {}
-                    agent-id (assoc :seon.agent/id agent-id)
-                    db-name  (assoc :seon.server.registry/db-name db-name)))]
+                    db-name (assoc :seon.server.registry/db-name db-name)))]
     (cond
       (:seon.server.registry/db-name resolved) (kw->str (:seon.server.registry/db-name resolved))
       ;; ::unresolved? (neither key) → ambient conn's db-name

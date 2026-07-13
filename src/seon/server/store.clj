@@ -2,17 +2,16 @@
   "Build datahike config maps for the wire-server's per-session DBs.
 
    Path B (no flow): each session in `seon.server.registry/registry` calls
-   `(datahike.api/connect cfg)` with one of these maps. Three backends
+   `(datahike.api/connect cfg)` with one of these maps. Two backends
    supported:
 
    - `:memory` — testing only; no disk artifacts. Stable per-name id-uuid
      so the same `db-name` yields the same in-memory store across calls.
-   - `:file`   — file-tree konserve. Transitional / acceptable.
-   - `:sqlite` — konserve-jdbc:sqlite. Preferred long-term.
+   - `:file`   — durable file-tree konserve.
 
    Default path layout (per `integration-architecture-2026-05-26.md` §3):
 
-       data/sessions/<short>/store.sqlite      (or store/ tree for :file)
+       data/sessions/<short>/store
 
    where `<short>` is the name portion of the db-name keyword. Caller may
    override via `::path`.
@@ -29,22 +28,10 @@
   (:import [java.io File]
            [java.util UUID]))
 
-;; NOTE on :sqlite backend (2026-05-27): konserve 0.9.340's dispatch
-;; multimethods (-connect-store, -create-store, -store-exists? in
-;; konserve/store.cljc) only ship :memory, :file, and :tiered. The
-;; konserve-jdbc 0.2.91 dep on the classpath exposes its own
-;; `connect-store` fn but does NOT register `:jdbc` as a backend on
-;; the datahike-facing multimethods. Therefore {:backend :jdbc ...}
-;; in a datahike config currently throws "Unsupported store backend".
-;; For MVP we ship :memory + :file only. :sqlite is left wired but
-;; throws a clear "not yet supported" error — TODO: write a small
-;; konserve dispatch shim that adapts konserve-jdbc's standalone API
-;; to the -connect-store / -create-store multimethod expectations.
-
 ;;; --- Schemas ---------------------------------------------------------------
 
 (schema/register! ::db-name :keyword)
-(schema/register! ::backend [:enum :memory :file :sqlite])
+(schema/register! ::backend [:enum :memory :file])
 (schema/register! ::path [:string {:min 1}])
 
 (schema/register! ::config-for-request
@@ -73,15 +60,9 @@
   (str/replace (name db-name) #"[^A-Za-z0-9._-]" "_"))
 
 (defn- default-path
-  "Default on-disk path for a session DB. `:file` → directory under
-   `data/sessions/<name>/store`. `:sqlite` → `data/sessions/<name>/store.sqlite`.
-   Returns nil for `:memory`."
-  [db-name backend]
-  (let [seg (name-segment db-name)]
-    (case backend
-      :file   (str "data/sessions/" seg "/store")
-      :sqlite (str "data/sessions/" seg "/store.sqlite")
-      :memory nil)))
+  "Default file-store path for a session database."
+  [db-name]
+  (str "data/sessions/" (name-segment db-name) "/store"))
 
 (defn- bare-name?
   "True if `p` is a non-absolute path with no directory component — it
@@ -93,18 +74,15 @@
     (and (not (.isAbsolute f))
          (nil? (.getParent f)))))
 
-(defn- harden-path
+(defn- harden-file-path
   "Guard against the repo-root-pollution footgun. A bare path (no
    directory component, not absolute) would plant the store in CWD;
    re-root it under `data/sessions/` using the same layout as
    `default-path`. Paths that already carry a directory (`tmp/...`,
    `data/...`) or are absolute pass through unchanged."
-  [backend p]
+  [p]
   (if (bare-name? p)
-    (case backend
-      :file   (str "data/sessions/" p "/store")
-      :sqlite (str "data/sessions/" p "/store.sqlite")
-      p)
+    (str "data/sessions/" p "/store")
     p))
 
 (defn- name->uuid
@@ -127,7 +105,7 @@
 
    Required:
      ::db-name — keyword identifying the session (e.g. :seon.cluster/alice).
-     ::backend — :memory | :file | :sqlite.
+     ::backend — :memory | :file.
 
    Optional:
      ::path    — override the default on-disk path. Ignored for :memory."
@@ -138,12 +116,7 @@
         store (case backend
                 :memory {:backend :memory :id id}
                 :file   {:backend :file
-                         :path    (harden-path :file (or path (default-path db-name :file)))
-                         :id      id}
-                :sqlite {:backend :jdbc
-                         :dbtype  "sqlite"
-                         :dbname  (harden-path :sqlite (or path (default-path db-name :sqlite)))
-                         :table   "store"
+                         :path    (harden-file-path (or path (default-path db-name)))
                          :id      id})]
     (assoc base-cfg :store store :name nm)))
 

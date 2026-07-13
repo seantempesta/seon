@@ -40,12 +40,6 @@
         ;; Fast serialization (used by seon.db.relay + seon.flow.harness)
         com.taoensso/nippy {:mvn/version "3.4.2"}
 
-        ;; konserve-jdbc + sqlite-jdbc — backing store for the wire-server's
-        ;; per-session datahike DBs. See seon.server.store.
-        io.replikativ/konserve-jdbc {:mvn/version "0.2.91"
-                                     :exclusions [io.replikativ/konserve]}
-        org.xerial/sqlite-jdbc {:mvn/version "3.46.1.0"}
-
         ;; HTML templating (compile-time Hiccup)
         dev.onionpancakes/chassis {:mvn/version "1.0.365"}
 
@@ -181,11 +175,8 @@
   ;; supervisor command may compose :simd/:fork-deps ahead of :writer; their
   ;; matching coordinates merge to this same dependency graph.
   ;;
-  ;; `konserve-jdbc` remains only because seon.server.wire still requires its
-  ;; namespace while the fake SQLite operation awaits deletion. Keep it out of
-  ;; dependency authority: the maintained Konserve/Superv pair wins, and the
-  ;; old SLF4J→Timbre provider is excluded. Proximum's slf4j-simple is selected
-  ;; explicitly as the writer's sole SLF4J provider.
+  ;; Proximum's slf4j-simple is selected explicitly as the writer's sole SLF4J
+  ;; provider.
   :writer
   {:replace-paths ["src" "resources"]
    :extra-paths ["reference-code/datahike/src-secondary"]
@@ -216,11 +207,6 @@
     com.github.kkuegler/human-readable-ids-java {:mvn/version "0.4"}
     io.github.thibaultmeyer/cuid {:mvn/version "2.0.5"}
 
-    io.replikativ/konserve-jdbc
-    {:mvn/version "0.2.91"
-     :exclusions [io.replikativ/konserve
-                  io.replikativ/superv.async
-                  com.fzakaria/slf4j-timbre]}
     org.slf4j/slf4j-simple {:mvn/version "2.0.16"}}
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
@@ -319,7 +305,7 @@
                          ;; Transit-JSON for wire value payloads
                          ;; (keywords, sets, instants, ratios) crossing the
                          ;; CLJS guest <-> JVM wire-server boundary. Mirrored by
-                         ;; com.cognitect/transit-clj on the server (seon.server.transit).
+                         ;; com.cognitect/transit-clj on the server (seon.server.codec).
                          com.cognitect/transit-cljs           {:mvn/version "0.8.280"}
                          ;; reitit — the pod's HTTP front door (seon.web.router).
                          ;; The published CLJS artifact is clean: reitit's trie

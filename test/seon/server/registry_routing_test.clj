@@ -1,18 +1,17 @@
 (ns seon.server.registry-routing-test
-  "P1 conn-resolution + on-ensure-db extension-point tests for
+  "Connection routing + on-ensure-db extension-point tests for
    `seon.server.registry`.
 
-   Covers the multi-cluster seam the reactive engine plugs into:
-   - `resolve-conn` routes a request to the right conn by agent-id or db-name
-     across MANY clusters in one registry; unknown → typed not-found; the
-     `register-agent!` agent→cluster binding.
+   Covers the multi-cluster writer seam:
+   - `resolve-conn` routes a request to the right conn by db-name across MANY
+     clusters in one registry; unknown → typed not-found.
    - `register-on-ensure-db-hook!` fires once per newly-opened conn, with a
      real datahike conn + db-name, and a `d/listen!` registered inside the hook
      receives the full TxReport on commit.
    - `ensure-db!` idempotency (no re-open, no re-fire of hooks).
 
-   All `:memory` backend. Each test snapshots/restores the registry + agents +
-   the on-ensure-db hook vector so tests are isolated and don't leak conns."
+   All `:memory` backend. Each test snapshots/restores the registry + the
+   on-ensure-db hook vector so tests are isolated and don't leak conns."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
             [seon.server.registry :as reg]))
@@ -53,71 +52,21 @@
           "20 clusters => 20 distinct conns")
       (doseq [n names] (reg/remove-db! {::reg/db-name n})))))
 
-(deftest resolve-conn-by-agent-id
-  (testing "agent-id → db-name → conn; many agents fanned across many clusters"
-    (let [names    (mapv #(keyword "cluster" (str "ac" %)) (range 12))
-          name->c  (into {} (map (fn [n] [n (::reg/conn (mem n))])) names)
-          ;; 3 agents per cluster
-          agents   (for [n names i (range 3)]
-                     [(str "agent-" (name n) "-" i) n])]
-      (doseq [[aid n] agents]
-        (reg/register-agent! {:seon.agent/id aid ::reg/db-name n}))
-      (testing "each agent resolves to its cluster's conn"
-        (doseq [[aid n] agents]
-          (let [res (reg/resolve-conn {:seon.agent/id aid})]
-            (is (identical? (name->c n) (::reg/conn res)))
-            (is (= n (::reg/db-name res))))))
-      (testing "list-agents reflects every binding"
-        (is (= (count agents)
-               (count (::reg/agents (reg/list-agents {}))))))
-      (doseq [n names] (reg/remove-db! {::reg/db-name n})))))
-
-(deftest resolve-conn-unknown-is-typed-not-found
-  (testing "unknown agent-id and unknown db-name both yield not-found, no conn"
+(deftest resolve-conn-unknown-db-is-typed-not-found
+  (testing "an unknown db-name yields a typed not-found value with no conn"
     (mem :cluster/present)
-    (let [a (reg/resolve-conn {:seon.agent/id "nope-not-registered"})
-          d (reg/resolve-conn {::reg/db-name :cluster/absent})]
-      (is (= "not-found" (::reg/error-kind a)))
-      (is (nil? (::reg/conn a)))
-      (is (string? (::reg/error a)))
+    (let [d (reg/resolve-conn {::reg/db-name :cluster/absent})]
       (is (= "not-found" (::reg/error-kind d)))
-      (is (nil? (::reg/conn d))))
+      (is (nil? (::reg/conn d)))
+      (is (string? (::reg/error d))))
     (reg/remove-db! {::reg/db-name :cluster/present})))
 
 (deftest resolve-conn-absent-keys-is-unresolved
-  (testing "neither agent-id nor db-name → ::unresolved? (caller falls back to
-            its ambient single-DB conn — back-compat)"
+  (testing "no db-name → ::unresolved? so the caller can use its ambient conn"
     (let [res (reg/resolve-conn {})]
       (is (true? (::reg/unresolved? res)))
       (is (nil? (::reg/conn res)))
       (is (nil? (::reg/error-kind res))))))
-
-(deftest agent-id-precedence-over-db-name
-  (testing "when both present, agent-id wins the resolution"
-    (mem :cluster/x)
-    (mem :cluster/y)
-    (reg/register-agent! {:seon.agent/id "ag-x" ::reg/db-name :cluster/x})
-    (let [res (reg/resolve-conn {:seon.agent/id "ag-x" ::reg/db-name :cluster/y})]
-      (is (= :cluster/x (::reg/db-name res))
-          "agent-id resolution takes precedence over the explicit db-name"))
-    (reg/remove-db! {::reg/db-name :cluster/x})
-    (reg/remove-db! {::reg/db-name :cluster/y})))
-
-(deftest register-agent-requires-registered-db
-  (testing "binding an agent to an unregistered cluster throws"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (reg/register-agent! {:seon.agent/id "orphan"
-                                       ::reg/db-name :cluster/never})))))
-
-(deftest remove-db-drops-its-agent-bindings
-  (testing "removing a cluster removes the agents that pointed at it"
-    (mem :cluster/z)
-    (reg/register-agent! {:seon.agent/id "z1" ::reg/db-name :cluster/z})
-    (reg/register-agent! {:seon.agent/id "z2" ::reg/db-name :cluster/z})
-    (is (= 2 (count (::reg/agents (reg/list-agents {})))))
-    (reg/remove-db! {::reg/db-name :cluster/z})
-    (is (empty? (::reg/agents (reg/list-agents {}))))
-    (is (= "not-found" (::reg/error-kind (reg/resolve-conn {:seon.agent/id "z1"}))))))
 
 ;;; --- on-ensure-db extension point ------------------------------------------
 

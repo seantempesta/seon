@@ -19,7 +19,6 @@
             [datahike.constants :as datahike.constants]
             [datahike.db.interface :as dbi]
             [hasch.core :as hasch]
-            [konserve-jdbc.core]
             [seon.db.id :as id]
             [seon.server.codec :as codec]
             [seon.server.registry :as registry]
@@ -39,7 +38,7 @@
 
 (defn- parse-args [args]
   (loop [acc {:backend "memory"
-              :path "data/seon-client-runtime.sqlite"
+              :path "data/seon-client-runtime/store"
               :req-sock "tmp/seon-client-runtime-req.sock"
               :pub-sock "tmp/seon-client-runtime-pub.sock"}
          xs args]
@@ -260,16 +259,6 @@
         (println "[embed] tx-augmenter failed; transacting un-augmented:"
                  (.getMessage t)))
       tx*)))
-
-;; ---------- Filtered-db handle registry ----------
-
-(defonce ^:private filtered-dbs (atom {}))
-(defonce ^:private filter-counter (atom 0))
-
-(defn- register-filtered-db! [filtered-db source-bt]
-  (let [h (swap! filter-counter inc)]
-    (swap! filtered-dbs assoc h {:db filtered-db :basis-t source-bt})
-    h))
 
 (defn- resolve-db-with-basis-t [conn basis-t-or-nil]
   (let [db (d/db conn)]
@@ -888,70 +877,6 @@
               :else
               (throw throwable))))))))
 
-(defmethod handle-op "transact-batch" [conn req]
-  (let [tx-data-list (vec (:seon.store.wire/tx-data-list req))
-        tx-meta-list (some-> (:seon.store.wire/tx-meta-list req) vec)
-        wire-ids     (:seon.store.wire/ids req)
-        n            (count tx-data-list)
-        per-tx-report
-        (fn [idx tx tx-meta-in wire-id]
-          (assoc
-           (transact-once!
-            conn
-            (cond-> {:seon.store.wire/tx-data tx}
-              (seq tx-meta-in)
-              (assoc :seon.store.wire/tx-meta tx-meta-in)
-              (and (string? wire-id) (not (str/blank? wire-id)))
-              (assoc :seon.store.wire/id wire-id)))
-           :seon.store.wire/index idx))]
-    (if-not (and (vector? wire-ids)
-                 (= n (count wire-ids))
-                 (every? #(and (string? %) (not (str/blank? %))) wire-ids)
-                 (= n (count (distinct wire-ids))))
-      (err "protocol"
-           "transact-batch requires one distinct nonblank :seon.store.wire/id per transaction")
-      (locking conn
-        (loop [idx 0 wire-reports (transient [])]
-          (if (>= idx n)
-            (ok {:seon.store.wire/reports (persistent! wire-reports)
-                 :seon.store.wire/applied idx
-                 :seon.store.wire/total   n})
-            (let [tx         (nth tx-data-list idx)
-                  tx-meta-in (some-> tx-meta-list (nth idx nil))
-                  wire-id    (nth wire-ids idx)
-                  result     (try
-                               {::success (per-tx-report idx tx tx-meta-in wire-id)}
-                               (catch clojure.lang.ExceptionInfo e
-                                 (let [server-error (:seon.server.wire/error
-                                                     (ex-data e))]
-                                   {::failure
-                                    {::failure-kind
-                                     (case server-error
-                                       :seon.server.wire.error/id-reuse
-                                       "wire-id-conflict"
-
-                                       :seon.server.wire.error/reserved-attribute
-                                       "protocol"
-
-                                       "datahike")
-                                     ::failure-message
-                                     (str (.getMessage e) " "
-                                          (pr-str (ex-data e)))}}))
-                               (catch Throwable throwable
-                                 {::failure
-                                  {::failure-kind "internal"
-                                   ::failure-message (.toString throwable)}}))]
-              (if-let [ok-rep (::success result)]
-                (recur (inc idx) (conj! wire-reports ok-rep))
-                (let [{kind ::failure-kind
-                       msg ::failure-message} (::failure result)]
-                  (ok {:seon.store.wire/reports    (persistent! wire-reports)
-                       :seon.store.wire/applied    idx
-                       :seon.store.wire/total      n
-                       :seon.store.wire/failed-at  idx
-                       :seon.store.wire/error      msg
-                       :seon.store.wire/error-kind kind}))))))))))
-
 (defmethod handle-op "pull" [conn req]
   (let [selector (:seon.store.wire/selector req)
         eid      (:seon.store.wire/eid req)
@@ -960,93 +885,20 @@
     (ok {:seon.store.wire/basis-t (basis-t-of db)
          :seon.store.wire/result  (d/pull db selector eid)})))
 
-(defn- expand-component-refs [m depth]
-  (if (or (nil? m) (zero? depth) (not (map? m)))
-    m
-    (into {}
-          (for [[k v] m]
-            [k (cond
-                 (map? v)         (expand-component-refs v (dec depth))
-                 (and (sequential? v) (every? map? v))
-                 (mapv #(expand-component-refs % (dec depth)) v)
-                 :else            v)]))))
-
-(defmethod handle-op "entity-pull" [conn req]
-  (let [eid      (:seon.store.wire/ref req)
-        sel-raw  (:seon.store.wire/selector req)
-        selector (or sel-raw '[*])
-        depth    (long (or (:seon.store.wire/depth req) 1))
-        basis-t  (:seon.store.wire/basis-t req)
-        db       (resolve-db-with-basis-t conn basis-t)
-        raw      (try
-                   (d/pull db selector eid)
-                   (catch clojure.lang.ExceptionInfo e
-                     (if (= :entity-id/missing (:error (ex-data e)))
-                       nil
-                       (throw e))))
-        result   (when raw (expand-component-refs raw depth))]
-    (ok {:seon.store.wire/basis-t (basis-t-of db)
-         :seon.store.wire/result  result})))
-
-(defmethod handle-op "pull-many" [conn req]
-  (let [selector (:seon.store.wire/selector req)
-        eids     (vec (:seon.store.wire/eids req))
-        basis-t  (:seon.store.wire/basis-t req)
-        db       (resolve-db-with-basis-t conn basis-t)]
-    (ok {:seon.store.wire/basis-t (basis-t-of db)
-         :seon.store.wire/result  (d/pull-many db selector eids)})))
-
 (defmethod handle-op "schema" [conn _req]
   (let [db (d/db conn)]
     (ok {:seon.store.wire/basis-t (basis-t-of db)
          :seon.store.wire/result  (:schema db)})))
 
-(defmethod handle-op "reverse-schema" [conn _req]
-  (let [db (d/db conn)]
-    (ok {:seon.store.wire/basis-t (basis-t-of db)
-         :seon.store.wire/result  (:rschema db)})))
-
-(defmethod handle-op "db-filter" [conn req]
-  (let [pred-query (:seon.store.wire/pred-query req)
-        args       (vec (:seon.store.wire/args req))
-        db         (d/db conn)
-        rows       (apply d/q pred-query db args)
-        keep-eids  (into #{} (map first) rows)
-        filtered-db
-        (d/filter db (fn [_db ^datahike.datom.Datom d]
-                       (contains? keep-eids (.-e d))))
-        bt         (basis-t-of db)
-        handle     (register-filtered-db! filtered-db bt)]
-    (ok {:seon.store.wire/basis-t bt
-         :seon.store.wire/handle  handle
-         :seon.store.wire/kept    (count keep-eids)})))
-
-(defmethod handle-op "q-filtered" [_conn req]
-  (let [handle  (long (:seon.store.wire/handle req))
-        query   (:seon.store.wire/query req)
-        args    (vec (:seon.store.wire/args req))]
-    (if-let [entry (get @filtered-dbs handle)]
-      (let [db (:db entry)]
-        (ok {:seon.store.wire/basis-t (:basis-t entry)
-             :seon.store.wire/result  (apply d/q query db args)}))
-      (err "not-found" (str "no filtered-db handle: " handle)))))
-
-(defmethod handle-op "filter-release" [_conn req]
-  (let [handle (long (:seon.store.wire/handle req))]
-    (swap! filtered-dbs dissoc handle)
-    (ok {:seon.store.wire/released true :seon.store.wire/handle handle})))
-
 (defn- resolve-conn-for-req
-  "Resolve the target conn for a request from the registry by `agent-id` /
-   `db-name`. Returns `{:conn <c>}` on success, `{:conn ambient}` when neither
-   key is present (single-DB back-compat), or `{:error <env>}` for an unknown
-   agent-id/db-name (typed `not-found`, matching the existing error envelope)."
+  "Resolve a request's target connection by `db-name`.
+
+   Returns `{:conn <c>}` on success, `{:conn ambient}` when no db-name is
+   present, or `{:error <env>}` for an unknown db-name."
   [ambient-conn req]
-  (let [agent-id (let [a (:seon.store.wire/agent-id req)] (when (and a (not= "" a)) a))
-        db-name  (some-> (:seon.store.wire/db-name req) keyword)
+  (let [db-name  (some-> (:seon.store.wire/db-name req) keyword)
         res      (registry/resolve-conn
                   (cond-> {}
-                    agent-id (assoc :seon.agent/id agent-id)
                     db-name  (assoc :seon.server.registry/db-name db-name)))]
     (cond
       (:seon.server.registry/conn res) {:conn (:seon.server.registry/conn res)}
@@ -1060,7 +912,7 @@
   (try
     ;; `ensure-db` is a cluster-lifecycle op with no pre-existing target conn —
     ;; it resolves/creates its own conn from the registry. Everything else
-    ;; routes to a conn resolved by agent-id/db-name (or the ambient conn).
+    ;; routes to a conn resolved by db-name (or the ambient conn).
     (if (= "ensure-db" (:seon.store.wire/op req))
       (handle-op conn req)
       (let [{:keys [conn error]} (resolve-conn-for-req conn req)]
@@ -1151,8 +1003,8 @@
   "The db-name string the ambient conn broadcasts under (the same value
    `ensure-db!` passed to its `::raw-broadcast` listener). The tx-feed ops
    (`seon.server.boot`) use this to route a `replay-tx` with
-   no agent-id/db-name to the ambient conn's pub events. Defaults to
-   \"default\" when not yet booted (matches `ensure-db!`'s fallback)."
+   no db-name to the ambient conn's pub events. Defaults to \"default\" when not
+   yet booted (matches `ensure-db!`'s fallback)."
   []
   (or (:ambient-db-name @state) "default"))
 

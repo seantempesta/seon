@@ -1,8 +1,8 @@
 (ns seon.server.registry-test
   "Tests for seon.server.registry — Path B registry.
 
-   All tests use the `:memory` backend exclusively. `:file`/`:sqlite`
-   exercise the same code paths via store/config-for; the registry's
+   Most tests use the `:memory` backend; the fork lifecycle exercises `:file`.
+   Both use the same registry path through store/config-for, so the registry's
    invariants are backend-agnostic.
 
    Isolation: each test runs under a fixture that snapshots the

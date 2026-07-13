@@ -63,38 +63,18 @@
                                  :seon.server.store/path "/tmp/abs-store"})]
       (is (= "/tmp/abs-store" (get-in cfg [:store :path]))))))
 
-(deftest config-for-sqlite
-  (testing ":sqlite cfg shape with default path"
-    (let [cfg (store/config-for {:seon.server.store/db-name :test/s
-                                 :seon.server.store/backend :sqlite})]
-      (is (= :jdbc (get-in cfg [:store :backend])))
-      (is (= "sqlite" (get-in cfg [:store :dbtype])))
-      (is (= "data/sessions/s/store.sqlite" (get-in cfg [:store :dbname])))
-      (is (= "store" (get-in cfg [:store :table])))
-      (is (uuid? (get-in cfg [:store :id])))))
-  (testing ":sqlite cfg with explicit path override"
-    (let [cfg (store/config-for {:seon.server.store/db-name :test/s
-                                 :seon.server.store/backend :sqlite
-                                 :seon.server.store/path "tmp/test-store.sqlite"})]
-      (is (= "tmp/test-store.sqlite" (get-in cfg [:store :dbname])))))
-  (testing "bare :sqlite path is re-rooted under data/sessions/"
-    (let [cfg (store/config-for {:seon.server.store/db-name :test/s
-                                 :seon.server.store/backend :sqlite
-                                 :seon.server.store/path "Bh"})]
-      (is (= "data/sessions/Bh/store.sqlite" (get-in cfg [:store :dbname]))))))
-
 (deftest namespaced-db-name-yields-name-segment
   (testing "namespace portion of db-name is stripped for path segment"
     (let [cfg (store/config-for {:seon.server.store/db-name :seon.cluster/alice
-                                 :seon.server.store/backend :sqlite})]
-      (is (= "data/sessions/alice/store.sqlite"
-             (get-in cfg [:store :dbname]))))))
+                                 :seon.server.store/backend :file})]
+      (is (= "data/sessions/alice/store"
+             (get-in cfg [:store :path]))))))
 
 (deftest config-for-is-pure
   (testing "no directories created merely by building a cfg"
     (let [cfg (store/config-for {:seon.server.store/db-name :test/pure-check
-                                 :seon.server.store/backend :sqlite
-                                 :seon.server.store/path "tmp/store-test-pure/store.sqlite"})
+                                 :seon.server.store/backend :file
+                                 :seon.server.store/path "tmp/store-test-pure/store"})
           parent (java.io.File. "tmp/store-test-pure")]
       ;; cfg built but directory NOT created
       (is (some? cfg))
@@ -103,7 +83,7 @@
       ;; explicit helper does create
       (let [{:seon.server.store/keys [created?]}
             (store/ensure-parent-dir!
-             {:seon.server.store/path "tmp/store-test-pure/store.sqlite"})]
+             {:seon.server.store/path "tmp/store-test-pure/store"})]
         (is (true? created?))
         (is (.exists parent)))
       ;; cleanup

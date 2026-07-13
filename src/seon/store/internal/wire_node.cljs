@@ -18,7 +18,7 @@
    - uniform frame: ONE Transit-JSON map, `:seon.store.wire/*` keyword keys
      and NATIVE values (query/args/tx-data/selectors/eids/results/tempids/
      tx-meta/datom a,v) — one encode/decode, no inner Transit strings.
-   - multi-DB routing: optional :seon.store.wire/agent-id / db-name on any req.
+   - multi-DB routing: optional :seon.store.wire/db-name on any request.
 
    Stays OUT of the `:client` build (its own `:wire-node` shadow build, its own
    `-main`). Build: `clj -M:cljs watch wire-node`;
@@ -279,10 +279,9 @@
 
 ;; ---------- op surface (mirrors seon.server.wire) ----------
 
-(defn- routed [req {:keys [agent-id db-name]}]
+(defn- routed [req {:keys [db-name]}]
   (cond-> req
-    agent-id (assoc :seon.store.wire/agent-id agent-id)
-    db-name  (assoc :seon.store.wire/db-name db-name)))
+    db-name (assoc :seon.store.wire/db-name db-name)))
 
 (defn- then [p f] (.then p f))
 
