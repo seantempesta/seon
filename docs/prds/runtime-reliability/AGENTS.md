@@ -18,8 +18,10 @@ canvas/surface/card cutover.
 
 This PRD is in **phase 3 of 6: finish the operator cutover and test trim**. The
 Babashka operator and default-cluster cold/restart proof are complete. ACME and
-Inspect callers, direct hook/tool doors, and the remaining obsolete harness
-trees are the phase-3 work still open. The active plan replaces mechanisms in
+Inspect callers and the remaining active test-door consolidation are the
+phase-3 work still open. The broken JVM gold-patch replay scripts and the
+dangling `bin/test-clj` symlink are deleted; their dated result artifacts remain
+as evidence. The active plan replaces mechanisms in
 place and deletes their superseded paths; it does not create compatibility
 namespaces or parallel architectures.
 

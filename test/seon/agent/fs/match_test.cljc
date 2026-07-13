@@ -5,8 +5,7 @@
    DETERMINISTIC matching MUTATES. Every ambiguity must REFUSE with
    line-numbered candidates rather than guess a location — the slice-3
    failure mode (a botched edit landing mid-function) is exactly what a
-   wrong-place mutation would reproduce. `.cljc` so the JVM gold-patch
-   replay harness drives the same pure code."
+   wrong-place mutation would reproduce."
   (:require
     [seon.agent.fs.match :as match]
     [malli.core :as m]

@@ -1,6 +1,6 @@
 ---
 type: research
-status: active
+status: completed
 tags: [research, agent]
 ---
 
@@ -108,20 +108,13 @@ matcher. (Verified live: `decide` on the raw pre-image returns
 - Passes 2 and 3 come up empty (0 ambiguous) precisely because gold anchors are
   well-formed — reported as-is rather than engineered to produce activity.
 
-## Reproduce
+## Retired harness
 
-```bash
-bin/replay-gold-patches                       # -> evals/runs/<date>-t2-gold-replay/
-bin/replay-gold-patches evals/runs/2026-07-06-t2-gold-replay   # explicit out-dir
-```
-
-Stage 1 reads the 10 dev-slice rows from the local HuggingFace cache
-(`princeton-nlp/SWE-bench_Verified`, `datasets.lock` revision `c104f840…`).
-Stage 2 shallow-fetches each repo AT its `base_commit` into `tmp/t2-gold/repos/`
-(re-run reuses existing checkouts; unreachable repos are SKIPPED and logged — no
-silent caps). Stage 3 drives the cascade via `clojure -M:test
-bin/replay_gold_patches.clj` and writes `summary.txt`, `detail.json` (every
-hunk's decision), and `per-instance.edn` here.
+This one-off JVM replay harness was retired with the paused JVM application.
+Its recorded artifacts remain as dated evidence; the active implementation is
+covered behaviorally by `seon.agent.fs.match-test` through the canonical CLJS
+test runner. The deleted harness depended on the removed `:test` alias and was
+not a valid operator or CI path.
 
 ## Artifacts
 
@@ -129,5 +122,5 @@ hunk's decision), and `per-instance.edn` here.
 - `detail.json` — one record per hunk: class, `wrong?`, decision stage/action,
   the four-pass fields, `find`/`replace`, `cascade-new` vs `oracle-content`.
 - `per-instance.edn` — hunk/file counts per instance.
-- Harness: `bin/replay-gold-patches` (wrapper) + `bin/replay_gold_patches.clj`
-  (scorer). Cascade under test: `src/seon/agent/fs/match.cljc` (`decide`).
+- Retained behavioral gate: `test/seon/agent/fs/match_test.cljc`. Cascade under
+  test: `src/seon/agent/fs/match.cljc` (`decide`).

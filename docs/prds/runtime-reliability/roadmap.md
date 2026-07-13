@@ -32,8 +32,10 @@ compensate for unclear functions.
 The permanent JVM database server is isolated, duplicate runtime authority is
 removed, the paused application is archived, and the Babashka operator has
 cold-started and restarted the default cluster through its one public door.
-Remaining phase-3 gates are ACME/Inspect caller migration, direct hook/tool
-doors, and deletion of obsolete harness trees. Remote replication, cloud topology, browser
+Remaining phase-3 gates are ACME/Inspect caller migration and consolidation of
+the active test doors. The broken JVM gold-patch replay scripts and dangling
+`bin/test-clj` symlink are deleted while their dated evidence remains. Remote
+replication, cloud topology, browser
 replicas, offline mutation, mobile packaging, and the full paid Inspect AI
 battery are explicit follow-on work rather than completion gates for this
 branch.
