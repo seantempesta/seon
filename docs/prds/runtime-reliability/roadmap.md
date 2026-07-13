@@ -34,6 +34,13 @@ clean-base proof; remote replication, cloud topology, browser replicas, offline
 mutation, mobile packaging, and the full paid Inspect AI battery are explicit
 follow-on work rather than completion gates for this branch.
 
+The shared ACME/plan/REPL work is now checkpointed at `3e0e0bff`; the tree was
+clean immediately afterward and the directly affected schema, plan, and AI
+dispatch CLJS namespaces pass their focused tests. The Phase 1 baseline is
+[[research/phase-1-baseline-2026-07-13]]. The checkpoint is not yet the archive
+ref: clean writer/CLJS artifacts, live transition proof, profiling, and the
+annotated pre-removal ref remain outstanding.
+
 The source-grounded system audits are complete and committed:
 
 - [[research/database-runtime-responsiveness-audit-2026-07-13]]
@@ -47,6 +54,7 @@ The source-grounded system audits are complete and committed:
 - [[research/surface-vocabulary-and-dead-ui-path-audit-2026-07-13]]
 - [[research/root-view-presence-crash-batch-audit-2026-07-13]]
 - [[research/cljs-test-suite-speed-and-quality-audit-2026-07-12]]
+- [[research/phase-1-baseline-2026-07-13]]
 
 Several foundational corrections have already landed:
 

@@ -22,6 +22,13 @@ clean-base proof. The active plan replaces mechanisms in place and deletes their
 superseded paths; it does not create compatibility namespaces or parallel
 architectures.
 
+The previously shared ACME/plan/REPL work is checkpointed at `3e0e0bff` and the
+tree was clean immediately afterward. Focused `seon.schema-test`,
+`my.plan-test`, and `seon.ai.dispatch-test` runs pass. This is a readable
+coordination point, not yet the archival boundary: clean writer/CLJS artifacts,
+live transition proof, profiling, and the annotated archive ref remain Phase 1
+work. The exact evidence is [[research/phase-1-baseline-2026-07-13]].
+
 Foundational gains already landed and are the baseline:
 
 - one generated-identity allocator and minimal user/process provenance;
@@ -217,6 +224,8 @@ a hosted JVM + Node cluster.
 
 - [[roadmap]] — authoritative six-phase order, acceptance transitions, settled
   choices, and explicit follow-on boundary.
+- [[research/phase-1-baseline-2026-07-13]] — current process/feed/render/build
+  evidence, shared checkpoint, focused proof, and remaining archival checklist.
 - [[provenance-and-lifecycle-design]] — database provenance/config/lifecycle
   target semantics.
 - [[research/jvm-archive-boundary-2026-07-13]] — retained/deleted JVM closure,
