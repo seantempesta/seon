@@ -1316,8 +1316,8 @@ cluster_create() {
   # own boot then ping-gates the socket AND ensure-db's its cluster db
   # (backend :file, path data/clusters/<name>/store) before attaching its
   # read conn — no bash-side db call needed, one creation path.
-  cmd_start wire-server
-  wait_ready wire-server || exit 1
+  # cmd_start returns only after the shared readiness fence succeeds.
+  cmd_start wire-server || exit 1
 
   mkdir -p "data/clusters/$name"
   # `--ephemeral` records INTENT (this cluster is disposable — a bench
@@ -1339,8 +1339,7 @@ cluster_create() {
     ensure_bench_bundle present || exit 1
   fi
 
-  cmd_start "pod-$name"
-  wait_ready "pod-$name" || exit 1
+  cmd_start "pod-$name" || exit 1
   local port
   port="$(cat "tmp/seon-port-$name" 2>/dev/null || echo '?')"
   echo "▶ cluster $name created — pod http://127.0.0.1:$port (db-name $name, store data/clusters/$name/store)"
@@ -1386,8 +1385,7 @@ cluster_fork() {
   echo "▶ cluster fork: $src @t=$t → $fork_name"
   # The source db lives on THIS supervisor's wire-server; the fork op
   # runs inside that JVM (registry fn over the loopback REPL).
-  cmd_start wire-server
-  wait_ready wire-server || exit 1
+  cmd_start wire-server || exit 1
 
   local expr out
   # Port from THIS supervisor's env: $SEON_WRITER_REPL_PORT is exactly what
@@ -1418,8 +1416,7 @@ cluster_fork() {
   # fixing the bug usually means iterating on src/ against it.
   date -u +%FT%TZ > "data/clusters/$fork_name/ephemeral"
 
-  cmd_start "pod-$fork_name"
-  wait_ready "pod-$fork_name" || exit 1
+  cmd_start "pod-$fork_name" || exit 1
   local port
   port="$(cat "tmp/seon-port-$fork_name" 2>/dev/null || echo '?')"
   echo "▶ cluster $fork_name forked from $src @t=$t — pod http://127.0.0.1:$port (store data/clusters/$fork_name/store)"
@@ -1538,14 +1535,11 @@ cluster_reset() {
   fi
 
   if [ "$bounce" = 1 ]; then
-    cmd_start wire-server
-    # The pod's boot is ping-gated FAIL-LOUD against the wire socket —
-    # wait for the writer to mint the fresh DB before starting it
-    # (socket accepting implies datahike is up; the writer binds the
-    # socket only after the DB is ready).
-    wait_ready wire-server || exit 1
-    cmd_start pod
-    wait_ready pod || exit 1
+    # cmd_start owns the one readiness fence. Do not probe again here: the
+    # duplicate waits used to add another complete stability window for both
+    # writer and pod after they were already proven usable.
+    cmd_start wire-server || exit 1
+    cmd_start pod || exit 1
     echo "▶ cluster $name reset complete — pod boot re-seeds the core"
   else
     echo "▶ cluster $name store wiped (no processes registered for it)"
