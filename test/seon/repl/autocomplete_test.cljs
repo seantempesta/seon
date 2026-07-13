@@ -343,3 +343,22 @@
             (is (not-any? #(str/includes? % "defn query") cards2)
                 "a fn deleted from the current index loses its card"))))
       done)))
+
+(deftest context-explicit-profile-override-wins
+  (async done
+    (run-test
+      (fn ^:async run []
+        (let [a        (await (fresh-agent!))
+              aid      (:seon.agent/id a)
+              _        (await (drive-turn! a "(+ 1 2)\n"))
+              db       @db/*conn*
+              no-ascii (mapv #(dissoc % :seon.agent.ctx/ascii?)
+                             auto/context-blocks)
+              c-def    (auto/context {:seon.agent/id aid :seon.db/db db})
+              c-ovr    (auto/context {:seon.agent/id aid :seon.db/db db
+                                      :seon.agent.ctx/profile no-ascii})]
+          (is (str/includes? c-def ";;; -- ")
+              "the default resolution renders the v3 ascii display")
+          (is (str/includes? c-ovr ";;; ┌─ ")
+              "an explicit :seon.agent.ctx/profile overrides the default resolution")))
+      done)))

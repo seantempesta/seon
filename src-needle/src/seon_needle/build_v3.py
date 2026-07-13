@@ -19,6 +19,10 @@ This builder adds ONE column and passes everything else through byte-exact:
                The encoder tools slot is
                json.dumps(row["json_tools"], separators=(",", ":")).
 
+Rows are LOCKED to the frozen v1 held-out id set (minus the 3 excluded):
+the store keeps accumulating turns, but v3 is the SAME held-out set —
+newer turns are reported in the sidecar, never silently added.
+
 There is NO card compaction here (display v3 owner ruling: cards MUST carry
 their `:malli/schema` contract — the v2-era `compact_card` schema-stripping
 is retired; git holds build_v2.py). No target transforms either: v3 keeps
@@ -46,6 +50,10 @@ SPLITTER = config.package_root() / "scripts" / "split_forms.clj"
 FN_INDEX = config.package_root() / "data" / "fn-index.json"
 DEFAULT_RAW = REPO_ROOT / "data" / "tune" / "acme-2026-07-12-v3-raw.jsonl"
 DEFAULT_V3 = REPO_ROOT / "data" / "tune" / "acme-2026-07-12-v3.jsonl"
+# The FROZEN held-out id set: the v1 export's turn ids. The store keeps
+# accumulating turns (the exporter walks everything), so rows outside the
+# v1 id set are locked OUT of v3 and reported in the sidecar.
+V1_LOCK = REPO_ROOT / "data" / "tune" / "acme-2026-07-12.jsonl"
 
 # The 3 junk-target turns (prose parsed as calls) rated :excluded in the
 # store per the scorer FN audit — documented here so the sidecar carries
@@ -157,6 +165,13 @@ def main():
     src_bytes = open(raw_path, "rb").read()
     rows = [json.loads(l) for l in src_bytes.decode().splitlines() if l.strip()]
 
+    # Held-out lock: only turns present in the frozen v1 export pass.
+    lock_ids = {json.loads(l)["meta"]["turn-id"]
+                for l in open(V1_LOCK) if l.strip()} - set(EXCLUDED_TURNS)
+    locked_out = [r["meta"]["turn-id"] for r in rows
+                  if r["meta"]["turn-id"] not in lock_ids]
+    rows = [r for r in rows if r["meta"]["turn-id"] in lock_ids]
+
     distinct_cards = []
     seen = set()
     for r in rows:
@@ -201,6 +216,7 @@ def main():
         "excluded_reference":
             "docs/prds/repl-autosuggest/research/"
             "scorer-false-negative-audit-2026-07-12.md",
+        "locked_out_turns": locked_out,
         "rows": len(rows),
         "card_translation": tool_stats,
     }

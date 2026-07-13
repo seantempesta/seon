@@ -166,28 +166,38 @@
 (schema/register! ::context-request
   [:map
    [:seon.agent/id :string]
-   [:seon.db/db {:optional true} :seon.db/db]])
+   [:seon.db/db {:optional true} :seon.db/db]
+   ;; Explicit profile override (display v3): the exporter resolves the
+   ;; profile ONCE from the export db HEAD and passes it per row, so one
+   ;; export renders every turn under ONE display — the default as-of
+   ;; read would resurrect the profile in force at each past t (mixed
+   ;; displays inside one dataset).
+   [:seon.agent.ctx/profile {:optional true} :seon.agent.ctx/profile]])
 
 (defn context
   "The autocomplete situation projection for one agent, as a bare String.
 
    THE encoder input (byte-exact contract): the ONE producer
    (`seon.agent.ctx/render-context` — the same fn behind the real prompt
-   and the web UI) invoked with the `:autocomplete` render profile — the
-   db-stored `:seon.config/context-profiles` entry when the passed db
-   carries one (the profile in force at that t), else [[context-blocks]].
+   and the web UI) invoked with the `:autocomplete` render profile — an
+   explicit `:seon.agent.ctx/profile` when the caller passes one (the
+   exporter's one-display-per-export resolution), else the db-stored
+   `:seon.config/context-profiles` entry when the passed db carries one
+   (the profile in force at that t), else [[context-blocks]].
    Pure over the db VALUE: pass the live db at inference,
    `(db/as-of db rendered-as-of)` at export — identical bytes for
    identical inputs (readline, `result/<id>` handles, and resume markers —
    the wall-clock / process-identity bytes — are off in this profile).
    Deterministic: no wall clock, no randomness."
   {:malli/schema [:=> [:cat ::context-request] :string]}
-  [{id :seon.agent/id db :seon.db/db}]
+  [{id :seon.agent/id db :seon.db/db profile :seon.agent.ctx/profile}]
   (let [db (or db @db/*conn*)]
     (ctx/render-context
       {:seon.agent/id id
        :seon.db/db    db
-       :seon.agent.ctx/profile (or (profile-from-db db) context-blocks)})))
+       :seon.agent.ctx/profile (if (seq profile)
+                                 (vec profile)
+                                 (or (profile-from-db db) context-blocks))})))
 
 ;; ============================================================
 ;; Export internals — mining turns into JSONL training rows.
@@ -418,7 +428,9 @@
    basis; turns rated `:excluded` are dropped. Per row:
 
      context — [[context]] rendered against `(db/as-of db rendered-as-of)`
-               (the pre-turn world the model actually saw)
+               (the pre-turn world the model actually saw), under ONE
+               profile for the whole export — the one in force at the
+               export db HEAD (never the per-row as-of profile)
      target  — the turn's ok eval sources, in order, newline-joined
      cards   — SPEC-FACE compact fn cards ([[fn-card]] — registered shape
                refs expanded, decoration glyphs stripped) for the fns the
@@ -447,6 +459,10 @@
           ;; DEPRECATED-docstring'd fn is refused as a distractor pick.
           live-syms  (indexed-fn-syms db)
           deprecated (deprecated-fn-syms db)
+          ;; ONE display per export (display v3): the profile in force at
+          ;; the export db HEAD, passed explicitly to every per-row render
+          ;; — never the per-row as-of profile (mixed displays).
+          profile    (or (profile-from-db db) context-blocks)
           out   (or out-path
                     (str "data/tune/" store "-"
                          (subs (.toISOString (js/Date.)) 0 10) ".jsonl"))
@@ -490,11 +506,13 @@
                               :else
                               (let [aodb    (db/as-of db basis)
                                     ctext   (context {:seon.agent/id agent-id
-                                                      :seon.db/db aodb})
+                                                      :seon.db/db aodb
+                                                      :seon.agent.ctx/profile profile})
                                     ;; determinism self-check: the SAME as-of
                                     ;; db value must render the SAME bytes.
                                     ctext2  (context {:seon.agent/id agent-id
-                                                      :seon.db/db aodb})
+                                                      :seon.db/db aodb
+                                                      :seon.agent.ctx/profile profile})
                                     target  (str/join "\n" sources)
                                     fn-syms (indexed-fn-syms aodb)
                                     called-all (called-syms target fn-syms
