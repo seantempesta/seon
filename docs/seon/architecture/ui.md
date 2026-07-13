@@ -155,8 +155,8 @@ is a tile. All pages are agent views — one mechanism, a tree of routes:
   displays that render in the primary panel. Missing and AI-only renders are
   omitted. The canvas is NOT a `(slot :canvas)` block — it is the agent's live
   tile projection. Renderer recency is the latest transaction by this agent
-  found by a bounded indexed history lookup over scoped inputs captured by the
-  renderer's current runtime-observed database reads; canvas
+  through the REPL, found by a bounded indexed history lookup over scoped
+  inputs captured by the renderer's current runtime-observed database reads; canvas
   slot writes share that same coordinate. Content recency orders the rail,
   while deliberate-focus recency
   treats an agent-to-human reply as a transcript update and a canvas/domain
@@ -165,8 +165,9 @@ is a tile. All pages are agent views — one mechanism, a tree of routes:
   selected surface disappears. **What the canvas shows is derived by default,
   pinnable to override** (the same derive-default/store-override pattern as
   everywhere): by default it is the **last-updated tile** — among the agent's
-  own authored tile fns, the one most recently touched (redefined, or a
-  user-scoped transaction that touches a current observed read's scoped input;
+  own authored tile fns, the one most recently touched (redefined, or an
+  agent-user/REPL transaction that touches a current observed read's scoped
+  input;
   `seon.agent.ctx.render-fns/last-updated-tile`, pure over the db value plus the
   runtime-derived read plan — see [[context]] for the exact derivation) — so the
   human's focus follows what the agent is actively doing, and the agent
@@ -185,6 +186,12 @@ is a tile. All pages are agent views — one mechanism, a tree of routes:
   broad/unknown read earns definition recency only. Human selection/pinning is
   the exact override. Live invalidation remains exact before/after result
   comparison and is not weakened by this focus policy.
+
+  Both provenance dimensions are load-bearing for deliberate focus. Root boot
+  and config transactions legitimately name root as their user, but are system
+  maintenance rather than updates authored by the root agent. Requiring the
+  REPL process keeps those facts available for provenance without letting them
+  select or reorder the root canvas.
 - **the root agent’s view** (`/`) — the all-agents overview IS the **root
   agent's** view (`:seon.agent/id "root"`). Its system-scoped blocks query across
   all agents to render a preview tile each; dive into one via reverse routing

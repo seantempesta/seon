@@ -23,9 +23,11 @@
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.render-fns :as rf]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.process :as process]))
 
 (def ^:private agent-id "tst-2607020000")
+(def ^:private other-agent-id "oth-2607020001")
 (def ^:private cur-ns :my.agent.tst-2607020000)
 (def ^:private cur-ns-str "my.agent.tst-2607020000")
 
@@ -54,6 +56,7 @@
 
 (defn- seed-tx []
   [{:seon.agent/id agent-id}
+   {:seon.agent/id other-agent-id}
    {:seon.ns/name   cur-ns
     :seon.ns/source (str "(ns " cur-ns-str ")")}
    ;; a render-typed TWIN fn, a render-typed ai-only fn, a THROWING render
@@ -246,10 +249,30 @@
        "{:seon.render/ai \"clock\" :seon.render/hiccup [:p \"tick\"]})"))
 
 (defn- transact-as!
-  "Transact `tx-data` on `conn` inside `aid`'s provenance scope."
+  "Transact `tx-data` as the agent user through the default REPL process."
   [conn aid tx-data]
-  (db/with-agent aid
-    (fn [] (db/transact! {:seon.db/conn conn :seon.db/tx-data tx-data}))))
+  (-> (db/with-agent aid
+        (fn [] (db/transact! {:seon.db/conn conn :seon.db/tx-data tx-data})))
+      (.then (fn [env]
+               (when-not (:seon.db/ok? env)
+                 (throw (ex-info "agent/REPL fixture transaction failed" env)))
+               env))))
+
+(defn- transact-as-process!
+  "Transact `tx-data` with an explicit agent user and database process."
+  [conn aid process-id tx-data]
+  (db/without-agent
+    (fn []
+      (-> (db/with-tx-context
+            {:seon.db/user [:seon.agent/id aid]
+             :seon.db/process (process/lookup-ref process-id)}
+            (fn []
+              (db/transact! {:seon.db/conn conn :seon.db/tx-data tx-data})))
+          (.then (fn [env]
+                   (when-not (:seon.db/ok? env)
+                     (throw (ex-info "explicit-provenance fixture transaction failed"
+                                     env)))
+                   env))))))
 
 (deftest last-updated-tile-derives-nothing-without-authored-tiles
   (async done
@@ -278,12 +301,29 @@
                             (symbol (str cur-ns-str "/clock-tile"))}
                            (rf/last-updated-tile {:seon.db/db @conn
                                                   :seon.agent/id agent-id}))))
-                  ;; now write DATA the purpose-tile's source names — the
-                  ;; canvas follows the data with zero ceremony.
-                  (db/transact!
-                    {:seon.db/conn conn
-                     :seon.db/tx-data [{:seon.agent/id agent-id
-                                        :seon.agent/purpose "canvas proof"}]})))
+                  (transact-as! conn other-agent-id
+                    [{:seon.agent/id agent-id
+                      :seon.agent/purpose "peer write"}])))
+                (.then (fn [_]
+                  (testing "another agent's data write cannot steal focus"
+                    (is (= {::rf/tile-sym
+                            (symbol (str cur-ns-str "/clock-tile"))}
+                           (rf/last-updated-tile {:seon.db/db @conn
+                                                  :seon.agent/id agent-id}))))
+                  (transact-as-process! conn "root" ::process/config
+                    [{:seon.agent/id agent-id
+                      :seon.agent/purpose "config repair"}])))
+                (.then (fn [_]
+                  (testing "root/config data work cannot steal agent focus"
+                    (is (= {::rf/tile-sym
+                            (symbol (str cur-ns-str "/clock-tile"))}
+                           (rf/last-updated-tile {:seon.db/db @conn
+                                                  :seon.agent/id agent-id}))))
+                  ;; now the owning agent deliberately writes DATA the
+                  ;; purpose-tile reads — the canvas follows with zero ceremony.
+                  (transact-as! conn agent-id
+                    [{:seon.agent/id agent-id
+                      :seon.agent/purpose "canvas proof"}])))
                 (.then (fn [_]
                   (testing "a write to a watched attr makes that tile last-updated"
                     (is (= {::rf/tile-sym
@@ -317,10 +357,9 @@
                             (symbol (str cur-ns-str "/clock-tile"))}
                            (rf/last-updated-tile {:seon.db/db @conn
                                                   :seon.agent/id agent-id}))))
-                  (db/transact!
-                    {:seon.db/conn conn
-                     :seon.db/tx-data [{:seon.agent/id agent-id
-                                        :seon.agent/purpose "stored read-set proof"}]})))
+                  (transact-as! conn agent-id
+                    [{:seon.agent/id agent-id
+                      :seon.agent/purpose "stored read-set proof"}])))
                 (.then (fn [_]
                   (testing "a write to a STORED-declared attr surfaces the tile (regex would miss it)"
                     (is (= {::rf/tile-sym
@@ -358,11 +397,11 @@
                         "provenance transport attrs do not invalidate views"))))))
         (.then done))))
 
-(deftest last-updated-tile-gates-on-provenance-and-privacy
+(deftest last-updated-tile-gates-on-provenance-process-and-privacy
   (async done
     (-> (with-seeded
           (fn [conn]
-            (-> (transact-as! conn "oth-2607020001"
+            (-> (transact-as! conn other-agent-id
                   [(fn-row (str cur-ns-str "/other-tile") render-spec
                            clock-tile-source)])
                 (.then (fn [_]
@@ -375,6 +414,60 @@
                   (testing "another agent's fn, a private fn, and an ai-only fn are not candidates"
                     (is (= {} (rf/last-updated-tile {:seon.db/db @conn
                                                      :seon.agent/id agent-id})))))))))
+        (.then done))))
+
+(deftest last-updated-tile-excludes-root-boot-renderers
+  (async done
+    (-> (with-seeded
+          (fn [conn]
+            (-> (transact-as-process! conn "root" ::process/boot
+                  [(fn-row "seon.agent.ctx/render-namespace" render-spec
+                           "(defn render-namespace [_] {:seon.render/hiccup [:div]})")])
+                (.then
+                  (fn [_]
+                    (is (= {} (rf/last-updated-tile
+                        {:seon.db/db @conn
+                                 :seon.agent/id "root"}))
+                        "root/boot source facts are not root-agent canvas authorship"))))))
+        (.then done))))
+
+(deftest renderer-recency-counts-only-deliberate-agent-repl-writes
+  (async done
+    (-> (with-seeded
+          (fn [conn]
+            (let [sym (symbol (str cur-ns-str "/purpose-tile"))
+                  touch #(get (rf/renderer-touch
+                                {:seon.db/db @conn
+                                 :seon.agent/id agent-id
+                                 :seon.render/html sym})
+                              ::rf/touch)]
+              (-> (transact-as! conn agent-id
+                    [(fn-row (str sym) render-spec purpose-tile-source)])
+                  (.then
+                    (fn [_]
+                      (let [authored-touch (touch)]
+                        (is (int? authored-touch))
+                        (-> (transact-as! conn other-agent-id
+                              [{:seon.agent/id agent-id
+                                :seon.agent/purpose "peer write"}])
+                            (.then
+                              (fn [_]
+                                (is (= authored-touch (touch))
+                                    "another agent cannot steal renderer recency")
+                                (transact-as-process! conn "root" ::process/config
+                                  [{:seon.agent/id agent-id
+                                    :seon.agent/purpose "config repair"}])))
+                            (.then
+                              (fn [_]
+                                (is (= authored-touch (touch))
+                                    "root/config work is not an agent update")
+                                (transact-as! conn agent-id
+                                  [{:seon.agent/id agent-id
+                                    :seon.agent/purpose "deliberate update"}])))
+                            (.then
+                              (fn [_]
+                                (is (> (touch) authored-touch)
+                                    "the owning agent's REPL write advances recency")))))))))))
         (.then done))))
 
 (deftest context-root-skips-the-derived-canvas-tile

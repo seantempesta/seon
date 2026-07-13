@@ -270,38 +270,46 @@
   "Latest transaction by `agent-id` touching a renderer's declared read-set.
 
    The renderer identity and read-set come from the stored program graph. The
-   history query joins each data transaction to the standard agent provenance
-   metadata, so another agent changing the same attribute cannot steal focus.
-   The renderer's own source transaction also counts when that agent authored
-   it. Pure over `db`; `{}` means no deliberate update by this agent."
+   history query joins each source/data transaction to BOTH durable provenance
+   dimensions: the agent user and the REPL process. Root boot/config work and
+   another agent changing the same attribute therefore cannot steal focus.
+   The renderer's own source transaction counts only when that agent authored
+   it through the REPL. Pure over `db`; `{}` means no deliberate update by
+   this agent."
   {:malli/schema [:=> [:cat ::renderer-touch-request]
                   ::renderer-touch-response]}
   [{db :seon.db/db id :seon.agent/id sym :seon.render/html}]
   (if-let [{::keys [src-tx attrs]} (fn-row db sym)]
-    (let [history (db/history db)
+    (let [history  (db/history db)
+          repl-eid (:db/id
+                     (db/entity {:seon.db/db db
+                                 :seon.db/ref
+                                 [:seon.db.process/id :seon.db.process/repl]}))
           attr-tx (when (seq attrs)
                     (ffirst
                       (db/query
                         {:seon.db/db history
                          :seon.db/query
                          '[:find (max ?tx)
-                           :in $ ?aid [?a ...]
+                           :in $ ?aid ?repl [?a ...]
                            :where
                            [?e ?a _ ?tx]
                            [?tx :seon.db/user ?author]
-                           [?author :seon.agent/id ?aid]]
-                         :seon.db/args [id (vec attrs)]})))
+                           [?author :seon.agent/id ?aid]
+                           [?tx :seon.db/process ?repl]]
+                         :seon.db/args [id repl-eid (vec attrs)]})))
           source-by-agent?
           (boolean
             (seq (db/query
-                   {:seon.db/db history
+                    {:seon.db/db history
                     :seon.db/query
                     '[:find ?tx
-                      :in $ ?tx ?aid
+                      :in $ ?tx ?aid ?repl
                       :where
                       [?tx :seon.db/user ?author]
-                      [?author :seon.agent/id ?aid]]
-                    :seon.db/args [src-tx id]})))
+                      [?author :seon.agent/id ?aid]
+                      [?tx :seon.db/process ?repl]]
+                    :seon.db/args [src-tx id repl-eid]})))
           touches (cond-> []
                     source-by-agent? (conj src-tx)
                     attr-tx (conj attr-tx))]
@@ -312,11 +320,13 @@
   "The agent's last-updated tile fn — the derived canvas default.
 
    Candidates are THIS agent's authored tile fns: `:seon.fn` rows whose
-   `:seon.fn/source` datom's tx carries the agent's provenance
-   (`:seon.db/user` ref — the one who-wrote-what mechanism) and
-   whose registered spec's output declares `:seon.render/hiccup`
+   `:seon.fn/source` datom's tx carries the agent user AND the REPL process.
+   Both facts are required: root boot/config transactions also carry root as
+   their user, but they are system work rather than definitions deliberately
+   authored by the root agent. Candidates additionally require a registered
+   spec whose output declares `:seon.render/hiccup`
    ([[output-twin-keys]] — the same structural detection as auto-run).
-   Each candidate's TOUCH coordinate is the max tx over (a) its own
+   Each candidate's TOUCH coordinate is the max agent/REPL tx over (a) its own
    source datom — redefining the tile touches it — and (b) every datom
    of the attrs it declares ([[declared-read-attrs]] — the stored
    `:seon.fn/read-attrs`, regex fallback for pre-structural rows), read
@@ -330,9 +340,14 @@
    redefinitions."
   {:malli/schema [:=> [:cat ::last-updated-request] ::last-updated-response]}
   [{db :seon.db/db id :seon.agent/id}]
-  (let [installed (db/installed-schema db)]
+  (let [installed (db/installed-schema db)
+        repl-eid (:db/id
+                   (db/entity {:seon.db/db db
+                               :seon.db/ref
+                               [:seon.db.process/id :seon.db.process/repl]}))]
     (if-not (every? installed [:seon.fn/sym :seon.fn/source :seon.fn/spec
-                               :seon.db/user])
+                               :seon.db/user :seon.db/process
+                               :seon.db.process/id])
       {}
       (let [;; `get-else` on a NEVER-INSTALLED attr yields NO rows at all
             ;; (not its default), so the privacy column joins the query
@@ -340,20 +355,22 @@
             ;; itself runs in Clojure, mirroring [[render-fn-rows]].
             q    (if (installed :seon.fn/private?)
                    '[:find ?sym ?src ?spec ?srctx ?priv
-                     :in $ ?aid
+                     :in $ ?aid ?repl
                      :where
                      [?f :seon.fn/source ?src ?srctx]
                      [?srctx :seon.db/user ?author]
                      [?author :seon.agent/id ?aid]
+                     [?srctx :seon.db/process ?repl]
                      [?f :seon.fn/sym ?sym]
                      [?f :seon.fn/spec ?spec]
                      [(get-else $ ?f :seon.fn/private? false) ?priv]]
                    '[:find ?sym ?src ?spec ?srctx
-                     :in $ ?aid
+                     :in $ ?aid ?repl
                      :where
                      [?f :seon.fn/source ?src ?srctx]
                      [?srctx :seon.db/user ?author]
                      [?author :seon.agent/id ?aid]
+                     [?srctx :seon.db/process ?repl]
                      [?f :seon.fn/sym ?sym]
                      [?f :seon.fn/spec ?spec]])
             ;; stored read-set (C28) — nil for a pre-structural row (or
@@ -366,7 +383,7 @@
                                     (db/pull db [:seon.fn/read-attrs]
                                              [:seon.fn/sym (str sym)]))))))
             rows (->> (db/query {:seon.db/db db :seon.db/query q
-                                 :seon.db/args [id]})
+                                 :seon.db/args [id repl-eid]})
                       (keep (fn [[sym src spec srctx priv]]
                               (when (and (not priv)
                                          (contains? (output-twin-keys spec)
@@ -383,9 +400,13 @@
                                  {:seon.db/db (db/history db)
                                   :seon.db/query
                                   '[:find ?a (max ?tx)
-                                    :in $ [?a ...]
-                                    :where [?e ?a _ ?tx]]
-                                  :seon.db/args [(vec attrs)]}))
+                                    :in $ ?aid ?repl [?a ...]
+                                    :where
+                                    [?e ?a _ ?tx]
+                                    [?tx :seon.db/user ?author]
+                                    [?author :seon.agent/id ?aid]
+                                    [?tx :seon.db/process ?repl]]
+                                  :seon.db/args [id repl-eid (vec attrs)]}))
                       {})
             best    (->> rows
                          (map (fn [{::keys [tile-sym src-tx attrs]}]

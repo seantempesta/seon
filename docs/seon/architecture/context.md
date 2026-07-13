@@ -189,9 +189,10 @@ The **canvas** is a distinct, focal tile. Default: it shows the
 **last-updated tile** — a pure function of the db
 (`seon.agent.ctx.render-fns/last-updated-tile`): among the agent's own
 authored tile fns (its `:seon.fn` rows whose tx provenance names the agent
-and whose output schema declares the hiccup twin), the one most recently
-*touched*—redefined, or a transaction by that agent that touches a scoped input
-captured by the tile's **current** runtime-observed database reads. Initial/cold
+through the REPL process and whose output schema declares the hiccup twin), the
+one most recently *touched*—redefined, or an agent-user/REPL transaction that
+touches a scoped input captured by the tile's **current** runtime-observed
+database reads. Initial/cold
 render captures actual `seon.db` query/pull/entity calls (including current
 helpers/conditional branches), then runs a bounded indexed history lookup for
 the newest matching user+entity/attr datom. It does not reconstruct every past
@@ -207,6 +208,10 @@ retract the pin to fall back to derived; with neither, the core welcome.
 Derive the default, store only the pin — the same rule as everywhere else.
 (Unknown/dynamic reads are conservatively compared for live invalidation, but do
 not claim precise historical focus.)
+
+The process qualifier prevents root-owned boot/config facts from masquerading
+as root-agent authorship. `:seon.db/user` answers who; `:seon.db/process`
+answers which durable ingress. Deliberate canvas recency needs both facts.
 
 This is the block's two renders (`:seon.render/ai` / `:seon.render/hiccup`),
 now emitted by any in-scope `defn`, not only by seeded blocks. Its args are

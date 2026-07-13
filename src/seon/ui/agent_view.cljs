@@ -51,7 +51,7 @@
   "Stable browser selection key for one resolved context block."
   [block-name]
   (str "context-"
-       (when-let [ns (namespace block-name)] (str ns "-"))
+       (when-let [ns-part (namespace block-name)] (str ns-part "-"))
        (name block-name)))
 
 (defn- class-token?
@@ -127,8 +127,16 @@
            (assoc :data-effect (bottom-effect touch)))
     compact]])
 
+(defn- repl-process-eid
+  "The stable REPL process entity id in `dbv`."
+  [dbv]
+  (:db/id
+    (db/entity {:seon.db/db dbv
+                :seon.db/ref
+                [:seon.db.process/id :seon.db.process/repl]})))
+
 (defn- agent-attr-touch
-  "Latest transaction by this agent touching `attr` on its own entity."
+  "Latest deliberate agent/REPL transaction touching `attr` on its entity."
   [dbv agent-id attr]
   (or
     (ffirst
@@ -136,13 +144,14 @@
         {:seon.db/db (db/history dbv)
          :seon.db/query
          '[:find (max ?tx)
-           :in $ ?aid ?attr
+           :in $ ?aid ?attr ?repl
            :where
            [?e :seon.agent/id ?aid]
            [?e ?attr _ ?tx]
            [?tx :seon.db/user ?author]
-           [?author :seon.agent/id ?aid]]
-         :seon.db/args [agent-id attr]}))
+           [?author :seon.agent/id ?aid]
+           [?tx :seon.db/process ?repl]]
+         :seon.db/args [agent-id attr (repl-process-eid dbv)]}))
     0))
 
 (defn- renderer-touch
@@ -168,14 +177,17 @@
         {:seon.db/db dbv
          :seon.db/query
          '[:find (max ?tx)
-           :in $ ?aid
+           :in $ ?aid ?repl
            :where
            [?agent :seon.agent/id ?aid]
            [?user :seon.user/id "user"]
            [?message :seon.agent.message/from ?agent]
            [?message :seon.agent.message/to ?user]
-           [?message :seon.agent.message/content _ ?tx]]
-         :seon.db/args [agent-id]}))
+           [?message :seon.agent.message/content _ ?tx]
+           [?tx :seon.db/user ?author]
+           [(= ?author ?agent)]
+           [?tx :seon.db/process ?repl]]
+         :seon.db/args [agent-id (repl-process-eid dbv)]}))
     0))
 
 (defn- canvas-touch
@@ -203,13 +215,13 @@
                                   [:seon.agent/id agent-id])
                          :seon.render.canvas/content
                          (db/decode-edn-value :seon.render.canvas/content))
-                 (catch :default _ nil))]
-    (let [derived (when-not (symbol? pinned)
-                    (::render-fns/tile-sym
-                      (render-fns/last-updated-tile
-                        {:seon.db/db dbv :seon.agent/id agent-id})))
-          renderer (or pinned derived)]
-      (when (symbol? renderer) renderer))))
+                 (catch :default _ nil))
+        derived (when-not (symbol? pinned)
+                  (::render-fns/tile-sym
+                    (render-fns/last-updated-tile
+                      {:seon.db/db dbv :seon.agent/id agent-id})))
+        renderer (or pinned derived)]
+    (when (symbol? renderer) renderer)))
 
 (defn- renderer-attrs [dbv renderer]
   (if (symbol? renderer)

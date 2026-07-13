@@ -819,7 +819,9 @@ Commit: render units/feed unification and duplicate-path deletion.
   `db-after`; render only units with unequal results.
 - Recapture conditional reads after a dirty render and suppress identical
   serialized complete-element output.
-- Use user provenance only to fix deliberate surface recency/focus scope.
+- Use agent-user plus REPL-process provenance only to fix deliberate surface
+  recency/focus scope. Root boot/config work must not masquerade as a root-agent
+  canvas update.
 - On cold restart, capture current scoped reads and prove the bounded indexed
   user+entity/attr history heuristic; broad reads get definition recency rather
   than claiming historical precision.
