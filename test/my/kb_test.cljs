@@ -347,29 +347,6 @@
       done)))
 
 ;;; ───────────────────────────────────────────────────────────────────────
-;;; Inventory — the discovery call lists every attribute NAMESPACE we just
-;;; stored data under (NOT entity "types" — datahike entities have none).
-;;; store-inventory keys these rows :seon.db/attr-groups, each labelled by
-;;; its :seon.db/attr-ns — one attribute-namespace family per row.
-;;; ───────────────────────────────────────────────────────────────────────
-
-(deftest inventory-lists-the-source-attribute-namespaces
-  (async done
-    (run-test
-      (fn [conn]
-        (-> (kb/build-kb-example!)
-            (.then (pinned conn
-                     (fn [_]
-                       (let [families (set (map :seon.db/attr-ns (:seon.db/attr-groups (kb/inventory))))]
-                         (is (contains? families :my.kb.source)
-                             "the source attrs show once their data lands")
-                         (is (contains? families :my.kb.author)
-                             "the author attrs too")
-                         (is (contains? families :my.kb.finding)
-                             "the component finding attrs too")))))))
-      done)))
-
-;;; ───────────────────────────────────────────────────────────────────────
 ;;; Recall — the symmetric ASK: deterministic whole-token match over every
 ;;; stored my.kb* string (claims AND domain rows), ranked, honest totals.
 ;;; SEON_EMBED is unset in this suite, so the semantic top-up arm stays

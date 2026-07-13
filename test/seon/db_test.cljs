@@ -516,38 +516,6 @@
                    (is (= "Alpha" (::name e)))))))
       done)))
 
-(deftest store-inventory-returns-a-map-of-attr-groups-with-data
-  ;; The discovery surface: WHICH ATTRS HOLD DATA. Returns a map (NOT a
-  ;; bare vector) so `(keys inv)` / keyword lookup work — the agent reads
-  ;; :seon.db/attr-groups (rows, grouped by attr namespace) + the headline
-  ;; counts to decide what to query. Entities have no kind; the namespace
-  ;; is a display grouping, not an entity type.
-  (async done
-    (with-conn
-      (fn [conn]
-        (.then (tx! conn [{::name "Alpha" ::rank 1}
-                          {::name "Seon"  ::rank 2}])
-               (fn [_]
-                 (let [inv (db/store-inventory {::db/conn conn})
-                       row (->> (:seon.db/attr-groups inv)
-                                (filter (fn [r] (= :seon.db-test
-                                                   (:seon.db/attr-ns r))))
-                                first)]
-                   ;; map-out: keyword access works (old vector threw on keys)
-                   (is (map? inv))
-                   (is (vector? (:seon.db/attr-groups inv)))
-                   (is (every? keyword? (keys inv)))
-                   ;; the user-domain namespace appears with its attrs + counts
-                   (is (some? row) "the :seon.db-test namespace is inventoried")
-                   (is (= 2 (get-in row [:seon.db/attrs :seon.db-test/name])))
-                   (is (= 2 (get-in row [:seon.db/attrs :seon.db-test/rank])))
-                   ;; headline counts are consistent with the rows
-                   (is (= (count (:seon.db/attr-groups inv))
-                          (:seon.db/attr-ns-count inv)))
-                   (is (pos? (:seon.db/attr-count inv)))
-                   (is (pos? (:seon.db/datom-count inv)))))))
-      done)))
-
 (deftest query-accepts-explicit-db
   ;; Caller can pass a frozen ::db/db value (e.g. :db-after from a tx-report)
   ;; instead of going through @conn — useful in listener handlers.

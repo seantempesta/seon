@@ -9,13 +9,12 @@
     [seon.render.system :as system]
     [seon.ui.header :as header]))
 
-(deftest header-uses-the-index-count-without-building-an-inventory
+(deftest header-uses-the-maintained-index-count
   (async done
     (-> (client/open-agent-conn!)
         (.then
           (fn [conn]
             (let [count-calls (atom 0)
-                  inventory-calls (atom 0)
                   fleet {::system/agents [{:seon.agent/id "root"}]
                          ::system/state-counts {:idle 1}
                          ::system/embedding? false}]
@@ -25,22 +24,13 @@
                               db/datom-count
                               (fn
                                 ([] (swap! count-calls inc) 42)
-                                ([_] (swap! count-calls inc) 42))
-                              db/store-inventory
-                              (fn
-                                ([]
-                                 (swap! inventory-calls inc)
-                                 (throw (js/Error. "inventory should not be built")))
-                                ([_]
-                                 (swap! inventory-calls inc)
-                                 (throw (js/Error. "inventory should not be built"))))]
+                                ([_] (swap! count-calls inc) 42))]
                   (let [view (header/system-header @conn)]
                     (testing "the complete header renders from bounded projections"
                       (is (= "system-header" (:id (second view))) (pr-str view))
                       (is (= 1 (:data-agent-count (second view))) (pr-str view)))
-                    (testing "the database metric uses only the maintained index count"
-                      (is (= 1 @count-calls))
-                      (is (zero? @inventory-calls)))))
+                    (testing "the database metric uses the maintained index count"
+                      (is (= 1 @count-calls)))))
                 (finally
                   (d/release conn))))))
         (.then (fn [_] (done)))

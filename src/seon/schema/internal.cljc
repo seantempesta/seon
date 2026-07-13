@@ -201,7 +201,7 @@
                     "Keyword namespaces are data DOMAINS and need ≥2 "
                     "segments — e.g. :" ns-str "/" (name k) " → :kb."
                     ns-str "/" (name k) " or :fitness." ns-str "/"
-                    (name k) ". FIRST run (seon.db/store-inventory): "
+                    (name k) ". FIRST inspect the installed schema: "
                     "if an attr for this fact already exists, reuse "
                     "its EXACT keyword instead of registering a new "
                     "one.")

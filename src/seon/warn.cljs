@@ -362,7 +362,7 @@
    `:seon.schema/key` row was asserted OUTSIDE the boot seed). These
    are the attrs agents registered for the human's data — INCLUDING
    `seon.*` data domains like `:my.workout/*` — the reuse surface
-   (seon.db/store-inventory) reports and [[check-parallel-attr]] guards.
+   [[check-parallel-attr]] guards.
    Core attrs (`:seon.db/*`, `:seon.agent/*`, …) stay hidden
    because their rows land through the boot process.
    Derived from the db value itself (NOT the live registry), so it
@@ -513,8 +513,8 @@
 
    DEV-ONLY: this is the one check that is purely about the
    entity-renderer marker — a dev/web-UI display concern, not an agent
-   task (the rows ARE queryable and DO show in store-inventory, as the
-   explain text itself says). It is tagged `:seon.warn/dev-only? true` so
+   task (the rows remain directly queryable). It is tagged
+   `:seon.warn/dev-only? true` so
    [[render-warnings]] drops it from the AGENT prompt (the agent is told to
    store my.kb.* facts under identity attrs — nagging that a correct write
    is \"invisible\" frames the right action as broken). The check still
@@ -542,8 +542,8 @@
      :seon.warn/explain
      (str "Rows are STORED under an identity attr but no registered :map "
           "schema marked {:seon.db/entity true} declares that kind — its "
-          "entities are invisible to the entity renderer (the rows still "
-          "show in (seon.db/store-inventory), which keys off live data). "
+          "entities are invisible to the entity renderer (the rows remain "
+          "directly queryable by attribute presence). "
           "Register (or re-register) the kind's :map schema WITH the "
           "marker. Request/response envelopes stay unmarked; this fires "
           "only where rows actually exist.")

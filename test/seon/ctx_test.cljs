@@ -32,7 +32,6 @@
     [seon.client :as client]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.findings :as ctx-findings]
-    [seon.agent.ctx.inventory :as ctx-inventory]
     [seon.agent.ctx.canvas :as ctx-canvas]
     [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.agent.ctx.transcript :as transcript]
@@ -632,68 +631,6 @@
                           "storage representation is the EDN string")
                       (is (= "my.x/view-section" (:seon.render/ai raw-tile))
                           "…the pr-str of the symbol")))))))
-        (.then (fn [] (done)))
-        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
-
-;; ------------------------------------------------------------
-;; inventory-block — the cheap stored-data discovery surface.
-;; ------------------------------------------------------------
-
-(deftest inventory-block-renders-stored-kinds-compact
-  (async done
-    (-> (with-conn
-          (fn [_conn]
-            ;; REACTIVE: a fresh conn has NO post-bootstrap data → the
-            ;; section is suppressed (composer drops it), not an empty shell.
-            (is (= "" (ctx-inventory/inventory-block {:seon.db/db @db/*conn*}))
-                "no user-domain data → \"\" (reactive suppression)")
-            (schema/register! :my.workout/date :string)
-            (schema/register! :my.workout/type :keyword)
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:my.workout/date "2026-06-17" :my.workout/type :run}
-                    {:my.workout/date "2026-06-16" :my.workout/type :lift}
-                    {:my.workout/date "2026-06-15" :my.workout/type :run}]})
-                (.then
-                  (fn [_]
-                    (let [txt   (ctx-inventory/inventory-block {:seon.db/db @db/*conn*})
-                          lines (str/split-lines txt)]
-                      ;; The section renderer's bracket demarcates the
-                      ;; section; the body is header-less. ONE line per kind:
-                      ;; the kind name is the line label, written ONCE, then
-                      ;; bare attr-name count pairs. Anchor on the kind NAME,
-                      ;; not the comment-prefix glyph (format is not pinned).
-                      (is (str/includes? txt "my.workout: ")
-                          "kind is the line label (namespace written once)")
-                      ;; count is correct (3 rows, both attrs present on each).
-                      (is (str/includes? txt "date 3")
-                          "attr count is the live row count, namespace stripped")
-                      (is (str/includes? txt "type 3")
-                          "second attr counted the same")
-                      ;; attr NAMES appear WITHOUT their namespace prefix on
-                      ;; the kind's OWN line — the line label already carries
-                      ;; it. (The schema-key values on the seon.schema line
-                      ;; legitimately ARE the qualified attr keywords now that
-                      ;; low-card identity values render inline, so scope the
-                      ;; check to the my.workout line.)
-                      (let [wline (first (filter #(str/includes? % "my.workout: ")
-                                                 lines))]
-                        (is (some? wline) "the my.workout kind line is present")
-                        (is (not (str/includes? wline ":my.workout/date"))
-                            "attr namespace prefix is stripped from the pairs")
-                        (is (not (str/includes? wline "my.workout/date"))
-                            "no qualified attr name leaks into the pairs")
-                        ;; low-card keyword attr shows DISTINCT members inline
-                        ;; as an ILLUSTRATIVE SAMPLE — anchor on the member
-                        ;; VALUES present (the behavior), not the decorative
-                        ;; «…» delimiter glyphs (a render surface).
-                        (is (and (str/includes? wline ":lift")
-                                 (str/includes? wline ":run"))
-                            "low-cardinality categorical values render inline as a sample"))
-                      ;; one-line-per-kind: exactly ONE body line mentions the kind.
-                      (is (= 1 (count (filter #(str/includes? % "my.workout: ")
-                                              lines)))
-                          "exactly one line per kind")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 

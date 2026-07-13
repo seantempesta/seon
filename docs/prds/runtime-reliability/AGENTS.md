@@ -122,15 +122,10 @@ process verbs are not primary UX.
   not a second live path or completion gate for this branch.
 - The current agent view already has a surface catalog, database-recency focus,
   and right rail. Rename and finish that mechanism; do not invent a new view.
-- `seon.store.wire`, `:seon.store.wire/*`, `{store-id, ...}`,
-  `seon.server.store`, `/store`, and `db/store-inventory` form a competing
-  database language. Cut them over atomically to db/database/backend terms,
-  with literal upstream `:store` keys confined inside the third-party adapter.
-- The inventory context, `db/store-inventory`, `my.kb/inventory`, root-canvas
-  “STORE” panel, header count, and `/data` browser repeat broad
-  namespace/count scans. Delete the generic inventory family, but keep and port
-  `/data`: it becomes the single database browser on the canonical lazy
-  render-unit/feed lifecycle with bounded `seon.db.browser` projections.
+- The competing Seon store vocabulary and generic inventory family are deleted.
+  Literal upstream `:store` keys remain private inside the third-party adapter.
+  `/data` is the single database browser and direct indexed queries are the
+  agent discovery path; do not restore a whole-database inventory projection.
 - Database-browser pages use EAVT/AEVT/AVET cursors, never Datalog
   offset/limit. Add a general upstreamable Datahike `count-datoms` API over its
   existing O(log n) subtree count-slice; keep transaction bodies lazy/capped

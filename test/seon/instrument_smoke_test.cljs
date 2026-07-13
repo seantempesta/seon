@@ -334,8 +334,6 @@
     (check-clean! "db/since 1-arity"          #(db/since (js/Date. 0)))
     (check-clean! "db/since 2-arity"          #(db/since D (js/Date. 0)))
     (check-clean! "db/core-attr-namespaces 1-arity" #(db/core-attr-namespaces D))
-    (check-clean! "db/store-inventory 0-arity" #(db/store-inventory))
-    (check-clean! "db/store-inventory 1-arity" #(db/store-inventory {:seon.db/system? true}))
     (check-clean! "db/assert-preconditions! 0" #(db/assert-preconditions!))
     (check-clean! "db/entity 1-arity"         #(db/entity {:seon.db/ref [:seon.agent/id test-agent-id]}))
     (check-clean! "db/entity 2-arity"         #(db/entity D [:seon.agent/id test-agent-id]))

@@ -1,8 +1,7 @@
 (ns seon.agent.ctx.findings
-  "The stored-findings context section — the CONTENT counterpart to
-   `seon.agent.ctx.inventory` (which renders COUNTS for discoverability).
-   A fresh agent must SEE the knowledge already in the db, not just be
-   told how many rows exist — otherwise it under-stores and re-researches
+  "The stored-findings context section.
+   A fresh agent must SEE relevant knowledge already in the db — otherwise
+   it under-stores and re-researches
    instead of consulting (the DB-memory regression this restores). So this
    renders the TOP-N most-recent user-domain `my.*`/consumer rows' actual
    claim/answer TEXT plus their shared `:my.kb/source-*` PROVENANCE, one
@@ -168,9 +167,7 @@
 
    Volatile tail — the TOP-N most-recent user-domain rows' actual
    claim/answer TEXT + their `:my.kb/source-*` provenance, one
-   `;`-comment line each. The CONTENT
-   sibling of [[seon.agent.ctx.inventory/inventory-block]] (counts for
-   discoverability) — restores the salience render a fresh agent needs to
+   `;`-comment line each. Restores the salience render a fresh agent needs to
    consult-before-researching. Pure fn of the db; stores nothing; recomputed
    each render (a newly-stored finding appears next turn, a retracted one
    vanishes — see docs/seon/concepts/reactive-context). Boot-scope rows are

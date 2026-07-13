@@ -39,7 +39,6 @@
        `seon.agent.ctx.<name>` nses: :namespaces → `seon.agent.ctx.namespaces`,
        :canvas → `seon.agent.ctx.canvas`, :warnings →
        `seon.agent.ctx.warnings`,
-       :inventory → `seon.agent.ctx.inventory`,
        :transcript → `seon.agent.ctx.transcript`;
        `config/system.edn` wires active blocks by SYMBOL (late lookup-value
        resolution), so this ns does NOT require them — they require this
@@ -1477,7 +1476,7 @@
     "; away, so you are not buried in code you don't need. Never hallucinate a\n"
     "; fn name — discover it. To find or read any non-shown ns or fn:\n"
     ";   (seon.agent.search/grep {:seon.agent.search/pattern \"defn store-\"})\n"
-    ";   (db/store-inventory {:seon.db/system? true})  ; every indexed attribute namespace\n"
+    ";   (keys (db/installed-schema @db/*conn*))  ; every installed attribute\n"
     ";   (seon.agent.ctx/render-namespace {:seon.ns/name :seon.warn})  ; whole-ns source\n"
     "; To PIN a ns into your always-on view, transact its keyword onto your\n"
     "; agent's :seon.agent.ctx/render-namespaces; retract it to unpin.\n"
@@ -1509,16 +1508,10 @@
     "; database rendered; ids are live handles, not labels.\n"
     ";\n"
     "; STANDING TEACHINGS:\n"
-    "; - Consult stored knowledge FIRST — it is DISCOVERABLE, not dumped:\n"
-    ";   the stored-data inventory lists what's stored, one line per\n"
-    ";   attribute namespace + its attrs (run\n"
-    ";   (db/store-inventory) — your creation turn already did), so\n"
-    ";   you READ the rows by QUERYING rather than from a wall of text.\n"
-    ";   Datalog the existing attrs for\n"
-    ";   anything you need. The inventory lists the data added AFTER\n"
-    ";   bootstrap; the full system inventory — the core's own\n"
-    ";   fn/schema/test index included — is one call away:\n"
-    ";   (db/store-inventory {:seon.db/system? true})\n"
+    "; - Consult stored knowledge FIRST — query it rather than relying on a\n"
+    ";   wall of text. Use (my.kb/recall {:my.kb/about \"<topic>\"}) for\n"
+    ";   knowledge, or Datalog an existing attribute directly. Inspect\n"
+    ";   (keys (db/installed-schema @db/*conn*)) before defining a new attr.\n"
     ";   Prior agents already answered many questions; re-deriving a\n"
     ";   stored answer is wasted turns.\n"
     "; - Store what you verify, without being asked — ONE call does it:\n"
@@ -1645,12 +1638,12 @@
     ";   you tell your human it landed.\n"
     "; - TURNS ARE PRECIOUS — each turn is a full round-trip; don't spend one\n"
     ";   exploring when the answer is already in front of you. If your\n"
-    ";   context CLEARLY contains the answer (it's in the soul, the\n"
-    ";   inventory, a loaded ns, or the transcript above), ANSWER this turn —\n"
+    ";   context CLEARLY contains the answer (it's in the soul, a loaded ns,\n"
+    ";   or the transcript above), ANSWER this turn —\n"
     ";   (message/user \"...\") — don't re-research what you can already see. But\n"
     ";   if the answer is NOT plainly present — anything about stored\n"
     ";   knowledge, your human's data, the codebase, or specifics you haven't\n"
-    ";   read this turn — QUERY FIRST (store-inventory + datalog), THEN answer\n"
+    ";   read this turn — QUERY FIRST (my.kb/recall or Datalog), THEN answer\n"
     ";   from what you found.\n"
     "; - THE PER-LOOP CAP IS A SLIDING WINDOW. A loop runs up to a base cap\n"
     ";   of turns, and EVERY message you receive (from your human or a peer)\n"

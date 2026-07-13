@@ -1,6 +1,6 @@
 ---
 name: datahike
-description: "Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty/unexpected results, designing a schema, or working with seon.db / seon.schema. Use for schema/register!, db/transact!, db/query, db/pull, db/entity, db/store-inventory, lookup-refs, refs/components/identity, upsert, retract, cardinality-many, CAS fences, as-of/since history, listen!/triggers, or any 'where do I put this data / how do I read it back' question in the CLJS pod."
+description: "Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty/unexpected results, designing a schema, or working with seon.db / seon.schema. Use for schema/register!, db/transact!, db/query, db/pull, db/entity, installed-schema, lookup-refs, refs/components/identity, upsert, retract, cardinality-many, CAS fences, as-of/since history, listen!/triggers, or any 'where do I put this data / how do I read it back' question in the CLJS pod."
 ---
 
 # Datahike — Seon Database Patterns
@@ -69,18 +69,16 @@ Applied to datahike, four moves replace every "for each kind":
 If you catch yourself writing a `:type`/`:kind` field or a per-kind loop, stop
 and reframe in attributes + connections + provenance.
 
-**Inspect database contents by attribute** — the currently named
-`store-inventory` function groups live attributes by namespace (a display
-grouping, not an entity
-type) and, when you want the entities themselves, scan one identity attr's index.
-REPL-proven against the live database:
+**Inspect database contents by attribute.** Use the installed schema to discover
+attributes, then query by attribute presence. REPL-proven against the live
+database:
 
 ```clojure
-;; "what holds data?" — attr namespaces + counts (no entity kind anywhere)
-(seon.db/store-inventory)
-;; => {:seon.db/attr-groups   [{:seon.db/attr-ns :my.kb
-;;                              :seon.db/attrs {:my.kb/question 3 :my.kb/answer 3}} …]
-;;     :seon.db/attr-ns-count 9 :seon.db/attr-count 53 :seon.db/datom-count 124}
+;; every installed domain attribute, including attrs with no live values
+(->> (keys (seon.db/installed-schema @seon.db/*conn*))
+     (filter keyword?)
+     (filter #(= "my.kb" (namespace %)))
+     sort)
 
 ;; enumerate entities BY ID-ATTR PRESENCE (scan that attr's index)
 (seon.db/query {:seon.db/query '[:find ?id :where [?e :seon.agent/id ?id]]})
@@ -96,9 +94,8 @@ REPL-proven against the live database:
 ;; => ([:seon.fn/sym 614] [:seon.eval/id 317] [:my.kb.runtime/slug 7] …)
 ```
 
-The grouping label is always an **attribute** (a namespace or an id-attr), never a
-"kind". `store-inventory` returns `:seon.db/attr-groups` keyed by `:seon.db/attr-ns`
-for exactly this reason.
+The grouping label is always an **attribute** (a namespace or an id-attr), never
+a "kind".
 
 ## Quick start — register, transact (check the envelope), read back
 
@@ -278,23 +275,15 @@ attr keyword is almost certainly misspelled (the guard below catches it).
 ## Discovery — inspect the database before registering a new shape
 
 ```clojure
-;; The database inventory: WHICH attribute namespaces hold data RIGHT NOW
-;; what you can query, and which shapes to REUSE rather than fork). Default
-;; scope = data added after the core seed.
-(db/store-inventory)
-;;=> {:seon.db/attr-groups [{:seon.db/attr-ns :my.kb :seon.db/attrs {:my.kb/question 3 …}} …]
-;;    :seon.db/attr-ns-count … :seon.db/attr-count … :seon.db/datom-count … :seon.db/topology …}
-
-;; installed-schema: EVERY attr installed on the db, including
-;; registered-but-dataless ones store-inventory omits. Filter keyword? — the
+;; installed-schema: EVERY attr installed on the db, including attrs with no
+;; live values. Filter keyword? — the
 ;; map is also keyed by numeric attr-eid (a datahike internal):
 (->> (keys (db/installed-schema @db/*conn*)) (filter keyword?)
      (filter #(= "seon.agent.todo" (namespace %))) sort)
 ```
 
-An attr namespace that already holds data means data you can datalog (its listed
-attrs ARE the `:where` keywords) and a shape to REUSE. Check before inventing an
-attr.
+An installed attr is a shape to reuse. Query its presence to learn whether live
+entities carry it. Check before inventing an attr.
 
 ## Common errors and gotchas
 

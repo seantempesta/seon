@@ -20,7 +20,7 @@
 
    Design one `my.kb.<domain>` schema per thing you learn (the same skill as
    modelling your human's data); never default to a memory-markdown blob.
-   Your store starts EMPTY — `(db/store-inventory)` is the truth; the sample
+   The database starts without sample knowledge; query before answering. The
    `:my.kb.source/*` rows exist only once YOU run a recipe (my.kb-test uses
    its own throwaway db), so never report them as real data.
 
@@ -428,19 +428,6 @@
   {:malli/schema [:=> [:catn [::id :string]] :any]}
   [id]
   (db/entity [:my.kb.source/id id]))
-
-;;; INVENTORY — CONSULT before researching: lists every ATTRIBUTE NAMESPACE
-;;; with live rows, so you can datalog those exact attrs (and REUSE a shape
-;;; instead of re-registering one).
-
-(defn inventory
-  "Which attribute namespaces hold data, with per-attr counts.
-
-   NOT a list of entity 'types' (there are none). Returns the
-   `db/store-inventory` map."
-  {:malli/schema [:=> [:cat] :map]}
-  []
-  (db/store-inventory))
 
 ;;; WORKFLOW — store data, then build fns that turn it into answers: switch
 ;;; into a domain, register its schema, transact rows, run your analysis fn.

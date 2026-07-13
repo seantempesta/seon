@@ -115,8 +115,8 @@ to a nested map under `[*]`. Reverse-ref navigation (`::parent` →
 
 ## Inspecting the index (debugging only)
 
-You almost never need raw datoms — `query`/`pull`/`entity`, the database
-inventory (`store-inventory`), and `installed-schema` cover normal work. When
+You almost never need raw datoms — `query`/`pull`/`entity` and
+`installed-schema` cover normal work. When
 you genuinely must see the raw EAV
 shape while debugging, the guarded surface is `seon.db`, not `datahike.api`
 directly (the one-API rule). `installed-schema` answers "what attrs exist on

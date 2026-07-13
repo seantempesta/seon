@@ -41,8 +41,8 @@
           "agent-input error kind — the established register! failure mode")
       (is (re-find #":\w+\.\w+/\w+" (ex-message e))
           "the error GUIDES: names a corrected multi-segment keyword example")
-      (is (str/includes? (ex-message e) "(seon.db/store-inventory)")
-          "the error teaches reuse-first: consult the store before registering"))))
+      (is (str/includes? (ex-message e) "inspect the installed schema")
+          "the error teaches reuse-first discovery before registering"))))
 
 (deftest nilable-value-schema-is-refused-with-guidance
   ;; Live-drive finding 2026-07-13: a Muse agent ran

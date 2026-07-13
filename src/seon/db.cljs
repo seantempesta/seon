@@ -893,10 +893,9 @@
    runtime handle (third-party boundary).
 
    This is the \"what attrs exist on this db, exactly?\" tool. It lists
-   EVERY installed attr — including REGISTERED-BUT-DATALESS kinds that
-   [[store-inventory]] omits (it shows only kinds with live rows). Check
-   here before inventing a new attr — a kind you'd reach for may already
-   exist with zero rows:
+   EVERY installed attr, including registered attrs with no live values.
+   Check here before inventing a new attr — the attribute you need may
+   already exist with zero rows:
 
      (filter #(= \"my.plan\" (namespace %))
              (keys (db/installed-schema @db/*conn*)))
@@ -1557,25 +1556,12 @@
    (internal/assert-preconditions! conn)))
 
 ;; ---------------------------------------------------------------------------
-;; Store inventory — what's in the shared store, one query away.
+;; Database counts and provenance-derived scopes.
 ;; ---------------------------------------------------------------------------
 
-;; An entity has NO kind — it is its attributes + connections. This
-;; inventory groups the attributes that hold data BY THEIR NAMESPACE
-;; (`:my.kb`, `:seon.eval`, …); the namespace is the row LABEL, never an
-;; entity-type stamp. To FIND entities you scan one attribute's index
-;; (attribute-presence); these rows just tell you WHICH attrs to scan.
 (schema/register! ::attr-ns      :keyword)
-(schema/register! ::attrs        [:map-of :keyword :int])
-(schema/register! ::system?      :boolean)
 (schema/register! ::row-ids      [:set :int])
 (schema/register! ::attr-ns-set  [:set ::attr-ns])
-(schema/register! ::inventory-row
-  [:map
-   [::attr-ns ::attr-ns]
-   [::attrs   ::attrs]])
-(schema/register! ::attr-ns-count :int)
-(schema/register! ::attr-count    :int)
 (schema/register! ::datom-count   :int)
 
 (defn datom-count
@@ -1595,43 +1581,18 @@
      (di/-count eavt)
      (count (d/datoms db :eavt)))))
 
-;; The agent/run/turn/eval ref chain — how to JOIN across the entities the
-;; inventory lists. Entities have no kind, so the ONLY way across them is a
-;; ref. The trap a fresh agent falls into: guessing a flat
-;; `:seon.agent.turn/agent` (it does NOT exist) — turns reach an agent THROUGH
-;; their run. These are the live registered ref attrs; verbatim so the agent's
-;; next query lands.
-(schema/register! ::topology :string)
-(def ^:private entity-topology
-  (str "JOIN MAP (agent↔run↔turn↔eval — entities have no kind, you cross them by ref): "
-       "agent -:seon.agent/run-> run (current run); "
-       "run -:seon.agent.run/agent-> agent (back-ref — joins ALL of an agent's runs); "
-       "turn -:seon.agent.turn/run-> run (turns reach an agent THROUGH a run; "
-       "there is NO :seon.agent.turn/agent); "
-       "turn -:seon.agent.turn/evals-> eval (component); "
-       "eval -:seon.eval/agent-> agent (direct shortcut). "
-       "messages: :seon.agent.message/from + :seon.agent.message/to (both → agents). "
-       "Count an agent's turns: [?r :seon.agent.run/agent ?a][?t :seon.agent.turn/run ?r]."))
+(defn bootstrap-row-ids
+  "Entity ids whose first assertion came through boot or config.
 
-(schema/register! ::inventory
-  [:map
-   [::attr-groups   [:vector ::inventory-row]]
-   [::attr-ns-count ::attr-ns-count]
-   [::attr-count    ::attr-count]
-   [::datom-count   ::datom-count]
-   [::topology      ::topology]])
-
-(defn- row-provenance-scan
-  "ONE pass over every live datom `[e a tx]` — the provenance facts the
-   inventory split needs:
-    ::bootstrap-rows — entity ids whose IDENTITY datom (the entity's
-       first assertion, min tx) landed under the boot or config database
-       process. Both are
-       core infrastructure the boot minted, as opposed to agent-authored data;
-     ::tx-rows — entity ids that ARE transactions (they appear in a
-       datom's tx slot) — provenance machinery, not data rows;
-     ::pairs — the distinct `[e a]` pairs (datalog results are sets,
-       so cardinality-many attrs count each entity once)."
+   The IDENTITY datom was transacted through the boot process (the program
+   graph index + seed) or config process (the reconcile-managed
+   declarative set: routes + skills) — the rows the boot minted.
+   Everything else is data this cluster
+   added AFTER bootstrap. Per-ROW, never per-kind-name: an
+   agent-authored `:seon.fn` row is NOT in this set; a boot-indexed
+   one is. THE shared provenance derivation — [[core-attr-namespaces]],
+   findings, and the /data browser all read this one mechanism."
+  {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]}
   [db]
   (let [seed-txs (into #{}
                        (map first)
@@ -1644,35 +1605,18 @@
                                             :seon.db.process/boot]
                                            [?process :seon.db.process/id
                                             :seon.db.process/config])]}))
-        triples  (query {::db db ::query '[:find ?e ?a ?tx :where [?e ?a _ ?tx]]})
+        triples  (query {::db db
+                         ::query '[:find ?e ?a ?tx :where [?e ?a _ ?tx]]})
         first-tx (reduce (fn [m [e _ tx]]
                            (update m e #(if % (min % tx) tx)))
                          {} triples)]
-    {::bootstrap-rows (into #{}
-                            (keep (fn [[e tx]]
-                                    (when (contains? seed-txs tx) e)))
-                            first-tx)
-     ::tx-rows        (into #{} (map (fn [[_ _ tx]] tx)) triples)
-     ::pairs          (into #{} (map (fn [[e a _]] [e a])) triples)}))
-
-(defn bootstrap-row-ids
-  "Entity ids whose first assertion came through boot or config.
-
-   The IDENTITY datom was transacted through the boot process (the program
-   graph index + seed) or config process (the reconcile-managed
-   declarative set: routes + skills) — the rows the boot minted.
-   Everything else is data this cluster
-   added AFTER bootstrap. Per-ROW, never per-kind-name: an
-   agent-authored `:seon.fn` row is NOT in this set; a boot-indexed
-   one is. THE shared provenance derivation — [[store-inventory]]'s
-   user/system split, [[core-attr-namespaces]], and the /data
-   browser all read this one mechanism."
-  {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]}
-  [db]
-  (::bootstrap-rows (row-provenance-scan db)))
+    (into #{}
+          (keep (fn [[e tx]]
+                  (when (contains? seed-txs tx) e)))
+          first-tx)))
 
 ;; --- provenance-scoped managed population (the reconcile handle) ----------
-;; Generalizes [[row-provenance-scan]]'s boot/config first-tx derivation to an
+;; Generalizes [[bootstrap-row-ids]]'s boot/config first-tx derivation to an
 ;; arbitrary set of stable database process ids and pairs each managed entity
 ;; with the `:db.unique/identity`
 ;; datom(s) it carries — the population `seon.state/reconcile!` diffs a
@@ -1699,7 +1643,7 @@
    whose FIRST-assertion (min-tx) process is in `:seon.db/managed-scope`,
    paired with the `:db.unique/identity` datom(s) it carries. PURE
    PROVENANCE — ONE `[?e ?a ?v ?tx]` scan + a min-tx-process reduce (the same
-   derivation as [[row-provenance-scan]], generalized to an arbitrary process
+   derivation as [[bootstrap-row-ids]], generalized to an arbitrary process
    scope), never a per-kind / per-identity-attr
    AEVT loop. Eids carrying NO identity attr (component children, tx /
    schema-def rows) are OMITTED: they are removed via their parent's
@@ -1742,8 +1686,7 @@
 
    ([[bootstrap-row-ids]].) The namespaces the compiled
    core's boot index registered, as opposed to agent-registered ones.
-   Used by [[store-inventory]] for its user-domain-first ordering. The
-   2-arity takes a precomputed bootstrap set so one scan can serve
+   The 2-arity takes a precomputed bootstrap set so one scan can serve
    multiple consumers."
   {:malli/schema
    [:function
@@ -1757,96 +1700,6 @@
                    (some-> (namespace k) keyword))))
          (query {::db db
                  ::query '[:find ?s ?k :where [?s :seon.schema/key ?k]]}))))
-
-(defn store-inventory
-  "Discovery call: which attributes hold data in this store right now.
-
-   So you know what you can query for. Entities have no kind;
-   this groups the live attributes BY THEIR NAMESPACE. Returns a map:
-
-     {:seon.db/attr-groups   [{:seon.db/attr-ns :my.kb        ; the attr namespace
-                               :seon.db/attrs {:my.kb/question 3  ; attr -> row count
-                                               :my.kb/answer   3}}
-                              …
-                              {:seon.db/attr-ns :seon.eval …}] ; core namespaces last
-      :seon.db/attr-ns-count 9    ; distinct attr namespaces with data
-      :seon.db/attr-count    53   ; distinct attrs with data
-      :seon.db/datom-count   124  ; total entity/attr pairs in scope
-      :seon.db/topology      \"…JOIN MAP…\"} ; the agent/run/turn/eval ref chain
-
-   `:seon.db/topology` is a one-line JOIN MAP: the live ref attrs that wire
-   agent → run → turn → eval (and messages), so you can join across the listed
-   namespaces without guessing. Entities have no kind — a ref is the ONLY way
-   across them — and the chain is NOT flat: a turn reaches its agent THROUGH a
-   run (there is no `:seon.agent.turn/agent`), evals carry a direct
-   `:seon.eval/agent` shortcut.
-
-   `:seon.db/attr-groups` is one row per attr NAMESPACE, each carrying
-   every attr of that namespace that has ≥1 live row with its entity
-   count. To FIND those entities, scan one attr's index directly
-   (attribute-presence — `[?e :my.kb/question]`); the namespace is a
-   display grouping, not an entity type. Pure query, not a snapshot — an
-   attr appears the moment its first row lands and vanishes when all its
-   rows retract. Attrs only REGISTERED (no rows yet) don't show; pair
-   with [[installed-schema]] to see every registered attr.
-
-   DEFAULT scope = data added AFTER bootstrap. Boot-index rows (the
-   compiled core's `:seon.fn`/`:seon.schema`/`:seon.ns`/seed, minted
-   under a `:core-seed` tx — thousands of datoms) and transaction
-   entities are excluded by per-ROW provenance ([[bootstrap-row-ids]]),
-   so agent-authored rows count while the boot index does not. Pass
-   `{:seon.db/system? true}` for the FULL inventory including the boot
-   index. Namespaces are ordered user-domain-first
-   ([[core-attr-namespaces]]), alphabetical within each group.
-
-   Check this BEFORE researching or registering: a kind that exists
-   means data you can query — datalog its listed attrs directly (the
-   attr names are the exact :where keywords) — and a shape that exists
-   must be REUSED, never forked.
-
-   (def inv (seon.db/store-inventory))
-   (keys inv)                                ; the section keys
-   (count (:seon.db/attr-groups inv))        ; how many namespaces hold data
-   (seon.db/query {:seon.db/query            ; then read one
-                   '[:find ?q :where [?e :my.kb/question ?q]]})"
-  {:malli/schema
-   [:function
-    [:=> [:cat] ::inventory]
-    [:=> [:cat [:map [::db {:optional true} :any]
-                     [::conn {:optional true} ::conn]
-                     [::system? {:optional true} ::system?]]]
-         ::inventory]]}
-  ([] (store-inventory {}))
-  ([{::keys [db conn system?] :or {conn *conn*}}]
-   (let [db (or db @(internal/resolve-conn conn))
-         {::keys [bootstrap-rows tx-rows pairs]} (row-provenance-scan db)
-         core-nses (core-attr-namespaces db bootstrap-rows)
-         counts (reduce (fn [m [e a]]
-                          (if (or (system-pull-attr? a) (nil? (namespace a))
-                                  ;; default view: post-bootstrap data
-                                  ;; rows only — boot-index rows and tx
-                                  ;; (provenance) entities are system.
-                                  (and (not system?)
-                                       (or (contains? bootstrap-rows e)
-                                           (contains? tx-rows e))))
-                            m
-                            (update m a (fnil inc 0))))
-                        {} pairs)
-         rows   (->> counts
-                     (group-by (fn [[a _]] (keyword (namespace a))))
-                     ;; User-domain namespaces FIRST (consult-first — see
-                     ;; docstring), core namespaces after; alphabetical within.
-                     (sort-by (fn [[ns-kw _]]
-                                [(if (contains? core-nses ns-kw) 1 0)
-                                 (str ns-kw)]))
-                     (mapv (fn [[ns-kw attr-counts]]
-                             {::attr-ns ns-kw
-                              ::attrs   (into (sorted-map) attr-counts)})))]
-     {::attr-groups   rows
-      ::attr-ns-count (count rows)
-      ::attr-count    (count counts)
-      ::datom-count   (reduce + 0 (vals counts))
-      ::topology      entity-topology})))
 
 ;; ---------------------------------------------------------------------------
 ;; Error-persistence hooks — `seon.error/record!`'s write path, INJECTED here

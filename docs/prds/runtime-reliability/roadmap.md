@@ -460,8 +460,8 @@ is evaluated behaviorally, not by asserting prose.
 | JVM artifact | Source and uberjar use the same complete `:writer` basis with the maintained forks and one SLF4J provider, but no published launch manifest yet records the artifact/runtime contract. |
 | Dependencies | The writer and writer-test closures are honest and narrow. Heavy paused-app dependencies still live in the base graph used by old JVM/tools, and CLJS/tool ownership is not yet fully separated. |
 | Writer protocol | The semantic protocol, JVM writer/server, CLJS replica, and UDS transports are separated and the duplicate operations/helpers are deleted. A typed supervisor administration surface and cold process proof remain. |
-| Database vocabulary | The protocol/backend/replica path is canonical and the managed leaf is `/db`; the root/header labels are clean, while `db/store-inventory`, skills, paused JVM code, and downstream ACME still expose obsolete vocabulary. |
-| Database browser | The root inventory panel is deleted and the header now reads Datahike's maintained index count without building an inventory. `/data` now uses the canonical shared gzip feed and cheap shell, but the inventory context block, `db/store-inventory`, `my.kb/inventory`, and its current projection still repeat broad namespace/count scans. Index-backed bounded projections and lazy detail units remain. |
+| Database vocabulary | The protocol/backend/replica path is canonical, the managed leaf is `/db`, and the generic `store-inventory` API/context/tooling family is deleted. Skills and downstream ACME still need vocabulary convergence. |
+| Database browser | The root inventory panel, header inventory scan, generic context block, `db/store-inventory`, and `my.kb/inventory` are deleted. `/data` uses the canonical shared gzip feed and cheap shell; index-backed bounded detail projections remain. |
 | Developer hooks | Active hook config still calls the paused nREPL JVM on port 7888, so several claimed checks silently do not run. |
 | Operator | The Babashka graph and thin launcher are built and focused-tested; active caller migration plus default/ACME/Inspect live proof remain. |
 | Tests | The retained writer gate is 47 tests/295 assertions after deleting 14 legacy server suites, but disabled and paused-application tests plus noisy expected-failure logging still need removal. |
@@ -666,12 +666,10 @@ agents idle and one exact notice visible to root.
    `#surface-*`, and `.seon-card*`.
 2. Update every producer/consumer/schema/test and regenerate CSS atomically.
    Do not leave forwarding vars or old selectors.
-3. Delete exactly the four dormant context-display namespaces and their display
-   tests while preserving their underlying domain/runtime facts. Delete the
-   remaining duplicate inventory family: `db/store-inventory`,
-   `my.kb/inventory`, warning coupling, teaching references, and brittle tests.
-   The root panel and header inventory scan are already deleted; keep the
-   header's cheap database link, but make `/data` the only exploration surface.
+3. **Complete:** the dormant inventory context renderer, `db/store-inventory`,
+   `my.kb/inventory`, warning coupling, teaching references, and brittle tests
+   are deleted. The header keeps its cheap database link and `/data` is the only
+   exploration surface.
 4. Port `/data` in place to the canonical render-unit and shared gzip Datastar
    feed lifecycle. **Feed cut complete:** `/data/sse`, `!data-connections`, its
    listener flag, broadcast loop, and the generic `/sse` registry are deleted;
