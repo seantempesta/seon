@@ -19,6 +19,9 @@
   (:require
     [cljs.test :refer [deftest is testing async]]
     [clojure.string :as str]
+    [clojure.test.check :as tc]
+    [clojure.test.check.generators :as gen]
+    [clojure.test.check.properties :as prop :include-macros true]
     [seon.client :as client]
     [seon.db :as db]
     [seon.derive :as derive]
@@ -26,9 +29,32 @@
     [seon.web.brand :as brand]
     [seon.web.datastar :as datastar]))
 
+(defn- check-property
+  "Assert a deterministic test.check property and surface its shrink."
+  [n property]
+  (let [{:keys [result shrunk]} (tc/quick-check n property)]
+    (is (true? result) (pr-str shrunk))))
+
 ;; Valid 14-char ids (`:seon.db/id` is [:string {:min 14 :max 14}]).
 (def ^:private agent-a "view-aaaa00001")
 (def ^:private agent-b "view-bbbb00002")
+
+(def ^:private coordinate-gen
+  (gen/fmap
+    (fn [[agent-id block-name face page]]
+      {:seon.agent/id agent-id
+       :seon.agent.ctx/name block-name
+       :seon.web.unit/face face
+       :seon.web.data/page page})
+    (gen/tuple
+      (gen/elements [agent-a agent-b "root"])
+      (gen/elements [:seon.agent.ctx/transcript
+                     :seon.agent.ctx/plan
+                     :seon.agent.ctx/namespaces])
+      (gen/elements [:seon.web.unit.face/expanded
+                     :seon.web.unit.face/compact
+                     :seon.web.unit.face/detail])
+      (gen/choose 0 20))))
 
 (defn- with-conn
   "Fresh isolated `:memory` conn (full pod schema). Transact each id in
@@ -47,7 +73,105 @@
                  (body conn))))))
 
 ;; ============================================================
-;; 1. patch-elements — the datastar-patch-elements wire framing (pure).
+;; 1. View-unit contracts — stable coordinates and zero speculative work.
+;; ============================================================
+
+(deftest unit-coordinate-token-is-canonical-and-stable
+  (let [coordinate-a (array-map
+                       :seon.agent/id agent-a
+                       :seon.agent.ctx/name :seon.agent.ctx/transcript
+                       :seon.render/view :html
+                       :seon.web.unit/face :seon.web.unit.face/expanded)
+        coordinate-b (array-map
+                       :seon.web.unit/face :seon.web.unit.face/expanded
+                       :seon.render/view :html
+                       :seon.agent.ctx/name :seon.agent.ctx/transcript
+                       :seon.agent/id agent-a)]
+    (is (= (datastar/unit-token coordinate-a)
+           (datastar/unit-token coordinate-b))
+        "map insertion order does not change a coordinate token")
+    (is (= (datastar/unit-dom-id coordinate-a)
+           (datastar/unit-dom-id coordinate-b))
+        "map insertion order does not change the stable DOM target")
+    (is (str/starts-with? (datastar/unit-dom-id coordinate-a) "seon-unit-")
+        "unit DOM ids live in one explicit id namespace")))
+
+(deftest representative-distinct-coordinates-have-distinct-tokens
+  (check-property
+    250
+    (prop/for-all [left coordinate-gen
+                   right coordinate-gen]
+      (or (= left right)
+          (not= (datastar/unit-token left)
+                (datastar/unit-token right))))))
+
+(deftest catalog-and-inactive-stubs-never-invoke-producers
+  (let [renders (atom 0)
+        definitions [{::datastar/coordinate
+                      {:seon.agent/id agent-a
+                       :seon.agent.ctx/name :seon.agent.ctx/transcript}
+                      ::datastar/label "transcript"
+                      ::datastar/producer #(swap! renders inc)}]
+        catalog (datastar/unit-catalog definitions)
+        descriptor (first catalog)]
+    (is (= 1 (count catalog)) "catalog construction preserves the unit")
+    (is (vector? (datastar/inactive-stub descriptor))
+        "an inactive unit is a complete hiccup target")
+    (is (zero? @renders)
+        "catalog and stub construction never speculate behind the unit door")))
+
+(deftest exclusive-activation-deactivates-the-prior-unit
+  (let [renders (atom 0)
+        definition (fn [agent-id block-name]
+                     {::datastar/coordinate
+                      {:seon.agent/id agent-id
+                       :seon.agent.ctx/name block-name}
+                      ::datastar/exclusive-group :seon.web.unit.group/mainstage
+                      ::datastar/producer #(swap! renders inc)})
+        catalog (datastar/unit-catalog
+                  [(definition agent-a :seon.agent.ctx/transcript)
+                   (definition agent-a :seon.agent.ctx/plan)
+                   (assoc (definition agent-b :seon.agent.ctx/namespaces)
+                          ::datastar/exclusive-group
+                          :seon.web.unit.group/other)])
+        by-block (fn [block-name]
+                   (some #(when (= block-name
+                                   (get-in % [::datastar/coordinate
+                                              :seon.agent.ctx/name]))
+                            %)
+                         catalog))
+        prior (by-block :seon.agent.ctx/transcript)
+        requested (by-block :seon.agent.ctx/plan)
+        independent (by-block :seon.agent.ctx/namespaces)
+        prior-token (::datastar/token prior)
+        requested-token (::datastar/token requested)
+        independent-token (::datastar/token independent)
+        result (datastar/transition-active-set
+                 {::datastar/catalog catalog
+                  ::datastar/active-tokens #{prior-token independent-token}
+                  ::datastar/token requested-token
+                  ::datastar/active? true})]
+    (is (= #{requested-token independent-token}
+           (::datastar/active-tokens result))
+        "activation swaps only the requested exclusive group")
+    (is (= #{requested-token} (::datastar/activated-tokens result)))
+    (is (= #{prior-token} (::datastar/deactivated-tokens result)))
+    (is (zero? @renders) "an active-set transition invokes no producer")))
+
+(deftest active-fingerprint-is-order-independent
+  (let [coordinates [{:seon.agent/id agent-a
+                      :seon.web.unit/face :seon.web.unit.face/expanded}
+                     {:seon.agent/id agent-b
+                      :seon.web.unit/face :seon.web.unit.face/compact}
+                     {:seon.eval/id "eval-aaaa00001"
+                      :seon.web.unit/face :seon.web.unit.face/detail}]
+        tokens (mapv datastar/unit-token coordinates)]
+    (is (= (datastar/active-fingerprint (into #{} tokens))
+           (datastar/active-fingerprint (into #{} (reverse tokens))))
+        "active membership, not discovery order, keys shared subscriptions")))
+
+;; ============================================================
+;; 2. patch-elements — the datastar-patch-elements wire framing (pure).
 ;; Assert the CONTRACT structurally (event line, per-HTML-line datalines,
 ;; blank-line terminator), never the exact event bytes.
 ;; ============================================================

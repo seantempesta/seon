@@ -264,7 +264,7 @@ Debug and data should become view plans handled by it; delete
 `seon.web.debug`'s `!sse-by-agent`, debug listener, timer map, and custom SSE
 framing after parity is proven.
 
-Add exactly one static supplement route:
+Seed exactly one core database route through `seon.route/core-routes-tx`:
 
 ```text
 GET /view/unit?view=<ephemeral-view-id>&unit=<stable-token>&active=1|0
@@ -313,11 +313,12 @@ than relying on an unqualified `:kind` discriminator. A more ergonomic
 map-shaped coordinate is also valid if every key is namespaced and its
 canonical order is explicit.
 
-Encode `(pr-str coordinate)` as UTF-8 base64url with the platform's Buffer and
-prefix it `seon-unit-` for the DOM id/token. This is deterministic and
-collision-free for the canonical text; it is not a new random id function. The
-server-side catalog maps the token back to the trusted descriptor. The route
-must never decode a client token into an arbitrary renderer symbol.
+Encode the canonical coordinate EDN as UTF-8 base64url with Node's Buffer to
+form the token, then prefix that token with `seon-unit-` for the DOM id. This is
+deterministic and collision-free for the canonical text; it is not a new random
+id function. The server-side catalog maps the token back to the trusted
+descriptor. The route must never decode a client token into an arbitrary
+renderer symbol.
 
 The page shell receives a random ephemeral view id. Stable unit tokens survive
 morphs and reconnects, while the view id scopes active presentation state to
@@ -440,12 +441,13 @@ Preserve one initial visible-unit render. A page GET emits only the shell and
 feed opener. The feed's initial event emits visible active content exactly
 once.
 
-### 3. Add the single unit route
+### 3. Add the single database-seeded unit route
 
-In `src/seon/web/router.cljs`, add `/view/unit` to the static supplement and
-delegate it to a public handler in `seon.web.datastar`. The handler validates
-view id, token, and active flag; mutates only ephemeral view state; and returns
-one or more complete `text/html` elements.
+In `src/seon/route.cljs`, add `/view/unit` to the reconciled core route facts
+and delegate it to a public handler in `seon.web.datastar`. Do not add it to the
+static supplement. The handler validates view id, token, and active flag;
+mutates only ephemeral view state; and returns one or more complete `text/html`
+elements.
 
 There are no block, eval, agent, roster, or data-specific HTTP routes beneath
 it. Page plans supply descriptors and producers.

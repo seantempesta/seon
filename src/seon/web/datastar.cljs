@@ -43,10 +43,147 @@
     [seon.derive :as derive]
     [seon.log :as log]
     [seon.render :as render]
+    [seon.schema :as schema]
     [seon.ui.header :as header]
     [seon.ui.html :as html]
     [seon.ui.agent-view :as agent-view]
     [seon.web.brand :as brand]))
+
+;; ============================================================
+;; View units — stable, pure presentation coordinates.
+;;
+;; A definition names one renderer without invoking it. `unit-catalog` adds
+;; only values derived from the coordinate, so inactive page shells can be
+;; built without paying for content. Tokens are opaque client handles: the
+;; eventual route resolves them through its trusted server-side catalog and
+;; never decodes client input into code.
+;; ============================================================
+
+(schema/register! ::coordinate-value
+  [:or :string :keyword :symbol :boolean :int :uuid])
+(schema/register! ::coordinate
+  [:map-of {:min 1} :qualified-keyword ::coordinate-value])
+(schema/register! ::token [:string {:min 1}])
+(schema/register! ::dom-id [:string {:min 1}])
+(schema/register! ::label :string)
+(schema/register! ::order :int)
+(schema/register! ::exclusive-group :qualified-keyword)
+(schema/register! ::producer [:fn fn?])
+(schema/register! ::definition
+  [:map
+   [::coordinate ::coordinate]
+   [::producer ::producer]
+   [::label {:optional true} ::label]
+   [::order {:optional true} ::order]
+   [::exclusive-group {:optional true} ::exclusive-group]])
+(schema/register! ::definitions [:vector ::definition])
+(schema/register! ::descriptor
+  [:map
+   [::coordinate ::coordinate]
+   [::token ::token]
+   [::dom-id ::dom-id]
+   [::producer ::producer]
+   [::label {:optional true} ::label]
+   [::order {:optional true} ::order]
+   [::exclusive-group {:optional true} ::exclusive-group]])
+(schema/register! ::catalog [:vector ::descriptor])
+(schema/register! ::active-tokens [:set ::token])
+(schema/register! ::active? :boolean)
+(schema/register! ::transition-request
+  [:map
+   [::catalog ::catalog]
+   [::active-tokens ::active-tokens]
+   [::token ::token]
+   [::active? ::active?]])
+(schema/register! ::activated-tokens [:set ::token])
+(schema/register! ::deactivated-tokens [:set ::token])
+(schema/register! ::transition-response
+  [:map
+   [::active-tokens ::active-tokens]
+   [::activated-tokens ::activated-tokens]
+   [::deactivated-tokens ::deactivated-tokens]])
+(schema/register! ::fingerprint [:string {:min 1}])
+
+(defn- canonical-coordinate
+  "A coordinate's entries in one platform-independent EDN order."
+  [coordinate]
+  (->> coordinate
+       (sort-by (comp str key))
+       (mapv (fn [[k v]] [k v]))))
+
+(defn- base64url
+  "UTF-8 text encoded with Node's RFC 4648 base64url implementation."
+  [text]
+  (-> (js/Buffer.from text "utf8")
+      (.toString "base64url")))
+
+(defn unit-token
+  "Stable opaque token derived from a canonical unit coordinate."
+  {:malli/schema [:=> [:catn [::coordinate ::coordinate]] ::token]}
+  [coordinate]
+  (base64url (pr-str (canonical-coordinate coordinate))))
+
+(defn unit-dom-id
+  "Stable DOM id derived from a unit coordinate."
+  {:malli/schema [:=> [:catn [::coordinate ::coordinate]] ::dom-id]}
+  [coordinate]
+  (str "seon-unit-" (unit-token coordinate)))
+
+(defn unit-catalog
+  "Compile cheap unit definitions into stable descriptors."
+  {:malli/schema [:=> [:catn [::definitions ::definitions]] ::catalog]}
+  [definitions]
+  (->> definitions
+       (map (fn [{coordinate ::coordinate :as definition}]
+              (assoc definition
+                     ::token (unit-token coordinate)
+                     ::dom-id (unit-dom-id coordinate))))
+       (sort-by (juxt #(get % ::order 0) ::token))
+       vec))
+
+(defn inactive-stub
+  "Render a stable empty unit target without invoking its producer."
+  {:malli/schema [:=> [:catn [::descriptor ::descriptor]]
+                  :seon.render.canvas/hiccup]}
+  [{token ::token dom-id ::dom-id label ::label}]
+  [:div (cond-> {:id dom-id
+                 :data-seon-unit token
+                 :data-seon-unit-active "false"}
+          (seq label) (assoc :aria-label label))])
+
+(defn transition-active-set
+  "Apply one activation or deactivation to an ephemeral active set."
+  {:malli/schema [:=> [:catn [::transition-request ::transition-request]]
+                  ::transition-response]}
+  [{catalog ::catalog
+    active-tokens ::active-tokens
+    token ::token
+    active? ::active?}]
+  (let [target (some #(when (= token (::token %)) %) catalog)
+        group (::exclusive-group target)
+        competing (if (and target active? group)
+                    (into #{}
+                          (comp (filter #(= group (::exclusive-group %)))
+                                (map ::token)
+                                (filter active-tokens)
+                                (remove #{token}))
+                          catalog)
+                    #{})
+        next-active (cond
+                      (nil? target) active-tokens
+                      active? (-> active-tokens
+                                  (set/difference competing)
+                                  (conj token))
+                      :else (disj active-tokens token))]
+    {::active-tokens next-active
+     ::activated-tokens (set/difference next-active active-tokens)
+     ::deactivated-tokens (set/difference active-tokens next-active)}))
+
+(defn active-fingerprint
+  "Order-independent fingerprint of an ephemeral active unit set."
+  {:malli/schema [:=> [:catn [::active-tokens ::active-tokens]] ::fingerprint]}
+  [active-tokens]
+  (base64url (pr-str (vec (sort active-tokens)))))
 
 ;; ============================================================
 ;; Connection registry — one descriptor per open gzip stream. Render fns are
