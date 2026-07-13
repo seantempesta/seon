@@ -11,10 +11,20 @@
     [seon.error :as err]
     [seon.render :as render]
     [seon.ui.agent-view :as agent-view]
-    [seon.ui.html :as html]))
+    [seon.ui.html :as html]
+    [seon.web.view-unit :as view-unit]))
 
 (def ^:private agent-a "view-aaaa00001")
 (def ^:private agent-b "view-bbbb00002")
+
+(defn- selection-for [block-name]
+  (str "context-"
+       (view-unit/coordinate-token {:seon.agent.ctx/name block-name})))
+
+(defn- catalog-selection [dbv agent-id block-name]
+  (::agent-view/selection
+    (some #(when (= block-name (:seon.agent.ctx/name %)) %)
+          (agent-view/surface-catalog dbv agent-id))))
 
 (defn- with-agents [agents body]
   (-> (client/open-agent-conn!)
@@ -31,58 +41,138 @@
 (deftest surface-catalog-is-cheap-and-omits-ai-only-context
   (async done
     (-> (with-agents
-          [[agent-a []]]
+          [[agent-a
+            [{:seon.agent.ctx/name :plan
+              :seon.agent.ctx/priority 10
+              :seon.render/html [:div "plan"]}
+             {:seon.agent.ctx/name :notes
+              :seon.agent.ctx/priority 20
+              :seon.render/ai "agent-only"}]]]
           (fn [conn]
             (let [html-renders (atom 0)
-                  canvas-renders (atom 0)]
+                  canvas-renders (atom 0)
+                  context-roots (atom 0)]
               (with-redefs
                 [agent-ctx/context-root
                  (fn [_]
-                   {:seon.agent/entity {:seon.agent/id agent-a}
-                    :seon.agent.ctx/children
-                    [{:seon.agent.ctx/name :plan
-                      :seon.render/html 'my.agent.view/plan}
-                     {:seon.agent.ctx/name :notes
-                      :seon.render/ai "agent-only"}]})
+                   (swap! context-roots inc)
+                   (throw (js/Error. "catalog loaded the context root")))
                  render/render
                  (fn [& _] (swap! html-renders inc) [:div])
                  render/render-agent-canvas
                  (fn [_]
                    (swap! canvas-renders inc)
-                   {:seon.render/hiccup [:div]})
-                 render-fns/renderer-read-attrs
-                 (fn [{renderer :seon.render/html}]
-                   {:seon.agent.ctx.render-fns/attrs
-                    (if (= renderer 'my.agent.view/plan)
-                      [:my.agent.view/state]
-                      [])})
-                 render-fns/renderer-touch
-                 (fn [{renderer :seon.render/html}]
-                   (if (= renderer 'my.agent.view/plan)
-                     {:seon.agent.ctx.render-fns/touch 12}
-                     {}))]
+                   {:seon.render/hiccup [:div]})]
                 (let [catalog (agent-view/surface-catalog @conn agent-a)
                       selections (into #{} (map ::agent-view/selection) catalog)
-                      plan (some #(when (= "context-plan"
-                                           (::agent-view/selection %))
+                      plan (some #(when (= :plan
+                                           (:seon.agent.ctx/name %))
                                     %)
                                  catalog)
-                      public-keys #{::agent-view/selection
+                      canvas (some #(when (= "canvas"
+                                             (::agent-view/selection %))
+                                      %)
+                                   catalog)
+                      common-keys #{::agent-view/selection
                                     ::agent-view/label
                                     ::agent-view/read-attrs
                                     ::agent-view/touch
                                     ::agent-view/focus-touch}]
-                  (is (= #{"canvas" "context-plan"} selections))
-                  (is (every? #(= public-keys (set (keys %))) catalog)
-                      "catalog rows contain facts, not private render sources")
-                  (is (contains? (::agent-view/read-attrs plan)
-                                 :my.agent.view/state))
-                  (is (= 12 (::agent-view/touch plan)))
-                  (is (= 12 (::agent-view/focus-touch plan)))
+                  (is (= #{"canvas" (selection-for :plan)} selections))
+                  (is (= (conj common-keys :seon.agent.ctx/name)
+                         (set (keys plan))))
+                  (is (= common-keys (set (keys canvas))))
+                  (is (= :plan (:seon.agent.ctx/name plan)))
+                  (is (= #{} (::agent-view/read-attrs plan)))
+                  (is (zero? @context-roots))
                   (is (zero? @html-renders))
                   (is (zero? @canvas-renders)))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest surface-catalog-preserves-symbolic-renderer-dependencies
+  (async done
+    (-> (with-agents
+          [[agent-a
+            [{:seon.agent.ctx/name :plan
+              :seon.agent.ctx/priority 10
+              :seon.render/html 'my.agent.view/plan}]]]
+          (fn [conn]
+            (-> (db/with-agent
+                  agent-a
+                  (fn []
+                    (db/transact!
+                      {:seon.db/conn conn
+                       :seon.db/tx-data
+                       [{:seon.fn/sym "my.agent.view/plan"
+                         :seon.fn/source
+                         "(defn plan [_] {:seon.render/hiccup [:div]})"
+                         :seon.fn/read-attrs [:seon.agent/purpose]}
+                        {:seon.agent/id agent-a
+                         :seon.agent/purpose "dependency touch"}]})))
+                (.then
+                  (fn [result]
+                    (is (true? (:seon.db/ok? result)))
+                    (let [surface
+                          (some #(when (= :plan (:seon.agent.ctx/name %)) %)
+                                (agent-view/surface-catalog @conn agent-a))]
+                      (is (contains? (::agent-view/read-attrs surface)
+                                     :seon.agent/purpose))
+                      (is (pos? (::agent-view/touch surface)))
+                      (is (= (::agent-view/touch surface)
+                             (::agent-view/focus-touch surface)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest surface-selection-preserves-every-legal-keyword-identity
+  (async done
+    (-> (with-agents
+          [[agent-a
+            [{:seon.agent.ctx/name :foo/bar
+              :seon.agent.ctx/priority 10
+              :seon.render/html [:div "NAMESPACED"]}
+             {:seon.agent.ctx/name :foo-bar
+              :seon.agent.ctx/priority 20
+              :seon.render/html [:div "UNQUALIFIED"]}]]]
+          (fn [conn]
+            (let [dbv @conn
+                  catalog (agent-view/surface-catalog dbv agent-a)
+                  by-name (into {}
+                                (keep (fn [surface]
+                                        (when-let [block-name
+                                                   (:seon.agent.ctx/name surface)]
+                                          [block-name surface])))
+                                catalog)
+                  namespaced (get by-name :foo/bar)
+                  unqualified (get by-name :foo-bar)
+                  namespaced-selection (::agent-view/selection namespaced)
+                  unqualified-selection (::agent-view/selection unqualified)]
+              (is (= #{:foo/bar :foo-bar} (set (keys by-name))))
+              (is (not= namespaced-selection unqualified-selection)
+                  "distinct legal keywords never share browser identity")
+              (is (= [:div "NAMESPACED"]
+                     (agent-view/materialize-surface
+                       {:seon.db/db dbv
+                        :seon.agent/id agent-a
+                        ::agent-view/selection namespaced-selection
+                        ::agent-view/face :expanded})))
+              (is (= [:div "UNQUALIFIED"]
+                     (agent-view/materialize-surface
+                       {:seon.db/db dbv
+                        :seon.agent/id agent-a
+                        ::agent-view/selection unqualified-selection
+                        ::agent-view/face :expanded}))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest surface-selection-distinguishes-ambiguous-keyword-printing
+  (let [left (keyword "a/b" "c")
+        right (keyword "a" "b/c")]
+    (is (not= left right))
+    (is (= (pr-str left) (pr-str right))
+        "the historical printed-form coordinate cannot distinguish this pair")
+    (is (not= (selection-for left) (selection-for right))
+        "the canonical coordinate preserves keyword namespace and name")))
 
 (deftest materialize-surface-invokes-only-the-selected-renderer-once
   (async done
@@ -116,7 +206,7 @@
                       (agent-view/materialize-surface
                         {:seon.db/db @conn
                          :seon.agent/id agent-a
-                         ::agent-view/selection "context-plan"
+                         ::agent-view/selection (selection-for :plan)
                          ::agent-view/face :expanded})]
                   (is (= [:section {:class "seon-tile-expanded"}
                           [:p "expanded"]]
@@ -128,7 +218,7 @@
                       (agent-view/materialize-surface
                         {:seon.db/db @conn
                          :seon.agent/id agent-a
-                         ::agent-view/selection "context-transcript"
+                         ::agent-view/selection (selection-for :transcript)
                          ::agent-view/face :compact})]
                   (is (= [:section {:class "seon-tile-compact"}
                           [:p "compact"]]
@@ -171,7 +261,7 @@
                       (agent-view/materialize-surface
                         {:seon.db/db @conn
                          :seon.agent/id agent-a
-                         ::agent-view/selection "context-missing"
+                         ::agent-view/selection (selection-for :missing)
                          ::agent-view/face :expanded})))
                 (is (zero? @renders)
                     "a vanished selection does not invoke another surface")
@@ -179,7 +269,7 @@
                       (agent-view/materialize-surface
                         {:seon.db/db @conn
                          :seon.agent/id agent-a
-                         ::agent-view/selection "context-agent-only"
+                         ::agent-view/selection (selection-for :agent-only)
                          ::agent-view/face :compact})))
                 (is (zero? @renders)
                     "an AI-only block is not an HTML surface")
@@ -187,7 +277,7 @@
                       (agent-view/materialize-surface
                         {:seon.db/db @conn
                          :seon.agent/id agent-a
-                         ::agent-view/selection "context-conditional"
+                         ::agent-view/selection (selection-for :conditional)
                          ::agent-view/face :expanded})))
                 (is (= 1 @renders)
                     "an empty selected renderer is still invoked exactly once")))))
@@ -222,17 +312,21 @@
              {:seon.agent.ctx/name :ai-only :seon.agent.ctx/priority 20
               :seon.render/ai "AI-ONLY-TEXT"}]]]
           (fn [conn]
-            (let [s (html/->string (agent-view/agent-view @conn agent-a))]
+            (let [dbv @conn
+                  dual-selection (catalog-selection dbv agent-a :dual)
+                  s (html/->string (agent-view/agent-view dbv agent-a))]
               (is (str/includes? s "id=\"app-view\""))
               (is (str/includes? s "DUAL-HTML"))
               (is (not (str/includes? s "AI-ONLY-TEXT")))
-              (is (str/includes? s "data-agent-primary=\"context-dual\""))
+              (is (str/includes?
+                    s (str "data-agent-primary=\"" dual-selection "\"")))
               (testing "the global new-agent action avoids unsupported modal APIs"
                 (is (str/includes? s "fetch(&#39;/agents/new&#39;"))
                 (is (not (str/includes? s "prompt("))))
               (testing "the focused surface is reactively omitted from the rail"
                 (is (str/includes? s
-                      "data-show=\"$selected !== &#39;context-dual&#39;\""))
+                      (str "data-show=\"$selected !== &#39;"
+                           dual-selection "&#39;\"")))
                 (is (str/includes? s
                       "data-show=\"$selected !== &#39;canvas&#39;\""))))))
         (.then (fn [_] (done)))
@@ -271,7 +365,7 @@
                                :seon.render/html [:div "DERIVED-HTML"]}]})]
               (let [s (html/->string (agent-view/agent-view @conn agent-a))]
                 (is (str/includes? s "DERIVED-HTML"))
-                (is (str/includes? s "context-render-fn-live"))))))
+                (is (str/includes? s (selection-for :render-fn/live)))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 
@@ -349,7 +443,19 @@
     (-> (client/open-agent-conn!)
         (.then
           (fn [conn]
-            (let [view (agent-view/agent-view @conn "ghost-agent-xx")]
+            (let [dbv @conn
+                  agent-id "ghost-agent-xx"
+                  catalog (agent-view/surface-catalog dbv agent-id)
+                  view (agent-view/agent-view dbv agent-id)]
+              (is (= ["canvas"]
+                     (mapv ::agent-view/selection catalog)))
+              (is (nil? (:seon.agent.ctx/name (first catalog))))
+              (is (nil?
+                    (agent-view/materialize-surface
+                      {:seon.db/db dbv
+                       :seon.agent/id agent-id
+                       ::agent-view/selection "canvas"
+                       ::agent-view/face :expanded})))
               (is (vector? view))
               (is (= "app-view" (:id (second view)))))))
         (.then (fn [_] (done)))

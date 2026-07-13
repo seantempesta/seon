@@ -18,7 +18,8 @@
     [seon.error :as err]
     [seon.render :as render]
     [seon.schema :as schema]
-    [seon.ui.header :as header]))
+    [seon.ui.header :as header]
+    [seon.web.view-unit :as view-unit]))
 
 (schema/register! ::changed-attrs [:set :qualified-keyword])
 (schema/register! ::surface-attrs [:set :qualified-keyword])
@@ -38,6 +39,7 @@
   [:map
    [::selection ::selection]
    [::label ::label]
+   [:seon.agent.ctx/name {:optional true} :seon.agent.ctx/name]
    [::read-attrs ::read-attrs]
    [::touch ::touch]
    [::focus-touch ::focus-touch]])
@@ -46,7 +48,7 @@
 (schema/register! ::materialize-surface-request
   [:map
    [:seon.db/db :seon.db/db-val]
-   [:seon.agent/id :string]
+   [:seon.agent/id :seon.agent/id]
    [::selection ::selection]
    [::face ::face]])
 (schema/register! ::materialized-surface
@@ -75,8 +77,8 @@
   "Stable browser selection key for one resolved context block."
   [block-name]
   (str "context-"
-       (when-let [ns-part (namespace block-name)] (str ns-part "-"))
-       (name block-name)))
+       (view-unit/coordinate-token
+         {:seon.agent.ctx/name block-name})))
 
 (defn- class-token?
   [attrs token]
@@ -102,8 +104,8 @@
                           :expanded "seon-tile-expanded"))
       hiccup))
 
-(defn- transcript-selection? [selection]
-  (= selection "context-transcript"))
+(defn- transcript-block? [block-name]
+  (= block-name :transcript))
 
 (defn- bottom-effect
   "Datastar effect that re-anchors a transcript scroller after its revision morph."
@@ -112,19 +114,19 @@
 
 (defn- primary-panel
   "One selectable primary-panel body. Transcript bodies follow their tail."
-  [selection expanded touch]
+  [selection block-name expanded touch]
   [:section (cond-> {:id (str "agent-view-primary-" selection)
                      :data-agent-primary selection
                      :data-show (str "$selected === '" selection "'")
                      :class (str "agent-view-surface tile-hero min-h-0 overflow-auto border "
                                  "border-base-800 rounded-md bg-base-900 p-2 h-full")}
-              (transcript-selection? selection)
+              (transcript-block? block-name)
               (assoc :data-effect (bottom-effect touch)))
    expanded])
 
 (defn- rail-button
   "A compact selectable card for a non-focused primary-panel body."
-  [selection label compact touch]
+  [selection block-name label compact touch]
   [:div {:id (str "agent-view-rail-" selection)
          :role "button"
          :tabindex "0"
@@ -147,7 +149,7 @@
    [:div (cond-> {:class "overflow-hidden"
                   :aria-hidden "true"
                   :style "max-height:20rem;pointer-events:none"}
-           (transcript-selection? selection)
+           (transcript-block? block-name)
            (assoc :data-effect (bottom-effect touch)))
     compact]])
 
@@ -252,18 +254,6 @@
         (err/record! {:seon.error/raw e :seon.error/fault :core})
         (throw e)))))
 
-(defn- canvas-touch
-  "Canvas recency from its explicit slot and its derived tile renderer."
-  [dbv agent-id]
-  (let [pinned (pinned-canvas-renderer dbv agent-id)
-        derived (when (nil? pinned)
-                  (::render-fns/tile-sym
-                    (render-fns/last-updated-tile
-                      {:seon.db/db dbv :seon.agent/id agent-id})))
-        renderer (when (symbol? (or pinned derived)) (or pinned derived))]
-    (max (agent-attr-touch dbv agent-id :seon.render.canvas/content)
-         (renderer-touch dbv agent-id renderer))))
-
 (defn- canvas-renderer
   "The symbolic renderer currently driving the canvas, when it has one."
   [dbv agent-id]
@@ -275,12 +265,102 @@
         renderer (or pinned derived)]
     (when (symbol? renderer) renderer)))
 
+(defn- canvas-touch-for-renderer
+  "Canvas recency from its explicit slot and known symbolic renderer."
+  [dbv agent-id renderer]
+  (max (agent-attr-touch dbv agent-id :seon.render.canvas/content)
+       (renderer-touch dbv agent-id renderer)))
+
 (defn- renderer-attrs [dbv renderer]
   (if (symbol? renderer)
     (set (::render-fns/attrs
            (render-fns/renderer-read-attrs
              {:seon.db/db dbv :seon.render/html renderer})))
     #{}))
+
+(defn- agent-present?
+  "Whether the frozen database contains the requested agent identity."
+  [dbv agent-id]
+  (boolean
+    (seq (db/query
+           {:seon.db/db dbv
+            :seon.db/query
+            '[:find ?agent
+              :in $ ?aid
+              :where [?agent :seon.agent/id ?aid]]
+            :seon.db/args [agent-id]}))))
+
+(defn- known-renderer-by-block
+  "Symbolic HTML renderers joined through the program graph, keyed by block."
+  [dbv agent-id]
+  (into {}
+        (map (fn [[block-id renderer]]
+               [block-id (symbol renderer)]))
+        (db/query
+          {:seon.db/db dbv
+           :seon.db/query
+           '[:find ?block ?renderer
+             :in $ ?aid
+             :where
+             [?agent :seon.agent/id ?aid]
+             [?agent :seon.agent/ctx ?block]
+             [?block :seon.render/html ?renderer]
+             [_ :seon.fn/sym ?renderer]]
+           :seon.db/args [agent-id]})))
+
+(defn- stored-renderer-symbols
+  "Stored block-slot symbols projected by joining their program-graph rows."
+  [dbv agent-id]
+  (into #{}
+        (map (comp symbol first))
+        (db/query
+          {:seon.db/db dbv
+           :seon.db/query
+           '[:find ?renderer
+             :in $ ?aid [?slot ...]
+             :where
+             [?agent :seon.agent/id ?aid]
+             [?agent :seon.agent/ctx ?block]
+             [?block ?slot ?renderer]
+             [_ :seon.fn/sym ?renderer]]
+           :seon.db/args
+           [agent-id [:seon.render/ai :seon.render/html]]})))
+
+(defn- canvas-slot-present?
+  "Whether the agent has an explicit canvas value, without reading it."
+  [dbv agent-id]
+  (boolean
+    (seq (db/query
+           {:seon.db/db dbv
+            :seon.db/query
+            '[:find ?agent
+              :in $ ?aid
+              :where
+              [?agent :seon.agent/id ?aid]
+              [?agent :seon.render.canvas/content]]
+            :seon.db/args [agent-id]}))))
+
+(defn- known-canvas-renderer
+  "Canvas renderer identity without projecting or decoding literal content."
+  [dbv agent-id]
+  (let [pinned
+        (some-> (ffirst
+                  (db/query
+                    {:seon.db/db dbv
+                     :seon.db/query
+                     '[:find ?renderer
+                       :in $ ?aid
+                       :where
+                       [?agent :seon.agent/id ?aid]
+                       [?agent :seon.render.canvas/content ?renderer]
+                       [_ :seon.fn/sym ?renderer]]
+                     :seon.db/args [agent-id]}))
+                symbol)]
+    (or pinned
+        (when-not (canvas-slot-present? dbv agent-id)
+          (::render-fns/tile-sym
+            (render-fns/last-updated-tile
+              {:seon.db/db dbv :seon.agent/id agent-id}))))))
 
 (def ^:private structural-attrs
   "Changes that can add/remove/rebind surfaces, requiring a shell morph."
@@ -347,6 +427,24 @@
      ::structural-attrs structural-attrs
      ::header-attrs header-attrs}))
 
+(defn- context-surface-metadata
+  "Surface facts from a block name and its dependency renderer identity."
+  [dbv agent-id block-name priority dependency-renderer]
+  (let [touch (renderer-touch dbv agent-id dependency-renderer)]
+    {::selection (selection-key block-name)
+     ::label (name block-name)
+     :seon.agent.ctx/name block-name
+     :seon.agent.ctx/priority priority
+     ::read-attrs
+     (cond-> (renderer-attrs dbv dependency-renderer)
+       (symbol? dependency-renderer)
+       (conj :seon.fn/source :seon.fn/read-attrs))
+     ::touch touch
+     ::focus-touch
+     (if (= block-name :transcript)
+       (assistant-reply-touch dbv agent-id)
+       touch)}))
+
 (defn- context-surface-sources
   "Unrendered HTML surface sources from the agent's context root."
   [dbv agent-id]
@@ -356,29 +454,63 @@
          (keep
            (fn [child]
              (when (contains? child :seon.render/html)
-               (let [nm (:seon.agent.ctx/name child)
-                     displayed-renderer (:seon.render/html child)
-                     dependency-renderer (or (::render-fns/fn-sym child)
-                                             displayed-renderer)]
-                 {::selection (selection-key nm)
-                  ::label (name nm)
-                  ::node child
-                  ::root root
-                  ::read-attrs
-                  (cond-> (renderer-attrs dbv dependency-renderer)
-                    (symbol? dependency-renderer)
-                    (conj :seon.fn/source :seon.fn/read-attrs))
-                  ::touch
-                  (renderer-touch dbv agent-id dependency-renderer)
-                  ::focus-touch
-                  (if (= nm :transcript)
-                    (assistant-reply-touch dbv agent-id)
-                    (renderer-touch dbv agent-id dependency-renderer))}))))
+               (let [dependency-renderer
+                     (or (::render-fns/fn-sym child)
+                         (:seon.render/html child))]
+                 (assoc
+                   (context-surface-metadata
+                     dbv agent-id
+                     (:seon.agent.ctx/name child)
+                     (:seon.agent.ctx/priority child)
+                     dependency-renderer)
+                   ::node child
+                   ::root root)))))
+         vec)))
+
+(defn- stored-context-surface-metadata
+  "Stored HTML block facts without projecting or decoding either render body."
+  [dbv agent-id]
+  (let [renderer-by-block (known-renderer-by-block dbv agent-id)]
+    (->> (db/query
+           {:seon.db/db dbv
+            :seon.db/query
+            '[:find ?block ?name ?priority
+              :in $ ?aid
+              :where
+              [?agent :seon.agent/id ?aid]
+              [?agent :seon.agent/ctx ?block]
+              [?block :seon.agent.ctx/name ?name]
+              [?block :seon.agent.ctx/priority ?priority]
+              [?block :seon.render/html]]
+            :seon.db/args [agent-id]})
+         (sort-by (juxt #(nth % 2) (comp str second)))
+         (mapv (fn [[block-id block-name priority]]
+                 (context-surface-metadata
+                   dbv agent-id block-name priority
+                   (get renderer-by-block block-id)))))))
+
+(defn- derived-context-surface-metadata
+  "Auto-run HTML surface facts from program metadata, never renderer output."
+  [dbv agent-id pinned-renderers]
+  (let [current-ns (some-> (agent-ctx/current-ns
+                             {:seon.db/db dbv :seon.agent/id agent-id})
+                           name keyword)]
+    (->> (render-fns/derived-blocks
+           (cond-> {:seon.db/db dbv
+                    ::render-fns/pinned-syms pinned-renderers}
+             current-ns (assoc ::render-fns/current-ns current-ns)))
+         (keep (fn [child]
+                 (when (contains? child :seon.render/html)
+                   (context-surface-metadata
+                     dbv agent-id
+                     (:seon.agent.ctx/name child)
+                     (:seon.agent.ctx/priority child)
+                     (::render-fns/fn-sym child)))))
          vec)))
 
 (defn- canvas-surface-source [dbv agent-id]
   (let [renderer (canvas-renderer dbv agent-id)
-        touch (canvas-touch dbv agent-id)]
+        touch (canvas-touch-for-renderer dbv agent-id renderer)]
     {::selection "canvas"
      ::label "canvas"
      ::read-attrs
@@ -388,12 +520,47 @@
      ::touch touch
      ::focus-touch touch}))
 
+(defn- catalog-surface-sources
+  "Metadata-only surface discovery for one present or missing agent."
+  [dbv agent-id]
+  (if-not (agent-present? dbv agent-id)
+    [(let [touch (canvas-touch-for-renderer dbv agent-id nil)]
+       {::selection "canvas"
+        ::label "canvas"
+        ::read-attrs #{:seon.render.canvas/content}
+        ::touch touch
+        ::focus-touch touch})]
+    (let [canvas-renderer* (known-canvas-renderer dbv agent-id)
+          pinned-renderers (cond-> (stored-renderer-symbols dbv agent-id)
+                             (symbol? canvas-renderer*)
+                             (conj canvas-renderer*))
+          contexts (->> (concat
+                          (stored-context-surface-metadata dbv agent-id)
+                          (derived-context-surface-metadata
+                            dbv agent-id pinned-renderers))
+                        (sort-by (juxt :seon.agent.ctx/priority
+                                       (comp str :seon.agent.ctx/name)))
+                        vec)
+          canvas-touch* (canvas-touch-for-renderer
+                          dbv agent-id canvas-renderer*)
+          canvas {::selection "canvas"
+                  ::label "canvas"
+                  ::read-attrs
+                  (cond-> (conj (renderer-attrs dbv canvas-renderer*)
+                                :seon.render.canvas/content)
+                    (symbol? canvas-renderer*)
+                    (conj :seon.fn/source :seon.fn/read-attrs))
+                  ::touch canvas-touch*
+                  ::focus-touch canvas-touch*}]
+      (conj contexts canvas))))
+
 (defn- surface-sources [dbv agent-id]
   (conj (context-surface-sources dbv agent-id)
         (canvas-surface-source dbv agent-id)))
 
 (def ^:private catalog-keys
-  #{::selection ::label ::read-attrs ::touch ::focus-touch})
+  #{::selection ::label :seon.agent.ctx/name
+    ::read-attrs ::touch ::focus-touch})
 
 (defn- catalog-from-sources
   "Public surface facts projected away from their private render sources."
@@ -403,10 +570,10 @@
 (defn surface-catalog
   "Cheap surface facts for one agent without invoking content renderers."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
-                             [:seon.agent/id :string]]
+                             [:seon.agent/id :seon.agent/id]]
                   ::surface-catalog]}
   [dbv agent-id]
-  (catalog-from-sources (surface-sources dbv agent-id)))
+  (catalog-from-sources (catalog-surface-sources dbv agent-id)))
 
 (defn- latest-focus-surface
   "Most recently deliberately updated surface; canvas wins an untouched tie."
@@ -486,10 +653,11 @@
 
 (defn- surface-elements [surface]
   (let [selection (::selection surface)
+        block-name (:seon.agent.ctx/name surface)
         label (::label surface)
         touch (::touch surface)]
-    [(primary-panel selection (::expanded surface) touch)
-     (rail-button selection label (::compact surface) touch)]))
+    [(primary-panel selection block-name (::expanded surface) touch)
+     (rail-button selection block-name label (::compact surface) touch)]))
 
 (defn agent-view-changes
   "Complete ID-addressed elements affected by one coalesced transaction batch.
@@ -578,19 +746,21 @@
                :class "col-span-2 min-h-0 h-full overflow-hidden"}
          (doall
            (map (fn [{selection ::selection
+                      block-name :seon.agent.ctx/name
                       expanded ::expanded
                       touch ::touch}]
-                  (primary-panel selection expanded touch))
+                  (primary-panel selection block-name expanded touch))
                 surfaces))]
         [:aside {:id "agent-view-context"
                  :class (str "agent-view-rail col-span-1 flex flex-col gap-2 "
                              "min-h-0 h-full overflow-y-auto")}
          (doall
            (map (fn [{selection ::selection
+                      block-name :seon.agent.ctx/name
                       label ::label
                       compact ::compact
                       touch ::touch}]
-                  (rail-button selection label compact touch))
+                  (rail-button selection block-name label compact touch))
                 surfaces))]]])
     (catch :default e
       [:main {:id "app-view" :class "flex flex-col gap-3 w-full"}

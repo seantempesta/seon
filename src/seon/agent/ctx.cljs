@@ -1244,14 +1244,26 @@
   ([] (current-ns {}))
   ([{:seon.agent/keys [id] db :seon.db/db}]
    (let [id (resolve-id id)
-         ;; All evals across all the agent's turns, successful only.
-         all-evals
-         (for [t (agent-turns id db)
-               e (:seon.agent.turn/evals t)
-               :when (true? (:seon.eval/ok? e))]
-           e)
-         latest (last (sort-by :seon.eval/at all-evals))]
-     (or (:seon.eval/ns latest) (home/home-ns id)))))
+         dbv (or db @db/*conn*)
+         latest-ns
+         (some->> (db/query
+                    {:seon.db/db dbv
+                     :seon.db/query
+                     '[:find ?at ?ns
+                       :in $ ?aid
+                       :where
+                       [?agent :seon.agent/id ?aid]
+                       [?run :seon.agent.run/agent ?agent]
+                       [?turn :seon.agent.turn/run ?run]
+                       [?turn :seon.agent.turn/evals ?eval]
+                       [?eval :seon.eval/ok? true]
+                       [?eval :seon.eval/at ?at]
+                       [?eval :seon.eval/ns ?ns]]
+                     :seon.db/args [id]})
+                  (sort-by first)
+                  last
+                  second)]
+     (or latest-ns (home/home-ns id)))))
 
 (defn ctx-entities
   "Pull the agent's `:seon.agent/ctx` vector, entities inlined.
