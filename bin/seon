@@ -11,7 +11,8 @@
 # Subcommands:
 #   start <name|all>   Idempotent. Spawns detached; logs to logs/<name>.log
 #                      `all` = cljs-watch → wire-server → pod, each gated on
-#                      REAL readiness before the next (jvm NOT included)
+#                      observed, stable readiness before the next
+#                      (jvm NOT included)
 #
 # Why `all` excludes the jvm (decided 2026-06-11, not an oversight):
 # the jvm process hosts nREPL 7888 — the SHARED REPL that every Claude
@@ -300,8 +301,8 @@ process_command() {
 
 process_ready_hint() {
   case "$1" in
-    pod)         echo "  ready: $SEON_PORT_FILE written + HTTP answers on /" ;;
-    pod-*)       echo "  ready: tmp/seon-port-${1#pod-} written + HTTP answers on /" ;;
+    pod)         echo "  ready: auto-boot completed + $SEON_PORT_FILE written + HTTP / stays healthy" ;;
+    pod-*)       echo "  ready: auto-boot completed + tmp/seon-port-${1#pod-} written + HTTP / stays healthy" ;;
     cljs-watch)  echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
     jvm)         echo "  ready: logs/app.log shows 'Server started'" ;;
     wire-server) echo "  ready: $SEON_REQ_SOCK ACCEPTING; REPL on 127.0.0.1:$SEON_WRITER_REPL_PORT ($SEON_WRITER_REPL_PORT_FILE)" ;;
@@ -355,18 +356,26 @@ ready_check() {
       fi
       ;;
     pod-*)
-      # A cluster pod writes its ephemeral bound port to its own file.
+      # HTTP starts near the END of cold boot, but not at its completion.
+      # Require the promise-completion marker as well as the ephemeral port;
+      # otherwise a briefly serving pod can be reported ready while cold boot
+      # is still unwinding toward a fatal error.
       [ -f "tmp/seon-port-${name#pod-}" ] || return 1
+      grep -q '\[seon.client\] auto-boot ready' "$(log_file "$name")" \
+        2>/dev/null || return 1
       curl -fsS -m 2 -o /dev/null \
         "http://127.0.0.1:$(cat "tmp/seon-port-${name#pod-}")/" 2>/dev/null
       ;;
     pod)
       [ -f "$SEON_PORT_FILE" ] || return 1
-      # Probe `/` — the most fundamental core route (always seeded on every
-      # cluster). It's render-independent (a 302/200, no agent-page render),
-      # so this gate won't false-fail during a render hot-reload. `curl -f`
-      # passes on the 302 (<400) and on the 200 after the root=/ repoint.
-      # (Was `/agents`, removed by the db->routes routing cutover → 404.)
+      # The listener is deliberately started just before start-runtime!
+      # returns. Its exact completion marker distinguishes a fully completed
+      # cold-start promise from that short, externally visible interval.
+      grep -q '\[seon.client\] auto-boot ready' "$(log_file "$name")" \
+        2>/dev/null || return 1
+      # Probe `/` — the fundamental core route. It is render-independent (a
+      # 302/200, no agent-page render), so hot-reload cannot false-fail this
+      # check. `curl -f` accepts the 302 and the later root=/ 200.
       curl -fsS -m 2 -o /dev/null \
         "http://127.0.0.1:$(cat "$SEON_PORT_FILE")/" 2>/dev/null
       ;;
@@ -378,6 +387,33 @@ ready_check() {
         || grep -q 'Build completed' "$(log_file cljs-watch)" 2>/dev/null
       ;;
     *) return 0 ;;
+  esac
+}
+
+readiness_fault_marker() {
+  # A fresh start truncates this process's log, so every match belongs to the
+  # lifetime wait_ready is observing. Unexpected core faults are logged BEFORE
+  # record! awaits their durable transaction and :crash exits; recognizing the
+  # marker avoids declaring success (or waiting many seconds for PID death)
+  # while a fatal boot fault is already known. Expected test-fixture markers
+  # have the distinct SEON-EXPECTED-CORE-FAULT prefix and do not match.
+  case "$1" in
+    pod|pod-*)
+      grep -E '(^SEON-CORE-FAULT )|auto-boot FAILED' "$(log_file "$1")" \
+        2>/dev/null | tail -n 1 || true
+      ;;
+  esac
+}
+
+ready_observations() {
+  # Pod readiness crosses an asynchronous process boundary. Three consecutive
+  # one-second observations prove the PID and HTTP endpoint stayed live after
+  # auto-boot completed, while readiness_fault_marker makes a known fatal fault
+  # fail immediately. This adds at most two observed probe intervals after the
+  # first success; it is a stability fence, not a blind boot delay.
+  case "$1" in
+    pod|pod-*) echo 3 ;;
+    *)         echo 1 ;;
   esac
 }
 
@@ -429,21 +465,38 @@ ready_bound() {
 }
 
 wait_ready() {
-  # Bounded wait for ready_check. Loud on timeout or early death,
-  # naming the log to read. Processes without a gate (jvm) pass through.
+  # Bounded wait for ready_check. Pods additionally need consecutive passing
+  # observations and no boot-fault marker; all entry points share this one
+  # readiness/stability mechanism. Loud on timeout, fault, or early death.
+  # Processes without a gate (jvm) pass through.
   local name="$1"
-  local bound
+  local bound required
   bound="$(ready_bound "$name")"
   [ "$bound" = 0 ] && return 0
-  local waited=0
+  required="$(ready_observations "$name")"
+  local waited=0 consecutive=0 marker=""
   printf '  waiting for %s ready (bound %ss) ' "$name" "$bound"
-  until ready_check "$name"; do
+  while [ "$consecutive" -lt "$required" ]; do
+    marker="$(readiness_fault_marker "$name")"
+    if [ -n "$marker" ]; then
+      echo ""
+      echo "✗ $name FAULTED while waiting for readiness:" >&2
+      echo "    $marker" >&2
+      echo "    bin/seon logs $name   ($(log_file "$name"))" >&2
+      return 1
+    fi
     if ! is_running "$name"; then
       echo ""
       echo "✗ $name DIED while waiting for readiness — read its log:" >&2
       echo "    bin/seon logs $name   ($(log_file "$name"))" >&2
       return 1
     fi
+    if ready_check "$name"; then
+      consecutive=$((consecutive + 1))
+    else
+      consecutive=0
+    fi
+    [ "$consecutive" -ge "$required" ] && break
     if [ "$waited" -ge "$bound" ]; then
       echo ""
       echo "✗ $name not ready after ${bound}s — read its log:" >&2
@@ -455,7 +508,11 @@ wait_ready() {
     printf '.'
   done
   echo ""
-  echo "  ● $name ready (${waited}s)"
+  if [ "$required" -gt 1 ]; then
+    echo "  ● $name ready (${waited}s, $required consecutive observations)"
+  else
+    echo "  ● $name ready (${waited}s)"
+  fi
 }
 
 # ============================================================
@@ -1724,8 +1781,8 @@ Usage: bin/seon <command> [process] [args...]
 Commands:
   start <name|all>   Start a process (idempotent — no-op if already running)
                      `all` = cljs-watch → wire-server → pod, dependency-
-                     ordered with REAL ready gates between stages (socket
-                     accepting / HTTP answering / build completed).
+                     ordered with observed ready gates between stages (socket
+                     accepting / completed+stable pod HTTP / build completed).
                      jvm is NOT in `all` BY DESIGN — it hosts the shared
                      nREPL 7888 (every agent's REPL, the dev hook, the
                      MCP bridge); bouncing it inside `all` would sever

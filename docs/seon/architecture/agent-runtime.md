@@ -407,9 +407,13 @@ functions in [[toolkit]]). The derived open-todo count feeds the fingerprint abo
 `bin/seon start` has a usability boundary, not a fork boundary. Every managed
 process starts in a new operating-system session, so closing the invoking
 terminal cannot reap it, and the command returns only after that process's real
-readiness probe succeeds. Port files, REPL-port files, and Unix sockets belong
-to one process lifetime: a fresh spawn removes stale artifacts before waiting
-and refuses to unlink an artifact that is still serving an unregistered live
+readiness probe succeeds. Pod readiness means its cold-start promise has logged
+completion and its PID plus fundamental HTTP route remain healthy across three
+consecutive observations. An unexpected core-fault marker fails that gate as
+soon as the fault is known, before durable fault recording and the configured
+process exit finish. Port files, REPL-port files, and Unix sockets belong to one
+process lifetime: a fresh spawn removes stale artifacts before waiting and
+refuses to unlink an artifact that is still serving an unregistered live
 process. Thus a reboot cannot turn an old port file into a false-positive boot,
 and an unmanaged listener is reported for inspection/adoption rather than
 silently replaced.

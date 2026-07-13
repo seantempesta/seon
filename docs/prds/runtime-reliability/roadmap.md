@@ -898,6 +898,8 @@ Commit: complete the remaining Inspect AI journeys and lifecycle integration.
 
 Run from a cold process and a converged restart:
 
+- supervisor readiness that rejects a briefly serving pod when cold boot has
+  already emitted an unexpected core fault;
 - fresh genesis and existing-store provenance migration;
 - config fault injection/recovery and zero-write convergence;
 - five sequential and concurrent web-created agents with correct navigation;
