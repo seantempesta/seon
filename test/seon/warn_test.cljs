@@ -600,7 +600,7 @@
           [{:seon.agent/id "warntst-rslv01"
             :seon.render.canvas/content 'seon.warn/render-warnings}
            {:seon.agent/id "warntst-hicc01"
-            :seon.render.canvas/content [:div {:class "seon-tile"} "literal"]}]
+            :seon.render.canvas/content [:div {:class "seon-card"} "literal"]}]
           (fn [db]
             (let [r (warn/check-canvas-unresolved {:seon.db/db db})]
               (is (= [] (:seon.warn/affected r))

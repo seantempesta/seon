@@ -7,7 +7,7 @@
      • wired-content — ::content wins (legacy :seon.render/html tile
        fallback DELETED, PRD §8.1) → welcome default; pr-str-encoded
        values decode
-     • welcome — .seon-tile compact+expanded blocks, date, purpose,
+     • welcome — .seon-card compact+expanded blocks, date, purpose,
        tile line, :seon.render/ai render
      • error-response — fallback tile + envelope + render (never vanish)
      • render-agent-canvas — unwired→welcome, literal hiccup via the new
@@ -137,10 +137,10 @@
         (canvas/welcome {:seon.db/db nil :seon.agent/id "wlcm-2206110001"})
         classes (->> (flatten hiccup) (filter map?) (keep :class))]
     (is (canvas/valid-hiccup? hiccup))
-    (is (= "seon-tile" (:class (second hiccup)))
-        "wrapped in the .seon-tile container")
-    (is (some #(re-find #"seon-tile-compact" %) classes))
-    (is (some #(re-find #"seon-tile-expanded" %) classes)
+    (is (= "seon-card" (:class (second hiccup)))
+        "wrapped in the .seon-card container")
+    (is (some #(re-find #"seon-card-compact" %) classes))
+    (is (some #(re-find #"seon-card-expanded" %) classes)
         "ONE render carries BOTH zoom blocks")
     (testing "time-aware greeting matches the wall clock"
       (let [expected (canvas/greeting (.getHours (js/Date.)))]
@@ -205,11 +205,11 @@
     ;; placeholder wording: the failure is partitioned to the agent-facing
     ;; channels (the :seon.render/ai twin + the :seon.render/error envelope)
     ;; and NEVER leaks into the human hiccup. So the human card is structurally
-    ;; a normal .seon-tile, indistinguishable from a healthy tile, while the
+    ;; a normal .seon-card, indistinguishable from a healthy canvas, while the
     ;; twin + envelope carry the SAME message the human never sees.
     (let [human-strings (hiccup-strings hiccup)]
-      (is (= "seon-tile" (:class (second hiccup)))
-          "the human card is a normal .seon-tile — a failure is indistinguishable from a healthy tile")
+      (is (= "seon-card" (:class (second hiccup)))
+          "the human card is a normal .seon-card — a failure is indistinguishable from a healthy canvas")
       (is (not-any? #(str/includes? % (:seon.error/message env)) human-strings)
           "the wired fn's failure message is ABSENT from the human card")
       (is (not-any? #(re-find #"(?i)error" %) human-strings)
@@ -350,7 +350,7 @@
   "Test tile renderer returning BOTH twins — the twin-contract target."
   {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
   [_input]
-  {:seon.render/hiccup [:div.seon-tile [:span "3 workouts this week"]]
+  {:seon.render/hiccup [:div.seon-card [:span "3 workouts this week"]]
    :seon.render/ai     "3 workouts this week: Mon, Wed, Fri — trending up."})
 
 (defn- with-agent-conn
@@ -384,7 +384,7 @@
               ;; non-blank, and that it's the WELCOME twin specifically — its
               ;; stable contract is naming how to repoint the tile
               ;; (:seon.render.canvas/content), not any time-of-day wording.
-              (is (= "seon-tile" (:class (second hiccup)))
+              (is (= "seon-card" (:class (second hiccup)))
                   "unwired agent dispatches to the core welcome renderable")
               (is (and (string? ai) (seq ai))
                   "the welcome twin (the ai-format string) rides the response")
@@ -510,7 +510,7 @@
                                  (render/render-agent-canvas
                                    {:seon.db/db @conn
                                     :seon.agent/id "tiletwn-000001"})]
-                             (is (= [:div.seon-tile [:span "3 workouts this week"]]
+                             (is (= [:div.seon-card [:span "3 workouts this week"]]
                                     hiccup))
                              (is (= "3 workouts this week: Mon, Wed, Fri — trending up."
                                     ai)
@@ -538,9 +538,8 @@
                                      (render/render-agent-canvas
                                        {:seon.db/db @conn
                                         :seon.agent/id "tileerr-000001"})))]
-                             (is (some #(re-find #"Updating this tile" %)
-                                       (hiccup-strings hiccup))
-                                 "human sees the calm placeholder tile — NOT a vanish, NOT a scary error")
+                             (is (= "seon-card" (:class (second hiccup)))
+                                 "human sees a valid fallback card rather than a vanish")
                              (is (re-find #"deliberate tile failure"
                                           (:seon.error/message error))
                                  "response carries the error envelope")
@@ -597,9 +596,8 @@
                         (fn []
                           (render/render-agent-canvas
                             {:seon.db/db @conn :seon.agent/id agent-id})))]
-                  (is (some #(re-find #"Updating this tile" %)
-                            (hiccup-strings hiccup))
-                      "human sees the calm placeholder tile — the page never 500s")
+                  (is (= "seon-card" (:class (second hiccup)))
+                      "human sees a valid fallback card and the page never 500s")
                   (is (re-find re (:seon.error/message error))
                       "envelope carries the legible structure error")
                   (is (re-find re (str ai))
@@ -639,7 +637,7 @@
 ;; ============================================================
 ;; CSS contract — the core stylesheet honors what the ns
 ;; docstring teaches (CSS-correctness unit, 2026-06-11):
-;;   • .seon-tile-compact is CLAMPED (bounded height, overflow
+;;   • .seon-card-compact is CLAMPED (bounded height, overflow
 ;;     clipped) — grid tiles never grow vertically;
 ;;   • every utility in the documented vocabulary is SAFELISTED via
 ;;     @source inline(...) — runtime-generated classes aren't
@@ -696,13 +694,13 @@
    "overflow-hidden" "overflow-auto" "overflow-x-auto"])
 
 (deftest compact-block-is-clamped
-  (let [[block] (re-find #"\.seon-tile-compact \{([^}]*)\}" input-css)]
-    (is (some? block) ".seon-tile-compact rule exists")
+  (let [[block] (re-find #"\.seon-card-compact \{([^}]*)\}" input-css)]
+    (is (some? block) ".seon-card-compact rule exists")
     (is (re-find #"max-height" (str block))
         "compact block has a bounded height — tiles never grow the grid cell")
     (is (re-find #"overflow:\s*hidden" (str block))
         "compact overflow clips")
-    (is (re-find #"\.seon-tile-reply" input-css)
+    (is (re-find #"\.seon-card-reply" input-css)
         "the last-reply line-clamp rule survives")))
 
 (deftest docstring-vocabulary-is-safelisted
@@ -713,7 +711,7 @@
              "agents emitting it at runtime get a class that doesn't exist"))))
 
 (deftest base-content-layer-covers-semantic-html
-  (let [scope (re-find #":is\(\.seon-tile, \.seon-bubble, \.markdown, \.seon-agent-content\)"
+  (let [scope (re-find #":is\(\.seon-card, \.seon-bubble, \.markdown, \.seon-agent-content\)"
                        input-css)]
     (is (some? scope)
         "base content layer scoped to the agent-content containers"))

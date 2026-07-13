@@ -78,7 +78,7 @@
   [:section (cond-> {:id (str "agent-view-primary-" selection)
                      :data-agent-primary selection
                      :data-show (str "$selected === '" selection "'")
-                     :class (str "agent-view-surface tile-hero min-h-0 overflow-auto border "
+                     :class (str "agent-view-surface surface-focus min-h-0 overflow-auto border "
                                  "border-base-800 rounded-md bg-base-900 p-2 h-full")}
               (transcript-block? block-name)
               (assoc :data-effect (bottom-effect touch)))

@@ -61,11 +61,11 @@
   {:malli/schema [:=> [:cat :symbol] :seon.render/html-response]}
   [sym]
   {:seon.render/hiccup
-   [:div {:class "seon-tile"}
-    [:div {:class "seon-tile-compact flex flex-col gap-1 p-3"}
+   [:div {:class "seon-card"}
+    [:div {:class "seon-card-compact flex flex-col gap-1 p-3"}
      [:div {:class "text-sm text-text-400 italic"} "Preparing this view…"]
      [:div {:class "text-[10px] font-mono text-text-500"} (str sym)]]
-    [:div {:class "seon-tile-expanded flex flex-col gap-3 p-4"}
+    [:div {:class "seon-card-expanded flex flex-col gap-3 p-4"}
      [:div {:class "text-sm text-text-400 italic"} "Preparing this view…"]
      [:div {:class "text-xs text-text-500"}
       "This panel points at a render fn that isn't loaded yet."]

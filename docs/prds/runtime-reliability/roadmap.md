@@ -111,6 +111,14 @@ comparable run. The optional Caddy edge served the same gzip feed over HTTP/2
 with immediate flushing; it remains outside the default development process
 graph.
 
+The UI vocabulary cut is now underway in the existing render path. Core focus
+derivation uses `last-updated-surface`/`::surface-sym`, unresolved canvas facts
+use one canvas warning, the overridable failure seam is `error-card`, block
+slots use stable `#surface-*` identifiers, and the generated stylesheet uses
+`.seon-card*` plus `.surface-focus`. Focused recency, warning, render, canvas,
+and agent-view suites pass with no forwarding aliases. Remaining active prose,
+helper names, and downstream ACME references are part of the same in-place cut.
+
 The CLJS test process now installs the pod's existing third-party log gate as a
 Shadow preload before any test namespace. A representative database run fell
 from about 1.85M estimated tokens of trace-heavy output to about 43 estimated

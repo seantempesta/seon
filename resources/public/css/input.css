@@ -338,7 +338,7 @@ details.tool-call-details[open] .tool-preview {
    Canvas container queries (`seon.render.canvas`).
    ONE render emits both blocks; the CONTAINER's size — not the
    viewport — selects which is visible. Agents tag blocks with
-   .seon-tile-compact / .seon-tile-expanded and never write
+   .seon-card-compact / .seon-card-expanded and never write
    media/container queries themselves. Untagged content renders
    at every size.
 
@@ -346,7 +346,7 @@ details.tool-call-details[open] .tool-preview {
    real mission-control grid cell (grid cells sit well below it;
    the agent-view right pane sits well above it).
    ============================================================ */
-.seon-tile {
+.seon-card {
   container-type: inline-size;
   width: 100%;
   height: 100%;
@@ -357,22 +357,22 @@ details.tool-call-details[open] .tool-preview {
    pairs with the grid card's fixed h-44 (footer takes the rest);
    whichever bound is hit first clips. The EXPANDED block stays
    unbounded — the agent-view right pane scrolls. */
-.seon-tile-compact {
+.seon-card-compact {
   display: block;
   max-height: 10rem;
   overflow: hidden;
 }
-.seon-tile-expanded { display: none; }
+.seon-card-expanded { display: none; }
 @container (min-width: 480px) {
-  .seon-tile-compact { display: none; }
-  .seon-tile-expanded { display: block; }
+  .seon-card-compact { display: none; }
+  .seon-card-expanded { display: block; }
 }
 /* A HERO tile is a PRIMARY surface, not a grid-cell preview, so it always
    shows the rich EXPANDED face — never the clamped, text-clipping compact face
-   — regardless of container width (phones included). Scoped to `.tile-hero`;
+   — regardless of container width (phones included). Scoped to `.surface-focus`;
    the container-query default above is untouched for every other tile. */
-.tile-hero .seon-tile-compact { display: none; }
-.tile-hero .seon-tile-expanded { display: block; }
+.surface-focus .seon-card-compact { display: none; }
+.surface-focus .seon-card-expanded { display: block; }
 
 /* Agent surfaces accept authored and model-produced content. Keep every child
    inside its column even when it contains long symbols, URLs, maps, or code. */
@@ -443,7 +443,7 @@ details.tool-call-details[open] .tool-preview {
 /* Compact-canvas last reply: the default root canvas
    shows the agent's last reply as readable text — clamp it so a
    long reply never blows the grid cell. */
-.seon-tile-reply {
+.seon-card-reply {
   display: -webkit-box;
   -webkit-line-clamp: 3;
   line-clamp: 3;
@@ -458,7 +458,7 @@ details.tool-call-details[open] .tool-preview {
    [:pre [:code …]], [:dl …] would get flat unstyled output. These
    rules restore Phosphor-styled (design-system.md) semantics
    SCOPED to the agent-content containers only:
-     .seon-tile           — canvas and context-tile content
+     .seon-card           — canvas and context surface content
      .seon-bubble         — chat bubble content
      .markdown            — rendered markdown bodies
      .seon-agent-content  — debug-pane card streams
@@ -469,7 +469,7 @@ details.tool-call-details[open] .tool-preview {
    .markdown overrides both win ties.
    ============================================================ */
 @layer base {
-  :is(.seon-tile, .seon-bubble, .markdown, .seon-agent-content) {
+  :is(.seon-card, .seon-bubble, .markdown, .seon-agent-content) {
     /* Headings — amber-graded emphasis, terminal-dense. */
     & h1 { font-size: 0.95rem; font-weight: 600; color: var(--color-signal);   margin: 0.5rem 0 0.25rem; }
     & h2 { font-size: 0.85rem; font-weight: 600; color: var(--color-text-50);  margin: 0.4rem 0 0.2rem; }

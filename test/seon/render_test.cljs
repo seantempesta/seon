@@ -217,8 +217,8 @@
                   (render/render-agent-canvas {:seon.db/db @conn
                                                :seon.agent/id agent-id})]
               (is (vector? hiccup) "default tile renders hiccup")
-              (is (= "seon-tile" (:class (second hiccup)))
-                  "it is the welcome's .seon-tile container")
+              (is (= "seon-card" (:class (second hiccup)))
+                  "it is the welcome's .seon-card container")
               (is (string? ai) "the welcome carries its :seon.render/ai render")
               (is (re-find #"Good (morning|afternoon|evening|night)" ai)
                   "the ai render carries the time-aware greeting"))))
@@ -244,7 +244,7 @@
                                  (render/render-agent-canvas
                                    {:seon.db/db @conn
                                     :seon.agent/id agent-id})]
-                             (is (= "seon-tile" (:class (second hiccup)))
+                             (is (= "seon-card" (:class (second hiccup)))
                                  "tile ignores :seon.render/html and renders the welcome")
                              (is (not= [:h1 "card-slot-not-a-tile"] hiccup)
                                  "the entity-card slot never reaches the tile surface"))))))))
@@ -366,8 +366,8 @@
                                    :mytile)]
               (is (vector? out) "slot returns hiccup")
               (is (= :div (first out)) "wrapped in a div")
-              (is (= "tile-mytile" (:id (second out)))
-                  "stable DOM id #tile-<name> for idiomorph")
+              (is (= "surface-mytile" (:id (second out)))
+                  "stable DOM id #surface-<name> for idiomorph")
               (is (= "mytile" (:data-slot (second out)))
                   "carries data-slot=<name> (string, no colon)")
               (is (re-find #"tile!" (html/->string out))
@@ -408,7 +408,7 @@
                       sibling (render/slot ctx :mytile)]
                   (is (vector? missing)
                       "a missing block still returns a slot div, never throws")
-                  (is (= "tile-no-such-block" (:id (second missing)))
+                  (is (= "surface-no-such-block" (:id (second missing)))
                       "the slot div keeps its stable id even on error")
                   (is (re-find #"OVERRIDE CARD" (html/->string missing))
                       "the error surface routes through the overridable error-card seam")
@@ -431,13 +431,13 @@
             (let [out  (render/slot {:seon.db/db @conn :seon.agent/id agent-id}
                                     :wtile)
                   body (nth out 2 nil)]
-              (is (= "tile-wtile" (:id (second out)))
+              (is (= "surface-wtile" (:id (second out)))
                   "stable slot id preserved")
               (is (vector? body)
                   "the map envelope is unwrapped to hiccup, not a raw map body")
               (is (not (map? body))
                   "body is not the raw :seon.render/html-response map")
-              (is (re-find #"seon-tile" (html/->string out))
+              (is (re-find #"seon-card" (html/->string out))
                   "the welcome envelope's hiccup actually renders into the slot"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

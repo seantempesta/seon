@@ -462,7 +462,7 @@
         recoveries (recovery/pending-notices {:seon.db/db db})
         activity (recent-activity db)]
     {:seon.render/hiccup
-     [:div {:class "seon-tile flex flex-col bg-base-950 text-text-200"}
+     [:div {:class "seon-card flex flex-col bg-base-950 text-text-200"}
       (vitals-hiccup fleet)
       (when (seq recoveries) (recovery-hiccup recoveries))
       (grid-hiccup db fleet)

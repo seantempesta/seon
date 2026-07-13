@@ -41,20 +41,20 @@
    Small-vs-large is core CSS container queries over ONE render.
    Emit both blocks in one document and tag them:
 
-       [:div.seon-tile
-        [:div.seon-tile-compact  [:span \"3 workouts this week\"]]
-        [:div.seon-tile-expanded [:svg …full chart…] [:table …]]]
+       [:div.seon-card
+        [:div.seon-card-compact  [:span \"3 workouts this week\"]]
+        [:div.seon-card-expanded [:svg …full chart…] [:table …]]]
 
-   The core shows `.seon-tile-compact` below the breakpoint and
-   `.seon-tile-expanded` at or above it (container rules live in
+   The core shows `.seon-card-compact` below the breakpoint and
+   `.seon-card-expanded` at or above it (container rules live in
    `resources/public/css/input.css`). Untagged content renders at
    every size. The compact block is HEIGHT-CLAMPED by the core
-   (grid tiles are uniform; overflow clips) — put a glanceable
+   (grid cards are uniform; overflow clips) — put a glanceable
    summary there and the full content in the expanded block.
 
    ## Styling — write SEMANTIC hiccup, zero classes needed
 
-   The core styles plain HTML elements inside your tile (and
+   The core styles plain HTML elements inside your canvas (and
    chat/markdown/debug surfaces) — `[:table …]` with `[:thead]`/
    `[:tbody]`, `[:ul …]`/`[:ol …]`, `[:h1 …]`–`[:h4 …]`, `[:p …]`,
    `[:pre [:code …]]`, `[:blockquote …]`, `[:dl [:dt …] [:dd …]]`,
@@ -513,13 +513,13 @@
                        (chat/last-reply {:seon.agent/id agent-id
                                          :seon.db/db    db})))]
     {:seon.render/hiccup
-     [:div {:class "seon-tile"}
-      [:div {:class "seon-tile-compact flex flex-col gap-1 p-3"}
+     [:div {:class "seon-card"}
+      [:div {:class "seon-card-compact flex flex-col gap-1 p-3"}
        [:div {:class "text-sm text-text-100"} purpose-line]
        (when agent-id
          [:div {:class "text-[10px] font-mono text-text-500"} agent-id])
        (if reply
-         [:div {:class "seon-tile-reply text-xs text-text-300 whitespace-pre-wrap"}
+         [:div {:class "seon-card-reply text-xs text-text-300 whitespace-pre-wrap"}
           reply]
          [:div {:class "text-xs text-text-400 italic"} greet-line])]
       (if reply
@@ -528,19 +528,19 @@
         ;; arm, called direct here because seon.render requires THIS ns), and
         ;; demotes the greeting/date to a thin subhead. So a plain chat reply
         ;; renders richly on the canvas with zero agent effort.
-        [:div {:class "seon-tile-expanded flex flex-col gap-2 p-4"}
+        [:div {:class "seon-card-expanded flex flex-col gap-2 p-4"}
          (md/md->hiccup reply {:wrap-class "markdown text-sm text-text-100"})
          [:div {:class "text-[10px] font-mono text-text-500 pt-1.5 border-t border-base-800"}
           (str greet-line " · " date-str " · " time-str)]]
         ;; Fresh agent, no reply yet — keep the greeting empty-state.
-        [:div {:class "seon-tile-expanded flex flex-col gap-3 p-4"}
+        [:div {:class "seon-card-expanded flex flex-col gap-3 p-4"}
          [:div {:class "text-lg text-text-50"} greet-line]
          [:div {:class "text-xs font-mono text-signal"}
           (str date-str " · " time-str)]
          [:div {:class "text-sm text-text-200"} purpose-line]
          [:div {:class "text-xs text-text-400 italic"} welcome-line]])]
      :seon.render/ai
-     (str "Welcome — your tile is showing the core default "
+     (str "Welcome — your canvas is showing the core default "
           "(point :seon.render.canvas/content at your own fn to "
           "replace it). Your human currently sees — in the root grid "
           "(compact): "
@@ -617,7 +617,7 @@
    `set!`-ing [[error-card]]."
   {:malli/schema [:=> [:cat :seon.db/error] ::hiccup]}
   [{:seon.error/keys [message where hint] sym :seon.error/symbol}]
-  [:div {:class (str "seon-tile flex flex-col gap-1 p-3 border "
+  [:div {:class (str "seon-card flex flex-col gap-1 p-3 border "
                      "border-error/40 bg-error/10 rounded")}
    [:div {:class "text-xs text-error font-mono font-bold"}
     (str "⚠ " (when where (str (name where) " — ")) "render error")]
@@ -638,7 +638,7 @@
   "Build the html-response for a canvas fn that THREW.
 
    THE HUMAN sees a calm,
-   nicely-formatted 'updating this tile' placeholder — never a scary error
+   nicely-formatted 'updating this canvas' placeholder — never a scary error
    (NO failure text leaks to the human card), never a blank (vanish is
    indistinguishable from unwired, banned). THE AGENT is told
    the truth: the `:seon.render/ai` render carries the failure (awareness
@@ -657,16 +657,16 @@
                     (str wired)
                     "literal hiccup on your entity")]
     {:seon.render/hiccup
-     [:div {:class "seon-tile"}
-      [:div {:class "seon-tile-compact flex flex-col gap-1 p-3"}
-       [:div {:class "text-sm text-text-200"} "Updating this tile…"]]
-      [:div {:class "seon-tile-expanded flex flex-col gap-2 p-4"}
-       [:div {:class "text-base text-text-100"} "Updating this tile…"]
+     [:div {:class "seon-card"}
+      [:div {:class "seon-card-compact flex flex-col gap-1 p-3"}
+       [:div {:class "text-sm text-text-200"} "Updating this canvas…"]]
+      [:div {:class "seon-card-expanded flex flex-col gap-2 p-4"}
+       [:div {:class "text-base text-text-100"} "Updating this canvas…"]
        [:div {:class "text-xs text-text-400 italic"}
         "I'm refining what I show here."]]]
      :seon.render/ai
      (str "YOUR CANVAS IS BROKEN — the wired renderer (" wired-str
-          ") threw: " msg ". Your human sees a calm 'updating this tile' "
+          ") threw: " msg ". Your human sees a calm 'updating this canvas' "
           "placeholder, not your content. Fix the fn, or transact a working "
           "value onto :seon.render.canvas/content.")
      :seon.render/error error}))

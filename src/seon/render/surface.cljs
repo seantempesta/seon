@@ -89,8 +89,8 @@
   "Project an existing dual-face surface without invoking its renderer again."
   [hiccup view]
   (or (find-face hiccup (case view
-                          :compact "seon-tile-compact"
-                          :expanded "seon-tile-expanded"))
+                          :compact "seon-card-compact"
+                          :expanded "seon-card-expanded"))
       hiccup))
 
 (defn- repl-process-eid

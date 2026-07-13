@@ -1225,5 +1225,5 @@
                       {:seon.error/message (str block-name " render failed: "
                                                 (err/->message e))
                        :seon.error/where   block-name}))))]
-    [:div {:id (str "tile-" (name block-name)) :data-slot (name block-name)}
+    [:div {:id (str "surface-" (name block-name)) :data-slot (name block-name)}
      body]))

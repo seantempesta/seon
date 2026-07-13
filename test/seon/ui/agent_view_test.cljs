@@ -181,9 +181,9 @@
             (let [html-renders (atom [])
                   canvas-renders (atom 0)
                   dual-face
-                  [:article {:class "seon-tile"}
-                   [:section {:class "seon-tile-compact"} [:p "compact"]]
-                   [:section {:class "seon-tile-expanded"} [:p "expanded"]]]]
+                  [:article {:class "seon-card"}
+                   [:section {:class "seon-card-compact"} [:p "compact"]]
+                   [:section {:class "seon-card-expanded"} [:p "expanded"]]]]
               (with-redefs
                 [agent-ctx/context-root
                  (fn [_]
@@ -207,7 +207,7 @@
                          :seon.agent/id agent-a
                          ::surface/selection (selection-for :plan)
                          ::surface/face :expanded})]
-                  (is (= [:section {:class "seon-tile-expanded"}
+                  (is (= [:section {:class "seon-card-expanded"}
                           [:p "expanded"]]
                          expanded))
                   (is (= [:plan] @html-renders))
@@ -219,7 +219,7 @@
                          :seon.agent/id agent-a
                          ::surface/selection (selection-for :transcript)
                          ::surface/face :compact})]
-                  (is (= [:section {:class "seon-tile-compact"}
+                  (is (= [:section {:class "seon-card-compact"}
                           [:p "compact"]]
                          compact))
                   (is (= [:transcript] @html-renders))
@@ -231,7 +231,7 @@
                          :seon.agent/id agent-a
                          ::surface/selection "canvas"
                          ::surface/face :compact})]
-                  (is (= [:section {:class "seon-tile-compact"}
+                  (is (= [:section {:class "seon-card-compact"}
                           [:p "compact"]]
                          canvas))
                   (is (empty? @html-renders))

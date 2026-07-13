@@ -969,7 +969,7 @@
           "  {:malli/schema [:=> [:cat :seon.render/system-input]\n"
           "                  :seon.render/html-response]}\n"
           "  [{:seon.db/keys [db] :seon.agent/keys [id]}]\n"
-          "  {:seon.render/hiccup [:div {:class \"seon-tile\"} \"hi\"]})\n"
+          "  {:seon.render/hiccup [:div {:class \"seon-card\"} \"hi\"]})\n"
           "(seon.db/transact!\n"
           "  {:seon.db/tx-data\n"
           "   [{:seon.agent/id \"<id>\"\n"

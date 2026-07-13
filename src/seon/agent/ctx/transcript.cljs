@@ -885,9 +885,9 @@
                               last
                               render-message)]
     (if (seq cards)
-      [:div {:class "seon-tile"}
-       [:div {:class "seon-tile-compact"}
+      [:div {:class "seon-card"}
+       [:div {:class "seon-card-compact"}
         (or latest-reply (last cards))]
-       (into [:div {:class "seon-tile-expanded flex flex-col"}] cards)]
+       (into [:div {:class "seon-card-expanded flex flex-col"}] cards)]
       [:div {:class "text-text-500 italic p-2 text-xs font-mono"}
        "no events yet — every message and eval this agent makes appears here live"])))
