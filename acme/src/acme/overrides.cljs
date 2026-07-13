@@ -7,13 +7,14 @@
 
    Two error seams, both branded calm. Core split the one error contract
    into two vars:
-   - `error-response` — the canvas HERO (`render-agent-tile`'s catch):
-     returns the FULL `:seon.render/html-response` map, so we preserve the
-     agent-facing `:seon.render/ai` + `:seon.render/error` and swap only the
-     human-facing hiccup.
-   - `error-tile` — the SLOT / world / entity error surfaces (`render`,
-     `slot`, `render-entity-html` catches): a `(fn [:seon/error] → BARE
-     hiccup)`. No agent-facing envelope to preserve, so we replace outright.
+   - `error-response` — the canvas HERO (`seon.render/render-agent-canvas`'s
+     catch): returns the FULL `:seon.render/html-response` map, so we
+     preserve the agent-facing `:seon.render/ai` + `:seon.render/error` and
+     swap only the human-facing hiccup.
+   - `error-tile` — the slot / entity / block error-tile surfaces
+     (`render`, `slot`, `render-entity-html` catches): a `(fn [:seon/error]
+     → BARE hiccup)`. No agent-facing envelope to preserve, so we replace
+     outright.
 
    Both render the same calm 'preparing this view' card — while an agent is
    mid-building a tile the human sees a calm placeholder instead of a raw
@@ -30,11 +31,11 @@
                 [:div {:class "seon-tile-compact p-3 text-xs text-text-300 italic"}
                  "Acme is preparing this view…"]])))
 
-;; The slot / world / entity error-tile seam — `(fn [:seon/error] → BARE
+;; The slot / entity / block error-tile seam — `(fn [:seon/error] → BARE
 ;; hiccup)`. Returns hiccup only (no `:seon.render/ai`/`:seon.render/error`
 ;; envelope like the hero), so there is nothing from the default to preserve:
 ;; we replace it outright with acme's calm branded card (mirroring the hero
-;; above). One `set!`, every slot/world/entity error tile on the page is acme.
+;; above). One `set!`, every slot/entity/block error tile on the page is acme.
 (set! canvas/error-tile
       (fn acme-error-tile [_err]
         [:div {:class "seon-tile"}

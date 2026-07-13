@@ -254,6 +254,7 @@
   #?(:cljs (internal/assert-multi-segment-namespace! k)
      :clj  nil)
   (internal/assert-compilable-schema! k v)
+  (internal/assert-non-nilable-value-schema! @*schemas k v)
   (swap! *schemas assoc k (internal/with-entity-id-attr @*schemas v))
   ;; Self-tee (durability): hand the ORIGINAL form to the hook — replay
   ;; re-derives :seon.entity/id-attr by re-running register!. No hook

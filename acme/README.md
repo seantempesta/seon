@@ -50,7 +50,7 @@ bin/acme tail pod
 with the live cluster's shadow nREPL on `:7889`. Re-run it after editing
 `acme/src`.
 
-Fresh world (clean store — needed to reproduce BUG B from zero):
+Fresh store (clean store — needed to reproduce BUG B from zero):
 
 ```bash
 bin/acme cluster reset default   # wipes data/clusters/acme/store, bounces both

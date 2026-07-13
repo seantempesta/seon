@@ -272,6 +272,24 @@
                         {::db/error :seon.db/unbridgeable-malli-form
                          ::db/form resolved-form})))
 
+      ;; [:maybe X] — a stored value is never nil in seon (absent = the key
+      ;; is omitted), so a nilable attr cannot map to a datahike value type.
+      ;; Fail DIRECTIVE (not the generic :else "cannot map"): name the base
+      ;; type + optional-field fix. seon.schema/register! rejects the common
+      ;; case up front; this catches a nilable that reached storage.
+      (= head :maybe)
+      (let [inner (first (form-children resolved-form))]
+        (throw (ex-info
+                 (str "a stored value is never nil in seon (absent = the key is "
+                      "simply omitted), so a nilable/[:maybe …] attr cannot be "
+                      "stored: " (pr-str resolved-form) ". Register the BASE type "
+                      "(" (pr-str inner) ") and mark the FIELD optional at its "
+                      ":map site ([<attr> {:optional true} " (pr-str inner)
+                      "]), or omit the key when there is no value.")
+                 {::db/error :seon.db/nilable-attr
+                  ::db/form  resolved-form
+                  :seon.error/kind :user-input})))
+
       ;; [:and base extra-constraints] — bridge on the base.
       (= head :and)
       (form->datahike-value-type (resolve-malli-form (first (form-children resolved-form))))

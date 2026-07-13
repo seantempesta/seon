@@ -142,6 +142,50 @@
                 :seon.error/kind   :user-input}
                e)))))
 
+(defn maybe-inner
+  "The child form of a top-level `[:maybe X]` schema, else nil.
+
+   Skips an optional leading props map (`[:maybe {…} X]`). nil when `v`
+   is not a top-level nilable form — the caller treats nil as 'nothing to
+   reject'."
+  [v]
+  (when (and (vector? v) (= :maybe (first v)))
+    (let [body (rest v)
+          body (if (and (seq body) (map? (first body))) (rest body) body)]
+      (first body))))
+
+(defn assert-non-nilable-value-schema!
+  "register!-time gate: reject a top-level nilable value schema whose inner
+   is a raw Malli built-in type — e.g. `[:maybe :int]`. In seon a stored
+   value is NEVER nil (absent = the key is simply omitted, never stored as
+   nil), so a NAMED value schema must not be nilable. Throws a guiding
+   `:user-input` ex-info that hands back the copy-pasteable fix: register
+   the base type, then mark the FIELD optional at its map site.
+
+   `schemas` is the seon registry map — a keyword NOT in it is a Malli
+   built-in (`:int`/`:string`/…), which is exactly the mis-modeled-attr
+   case; a `:maybe` around an already-registered DOMAIN type (`::view-id`)
+   or a composite (`[:or …]`) is a deliberate nullable fn-slot/return type
+   and is permitted here. A stored nilable that slips past this narrow
+   check is still rejected by the datahike bridge
+   (`seon.db.internal/form->datahike-value-type`)."
+  [schemas k v]
+  (when-let [inner (maybe-inner v)]
+    (when (and (keyword? inner) (not (contains? schemas inner)))
+      (throw (ex-info
+               (str "schema/register! " k ": " (pr-str v)
+                    " — a stored value is never nil in seon (absent = the key "
+                    "is simply omitted, never stored as nil), so a value schema "
+                    "may not be nilable/[:maybe …]. Register the BASE type: "
+                    "(schema/register! " k " " (pr-str inner) ") — then mark the "
+                    "FIELD optional where it appears in a :map schema: [" k
+                    " {:optional true} " (pr-str inner) "], or just omit the key "
+                    "entirely when there is no value.")
+               {:seon.schema/error :seon.schema/nilable-value-schema
+                :seon.schema/key   k
+                :seon.schema/form  v
+                :seon.error/kind   :user-input})))))
+
 (defn assert-multi-segment-namespace!
   "register!-time gate: reject attrs whose keyword NAMESPACE is
    single-segment (`:workout/date`). Keyword namespaces are DOMAINS with

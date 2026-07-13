@@ -10,7 +10,9 @@
     [seon.ai.dispatch :as dispatch]
     [seon.ai.tokens :as tokens]
     [seon.ai.typeahead :as typeahead]
-    [seon.config :as config]))
+    [seon.config :as config]
+    [seon.db :as db]
+    [seon.repl.internal :as repl-internal]))
 
 (defn- tagged-adapter
   "An adapter function tagged by its constructor's identity."
@@ -118,6 +120,52 @@
                                    (str (tokens/estimate ctx) " tokens of ctx"))
                     "the reply reports the canonical token estimate"))))
           (.then (fn [_] (done)))
+          (.catch (fn [error]
+                    (is false (str "threw — " error))
+                    (done)))))))
+
+;; ── generate-plan (the frontier planner) ─────────────────────────────────
+
+(deftest heredoc-wrap-produces-a-parser-readable-code-block
+  ;; The heredoc a worker drops into (my.plan/reconcile! {:my.plan/tree …})
+  ;; must read back through THE parser as a #code/markdown block value.
+  (let [text  "# Plan\n\n1. do a thing with (foo/bar {:x 1})\n2. then close it"
+        h     (dispatch/heredoc-wrap "markdown" text)
+        call  (str "(my.plan/reconcile! {:my.plan/tree\n" h "})")
+        forms (repl-internal/parse-forms call)
+        f     (first forms)
+        es    (:seon.repl/eval-source f)]
+    (is (str/starts-with? h "#code/markdown <<SEON_PLAN\n"))
+    (is (= 1 (count forms)))
+    (is (= :form (:seon.repl/kind f)))
+    (is (str/includes? es ":seon.code/lang :markdown")
+        "the heredoc reads to a #code block tagged markdown")
+    (is (str/includes? es "do a thing with")
+        "the markdown payload survives verbatim into the block text")))
+
+(deftest heredoc-wrap-grows-the-sentinel-off-a-colliding-payload-line
+  ;; A payload line equal to the default sentinel would close the block
+  ;; early; the sentinel must grow until no payload line matches it.
+  (let [h (dispatch/heredoc-wrap "markdown" "SEON_PLAN\nreal content line")]
+    (is (str/starts-with? h "#code/markdown <<SEON_PLAN_X\n"))
+    (is (repl-internal/contains-heredoc-opener? h))))
+
+(deftest generate-plan-refuses-a-non-frontier-provider-with-a-directive-error
+  ;; Errors-as-values: a local-worker provider must not be asked to plan;
+  ;; the message must name the env/config that selects a frontier one.
+  (async done
+    (with-redefs [db/*conn* (atom :fake-db)
+                  ai/resolved-config
+                  (fn [_] {:seon.ai/resolved-config
+                           {:seon.ai/provider :diffusiongemma}})]
+      (-> (dispatch/generate-plan {:seon.ai.dispatch/goal "track a reading list"})
+          (.then (fn [r]
+                   (is (false? (:seon.ai.dispatch/ok? r)))
+                   (is (nil? (:seon.ai.dispatch/plan-heredoc r)))
+                   (is (str/includes? (:seon.ai.dispatch/error r) "FRONTIER"))
+                   (is (str/includes? (:seon.ai.dispatch/error r) "SEON_AI_PROVIDER")
+                       "the error names the env that selects a frontier provider")
+                   (done)))
           (.catch (fn [error]
                     (is false (str "threw — " error))
                     (done)))))))

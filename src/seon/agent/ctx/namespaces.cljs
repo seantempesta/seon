@@ -658,10 +658,22 @@
                          (sort-by :seon.fn/sym))
             reg-lines (map #(compact-schema-line ns-str %) schemas)
             fn-lines  (map #(compact-fn-head ns-str %) fns)
+            ;; The cross-ns schema DEFINITIONS these fns reference (transitive,
+            ;; global — the ns's OWN schemas are already in reg-lines above and
+            ;; excluded). Shared closure lives in seon.agent.ctx (one mechanism).
+            ref-blk   (ctx/referenced-schema-block
+                        {:seon.db/db          db
+                         :seon.agent.ctx/seed-specs (into [] (keep :seon.fn/spec) fns)
+                         :seon.agent.ctx/own-keys   (into #{} (map :seon.schema/key) schemas)})
+            ;; Schema block = own register! lines THEN the referenced ones
+            ;; (contiguous, unlabeled — a register! is self-evidently a schema);
+            ;; one blank line, then the fn heads (the `…` already shows the body
+            ;; is elided — no label). `;;;` ns demarcation stays (structural).
             parts (cond-> []
-                    (seq reg-lines) (into reg-lines)
-                    (and (seq reg-lines) (seq fn-lines)) (conj "" "; fns (body elided):")
-                    (seq fn-lines)  (into fn-lines))
+                    (seq reg-lines)                 (into reg-lines)
+                    ref-blk                         (conj ref-blk)
+                    (and (or (seq reg-lines) ref-blk) (seq fn-lines)) (conj "")
+                    (seq fn-lines)                  (into fn-lines))
             body  (if (seq parts)
                     (str/join "\n" parts)
                     "; (nothing indexed)")]

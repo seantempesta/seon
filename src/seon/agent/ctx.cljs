@@ -63,6 +63,7 @@
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]
+    [malli.core :as m]
     [seon.agent.home :as home]
     [seon.agent.ctx.render-fns :as render-fns]
     [seon.ai.tokens :as tokens]
@@ -1789,6 +1790,125 @@
                  (conj (str/trim source)))]
     (str/join "\n" lines)))
 
+;;; ---------------------------------------------------------------------------
+;;; Referenced-schema closure — the DEFINITIONS behind a namespace's fn specs.
+;;;
+;;; A compact/full ns card shows each public fn's `:malli/schema` and the ns's
+;;; OWN `register!` block, but a spec references registered schemas whose
+;;; definitions live in OTHER namespaces (`:seon.db/ref`, `:seon.ns/name`, a
+;;; `::foo-request` map…). Without those a reader can't tell what an arg IS or
+;;; whether the call is positional vs map-in. These fns compute the TRANSITIVE
+;;; closure of registered schemas a namespace's fns reference — reaching freely
+;;; across namespaces (schemas are ONE global registry; which file a `register!`
+;;; sits in is incidental) — and render their definitions as `(register! …)`
+;;; lines. Shared by BOTH the full renderer ([[render-one-ns-ai]]) and the
+;;; compact card ([[seon.agent.ctx.namespaces/render-one-ns-compact]]).
+;;;
+;;; PURE FUNCTION OF THE DB VALUE (byte-identical train/serve): references are
+;;; detected with malli's own RefSchema walk (`m/-ref-schema?` / `m/-ref`, which
+;;; needs NO registry deref — registration-independent), and definitions are
+;;; resolved from `:seon.schema/source` in the db — NOT the live `*schemas`
+;;; registry. (Malli's native transitive walk, `::m/walk-refs`, resolves refs
+;;; THROUGH the registry to descend; using it would couple the render to live
+;;; registry state. So we use malli only for per-form DIRECT detection and do
+;;; the transitive expansion ourselves over db source strings.)
+;;; ---------------------------------------------------------------------------
+
+(def ^:private referenced-schema-cap
+  ;; Token weight is real (these cards ride every prompt). Bound the closure and
+  ;; say what was capped rather than silently truncate. Measured max closure in
+  ;; the live corpus is ~26; 40 is headroom that essentially never trips.
+  40)
+
+(defn- schema-form-refs
+  "The DIRECT registered-schema references in one Malli form — every qualified
+   keyword in SCHEMA position (not a `:catn`/`:cat` entry LABEL), via malli's own
+   RefSchema walk. Built-ins (`:string`, `:map`, …) are not refs and never
+   match; a bare `[:schema …]` inline (nil ref name) is skipped. No registry
+   deref, so detection holds even for a not-yet-registered ref. Errors-as-values:
+   a foreign/unbuildable form yields `#{}`, never throws into the render."
+  [form]
+  (let [acc (atom #{})]
+    (try
+      (m/walk (m/schema form)
+              (fn [sch _ _ _]
+                (when (m/-ref-schema? sch)
+                  (let [r (m/-ref sch)]
+                    (when (qualified-keyword? r) (swap! acc conj r))))
+                sch))
+      (catch :default _ nil))
+    @acc))
+
+(defn- schema-str-refs
+  "[[schema-form-refs]] over a stored spec/source STRING — the read is guarded
+   too, so an unreadable string degrades to `#{}`."
+  [s]
+  (let [form (try (edn/read-string s) (catch :default _ ::bad))]
+    (if (= form ::bad) #{} (schema-form-refs form))))
+
+(defn- schema-src-in-db
+  "The persisted `:seon.schema/source` for registered key `k`, purely from the
+   db VALUE (`[:seon.schema/key k]` lookup), or nil. Guarded — a missing row or
+   unresolved lookup degrades to nil, never throws."
+  [db k]
+  (when (keyword? k)
+    (try (:seon.schema/source
+           (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.schema/key k]}))
+         (catch :default _ nil))))
+
+(defn- schema-ref-closure
+  "Transitive closure of registered schema keys reachable from `seed`, resolved
+   over the db's `:seon.schema/source`. `own-keys` are TRAVERSED (so their
+   cross-ns children still surface) but never EMITTED — the ns already shows them
+   as its own `register!` block / in its source. Cycle-safe via a `seen` set;
+   bounded at [[referenced-schema-cap]]. Returns
+   `{::closure-keys [<kw>…] ::capped? bool}`, keys sorted."
+  [db seed own-keys]
+  (loop [queue (vec seed), seen #{}, out #{}]
+    (if (or (empty? queue) (>= (count out) referenced-schema-cap))
+      {::closure-keys (vec (sort out))
+       ::capped?      (boolean (and (seq queue) (>= (count out) referenced-schema-cap)))}
+      (let [k     (first queue)
+            queue (subvec queue 1)]
+        (if (contains? seen k)
+          (recur queue seen out)
+          (let [src   (schema-src-in-db db k)
+                child (if src (schema-str-refs src) #{})
+                out'  (if (or (contains? own-keys k) (nil? src)) out (conj out k))]
+            (recur (into queue (remove seen) child) (conj seen k) out')))))))
+
+(schema/register! ::seed-specs [:vector :string])
+(schema/register! ::own-keys   [:set :keyword])
+(schema/register! ::referenced-schema-request
+  [:map
+   [:seon.db/db  :seon.db/db]
+   [::seed-specs ::seed-specs]
+   [::own-keys   ::own-keys]])
+
+(defn referenced-schema-block
+  "The DEFINITIONS behind a namespace's fn specs — the transitive closure of
+   registered schemas its fns reference, INCLUDING cross-namespace ones, as
+   runnable `(register! <key> <form>)` lines. Excludes `::own-keys` (the ns's
+   own schemas, already shown), so nothing renders twice. Pure fn of the db
+   value; malli-native ref detection; cycle-safe; bounded with an explicit cap
+   note. Returns the block string, or nil when the closure is empty.
+
+   Map-in: `{:seon.db/db <db> ::seed-specs [<spec-str>…] ::own-keys #{<kw>…}}`."
+  {:malli/schema [:=> [:cat ::referenced-schema-request] [:maybe :string]]}
+  [{db :seon.db/db seed-specs ::seed-specs own-keys ::own-keys}]
+  (let [seed    (reduce (fn [a s] (into a (schema-str-refs s))) #{} seed-specs)
+        closure (schema-ref-closure db seed own-keys)
+        lines   (mapv (fn [k]
+                        (str "(register! " (pr-str k) " "
+                             (or (schema-src-in-db db k) "<not indexed>") ")"))
+                      (::closure-keys closure))
+        lines   (cond-> lines
+                  (::capped? closure)
+                  (conj (str "; … " referenced-schema-cap "+ referenced schemas"
+                             " — capped; more reachable via the db")))]
+    (when (seq lines)
+      (str/join "\n" lines))))
+
 (defn- schema-block-ai
   "One schema rendered for the :ai form: `[schema :ns/key]  <malli form>`.
    Pulls the live shape from the registry; falls back to the persisted
@@ -1840,7 +1960,8 @@
 
 (defn- render-one-ns-ai
   "Render a single namespace block to text, FULL — `ns-kw` is the namespace
-   keyword; `data` is the `pull-ns-data` result (or nil = not in db).
+   keyword; `data` is the `pull-ns-data` result (or nil = not in db); `db` is
+   the db value (threaded for the referenced-schema closure below).
 
    Every block is delimited by the per-ns `;;; ┌─ namespace X ─` /
    `;;; └─ end namespace X ─` brackets ([[ns-demarc]]) — the runtime-
@@ -1862,13 +1983,19 @@
    is load-bearing for the on-demand `render-namespace` capability the system
    prompt teaches by name: without it, rendering a dropped framework ns (e.g.
    :seon.warn) would yield just `(ns x)`, erasing its whole API."
-  [ns-kw data]
+  [db ns-kw data]
   (if (nil? data)
     (str "; requires: " (name ns-kw) " (not in db)")
     (let [src     (:seon.ns/source data)
           fns     (->> (:seon.fn/_ns data)     (sort-by :seon.fn/sym))
           schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
-          tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))]
+          tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))
+          ;; The cross-ns schema definitions this ns's fns reference (its OWN
+          ;; schemas are already in the source / the per-member schema blocks).
+          ref-blk (referenced-schema-block
+                    {:seon.db/db  db
+                     ::seed-specs (into [] (keep :seon.fn/spec) fns)
+                     ::own-keys   (into #{} (map :seon.schema/key) schemas)})]
       (if (and src (not (str/blank? src))
                (not= (str/trim src) (str "(ns " (name ns-kw) ")")))
         (let [notes (concat
@@ -1883,10 +2010,12 @@
                                (str ": " (clip last-failure-summary 120))))))]
           (ns-demarc ns-kw
                      (str (str/trim src)
+                          (when ref-blk (str "\n\n" ref-blk))
                           (when (seq notes) (str "\n\n" (str/join "\n" notes))))))
         (let [body (cond-> []
                      (seq fns)     (into (map fn-block-ai fns))
                      (seq schemas) (into (map schema-block-ai schemas))
+                     ref-blk       (conj ref-blk)
                      (seq tests)   (into (map test-block-ai tests)))]
           (ns-demarc ns-kw
                      (if (seq body) (str/join "\n\n" body) "; (no recorded source/fns/schemas)")))))))
@@ -2066,7 +2195,7 @@
                    (render-one-ns-html db k (data-by-kw k))))}
           {:seon.render/text
            (str/join "\n\n" (for [k order]
-                              (render-one-ns-ai k (data-by-kw k))))})))))
+                              (render-one-ns-ai db k (data-by-kw k))))})))))
 
 ;; The HTML TWIN of a rendered section (debug-view-section-twins-2026-06-18):
 ;; the dormant `:seon.render/html` slot, resolved through

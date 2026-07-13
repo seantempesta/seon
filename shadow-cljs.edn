@@ -284,6 +284,18 @@
                       :optimizations      :simple
                       :externs            ["externs/node_fs.js"]}}
 
+  ;; Isolated runner for the lora-data-audit (repl-autosuggest lane) — the
+  ;; audit must NOT share a process with the suite's instrument/uninstrument
+  ;; fixtures (stale instrumented? flags make instrument-from-db! skip vars).
+  ;; ns lives at src-needle/audit/seon/needle_lora_audit_test.cljs.
+  :lora-audit
+  {:target    :node-test
+   :output-to "out/lora-audit/test.js"
+   :ns-regexp "needle-lora-audit-test$"
+   :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
+                      :externs            ["externs/node_fs.js"]}}
+
   ;; Build: `clj -M:cljs compile bootstrap`   (or release)
   ;; Output: out/bootstrap/  — index.transit.json + per-ns .js
   :bootstrap

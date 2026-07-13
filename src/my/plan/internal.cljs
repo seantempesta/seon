@@ -442,21 +442,127 @@
   [idx]
   (keyword "my.plan.internal" (str "id-" idx)))
 
-(defn compile-reconcile
-  "Diff document `forest` against `agent`'s open tree → ONE flat tx.
+(defn- candidate-list
+  "Readable `\"id «title»\"` listing of baseline step `ids`, sorted."
+  [baseline ids]
+  (str/join ", " (map (fn [id] (str (pr-str id) " «"
+                                    (:my.plan/title (baseline id)) "»"))
+                      (sort ids))))
 
-   Returns a `:my.plan.internal/*` compiler result carrying transaction data,
-   allocation keys, labels, root id, and the public `:my.plan/diff`; failures
-   carry `:my.plan.internal/error`. Identity rules: a node WITH
-   `:my.plan/id` updates in
-   place (scalars + parent + needs; STATUS is never edited here — active!/
-   done! own it); a node WITHOUT one is minted; a baseline open node absent
-   from the document is dropped (entity retract; its absent descendants
-   drop the same way); a `:done` or foreign id → `:error`. `db` nil ⇒
-   empty baseline — plan!'s authoring path IS reconcile-against-empty.
-   `:after` labels resolve to any node's `:my.plan/ref` (tempid for a
-   minted node, lookup-ref for an existing one)."
-  [db fn-name agent forest ids now]
+(defn resolve-doc-identities
+  "Resolve id-less document entries onto the open steps they re-state.
+
+   The reconcile boundary rule — identity is unforgeable by construction:
+   an edited document that OMITS a step's `:my.plan/id` must never mint a
+   copy over a drop of the original (the id-less-root re-mint hazard).
+   Root rule: exactly one id-less document root + exactly one open root
+   unnamed by the document ⇒ the same root (update-in-place); several
+   unnamed roots ⇒ only an IDENTICAL title picks one; still ambiguous ⇒
+   `::error` naming the candidate ids — refuse, never guess-mint. Child
+   rule (conservative): an id-less node resolves onto an unnamed open
+   child of its own resolved parent ONLY on a one-to-one identical-title
+   match; an ambiguous match ⇒ `::error`; no match ⇒ mint (a genuinely
+   new step). Pure and deterministic over (entries, baseline) — safe to
+   run identically in both compile passes.
+   → `{::entries … ::resolved-root? bool}` or `{::error msg}`."
+  [fn-name entries baseline]
+  (let [doc-ids       (into #{} (keep ::id) entries)
+        entry-title   (fn [e] (:my.plan/title (::node e)))
+        unnamed-roots (into []
+                            (keep (fn [[id row]]
+                                    (when (and (nil? (::parent-id row))
+                                               (not (doc-ids id)))
+                                      id)))
+                            baseline)
+        idless-roots  (into []
+                            (keep-indexed
+                              (fn [i {::keys [id parent-index]}]
+                                (when (and (nil? parent-index) (nil? id)) i)))
+                            entries)
+        root-res
+        (cond
+          (or (empty? idless-roots) (empty? unnamed-roots))
+          {}
+
+          (and (= 1 (count idless-roots)) (= 1 (count unnamed-roots)))
+          {(first idless-roots) (first unnamed-roots)}
+
+          :else
+          (let [by-title (group-by #(:my.plan/title (baseline %)) unnamed-roots)
+                matches  (mapv (fn [i]
+                                 [i (by-title (entry-title (nth entries i)))])
+                               idless-roots)
+                resolved (into {} (keep (fn [[i cs]]
+                                          (when (= 1 (count cs)) [i (first cs)])))
+                               matches)]
+            (if (and (every? (fn [[_ cs]] (< (count cs) 2)) matches)
+                     (= (count resolved) (count (distinct (vals resolved))))
+                     (or (= (count resolved) (count idless-roots))
+                         (= (count resolved) (count unnamed-roots))))
+              resolved
+              {::error (str fn-name ": a document root carries no :my.plan/id "
+                            "while open root(s) "
+                            (candidate-list baseline unnamed-roots)
+                            " are absent from the document — carry the "
+                            ":my.plan/id of the root you are editing; an "
+                            "id-less root resolves only when exactly one open "
+                            "root (or a title-identical one) matches, otherwise "
+                            "it would drop-and-re-mint the original.")})))]
+    (if (::error root-res)
+      root-res
+      (let [entries   (reduce-kv (fn [es i id] (assoc-in es [i ::id] id))
+                                 (vec entries) root-res)
+            ;; Static claimant counts per [parent-index title] over the
+            ;; still-id-less entries — computed BEFORE any child resolves,
+            ;; so two same-title id-less siblings register as the
+            ;; ambiguity they are (never first-come-takes-the-id).
+            claimants (frequencies
+                        (keep (fn [{::keys [id parent-index] :as e}]
+                                (when (and (nil? id) parent-index)
+                                  [parent-index (entry-title e)]))
+                              entries))]
+        (loop [i     0
+               es    entries
+               taken (into doc-ids (vals root-res))]
+          (if (= i (count es))
+            {::entries es ::resolved-root? (boolean (seq root-res))}
+            (let [{::keys [id parent-index] :as e} (nth es i)
+                  pid (when (and (nil? id) parent-index)
+                        (::id (nth es parent-index)))]
+              (if (nil? pid)
+                (recur (inc i) es taken)
+                (let [title (entry-title e)
+                      cands (into []
+                                  (keep (fn [[bid row]]
+                                          (when (and (= pid (::parent-id row))
+                                                     (not (taken bid))
+                                                     (= title (:my.plan/title row)))
+                                            bid)))
+                                  baseline)]
+                  (cond
+                    (empty? cands)
+                    (recur (inc i) es taken)
+
+                    (and (= 1 (count cands))
+                         (= 1 (claimants [parent-index title])))
+                    (recur (inc i)
+                           (assoc-in es [i ::id] (first cands))
+                           (conj taken (first cands)))
+
+                    :else
+                    {::error (str fn-name ": «" title "» carries no "
+                                  ":my.plan/id but matches your open step(s) "
+                                  (candidate-list baseline cands)
+                                  " under the same parent — carry the "
+                                  ":my.plan/id of the step you are editing, or "
+                                  "retitle the new one; minting here would "
+                                  "drop-and-re-mint the original.")}))))))))))
+
+(defn- compile-resolved
+  "The post-resolution compile behind [[compile-reconcile]]: identity-
+   resolved `entries` + the open `baseline` → the flat tx + the receipt
+   fields (`{::error …}` on a bad id / label / needs reference)."
+  [db fn-name agent entries resolved-root? baseline ids now]
   (let [entries  (vec (map-indexed
                         (fn [i e]
                           (if (::id e)
@@ -467,26 +573,15 @@
                                      ::tempid (str "t" i)
                                      ::allocation-key allocation-token
                                      ::new-id (get ids allocation-token)))))
-                        (collect-doc-nodes forest)))
+                        entries))
         target   (fn [{::keys [id tempid]}]
                    (if id [:my.plan/id id] tempid))
         l->t     (into {} (keep (fn [e]
                                   (when (::label e)
                                     [(::label e) (target e)])))
                        entries)
-        doc-ids  (into [] (keep ::id) entries)
-        oe       (when db (agent-eid db agent))
-        baseline (if oe (flatten-open (open-forest db oe)) {})]
+        doc-ids  (into [] (keep ::id) entries)]
     (or
-      (some (fn [{::keys [node]}]
-              (let [t (:my.plan/title node)]
-                (when (or (nil? t) (str/blank? t))
-                  {::error (str fn-name ": blank :my.plan/title refused — every "
-                                "step names itself.")})))
-            entries)
-      (when-let [dup (some (fn [[id n]] (when (< 1 n) id)) (frequencies doc-ids))]
-        {::error (str fn-name ": " (pr-str dup)
-                      " appears twice in the document — one node per step.")})
       (some (fn [{::keys [id]}]
               (when id
                 ;; db is nil only on the plan! path, whose node schema has
@@ -601,17 +696,58 @@
                            (remove (set doc-ids) (keys baseline)))
             root-id  (when-let [e (first entries)]
                        (or (::id e) (::new-id e)))]
-        {::transaction-data (-> (vec news) (into cat updates) (into drops))
-         ::allocation-keys (into [] (keep ::allocation-key) entries)
-         ::labels (into {:root root-id}
-                        (keep (fn [e]
-                                (when (::label e)
-                                  [(::label e) (or (::id e) (::new-id e))])))
-                        entries)
-         ::root-id root-id
-         ::diff {:my.plan/added   (count news)
-                 :my.plan/dropped (count drops)
-                 :my.plan/updated (count updates)}}))))
+        (cond-> {::transaction-data (-> (vec news) (into cat updates) (into drops))
+                 ::allocation-keys (into [] (keep ::allocation-key) entries)
+                 ::labels (into {:root root-id}
+                                (keep (fn [e]
+                                        (when (::label e)
+                                          [(::label e) (or (::id e) (::new-id e))])))
+                                entries)
+                 ::root-id root-id
+                 ::diff {:my.plan/added   (count news)
+                         :my.plan/dropped (count drops)
+                         :my.plan/updated (count updates)}}
+          resolved-root? (assoc ::resolved-root? true))))))
+
+(defn compile-reconcile
+  "Diff document `forest` against `agent`'s open tree → ONE flat tx.
+
+   Returns a `:my.plan.internal/*` compiler result carrying transaction data,
+   allocation keys, labels, root id, the public `:my.plan/diff`, and
+   `::resolved-root?` when an id-less root resolved onto the open root;
+   failures carry `:my.plan.internal/error`. Identity rules: a node WITH
+   `:my.plan/id` updates in
+   place (scalars + parent + needs; STATUS is never edited here — active!/
+   done! own it); a node WITHOUT one first passes
+   [[resolve-doc-identities]] — an unambiguous match onto the open step it
+   re-states updates that step in place, an ambiguous one is an `::error`
+   naming the candidates (never a guess-mint) — and only a genuinely new
+   node is minted; a baseline open node absent
+   from the document is dropped (entity retract; its absent descendants
+   drop the same way); a `:done` or foreign id → `:error`. `db` nil ⇒
+   empty baseline — plan!'s authoring path IS reconcile-against-empty.
+   `:after` labels resolve to any node's `:my.plan/ref` (tempid for a
+   minted node, lookup-ref for an existing one)."
+  [db fn-name agent forest ids now]
+  (let [raw      (collect-doc-nodes forest)
+        oe       (when db (agent-eid db agent))
+        baseline (if oe (flatten-open (open-forest db oe)) {})]
+    (or
+      (some (fn [{::keys [node]}]
+              (let [t (:my.plan/title node)]
+                (when (or (nil? t) (str/blank? t))
+                  {::error (str fn-name ": blank :my.plan/title refused — every "
+                                "step names itself.")})))
+            raw)
+      (when-let [dup (some (fn [[id n]] (when (< 1 n) id))
+                           (frequencies (keep ::id raw)))]
+        {::error (str fn-name ": " (pr-str dup)
+                      " appears twice in the document — one node per step.")})
+      (let [res (resolve-doc-identities fn-name raw baseline)]
+        (if (::error res)
+          res
+          (compile-resolved db fn-name agent (::entries res)
+                            (::resolved-root? res) baseline ids now))))))
 
 (defn compile-plan
   "plan!'s authoring compile — [[compile-reconcile]] with an EMPTY baseline
@@ -744,7 +880,9 @@
    away."
   [id]
   (if (nil? (status-of id))
-    (fail (str "drop!: no step " (pr-str id) "."))
+    (fail (str "drop!: no step " (pr-str id)
+               " — (my.plan/tree {}) lists every step id (drop! deletes the "
+               "step and its whole subtree)."))
     (let [db  @db/*conn*
           ids (distinct (conj (descendant-ids db id) id))
           env (await (db/transact!

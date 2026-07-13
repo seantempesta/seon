@@ -996,6 +996,20 @@ def run_report(_args):
               f"{l.get('gen_tps_median', '—')} | {l.get('peak_mem_gb', '—')} GB | "
               f"{l.get('hit_token_cap', '—')} |")
 
+    # Fair-scored columns (scoring v3, fair_score.py) — shown when the fair
+    # rescore has run for this run's arms.
+    fair_dir = OUTDIR.parent / "fair"
+    fair = [json.loads(p.read_text())
+            for p in sorted(fair_dir.glob("summary-fair-kt3redux-*.json"))]
+    if fair:
+        print("\n## Fair-scored (scoring v3 — see fair_score.py report for all arms)\n")
+        print("| arm | n | L2 gated | L3 fired | L4 useful | FAIR useful | Δ |")
+        print("|---|---|---|---|---|---|---|")
+        for s in fair:
+            print(f"| {s['arm']} | {s['n_clean']} | {s['l2_gated_rows']} | "
+                  f"{s['l3_fired_rate']} | {s['l4_useful_mean']} | "
+                  f"**{s['fair_useful_mean']}** | {s['delta_fair_minus_l4']} |")
+
 
 def main():
     ap = argparse.ArgumentParser()

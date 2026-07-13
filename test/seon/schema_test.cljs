@@ -44,6 +44,39 @@
       (is (str/includes? (ex-message e) "(seon.db/store-inventory)")
           "the error teaches reuse-first: consult the store before registering"))))
 
+(deftest nilable-value-schema-is-refused-with-guidance
+  ;; Live-drive finding 2026-07-13: a Muse agent ran
+  ;; (register! :my.reading/rating [:maybe :int]) and it returned ok — a
+  ;; "false ok". seon bans nilable value schemas (a stored value is never
+  ;; nil; absent = the key is simply omitted). register! now refuses a
+  ;; top-level [:maybe <builtin>] with a guiding :user-input ex-info.
+  (testing "the smell shape — [:maybe :int]"
+    (let [e (try (schema/register! :my.reading/rating [:maybe :int])
+                 nil
+                 (catch :default e e))]
+      (is (some? e) "register! must throw, not register")
+      (is (not (schema/registered? :my.reading/rating))
+          "nothing landed in the registry (throw precedes the swap!)")
+      (is (= :seon.schema/nilable-value-schema
+             (:seon.schema/error (ex-data e))))
+      (is (= :user-input (:seon.error/kind (ex-data e)))
+          "agent-input error kind — surfaced to agents as an error envelope")
+      (is (str/includes? (ex-message e) "(schema/register! :my.reading/rating :int)")
+          "the error GUIDES: names the copy-pasteable base-type registration")
+      (is (str/includes? (ex-message e) "{:optional true}")
+          "the error teaches the fix: mark the FIELD optional, don't store nil")))
+  (testing "a :maybe around a REGISTERED domain type is a nullable fn-slot — allowed"
+    ;; [:maybe ::registered] and [:maybe [:or …]] are deliberate nullable
+    ;; return/arg schemas (e.g. :my.plan/tree-response); only a :maybe around
+    ;; a raw builtin is the mis-modeled-attr case register! rejects.
+    (schema/register! :schematest.slot/base :string)
+    (is (= :schematest.slot/opt
+           (schema/register! :schematest.slot/opt [:maybe :schematest.slot/base])))
+    (unregister! :schematest.slot/opt :schematest.slot/base))
+  (testing "the base type still registers cleanly"
+    (is (= :my.reading/rating (schema/register! :my.reading/rating :int)))
+    (unregister! :my.reading/rating)))
+
 (deftest multi-segment-and-bare-keys-still-register
   (testing "multi-segment data domain"
     (is (= :schematest.workout/date

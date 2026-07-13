@@ -97,6 +97,20 @@
                        (into {}))]
       (when (seq entries) entries))))
 
+;; Id grammar is the system constant (XXX-26########); defined before
+;; collect-calls so per-call id collection can use it.
+(def id-re #"[A-Za-z0-9]{3}-\d{10}")
+
+(defn id-shaped? [s] (boolean (re-matches id-re s)))
+
+(defn collect-string-values
+  "All string leaves in a parsed form tree (reader-based, not textual)."
+  [form]
+  (cond
+    (string? form) [form]
+    (coll? form) (vec (mapcat collect-string-values (seq form)))
+    :else []))
+
 (defn collect-calls
   "All call sites in reading order: [{:sym {:name :ns} :kind k :arg-keys #{...}}]."
   [form]
@@ -110,7 +124,11 @@
                        [{:sym nsym :kind (call-kind nsym)
                          :arg-keys (map-arg-keys form)
                          :arg-entries (map-arg-entries form)
-                         :pos-args (mapv pr-str (rest form))}]))]
+                         :pos-args (mapv pr-str (rest form))
+                         :ids (vec (distinct (filter id-shaped?
+                                                     (collect-string-values form))))
+                         :first-kw (when-let [k (first (filter keyword? (rest form)))]
+                                     (str k))}]))]
           (into (vec self) (mapcat collect-calls (rest form))))))
     (coll? form) (vec (mapcat collect-calls form))
     :else []))
@@ -198,18 +216,6 @@
 
 (def core-names
   (set (map name (keys (ns-publics 'clojure.core)))))
-
-(def id-re #"[A-Za-z0-9]{3}-\d{10}")
-
-(defn id-shaped? [s] (boolean (re-matches id-re s)))
-
-(defn collect-string-values
-  "All string leaves in a parsed form tree (reader-based, not textual)."
-  [form]
-  (cond
-    (string? form) [form]
-    (coll? form) (vec (mapcat collect-string-values (seq form)))
-    :else []))
 
 (defn form-ids [forms]
   (->> forms (mapcat collect-string-values) (filter id-shaped?) set))
@@ -329,10 +335,189 @@
            :spurious-invented (vec (sort (or invented-sp [])))}}))
 
 ;;; ---------------------------------------------------------------------
+;;; Fair scoring (scoring v3) — static layer columns
+;;;
+;;; Emitted as a :fair block ONLY when the input row carries "plan-state"
+;;; (the fair_score.py driver's runs); kt3_redux.py extended calls and the
+;;; legacy array mode are byte-stable.
+;;;
+;;; Layers (docs/prds/repl-autosuggest/research/fair-scoring-2026-07-12.md):
+;;;   L0 parse    — existing :parsed
+;;;   L1 valid    — head grounded ∧ map-arg key names ⊆ the fn's known
+;;;                 request keys (from the index arglists' destructuring)
+;;;   L3 static   — the mechanical prescribed-act accept-set, STATE-GUARDED
+;;;                 against the row's own plan block (next-ready / ▶-active
+;;;                 / open ✉ step ids) + id-grounding. Classes per
+;;;                 TOP-LEVEL call:
+;;;                   accepted  prescribed active!/done!/plan-probe
+;;;                   void      hallucinated head · ungrounded id ·
+;;;                             guard-violating plan mutation · re-register
+;;;                   pending-* register!/transact!/other plan writes whose
+;;;                             verdict needs the staged-world eval (the
+;;;                             driver resolves them from harness results)
+;;;                   neutral   grounded reads/defns/everything else
+;;;   L2 eval     — NOT computed here (the staged-world harness owns it).
+;;; ---------------------------------------------------------------------
+
+(def plan-probe-names #{"document" "tree" "list-open"})
+
+(defn destructure-key-names
+  "Key NAMES bound by one map-destructuring pattern (:keys vectors and
+  renamed `sym :kw` entries; :as/:or ignored)."
+  [m]
+  (reduce-kv (fn [acc k v]
+               (cond
+                 (and (keyword? k) (= "keys" (name k)) (vector? v))
+                 (into acc (map name v))
+                 (and (symbol? k) (keyword? v)) (conj acc (name v))
+                 :else acc))
+             #{} (dissoc m :as :or)))
+
+(defn arglists-key-names
+  "Union of destructured key NAMES across an arglists string, nil when the
+  arglists carry no map pattern (= no key constraint)."
+  [s]
+  (try
+    (let [argvs (e/parse-string (str s) {:all true
+                                         :auto-resolve (fn [k] (if (= :current k) "CURNS" (str k)))})
+          ks (->> argvs
+                  (mapcat (fn [argv] (filter map? argv)))
+                  (map destructure-key-names)
+                  (reduce into #{}))]
+      (when (seq ks) ks))
+    (catch Exception _ nil)))
+
+(defn parse-index-arglists
+  "{qualified-sym-str arglists-str} -> {fn-name {ns-suffix key-name-set}}.
+  Cheshire keywordizes the outer map's keys; both shapes accepted."
+  [m]
+  (reduce-kv (fn [acc k s]
+               (let [sym (if (keyword? k) (subs (str k) 1) (str k))
+                     [ns' n] (str/split sym #"/" 2)]
+                 (if n
+                   (assoc-in acc [n (last (str/split ns' #"\."))]
+                             (arglists-key-names s))
+                   acc)))
+             {} m))
+
+(defn l1-keys-ok?
+  "Map-arg key names ⊆ the fn's known request keys (vacuous when the fn is
+  unknown, has no map pattern, or the call has no map arg)."
+  [call index-args]
+  (let [{n :name ns' :ns} (:sym call)
+        by-suffix (get index-args n)
+        ksets (cond
+                (nil? by-suffix) nil
+                ns' (when (contains? by-suffix ns') [(get by-suffix ns')])
+                :else (vals by-suffix))
+        allowed (let [real (keep identity ksets)]
+                  (when (seq real) (reduce into #{} real)))
+        mkeys (:arg-keys call)]
+    (boolean (or (nil? allowed) (nil? mkeys) (every? allowed mkeys)))))
+
+(defn entry-id
+  "The call's \"id\"-named map-arg value when it is a string, else nil."
+  [call]
+  (when-let [e (get (:arg-entries call) "id")]
+    (let [v (:val e)]
+      (when (and v (str/starts-with? v "\""))
+        (try (read-string v) (catch Exception _ nil))))))
+
+(defn context-registered-attrs
+  "Attr keywords whose register! call is visible in the context text (the
+  echoed history) — the re-register guard's ground truth."
+  [context]
+  (if context
+    (set (map second (re-seq #"register!\s+(:[A-Za-z0-9.+*!_?<>='-]+(?:/[A-Za-z0-9.+*!_?<>='-]+)?)"
+                             context)))
+    #{}))
+
+(defn fair-classify-call
+  "One top-level call's accept-set class under the plan-block state guards."
+  [call plan-state ctx-ids reg-attrs grounded]
+  (let [{n :name ns' :ns} (:sym call)
+        kind (:kind call)
+        ungrounded (vec (remove ctx-ids (:ids call)))
+        id (entry-id call)
+        {:keys [next-ready active-ids msg-open-ids]} plan-state
+        active-set (set active-ids)
+        msg-set (set msg-open-ids)]
+    (cond
+      (= :ns-move kind) {:class "ns-move"}
+      (not grounded) {:class "void" :why "hallucinated-fn"}
+      (seq ungrounded) {:class "void" :why "ungrounded-id"
+                        :ungrounded-ids ungrounded}
+      (and (= ns' "plan") (= n "active!"))
+      (if (and id (empty? active-set)
+               (or (= id next-ready) (contains? msg-set id)))
+        {:class "accepted" :why "prescribed-active"}
+        {:class "void" :why "plan-guard-active"})
+      (and (= ns' "plan") (= n "done!"))
+      (if (and id (contains? active-set id))
+        {:class "accepted" :why "prescribed-done"}
+        {:class "void" :why "plan-guard-done"})
+      (and (= ns' "plan") (plan-probe-names n))
+      (if (seq (:ids call))
+        {:class "accepted" :why "plan-probe"}
+        {:class "neutral"})
+      (and (= ns' "plan") (str/ends-with? n "!"))
+      {:class "pending-plan-write"}
+      (= :register kind)
+      (if (and (:first-kw call) (contains? reg-attrs (:first-kw call)))
+        {:class "void" :why "re-register"}
+        {:class "pending-register"})
+      (= :transact kind) {:class "pending-transact"}
+      :else {:class "neutral"})))
+
+(defn fair-static
+  "The :fair block: per-top-level-form accept-set classes + L1 validity."
+  [p-forms plan-state ctx-ids reg-attrs index-by-name card-names context
+   index-args]
+  (let [own-defs (own-def-names p-forms)
+        tops (map-indexed
+              (fn [i form]
+                (let [call (when (and (seq? form) (symbol? (first form))
+                                      (not= 'quote (first form)))
+                             (first (collect-calls form)))]
+                  {:idx i
+                   :src (let [s (pr-str form)]
+                          (if (> (count s) 120) (subs s 0 120) s))
+                   :call (some? call)
+                   :top-call call}))
+              p-forms)
+        calls (vec
+               (for [{:keys [idx top-call]} tops
+                     :when top-call
+                     :let [grounded (grounded? top-call index-by-name
+                                               card-names context own-defs)
+                           cls (fair-classify-call top-call plan-state ctx-ids
+                                                   reg-attrs grounded)]]
+                 (merge {:form-idx idx
+                         :head (head-str top-call)
+                         :kind (name (:kind top-call))
+                         :l1-known (boolean grounded)
+                         :l1-keys-ok (l1-keys-ok? top-call index-args)}
+                        cls)))
+        subst (remove #(= "ns-move" (:class %)) calls)
+        counts (frequencies (map :class subst))]
+    {:calls calls
+     :forms (mapv #(dissoc % :top-call) tops)
+     :counts {:accepted (get counts "accepted" 0)
+              :void (get counts "void" 0)
+              :neutral (get counts "neutral" 0)
+              :pending (+ (get counts "pending-register" 0)
+                          (get counts "pending-transact" 0)
+                          (get counts "pending-plan-write" 0))}
+     :l1 {:total (count subst)
+          :valid (count (filter #(and (:l1-known %) (:l1-keys-ok %)) subst))
+          :all-valid (every? #(and (:l1-known %) (:l1-keys-ok %)) subst)}}))
+
+;;; ---------------------------------------------------------------------
 ;;; Row scoring
 ;;; ---------------------------------------------------------------------
 
-(defn score-row [{:keys [id target prediction context card-names]} extended? index-by-name]
+(defn score-row [{:keys [id target prediction context card-names plan-state]} extended? index-by-name
+                 index-args]
   (let [pair-fn (if extended? pair-calls-v2 pair-calls)
         tp (parse-forms target)
         pp (parse-forms prediction)
@@ -363,13 +548,26 @@
                               :useful (if (:ok pp) (or (:useful subst) 0.0) 0.0)})
               :kinds kinds
               :target-heads (mapv head-str t-calls)
-              :pred-heads (mapv head-str p-calls)}]
-    (if extended?
-      (assoc base :decomp
-             (decompose t-calls p-calls pairs used index-by-name
-                        (set (or card-names [])) context
-                        (when (:ok tp) (:forms tp))
-                        (if (:ok pp) (:forms pp) [])))
+              :pred-heads (mapv head-str p-calls)}
+        base (if extended?
+               (assoc base :decomp
+                      (decompose t-calls p-calls pairs used index-by-name
+                                 (set (or card-names [])) context
+                                 (when (:ok tp) (:forms tp))
+                                 (if (:ok pp) (:forms pp) [])))
+               base)]
+    (if (and extended? plan-state)
+      (assoc base :fair
+             (if (:ok pp)
+               (fair-static (:forms pp) plan-state
+                            (set (re-seq id-re (or context "")))
+                            (context-registered-attrs context)
+                            index-by-name (set (or card-names [])) context
+                            index-args)
+               {:calls [] :forms []
+                :counts {:accepted 0 :void 0 :neutral 0 :pending 0}
+                :l1 {:total 0 :valid 0 :all-valid true}
+                :parse-fail true}))
       base)))
 
 (defn index-by-name
@@ -385,6 +583,8 @@
 (let [input (json/parse-stream *in* true)
       extended? (map? input)
       rows (if extended? (:rows input) input)
-      idx (when extended? (index-by-name (:index-syms input)))]
-  (json/generate-stream (mapv #(score-row % extended? idx) rows) *out*)
+      idx (when extended? (index-by-name (:index-syms input)))
+      index-args (when extended?
+                   (some-> (:index-arglists input) parse-index-arglists))]
+  (json/generate-stream (mapv #(score-row % extended? idx index-args) rows) *out*)
   (flush))

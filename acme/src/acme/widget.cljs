@@ -13,7 +13,7 @@
    Wire the tile onto an agent with:
      (seon.db/transact!
        {:seon.db/tx-data [{:seon.agent/id \"<id>\"
-                           :seon.render.live-tile/content 'acme.widget/dash}]})"
+                           :seon.render.canvas/content 'acme.widget/dash}]})"
   (:require [acme.helpers :as h]
             [seon.db :as db]))
 
@@ -82,7 +82,7 @@
 (defn broken-tile
   "A DELIBERATELY-broken live tile — it throws when rendered. Wire it onto
    an agent to prove `acme.overrides`' `set!` of
-   `seon.render.live-tile/error-response` is live: instead of seon's stock
+   `seon.render.canvas/error-response` is live: instead of seon's stock
    'Updating this panel…' card, the human sees the calm Acme-branded
    'Acme is preparing this view…' card. This is the override seam exercised
    end to end — extend seon without forking it."

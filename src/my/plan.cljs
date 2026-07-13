@@ -191,6 +191,7 @@
 (schema/register! ::markdown [:string {:min 1}])
 (schema/register! ::added :int)
 (schema/register! ::updated :int)
+(schema/register! ::resolved-root :boolean)  ; id-less root resolved onto the open root
 (schema/register! ::diff
   [:map [::added ::added] [::dropped ::dropped] [::updated ::updated]])
 
@@ -211,11 +212,12 @@
 
 (schema/register! ::reconcile-response
   [:map
-   [::ok?   ::ok?]
-   [::root  {:optional true} ::id]
-   [::ids   {:optional true} ::ids]
-   [::diff  {:optional true} ::diff]
-   [::error {:optional true} ::error]])
+   [::ok?           ::ok?]
+   [::root          {:optional true} ::id]
+   [::ids           {:optional true} ::ids]
+   [::diff          {:optional true} ::diff]
+   [::resolved-root {:optional true} ::resolved-root]
+   [::error         {:optional true} ::error]])
 
 ;; --- The stored entity kind. `{:seon.db/entity true}` DECLARES that rows of
 ;; --- this shape live in the DB (puts the kind in the catalog). Required =
@@ -395,7 +397,8 @@
       nil     (internal/fail (str "active!: no step " (pr-str id)
                                   " — (my.plan/next {}) shows the ready ids."))
       :done   (internal/fail (str "active!: " (pr-str id)
-                                  " is :done — reopen! it first."))
+                                  " is :done — reopen! it first: "
+                                  "(my.plan/reopen! {:my.plan/id " (pr-str id) "})."))
       :active {::ok? true ::id id}
       (let [db     @db/*conn*
             agent  (:db/id (::agent (db/entity db [::id id])))
@@ -438,7 +441,9 @@
   (or
     (internal/check-request-keys "reopen!" request ::id-request)
     (case (internal/status-of id)
-      nil   (internal/fail (str "reopen!: no step " (pr-str id) "."))
+      nil   (internal/fail (str "reopen!: no step " (pr-str id)
+                                " — (my.plan/tree {}) lists every step id; "
+                                "reopen! flips a :done/:blocked step back to :open."))
       :open {::ok? true ::id id}
       (->> (await (db/transact!
                     {:seon.db/tx-data
@@ -456,7 +461,10 @@
   (or
     (internal/check-request-keys "needs!" request ::needs-request)
     (case (internal/status-of id)
-      nil (internal/fail (str "needs!: no step " (pr-str id) "."))
+      nil (internal/fail (str "needs!: no step " (pr-str id)
+                              " — (my.plan/tree {}) lists every step id. needs! "
+                              "adds dependency edges: {:my.plan/id \"<step>\" "
+                              ":my.plan/on [[:my.plan/id \"<dep>\"]]}."))
       (->> (await (db/transact!
                     {:seon.db/tx-data
                      (mapv (fn [ref] [:db/add [::id id] ::needs ref]) on)}))
@@ -472,7 +480,9 @@
   (or
     (internal/check-request-keys "move!" request ::move-request)
     (case (internal/status-of id)
-      nil (internal/fail (str "move!: no step " (pr-str id) "."))
+      nil (internal/fail (str "move!: no step " (pr-str id)
+                              " — (my.plan/tree {}) lists every step id (the step "
+                              "AND its new :my.plan/parent must both exist)."))
       (->> (await (db/transact! {:seon.db/tx-data [{::id id ::parent parent}]}))
            (internal/write-result "move!" id)))))
 
@@ -502,7 +512,12 @@
    `:my.plan/expect`; cosmetic `[ ]`/`[x]` checkboxes and redundant `N.`
    enumerators are stripped — a checked box never closes a step). Identity: a node WITH `:my.plan/id` updates in
    place (title/description/expect/goal/pace/parent/needs — never status:
-   `active!`/`done!` own that); a node WITHOUT one is minted; an open
+   `active!`/`done!` own that); a node WITHOUT one resolves to the open
+   step it re-states when that is unambiguous — an id-less ROOT resolves
+   to your one open root (the receipt says `::resolved-root true`), an
+   id-less child to a title-identical open sibling; an AMBIGUOUS match
+   fails naming the candidate ids (identity is never re-minted by an
+   omitted id) — and only a genuinely new node is minted; an open
    step ABSENT from the document is dropped (`drop!` semantics); `:done`
    steps are immune — absent from the document by construction, and
    submitting one fails. `:ref`/`:after` label deps work as in `plan!`.
@@ -553,8 +568,10 @@
                     error    (::internal/error preview)]
                 (cond
                   error      (internal/fail error)
-                  (empty? tx) {::ok? true ::root root-id ::ids labels
-                               ::diff diff}
+                  (empty? tx) (cond-> {::ok? true ::root root-id ::ids labels
+                                       ::diff diff}
+                                (::internal/resolved-root? preview)
+                                (assoc ::resolved-root true))
                   :else
                   (let [allocation-keys (::internal/allocation-keys preview)
                         env
@@ -588,10 +605,12 @@
                                 (::internal/nodes doc)
                                 (::db.id/ids env) now)
                               preview)]
-                        {::ok? true
-                         ::root (::internal/root-id compiled)
-                         ::ids (::internal/labels compiled)
-                         ::diff (::internal/diff compiled)})
+                        (cond-> {::ok? true
+                                 ::root (::internal/root-id compiled)
+                                 ::ids (::internal/labels compiled)
+                                 ::diff (::internal/diff compiled)}
+                          (::internal/resolved-root? compiled)
+                          (assoc ::resolved-root true)))
                       (internal/fail
                         (str "reconcile!: store failed — "
                              (get-in env [:seon.db/error

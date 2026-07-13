@@ -977,12 +977,14 @@
                          (is (true? ok?))
                          (plan/reconcile! {:my.plan/tree (plan/document {})})))
                 (.then
-                  (fn [{:my.plan/keys [ok? diff]}]
+                  (fn [{:my.plan/keys [ok? diff] :as env}]
                     (is (true? ok?))
                     (is (= {:my.plan/added 0 :my.plan/dropped 0
                             :my.plan/updated 0}
                            diff)
-                        "an unedited document reconciles to ZERO delta — the projection and the diff share one shape"))))))
+                        "an unedited document reconciles to ZERO delta — the projection and the diff share one shape")
+                    (is (not (contains? env :my.plan/resolved-root))
+                        "ids present ⇒ no identity resolution happened"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -1069,6 +1071,205 @@
                                (d/pull @db/*conn* '[*]
                                        [:my.plan/id (get @st "f")])))
                           "history was not mutated"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; --- reconcile! identity resolution — the id-less-root re-mint hazard
+;; --- (three live sightings: W1/W3 planner-worker drives + the 2026-07-12
+;; --- plan-preload pilot). Identity is unforgeable by construction: an
+;; --- edited document that OMITS the root's id must UPDATE the root, never
+;; --- drop-and-re-mint it; ambiguity refuses with the candidate ids.
+
+(deftest reconcile-idless-root-resolves-to-the-single-open-root
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/plan! {:my.plan/title "Ship the tracker"
+                               :my.plan/goal  "a tracker in use"
+                               :my.plan/children
+                               [{:my.plan/title "design the schema"}
+                                {:my.plan/title "store seed rows"}]})
+                  (.then
+                    (fn [{:my.plan/keys [ok? root]}]
+                      (is (true? ok?))
+                      (reset! st {:root root})
+                      ;; the third-sighting shape: an edited document whose
+                      ;; ROOT lost its id while the children keep theirs
+                      (let [[doc-root] (plan/document {})]
+                        (plan/reconcile!
+                          {:my.plan/tree
+                           (-> doc-root
+                               (dissoc :my.plan/id)
+                               (assoc :my.plan/title
+                                      "Ship the tracker (retitled)"))}))))
+                  (.then
+                    (fn [{:my.plan/keys [ok? root resolved-root diff]}]
+                      (let [{orig :root} @st]
+                        (is (true? ok?) "an id-less single root reconciles")
+                        (is (= orig root)
+                            "the receipt's root IS the original — no mint")
+                        (is (true? resolved-root)
+                            "the receipt says the root was resolved")
+                        (is (= {:my.plan/added 0 :my.plan/dropped 0
+                                :my.plan/updated 1}
+                               diff)
+                            "ONE update — nothing minted, nothing dropped")
+                        (is (= "Ship the tracker (retitled)"
+                               (:my.plan/title
+                                 (d/pull @db/*conn* '[*] [:my.plan/id orig])))
+                            "the edit landed ON the original root")
+                        (is (= 1 (count (d/q '[:find ?t :where
+                                               [?t :my.plan/id _]
+                                               (not-join [?t]
+                                                         [?t :my.plan/parent _])]
+                                             @db/*conn*)))
+                            "exactly ONE root exists — no second root minted")))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest reconcile-idless-root-refuses-when-ambiguous
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/plan! {:my.plan/title "tree one"})
+                  (.then (fn [{:my.plan/keys [root]}]
+                           (swap! st assoc :r1 root)
+                           (plan/plan! {:my.plan/title "tree two"})))
+                  (.then (fn [{:my.plan/keys [root]}]
+                           (swap! st assoc :r2 root)
+                           ;; two open roots, an id-less root naming neither —
+                           ;; a guess would silently drop one and mint
+                           (plan/reconcile!
+                             {:my.plan/tree
+                              {:my.plan/title "a third thing"
+                               :my.plan/children [{:my.plan/title "s"}]}})))
+                  (.then
+                    (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                      (let [{:keys [r1 r2]} @st]
+                        (is (false? ok?)
+                            "ambiguous id-less root refused, never guess-minted")
+                        (is (str/includes? error r1)
+                            "the envelope names candidate root one")
+                        (is (str/includes? error r2)
+                            "…and candidate root two")
+                        (is (= #{"tree one" "tree two"}
+                               (into #{}
+                                     (map :my.plan/title)
+                                     (plan/tree {})))
+                            "nothing changed on refusal — both trees intact")))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest reconcile-idless-child-resolves-on-identical-title
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/plan! {:my.plan/title "root"
+                               :my.plan/children
+                               [{:my.plan/title "alpha" :my.plan/ref "a"}
+                                {:my.plan/title "beta"  :my.plan/ref "b"}]})
+                  (.then
+                    (fn [{:my.plan/keys [ok? ids]}]
+                      (is (true? ok?))
+                      (reset! st ids)
+                      ;; alpha re-stated WITHOUT its id, title identical —
+                      ;; resolve and update in place, never drop+re-mint
+                      (let [[doc-root] (plan/document {})
+                            kids (mapv (fn [k]
+                                         (if (= (get ids "a") (:my.plan/id k))
+                                           (-> k
+                                               (dissoc :my.plan/id)
+                                               (assoc :my.plan/description
+                                                      "sharpened"))
+                                           k))
+                                       (:my.plan/_parent doc-root))]
+                        (plan/reconcile!
+                          {:my.plan/tree
+                           (assoc doc-root :my.plan/_parent kids)}))))
+                  (.then
+                    (fn [{:my.plan/keys [ok? diff] :as env}]
+                      (is (true? ok?) "a 1:1 identical-title child resolves")
+                      (is (= {:my.plan/added 0 :my.plan/dropped 0
+                              :my.plan/updated 1}
+                             diff)
+                          "resolved child UPDATES — nothing minted or dropped")
+                      (is (not (contains? env :my.plan/resolved-root))
+                          "the root itself carried its id — no root resolution")
+                      (is (= "sharpened"
+                             (:my.plan/description
+                               (d/pull @db/*conn* '[*]
+                                       [:my.plan/id (get @st "a")])))
+                          "the edit landed ON the original alpha"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest reconcile-idless-child-refuses-on-ambiguous-title
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/plan! {:my.plan/title "root"
+                               :my.plan/children
+                               [{:my.plan/title "alpha" :my.plan/ref "a1"}
+                                {:my.plan/title "alpha" :my.plan/ref "a2"}]})
+                  (.then
+                    (fn [{:my.plan/keys [ok? ids]}]
+                      (is (true? ok?))
+                      (reset! st ids)
+                      ;; ONE id-less «alpha» against TWO open alphas — which
+                      ;; original it re-states is unknowable: refuse
+                      (let [[doc-root] (plan/document {})]
+                        (plan/reconcile!
+                          {:my.plan/tree
+                           (assoc doc-root :my.plan/_parent
+                                  [{:my.plan/title "alpha"}])}))))
+                  (.then
+                    (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                      (is (false? ok?) "an ambiguous title match is refused")
+                      (is (str/includes? error (get @st "a1"))
+                          "the envelope names candidate a1")
+                      (is (str/includes? error (get @st "a2"))
+                          "…and candidate a2")
+                      (is (some? (plan-int/status-of (get @st "a1")))
+                          "nothing dropped on refusal")
+                      (is (some? (plan-int/status-of (get @st "a2")))))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest reconcile-markdown-rehand-keeps-root-identity
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/plan! {:my.plan/title "Ship the tracker"
+                               :my.plan/children
+                               [{:my.plan/title "design the schema"
+                                 :my.plan/ref "d"}]})
+                  (.then
+                    (fn [{:my.plan/keys [ok? root ids]}]
+                      (is (true? ok?))
+                      (reset! st {:root root :d (get ids "d")})
+                      ;; the pilot's exact shape: a markdown re-hand whose
+                      ;; heading root carries no [id], children keep theirs
+                      (plan/reconcile!
+                        {:my.plan/markdown
+                         (str "# Ship the tracker\n"
+                              "- [" (get ids "d") "] design the schema\n"
+                              "- write the tests\n")})))
+                  (.then
+                    (fn [{:my.plan/keys [ok? root resolved-root diff]}]
+                      (let [{orig :root} @st]
+                        (is (true? ok?))
+                        (is (= orig root)
+                            "the markdown re-hand kept the root's identity")
+                        (is (true? resolved-root))
+                        (is (= {:my.plan/added 1 :my.plan/dropped 0
+                                :my.plan/updated 0}
+                               diff)
+                            "only the genuinely new step minted")))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
