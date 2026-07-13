@@ -27,9 +27,13 @@ below). Pre-slice-4 debt unit (2026-07-05) added three properties:
   `:seon.agent.run/default-deadline-ms` (`src/seon/agent/run.cljs:263-270`).
 - **Model-API-only egress (the default):** the task container joins an
   `internal: true` network only; a socat relay sits on both that network and
-  an egress network, carries the network-alias `api.deepseek.com`, and TCP-
-  passthrough-forwards :443 to the REAL endpoint's host-resolved IP (TLS
-  untouched — SNI/cert intact, zero pod config) — nothing else is reachable.
+  an egress network, carries the CONFIGURED model-API host as a network-alias
+  (derived from SEON_AI_BASE_URL — the ACTIVE provider, default
+  `api.deepseek.com`), and TCP-passthrough-forwards :443 to the REAL
+  endpoint's host-resolved IP (TLS untouched — SNI/cert intact, zero pod
+  config) — nothing else is reachable. The pod's provider env
+  ([[model_api_env_names]]) is passed through by name, so the in-container pod
+  reaches whatever model is configured, not a hardcode.
   The relay also forwards the published pod port (an internal-only service
   cannot publish ports itself). `open_egress=True` is the recorded escape
   hatch back to unrestricted egress.
@@ -54,11 +58,13 @@ OFFICIAL scorer's verdict on /testbed.
 from __future__ import annotations
 
 import hashlib
+import os
 import socket as pysocket
 import textwrap
 import time
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 from inspect_ai.solver import Generate, TaskState, solver
 from inspect_ai.util import SandboxEnvironmentSpec
@@ -85,10 +91,63 @@ OVERLAY_VOLUME = "seon-runtime-arm64"
 # mounted file's sha256 is stamped into sample metadata per run.
 ENTRYPOINT_FILE = REPO_ROOT / "docker" / "seon-entrypoint"
 
-# The ONE host the bench container may reach: the model API. Resolved to an
-# IP on the HOST at compose-generation time (the relay must not resolve the
-# name itself — on the internal network the name aliases the relay).
-MODEL_API_HOST = "api.deepseek.com"
+# The shipped-default provider endpoint (mirrors openai_compat.cljs
+# `default-endpoint`) — used only when SEON_AI_BASE_URL is unset.
+DEFAULT_MODEL_API_BASE_URL = "https://api.deepseek.com/v1"
+
+
+def model_api_base_url() -> str:
+    """The ACTIVE provider's base URL — SEON_AI_BASE_URL, else the deepseek default."""
+    return os.environ.get("SEON_AI_BASE_URL") or DEFAULT_MODEL_API_BASE_URL
+
+
+def model_api_host(base_url: str | None = None) -> str:
+    """The ONE host the bench container may reach: the model API, from config.
+
+    Derived from the ACTIVE provider (SEON_AI_BASE_URL, else the deepseek
+    default) so the egress-restricted arm follows whatever model is configured
+    — deepseek, Muse, any openai-compat endpoint — instead of a stale
+    hardcode. This host is BOTH the relay's internal-network alias (so the
+    pod's HTTPS call resolves to the relay) and the forward target
+    ([[resolve_model_api_ip]] resolves it to an IP on the HOST). A loopback
+    endpoint (a LOCAL model server) cannot be reached through this alias/relay
+    mechanism — the caller must use `open_egress=True` for that.
+    """
+    host = urlparse(base_url or model_api_base_url()).hostname
+    if not host:
+        raise ValueError(
+            f"cannot parse a model-API host from SEON_AI_BASE_URL "
+            f"{model_api_base_url()!r}")
+    if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        raise ValueError(
+            f"the egress-restricted swebench arm needs a PUBLIC model API, but "
+            f"SEON_AI_BASE_URL resolves to loopback host {host!r}. Point it at a "
+            f"public provider (deepseek/Muse) or run with open_egress=True.")
+    return host
+
+
+# Env var NAMES the bench pod needs to reach the ACTIVE provider. Passed
+# through by NAME (compose `- NAME` reads the value from the harness process
+# env), so no secret is written into a compose file. `SEON_AI_API_KEY_ENV`
+# names the key var (openai_compat.cljs indirection); DEEPSEEK_API_KEY is the
+# shipped default provider's direct key.
+_MODEL_ENV_NAMES = ("SEON_AI_PROVIDER", "SEON_AI_BASE_URL", "SEON_AI_MODEL",
+                    "SEON_AI_API_KEY_ENV", "SEON_AI_THINKING",
+                    "SEON_AI_EXTRA_BODY")
+
+
+def model_api_env_names() -> list[str]:
+    """The provider env var NAMES to pass through, filtered to those actually set.
+
+    A compose `- NAME` passthrough with no value AND no host-env entry is a
+    hard error, so only present names are emitted. Includes the key var named
+    by SEON_AI_API_KEY_ENV plus the deepseek default key."""
+    names = list(_MODEL_ENV_NAMES)
+    key_env = os.environ.get("SEON_AI_API_KEY_ENV")
+    if key_env:
+        names.append(key_env)
+    names.append("DEEPSEEK_API_KEY")
+    return [n for n in dict.fromkeys(names) if n in os.environ]
 
 # Per-sample published pod ports: deterministic in [PORT_BASE, PORT_BASE+SPAN).
 POD_PORT_BASE = 17900
@@ -132,7 +191,7 @@ def entrypoint_sha256() -> str:
     return hashlib.sha256(ENTRYPOINT_FILE.read_bytes()).hexdigest()
 
 
-def resolve_model_api_ip(host: str = MODEL_API_HOST) -> str:
+def resolve_model_api_ip(host: str | None = None) -> str:
     """Host-resolve the model API to an IP for the relay's forward target.
 
     The relay cannot resolve the NAME itself: on the internal network the
@@ -145,22 +204,23 @@ def resolve_model_api_ip(host: str = MODEL_API_HOST) -> str:
     backgrounded socat dies mid-run, the pod loses egress silently. Accepted
     flake class at concurrency 1 (a lost endpoint surfaces as a model/run
     fault in that one sample's evidence); revisit if it recurs at scale."""
-    return pysocket.gethostbyname(host)
+    return pysocket.gethostbyname(host or model_api_host())
 
 
 # The agent-arm pod env + mounts, shared by both egress stances.
 # SEON_FS_ROOT=/testbed + read-only OFF is the workspace-rooted fs grant
 # (the repo entrypoint honors env overrides; the bind-mount below puts it
-# over the pinned volume's pre-override copy).
-_BENCH_ENV = """\
-    environment:
-      - SEON_BIND=0.0.0.0
-      - SEON_RUNTIME_ROOT=/opt/seon
-      - SEON_SHELL=1
-      - SEON_FS_ROOT=/testbed
-      - SEON_FS_READ_ONLY=0
-      - DEEPSEEK_API_KEY
-"""
+# over the pinned volume's pre-override copy). The ACTIVE provider's env
+# ([[model_api_env_names]]) is passed through by name so the in-container pod
+# talks to whatever model is configured (deepseek, Muse, …), not a hardcode.
+def _bench_env() -> str:
+    fixed = ("      - SEON_BIND=0.0.0.0\n"
+             "      - SEON_RUNTIME_ROOT=/opt/seon\n"
+             "      - SEON_SHELL=1\n"
+             "      - SEON_FS_ROOT=/testbed\n"
+             "      - SEON_FS_READ_ONLY=0\n")
+    provider = "".join(f"      - {n}\n" for n in model_api_env_names())
+    return "    environment:\n" + fixed + provider
 
 
 def _bench_volumes(volume: str) -> str:
@@ -191,7 +251,7 @@ def _external_volume_block(volume: str) -> str:
 
 def _compose_yaml(image: str, *, boot: bool, volume: str,
                   host_port: int | None, open_egress: bool = False,
-                  api_ip: str | None = None) -> str:
+                  api_ip: str | None = None, api_host: str | None = None) -> str:
     """The per-sample compose text (see the module docstring for the shape)."""
     if not boot:
         # Null-run: byte-for-byte the official compose (sleep infinity,
@@ -220,7 +280,7 @@ def _compose_yaml(image: str, *, boot: bool, volume: str,
     if open_egress:
         # The recorded escape hatch: slice-3 shape (unrestricted egress,
         # port published on the task container itself).
-        return (head + _BENCH_ENV
+        return (head + _bench_env()
                 + f"    ports:\n"
                   f"      - \"127.0.0.1:{host_port}:7890\"\n"
                 + _bench_volumes(volume)
@@ -229,8 +289,8 @@ def _compose_yaml(image: str, *, boot: bool, volume: str,
     # the relay carries the API alias + forwards :443 by TCP passthrough to
     # the host-resolved real IP, and forwards the published pod port inward
     # (an internal-only service cannot publish ports itself).
-    assert api_ip is not None
-    return (head + _BENCH_ENV
+    assert api_ip is not None and api_host is not None
+    return (head + _bench_env()
             + "    depends_on:\n"
               "      - relay\n"
               "    networks:\n"
@@ -245,7 +305,7 @@ def _compose_yaml(image: str, *, boot: bool, volume: str,
                     networks:
                       internal:
                         aliases:
-                          - {MODEL_API_HOST}
+                          - {api_host}
                       egress: {{}}
                     ports:
                       - "127.0.0.1:{host_port}:7890"
@@ -274,12 +334,15 @@ def overlay_sandbox_config(*, boot: bool, volume: str = OVERLAY_VOLUME,
         image = sample.metadata["image_name"]
         host_port = sample_port(str(sample.id)) if boot else None
         api_ip = None
+        api_host = None
         if boot:
             sample.metadata["seon_pod_port"] = host_port
             sample.metadata["seon_open_egress"] = open_egress
             sample.metadata["seon_entrypoint_sha"] = entrypoint_sha256()
             if not open_egress:
-                api_ip = resolve_model_api_ip()
+                api_host = model_api_host()
+                api_ip = resolve_model_api_ip(api_host)
+                sample.metadata["seon_model_api_host"] = api_host
                 sample.metadata["seon_model_api_ip"] = api_ip
         COMPOSE_DIR.mkdir(parents=True, exist_ok=True)
         flavour = "seon" if boot else "null"
@@ -287,7 +350,7 @@ def overlay_sandbox_config(*, boot: bool, volume: str = OVERLAY_VOLUME,
         config_file.write_text(
             _compose_yaml(image, boot=boot, volume=volume,
                           host_port=host_port, open_egress=open_egress,
-                          api_ip=api_ip))
+                          api_ip=api_ip, api_host=api_host))
         return SandboxEnvironmentSpec(type=sandbox_type,
                                       config=str(config_file))
 

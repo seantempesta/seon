@@ -12,8 +12,8 @@ from seon_inspect.cluster import parse_wire_json
 from seon_inspect.bench_common import apply_run_bounds, run_bounds_form
 from seon_inspect.swebench_arm import (
     DEFAULT_TURN_LIMIT,
-    MODEL_API_HOST,
     OVERLAY_VOLUME,
+    model_api_host,
     overlay_sandbox_config,
     sample_port,
     task_contract,
@@ -54,8 +54,15 @@ def test_null_compose_is_official_plus_mounts_only(tmp_path, monkeypatch):
 
 def _boot_spec(tmp_path, monkeypatch, s, **kwargs):
     monkeypatch.setattr("seon_inspect.swebench_arm.COMPOSE_DIR", tmp_path)
+    # Hermetic provider env: a PUBLIC endpoint (the egress arm rejects loopback,
+    # so the test-runner's real SEON_AI_BASE_URL — often the local model — must
+    # be overridden) + the key var, so the derived host + passthrough are
+    # deterministic regardless of the shell env.
+    monkeypatch.setenv("SEON_AI_BASE_URL", "https://api.deepseek.com/v1")
+    monkeypatch.setenv("SEON_AI_API_KEY_ENV", "DEEPSEEK_API_KEY")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "presence-only-never-a-value")
     monkeypatch.setattr("seon_inspect.swebench_arm.resolve_model_api_ip",
-                        lambda host=MODEL_API_HOST: "203.0.113.7")
+                        lambda host=None: "203.0.113.7")
     return overlay_sandbox_config(boot=True, **kwargs)("docker", s)
 
 
@@ -95,7 +102,7 @@ def test_boot_compose_default_is_model_api_only_egress(tmp_path, monkeypatch):
     s = _sample()
     text = _spec_text(_boot_spec(tmp_path, monkeypatch, s))
     assert "internal: true" in text
-    assert f"- {MODEL_API_HOST}" in text                     # the alias
+    assert f"- {model_api_host()}" in text                   # the alias (config-derived)
     assert "TCP:203.0.113.7:443" in text                     # host-resolved IP
     assert "TCP:default:7890" in text                        # pod-port forward
     assert s.metadata["seon_open_egress"] is False
@@ -103,6 +110,36 @@ def test_boot_compose_default_is_model_api_only_egress(tmp_path, monkeypatch):
     # the ports block publishes via the relay, not the task container
     default_body = text.split("relay:")[0]
     assert "ports:" not in default_body
+
+
+def test_egress_follows_active_provider_not_a_hardcode(tmp_path, monkeypatch):
+    # Regression (2026-07-13): the arm derives the egress host + credential
+    # passthrough from the ACTIVE provider (SEON_AI_BASE_URL), never a stale
+    # deepseek hardcode. Point it at Muse and both must follow.
+    monkeypatch.setattr("seon_inspect.swebench_arm.COMPOSE_DIR", tmp_path)
+    monkeypatch.setenv("SEON_AI_BASE_URL", "https://api.meta.ai/v1")
+    monkeypatch.setenv("SEON_AI_MODEL", "muse-spark-1.1")
+    monkeypatch.setenv("SEON_AI_API_KEY_ENV", "META_MODEL_API_KEY")
+    monkeypatch.setenv("META_MODEL_API_KEY", "presence-only-never-a-value")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setattr("seon_inspect.swebench_arm.resolve_model_api_ip",
+                        lambda host=None: "203.0.113.9")
+    assert model_api_host() == "api.meta.ai"
+    text = _spec_text(overlay_sandbox_config(boot=True)("docker", _sample()))
+    assert "- api.meta.ai" in text                    # relay alias follows Muse
+    assert "- META_MODEL_API_KEY" in text             # key passthrough (by name)
+    assert "- SEON_AI_MODEL" in text
+    assert "api.deepseek.com" not in text             # no stale hardcode
+    assert "- DEEPSEEK_API_KEY" not in text           # unset ⇒ not passed through
+
+
+def test_egress_arm_rejects_a_loopback_endpoint(monkeypatch):
+    # A LOCAL model server cannot be reached through the alias/relay; the arm
+    # must fail LEGIBLY (not silently forward :443 to loopback), pointing the
+    # caller at open_egress.
+    monkeypatch.setenv("SEON_AI_BASE_URL", "http://127.0.0.1:8081/v1")
+    with pytest.raises(ValueError, match="loopback|open_egress"):
+        model_api_host()
 
 
 def test_boot_compose_open_egress_escape_hatch(tmp_path, monkeypatch):
