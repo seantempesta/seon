@@ -180,6 +180,28 @@ whose per-attribute diagnostics scan the complete EAVT index. Transaction
 reconstruction is explicitly on demand and budgeted because Datahike does not
 currently expose a TX-leading primary index.
 
+The source-grounded access rules are:
+
+- EAVT cursors page entities/facts; AEVT cursors page one attribute's carrier
+  entities; AVET sorts/searches values only when that attribute is indexed.
+- Datahike Datalog offset/limit is not browser pagination because it slices
+  after collecting/deduplicating results. Browser pages use `seek-datoms` or
+  `rseek-datoms` and opaque validated cursors.
+- Non-indexed values are bounded AEVT samples labeled as such; the UI never
+  implies that unsupported value sorting/search is complete.
+- Reverse refs probe the schema's indexed ref attributes lazily. There is no
+  cross-attribute incoming-ref index, so “all incoming refs” never becomes one
+  unbounded wildcard query.
+- Add a general Datahike `count-datoms` API backed by the existing subtree
+  `-count-slice` primitive, with CLJ/CLJS behavioral tests and Seon wrapper.
+  Keep it library-general and upstreamable; do not cache counts as database
+  facts.
+- Transaction IDs page backward arithmetically from the database head and
+  metadata reads by exact EAVT prefix. Exact transaction datoms remain a
+  capped, explicitly opened history reconstruction. If profiling proves that
+  inadequate, add a Datahike-owned transaction-leading index rather than a
+  Seon transaction projection.
+
 ### Operator contract
 
 The owner-selected primary door is:
@@ -443,36 +465,44 @@ or duplicate runtime registry.
    transaction datoms/user/process/instant, and history. Omit unavailable
    sections. Counts/samples that cannot be obtained cheaply are lazy units with
    explicit budgets, not work performed on every transaction.
-6. Give each browser region a stable fully namespaced unit coordinate and
+6. Add the general Datahike `count-datoms` public primitive over its existing
+   subtree count-slice implementation, then expose it only through the
+   fully-specified Seon database API. Use cursor windows—not Datalog
+   offset/limit—for every page. Prove CLJ/CLJS, current/history, indexed and
+   non-indexed edge behavior in the maintained fork and prepare it for upstream.
+7. Give each browser region a stable fully namespaced unit coordinate and
    observed database dependencies. A commit rerenders only the open summary,
-   table, or detail whose read result changed; equivalent tabs compose through
-   the existing cache/fan-out; identical output sends no morph. Pagination and
-   row windows are bounded, and closed details construct no Hiccup or SCI work.
-7. Keep installed-schema and direct attribute-presence queries as the small
+   table, or detail whose read result changed. Attribute pages match changed
+   attrs; entity/reverse-ref pages match the existing changed datoms/entity IDs;
+   immutable past transaction units never rerender. Equivalent tabs compose
+   through the existing cache/fan-out; identical output sends no morph.
+   Pagination and row windows are bounded, and closed details construct no
+   Hiccup or SCI work.
+8. Keep installed-schema and direct attribute-presence queries as the small
    composable agent/domain discovery tools. A later KB surface must be a focused
    domain query through the normal block/render/surface mechanism, not a
    restored global inventory/context block.
-8. Make `seon-skills` the canonical distributable skill source; generate or
+9. Make `seon-skills` the canonical distributable skill source; generate or
    validate tool-facing views mechanically. Delete `ui-live-tiles` and stale
    world/inspector/`my.tile` teaching.
-9. Keep `my.canvas` as the permanent API, make its leaf encodings
+10. Keep `my.canvas` as the permanent API, make its leaf encodings
    browser-portable, and ensure its docstrings/Malli errors make buttons,
    inputs, selects, toggles, forms, state, save, pin, and clear self-explanatory.
-10. Complete stable render-unit membership, runtime database-read observation,
+11. Complete stable render-unit membership, runtime database-read observation,
    changed-result invalidation, bounded compositional caches, and identical
    output suppression in the existing Datastar feed.
-11. Pay only for open/visible work: debug remains an empty shell until opened;
+12. Pay only for open/visible work: debug remains an empty shell until opened;
    offscreen/closed bodies are stubs; hidden source/result/error trees are not
    constructed.
-12. Finish the responsive layout: full-height primary canvas, independent
+13. Finish the responsive layout: full-height primary canvas, independent
    readable right rail, bounded fonts/code, compact plan disclosures,
    transcript bottom anchoring, no visible focused duplicate, and no live-bar
    overlap.
-13. Prove deliberate focus: canvas/domain writes select canvas; an agent reply
+14. Prove deliberate focus: canvas/domain writes select canvas; an agent reply
    selects transcript; human selection stays locally sticky until invalid.
-14. Prove every `my.canvas` control with valid, invalid, rejected, rapid, and
+15. Prove every `my.canvas` control with valid, invalid, rejected, rapid, and
     throwing handlers. Feedback is structured and visible to the agent.
-15. Cold-prove the default cluster, then coordinate the same no-alias cutover in
+16. Cold-prove the default cluster, then coordinate the same no-alias cutover in
     ACME and rebuild/reset it.
 
 Exit proof: one database transaction causes only affected units to render and

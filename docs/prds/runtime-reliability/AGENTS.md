@@ -100,6 +100,10 @@ production alias and paused/advanced process verbs are not primary UX.
   namespace/count scans. Delete the generic inventory family, but keep and port
   `/data`: it becomes the single database browser on the canonical lazy
   render-unit/feed lifecycle with bounded `seon.db.browser` projections.
+- Database-browser pages use EAVT/AEVT/AVET cursors, never Datalog
+  offset/limit. Add a general upstreamable Datahike `count-datoms` API over its
+  existing O(log n) subtree count-slice; keep transaction bodies lazy/capped
+  until a measured need justifies a Datahike-owned transaction-leading index.
 - `my.kb` domain facts and provenance are independent of that inventory. A
   later refined KB may compose purpose-specific database queries without
   restoring a global default context section.
