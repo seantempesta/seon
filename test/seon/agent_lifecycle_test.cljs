@@ -29,8 +29,7 @@
     [seon.agent.run :as run]
     [seon.agent.testrun :as testrun]
     [seon.client :as client]
-    [seon.db :as db]
-    [seon.dev.runtime-id :as runtime-id]))
+    [seon.db :as db]))
 
 (defn- with-conn
   "Open a fresh schema-loaded conn, `set!` it as the ROOT `db/*conn*`
@@ -430,13 +429,17 @@
               (let [birth-t (db/basis-t)
                     resumed (await (agent/resume! {:seon.agent/id id}))]
                 (is (true? (:seon.agent.runtime/resumed? resumed)))
-                (is (some #{id} (runtime-id/hosted))
-                    "resume advertises the durable agent in this process")
+                (is (some #{id}
+                          (:seon.dev.runtime-id/ids
+                           (client/runtime-advertisement)))
+                    "runtime addressing projects the durable agent query")
                 (is (= birth-t (db/basis-t))
                     "compiler/listener reconstruction adds no database facts")
                 (is (= :terminated (await (lifecycle/terminate id))))
-                (is (not (some #{id} (runtime-id/hosted)))
-                    "durable termination removes every process advertisement")))))
+                (is (not (some #{id}
+                               (:seon.dev.runtime-id/ids
+                                (client/runtime-advertisement))))
+                    "termination disappears from the database-derived advertisement")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

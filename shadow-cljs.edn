@@ -1,9 +1,8 @@
 ;; CLJS build config — lives at seon root.
 ;; Builds pull from the :cljs alias in deps.edn for CLJS deps.
 ;;
-;; nREPL pinned to :7889 so editor + bin/mcp-server-cljs can find it
-;; without port discovery. JVM nREPL stays on :7888 (separate process,
-;; seon.runner).
+;; Shadow nREPL is pinned to :7889 so bin/mcp-server-cljs and editors have one
+;; stable CLJS development endpoint.
 {:deps  {:aliases [:cljs]}
 
  :nrepl {:port 7889}
@@ -123,29 +122,6 @@
    :main             seon.client/-main
    :devtools         {:enabled  true
                       :preloads [seon.dev.test-preload seon.demo]}
-   :compiler-options {:warnings-as-errors false
-                      :externs           ["externs/node_fs.js"]}}
-
-  ;; Multi-runtime MCP-eval probe build (go/no-go for "N agents you can
-  ;; REPL into by id"). ONE :node-script build, run as N Node processes →
-  ;; N distinct shadow runtimes under one worker. `:devtools {:enabled true}`
-  ;; (default for :node-script, explicit here) so the watcher injects the
-  ;; websocket client that registers each process as a runtime. Source lives
-  ;; under src/ so it's on the ALREADY-RUNNING watcher's classpath — add +
-  ;; `watch node-agent` with no server restart.
-  ;;
-  ;; MCP probe = (seon.dev.runtime-id/hosted) — the runtime answers with
-  ;; the vector of ids it hosts; the resolver matches by membership
-  ;; (mcp-agent-id-unification PRD 2026-06-10).
-  ;;
-  ;; Build:  clj -M:cljs watch node-agent
-  ;; Run:    node out/node-agent/main.js --agent-id <core-agent-id>
-  ;; Output: out/node-agent/main.js
-  :node-agent
-  {:target           :node-script
-   :output-to        "out/node-agent/main.js"
-   :main             seon.dev.node-agent/-main
-   :devtools         {:enabled true}
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 

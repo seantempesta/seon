@@ -229,9 +229,8 @@
     ;; Local reads plus the sole-writer transaction and feed attachment.
     [seon.db.protocol :as db.protocol]
     [seon.db.replica :as replica]
-    ;; MCP runtime-addressing probe (mcp-agent-id-unification PRD):
-    ;; the pod `host!`s every agent id it resumes/mints/re-arms so
-    ;; `mcp__seon_cljs__eval agent_id=<id>` pins THIS runtime.
+    ;; Pure MCP runtime-addressing values. The pod advertisement below queries
+    ;; its database on demand; there is no second hosted-agent registry.
     [seon.dev.runtime-id :as runtime-id])
   ;; Compile-time enumeration of the build's PUBLIC fns — `core-vars`
   ;; below IS this macro's whole-closure var vector: every public first-party
@@ -248,13 +247,25 @@
          :reload-count 0
          :heartbeat-id nil}))
 
-;; C27: advertise this pod's CLUSTER to the MCP resolver. The probe
-;; `(seon.dev.runtime-id/advertisement)` cluster-qualifies every hosted
-;; id, so `agent_id "default/root"` pins THIS pod deterministically and a
-;; bare "root" across several pods fails loud instead of mis-pinning.
-;; Top level (not -main) so a hot reload arms an already-running pod;
-;; idempotent. `cluster-name` is the ONE derivation (registry C15).
-(runtime-id/cluster! replica/database-name)
+(defn runtime-advertisement
+  "Project this pod's MCP addressable agents directly from its database.
+
+   The cluster coordinate is immutable launch configuration. Agent membership
+   is the same nonterminated, born-agent query used by cold resume. Before the
+   database attaches, the pod still advertises its cluster with no agent ids so
+   an ordinary cluster-pinned REPL can connect during boot."
+  {:malli/schema
+   [:=> [:cat]
+    [:map
+     [:seon.dev.runtime-id/cluster :string]
+     [:seon.dev.runtime-id/ids [:vector :string]]]]}
+  []
+  (runtime-id/advertisement
+   #:seon.dev.runtime-id
+    {:cluster replica/database-name
+     :ids (if (db/attached?)
+            (agent/resumable-agent-ids {:seon.db/db @db/*conn*})
+            [])}))
 
 (defn start-heartbeat!
   "Holds the Node event loop open with a minute-cadence heartbeat. The

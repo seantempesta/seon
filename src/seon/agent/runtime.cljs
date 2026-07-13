@@ -3,7 +3,7 @@
 
    Durable birth belongs to [[seon.agent]]. This namespace owns the inverse
    projection: reconstruct one existing agent's disposable compiler namespace,
-   loop input, message listener, and runtime advertisement from database facts.
+   loop input, and message listener from database facts.
    Resume never allocates identity or re-runs cluster boot work; unhost removes
    every per-agent process handle."
   (:require
@@ -11,7 +11,6 @@
     [seon.agent.loop :as loop]
     [seon.ai.dispatch :as ai.dispatch]
     [seon.db :as db]
-    [seon.dev.runtime-id :as runtime-id]
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.schema :as schema]))
@@ -51,8 +50,8 @@
   "Whether `id` should install its automatic inbound-message listener.
 
    The durable `::wake?` fact defaults to true when the attribute or value is
-   absent. It gates only the listener; a manually driven agent is still fully
-   wired and advertised by [[resume!]]."
+   absent. It gates only the listener; MCP addressability is projected from
+   durable agent facts and does not depend on this process handle."
   {:malli/schema [:=> [:catn [:seon.agent/id :seon.agent/id]] :boolean]}
   [id]
   (let [db-value (some-> db/*conn* deref)]
@@ -69,16 +68,16 @@
   {:malli/schema [:=> [:cat ::unhost-request] ::unhost-response]}
   [{:seon.agent/keys [id]}]
   (loop/uninstall-wake-trigger! {:seon.agent/id id})
-  (runtime-id/unhost! id)
   {:seon.agent/id id ::unhosted? true})
 
 (defn ^:async resume!
   "Reconstruct one existing, nonterminated agent in this process.
 
    The database entity must already exist. The function wires its deterministic
-   home namespace into the shared bootstrap compiler, replaces any stale loop
-   listener/input, and advertises the id. No cluster seed, program replay,
-   global instrumentation, or identity allocation occurs here."
+   home namespace into the shared bootstrap compiler and replaces any stale
+   loop listener/input. No cluster seed, program replay,
+   global instrumentation, identity allocation, or duplicate membership
+   bookkeeping occurs here."
   {:malli/schema [:=> [:cat ::resume-request] ::resume-response]}
   [{:seon.agent/keys [id] ::keys [llm-fn compile-state]}]
   (let [entity (db/entity {:seon.db/ref [:seon.agent/id id]})]
@@ -108,8 +107,7 @@
                   {:seon.agent/id id
                    :seon.agent/llm-fn llm
                    :seon.agent/compile-state cs})
-                (loop/uninstall-wake-trigger! {:seon.agent/id id}))
-              (runtime-id/host! id))))
+                (loop/uninstall-wake-trigger! {:seon.agent/id id})))))
         {:seon.agent/id id
          :seon.agent/ns ns
          ::resumed? true}))))
