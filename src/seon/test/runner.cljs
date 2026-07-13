@@ -107,9 +107,6 @@
      [:seon.error/kind    :seon.error/kind]
      [:seon.error/message :seon.error/message]]]])
 
-(schema/register! ::last-result-response
-  [:maybe ::run-result])
-
 ;; record-run! takes a run result. Conn is optional — falls back on db's
 ;; dynamic *conn*.
 (schema/register! ::record-request
@@ -137,9 +134,10 @@
 ;; seon.client/agent-bootstrap-schema; the Malli shapes here let
 ;; db/transact!'s validation gate accept the tx.
 ;;
-;; NOTE: the FULL event sequence is NOT a DB field. It lives in the
-;; bounded process stash below and the DB carries only the
-;; minimal projection the warnings / recent-evals tiles render.
+;; NOTE: the FULL event sequence is NOT a DB field. It is returned to the
+;; evaluator, which gives the value its ordinary addressable `result/<id>`
+;; symbol. The DB carries only the minimal projection the warnings and
+;; recent-evals surfaces render.
 ;; Per the user's design directive: "only put data in the database
 ;; schema that we want to surface in the agent's context."
 (schema/register! :seon.test/sym [:string {:seon.db/identity true}])
@@ -609,34 +607,6 @@
       {::events events ::summary summary})))
 
 ;; ============================================================
-;; Live details — one bounded process-local store for full recorded results.
-;; Entries are kept oldest-first in recording order. `last-result` reads the
-;; newest entry directly; the store deliberately disappears on restart.
-;; ============================================================
-
-(def ^:private run-stash-cap
-  "Maximum full test-run results retained in this process. The database keeps
-   summaries; this bounded runtime detail store is only for recent drill-down."
-  32)
-
-(defonce ^:private !run-stash
-  ;; Oldest first. Each entry is one complete recorded ::run-result.
-  (atom []))
-
-(defn- remember-recorded-run!
-  "Append one recorded result to the bounded live detail store."
-  [run-result]
-  (try
-    (swap! !run-stash
-           (fn [entries]
-             (let [entries' (conj entries run-result)
-                   excess   (max 0 (- (count entries') run-stash-cap))]
-               (subvec entries' excess))))
-    (catch :default e
-      (error/record! {:seon.error/raw e :seon.error/fault :core})))
-  run-result)
-
-;; ============================================================
 ;; Record — minimal projection to the DB. NEVER transacts events.
 ;; ============================================================
 
@@ -667,8 +637,8 @@
 
 (defn ^:async record-run!
   "Transact the SURFACED projection for each test in `run-result`.
-   Successful recordings append the full result to the bounded process store;
-   `(seon.test.runner/last-result {})` reads its newest live entry directly.
+   The full result is returned to the evaluator and remains addressable through
+   the evaluator's ordinary result symbol; it is not copied into runner state.
 
    Per-var DB fields:
      :seon.test/sym                    — \"agent.ns/my-test\"
@@ -708,13 +678,11 @@
                          ::recorded-syms (if ok?
                                            (recorded-syms run-result)
                                            []))]
-    (when ok?
-      (remember-recorded-run! result'))
     {::run-result result'
      ::tx-report  tx-report}))
 
 (defn ^:async run-and-record!
-  "Run vars, record summary facts, and retain the full live result.
+  "Run vars and record summary facts.
 
    Returns `{::run-result ::tx-report}`. This is the surface the agent's
    eval-batch will typically call after a `(defn …)` that touches a
@@ -725,7 +693,7 @@
     (await (record-run! {::run-result result}))))
 
 ;; ============================================================
-;; Phase 1 universal entrypoints — vars-in-ns, run!, run-ns!, last-result
+;; Phase 1 universal entrypoints — vars-in-ns, run!, run-ns!
 ;; ============================================================
 
 (defn vars-in-ns
@@ -853,20 +821,6 @@
   (await (run! (cond-> {::ns ns ::record? record?}
                  trigger (assoc ::trigger trigger)
                  (::db/conn request) (assoc ::db/conn (::db/conn request))))))
-
-(defn last-result
-  "The most recent live recorded `::run-result`, or nil.
-
-   Scoped to this process. Reads the newest entry directly from the bounded
-   recorded-run store; an empty or restarted process returns nil. Durable
-   per-test summaries remain independently queryable from the database.
-
-   Used by humans at the REPL and by agents reading their own most-
-   recent test outcome. NOT per-agent today — Phase 2+ will key by
-   `:seon.agent/id`."
-  {:malli/schema [:=> [:cat [:map]] ::last-result-response]}
-  [_]
-  (peek @!run-stash))
 
 ;; ============================================================
 ;; Phase 4 (mvp-completion-plan 2026-05-27) — auto-test-on-fn-redef.

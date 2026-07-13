@@ -136,6 +136,9 @@ process verbs are not primary UX.
   Literal upstream `:store` keys remain private inside the third-party adapter.
   `/data` is the single database browser and direct indexed queries are the
   agent discovery path; do not restore a whole-database inventory projection.
+- Full test-run values are owned by the evaluator's ordinary addressable result
+  symbols. The runner persists only queryable per-test outcome facts; do not
+  restore a second atom-backed recent-result history.
 - Database-browser pages use EAVT/AEVT/AVET cursors, never Datalog
   offset/limit. Add a general upstreamable Datahike `count-datoms` API over its
   existing O(log n) subtree count-slice; keep transaction bodies lazy/capped

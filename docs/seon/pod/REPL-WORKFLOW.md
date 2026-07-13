@@ -177,8 +177,8 @@ DATA (not parsed from stdout), use `seon.test.runner`. Same
 ;;        {:type :summary, :test 1, :pass 1, :fail 0, :error 0}]
 ;;     :seon.test.runner/summary {:test 1 :pass 1 :fail 0 :error 0}}
 
-;; Full surface — run + retain the full result in bounded process history +
-;; record the per-test summary facts in the DB. This is the convenience the
+;; Full surface — run and record the per-test summary facts in the DB. This is
+;; the convenience the
 ;; agent's eval-batch uses after a (defn …) that touches a :seon.fn (spec D4).
 (.then (runner/run-and-record! {:seon.test.runner/vars ['cljs.user/mytest]})
        prn)
@@ -188,20 +188,12 @@ DATA (not parsed from stdout), use `seon.test.runner`. Same
 ;;               :seon.test.runner/recorded-syms ["cljs.user/mytest"]}
 ;;             :seon.test.runner/tx-report {:seon.db/ok? true ...}}>
 
-;; The latest full recorded result is process-local and directly available.
-;; It is nil before a recorded run and after a process restart.
-(runner/last-result {})
-;; => {:seon.test.runner/events [...]
-;;     :seon.test.runner/summary {...}
-;;     :seon.test.runner/recorded? true
-;;     :seon.test.runner/recorded-syms ["cljs.user/mytest"]}
-
 ```
 
-**Storage model.** Full recorded results live oldest-first in one bounded
-process-local vector. `last-result` returns its newest entry directly, with no
-DB lookup. The vector is intentionally empty after restart. Each test's durable
-DB row carries only the surfaced projection:
+**Storage model.** The full result is the ordinary return value. In an agent
+eval, the evaluator makes that value addressable through its `result/<id>`
+symbol; the test runner does not copy it into a second history. Each test's
+durable DB row carries only the surfaced projection:
 
 | Attr | Purpose |
 |---|---|
@@ -209,9 +201,8 @@ DB row carries only the surfaced projection:
 | `:seon.test/last-passed-at` / `:last-failed-at` | timestamps |
 | `:seon.test/last-failure-summary` | ≤50-token rendered failure (for the warnings surface) |
 
-Renderers read those durable facts via Datalog. Live drill-down uses
-`(runner/last-result {})`; there is no generated test-run identity or durable
-pointer into process memory.
+Renderers read those durable facts via Datalog. There is no generated test-run
+identity, runner-owned result atom, or durable pointer into process memory.
 
 **Reporter mechanism.** The runner claims the `::runner/capture`
 reporter keyword via per-event `defmethod`s. `cljs.test/test-vars`'

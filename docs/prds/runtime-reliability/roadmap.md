@@ -135,6 +135,11 @@ The writer test process now suppresses only `datahike.writer` error logging:
 expected transaction-conflict cases remain behavioral assertions, while their
 repeated full stack traces no longer dominate a successful focused run.
 
+The test runner's bounded full-result atom and `last-result` API are deleted.
+Full run values already return through the evaluator's addressable result
+symbols; only durable, queryable per-test outcome facts are projected into the
+database. There is no second process-local result-history authority.
+
 The source-grounded system audits are complete and committed:
 
 - [[research/database-runtime-responsiveness-audit-2026-07-13]]

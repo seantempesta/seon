@@ -14,7 +14,6 @@
      - `run!` with `::ns` selector picks up every probe in the probe ns
        AND surfaces the failing probe's fail event in the returned data
      - `run-ns!` records durable per-test summary facts without a session id
-     - `last-result` returns the newest live recorded result without a DB read
      - the async driver awaits the probe body before resolving (verified
        via a side-effect atom that the body mutates from inside setTimeout)
 
@@ -261,52 +260,11 @@
                   (is false (str "threw — " e))
                   (done))))))
 
-;; ============================================================
-;; last-result — direct bounded-process-history read
-;; ============================================================
-
-(deftest last-result-returns-latest-recorded-result-without-a-db-read
-  (async done
-    (let [stash (deref #'r/!run-stash)
-          prior @stash]
-      (reset! stash [])
-      (is (nil? (r/last-result {}))
-          "an empty process history has no last result")
-      (-> (ensure-conn!)
-        (.then (fn [_]
-                 (r/run-and-record!
-                   {:seon.test.runner/vars
-                    '[seon.test.runner-probes/probe-passing-test]})))
-        (.then
-          (fn [recorded]
-            (let [run-result (:seon.test.runner/run-result recorded)
-                  conn       db/*conn*
-                  fetched    (try
-                               ;; Proves `last-result` has no hidden DB query.
-                               (set! db/*conn* nil)
-                               (r/last-result {})
-                               (finally
-                                 (set! db/*conn* conn)))]
-              (is (= run-result fetched)
-                  "last-result returns the newest complete recorded result")
-              (is (true? (:seon.test.runner/recorded? fetched))
-                  "the retained result exposes recording status structurally")
-              (is (vector? (:seon.test.runner/recorded-syms fetched))
-                  "the retained result exposes the recorded test symbols"))))
-        (.finally (fn [] (reset! stash prior)))
-        (.then (fn [_] (done)))
-        (.catch (fn [e]
-                  (is false (str "threw — " e))
-                  (done)))))))
-
 (deftest no-outcome-recording-is-a-structural-no-op
   (async done
-    (let [stash      (deref #'r/!run-stash)
-          prior      @stash
-          run-result {:seon.test.runner/events []
+    (let [run-result {:seon.test.runner/events []
                       :seon.test.runner/summary
                       {:test 0 :pass 0 :fail 0 :error 0}}]
-      (reset! stash [])
       (-> (r/record-run! {:seon.test.runner/run-result run-result})
           (.then
             (fn [recorded]
@@ -321,20 +279,15 @@
                 (is (true? (:seon.db/ok? tx-result))
                     "the no-op recording resolves through the success channel")
                 (is (zero? (:seon.db/tx-count tx-result))
-                    "no outcomes produce no durable transaction datoms")
-                (is (= result (r/last-result {}))
-                    "the complete no-op result still enters live history"))))
-          (.finally (fn [] (reset! stash prior)))
+                    "no outcomes produce no durable transaction datoms"))))
           (.then (fn [_] (done)))
           (.catch (fn [e]
                     (is false (str "threw — " e))
                     (done)))))))
 
-(deftest failed-db-recording-does-not-enter-live-history
+(deftest failed-db-recording-reports-no-recorded-symbols
   (async done
-    (let [stash      (deref #'r/!run-stash)
-          prior      @stash
-          prior-conn db/*conn*
+    (let [prior-conn db/*conn*
           run-result {:seon.test.runner/events
                       [{:type :pass
                         :var 'seon.test.runner-probes/probe-passing-test
@@ -357,43 +310,13 @@
                 (is (false? (:seon.test.runner/recorded? result))
                     "the result reports that durable recording failed")
                 (is (= [] (:seon.test.runner/recorded-syms result))
-                    "no symbols claim to be recorded after a rejected write")
-                (is (= prior @stash)
-                    "failed durable recording does not mutate live history"))))
+                    "no symbols claim to be recorded after a rejected write"))))
           (.finally (fn []
-                      (set! db/*conn* prior-conn)
-                      (reset! stash prior)))
+                      (set! db/*conn* prior-conn)))
           (.then (fn [_] (done)))
           (.catch (fn [e]
                     (is false (str "threw — " e))
                     (done)))))))
-
-(deftest full-run-stash-evicts-oldest-and-retains-newest
-  ;; Full event vectors are process-only drill-down data. Repeated test runs
-  ;; must plateau while preserving the order of the retained tail.
-  (let [stash    (deref #'r/!run-stash)
-        cap      (deref #'r/run-stash-cap)
-        remember (deref #'r/remember-recorded-run!)
-        prior    @stash
-        runs (mapv (fn [n]
-                     {:seon.test.runner/events []
-                      :seon.test.runner/summary
-                      {:test n :pass n :fail 0 :error 0}
-                      :seon.test.runner/recorded? true
-                      :seon.test.runner/recorded-syms []})
-                   (range (inc cap)))]
-    (try
-      (reset! stash [])
-      (doseq [run-result runs]
-        (remember run-result))
-      (is (= cap (count @stash))
-          "the process store plateaus at its item cap")
-      (is (= (subvec runs 1) @stash)
-          "eviction preserves the recorded order of the newest full results")
-      (is (= (peek runs) (r/last-result {}))
-          "last-result reads the newest retained entry directly")
-      (finally
-        (reset! stash prior)))))
 
 (deftest failure-summary-is-clipped-at-the-shared-token-boundary
   (let [summarize (deref #'r/failure-summary)
