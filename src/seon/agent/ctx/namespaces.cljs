@@ -521,13 +521,16 @@
 ;; ============================================================
 
 (defn- abbrev-ns-kws
-  "Rewrite every fully-qualified keyword whose namespace is `ns-str`
-   (`:my.kb/claim`) to its `::`-abbreviated form (`::claim`) in string
-   `s`. A literal prefix replace of `\":<ns>/\"` → `\"::\"`: the trailing
-   `/` means a SIBLING namespace (`:my.kb.source/rating`) is left intact.
-   No regex — the ns dots are literal."
-  [s ns-str]
-  (str/replace s (str ":" ns-str "/") "::"))
+  "NO-OP (2026-07-13): cards render FULLY-QUALIFIED keywords, never `::`.
+   A card is read from the AGENT'S namespace, not the fn's — so a `::` key
+   (which means the agent's OWN ns) is the WRONG keyword for every toolkit
+   key. Models fumbled the old abbreviation into malformed
+   `::seon.db/tx-data` (which the reader parses as an unresolved alias) and
+   every db/schema/canvas call failed. `:seon.db/tx-data` is copy-pasteable
+   and correct from anywhere. `ns-str` retained for the call sites; ignored.
+   (Was: `(str/replace s (str \":\" ns-str \"/\") \"::\")`.)"
+  [s _ns-str]
+  s)
 
 (defn- soft-clip
   "Return `s` unchanged when ≤ `n` chars, else clipped to `n` chars with a
@@ -540,13 +543,12 @@
   "One `(register! <key> <form>)` line for a schema row the ns OWNS.
    `<form>` is the LIVE registry definition ([[seon.schema/schema-definition]]),
    falling back to the persisted `:seon.schema/source`, then a `<not
-   registered>` note — kept VERBATIM (real runnable `register!`), with
-   ns-local keywords abbreviated to `::`. Errors-as-values: a lookup that
-   throws degrades to the source/`<not registered>` fallback."
+   registered>` note — kept VERBATIM (real runnable `register!`), with every
+   keyword FULLY QUALIFIED (schemas are global; a card is read from the
+   agent's ns, so `::` would resolve to the wrong ns). Errors-as-values: a
+   lookup that throws degrades to the source/`<not registered>` fallback."
   [ns-str {:seon.schema/keys [key source]}]
-  (let [key-str (if (= (namespace key) ns-str)
-                  (str "::" (name key))
-                  (pr-str key))
+  (let [key-str (pr-str key)
         def     (when (keyword? key)
                   (try (schema/schema-definition key) (catch :default _ nil)))
         form    (cond
@@ -597,10 +599,11 @@
    `(defn name \"<doc line 1>\" {:malli/schema <spec>} [args] …)` — real
    Clojure. Docstring line 1 is soft-clipped at 78; a fn with no
    docstring omits the string; a fn with no `:malli/schema` omits the
-   metadata map; ns-local keywords in the spec + arglist abbreviate to
-   `::`. Multi-arity specs/arglists pass through unchanged. `ns-str` is
-   the fn's own namespace (drives the `::` abbreviation); the row is the
-   indexed `:seon.fn` map. PUBLIC: the ONE per-fn card renderer — the
+   metadata map; every keyword in the spec + arglist stays FULLY QUALIFIED
+   (copy-pasteable from the agent's own ns — `::` would mean the WRONG ns).
+   Multi-arity specs/arglists pass through unchanged. `ns-str` is the fn's
+   own namespace (retained for call sites; no longer drives abbreviation);
+   the row is the indexed `:seon.fn` map. PUBLIC: the ONE per-fn card renderer — the
    compact ns cards below and the `seon.repl.autocomplete` exporter's
    fn cards both render through it."
   {:malli/schema [:=> [:catn [::ns-str ::ns-str] [::fn-row ::fn-row]] :string]}

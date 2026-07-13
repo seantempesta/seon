@@ -128,6 +128,34 @@
                   "a compact card is smaller than the full render of the same ns"))))
         (.then (fn [_] (done)) (fn [e] (is false (str "threw: " (.-message e))) (done))))))
 
+(deftest compact-card-keeps-keywords-fully-qualified
+  ;; Regression (2026-07-13): `abbrev-ns-kws` rewrote `:my.helper/x` → `::x`
+  ;; in a card. A card is read from the AGENT'S ns, so `::x` resolves to the
+  ;; WRONG ns — models fumbled it into malformed `::seon.db/tx-data` (an
+  ;; unresolved alias) and every db/schema/canvas call failed. A card must
+  ;; show FULLY-QUALIFIED keywords, in BOTH the register! block and fn heads.
+  (async done
+    (-> (with-seeded
+          [{:seon.schema/key    :my.helper/thing
+            :seon.schema/ns     [:seon.ns/name :my.helper]
+            :seon.schema/source "[:map [:my.helper/thing :string]]"}
+           {:seon.fn/sym      "my.helper/use-thing"
+            :seon.fn/ns       [:seon.ns/name :my.helper]
+            :seon.fn/source   "(defn use-thing [x] x)"
+            :seon.fn/fn-var?  true :seon.fn/private? false
+            :seon.fn/arglists "([x])"
+            :seon.fn/spec     "[:=> [:cat :my.helper/thing] :my.helper/thing]"}]
+          (fn [conn]
+            (let [card (nss/render-one-ns-compact
+                         {:seon.ns/name :my.helper :seon.db/db @conn})]
+              (is (str/includes? card ":my.helper/thing")
+                  "keyword rendered FULLY QUALIFIED in the card")
+              (is (not (str/includes? card "::thing"))
+                  "the own-ns keyword is NOT abbreviated to `::`")
+              (is (not (str/includes? card "::"))
+                  "a compact card contains NO `::` abbreviation anywhere"))))
+        (.then (fn [_] (done)) (fn [e] (is false (str "threw: " (.-message e))) (done))))))
+
 (deftest workspace-stub-reflects-configured-requires-not-const
   ;; Turn-0 regression: a FRESH agent (no home-ns source yet) renders the
   ;; workspace stub. Its `(ns … (:require …))` prose must reflect THIS agent's
