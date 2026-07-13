@@ -408,15 +408,27 @@ functions in [[toolkit]]). The derived open-todo count feeds the fingerprint abo
 process starts in a new operating-system session, so closing the invoking
 terminal cannot reap it, and the command returns only after that process's real
 readiness probe succeeds. Pod readiness means its cold-start promise has logged
-completion and its PID plus fundamental HTTP route remain healthy across three
-consecutive observations. An unexpected core-fault marker fails that gate as
-soon as the fault is known, before durable fault recording and the configured
-process exit finish. Port files, REPL-port files, and Unix sockets belong to one
-process lifetime: a fresh spawn removes stale artifacts before waiting and
-refuses to unlink an artifact that is still serving an unregistered live
-process. Thus a reboot cannot turn an old port file into a false-positive boot,
-and an unmanaged listener is reported for inspection/adoption rather than
-silently replaced.
+completion only after database-backed AI/provider configuration has synchronized
+and shared debug/ticker services are installed. Its PID plus fundamental HTTP
+route must then remain healthy across three consecutive observations. An
+unexpected core-fault marker fails that gate as soon as the fault is known,
+before durable fault recording and the configured process exit finish. Port
+files, REPL-port files, and Unix sockets belong to one process lifetime: a fresh
+spawn removes stale artifacts before waiting and refuses to unlink an artifact
+that is still serving an unregistered live process. Thus a reboot cannot turn an
+old port file into a false-positive boot, and an unmanaged listener is reported
+for inspection/adoption rather than silently replaced.
+
+Process ownership is `(pid, operating-system start stamp)`, never a bare PID.
+That identity survives the supervised shell's `exec` into Node/JVM while a
+later reuse of the same PID fails closed and is never signalled. A managed
+launch owns a complete operating-system session: stop sends TERM and, when
+needed, KILL to the process group and does not return until the group is
+drained, so a child from a pre-exec build cannot become a duplicate orphan.
+Atomic owner-PID locks serialize each process, while one lifecycle lock spans
+multi-process restart/reset/nuke transitions from teardown through any durable
+store mutation and final readiness. A second invocation therefore cannot
+reopen the writer while its store is being replaced.
 
 The cluster runtime has one boot entry and a strict durable/runtime split:
 

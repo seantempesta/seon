@@ -8,13 +8,15 @@ tags: [orchestrator, prd, database, flow, agent]
 
 ## Current state
 
-The CLJS pod works end to end, but schema restoration and live rendering still
-contain duplicate or overly broad paths. Warm agent mint is split from cold
-cluster work. Core program add/change/remove now compiles through one desired
-graph and one transaction; the second complete source build and boot-time
-ghost-pruning pass are deleted. A grown-store open feed can still repeatedly
-invoke expensive render/SCI work and produce transient RSS sawtoothing around
-1.4–2.5 GB.
+The CLJS pod works end to end, but schema restoration and the remaining
+debug/data rendering paths still contain duplicate or overly broad work. Warm
+agent mint is split from cold cluster work. Core program add/change/remove now
+compiles through one desired graph and one transaction; the second complete
+source build and boot-time ghost-pruning pass are deleted. The grown-store
+normal agent feed no longer recreates the whole transcript/page on a local
+canvas update: captured patches target the focus marker plus the two canvas
+faces, stay near 3,872 estimated tokens, and return to a stable idle RSS instead
+of the former 1.4–2.5 GB sawtooth.
 
 The core source/live audits, integrated design, ID study, and Datahike
 fork/restore study are complete. The baseline runtime cleanup, exact
@@ -31,15 +33,32 @@ only fresh genesis and convergence. The coordinated storage forks are now
 integrated: Datahike through upstream 0.8.1729 plus the lifecycle/versioning
 fixes, Konserve through upstream 0.9.356 plus legacy cross-runtime header reads,
 and Konserve-sync 0.1.35. The fake Konserve version shim is gone and both fork
-sources are exact submodules. Parent and fresh-cluster acceptance are the active
-gate. The homegrown evaluator is now retired atomically: its CLJS
+sources are exact submodules. Datahike transaction reports now omit redundant
+assertions and absent retracts at the transactor, so listeners receive effective
+changed attributes without a Seon-side filter. Cold runtime readiness also
+awaits database-backed AI/provider synchronization before declaring completion.
+Parent and fresh-cluster acceptance are the active gate. The homegrown evaluator
+is now retired atomically: its CLJS
 driver, predicate language, scenarios, scorecards, gated pseudo-tests, scripts,
 and live docs are deleted. Focused production tests already own its deterministic
 regressions; Datahike itself owns the former multi-group join regression. Inspect
 AI is the sole agent/model evaluation control plane. Its restart/resume planning
 journey is implemented; the schema-backed memory and UI journeys remain explicit
 Inspect work rather than reasons to retain a compatibility harness. The
-authoritative target is
+external supervisor lifecycle is now fenced as well: process instances are
+identified by PID plus OS start stamp, managed process groups drain completely,
+and one atomic lifecycle lock spans restart/reset/nuke through store mutation
+and readiness. Isolated shell coverage exercises idempotent start, descendant
+drain, stale PID reuse, concurrent lifecycle serialization, and nested-lock
+failure cleanup without touching a cluster.
+The pay-for-use web foundation is also live: stable fully namespaced unit
+coordinates compile to opaque tokens and DOM ids without invoking producers;
+one existing gzip-feed registry owns each ephemeral view's catalog and active
+set; and the sole activation door is the reconciled database route
+`GET /view/unit`. Synchronous `seon.db` reads can now be captured as normalized
+immutable observations with no DB/Entity handles. Page cutovers and exact read
+replay/invalidation are the active work; inactive surfaces must remain stubs.
+The authoritative target is
 [[provenance-and-lifecycle-design]] and the ordered implementation/commit plan
 is [[roadmap]].
 

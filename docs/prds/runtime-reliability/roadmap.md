@@ -136,6 +136,16 @@ that could conceal the observed failure.
 Paused JVM UI/MCP, dormant shared UI, and the separately owned ACME-only tile
 remain explicitly deferred rather than gaining another estimator.
 
+The external lifecycle baseline is now mechanically fenced. `bin/seon` records
+the OS start stamp with every managed/adopted PID and refuses to signal a reused
+PID; managed sessions are stopped as complete process groups and confirmed
+drained. An atomic owner-PID lock removes the owner-publication interval, tracks
+nested locks through failure cleanup, and one lifecycle lock spans every process
+mutation—including the complete teardown/store-wipe/restart interval of reset
+and nuke. An isolated shell suite proves idempotent start, descendant drain,
+stale-PID safety, concurrent serialization, and nested-lock cleanup without
+starting or resetting a Seon cluster.
+
 The duplicated eval-result authority is removed in place. A successful eval now
 has one capped `globalThis.result.<id>` value slot shared by the analyzer-emitted
 `result/<id>` symbol and `lookup-result`; eviction removes the value and analyzer
@@ -283,7 +293,10 @@ and structural home-namespace facts commit together; namespace reconstruction
 no longer writes analyzer-derived require edges. Focused proof is green at 50
 tests / 251 assertions, including a one-transaction birth and a resume whose
 database basis does not advance. The production client build completes with
-zero warnings.
+zero warnings. Cold readiness now also awaits database-backed AI/provider
+synchronization before installing the remaining shared services and logging
+runtime completion, closing the first-request race where the HTTP route could be
+live while provider configuration was still in flight.
 
 - Give cluster/runtime boot one owner that opens the connection, reconstructs
   global runtime state, installs services/listeners/ticker/hooks once, recovers
@@ -794,6 +807,16 @@ Commit: shared subscription/batch/router foundation.
 
 ## Phase 11 — stable render units and one Datastar feed
 
+Progress on 2026-07-12: stable unit coordinates, opaque tokens, DOM ids, cheap
+catalogs/stubs, exclusive active-set transitions, and active fingerprints are
+implemented in the existing `seon.web.datastar` namespace. The existing gzip
+feed registry is now keyed by ephemeral view id and owns its catalog, active
+set, and one reconnect-fenced socket; closing the current owner releases the
+whole view. `GET /view/unit` is a reconciled `:seon.route/*` fact, resolves only
+through the trusted open catalog, and returns complete stable-id HTML roots.
+Unknown/closed views and units invoke no producer. Individual page cutovers are
+in progress; no page-specific unit endpoint or second feed registry was added.
+
 - Decompose the global header, roster membership/rows/previews, agent shell,
   each surface pair, focus controller, debug raw/HTML/diagnostic panes, and data
   browser result into stable ID-addressed units.
@@ -817,6 +840,23 @@ DOM; inputs, focus, and transcript scroll anchoring survive morphs.
 Commit: render units/feed unification and duplicate-path deletion.
 
 ## Phase 12 — runtime read observation and exact invalidation
+
+Progress on 2026-07-12: the underlying Datahike transaction report now contains
+only effective changes. Reasserting an existing cardinality-one or
+cardinality-many fact and retracting an absent fact no longer mutates current
+indexes or publishes false changed attributes to listeners; transaction
+functions still see the complete attempted transaction while evaluating. The
+fork is current through upstream 0.8.1729, where this fix was not present, and
+Seon pins the owner patch directly.
+
+The synchronous observation boundary is now implemented at `seon.db` query,
+pull, touched/lazy entity, installed-schema, temporal, and basis reads. An
+unbound read allocates no observation data; nested scopes compose; requests and
+results normalize immutable instants, UUIDs, bigints, bytes, and collections;
+DB handles and lazy entities never escape. Foreign, lazy, temporal, and opaque
+reads are conservatively non-replayable. Semantic replay/result comparison and
+unit subscription indexes are the next step; no speculative result cache has
+been introduced ahead of that correctness boundary.
 
 - Add a synchronous observer at every `seon.db` read boundary with no
   meaningful overhead when unbound.
