@@ -444,7 +444,7 @@
                            (is (string? root))
                            (is (= #{:root "a" "b" "syn"} (set (keys ids)))
                                "label→id map returned for the root + each :ref node")
-                           (let [sub  (plan/tree {:my.plan/root? root})
+                           (let [sub  (plan/tree {:my.plan/root root})
                                  kids (:my.plan/_parent sub)
                                  syn  (some #(when (= (get ids "syn") (:my.plan/id %)) %) kids)]
                              (is (= 3 (count kids)) "plan! linked 3 children under root in one tx")
@@ -569,20 +569,20 @@
                   (.then (fn [{lf :my.plan/id}]
                            (swap! st assoc :leaf lf)
                            (is (= 1 (count (:my.plan/_parent
-                                             (plan/tree {:my.plan/root? (:p1 @st)}))))
+                                             (plan/tree {:my.plan/root (:p1 @st)}))))
                                "leaf starts under plan A")
                            (is (nil? (:my.plan/_parent
-                                       (plan/tree {:my.plan/root? (:p2 @st)})))
+                                       (plan/tree {:my.plan/root (:p2 @st)})))
                                "plan B starts childless")
                            (plan/move! {:my.plan/id lf
                                         :my.plan/parent [:my.plan/id (:p2 @st)]})))
                   (.then (fn [{ok? :my.plan/ok?}]
                            (is (true? ok?))
                            (is (nil? (:my.plan/_parent
-                                       (plan/tree {:my.plan/root? (:p1 @st)})))
+                                       (plan/tree {:my.plan/root (:p1 @st)})))
                                "move! retracted the old parent edge — plan A now childless")
                            (is (= 1 (count (:my.plan/_parent
-                                             (plan/tree {:my.plan/root? (:p2 @st)}))))
+                                             (plan/tree {:my.plan/root (:p2 @st)}))))
                                "move! re-parented the leaf under plan B"))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
@@ -906,7 +906,7 @@
                     (is (= {:my.plan/added 3 :my.plan/dropped 0 :my.plan/updated 0}
                            diff)
                         "diff counts the 3 minted nodes, nothing else")
-                    (let [sub  (plan/tree {:my.plan/root? root})
+                    (let [sub  (plan/tree {:my.plan/root root})
                           kids (:my.plan/_parent sub)
                           rows (some #(when (= (get ids "rows") (:my.plan/id %)) %)
                                      kids)]
@@ -974,7 +974,7 @@
                              diff)
                           "one delta: a updated, b dropped, c minted")
                       (let [{:keys [root a b]} @st
-                            sub  (plan/tree {:my.plan/root? root})
+                            sub  (plan/tree {:my.plan/root root})
                             kids (:my.plan/_parent sub)
                             a*   (some #(when (= a (:my.plan/id %)) %) kids)]
                         (is (= 2 (count kids)) "root has a + the minted child")
@@ -1048,7 +1048,7 @@
                     (is (true? ok?))
                     (is (= 5 (:my.plan/added diff))
                         "root + 3 steps + 1 nested substep minted")
-                    (let [sub   (plan/tree {:my.plan/root? root})
+                    (let [sub   (plan/tree {:my.plan/root root})
                           kids  (:my.plan/_parent sub)
                           k     (fn [t] (some #(when (str/starts-with?
                                                        (:my.plan/title %) t) %)
@@ -1086,7 +1086,7 @@
                     (is (true? ok?) "a flat numbered list is a valid document")
                     (is (= 4 (:my.plan/added diff))
                         "a synthesized root + the 3 steps")
-                    (let [sub (plan/tree {:my.plan/root? root})]
+                    (let [sub (plan/tree {:my.plan/root root})]
                       (is (= "recall beats re-derivation" (:my.plan/title sub))
                           "no heading → the goal line titles the root")
                       (is (= 3 (count (:my.plan/_parent sub))))
