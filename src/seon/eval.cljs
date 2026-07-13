@@ -91,8 +91,8 @@
 ;; ============================================================
 
 ;; Per-form wall-clock timeout in milliseconds. Default 10000.
-;; Replace via [[set-timeout-ms!]] (persistent) or [[budget]] (one-shot
-;; override that agents call from inside a form).
+;; Replace via [[set-timeout-ms!]] (persistent) or [[budget]] (an explicit
+;; per-value override that agents call from inside a form).
 (defonce !timeout-ms (atom 10000))
 
 (defn set-timeout-ms!
@@ -101,10 +101,7 @@
   [ms]
   (reset! !timeout-ms ms))
 
-;; Side-channel: when set, applies to exactly the next auto-await
-;; in `maybe-await-value` (then resets to nil so it doesn't leak to
-;; subsequent forms). Agents set this via [[budget]].
-(defonce ^:private !next-budget-ms (atom nil))
+(deftype ^:private Budgeted [ms value])
 
 (defn budget
   "Override the auto-await wall-clock timeout for a slow form.
@@ -119,9 +116,11 @@
      ;; give this form 60 seconds
      (seon.eval/budget 60000 (some-fs-walk \"/Users/me/dir\"))
 
-   `inner` is returned unchanged; `ms` is recorded as a one-shot hint
-   that `eval-batch!`'s auto-await reads after the form returns,
-   consumes once, and resets. Pattern:
+   Returns an explicit runtime wrapper carrying `inner` and `ms` together.
+   `eval-batch!` consumes that wrapper before recording or displaying the
+   value, so agents still see only the resolved data. Keeping the deadline
+   attached to its value prevents overlapping agent evals from consuming one
+   another's budgets. Pattern:
 
    ;; turn 1 — budget applies only to THIS form
    (seon.eval/budget 60000 (slow-async-op))
@@ -129,12 +128,15 @@
    ;; turn 2 — uses the default 10s again
    (regular-op)"
   ;; `inner` + the return are `:any` on purpose: `inner` is the agent form's
-  ;; already-evaluated value (a Promise / any runtime value), returned
-  ;; unchanged — a runtime-value boundary. Only `ms` carries a data contract.
+  ;; already-evaluated value (a Promise / any runtime value), carried in an
+  ;; opaque runtime wrapper. Only `ms` carries a data contract.
   {:malli/schema [:=> [:catn [::ms :int] [::inner :any]] :any]}
   [ms inner]
-  (reset! !next-budget-ms ms)
-  inner)
+  ;; An outer budget replaces an inner budget instead of nesting wrappers.
+  ;; The value at the eval boundary therefore has exactly one deadline.
+  (if (instance? Budgeted inner)
+    (->Budgeted ms (.-value inner))
+    (->Budgeted ms inner)))
 
 ;; ============================================================
 ;; Deferred — explicit opt-out of auto-await. `(seon.eval/defer expr)`
@@ -169,9 +171,13 @@
   ;; runtime-value boundary, same as `budget`'s `inner`.
   {:malli/schema [:=> [:catn [::value :any]] :any]}
   [v]
-  (if (instance? js/Promise v)
-    (->Deferred v)
-    v))
+  ;; Preserve composition with `(defer (budget ms promise))`: before budgets
+  ;; were explicit wrappers, `defer` saw that same raw Promise and opted out of
+  ;; awaiting it. A budget has no meaning once the caller explicitly defers.
+  (let [v (if (instance? Budgeted v) (.-value v) v)]
+    (if (instance? js/Promise v)
+      (->Deferred v)
+      v)))
 
 (defn- pending-placeholder
   "The clean DATA value recorded + displayed for a form whose Promise is
@@ -1607,7 +1613,7 @@
    CLJS-1.12.145 syntax they don't see. This makes calls to seon.db/*
    feel synchronous from inside agent forms.
 
-   Bounded by `@!timeout-ms` (default) OR the one-shot override left by
+   Bounded by `@!timeout-ms` (default) OR the explicit wrapper returned by
    [[budget]]. A Promise that exceeds the bound is NOT dropped: it is
    handed back as `::pending-promise` so the caller binds the live handle at
    `result/<id>` (re-reference auto-resolves it later). A `(defer …)`
@@ -1619,45 +1625,38 @@
                                           carry the still-running Promise to
                                           result/<id>;
            {::ok? false :seon/error <seon.error/->map>} on rejection."
-  [v]
-  (cond
-    ;; Explicit opt-out: `(defer expr)` wrapped the Promise. Don't await —
-    ;; hand the raw Promise back as a pending handle. Consume any one-shot
-    ;; budget so it doesn't leak into the NEXT form's auto-await.
-    (instance? Deferred v)
-    (do (reset! !next-budget-ms nil)
-        {::ok? false ::pending-promise (.-promise v)})
+  [runtime-value]
+  (let [budgeted? (instance? Budgeted runtime-value)
+        v         (if budgeted? (.-value runtime-value) runtime-value)
+        ms        (if budgeted? (.-ms runtime-value) @!timeout-ms)]
+    (cond
+      ;; Explicit opt-out: `(defer expr)` wrapped the Promise. Don't await —
+      ;; hand the raw Promise back as a pending handle.
+      (instance? Deferred v)
+      {::ok? false ::pending-promise (.-promise v)}
 
-    (instance? js/Promise v)
-    (try
-      (let [override (let [m @!next-budget-ms]
-                       (reset! !next-budget-ms nil)
-                       m)
-            ms       (or override @!timeout-ms)
-            raced    (await (race-timeout v ms))]
-        (if (identical? raced timeout-sentinel)
-          ;; Auto-await timed out. The Promise keeps running (no JS
-          ;; preemption); carry the live handle back as `::pending-promise` so the
-          ;; caller binds it at result/<id> for a later re-reference —
-          ;; never drop it (the agent would have no way to recover it).
-          {::ok? false ::pending-promise v}
-          {::ok? true ::value raced}))
-      (catch :default e
-        ;; The awaited value came from the AGENT form's async execution, so
-        ;; a rejection is agent-fault by default (wrapper-fault refines a
-        ;; propagated core-function violation back to :core). recorded? skips
-        ;; the datom when an instrumented ^:async function's wrapper .catch
-        ;; already recorded this same rejection. Return contract unchanged.
-        (when-not (error/recorded? e)
-          (error/record! {:seon.error/raw   e
-                          :seon.error/fault (instrument/wrapper-fault e :agent)}))
-        {::ok? false :seon/error (error/->map e)}))
+      (instance? js/Promise v)
+      (try
+        (let [raced (await (race-timeout v ms))]
+          (if (identical? raced timeout-sentinel)
+            ;; Auto-await timed out. The Promise keeps running (no JS
+            ;; preemption); carry the live handle back as `::pending-promise` so the
+            ;; caller binds it at result/<id> for a later re-reference —
+            ;; never drop it (the agent would have no way to recover it).
+            {::ok? false ::pending-promise v}
+            {::ok? true ::value raced}))
+        (catch :default e
+          ;; The awaited value came from the AGENT form's async execution, so
+          ;; a rejection is agent-fault by default (wrapper-fault refines a
+          ;; propagated core-function violation back to :core). recorded? skips
+          ;; the datom when an instrumented ^:async function's wrapper .catch
+          ;; already recorded this same rejection. Return contract unchanged.
+          (when-not (error/recorded? e)
+            (error/record! {:seon.error/raw   e
+                            :seon.error/fault (instrument/wrapper-fault e :agent)}))
+          {::ok? false :seon/error (error/->map e)}))
 
-    :else
-    (do
-      ;; Even for non-Promise values, consume any pending budget so it
-      ;; doesn't leak into the NEXT form's auto-await.
-      (reset! !next-budget-ms nil)
+      :else
       {::ok? true ::value v})))
 
 ;; ============================================================

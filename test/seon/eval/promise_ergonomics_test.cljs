@@ -87,9 +87,117 @@
 (deftest defer-wraps-promise-passes-non-promise
   (is (instance? seval/Deferred (seval/defer (js/Promise.resolve 1)))
       "a Promise becomes a Deferred handle")
+  (is (instance? seval/Deferred
+                 (seval/defer (seval/budget 25 (js/Promise.resolve 1))))
+      "defer still opts out when composed outside budget")
   (is (= 42 (seval/defer 42))
       "a non-Promise is returned unchanged — nothing to defer")
   (is (= [:plain :data] (seval/defer [:plain :data]))))
+
+(deftest defer-wins-in-either-budget-composition-order
+  (async done
+    (let [budget-outside-p (js/Promise. (fn [_ _]))
+          defer-outside-p  (js/Promise. (fn [_ _]))
+          values           [(seval/budget 25 (seval/defer budget-outside-p))
+                            (seval/defer (seval/budget 25 defer-outside-p))]]
+      (-> (js/Promise.all
+            (clj->js (mapv (fn [v] (#'seval/maybe-await-value v)) values)))
+          (.then
+            (fn [results]
+              (let [[budget-outside defer-outside] (array-seq results)]
+                (is (false? (::seval/ok? budget-outside)))
+                (is (identical? budget-outside-p
+                                (::seval/pending-promise budget-outside))
+                    "(budget ms (defer p)) preserves the exact handle")
+                (is (false? (::seval/ok? defer-outside)))
+                (is (identical? defer-outside-p
+                                (::seval/pending-promise defer-outside))
+                    "(defer (budget ms p)) preserves the exact handle"))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e]
+                    (is false (str "threw — " e))
+                    (done)))))))
+
+;; ---------------------------------------------------------------------------
+;; budget ownership — the deadline travels with the returned value. Two agent
+;; fibers may return budgeted Promises before either auto-await starts; neither
+;; consumption order may steal or clear the other value's deadline.
+;; ---------------------------------------------------------------------------
+
+(defn- delayed-value [ms value]
+  (js/Promise.
+    (fn [resolve _]
+      (js/setTimeout (fn [] (resolve value)) ms))))
+
+(defn- interleaved-budget-results
+  "Return both auto-await envelopes after consuming the two already-created
+   budgeted values in `order`. The Promises overlap in either order."
+  [order]
+  (let [short-p  (delayed-value 80 :short-finished)
+        long-p   (delayed-value 80 :long-finished)
+        values   {::short (seval/budget 10 short-p)
+                  ::long  (seval/budget 250 long-p)}
+        promises (mapv (fn [k]
+                         (#'seval/maybe-await-value (get values k)))
+                       order)]
+    (-> (js/Promise.all (clj->js promises))
+        (.then (fn [results]
+                 {::short-p short-p
+                  ::results (zipmap order (array-seq results))})))))
+
+(deftest budget-is-value-local-under-both-consumption-orders
+  (async done
+    (letfn [(assert-order! [order]
+              (-> (interleaved-budget-results order)
+                  (.then
+                    (fn [env]
+                      (let [results      (::results env)
+                            short-result (::short results)
+                            long-result  (::long results)]
+                        (is (false? (::seval/ok? short-result))
+                            (str order " keeps the short deadline"))
+                        (is (identical? (::short-p env)
+                                        (::seval/pending-promise short-result))
+                            (str order " returns the exact timed-out handle"))
+                        (is (= {::seval/ok? true
+                                ::seval/value :long-finished}
+                               long-result)
+                            (str order " keeps the long deadline")))))))]
+      (-> (assert-order! [::short ::long])
+          (.then (fn [_] (assert-order! [::long ::short])))
+          (.then (fn [_] (done)))
+          (.catch (fn [e]
+                    (is false (str "threw — " e))
+                    (done)))))))
+
+(deftest budgeted-top-level-values-resolve-or-reject-as-data
+  (async done
+    (-> (with-conn
+          (fn []
+            (-> (run-batch "pe-budget-ok" "turnprom-budget-ok"
+                  "(seon.eval/budget 250 (js/Promise.resolve {:budget/value 42}))")
+                (.then
+                  (fn [resolved]
+                    (is (= 1 (:seon.eval/n-ok resolved))
+                        "a fast budgeted Promise remains an ordinary successful form")
+                    (let [resolved-row (row (first (:seon.eval/ids resolved)))]
+                      (is (true? (:seon.eval/ok? resolved-row)))
+                      (is (str/includes? (:seon.eval/result-edn resolved-row)
+                                         ":budget/value")
+                          "the runtime wrapper is removed before recording"))
+                    (run-batch "pe-budget-reject" "turnprom-budget-reject"
+                      "(seon.eval/budget 250 (js/Promise.reject (js/Error. \"budget rejection fixture\")))")))
+                (.then
+                  (fn [rejected]
+                    (is (= 1 (:seon.eval/n-fail rejected))
+                        "a budgeted rejection remains an error value, never an escaped rejection")
+                    (let [rejected-row (row (first (:seon.eval/ids rejected)))]
+                      (is (false? (:seon.eval/ok? rejected-row)))
+                      (is (string? (:seon.eval/error rejected-row)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e]
+                  (is false (str "threw — " e))
+                  (done))))))
 
 ;; ---------------------------------------------------------------------------
 ;; defer e2e — the form does NOT block; it records the placeholder and stores
@@ -132,7 +240,7 @@
 ;; ---------------------------------------------------------------------------
 ;; timeout e2e — a Promise that exceeds the per-form auto-await budget records
 ;; a placeholder + stores the handle (same downstream as defer); re-reference
-;; resolves it. The one-shot `(budget …)` sets the bound INSIDE the form.
+;; resolves it. The `(budget …)` wrapper carries the bound with THIS form.
 ;; ---------------------------------------------------------------------------
 
 (deftest timed-out-promise-stores-handle-and-re-reference-resolves
