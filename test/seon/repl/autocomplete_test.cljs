@@ -7,7 +7,7 @@
         turn's eval, not the turn's own), and fits the ~700-token budget.
      2. EXPORT ROW SHAPE — `export!` writes one JSONL row per ok-eval
         turn: context/cards/target/meta, target = the turn's ok sources
-        in order, meta carries turn-id/agent/basis-t/store/projection-sha.
+        in order, meta carries turn-id/agent/basis-t/database/projection-sha.
      3. CURATION — `rate!` upserts `::rating` onto a real turn (an unknown
         id is refused as a value); `:excluded` turns drop out of the
         export; a rating rides the row's meta.

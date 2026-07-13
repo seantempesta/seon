@@ -310,8 +310,8 @@
                                        #js {:stdio #js ["ignore" "pipe" "ignore"]})))
        (catch :default _ "unknown")))
 
-(defn- store-name
-  "This cluster's store name — the basename of `SEON_CLUSTER_DIR`
+(defn- database-name
+  "This cluster's database name — the basename of `SEON_CLUSTER_DIR`
    (\"default\" when unset)."
   []
   (let [dir (config/env-string "SEON_CLUSTER_DIR")]
@@ -320,12 +320,12 @@
 (defn- row-json
   "ONE JSONL line for a mined turn — the design.md row shape
    (`context`/`cards`/`target`/`meta`), JSON-stringified."
-  [{::keys [context-text cards target turn-id agent-id basis-t store sha
+  [{::keys [context-text cards target turn-id agent-id basis-t database sha
             rating coverage]}]
   (let [meta (js-obj "turn-id" turn-id
                      "agent" agent-id
                      "basis-t" basis-t
-                     "store" store
+                     "database" database
                      "projection-sha" sha
                      "coverage" coverage)]
     (when rating (aset meta "rating" (name rating)))
@@ -388,10 +388,10 @@
      cards   — compact fn cards for the fns the target CALLS (direct +
                home-alias + refer resolution) plus `::distractors`
                (default 3) deterministic distractor cards
-     meta    — turn-id, agent, basis-t, store, projection-sha (git HEAD
+     meta    — turn-id, agent, basis-t, database, projection-sha (git HEAD
                unless `::projection-sha` is passed), rating when present
 
-   Writes `::out-path` (default `data/tune/<store>-<yyyy-mm-dd>.jsonl`,
+   Writes `::out-path` (default `data/tune/<database>-<yyyy-mm-dd>.jsonl`,
    one JSON object per line) via node fs and returns honest counters —
    never throws; a failure comes back as `{::ok? false ::error …}`."
   {:malli/schema [:=> [:cat ::export-request] ::export-response]}
@@ -400,9 +400,9 @@
     (let [db    (or db @db/*conn*)
           sha   (or projection-sha (git-head-sha))
           k     (or distractors 3)
-          store (store-name)
+          database (database-name)
           out   (or out-path
-                    (str "data/tune/" store "-"
+                    (str "data/tune/" database "-"
                          (subs (.toISOString (js/Date.)) 0 10) ".jsonl"))
           agent-ids (->> (db/query {:seon.db/db db
                                     :seon.db/query
@@ -410,7 +410,7 @@
                          (map first)
                          sort)
           ;; Attr-presence guards (the installed-schema pattern): an OLD
-          ;; store may predate ::rating / rendered-as-of — reading a
+          ;; database may predate ::rating / rendered-as-of — reading a
           ;; never-installed attr must degrade to absent, never throw.
           installed  (db/installed-schema db)
           rating-ok? (contains? installed ::rating)
@@ -482,7 +482,7 @@
                                                        ::turn-id      turn-id
                                                        ::agent-id     agent-id
                                                        ::basis-t      basis
-                                                       ::store        store
+                                                       ::database     database
                                                        ::sha          sha
                                                        ::rating       rating
                                                        ::coverage     coverage})))))))
