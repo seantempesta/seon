@@ -50,6 +50,17 @@ acts on visible ids) vs 0% for small models — KT3's below-band STOP
 arithmetic softens (corrected ceiling ~.36–.46), KT3b's "1.5B ties
 frontier" is a scorer artifact; fix = mechanical prescribed-act
 accept-set + drop 3 junk targets, NO LLM judge inside the metric.
+**Plan-preload live-drive pilot RUN**
+([[research/plan-preload-drive-2026-07-12.md]]): markdown hand-down ×3
+DeepSeek scenarios on an own pinned cluster — authoring variance
+t0/t17/never, expect-verified closes when the tree exists,
+expect-BLIND wrong fact into `my.kb` (`:verified`) when it doesn't;
+first ORGANIC escalation firing (2 authority defects:
+`reopen!`-of-verified-done, id-less-root re-mint); `recall` round-trip
+across a pod restart; recommendation = pre-transacted vs
+markdown-authored vs no-plan ARMS + store-derived metrics (oracle,
+plan integrity, prose-rate). Harvest store:
+`/Users/sean/src/seon-plan-pilot/data/clusters/acme`.
 Live status: [[roadmap.md]].
 
 ## Settled — do NOT re-litigate
