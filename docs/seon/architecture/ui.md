@@ -402,7 +402,7 @@ reusing the same primitives, with zero `src/seon` edits:
 | **block set** (supporting tiles) | `ctx/install!` / `ctx/remove!` from downstream namespaces | the configured DB block set |
 | **initial block tree per cluster** | explicitly applied manifest `:seon.config/agent-context` / `:seon.config/root-context`; omission from the complete route population removes a route | schema/default compiler input materialized as DB facts |
 | **a tile's look** | the block's `:seon.render/html` symbol | seon's html render fn |
-| **focal `#view-canvas` (the canvas)** | the agent's `:seon.render.canvas/content` symbol | seon's `welcome` tile |
+| **focal `#agent-view-primary-canvas` (the canvas)** | the agent's `:seon.render.canvas/content` symbol | seon's `welcome` tile |
 | **the calm hero error (a broken canvas)** | `set!` of `seon.render.canvas/error-response` (the CALM hero — keeps the agent-facing `:seon.render/ai`/`:seon.render/error`, swaps only the human hiccup) | seon's "updating this tile" card |
 | **slot / view / entity error tiles** | `set!` of `seon.render.canvas/error-tile` (the `(fn [:seon/error] → hiccup)` seam the `render` / `slot` / `render-entity-html` catches call) | seon's `default-error-tile` (informative card) |
 | **root agent’s view (`/`)** | the `/` route handler symbol (root's agent-view layout) | seon's root agent-view layout |
@@ -414,8 +414,8 @@ acme installs at preload in its own namespaces (loaded via `SEON_EXTRA_SRC`),
 where it already wires its overrides. There are **two error seams**, and acme
 `set!`s BOTH so every error surface on the page is branded:
 
-- the **focal `#view-canvas`** flows through the LIVE-TILE path:
-  `view-layout`'s canvas IS `render-agent-canvas` resolving the agent's
+- the **focal `#agent-view-primary-canvas`** flows through the canvas path:
+  `seon.ui.agent-view/agent-view` calls `render-agent-canvas`, resolving the agent's
   `:seon.render.canvas/content`, and a throwing tile routes through the CALM
   hero seam `seon.render.canvas/error-response` (the human never sees the
   failure here — it rides the agent twin, so the hero does NOT delegate).
@@ -426,18 +426,6 @@ where it already wires its overrides. There are **two error seams**, and acme
 
 One `set!` per seam — two lines in `acme.overrides` — brands every error tile on
 the page.
-
-Acceptance (proven server-side on `/agent/{id}`, agent `zeG-2606272150`, acme
-cluster port 7980 — gunzipped feed, not inference): with acme's
-`:seon.render.canvas/content` wired to `acme.widget/broken-tile` (a throwing
-tile) and its blocks installed via `ctx/install!`, the focal `#view-canvas`
-(via `error-response`) and the `#tile-acme-broken` slot (via `error-tile`) BOTH
-render acme's branded `"Acme is preparing this view…"` card — NOT seon's stock
-"updating this tile" card and NOT the informative `default-error-tile` — and the
-`#view-tile-canvas` phantom (the stale pre-#19 `:canvas` block) is gone, while
-the agent's normal tiles (`#view-tile-acme-tile`, `#view-tile-acme-widget`)
-still render. `bin/acme build` ran with zero warnings; the default seon UI
-(default cluster) is untouched.
 
 ## Malli throughout
 

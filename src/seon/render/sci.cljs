@@ -60,8 +60,8 @@
    worker (PRD Layer 2). Layer 1 bounds the reproduced freeze: an interpreted
    loop/recursion in the tile fn's own body.
 
-   Toggle: env `SEON_TILE_SCI=0` disables bounding (agent tiles fall back to
-   the direct compiled call). Default on."
+   Toggle: env `SEON_CANVAS_SCI=0` disables bounding (agent canvas fns fall
+   back to the direct compiled call). Default on."
   (:require
     [clojure.string :as str]
     [clojure.walk :as walk]
@@ -91,12 +91,12 @@
   250)
 
 (defn bounding-enabled?
-  "Layer-1 SCI bounding is ON unless `SEON_TILE_SCI=0`.
+  "Layer-1 SCI bounding is ON unless `SEON_CANVAS_SCI=0`.
 
    Independently shippable + reversible — PRD migration step 2."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (not= "0" (config/env-string "SEON_TILE_SCI")))
+  (not= "0" (config/env-string "SEON_CANVAS_SCI")))
 
 ;; `agent-authored-sym?` MOVED to `seon.error` (2026-07-04,
 ;; error-blame-strict-gate phase 1): it now also decides
@@ -633,8 +633,8 @@
        "few DB queries. Re-wire :seon.render.canvas/content with a fn that "
        "renders a query, not one that computes."))
 
-(defn recover-hung-tile!
-  "Reset agent `agent-id`'s hung tile to the core welcome.
+(defn recover-hung-canvas!
+  "Reset agent `agent-id`'s hung canvas to the core welcome.
 
    Retracts `:seon.render.canvas/content` and posts the agent a force'd message
    explaining what happened. Async + deduped; returns nil."
@@ -663,7 +663,7 @@
                       ;; halt baseline even though it sends from the user-ref.
                       :seon.agent.message/origin  :core}))))
         (.catch (fn [e]
-                  (log/warn! {:seon.log/source  ::recover-hung-tile!
+                  (log/warn! {:seon.log/source  ::recover-hung-canvas!
                               :seon.log/message
                               (str "tile recovery for " agent-id
                                    " hit an error: " (or (.-message e) (str e)))})))

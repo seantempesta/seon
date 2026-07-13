@@ -149,7 +149,7 @@
 (schema/register! :seon.render/children
   [:vector {:seon.db/component true} :seon.db/ref])      ;; OPTIONAL authored nesting; derived sections query instead
 
-;; The `:seon.render/ai-response` envelope — the LIVE-TILE / default
+;; The `:seon.render/ai-response` envelope — the canvas / default
 ;; slot-primitive return shape (`ai-render` → `seon.render.default/pretty-ai`
 ;; and `seon.render.chat`). The old `:seon.render/text` second arm was
 ;; DELETED with the V4 composer rewrite (context-render keystone): the ONE
@@ -735,11 +735,11 @@
 ;; generic entity-tile render (one key, one meaning; PRD §8.1).
 ;; ============================================================
 
-(def ^:private tile-entity-pattern
-  "What tile rendering READS of the agent entity — the wired slot
+(def ^:private canvas-entity-pattern
+  "What canvas rendering READS of the agent entity — the wired slot
    (wired-content), the welcome's purpose/id, and the run pointer (derived
    state). Deliberately NOT '[*]: the full pull would inline the agent's whole
-   component tree per tile render (T5's amplifier finding, open-issues
+   component tree per canvas render (T5's amplifier finding, open-issues
    2026-06-11). Tile fns needing more get `:seon.db/db` in their input and
    query for it."
   [:db/id
@@ -748,7 +748,7 @@
    :seon.agent/purpose
    :seon.render.canvas/content])
 
-(schema/register! :seon.render/tile-request
+(schema/register! :seon.render/canvas-request
   [:map
    [:seon.agent/id :string]
    [:seon.db/db    {:optional true} :seon.db/db]])
@@ -766,7 +766,7 @@
    — fallback tile for the human, `:seon.render/error` envelope +
    `:seon.render/ai` render for the agent. nil hiccup only when the
    agent entity doesn't exist (the tile never crashes its caller)."
-  {:malli/schema [:=> [:cat :seon.render/tile-request] :seon.render/html-response]}
+  {:malli/schema [:=> [:cat :seon.render/canvas-request] :seon.render/html-response]}
   [{:seon.agent/keys [id] :seon.db/keys [db]}]
   (let [db  (or db @db/*conn*)
         ;; Guarded pull (seon.db/pull, 65dfc90): registered-but-never-
@@ -774,7 +774,7 @@
         ;; filtered, typos throw legibly. The remaining try covers only
         ;; the unresolvable-lookup-ref throw (missing agent → nil
         ;; hiccup, the documented contract).
-        ent (try (db/pull db tile-entity-pattern [:seon.agent/id id])
+        ent (try (db/pull db canvas-entity-pattern [:seon.agent/id id])
                  ;; probe: the only throw this covers is the unresolvable
                  ;; lookup-ref of a MISSING agent — nil ent is the documented
                  ;; contract (tile renders nothing), an expected absence.
@@ -820,7 +820,7 @@
                              ;; warn the agent (async, deduped), and render the
                              ;; known-good welcome for the human this turn.
                              (:seon.render.sci/interrupt r)
-                             (do (render-sci/recover-hung-tile!
+                             (do (render-sci/recover-hung-canvas!
                                    id value render-sci/default-budget-ms)
                                  (html-render canvas/welcome-sym input))
                              ;; SCI could not run the fn — FAIL-LOUD: throw

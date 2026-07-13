@@ -119,7 +119,7 @@ NEVER `bin/seon start/stop/restart` it or write to its store. Use **only**
 |---|---|
 | `acme/deps.edn` | the consumer's own project (`{:paths ["src"]}` + their deps) |
 | `acme/src/acme/pod.cljs` | entry ns; requires the surface + runs the `(reset! …)` |
-| `acme/src/acme/widget.cljs` | specced product fn + live-tiles (`dash`, plus `broken-tile` to exercise the error-response override) |
+| `acme/src/acme/widget.cljs` | specced product fn + canvas renderers (`dash`, plus `broken-tile` to exercise the error-response override) |
 | `acme/src/acme/helpers.cljs` | a specced fn AND an UNSPECCED helper (`format-count`) the tile calls |
 | `acme/src/acme/notes.cljs` | an ENTIRELY-UNSPECCED ns — proves a downstream ns owning ZERO specced fns still gets a `:seon.ns` row + shows in context (the full-surface indexing case) |
 | `acme/src/acme/brand.cljs` | a second indexed ns (product copy) |
@@ -143,14 +143,13 @@ NEVER `bin/seon start/stop/restart` it or write to its store. Use **only**
   Reproduce the *silent-failure* bug by commenting out the `(reset! …)` in
   `acme/src/acme/pod.cljs` and rebuilding: zero acme rows index and a loud
   boot WARN fires.
-- **Live tile via SCI** — `acme.widget/dash` is a specced tile that calls the
+- **Canvas via SCI** — `acme.widget/dash` is a specced canvas fn that calls the
   unspecced `acme.helpers/format-count` through a required-ns alias. It
   renders under the SCI-bounded path (proven: "N installed schemas", no
   "could not run under SCI bounding" warn).
 - **Function overrides** — `acme.overrides` `set!`s
-  `seon.render.live-canvas/error-response` (and is the place to override
-  `seon.ctx/core-default-ctx` to inject sections) — the universal
-  extend-without-fork mechanism.
+  `seon.render.canvas/error-response`; context blocks use
+  `seon.agent.ctx/install!` — the universal extend-without-fork mechanisms.
 - **CSS / branding** — `acme/branding/acme.css` + `SEON_BRAND_NAME/TAGLINE`.
 
 ## Testing a seon fix in the acme env (the fix→verify loop)

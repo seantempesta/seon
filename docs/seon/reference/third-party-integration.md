@@ -53,6 +53,7 @@ The LLM settings are **data** in the DB (`:seon.ai/config`), and they are
 Set these in the environment that launches the pod, then restart:
 
 **Anthropic**
+
 ```sh
 export SEON_AI_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-...        # read at call time, never stored
@@ -61,6 +62,7 @@ bin/seon restart pod
 ```
 
 **DeepSeek**
+
 ```sh
 export SEON_AI_PROVIDER=deepseek
 export DEEPSEEK_API_KEY=sk-...
@@ -69,6 +71,7 @@ bin/seon restart pod
 ```
 
 **Any OpenAI-compatible gateway**
+
 ```sh
 export SEON_AI_PROVIDER=openai-compat
 export SEON_AI_BASE_URL=https://your-gateway/v1/chat/completions   # FULL URL
@@ -117,6 +120,7 @@ binding routes **every existing caller** to your version with no recompile.
 ```
 
 **Enable it:**
+
 ```sh
 export SEON_EXTRA_SRC="$(pwd)/path/to/your-override-project"
 export SEON_EXTRA_PRELOAD=yourco.overrides
@@ -161,18 +165,18 @@ edit survives reboots).
   supplies the initial persona on a fresh store without forking the repo — same
   seed-once → DB-owns shape. (Ask if you need this prioritized.)
 
-## 6. Testing the 2026-06-21 updates (tile isolation + late-bound override)
+## 6. Testing the 2026-06-21 updates (canvas isolation + late-bound override)
 
 Concrete eval recipes for the work that just landed. Run them in the pod REPL
 against a live agent id.
 
-### 6.1 A hung tile no longer freezes the pod
+### 6.1 A hung canvas no longer freezes the pod
 
 Wire a non-terminating fn as the agent's canvas and confirm it aborts at the
 wall-clock budget instead of wedging the single pod thread:
 
 ```clojure
-;; persist an interpreted fn + point the tile at it
+;; persist an interpreted fn + point the canvas at it
 (seon.db/transact!
   {:seon.db/tx-data [{:seon.fn/sym "my.t/hang"
                       :seon.fn/source "(defn hang [m] (loop [] (recur)))"}
@@ -183,10 +187,11 @@ wall-clock budget instead of wedging the single pod thread:
 
 Expect the `welcome` fallback within ~the budget (not a hang); `/agents` keeps
 answering; `:seon.render.canvas/content` is retracted back to welcome; the
-agent is messaged once (deduped). A tile that THROWS instead shows the calm
-"Updating this panel" card and notifies the agent — no crash, content kept so a
-fix takes effect. Set `SEON_TILE_SCI=0` to disable bounding. Mechanism +
-caveats: [[components/renderer]].
+agent is messaged once (deduped). A canvas fn that THROWS instead shows the calm
+"Updating this panel" card without waking the agent — no crash, and the pin is
+kept so a redefinition heals the next render. The canvas context derives the
+failure on the agent's next turn. Set `SEON_CANVAS_SCI=0` to disable bounding.
+Mechanism + caveats: [[components/renderer]].
 
 ### 6.2 An override flows through a late-bound caller
 
@@ -203,13 +208,13 @@ Both `set!` and `defn` redefinition route every existing caller to the new
 version — this is the agent-facing override surface (the §3 build-time override
 is the same late-binding mechanism applied at compile time).
 
-### 6.3 Your own compiled persona / tile fns
+### 6.3 Your own compiled persona / canvas fns
 
-A fn compiled from your source is NOT indexed by default (no `:seon.fn/source`
-row), so it renders on the UNBOUNDED compiled path. To make it agent-visible AND
-boundable, index it via `SEON_EXTRA_SRC` plus the `!extra-core-vars` preload
-registration — see [[components/extra-src]]. Verify the fn picked up a source
-row:
+A downstream fn must be present in the boot program graph so its
+`:seon.fn/source` can be interpreted under SCI. A missing source is a fail-loud
+canvas error; it is never retried through the unbounded compiled path. Include
+the source through `SEON_EXTRA_SRC` and the downstream preload registration —
+see [[components/extra-src]]. Verify the fn picked up a source row:
 
 ```clojure
 (seon.client/index-core!)   ;; your fn now appears with :seon.fn/source

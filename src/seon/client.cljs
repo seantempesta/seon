@@ -80,7 +80,7 @@
     ;; needed.
     [seon.render]
     [seon.render.default]
-    ;; Live-tile render namespace — required so the build includes it.
+    ;; Canvas render namespace — required so the build includes it.
     [seon.render.canvas]
     ;; Root's SYSTEM VIEW — the `/` dashboard = root's canvas content.
     ;; Required so the build includes it and `system-view`'s symbol resolves

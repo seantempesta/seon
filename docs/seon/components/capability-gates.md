@@ -34,7 +34,7 @@ Related feature/kill switches (same env seam, not capability grants):
 |---|---|---|---|
 | `SEON_INSTRUMENT` | `0`/`false`/`off`/`no` disables | ON | runtime Malli instrumentation (kill-switch only) |
 | `SEON_SOUL` | `false`/`0`/`off`/`no` disables; `SEON_SOUL_FILE` overrides path | ON when SOUL.md exists | the SOUL.md identity context block |
-| `SEON_TILE_SCI` | `"0"` disables | ON | layer-1 SCI bounding of agent live tiles |
+| `SEON_CANVAS_SCI` | `"0"` disables | ON | layer-1 SCI bounding of agent canvas fns |
 | `SEON_RENDER_STRICT` | `1`/`true`/`on`/`yes` enables | OFF | fail-loud render dial |
 
 ## Web-access policy — reachability is CONFIG, not env

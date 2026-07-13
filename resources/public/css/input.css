@@ -20,8 +20,8 @@
    agents emit hiccup at RUNTIME, so any utility not safelisted
    here silently doesn't exist on their surfaces. This is the
    small curated vocabulary for data display, documented for
-   agents in the seon.render.live-tile ns docstring — keep the
-   two lists in sync (live_tile_test asserts the pairing).
+   agents in the seon.render.canvas ns docstring — keep the
+   two lists in sync (canvas_test asserts the pairing).
    Semantic hiccup (classless [:table …], [:ul …], [:h2 …]) needs
    NONE of these — the base content layer below styles it.
    ============================================================ */
@@ -41,11 +41,11 @@
 /* borders + overflow */
 @source inline("border border-t border-b border-base-{700,800} rounded rounded-md");
 @source inline("divide-y divide-base-800 overflow-hidden overflow-auto overflow-x-auto");
-/* interactive controls (my.tile) — button / input / select / toggle.
+/* interactive controls (my.canvas) — button / input / select / toggle.
    Without these an agent-authored control is unstyled + gives no click
    affordance. Variant classes (hover:/focus:/disabled:/placeholder:)
    each need their OWN safelist entry — the base class alone won't emit
-   the variant. Keep tight + in sync with my.tile's class strings. */
+   the variant. Keep tight + in sync with my.canvas's class strings. */
 @source inline("cursor-pointer select-none accent-amber-400");
 @source inline("hover:bg-base-{800,850} hover:text-text-{50,100} hover:border-base-700");
 @source inline("focus:outline-none focus-visible:border-amber-400 border-amber-{300,400}");
@@ -335,7 +335,7 @@ details.tool-call-details[open] .tool-preview {
 }
 
 /* ============================================================
-   Live tile container queries (seon.render.live-tile, U1).
+   Canvas container queries (`seon.render.canvas`).
    ONE render emits both blocks; the CONTAINER's size — not the
    viewport — selects which is visible. Agents tag blocks with
    .seon-tile-compact / .seon-tile-expanded and never write
@@ -440,7 +440,7 @@ details.tool-call-details[open] .tool-preview {
   overscroll-behavior: contain;
 }
 
-/* Compact-tile last reply (live-tiles U3): the default root tile
+/* Compact-canvas last reply: the default root canvas
    shows the agent's last reply as readable text — clamp it so a
    long reply never blows the grid cell. */
 .seon-tile-reply {
@@ -452,69 +452,13 @@ details.tool-call-details[open] .tool-preview {
 }
 
 /* ============================================================
-   Debug overlay (live-tiles U6): the debug view opens over the
-   consumer view (/agent/<id>) as a full-viewport layer — an iframe
-   onto /agent/<id>/debug — without a URL change. Toggled by the
-   ⚙ debug button / backtick (focus-guarded); Esc closes. Plain CSS
-   (not scanned utilities) so the overlay works independent of the
-   Tailwind content scan.
-   ============================================================ */
-#seon-debug-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  background: var(--color-base-950, #0d0d0c);
-}
-#seon-debug-overlay.open { display: block; }
-#seon-debug-overlay iframe {
-  width: 100%;
-  height: 100%;
-  border: 0;
-}
-
-/* Tile-console variant: an inset panel over a DIM backdrop (the console
-   shows through the padding, so a backdrop click — the overlay element
-   itself, outside the iframe — closes it). The web UI's full-bleed
-   variant (no `.tile` class) keeps the base rule above untouched. */
-#seon-debug-overlay.tile {
-  background: rgba(8, 8, 7, 0.84);
-  padding: 2.5vh 2.5vw;
-}
-#seon-debug-overlay.tile iframe {
-  border-radius: 8px;
-  border: 1px solid var(--color-base-800, #2a2a28);
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
-}
-#seon-debug-close {
-  position: fixed;
-  top: calc(2.5vh - 13px);
-  right: calc(2.5vw - 13px);
-  z-index: 60;
-  width: 26px;
-  height: 26px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9999px;
-  background: var(--color-base-900, #161614);
-  color: var(--color-signal, #f5a623);
-  border: 1px solid var(--color-base-700, #3a3a37);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-}
-#seon-debug-close:hover { background: var(--color-base-800, #2a2a28); }
-
-/* ============================================================
    BASE CONTENT LAYER — semantic HTML inside agent-rendered
    containers. Tailwind's preflight strips ALL element styling, so
    an agent rendering classless [:table …], [:ul …], [:h2 …],
    [:pre [:code …]], [:dl …] would get flat unstyled output. These
    rules restore Phosphor-styled (design-system.md) semantics
    SCOPED to the agent-content containers only:
-     .seon-tile           — the live tile (all three surfaces)
+     .seon-tile           — canvas and context-tile content
      .seon-bubble         — chat bubble content
      .markdown            — rendered markdown bodies
      .seon-agent-content  — debug-pane card streams
