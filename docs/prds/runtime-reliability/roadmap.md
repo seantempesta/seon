@@ -28,11 +28,12 @@ compensate for unclear functions.
 
 ## Current position
 
-**Current phase: replace the operator and cold-prove the reduced runtime
-(phase 3 of 6).** The permanent JVM database server is isolated, duplicate
-runtime authority is removed, and the paused application is archived. The
-remaining phase-3 gate is the Babashka operator plus a clean default-cluster
-start through that one door. Remote replication, cloud topology, browser
+**Current phase: finish the operator cutover and test trim (phase 3 of 6).**
+The permanent JVM database server is isolated, duplicate runtime authority is
+removed, the paused application is archived, and the Babashka operator has
+cold-started and restarted the default cluster through its one public door.
+Remaining phase-3 gates are ACME/Inspect caller migration, direct hook/tool
+doors, and deletion of obsolete harness trees. Remote replication, cloud topology, browser
 replicas, offline mutation, mobile packaging, and the full paid Inspect AI
 battery are explicit follow-on work rather than completion gates for this
 branch.
@@ -82,8 +83,16 @@ in place by a seven-line launcher over one Babashka process graph. Kernel file
 locking, exact process identity, bounded readiness-log reads, relevant-
 environment digests, artifact manifests, scoped reset, and fail-closed process-
 group ownership pass 10 focused tests/29 assertions. Phase 3 remains open for
-active caller migration and the default-cluster cold live proof; ACME and
-Inspect follow only after that default proof.
+active caller and test-door migration; the default-cluster cold live proof now
+passes, so ACME and Inspect can follow.
+
+The 2026-07-13 canonical restart rebuilt the writer, client, self-host
+bootstrap, and CSS, replaced the watcher/writer/pod process identities, and
+returned READY. The pod reopened the existing database, attached its replay/live
+feed with zero replay gap, replayed 2/2 forms, instrumented 772 definitions with
+zero bad specs, resumed `root` and `little-cars-laugh` idle, and preserved the
+agent's database-backed canvas. `/`, `/agents`, and `/data` returned HTTP 200;
+the agent feed returned gzip and an immediate `datastar-patch-elements` event.
 
 The source-grounded system audits are complete and committed:
 

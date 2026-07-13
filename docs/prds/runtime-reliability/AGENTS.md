@@ -10,16 +10,18 @@ tags: [orchestrator, prd, database, flow, agent, web]
 
 The proven CLJS pod is responsive enough to preserve, but the repository still
 contains a paused JVM application, several duplicate runtime paths, broad build
-closures, a large shell operator, stale UI/database vocabulary, and an
+closures, stale UI/database vocabulary, and an
 expensive test surface. Source-grounded audits have now mapped the permanent
 JVM server, canonical CLJS runtime/UI, archive boundary, local and remote
 database synchronization, client distribution, test authority, and exact
 canvas/surface/card cutover.
 
-This PRD is in **phase 3 of 6: replace and cold-prove the operator**. The owner
-decisions are resolved and the coordinated clean-base proof is tagged. The
-active plan replaces mechanisms in place and deletes their superseded paths; it
-does not create compatibility namespaces or parallel architectures.
+This PRD is in **phase 3 of 6: finish the operator cutover and test trim**. The
+Babashka operator and default-cluster cold/restart proof are complete. ACME and
+Inspect callers, direct hook/tool doors, and the remaining obsolete harness
+trees are the phase-3 work still open. The active plan replaces mechanisms in
+place and deletes their superseded paths; it does not create compatibility
+namespaces or parallel architectures.
 
 The previously shared ACME/plan/REPL work is checkpointed at `3e0e0bff` and the
 tree was clean immediately afterward. Focused `seon.schema-test`,
@@ -104,8 +106,12 @@ process verbs are not primary UX.
   There is no durable query-subscription engine or second in-process subscriber
   bus.
 - `bin/seon` is now a seven-line launcher over the Babashka process graph. Its
-  lifecycle gate passes 10 tests/29 assertions; default cold proof and
-  downstream ACME/Inspect caller migration remain before phase 3 closes.
+  lifecycle gate passes 10 tests/29 assertions. A canonical restart rebuilt all
+  artifacts, changed all three process identities, resumed `root` and
+  `little-cars-laugh` idle, replayed 2/2 forms, registered 772 contracts with
+  zero bad specs, served `/`, `/agents`, and `/data`, and emitted a gzip
+  Datastar patch. Downstream ACME/Inspect caller migration remains before phase
+  3 closes.
 - Active hooks still call the paused JVM nREPL on port 7888, so claimed checks
   can silently fail to run. Useful checks move to direct bounded tool doors.
 - The UDS writer has the stronger transaction contract: durable request
