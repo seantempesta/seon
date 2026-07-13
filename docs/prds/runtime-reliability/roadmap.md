@@ -692,18 +692,21 @@ or discover archived behavior.
 
 ### Phase 4 — finish database truth and lifecycle reconstruction
 
-1. Finish one exact desired-population compiler: scalar, cardinality-many,
-   component, removal, full-head fence, bounded reread/recompile, and
-   transact-if-nonempty. The full-head primitive is now implemented in the
-   maintained Datahike writer and carried through the canonical UDS protocol;
-   the exact compiler and bounded retry remain.
+1. **Exact desired-population compiler complete:** scalar,
+   cardinality-many, ref/component structural comparison, omitted-attribute
+   removal, stale-entity cascade, unmanaged-identity collision rejection,
+   full-head fence, bounded reread/recompile, and transact-if-nonempty all run
+   through `seon.state/reconcile!`. The maintained Datahike writer owns the
+   atomic basis precondition and keeps an expected stale rejection out of error
+   logs; the canonical UDS protocol carries the same fact end to end. Focused
+   proofs cover first-use schema installation/retry and basis-stable no-op.
 2. **Runtime boundary complete:** external config is operation-scoped and
    optional. A config-free boot preserves database facts, the singleton now
    stores agent/root context and skill selection needed for later births, fresh
    `bin/seon up` selects the shipped manifest once, and
-   `bin/seon config apply <path>` is explicit. Remaining: freeze the payload in
-   the supervisor intent and fold singleton attribute removal into the exact
-   desired-state compiler.
+   `bin/seon config apply <path>` is explicit. Singleton attribute removal now
+   uses the exact compiler, and the old config-heal function/transaction are
+   deleted. Remaining: freeze the payload in the supervisor intent.
 3. **Canonical form cut complete:** every schema row now persists the full
    EDN-round-tripping `:seon.schema/form`; runtime function/regex objects are
    rejected as durable definitions, schema source replay and the async self-tee

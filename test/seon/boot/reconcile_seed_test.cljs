@@ -45,7 +45,8 @@
 (deftest boot-seed-reconciles-routes-retract-on-drop
   (async done
     (let [prev-config (.. js/globalThis -process -env -SEON_CONFIG)
-          full   (write-manifest! "reconcile-seed-full.edn" "{}")
+          full   (write-manifest! "reconcile-seed-full.edn"
+                                  "{:seon.config/system-text \"temporary\"}")
           ;; A manifest that DROPS the POST action route. resolve-routes keys
           ;; off :seon.route/name; :seon.route/agent-call is seon.route/::agent-call.
           dropped (write-manifest! "reconcile-seed-drop.edn"
@@ -63,7 +64,12 @@
                         (is (contains? names :seon.route/agent-call)
                             "boot 1 (full manifest) seeds the agent-call route")
                         (is (contains? names :seon.route/root)
-                            "…and the root route"))))
+                            "…and the root route")
+                        (is (= "temporary"
+                               (:seon.config/system-text
+                                 (d/pull @conn '[*]
+                                         [:seon.config/id "cluster"])))
+                            "boot 1 stores an explicitly selected optional knob"))))
                   ;; BOOT 2 — same conn, manifest drops agent-call ⇒ RETRACTED.
                   (.then (fn [_] (set-config! dropped)))
                   (.then (fn [_] (client/boot-seed! {:seon.db/conn conn})))
@@ -75,7 +81,12 @@
                         (is (contains? names :seon.route/root)
                             "a route still in the desired set survives")
                         (is (contains? names :seon.route/agent)
-                            "…as does the agent page route"))))
+                            "…as does the agent page route")
+                        (is (not (contains?
+                                   (d/pull @conn '[*]
+                                           [:seon.config/id "cluster"])
+                                   :seon.config/system-text))
+                            "the same reconcile retracts an omitted singleton attr"))))
                   ;; BOOT 3 — no selected config means PRESERVE, not silently
                   ;; reapply config/system.edn or an implicit empty manifest.
                   (.then (fn [_] (set-config! nil)))

@@ -25,17 +25,41 @@
 ;; non-identity child attr (proves the retract cascade).
 (schema/register! :seon.state.scratch.a/id     [:string {:seon.db/identity true}])
 (schema/register! :seon.state.scratch.a/label  :string)
+(schema/register! :seon.state.scratch.a/tags   [:set :keyword])
 (schema/register! :seon.state.scratch.b/id     [:string {:seon.db/identity true}])
+(schema/register! :seon.state.scratch.b/note   :string)
 (schema/register! :seon.state.scratch.parent/id   [:string {:seon.db/identity true}])
 (schema/register! :seon.state.scratch.child/name  :keyword)
 (schema/register! :seon.state.scratch.parent/kids
                   [:vector {:seon.db/component true} :seon.db/ref])
+;; Registered but deliberately NOT installed by scratch-conn. The first
+;; reconcile attempt installs these attrs, invalidating its frozen basis; the
+;; bounded retry must recompile and commit the entity on attempt two.
+(schema/register! :seon.state.scratch.late/id
+                  [:string {:seon.db/identity true}])
+(schema/register! :seon.state.scratch.late/value :string)
 
 (def ^:private scratch-attrs
   [:seon.state.scratch.a/id :seon.state.scratch.a/label
-   :seon.state.scratch.b/id
+   :seon.state.scratch.a/tags
+   :seon.state.scratch.b/id :seon.state.scratch.b/note
    :seon.state.scratch.parent/id :seon.state.scratch.child/name
    :seon.state.scratch.parent/kids])
+
+(def ^:private desired-state
+  [{:seon.state.scratch.a/id "keep1"
+    :seon.state.scratch.a/label "new"
+    :seon.state.scratch.a/tags #{:new :kept}}
+   ;; :seon.state.scratch.b/note is deliberately omitted: exact desired
+   ;; state retracts the stale scalar from this retained entity.
+   {:seon.state.scratch.b/id "keepB"}
+   {:seon.state.scratch.a/id "fresh1"
+    :seon.state.scratch.a/label "added"}
+   ;; A retained component collection is replaced exactly and its old owned
+   ;; children must cascade away.
+   {:seon.state.scratch.parent/id "pkeep"
+    :seon.state.scratch.parent/kids
+    [{:seon.state.scratch.child/name :gk3}]}])
 
 (defn- scratch-conn
   "Promise of a fresh :memory conn with provenance + the scratch attr schema
@@ -81,9 +105,16 @@
                     (db/transact!
                       {:seon.db/conn conn
                        :seon.db/tx-data
-                       [{:seon.state.scratch.a/id "keep1"  :seon.state.scratch.a/label "old"}
+                       [{:seon.state.scratch.a/id "keep1"
+                         :seon.state.scratch.a/label "old"
+                         :seon.state.scratch.a/tags #{:old :drop}}
                         {:seon.state.scratch.a/id "stale1" :seon.state.scratch.a/label "doomed"}
-                        {:seon.state.scratch.b/id "keepB"}
+                        {:seon.state.scratch.b/id "keepB"
+                         :seon.state.scratch.b/note "remove-me"}
+                        {:seon.state.scratch.parent/id "pkeep"
+                         :seon.state.scratch.parent/kids
+                         [{:seon.state.scratch.child/name :gk-old-1}
+                          {:seon.state.scratch.child/name :gk-old-2}]}
                         {:seon.state.scratch.parent/id "pstale"
                          :seon.state.scratch.parent/kids
                          [{:seon.state.scratch.child/name :gk1}
@@ -109,11 +140,7 @@
                            (fn []
                              (state/reconcile!
                                {:seon.state/desired
-                                [{:seon.state.scratch.a/id "keep1"
-                                  :seon.state.scratch.a/label "new"}      ; UPDATE
-                                 {:seon.state.scratch.b/id "keepB"}        ; KEEP
-                                 {:seon.state.scratch.a/id "fresh1"
-                                  :seon.state.scratch.a/label "added"}]    ; ADD
+                                desired-state
                                 :seon.db/managed-scope
                                 #{:seon.db.process/boot
                                   :seon.db.process/config}
@@ -135,28 +162,43 @@
                                                       [?e :seon.state.scratch.a/label ?l]] db v))]
                       ;; envelope
                       (is (true? (:seon.state/ok? res)) "reconcile! success envelope")
-                      (is (= 3 (:seon.state/upserted res)) "3 desired maps upserted")
-                      (is (= 2 (:seon.state/retracted res))
-                          "2 stale managed entities retracted (stale1 + pstale)")
+                      (is (true? (:seon.state/changed? res)))
+                      (is (pos? (:seon.state/operations res)))
                       ;; UPDATE — existing managed row's scalar attr changes
                       (is (= "new" (label "keep1"))
                           "an existing managed row is UPDATED in place (upsert by identity)")
                       ;; ADD — new desired row appears
                       (is (contains? a-ids "fresh1") "a NEW desired row is added")
                       (is (= "added" (label "fresh1")))
+                      (is (= #{:new :kept}
+                             (:seon.state.scratch.a/tags
+                               (db/entity db [:seon.state.scratch.a/id
+                                              "keep1"])))
+                          "cardinality-many values match desired exactly")
                       ;; KEEP — a managed row under a DIFFERENT identity ns survives
                       (is (= #{"keepB"} b-ids)
                           "a kept managed row (different identity namespace) survives")
+                      (is (not (contains?
+                                 (db/entity db
+                                            [:seon.state.scratch.b/id "keepB"])
+                                 :seon.state.scratch.b/note))
+                          "an omitted scalar is retracted from a retained entity")
                       ;; RETRACT-STALE — managed row absent from desired is gone
                       (is (not (contains? a-ids "stale1"))
                           "a stale managed row is RETRACTED")
-                      (is (empty? (d/q '[:find [?v ...]
-                                         :where [?e :seon.state.scratch.parent/id ?v]] db))
+                      (is (= #{"pkeep"}
+                             (set (d/q '[:find [?v ...]
+                                         :where
+                                         [?e :seon.state.scratch.parent/id ?v]]
+                                       db)))
                           "the stale component-parent is retracted")
                       ;; CASCADE — the stale parent's children are gone, no orphans
-                      (is (empty? (d/q '[:find [?n ...]
-                                         :where [?c :seon.state.scratch.child/name ?n]] db))
-                          "the stale parent's component children cascade-retract — NO orphans")
+                      (is (= #{:gk3}
+                             (set (d/q '[:find [?n ...]
+                                         :where
+                                         [?c :seon.state.scratch.child/name ?n]]
+                                       db)))
+                          "stale and replaced component children cascade; only desired remains")
                       ;; LEAVE-AUTHORED-ALONE — REPL row untouched
                       (is (contains? a-ids "agent1")
                           "a REPL-authored row is PRESERVED outside the managed scope")
@@ -164,6 +206,45 @@
                           "…and is left completely unchanged")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "unexpected rejection: " e)) (done))))))
+
+(deftest reconcile-converged-state-is-a-no-op
+  (async done
+    (let [!conn   (atom nil)
+          !before (atom nil)
+          request (fn [conn]
+                    {:seon.state/desired desired-state
+                     :seon.db/managed-scope
+                     #{:seon.db.process/boot :seon.db.process/config}
+                     :seon.db/managed-identity-attrs
+                     #{:seon.state.scratch.a/id
+                       :seon.state.scratch.b/id
+                       :seon.state.scratch.parent/id}
+                     :seon.db/conn conn})]
+      (-> (scratch-conn)
+          (.then
+            (fn [conn]
+              (reset! !conn conn)
+              (db/with-tx-context
+                {:seon.db/user [:seon.agent/id "root"]
+                 :seon.db/process
+                 [:seon.db.process/id :seon.db.process/boot]}
+                (fn [] (state/reconcile! (request conn))))))
+          (.then
+            (fn [first-result]
+              (is (true? (:seon.state/changed? first-result)))
+              (reset! !before (db/basis-t @@!conn))
+              (state/reconcile! (request @!conn))))
+          (.then
+            (fn [again]
+              (is (true? (:seon.state/ok? again)))
+              (is (false? (:seon.state/changed? again)))
+              (is (zero? (:seon.state/operations again)))
+              (is (= @!before (db/basis-t @@!conn))
+                  "converged reconcile submits no transaction")
+              (done)))
+          (.catch (fn [e]
+                    (is false (str "unexpected rejection: " e))
+                    (done)))))))
 
 (deftest reconcile-rejects-identity-less-desired-map
   ;; A desired map carrying NO :db.unique/identity attr would allocate a fresh
@@ -186,6 +267,79 @@
                  (is (string? (:seon.state/error res)) "carries an explanatory error string")
                  (done)))
         (.catch (fn [e] (is false (str "unexpected rejection: " e)) (done))))))
+
+(deftest reconcile-recompiles-after-first-use-schema-install
+  (async done
+    (-> (scratch-conn)
+        (.then
+          (fn [conn]
+            (db/with-tx-context
+              {:seon.db/user [:seon.agent/id "root"]
+               :seon.db/process
+               [:seon.db.process/id :seon.db.process/boot]}
+              (fn []
+                (state/reconcile!
+                  {:seon.state/desired
+                   [{:seon.state.scratch.late/id "late"
+                     :seon.state.scratch.late/value "landed"}]
+                   :seon.db/managed-scope #{:seon.db.process/boot}
+                   :seon.db/managed-identity-attrs
+                   #{:seon.state.scratch.late/id}
+                   :seon.db/conn conn})))))
+        (.then
+          (fn [result]
+            (is (true? (:seon.state/ok? result)))
+            (is (= 2 (:seon.state/attempts result))
+                "schema install changes the head; retry recompiles once")
+            (done)))
+        (.catch (fn [e]
+                  (is false (str "unexpected rejection: " e))
+                  (done))))))
+
+(deftest reconcile-does-not-take-over-an-unmanaged-identity
+  (async done
+    (let [!conn (atom nil)
+          !basis (atom nil)]
+      (-> (scratch-conn)
+          (.then
+            (fn [conn]
+              (reset! !conn conn)
+              (db/with-tx-context
+                {:seon.db/user [:seon.user/id "user"]
+                 :seon.db/process
+                 [:seon.db.process/id :seon.db.process/repl]}
+                (fn []
+                  (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data
+                     [{:seon.state.scratch.a/id "owned-elsewhere"
+                       :seon.state.scratch.a/label "preserve"}]})))))
+          (.then
+            (fn [_]
+              (reset! !basis (db/basis-t @@!conn))
+              (state/reconcile!
+                {:seon.state/desired
+                 [{:seon.state.scratch.a/id "owned-elsewhere"
+                   :seon.state.scratch.a/label "must-not-land"}]
+                 :seon.db/managed-scope #{:seon.db.process/boot}
+                 :seon.db/managed-identity-attrs
+                 #{:seon.state.scratch.a/id}
+                 :seon.db/conn @!conn})))
+          (.then
+            (fn [result]
+              (is (false? (:seon.state/ok? result)))
+              (is (= @!basis (db/basis-t @@!conn))
+                  "authority collision creates no transaction")
+              (is (= "preserve"
+                     (:seon.state.scratch.a/label
+                       (db/entity @@!conn
+                                  [:seon.state.scratch.a/id
+                                   "owned-elsewhere"])))
+                  "the unmanaged entity is unchanged")
+              (done)))
+          (.catch (fn [e]
+                    (is false (str "unexpected rejection: " e))
+                    (done)))))))
 
 ;; ============================================================
 ;; #35 — upsert-ctx-tx component cascade (the orphan fix).

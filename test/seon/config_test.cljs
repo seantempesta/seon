@@ -404,22 +404,6 @@
           (set! (.-SEON_AI_MODEL env) saved-m)
           (js-delete env "SEON_AI_MODEL"))))))
 
-(deftest stale-singleton-retractions-heals-optional-attrs
-  (testing "an attr present in the stored singleton but absent from desired is retracted"
-    (let [current  {:db/id 7 :seon.config/id "cluster"
-                    :seon.config.render/eval-cap 1500
-                    :seon.config/system-text "stale"}
-          desired  (config/resolve-config-singleton {})    ; no system-text
-          retracts (config/stale-singleton-retractions current desired)]
-      ;; only system-text is stale (eval-cap is in desired; :db/id is ignored).
-      ;; VALUE-LESS 3-element retract: value-independent, so an EDN-slot
-      ;; collection knob heals without reproducing the stored pr-str bytes.
-      (is (= [[:db/retract [:seon.config/id "cluster"] :seon.config/system-text]]
-             retracts))))
-  (testing "no retractions when the stored map matches desired"
-    (let [d (config/resolve-config-singleton {})]
-      (is (empty? (config/stale-singleton-retractions d d))))))
-
 (defn- config-scratch-conn
   "Promise of a fresh :memory conn with tx-meta + the `:seon.config` singleton
    attrs installed — for the db-backed accessor reads."

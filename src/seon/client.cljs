@@ -2182,9 +2182,10 @@
               ;; AND the `:seon.config` SINGLETON (identity `:seon.config/id`,
               ;; every cluster-config knob as a datom — config-db-migration
               ;; 2026-07-10) are ONE managed population synced through
-              ;; reconcile! — upsert-by-identity (idempotent on an Nth boot)
-              ;; AND retract-stale, so a route dropped from the manifest / a
-              ;; skill removed from disk is RETRACTED. The singleton rides the
+              ;; reconcile! — exact add/change/attribute-remove/entity-remove,
+              ;; and NO transaction on a converged Nth boot. A route dropped
+              ;; from the manifest / a skill removed from disk is RETRACTED.
+              ;; The singleton rides the
               ;; SAME config-process scope: folding it INTO the desired set is
               ;; what keeps it retract-PROTECTED. Identity-attr scope prevents
               ;; that process from sweeping unrelated populations it authored.
@@ -2192,13 +2193,13 @@
               ;; (surface-errors-loudly).
               (when manifest
                 (let [singleton (config/resolve-config-singleton manifest)
-                    desired (-> (vec (config/resolve-routes
+                      desired (-> (vec (config/resolve-routes
                                        (route/core-routes-tx)
                                        manifest))
                                 (into (my.skills/seed-skills-tx-data
                                         (config/skills-dir manifest)))
                                 (conj singleton))
-                    recon   (await
+                      recon   (await
                               (db/with-tx-context
                                 {:seon.db/user [:seon.agent/id "root"]
                                  :seon.db/process
@@ -2212,32 +2213,14 @@
                                      #{:seon.route/name
                                        :my.skills/name
                                        :seon.config/id}
-                                     :seon.db/conn          conn}))))]
+                                     :seon.db/conn conn}))))]
                 (when (false? (:seon.state/ok? recon))
                   (throw (ex-info
                            (str "boot seed reconcile (routes+skills+config) failed: "
                                 (:seon.state/error recon))
                            {:seon.client/seed-step :core-declarative
-                            :seon.state/error      (:seon.state/error recon)})))
-                ;; Attr-level heal reconcile's entity-level retract can't do:
-                ;; the singleton ALWAYS survives, so an OPTIONAL knob removed
-                ;; from the manifest (e.g. `:seon.config/system-text`) would
-                ;; persist stale. Retract any singleton attr present in the
-                ;; stored entity but absent from the freshly-resolved desired
-                ;; map (read the post-reconcile db value for `current`).
-                (let [current  (config/config-view)
-                      retracts (config/stale-singleton-retractions current singleton)]
-                  (when (seq retracts)
-                    (check! :config-heal
-                            (await (db/with-tx-context
-                                     {:seon.db/user [:seon.agent/id "root"]
-                                      :seon.db/process
-                                      (db.process/lookup-ref
-                                        :seon.db.process/config)}
-                                     (fn ^:async heal-config! []
-                                       (db/transact! {:seon.db/conn conn
-                                                      :seon.db/tx-data retracts}))))))))))
-            {::seeded? true}
+                            :seon.state/error      (:seon.state/error recon)})))))
+              {::seeded? true})
             (finally
               (set! db/*conn* prev-conn))))))))
 

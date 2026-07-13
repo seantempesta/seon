@@ -640,8 +640,9 @@
    Every knob RESOLVED to its effective value (the default reproduces today's
    byte-parity behavior). The one resolution point — seeds the db at boot AND
    is the pre-conn fallback [[config-view]] reads. `:seon.config/system-text` is
-   OPTIONAL (no default): included ONLY when the manifest carries it (absent ⇒
-   the key is absent ⇒ [[stale-singleton-retractions]] retracts a stale one)."
+   OPTIONAL (no default): included ONLY when the manifest carries it; the exact
+   desired-state reconcile retracts a previously stored value when it is later
+   omitted."
   {:malli/schema [:=> [:catn [::manifest :seon.config/manifest]] :seon.config/singleton]}
   [manifest]
   (let [r   (get manifest :seon.config/render {})
@@ -705,29 +706,6 @@
       (assoc :seon.config/agent-context (:seon.config/agent-context manifest))
       (contains? manifest :seon.config/root-context)
       (assoc :seon.config/root-context (:seon.config/root-context manifest)))))
-
-(defn stale-singleton-retractions
-  "Retract ops for stored singleton attrs absent from `desired`.
-
-   The attr-level heal `seon.state/reconcile!`'s entity-level retract
-   cannot do (the singleton always survives, so it is never a stale
-   ENTITY). The plain-scalar case that matters: an OPTIONAL knob like
-   `:seon.config/system-text` removed from the manifest (absent ⇒ not in
-   `desired`) is retracted so the db stops carrying it. `current` is the
-   stored singleton map (the POST-reconcile db read — the reconcile upserts
-   but never retracts a leftover attr); `desired` is
-   `(resolve-config-singleton manifest)`. `:db/id` is ignored. Emits the
-   VALUE-LESS 3-element `:db/retract` (retract every value of the attr) —
-   value-independent, so an EDN-slot-bridged collection knob heals too (a
-   value-matched retract would have to reproduce the stored `pr-str` byte
-   for byte). Called by `seon.client/boot-seed!` AFTER the config reconcile
-   (the singleton entity exists by then)."
-  {:malli/schema [:=> [:catn [::current :map] [::desired :map]] [:vector :any]]}
-  [current desired]
-  (into []
-        (for [[k] current
-              :when (and (not= k :db/id) (not (contains? desired k)))]
-          [:db/retract [:seon.config/id cluster-config-id] k])))
 
 (defn config-view
   "The live config singleton map — database post-attach, explicit input pre-attach.
