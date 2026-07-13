@@ -643,7 +643,19 @@
                      (is (= #{["Alpha"] ["Seon"]}
                             (db/query '{:find [?n]
                                         :where [[?e :seon.db-test/name ?n]]}))
-                         "map-form query is positional, not a request map"))))))
+                         "map-form query is positional, not a request map"))
+                   (testing "malformed request maps fail instead of returning an empty answer"
+                     (try
+                       (db/query {:query '[:find ?n
+                                           :where [?e :seon.db-test/name ?n]]})
+                       (is false "a bare :query key must throw")
+                       (catch :default error
+                         (is (= :user-input
+                                (:seon.error/kind (ex-data error))))
+                         (is (= :seon.db/invalid-query-request
+                                (::db/error (ex-data error))))
+                         (is (re-find #":seon.db/query" (ex-message error))
+                             "the error names the fully qualified request key"))))))))
       done)))
 
 (deftest pull-positional-mirrors-datahike

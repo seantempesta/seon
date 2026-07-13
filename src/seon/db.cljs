@@ -811,14 +811,42 @@
                 [::rest [:+ :any]]] :any]]}
   [& args]
   (let [a0 (first args)]
-    (if (and (map? a0) (contains? a0 ::query))
-      ;; map-in request: a map that CONTAINS ::query
+    (cond
+      ;; Seon's map-in request is identified by its fully qualified key.
+      (and (map? a0) (contains? a0 ::query))
       (let [{::keys [query args db conn] :or {conn *conn* args []}} a0
             db (or db @(internal/resolve-conn conn))]
         (execute-query db query args))
-      ;; positional: a0 IS the query (vector / string / raw map-form query).
-      ;; If the next arg is a db VALUE it's the explicit db; otherwise the
-      ;; db auto-injects from *conn* and all trailing args are :in inputs.
+
+      ;; Datahike's raw map query is a separate supported query form. Every
+      ;; map-form query carries :find; do not confuse it with a malformed
+      ;; Seon request map.
+      (and (map? a0) (contains? a0 :find))
+      (let [q a0]
+        (if (internal/db-value? (second args))
+          (let [[_ db & inputs] args]
+            (execute-query db q inputs))
+          (let [db     @(internal/resolve-conn *conn*)
+                inputs (rest args)]
+            (execute-query db q inputs))))
+
+      ;; A map that is neither supported shape is almost always a bare-key
+      ;; typo such as {:query ...}. Passing it to Datahike used to return #{}
+      ;; silently, turning an invalid request into a plausible answer.
+      (map? a0)
+      (throw
+        (ex-info
+          (str "seon.db/query request maps require :seon.db/query. "
+               "Use {:seon.db/query '[:find ...]} or a raw Datahike map "
+               "query containing :find.")
+          {:seon.error/kind :user-input
+           ::error          :seon.db/invalid-query-request
+           ::request        a0}))
+
+      ;; Positional: a0 IS the vector/string query. If the next arg is a db
+      ;; VALUE it is explicit; otherwise inject *conn* and treat the rest as
+      ;; :in inputs.
+      :else
       (let [q a0]
         (if (internal/db-value? (second args))
           (let [[_ db & inputs] args]
