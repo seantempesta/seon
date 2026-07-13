@@ -14,11 +14,10 @@
  :docstring-lint
  {:enabled true}
 
- ;; Optional direct Gemini review. Reviewable edits accumulate while the
- ;; interval gate is closed, then one bounded call reviews the pending batch.
- ;; A failed review never blocks an edit and remains pending for a later retry.
+ ;; Optional direct Gemini review. Disabled by default: local deterministic
+ ;; checks stay automatic, while a network/model call is an explicit choice.
  :review
- {:enabled true
+ {:enabled false
   :interval-seconds 60
   :max-code-length 12000}
 

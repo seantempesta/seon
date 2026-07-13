@@ -25,17 +25,11 @@
 ;;; Paths
 ;;; ---------------------------------------------------------------------------
 
-;; Hooks run with cwd set to wherever the session happens to be (often the
-;; edited file's tree), so EVERY artifact path must resolve from the repo
-;; root, never from user.dir. CLAUDE_PROJECT_DIR is set by the Claude Code
-;; hook harness (settings.json already uses it for the command path); the
-;; fallback is this script's own location (bin/seon-hook -> repo root).
-;; NOTE: `git rev-parse --show-toplevel` would be WRONG here — inside a
-;; reference-code/ submodule it returns the submodule root.
+;; This script's location is the authority. Environment cwd/project variables
+;; describe the caller and may point at another checkout when a globally
+;; installed hook fires; they must never redirect Seon's checks or artifacts.
 (def repo-root
-  (or (System/getenv "CLAUDE_PROJECT_DIR")
-      (some-> *file* io/file .getCanonicalFile .getParentFile .getParentFile .getPath)
-      (System/getProperty "user.dir")))
+  (some-> *file* io/file .getCanonicalFile .getParentFile .getParentFile .getPath))
 
 (defn- root-file
   "A java.io.File for `parts` resolved from the repo root."
@@ -60,12 +54,23 @@
 ;;; Logging
 ;;; ---------------------------------------------------------------------------
 
+(def hook-log-path (root-file "logs/hook-debug.log"))
+(def hook-log-cap (* 1024 1024))
+
+(defn- bound-hook-log! []
+  (let [obsolete (root-file "logs/hook-debug.log.1")]
+    (when (.exists obsolete) (.delete obsolete)))
+  (when (and (.exists hook-log-path)
+             (> (.length hook-log-path) hook-log-cap))
+    (spit hook-log-path "")))
+
 (defn- log!
-  "Append a log line to logs/hook-debug.log."
+  "Append one line to the bounded hook diagnostic log."
   [& parts]
   (let [log-dir (root-file "logs")]
     (when-not (.exists log-dir) (.mkdirs log-dir))
-    (spit (io/file log-dir "hook-debug.log")
+    (bound-hook-log!)
+    (spit hook-log-path
           (str (java.util.Date.) " | " (clojure.string/join " | " parts) "\n")
           :append true)))
 
@@ -100,7 +105,15 @@
 (defn- absolute-file-path [file-path]
   (when file-path
     (let [file (io/file file-path)]
-      (.getPath (if (.isAbsolute file) file (root-file file-path))))))
+      (.getPath (.getCanonicalFile
+                  (if (.isAbsolute file) file (root-file file-path)))))))
+
+(defn- repository-file?
+  "True when the canonical event path is inside this script's checkout."
+  [file-path]
+  (when-let [path (absolute-file-path file-path)]
+    (let [prefix (str repo-root java.io.File/separator)]
+      (or (= path repo-root) (str/starts-with? path prefix)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Syntax Validation
@@ -434,7 +447,7 @@
     (let [review-cfg (:review config)
           file-path (absolute-file-path (get-file-path event))]
       (when (and (= (:hook_event_name event) "PostToolUse")
-                 (get review-cfg :enabled true)
+                 (get review-cfg :enabled false)
                  (reviewable-file? file-path))
         ;; 1. Accumulate BEFORE the rate-limit check — never lose an edit.
         (accumulate-pending! file-path)
@@ -559,7 +572,6 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn -main []
-  (log! "HOOK INVOKED" (str "cwd=" (System/getProperty "user.dir")))
   (try
     (let [event (try
                   (json/parse-string (slurp *in*) true)
@@ -569,14 +581,16 @@
           event-name (:hook_event_name event)
           tool-name (:tool_name event)
           edit-event? (and (#{"PreToolUse" "PostToolUse"} event-name)
-                           (#{"Edit" "Write"} tool-name))]
-      (log! (:hook_event_name event)
-            (str "tool=" tool-name)
-            (str "session=" (or (:session_id event) "orchestrator"))
-            (str "file=" (or file-path "unknown")))
+                           (#{"Edit" "Write"} tool-name))
+          local-edit? (and edit-event? (repository-file? file-path))]
+      (when local-edit?
+        (log! event-name
+              (str "tool=" tool-name)
+              (str "session=" (or (:session_id event) "orchestrator"))
+              (str "file=" file-path)))
 
       (cond
-        (not edit-event?)
+        (not local-edit?)
         (output! {:continue true})
 
         (= event-name "PreToolUse")

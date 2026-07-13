@@ -469,7 +469,7 @@ is evaluated behaviorally, not by asserting prose.
 | Writer protocol | The semantic protocol, JVM writer/server, CLJS replica, and UDS transports are separated and the duplicate operations/helpers are deleted. A typed supervisor administration surface and cold process proof remain. |
 | Database vocabulary | The protocol/backend/replica path is canonical, the managed leaf is `/db`, and the generic `store-inventory` API/context/tooling family is deleted. Skills and downstream ACME still need vocabulary convergence. |
 | Database browser | The root inventory panel, header inventory scan, generic context block, `db/store-inventory`, and `my.kb/inventory` are deleted. `/data` uses the canonical shared gzip feed and cheap shell; index-backed bounded detail projections remain. |
-| Developer hooks | Active hook config still calls the paused nREPL JVM on port 7888, so several claimed checks silently do not run. |
+| Developer hooks | The direct Babashka hook is repository-contained, runtime-independent, locally deterministic by default, and log-bounded. The operator test door still needs to include its Markdown/docstring checks. |
 | Operator | The Babashka graph and thin launcher are built and focused-tested; active caller migration plus default/ACME/Inspect live proof remain. |
 | Tests | The retained writer gate is 47 tests/295 assertions after deleting 14 legacy server suites, but disabled and paused-application tests plus noisy expected-failure logging still need removal. |
 | UI | Surface/focus machinery exists, but active symbols, CSS, DOM, docs, skills, and ACME still say tile; four dead context renderers still load. |
