@@ -1019,10 +1019,6 @@
    with SEON_EVAL_RESULT_VARS_CAP."
   (config/result-vars-cap))
 
-;; Insertion-ordered vector of bound result ids (oldest first). Process-
-;; shared, defonce'd so it survives hot-reload of `seon.eval`.
-(defonce ^:private !result-var-ids (atom []))
-
 (defn result-var-ref?
   "TRUE when `form-str` is a single bare `result/<id>` reference.
 
@@ -1280,8 +1276,11 @@
 ;; `globalThis.result.<munged-id>`, the same slot emitted for the
 ;; agent-facing `result/<id>` analyzer handle. Any value type can live
 ;; there, including opaque Datahike objects and Promises; no
-;; pr-str/read-string round trip is involved. `!result-var-ids` owns
-;; oldest-first eviction for both the value slot and analyzer def.
+;; pr-str/read-string round trip is involved. The reserved object's own
+;; enumerable property order is the oldest-first eviction order, so there is
+;; no second atom mirroring which live results exist. Eval ids are valid
+;; symbol names with a non-numeric prefix, so they follow JavaScript's string
+;; insertion-order branch rather than the integer-index ordering branch.
 ;; ============================================================
 
 (defn lookup-result
@@ -1349,50 +1348,62 @@
   "The live `globalThis.result` object, creating it on first use."
   []
   (or (js/Reflect.get js/globalThis (str result-ns-sym))
-      (let [o #js {}]
+      (let [o (js/Object.create nil)]
         (js/Reflect.set js/globalThis (str result-ns-sym) o)
         o)))
 
 (defn- replace-live-result!
   "Replace an already-live `result/<id>` value without changing its age.
 
-   Used when a pending Promise settles. Returns true only while both the
-   capped roster and runtime slot are still live; an evicted pending result
-   never resurrects itself or displaces a newer eval."
+   Used when a pending Promise settles. Returns true only while the bounded
+   runtime slot is still live; an evicted pending result never resurrects
+   itself or displaces a newer eval."
   [id value]
   (try
     (let [munged (cljs.core/munge id)
           robj   (js/Reflect.get js/globalThis (str result-ns-sym))]
       (boolean
-        (when (and (some #(= id %) @!result-var-ids)
-                   robj
+        (when (and robj
                    (js/Reflect.has robj munged))
           (js/Reflect.set robj munged value))))
     (catch :default e
       (error/record! {:seon.error/raw e :seon.error/fault :core})
       false)))
 
+(defn- unbind-result-runtime-key!
+  "Remove one result by its emitted JavaScript property key.
+
+   The runtime object's enumerable keys are the live-result authority. The
+   analyzer marker carries that same key solely so cleanup can remove the
+   corresponding compiler handle without trying to reverse CLJS munging."
+  [compile-state runtime-key]
+  (try
+    (let [robj (js/Reflect.get js/globalThis (str result-ns-sym))]
+      (when robj (js/Reflect.deleteProperty robj runtime-key)))
+    (catch :default e
+      (error/record! {:seon.error/raw e :seon.error/fault :core})))
+  (try
+    (swap! compile-state update-in
+           [:cljs.analyzer/namespaces result-ns-sym :defs]
+           (fn [defs]
+             (into {}
+                   (remove (fn [[definition-id definition]]
+                             (or (= runtime-key
+                                    (:seon.eval/result-runtime-key definition))
+                                 ;; Hot reload can leave handles created before
+                                 ;; the runtime-key marker existed. The emitted
+                                 ;; symbol still derives the same exact key.
+                                 (= runtime-key
+                                    (cljs.core/munge (name definition-id))))))
+                   (or defs {}))))
+    (catch :default e
+      (error/record! {:seon.error/raw e :seon.error/fault :core}))))
+
 (defn- unbind-result-var!
   "Remove a single `result/<id>` var — undef from globalThis AND the
    analyzer `result` ns defs. Best-effort; never throws."
   [compile-state id]
-  (let [munged (cljs.core/munge id)]
-    (try
-      (let [robj (js/Reflect.get js/globalThis (str result-ns-sym))]
-        (when robj (js/Reflect.deleteProperty robj munged)))
-      ;; OUR result-var unbind (globalThis delete) — a throw here is a
-      ;; core defect (these Reflect ops don't throw on ordinary props);
-      ;; record it, cleanup stays best-effort (a stale var is benign).
-      (catch :default e
-        (error/record! {:seon.error/raw e :seon.error/fault :core})))
-    (try
-      (swap! compile-state update-in
-             [:cljs.analyzer/namespaces result-ns-sym :defs]
-             dissoc (symbol id))
-      ;; OUR analyzer-defs unbind — a throw is a core defect (swap!/dissoc
-      ;; don't throw); record it, cleanup stays best-effort.
-      (catch :default e
-        (error/record! {:seon.error/raw e :seon.error/fault :core})))))
+  (unbind-result-runtime-key! compile-state (cljs.core/munge id)))
 
 (defn bind-result-var!
   "Store a successful eval's live value as the var `result/<id>`.
@@ -1400,8 +1411,9 @@
    Sets `globalThis.result.<munged-id>` and registers `<id>` in the
    `result` ns's analyzer defs in `compile-state`, so a later bare
    `result/<id>` resolves with no undeclared-var warning and
-   [[lookup-result]] reads the identical slot. Tracks the id for the
-   session cap and prunes the value plus analyzer handle together.
+   [[lookup-result]] reads the identical slot. The reserved runtime object's
+   own enumerable keys provide insertion order for the session cap; pruning
+   removes the value plus analyzer handle together.
 
    Failed evals never call this — there is no value to bind. Soft-fails
    (logs + ignores) so a bind hiccup never breaks the eval pipeline."
@@ -1409,9 +1421,14 @@
                   :nil]}
   [compile-state id v]
   (try
-    (let [munged (cljs.core/munge id)]
+    (let [munged (cljs.core/munge id)
+          robj (result-globalthis-obj)]
       ;; 1. Runtime value at globalThis.result.<munged-id>.
-      (js/Reflect.set (result-globalthis-obj) munged v)
+      ;; Delete first so rebinding an existing id moves that property to the
+      ;; newest position under JavaScript's specified own-key order.
+      (when (js/Reflect.has robj munged)
+        (js/Reflect.deleteProperty robj munged))
+      (js/Reflect.set robj munged v)
       ;; 2. Analyzer def — same shape cljs.js writes for an agent `def`
       ;;    (`:name` is the only key `var-ast` needs to emit a clean
       ;;    `:the-var` node; we add `:result-var? true` as a marker).
@@ -1421,24 +1438,23 @@
                    (assoc-in [:cljs.analyzer/namespaces result-ns-sym :name]
                              result-ns-sym)
                    (assoc-in [:cljs.analyzer/namespaces result-ns-sym :defs
-                              (symbol id)]
+                             (symbol id)]
                              {:name (symbol (str result-ns-sym) id)
-                              :seon.eval/result-var? true}))))
-      ;; 3. Track + prune. Re-binding an existing id moves it to the
-      ;;    front (most-recent); the cap drops the oldest excess.
-      (let [pruned (volatile! [])]
-        (swap! !result-var-ids
-               (fn [ids]
-                 (let [ids* (conj (vec (remove #(= % id) ids)) id)
-                       over (max 0 (- (count ids*) result-vars-cap))]
-                   (vreset! pruned (subvec ids* 0 over))
-                   (subvec ids* over))))
-        (doseq [old @pruned]
-          (unbind-result-var! compile-state old))))
+                              :seon.eval/result-var? true
+                              :seon.eval/result-runtime-key munged}))))
+      ;; 3. Prune oldest live runtime keys. The runtime object is already the
+      ;;    value authority; deriving the bounded key set from it removes the
+      ;;    former process-global mirror and its drift modes.
+      (let [runtime-keys (vec (js/Object.keys robj))
+            over (max 0 (- (count runtime-keys) result-vars-cap))]
+        (doseq [runtime-key (subvec runtime-keys 0 over)]
+          (unbind-result-runtime-key! compile-state runtime-key))))
     (catch :default e
       ;; OUR result-value bind (globalThis set + analyzer defs) failing is a
-      ;; core defect — record it (:core); the eval pipeline still returns
-      ;; nil (the value is unreachable via result/<id>, a benign miss).
+      ;; core defect. Roll back both local representations so a partial bind
+      ;; cannot masquerade as live, then record it; the eval pipeline still
+      ;; returns nil (a benign miss).
+      (unbind-result-runtime-key! compile-state (cljs.core/munge id))
       (error/record! {:seon.error/raw e :seon.error/fault :core})))
   nil)
 
@@ -1677,8 +1693,8 @@
   "Refresh exactly the changed function targets after their tee commits.
 
    The analyzer tuples are converted to the namespaced target data owned by
-   `seon.instrument`. Malli receives an explicit delta map; no global roster
-   or whole-program filter is involved."
+   `seon.instrument`. Malli receives an explicit delta map; no process-global
+   function list or whole-program filter is involved."
   [targets]
   (when (seq targets)
     (let [instrument-targets

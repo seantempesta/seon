@@ -99,12 +99,15 @@
   (let [eval-id       "mem-safe-0001"
         big-value     (apply str (repeat (* 5 1024 1024) "y"))
         compile-state (atom {:cljs.analyzer/namespaces {}})
-        roster        (deref #'seval/!result-var-ids)
-        prior-roster  @roster
+        prior-results (js/Reflect.get js/globalThis
+                                      (str seval/result-ns-sym))
         legacy-key    (str "__seon_results_" eval-id)
         ;; what record-eval! WOULD persist for this value:
         persisted (seval/cap-edn (pr-str big-value))]
-    (reset! roster [])
+    ;; Isolate the reserved runtime namespace without a parallel key mirror. Its
+    ;; enumerable properties are the live-result authority and eviction order.
+    (js/Reflect.set js/globalThis (str seval/result-ns-sym)
+                    (js/Object.create nil))
     (seval/bind-result-var! compile-state eval-id big-value)
     (try
       (testing "persisted datom is bounded"
@@ -121,7 +124,11 @@
         (is (false? (js/Reflect.has js/globalThis legacy-key))))
       (finally
         ((deref #'seval/unbind-result-var!) compile-state eval-id)
-        (reset! roster prior-roster)))))
+        (if prior-results
+          (js/Reflect.set js/globalThis (str seval/result-ns-sym)
+                          prior-results)
+          (js/Reflect.deleteProperty js/globalThis
+                                     (str seval/result-ns-sym)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; render-result-edn — the agent-facing text. Delegates to

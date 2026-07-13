@@ -102,7 +102,7 @@
 (deftest recent-eval-value-resolves-as-result-var
   (async done
     (-> (run-batch "rv1-260618t" "(+ 40 2)")
-        (.then (fn [o]
+        (.then (fn [^js o]
                  (let [cs (.-cs o) hns (.-hns o) r (.-result o)]
                    (is (= 1 (:seon.eval/n-ok r)) "the eval succeeded")
                    (-> (value cs hns (first (:seon.eval/ids r)))
@@ -137,9 +137,9 @@
 
 (deftest cap-prunes-oldest-keeps-recent
   (async done
-    (let [roster       (deref #'seval/!result-var-ids)
-          prior-roster @roster
-          !cleanup     (atom nil)]
+    (let [prior-results (js/Reflect.get js/globalThis
+                                        (str seval/result-ns-sym))
+          !cleanup      (atom nil)]
       (-> (repl/ensure-bootstrap!)
           (.then (fn [cs]
                    (-> (seval/eval cs "(ns probe.resultcap)"
@@ -150,14 +150,23 @@
                                       ids (mapv #(str "cz" (mod % 26)
                                                      "-99999999" (+ 10 %))
                                                 (range n))]
-                                  ;; Isolate the cap roster without deleting any
+                                  ;; Isolate the capped runtime without deleting any
                                   ;; live values established by earlier tests.
-                                  (reset! roster [])
+                                  ;; The runtime object's properties ARE the
+                                  ;; live keys; no process-global mirror exists.
+                                  (js/Reflect.set js/globalThis
+                                                  (str seval/result-ns-sym)
+                                                  (js/Object.create nil))
                                   (reset! !cleanup [cs ids])
                                   (doseq [[i id] (map-indexed vector ids)]
                                     (seval/bind-result-var! cs id (* 100 i)))
-                                  (is (= cap (count @roster))
-                                      "the live-result roster plateaus at its cap")
+                                  (is (= cap
+                                         (count
+                                           (js/Object.keys
+                                             (js/Reflect.get
+                                               js/globalThis
+                                               (str seval/result-ns-sym)))))
+                                      "the live-result runtime plateaus at its cap")
                                   (is (false?
                                         ((deref #'seval/replace-live-result!)
                                          (first ids) -1))
@@ -191,7 +200,11 @@
               (when-let [[cs ids] @!cleanup]
                 (doseq [id ids]
                   ((deref #'seval/unbind-result-var!) cs id)))
-              (reset! roster prior-roster)
+              (if prior-results
+                (js/Reflect.set js/globalThis (str seval/result-ns-sym)
+                                prior-results)
+                (js/Reflect.deleteProperty js/globalThis
+                                           (str seval/result-ns-sym)))
               (done)))))))
 
 ;; ---------------------------------------------------------------------------
@@ -201,7 +214,7 @@
 (deftest failed-eval-binds-no-result-var
   (async done
     (-> (run-batch "rv2-260618t" "(this-var-does-not-exist 1 2)")
-        (.then (fn [o]
+        (.then (fn [^js o]
                  (let [cs (.-cs o) hns (.-hns o) r (.-result o)]
                    (is (= 1 (:seon.eval/n-fail r)) "the eval failed")
                    (-> (value cs hns (first (:seon.eval/ids r)))
@@ -221,7 +234,7 @@
 (deftest result-var-resolves-with-no-result-fn-shadow
   (async done
     (-> (run-batch "rv3-260618t" "(* 6 7)")
-        (.then (fn [o]
+        (.then (fn [^js o]
                  (let [cs (.-cs o) hns (.-hns o)
                        id (first (:seon.eval/ids (.-result o)))]
                    (-> (value cs hns id)
