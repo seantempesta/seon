@@ -1,0 +1,209 @@
+(ns seon.dev.artifact
+  "Canonical build and content manifest for the Seon development runtime."
+  (:require [babashka.fs :as fs]
+            [babashka.process :as process]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [malli.core :as m])
+  (:import [java.nio.charset StandardCharsets]
+           [java.security MessageDigest]
+           [java.time Instant]
+           [java.util.jar JarFile]))
+
+(def artifact-manifest-schema
+  [:map
+   [:seon.dev.artifact/version [:= 1]]
+   [:seon.dev.artifact/published-at :string]
+   [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/bootstrap-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
+
+(defn- validate-manifest! [manifest]
+  (when-not (m/validate artifact-manifest-schema manifest)
+    (throw (ex-info "The canonical artifact manifest is invalid."
+                    {:seon.dev.artifact/explanation
+                     (mapv #(select-keys % [:path :in :type])
+                           (:errors (m/explain artifact-manifest-schema
+                                               manifest)))})))
+  manifest)
+
+(defn- bytes->hex [byte-values]
+  (apply str (map #(format "%02x" (bit-and 0xff %)) byte-values)))
+
+(defn- update-text! [^MessageDigest digest value]
+  (.update digest (.getBytes (str value) StandardCharsets/UTF_8))
+  (.update digest (byte 0)))
+
+(defn- update-stream! [^MessageDigest digest stream]
+  (let [buffer (byte-array 65536)]
+    (loop []
+      (let [n-read (.read stream buffer)]
+        (when (pos? n-read)
+          (.update digest buffer 0 n-read)
+          (recur))))))
+
+(defn- digest-values [values]
+  (let [digest (MessageDigest/getInstance "SHA-256")]
+    (doseq [value values] (update-text! digest value))
+    (bytes->hex (.digest digest))))
+
+(defn- regular-files [path]
+  (let [path (fs/path path)]
+    (cond
+      (fs/regular-file? path) [path]
+      (fs/directory? path) (->> (file-seq (io/file (str path)))
+                                (filter #(.isFile ^java.io.File %))
+                                (map fs/path)
+                                sort)
+      :else [])))
+
+(defn digest-paths
+  "Hash file paths and bytes in deterministic path order."
+  [root paths]
+  (let [root (fs/path root)
+        digest (MessageDigest/getInstance "SHA-256")
+        files (->> paths (mapcat regular-files) distinct sort)]
+    (doseq [path files]
+      (update-text! digest (str (fs/relativize root path)))
+      (with-open [stream (io/input-stream (str path))]
+        (update-stream! digest stream)))
+    (bytes->hex (.digest digest))))
+
+(defn- digest-jar [path]
+  ;; Zip entry timestamps are packaging metadata. Hash the entry names and
+  ;; bytes so rebuilding identical writer code retains one artifact identity.
+  (let [digest (MessageDigest/getInstance "SHA-256")]
+    (with-open [jar (JarFile. (str path))]
+      (doseq [entry (->> (enumeration-seq (.entries jar))
+                         (remove #(.isDirectory ^java.util.jar.JarEntry %))
+                         (sort-by #(.getName ^java.util.jar.JarEntry %)))]
+        (update-text! digest (.getName ^java.util.jar.JarEntry entry))
+        (with-open [stream (.getInputStream jar entry)]
+          (update-stream! digest stream))))
+    (bytes->hex (.digest digest))))
+
+(defn read-manifest
+  "Read the last atomically published artifact manifest."
+  [config]
+  (let [path (:seon.dev.config/artifact-manifest config)]
+    (when (fs/regular-file? path)
+      (validate-manifest! (edn/read-string (slurp path))))))
+
+(defn- atomic-spit! [path value]
+  (let [path (fs/path path)
+        temp (fs/path (str path "." (random-uuid) ".tmp"))]
+    (fs/create-dirs (fs/parent path))
+    (spit (str temp) (str (pr-str value) "\n"))
+    (fs/move temp path {:replace-existing true :atomic-move true})
+    value))
+
+(defn- extra-cljs-args [environment]
+  (let [source (get environment "SEON_EXTRA_SRC")
+        preload (get environment "SEON_EXTRA_PRELOAD")]
+    (cond-> []
+      (not (str/blank? source))
+      (into ["-Sdeps" (pr-str {:deps {'seon.extra/src {:local/root source}}})])
+
+      (and (not (str/blank? source)) (not (str/blank? preload)))
+      (into ["--config-merge"
+             (pr-str {:devtools {:preloads [(symbol preload)]}})]))))
+
+(defn cljs-command
+  "Build a structured Shadow CLJS argv vector."
+  [config action build-id]
+  (let [environment (:seon.dev.config/environment config)]
+    (into ["clj"]
+          (concat (take-while #(not= "--config-merge" %)
+                              (extra-cljs-args environment))
+                  ["-M:cljs" action build-id]
+                  (drop-while #(not= "--config-merge" %)
+                              (extra-cljs-args environment))))))
+
+(defn- run-step! [config label argv]
+  (println (str "▶ " label))
+  (let [started (System/nanoTime)
+        result (process/shell {:dir (:seon.dev.config/root config)
+                               :env (:seon.dev.config/environment config)
+                               :cmd argv})
+        elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
+    (println (str "  ● " label " (" elapsed-ms "ms)"))
+    result))
+
+(defn- build-source! [config]
+  (run-step! config "prepare writer dependencies"
+             ["clojure" "-X:deps" "prep" ":aliases" "[:writer]"])
+  (run-step! config "prepare CLJS dependencies"
+             ["clojure" "-X:deps" "prep" ":aliases" "[:cljs]"])
+  (run-step! config "warm writer classpath" ["clojure" "-P" "-M:writer"])
+  (run-step! config "warm CLJS classpath" ["clojure" "-P" "-M:cljs"])
+  (run-step! config "build canonical database server"
+             ["clojure" "-T:build" "writer-uber"])
+  (run-step! config "preflight canonical database server"
+             [(get-in config [:seon.dev.config/environment "JAVA_CMD"] "java")
+              "--add-modules" "jdk.incubator.vector"
+              "--enable-native-access=ALL-UNNAMED"
+              "-XX:+UseG1GC" "-Xmx2g" "-jar"
+              (:seon.dev.config/writer-output config) "--preflight"])
+  (run-step! config "build client" (cljs-command config "compile" "client"))
+  (run-step! config "build self-host bootstrap"
+             (cljs-command config "compile" "bootstrap"))
+  (run-step! config "repair bootstrap macro metadata"
+             [(str (fs/path (:seon.dev.config/root config)
+                            "bin/fix-bootstrap-macros"))])
+  (run-step! config "build web CSS" ["npm" "run" "css:build"]))
+
+(defn- output-manifest [config]
+  (let [root (:seon.dev.config/root config)
+        writer (:seon.dev.config/writer-output config)
+        client-runtime (fs/path root ".shadow-cljs/builds/client/dev/out/cljs-runtime")
+        bootstrap (fs/path root "out/bootstrap")
+        css (fs/path root "resources/public/css/output.css")
+        required [writer (:seon.dev.config/client-output config) bootstrap css]
+        missing (remove #(or (fs/regular-file? %) (fs/directory? %)) required)]
+    (when (seq missing)
+      (throw (ex-info "Canonical build did not publish every required output."
+                      {:seon.dev.artifact/missing (mapv str missing)})))
+    (let [writer-digest (digest-jar writer)
+          client-digest (digest-paths root [(:seon.dev.config/client-output config)
+                                            client-runtime])
+          bootstrap-digest (digest-paths root [bootstrap])
+          css-digest (digest-paths root [css])
+          application-digest
+          (digest-values ["client" client-digest
+                          "bootstrap" bootstrap-digest
+                          "css" css-digest])]
+      (validate-manifest!
+        {:seon.dev.artifact/version 1
+         :seon.dev.artifact/published-at (str (Instant/now))
+         :seon.dev.artifact/writer-digest writer-digest
+         :seon.dev.artifact/client-digest client-digest
+         :seon.dev.artifact/bootstrap-digest bootstrap-digest
+         :seon.dev.artifact/css-digest css-digest
+         :seon.dev.artifact/application-digest application-digest}))))
+
+(defn build!
+  "Build and atomically publish one canonical artifact manifest."
+  [config]
+  (if (:seon.dev.config/source-checkout? config)
+    (do
+      (build-source! config)
+      (let [previous (read-manifest config)
+            manifest (output-manifest config)
+            changed (cond-> #{}
+                      (not= (:seon.dev.artifact/writer-digest previous)
+                            (:seon.dev.artifact/writer-digest manifest))
+                      (conj :seon.dev.artifact/writer)
+
+                      (not= (:seon.dev.artifact/application-digest previous)
+                            (:seon.dev.artifact/application-digest manifest))
+                      (conj :seon.dev.artifact/application))]
+        (atomic-spit! (:seon.dev.config/artifact-manifest config) manifest)
+        (assoc manifest :seon.dev.artifact/changed changed)))
+    (let [manifest (or (read-manifest config)
+                       (throw (ex-info "Packaged Seon is missing its artifact manifest."
+                                       {:seon.dev.artifact/path
+                                        (:seon.dev.config/artifact-manifest config)})))]
+      (assoc manifest :seon.dev.artifact/changed #{}))))

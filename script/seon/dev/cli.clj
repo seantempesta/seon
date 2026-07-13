@@ -1,0 +1,305 @@
+(ns seon.dev.cli
+  "The single desired-state operator for a Seon source checkout."
+  (:require [babashka.fs :as fs]
+            [babashka.process :as shell]
+            [clojure.string :as str]
+            [seon.dev.artifact :as artifact]
+            [seon.dev.config :as config]
+            [seon.dev.process :as process]
+            [seon.dev.state :as state]))
+
+(defn- root-argument [arguments]
+  (if (= "--seon-root" (first arguments))
+    [(second arguments) (drop 2 arguments)]
+    [(System/getProperty "user.dir") arguments]))
+
+(defn- stop-development! [configuration]
+  (doseq [id (reverse process/target-processes)]
+    (process/stop! configuration id))
+  nil)
+
+(defn- reconcile-development! [configuration]
+  ;; A one-shot compiler must never share Shadow's mutable build cache with a
+  ;; watcher, and the pod must never read a partially rebuilt output closure.
+  ;; Quiesce both readers before building; the writer can safely keep running
+  ;; from its already-loaded jar until its digest is known to have changed.
+  (process/stop! configuration process/watcher-id)
+  (process/stop! configuration process/pod-id)
+  (let [manifest (artifact/build! configuration)
+        changed (:seon.dev.artifact/changed manifest)
+        spec-map (process/specs configuration manifest)]
+    (when (contains? changed :seon.dev.artifact/application)
+      (process/stop! configuration process/pod-id))
+    (when (contains? changed :seon.dev.artifact/writer)
+      (process/stop! configuration process/pod-id)
+      (process/stop! configuration process/writer-id))
+    (doseq [id (process/start-order spec-map)]
+      (println (str "▶ reconcile " (name id)))
+      (process/ensure! configuration (get spec-map id))
+      (println (str "  ● " (name id) " ready")))
+    (assoc (process/status configuration manifest)
+           :seon.dev.target/artifact-digest
+           (:seon.dev.artifact/application-digest manifest))))
+
+(defn- ordinary-agent-url [base-url]
+  ;; The feed's first patch is immediate and contains the database-derived
+  ;; fleet. Bound the stream and select the first non-root agent link.
+  (let [result (shell/sh {:continue true :out :string :err :string
+                          :cmd ["curl" "--compressed" "-sS" "-m" "1"
+                                (str base-url "/agents/feed")]})
+        ids (map second (re-seq #"href=\"/agent/([^\"]+)\"" (:out result)))
+        ordinary (first (remove #(= "root" %) ids))]
+    (if ordinary
+      (str base-url "/agent/" ordinary)
+      (str base-url "/agents"))))
+
+(defn- open-url! [url]
+  (let [argv (cond
+               (fs/executable? "/usr/bin/open") ["/usr/bin/open" url]
+               (fs/which "xdg-open") ["xdg-open" url]
+               :else nil)]
+    (when-not argv
+      (throw (ex-info "No browser opener is installed."
+                      {:seon.dev.target/url url})))
+    (shell/process {:out :discard :err :discard :cmd argv})
+    nil))
+
+(defn- print-ready! [target open?]
+  (let [base-url (:seon.dev.target/url target)
+        root-url (str base-url "/")
+        agent-url (ordinary-agent-url base-url)]
+    (println "")
+    (println "◆ Seon is ready")
+    (println (str "  agent: " agent-url))
+    (println (str "  root:  " root-url))
+    (println (str "  data:  " base-url "/data"))
+    (when open? (open-url! agent-url))))
+
+(defn- up! [configuration arguments]
+  (let [flags (set arguments)
+        unknown (remove #{"--open"} arguments)]
+    (when (seq unknown)
+      (throw (ex-info "Unknown `up` option."
+                      {:seon.dev.cli/arguments (vec unknown)})))
+    (let [target (state/with-lock configuration :stack 1800000
+                                   #(reconcile-development! configuration))]
+      (print-ready! target (contains? flags "--open")))))
+
+(defn- down! [configuration arguments]
+  (when (seq arguments)
+    (throw (ex-info "`down` takes no arguments."
+                    {:seon.dev.cli/arguments (vec arguments)})))
+  (state/with-lock configuration :stack 300000
+                   #(stop-development! configuration))
+  (println "○ Seon is down"))
+
+(defn- restart! [configuration arguments]
+  (let [flags (set arguments)
+        unknown (remove #{"--open"} arguments)]
+    (when (seq unknown)
+      (throw (ex-info "Unknown `restart` option."
+                      {:seon.dev.cli/arguments (vec unknown)})))
+    (let [target
+          (state/with-lock
+            configuration :stack 1800000
+            #(do (stop-development! configuration)
+                 (reconcile-development! configuration)))]
+      (print-ready! target (contains? flags "--open")))))
+
+(defn- status-value [configuration]
+  (if-let [manifest (artifact/read-manifest configuration)]
+    (process/status configuration manifest)
+    {:seon.dev.target/name :seon.dev.target/development
+     :seon.dev.target/status :seon.dev.target.status/down
+     :seon.dev.target/failure :seon.dev.target.failure/missing-artifact}))
+
+(defn- status! [configuration arguments]
+  (let [edn? (= ["--edn"] (vec arguments))]
+    (when (and (seq arguments) (not edn?))
+      (throw (ex-info "`status` accepts only `--edn`."
+                      {:seon.dev.cli/arguments (vec arguments)})))
+    (let [status (status-value configuration)]
+      (if edn?
+        (prn status)
+        (do
+          (println (str (case (:seon.dev.target/status status)
+                          :seon.dev.target.status/ready "●"
+                          :seon.dev.target.status/degraded "◐"
+                          "○")
+                        " Seon " (name (:seon.dev.target/status status))))
+          (when-let [url (:seon.dev.target/url status)]
+            (println (str "  " url)))
+          (doseq [[id value] (:seon.dev.target/processes status)]
+            (println (str "  " (name id) "  "
+                          (name (:seon.dev.process/status value))
+                          (when-let [pid (:seon.dev.process/pid value)]
+                            (str "  pid=" pid))
+                          (when-not (:seon.dev.process/ready? value)
+                            "  not-ready")))))))))
+
+(defn- parse-log-id [value]
+  (case value
+    "watcher" process/watcher-id
+    "writer" process/writer-id
+    "pod" process/pod-id
+    nil))
+
+(defn- parse-log-options [arguments]
+  (loop [arguments (seq arguments)
+         options {:seon.dev.logs/follow? false
+                  :seon.dev.logs/lines 200}]
+    (if-not arguments
+      options
+      (case (first arguments)
+        "--follow"
+        (recur (next arguments) (assoc options :seon.dev.logs/follow? true))
+
+        "--lines"
+        (let [lines (some-> (second arguments) parse-long)]
+          (when-not (and lines (pos? lines))
+            (throw (ex-info "`--lines` requires a positive integer."
+                            {:seon.dev.cli/arguments (vec arguments)})))
+          (recur (nnext arguments) (assoc options :seon.dev.logs/lines lines)))
+
+        (throw (ex-info "Unknown `logs` option."
+                        {:seon.dev.cli/arguments (vec arguments)}))))))
+
+(defn- logs! [configuration arguments]
+  (let [first-argument (first arguments)
+        id (some-> first-argument parse-log-id)
+        _ (when (and first-argument (not id)
+                     (not (str/starts-with? first-argument "--")))
+            (throw (ex-info "Unknown process log."
+                            {:seon.dev.cli/argument first-argument})))
+        arguments (if id (rest arguments) arguments)
+        {:seon.dev.logs/keys [follow? lines]} (parse-log-options arguments)
+        ids (if id [id] process/target-processes)]
+    (if follow?
+      (do
+        (when-not (= 1 (count ids))
+          (throw (ex-info "`logs --follow` requires writer, watcher, or pod."
+                          {:seon.dev.cli/arguments (vec arguments)})))
+        (if-let [path (process/current-log configuration (first ids))]
+          (shell/exec ["tail" "-n" (str lines) "-f" path])
+          (throw (ex-info "That process has no current log."
+                          {:seon.dev.process/id (first ids)}))))
+      (doseq [process-id ids]
+        (when-let [path (process/current-log configuration process-id)]
+          (println (str "== " (name process-id) " · " path " =="))
+          (let [result (shell/sh {:continue true :out :string :err :string
+                                  :cmd ["tail" "-n" (str lines) path]})]
+            (print (:out result))))))))
+
+(defn- command-available? [command]
+  (boolean (fs/which command)))
+
+(defn- doctor-value [configuration]
+  (let [manifest (artifact/read-manifest configuration)
+        checks {:seon.dev.doctor/babashka? (command-available? "bb")
+                :seon.dev.doctor/clj? (command-available? "clj")
+                :seon.dev.doctor/clojure? (command-available? "clojure")
+                :seon.dev.doctor/node? (command-available? "node")
+                :seon.dev.doctor/npm? (command-available? "npm")
+                :seon.dev.doctor/python? (command-available? "python3")
+                :seon.dev.doctor/curl? (command-available? "curl")
+                :seon.dev.doctor/java-22+?
+                (let [result (shell/sh {:continue true :out :string :err :string
+                                        :cmd [(get-in configuration
+                                                      [:seon.dev.config/environment "JAVA_CMD"]
+                                                      "java") "-version"]})
+                      major (some-> (re-find #"version \"([0-9]+)"
+                                            (str (:out result) (:err result)))
+                                    second parse-long)]
+                  (boolean (and major (<= 22 major))))}]
+    {:seon.dev.doctor/healthy? (every? true? (vals checks))
+     :seon.dev.doctor/checks checks
+     :seon.dev.doctor/artifact-status
+     (if manifest :seon.dev.artifact.status/published
+                  :seon.dev.artifact.status/missing)}))
+
+(defn- doctor! [configuration arguments]
+  (let [edn? (= ["--edn"] (vec arguments))]
+    (when (and (seq arguments) (not edn?))
+      (throw (ex-info "`doctor` accepts only `--edn`."
+                      {:seon.dev.cli/arguments (vec arguments)})))
+    (let [result (doctor-value configuration)]
+      (if edn?
+        (prn result)
+        (do
+          (println (if (:seon.dev.doctor/healthy? result)
+                     "● host prerequisites ready"
+                     "✗ host prerequisites incomplete"))
+          (doseq [[check ok?] (:seon.dev.doctor/checks result)]
+            (println (str "  " (if ok? "●" "✗") " " (name check))))
+          (println (str "  artifact "
+                        (name (:seon.dev.doctor/artifact-status result)))))))))
+
+(defn- reset-cluster! [configuration arguments]
+  (let [cluster-name (first arguments)]
+    (when (or (nil? cluster-name) (next arguments))
+      (throw (ex-info "`cluster reset` requires exactly one cluster name."
+                      {:seon.dev.cli/arguments (vec arguments)})))
+    (when-not (= cluster-name (:seon.dev.config/cluster-name configuration))
+      (throw (ex-info "This operator can reset only its explicitly configured cluster."
+                      {:seon.dev.cluster/requested cluster-name
+                       :seon.dev.cluster/configured
+                       (:seon.dev.config/cluster-name configuration)})))
+    (state/with-lock
+      configuration :stack 600000
+      #(let [manifest (or (artifact/read-manifest configuration)
+                          (throw (ex-info "Run `bin/seon up` before reset."
+                                          {:seon.dev.target/failure
+                                           :seon.dev.target.failure/missing-artifact})))
+             specs (process/specs configuration manifest)
+             database (fs/path (:seon.dev.config/cluster-dir configuration) "db")]
+         (process/stop! configuration process/pod-id)
+         (process/stop! configuration process/writer-id)
+         (when (fs/exists? database) (fs/delete-tree database))
+         (doseq [id (process/start-order specs)]
+           (process/ensure! configuration (get specs id)))
+         (process/status configuration manifest)))
+    (println (str "● cluster " cluster-name " reset and ready"))))
+
+(defn- cluster! [configuration arguments]
+  (case (first arguments)
+    "reset" (reset-cluster! configuration (rest arguments))
+    (throw (ex-info "The supported cluster transition is `cluster reset <name>`."
+                    {:seon.dev.cli/arguments (vec arguments)}))))
+
+(defn- help! []
+  (println
+    (str "Usage: bin/seon [up] [--open]\n\n"
+         "  up [--open]              build and reconcile the complete system\n"
+         "  down                     drain the complete system\n"
+         "  restart [--open]         drain, rebuild, and reconcile\n"
+         "  status [--edn]           report live health\n"
+         "  logs [writer|watcher|pod] [--lines N] [--follow]\n"
+         "  doctor [--edn]           check host prerequisites\n"
+         "  cluster reset <name>     drain and reset one named database\n")))
+
+(defn -main
+  "Run one Seon operator command."
+  [& raw-arguments]
+  (let [[root arguments] (root-argument raw-arguments)
+        arguments (vec arguments)
+        command (or (first arguments) "up")
+        command-arguments (if (seq arguments) (subvec arguments 1) [])]
+    (try
+      (let [configuration (config/load! root)]
+        (case command
+          "up" (up! configuration command-arguments)
+          "down" (down! configuration command-arguments)
+          "restart" (restart! configuration command-arguments)
+          "status" (status! configuration command-arguments)
+          "logs" (logs! configuration command-arguments)
+          "doctor" (doctor! configuration command-arguments)
+          "cluster" (cluster! configuration command-arguments)
+          ("help" "--help" "-h") (help!)
+          (throw (ex-info "Unknown Seon command."
+                          {:seon.dev.cli/command command}))))
+      (catch Throwable error
+        (binding [*out* *err*]
+          (println (str "✗ " (ex-message error)))
+          (when-let [data (not-empty (ex-data error))]
+            (prn data)))
+        (System/exit 1)))))
