@@ -34,12 +34,15 @@ clean-base proof; remote replication, cloud topology, browser replicas, offline
 mutation, mobile packaging, and the full paid Inspect AI battery are explicit
 follow-on work rather than completion gates for this branch.
 
-The shared ACME/plan/REPL work is now checkpointed at `3e0e0bff`; the tree was
-clean immediately afterward and the directly affected schema, plan, and AI
-dispatch CLJS namespaces pass their focused tests. The Phase 1 baseline is
-[[research/phase-1-baseline-2026-07-13]]. The checkpoint is not yet the archive
-ref: clean writer/CLJS artifacts, live transition proof, profiling, and the
-annotated pre-removal ref remain outstanding.
+The shared ACME/plan/REPL work is now checkpointed at `3e0e0bff`; the directly
+affected schema, plan, and AI dispatch CLJS namespaces pass their focused tests,
+and `runtime-reliability-pre-refactor-2026-07-13` anchors the complete
+`b4efd4f5` handoff. The Phase 1 baseline is
+[[research/phase-1-baseline-2026-07-13]]. Since that capture, `writer-uber` has
+been corrected to use the exact live `[:simd :fork-deps :writer]` composition;
+it now builds and reaches the expected opt-in embedding gate. Live transition
+proof, profiling, dependency slimming, and a published artifact manifest remain
+outstanding.
 
 The source-grounded system audits are complete and committed:
 
@@ -383,7 +386,7 @@ is evaluated behaviorally, not by asserting prose.
 | Area | Current defect |
 |---|---|
 | JVM source | The retained writer reaches thirteen namespaces; one is the unused second reactive system. The old Integrant/core.async/agent/web application remains searchable and on broad classpaths. |
-| JVM artifact | `writer-uber` claims the live fork/SIMD composition but builds a basis containing only `:writer`. |
+| JVM artifact | The corrected uberjar uses the live fork/SIMD/writer basis, but still inherits the broad base dependency graph, emits multiple SLF4J providers, and has no published launch manifest. |
 | Dependencies | Heavy paused-app dependencies live in base `:deps`; the writer, CLJS build, tools, and tests do not have honest narrow closures. |
 | Writer protocol | Dead query subscriptions, in-process subscriber routing, duplicate Transit helpers, unused read/filter/batch operations, an unwired agent registry, and a fake SQLite backend remain. |
 | Database vocabulary | `seon.store.wire`, `:seon.store.wire/*`, `{store-id, ...}`, `db/store-inventory`, `seon.server.store`, `/store` paths, and matching docs/UI/skills expose a second name for the database. |

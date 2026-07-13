@@ -24,10 +24,14 @@ architectures.
 
 The previously shared ACME/plan/REPL work is checkpointed at `3e0e0bff` and the
 tree was clean immediately afterward. Focused `seon.schema-test`,
-`my.plan-test`, and `seon.ai.dispatch-test` runs pass. This is a readable
-coordination point, not yet the archival boundary: clean writer/CLJS artifacts,
-live transition proof, profiling, and the annotated archive ref remain Phase 1
-work. The exact evidence is [[research/phase-1-baseline-2026-07-13]].
+`my.plan-test`, and `seon.ai.dispatch-test` runs pass. The annotated
+`runtime-reliability-pre-refactor-2026-07-13` tag anchors the complete
+`b4efd4f5` handoff. The first artifact correction is also landed in the working
+lane: `writer-uber` now builds successfully from the exact live
+`:simd:fork-deps:writer` basis and reaches the expected opt-in embedding gate.
+Live transition proof, profiling, dependency slimming, and artifact-manifest
+truth remain. The exact starting evidence is
+[[research/phase-1-baseline-2026-07-13]].
 
 Foundational gains already landed and are the baseline:
 
@@ -84,9 +88,11 @@ process verbs are not primary UX.
 - The retained writer currently reaches thirteen namespaces; deleting the
   unused second reactive system reduces that closure to twelve. Base aliases
   and the writer artifact still include misleading paused dependencies.
-- `writer-uber` builds from `[:writer]` while runtime uses the maintained
-  fork/SIMD composition. Artifact and local execution are not presently the
-  same program.
+- `writer-uber` originally built from `[:writer]` while runtime used the
+  maintained fork/SIMD composition. It now uses one explicit
+  `[:simd :fork-deps :writer]` basis and builds/preflights; the remaining
+  artifact defect is its broad inherited dependency closure and lack of one
+  published launch manifest.
 - `bin/seon` is a 2,186-line shell program. The replacement is a small shell
   launcher over a Babashka process graph with explicit transitions,
   readiness, locks, and scoped reset.

@@ -8,6 +8,12 @@
 (def uber-file (format "target/%s-%s-standalone.jar" (name lib) version))
 (def jar-file (format "target/%s-%s.jar" (name lib) version))
 
+;; The standalone artifact and the source-launched writer are the same program.
+;; Keep this composition in one value so the build cannot silently fall back to
+;; the Maven Datahike/Konserve graph while local launch uses the maintained
+;; forks and secondary-index source.
+(def writer-aliases [:simd :fork-deps :writer])
+
 (defn clean [_]
   (b/delete {:path "target"}))
 
@@ -41,10 +47,11 @@
 ;;   java --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED \
 ;;        -XX:+UseG1GC -Xmx2g -jar target/seon-wire-server-standalone.jar --preflight
 ;;
-;; It is built off the `:writer` basis (NOT the default `basis` the `uber`
-;; target above uses — that one is the PAUSED JVM app `seon.core`, with no
-;; embeddings classpath). Building off `:writer` bakes EVERYTHING the consumer
-;; would otherwise have to assemble themselves into one jar:
+;; It is built from the same `:simd:fork-deps:writer` basis as the source
+;; launcher (NOT the default `basis` the `uber` target above uses — that one is
+;; the PAUSED JVM app `seon.core`, with no embeddings classpath). Building from
+;; that exact composition bakes EVERYTHING the consumer would otherwise have to
+;; assemble themselves into one jar:
 ;;   - the datahike fork's `src-secondary` Proximum source;
 ;;   - the datahike fork's prep output (no `clojure -X:deps prep`);
 ;;   - the proximum + google-genai maven jars + the SHA-pinned forks.
@@ -56,7 +63,8 @@
 ;; this artifact's build cannot race/clobber the `uber`/`jar` targets (C19).
 
 (defn writer-uber [_]
-  (let [writer-basis (b/create-basis {:project "deps.edn" :aliases [:writer]})
+  (let [writer-basis (b/create-basis {:project "deps.edn"
+                                      :aliases writer-aliases})
         wclass-dir   "target/wire-classes"
         wuber-file   "target/seon-wire-server-standalone.jar"]
     (b/delete {:path wclass-dir})
