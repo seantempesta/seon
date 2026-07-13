@@ -339,7 +339,11 @@
   [{::keys [title] agent-id :seon.agent/id :as request}]
   (or
     (internal/check-plan-keys "plan!" request)
-    (let [agent (internal/agent-ref agent-id)]
+    (let [agent      (internal/agent-ref agent-id)
+          db         @db/*conn*
+          oe         (when agent (internal/agent-eid db agent))
+          open-roots (when oe (internal/open-forest db oe))
+          dup-root   (some #(when (= (:my.plan/title %) title) %) open-roots)]
       (cond
         (or (nil? title) (str/blank? title))
         (internal/fail "plan!: blank :my.plan/title refused — name the plan.")
@@ -347,6 +351,21 @@
         (nil? agent)
         (internal/fail (str "plan!: no :seon.agent/id resolved — pass one, or call "
                             "from inside an agent turn (the boundary fills in you)."))
+
+        ;; Idempotency guard: plan! only CREATES, and a SAME-TITLE re-statement
+        ;; (a model re-emitting its plan — common, since eval results arrive
+        ;; next turn) would silently duplicate the whole tree. Refuse only the
+        ;; duplicate (a distinct new plan is a legitimate forest), routing to
+        ;; the UPDATE doors and surfacing the existing root id the caller needs.
+        dup-root
+        (internal/fail
+          (str "plan!: you already have an open plan titled " (pr-str title)
+               " (root " (pr-str (:my.plan/id dup-root)) "). plan! CREATES — "
+               "re-stating it here duplicates it, it does NOT update. See it "
+               "with (my.plan/document {}). To revise the whole tree, edit that "
+               "and (my.plan/reconcile! {:my.plan/tree …}) — it diffs by "
+               ":my.plan/id (added/dropped/updated) and keeps your progress. Add "
+               "one step with my.plan/step!; close one with my.plan/done!."))
 
         :else
         (let [now     (js/Date.)

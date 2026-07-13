@@ -1197,6 +1197,47 @@
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
+(deftest plan-refuses-same-title-duplicate
+  ;; Regression (2026-07-13): plan! only CREATES; a same-title re-statement (a
+  ;; model re-emitting its plan, since eval results arrive next turn) must NOT
+  ;; silently duplicate the tree. The second call fails, names the existing
+  ;; root, points to the update door, and leaves exactly one root.
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/plan! {:my.plan/title "Tally ledger"})
+                  (.then (fn [{:my.plan/keys [root]}]
+                           (swap! st assoc :r1 root)
+                           (plan/plan! {:my.plan/title "Tally ledger"})))
+                  (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                           (is (false? ok?)
+                               "same-title plan! refused, never silently duplicated")
+                           (is (str/includes? error (:r1 @st))
+                               "the envelope names the existing root id")
+                           (is (str/includes? error "reconcile!")
+                               "…and routes to the update door")
+                           (is (= ["Tally ledger"]
+                                  (mapv :my.plan/title (plan/tree {})))
+                               "exactly ONE root — no duplicate tree minted"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest plan-allows-distinct-second-plan
+  ;; The guard is title-scoped: a DISTINCT second plan is a legitimate forest.
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            (-> (plan/plan! {:my.plan/title "tree one"})
+                (.then (fn [_] (plan/plan! {:my.plan/title "tree two"})))
+                (.then (fn [{ok? :my.plan/ok?}]
+                         (is (true? ok?) "a distinct-title second plan is allowed")
+                         (is (= #{"tree one" "tree two"}
+                                (into #{} (map :my.plan/title) (plan/tree {})))
+                             "both roots coexist"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest reconcile-idless-root-refuses-when-ambiguous
   (async done
     (let [st (atom {})]
