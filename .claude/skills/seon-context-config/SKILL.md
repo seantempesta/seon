@@ -73,9 +73,9 @@ skills context block absent unless a measured use case proves it belongs there.
 
 For a manifest-only change:
 
-    bin/seon restart pod
+    bin/seon restart
     bin/seon status
-    bin/seon tail pod
+    bin/seon logs pod --follow
 
 Existing agents retain the block entities copied at creation. Use a cluster
 reset only when the work explicitly requires a completely fresh database:

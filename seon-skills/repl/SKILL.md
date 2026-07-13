@@ -22,11 +22,6 @@ prose.
   warning. If you mean to RUN a value, wrap it in a call: `(db/transact! :seon
   [{…}])`, not a bare `{…}`.
 
-**Comment levels carry meaning** (your context renders as eval'able Clojure):
-`;` = prose to your human, `;;` = a code comment above a form, `;;;` = runtime
-structure (don't author these). Write your reasoning as `;` lines — never type
-`;;` when you actually mean data.
-
 ## `#code` — raw foreign-source blocks with ZERO escaping
 
 To pass a chunk of another language (Python, Rust, Go, YAML, a diff…) as data
@@ -57,9 +52,11 @@ PY
   like any bare literal.
 - Forget the closing `SENTINEL` line and you get a `:read` error naming the
   sentinel it's still waiting for — fix it the same way you'd close a paren.
-- `seon.agent.fs/replace!`/`insert!`/`write-file` accept a `#code` value
-  anywhere they take a string (`::find`/`::replace`/`::content`), so foreign
-  source crosses into an edit untouched.
+
+**Comment levels carry meaning** (your context renders as eval'able Clojure):
+`;` = prose to your human, `;;` = a code comment above a form, `;;;` = runtime
+structure (don't author these). Write your reasoning as `;` lines — never type
+`;;` when you actually mean data.
 
 ## What the REPL AUTO-FIXES for you (don't sweat these)
 

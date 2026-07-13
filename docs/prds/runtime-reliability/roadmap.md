@@ -509,17 +509,17 @@ is evaluated behaviorally, not by asserting prose.
 | JVM artifact | Source and uberjar use the same complete `:writer` basis with the maintained forks and one SLF4J provider, but no published launch manifest yet records the artifact/runtime contract. |
 | Dependencies | The writer and writer-test closures are honest and narrow. Heavy paused-app dependencies still live in the base graph used by old JVM/tools, and CLJS/tool ownership is not yet fully separated. |
 | Writer protocol | The semantic protocol, JVM writer/server, CLJS replica, and UDS transports are separated and the duplicate operations/helpers are deleted. A typed supervisor administration surface and cold process proof remain. |
-| Database vocabulary | The protocol/backend/replica path is canonical, the managed leaf is `/db`, and the generic `store-inventory` API/context/tooling family is deleted. Skills and downstream ACME still need vocabulary convergence. |
+| Database vocabulary | The protocol/backend/replica path is canonical, the managed leaf is `/db`, and the generic `store-inventory` API/context/tooling family is deleted. Runtime and developer skills are converged; downstream ACME still needs the proven vocabulary cut. |
 | Database browser | The root inventory panel, header inventory scan, generic context block, `db/store-inventory`, and `my.kb/inventory` are deleted. `/data` uses the canonical shared gzip feed and cheap shell; index-backed bounded detail projections remain. |
 | Developer hooks | The direct Babashka hook is repository-contained before config/artifact access, runtime-independent, locally deterministic, and log-bounded under a cross-process lock. Automatic model review is deleted. The operator gate includes its Markdown/docstring checks. |
 | Operator | The Babashka graph and thin launcher are built and focused-tested; active caller migration plus default/ACME/Inspect live proof remain. |
 | Tests | Public pod/database/operator doors delegate to one runner each; focused pod builds use compile-time namespace selection, one bundle lock, and exact freshness fingerprints. Disabled/paused-application tests and remaining intentional expected-failure noise still need removal. |
-| UI | Surface/focus machinery exists, but active symbols, CSS, DOM, docs, skills, and ACME still say tile; four dead context renderers still load. |
+| UI | Surface/focus machinery exists, but active symbols, CSS, DOM, docs, and ACME still say tile; four dead context renderers still load. Skill teaching is converged on canvas/surface/card vocabulary. |
 | Live rendering | Agent view unitization/read-observation is incomplete; legitimate work still needs bounded caching, layout/focus/browser proof, and grown-database profiling. |
 | Recent activity reads | `seon.render.default/recent-messages`, `seon.agent.ctx/messages`, transcript/activity queries, `seon.derive/real-eval-oks`, and the function menu independently scan and sort growing message/eval history before taking a small tail. Root's current cross-agent activity does the same over the whole database. |
 | Root/UI presence | `/` already renders root's system canvas, but first-run routing, concise root role context, originating-tab identity, database-backed current location, and feed-driven agent navigation are not one finished path. |
 | Root context | Root's scalar home-require replacement, sparse system-canvas pin, and ordinary-agent fallback are now distinct. Concise root role context and browser-location awareness remain unfinished. |
-| Skills | `.agents/skills`, `.claude/skills`, and `seon-skills` drift; file-backed bodies still depend on source paths after import; one runtime copy teaches deleted `my.tile`, live-tile, and world APIs. |
+| Skills | `seon-skills` now generates exact shared tool adapters, Codex-only operator skills generate their Claude views, and the operator suite rejects drift. File-backed imported bodies still depend on source paths after import. |
 | Prototypes | Wasmtime/WIT Tauri, Rust client-runtime, and old libdatahike CLJS spikes remain in the active tree despite settled rejection. |
 
 ## Implementation discipline
@@ -751,14 +751,15 @@ agents idle and one exact notice visible to root.
    composable agent/domain discovery tools. A later KB surface must be a focused
    domain query through the normal block/render/surface mechanism, not a
    restored global inventory/context block.
-9. Refine the existing skill path in place: one parser/validator and desired-fact
-   compiler accepts the shipped `seon-skills` tree, an operator directory, or
-   uploaded `SKILL.md` content; it stores exact canonical source/body facts so a
-   later config-free restart does not depend on the original path. Generate or
-   validate tool-facing adapter views mechanically. Keep default/test skill
-   context blocks absent; explicit load remains an override through the normal
-   block mechanism. Delete `ui-live-tiles` and stale
-   world/inspector/`my.tile` teaching.
+9. **Adapter generation complete:** `seon-skills` is the runtime authority;
+   `bin/seon skills sync` generates exact shared tool views, operator-only Codex
+   skills generate their Claude adapters, and `bin/seon skills check` runs in
+   the operator gate. Refine the existing import path in place: one
+   parser/validator and desired-fact compiler accepts the shipped corpus, an
+   operator directory, or uploaded `SKILL.md` content; it stores exact canonical
+   source/body facts so a later config-free restart does not depend on the
+   original path. Keep default/test skill context blocks absent; explicit load
+   remains an override through the normal block mechanism.
 10. Replace every full-history-then-`take-last` message/eval reader with one
     bounded path per fact owner: `seon.agent.message` owns recent conversation,
     `seon.eval` owns recent evals, and `seon.log/tail` remains the one error-log

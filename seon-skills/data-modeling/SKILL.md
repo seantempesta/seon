@@ -21,9 +21,6 @@ Read both — this skill assumes their mindset and won't repeat it.
 
 ## Step 0 — there are NO entity kinds; you model ATTRIBUTES + connections
 
-The no-`:kind` floor rule is always in your context; here is how it plays out in
-schema design.
-
 The single biggest design error from an OO/table background: reaching for a
 `:type`/`:kind`/class. Datahike has none — an entity is just an id plus the
 datoms it carries. What an entity "is" comes from **which attributes are present**
@@ -37,7 +34,8 @@ asserting them. Design moves, not tables:
 - **FIND a set** → query by attribute presence (`[?e :my.kb.source/id]`).
 - **IDENTIFY one** → a `{:seon.db/identity true}` attribute (also drives upsert).
 - **RELATE / REMOVE** → refs (`:seon.db/component` cascades the delete).
-- **SCOPE** → provenance (`:seon.db/origin` on the tx), not a kind field.
+- **SCOPE** → the transaction's `:seon.db/user` and `:seon.db/process` refs,
+  not a kind field.
 
 If you write "for each kind" or a `:kind` enum, stop and reframe.
 
@@ -93,8 +91,8 @@ What the bridge installs for each (verify live with
 | natural key | `[:string {:seon.db/identity true}]` | + `:db/unique :db.unique/identity` |
 
 The bridge maps `:enum` (keyword members only), `:and` (bridges on its base),
-and same-type `:or`; an unmappable shape THROWS instead of silently
-guessing — never hand-write a `:db.type/*` yourself. Full table +
+and same-type `:or`; an unmappable shape THROWS — extend the bridge
+(`src/seon/db/internal.cljs`), never hand-write a `:db.type/*`. Full table +
 query/transact mechanics: the **`datahike`** skill.
 
 ### Three design rules the type system enforces
@@ -119,10 +117,13 @@ inline-duplicate (duplication guarantees drift). The canonical examples live in
 `seon.schema`: `:seon.db/id` (the 14-char id shape) and `:seon.db/ref`.
 
 ```clojure
-(schema/register! :seon.db/id [:string {:min 14 :max 14}])   ; ONE source of truth
-(schema/register! ::agent-id   :seon.db/id)                  ; reference it
-(schema/register! ::session-id :seon.db/id)
-(schema/register! ::id [:and {:seon.db/identity true} :seon.db/id])  ; identity wrap
+;; Reuse the identity schema already owned by the agent namespace.
+(schema/register! ::agent-id :seon.agent/id)
+
+;; A domain identity owns its value schema locally.
+(schema/register! ::external-id :string)
+(schema/register! ::id
+  [:and {:seon.db/identity true} ::external-id])
 ```
 
 If the bridge can't follow a reference shape you need, FIX the bridge — don't
@@ -131,24 +132,24 @@ duct-tape by inlining.
 ## Provenance is NOT a domain attribute — the tx already records it
 
 Before registering a provenance-ish attr — `created-by`, `created-at`,
-`updated-by`, `source-turn` — STOP. Every `transact!` is auto-stamped with
-`:seon.db/agent-id`/`turn-id`/`origin` (+ friends) on the **transaction
-entity**, and datahike stamps `:db/txInstant`; "who/when wrote this" is a join
-through the datom's tx, not an attribute you model. Register a domain attr
-only for a **pre-event snapshot coordinate** — a fact about a db value observed
-*before* the entity's own tx (e.g. the basis-t a prompt rendered from), which
-no tx records. Join recipe + the seven stamped attrs: the **`datahike`** skill,
-"Transaction metadata".
+`updated-by`, `source-turn` — stop. Every `transact!` carries exactly two
+durable provenance refs on the transaction entity: `:seon.db/user` and
+`:seon.db/process`; Datahike also stamps `:db/txInstant`. "Who, through which
+stable process, and when wrote this?" is a join through the datom's transaction,
+not an attribute duplicated on the domain entity. Turn, eval, replay, and test
+execution details stay runtime-only. Add a domain-specific transaction fact
+only when it records a real source fact that those two refs cannot express.
+See the **`datahike`** skill, "Transaction metadata".
 
 ## Composite map schemas + entity declaration
 
 A `:map` schema names a composite shape — a fn's request/response, or a declared
-entity kind. Reference your attr schemas by keyword (don't re-inline their
+entity schema. Reference your attr schemas by keyword (don't re-inline their
 shapes); mark optional fields `{:optional true}`:
 
 ```clojure
 (schema/register! ::source-entity
-  [:map {:seon.db/entity true}                 ; ← declares a stored entity kind
+  [:map {:seon.db/entity true}                 ; ← declares a stored entity schema
    [::id ::id]                                 ; identity attr (required)
    [::title ::title]
    [::rating {:optional true} ::rating]        ; absent when unknown
@@ -226,10 +227,9 @@ specced positional one.
   [id new-title] …)
 ```
 
-The `:malli/schema`-is-enforced floor rule is always in your context; the design
-angle here: every schema'd public fn is instrumented and THROWS on a mismatch — a
-wrong schema is a runtime bug, not a doc nit. (Agent-facing verbs return their
-`::ok?` response map instead of throwing — see `data-oriented-clojure`.)
+Every schema'd public fn is instrumented and THROWS on a mismatch — a wrong
+schema is a runtime bug, not a doc nit. (Agent-facing verbs return their `::ok?`
+response map instead of throwing — see `data-oriented-clojure`.)
 
 ## The schema IS the generator — generative testing
 
@@ -244,9 +244,10 @@ tests. The loop: design schema → generate example data → assert a property.
 ```
 
 Use it to round-trip your model before writing real code: generate an entity,
-`transact!` it, query it back, check it matches. Write a real
-`cljs.test/deftest` in a `my.<domain>-test` ns that asserts against the
-schema (not a hand-built fixture) — the schema is the source of test data.
+`transact!` it, query it back, check it matches. On the **active pod (CLJS)**,
+write `cljs.test` properties through `bin/test-cljs` (see `clojure-testing`).
+The generator remains a data source inside that suite; it is not a separate
+runtime or harness. The schema, not a hand-built fixture, is the test oracle.
 
 ## Worked example — a small domain end to end
 
@@ -270,7 +271,7 @@ shared **author**).
 ;; 2. derived datahike schema (what got installed — no hand-writing):
 (seon.db/malli->datahike-schema
   [:my.kb.source/id :my.kb.source/topics :my.kb.source/author :my.kb.source/findings])
-; ⟹ [{:db/ident :my.kb.source/id     :db/valueType :db.type/string :db/cardinality :db.cardinality/one
+;;=> [{:db/ident :my.kb.source/id     :db/valueType :db.type/string :db/cardinality :db.cardinality/one
 ;;     :db/unique :db.unique/identity}
 ;;    {:db/ident :my.kb.source/topics  :db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
 ;;    {:db/ident :my.kb.source/author  :db/valueType :db.type/ref     :db/cardinality :db.cardinality/one}
@@ -291,10 +292,20 @@ shared **author**).
                    [:my.kb.source/rating :my.kb.source/rating]])
 ```
 
-The `my.kb` namespace carries exactly this pattern, running live — its
-`ns-publics` and docstrings are worth browsing for the recipe; `my.plan`
-is the exemplar for refs + tree/DAG modeling (identity, parent/needs
-refs, derived ready/blocked queries).
+`src/my/kb.cljs` is the runnable, test-exercised version of exactly this — read
+it for live idiom. `src/seon/agent/todo.cljs` is the exemplar for refs + tree/DAG
+modeling.
+
+## Key files
+
+| File | What it gives you |
+|---|---|
+| `src/seon/schema.cljc` | `register!`, the registry, entity-schema decomposition |
+| `src/seon/db/internal.cljs` | `malli->datahike-attr` — the bridge (extend it here) |
+| `src/my/kb.cljs` | runnable schema-design manual — copy a recipe |
+| `docs/conventions.md` | Malli patterns, base+provider, request/response, `:any` boundary |
+| `reference-code/malli/src/malli/{core,generator}.cljc` | schema syntax + generator derivation |
+| `reference-code/spectomic`, `reference-code/malli-datomic` | the upstream spec/malli→datomic bridges this generalizes |
 
 For querying / transacting / upsert / retract / refs-at-read-time → the
 **`datahike`** skill. For the mindset → **`data-oriented-clojure`**.

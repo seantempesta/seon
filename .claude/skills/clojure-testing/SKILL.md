@@ -35,7 +35,7 @@ behavior fast, eval
 the fn directly against the live pod instead of running a whole ns.
 
 **Never fire overlapping `cljs.test/run-tests` in the LIVE pod** — it wedges the
-shared async continuation. Restart (`bin/seon restart pod`) for a pristine run;
+shared async continuation. Restart (`bin/seon restart`) for a pristine run;
 `bin/test-cljs` is the isolated path (its own JVM, no live-pod contention).
 
 ## Fresh in-memory datahike conn per test

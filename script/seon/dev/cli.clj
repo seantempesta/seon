@@ -6,6 +6,7 @@
             [seon.dev.artifact :as artifact]
             [seon.dev.config :as config]
             [seon.dev.process :as process]
+            [seon.dev.skills :as skills]
             [seon.dev.state :as state]))
 
 (defn- root-argument [arguments]
@@ -307,6 +308,22 @@
                   :cmd argv}))
   nil)
 
+(defn- skills! [configuration arguments]
+  (let [root (:seon.dev.config/root configuration)]
+    (case (vec arguments)
+      ["sync"]
+      (let [result (skills/sync! root)]
+        (println (str "● generated "
+                      (count (:seon.dev.skills/synced result))
+                      " shared skills into both tool adapters")))
+
+      ["check"]
+      (do (skills/check! root)
+          (println "● generated skill adapters match seon-skills"))
+
+      (throw (ex-info "Choose `skills sync` or `skills check`."
+                      {:seon.dev.cli/arguments (vec arguments)})))))
+
 (defn- help! []
   (println
     (str "Usage: bin/seon [up] [--open]\n\n"
@@ -317,6 +334,7 @@
          "  logs [writer|watcher|pod] [--lines N] [--follow]\n"
          "  doctor [--edn]           check host prerequisites\n"
          "  test pod|database|operator|all [selector]\n"
+         "  skills sync|check        generate or verify tool-facing skill adapters\n"
          "  cluster reset <name>     drain and reset one named database\n")))
 
 (defn -main
@@ -336,6 +354,7 @@
           "logs" (logs! configuration command-arguments)
           "doctor" (doctor! configuration command-arguments)
           "test" (test! configuration command-arguments)
+          "skills" (skills! configuration command-arguments)
           "cluster" (cluster! configuration command-arguments)
           ("help" "--help" "-h") (help!)
           (throw (ex-info "Unknown Seon command."

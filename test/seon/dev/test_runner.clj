@@ -4,7 +4,8 @@
             [seon.dev.cli-test]
             [seon.dev.docstring-test]
             [seon.dev.markdown-test]
-            [seon.dev.process-test]))
+            [seon.dev.process-test]
+            [seon.dev.skills-test]))
 
 (defn -main [& _]
   (let [{:keys [fail error]}
@@ -12,5 +13,6 @@
                    'seon.dev.cli-test
                    'seon.dev.docstring-test
                    'seon.dev.markdown-test
-                   'seon.dev.process-test)]
+                   'seon.dev.process-test
+                   'seon.dev.skills-test)]
     (when (pos? (+ fail error)) (System/exit 1))))

@@ -10,7 +10,7 @@ query. Reads are synchronous.
 ```clojure
 (db/query '[:find (count ?e) (avg ?score) (max ?score)
             :where [?e ::score ?score]])
-; ⟹ [[3 30.0 42.0]]
+;; => [[3 30.0 42.0]]
 ```
 
 Built-ins: `count`, `count-distinct`, `sum`, `avg`, `min`, `max`, `median`,
@@ -30,7 +30,7 @@ repeated values still count:
 (db/query '[:find (sum ?r) . :with ?e :where [?e ::rating ?r]])
 ```
 
-(Live example: `my.kb/source-stats`.)
+(Live example: `my.kb/source-stats` in `src/my/kb.cljs`.)
 
 ## Order and Limit
 
@@ -63,7 +63,7 @@ alone cannot express.
           rules)
 ```
 
-`my.plan/rules` is the live exemplar: a
+`seon.agent.todo/rules` (`src/seon/agent/todo.cljs`) is the live exemplar: a
 recursive `descendant` closure, plus `leaf`/`open-work`/`blocked`/`ready`
 derived entirely from two refs — the whole work-queue is pure Datalog over the
 tree/DAG, nothing precomputed. Note its comment: negations (`leaf`, `not
@@ -102,7 +102,7 @@ must declare which vars unify with the outer query.
 ```clojure
 ;; pull refs inline; a sub-pattern expands the ref'd entity:
 (db/query '[:find (pull ?e [::name {::parent [::name]}]) :where [?e ::name _]])
-; ⟹ [[{::name "child" ::parent {::name "parent"}}]]
+;; => [[{::name "child" ::parent {::name "parent"}}]]
 
 ;; wildcard everything for matched entities:
 (db/query '[:find (pull ?e [*]) :where [?e ::id _]])
@@ -115,8 +115,9 @@ to a nested map under `[*]`. Reverse-ref navigation (`::parent` →
 
 ## Inspecting the index (debugging only)
 
-You almost never need raw datoms — `query`/`pull`/`entity` + `store-inventory`/
-`installed-schema` cover normal work. When you genuinely must see the raw EAV
+You almost never need raw datoms — `query`/`pull`/`entity` and
+`installed-schema` cover normal work. When
+you genuinely must see the raw EAV
 shape while debugging, the guarded surface is `seon.db`, not `datahike.api`
 directly (the one-API rule). `installed-schema` answers "what attrs exist on
 this db" without faulting data in:
@@ -138,14 +139,13 @@ that keeps the single-API rule. Do not reach around it into `datahike.api`.
 - **Batch inserts** in one `db/transact!` call, not one entity per call.
 - **Most selective clause first** — pin the entity by a known eid or a unique
   attr value so datahike picks a small AEVT/AVET slice, not a full-index scan.
-  Clause order is a perf knob, never a correctness knob.
 - **Scalar form (`.`)** when expecting one result — skips the set wrapper.
 - **Prefer pull** over N follow-up queries when fetching related entities.
 - **Thread one db value** through a unit of work instead of re-deref'ing
-  `@*conn*` per leaf fn — in the pod each deref reconstitutes a fresh value.
-  It's a correctness AND a perf win.
+  `@*conn*` per leaf fn — in the pod each deref reconstitutes a fresh value
+  (`datahike-primer.md` §1). It's a correctness AND a perf win.
 - **Don't `memoize` on a db value** — `=` on a DB walks the whole EAVT index,
-  faulting every node in off the store on a cache HIT. Measure before
-  caching; `:memory`/local reads are sub-ms on small datom counts.
+  faulting every node from durable storage on a cache HIT (`datahike-primer.md` §5).
+  Measure before caching; `:memory`/local reads are sub-ms on small datom counts.
 - **Skip history unless you need retractions** — current-db queries carry no
   history overhead; only reach for `db/history` when you want retracted datoms.

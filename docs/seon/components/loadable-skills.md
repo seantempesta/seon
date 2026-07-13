@@ -75,15 +75,16 @@ The directories currently serve different consumers:
 | `.agents/skills/` | Codex project-skill discovery |
 | `.claude/skills/` | Claude Code project-skill discovery and the unconfigured runtime fallback |
 
-Shared skill bodies in `.agents` and `.claude` are adapter copies today. The two
-trees are synchronized now and are not meant to define independent behavior,
-but there is not yet a checked-in generator or equality gate. A symlink is not
-assumed safe: project-skill discovery is owned by external tools, and their
-directory/link traversal contract is not specified by Seon. Until a generated
-adapter or mechanical validation step lands, edits must update both adapters and
-the runtime corpus deliberately where their audience shares the same contract.
+Runtime-importable skills originate in `seon-skills/`; `bin/seon skills sync`
+generates their exact `.agents` and `.claude` adapter trees. Codex-only operator
+skills originate in `.agents/skills/` and generate their matching Claude
+adapters. Claude-only skills are outside that graph and remain untouched.
 
-This is a known consolidation gap, not permission to create another corpus.
+`bin/seon skills check` reports every changed, missing, or extra adapter file.
+The operator suite runs the same check, so a tool-facing copy cannot quietly
+become another authority. A symlink is not assumed safe because project-skill
+discovery is owned by external tools whose link traversal contracts Seon does
+not control.
 
 ## Remaining database-ownership gap
 
@@ -104,4 +105,5 @@ loader, a second block collection, or an atom-backed registry.
 - `src/seon/client.cljs` — boot desired-state reconciliation
 - `src/seon/agent/ctx.cljs` — shared context file rendering
 - `config/system.edn` — shipped corpus selection and initial context tree
+- `script/seon/dev/skills.clj` — deterministic adapter generation and drift gate
 - `test/my/skills_test.cljs` — current behavioral coverage

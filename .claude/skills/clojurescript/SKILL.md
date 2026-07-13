@@ -170,7 +170,7 @@ through the bootstrap compile-state, not the shadow runtime:
     (.then (fn [r] (swap! !probe assoc :result r))))
 ```
 
-Restart hygiene: `bin/seon restart pod` for a bad pod state, or
+Restart hygiene: `bin/seon restart` for a bad pod state, or
 `bin/seon cluster reset default` for a fresh database (does not restart
 cljs-watch). Never restart cljs-watch standalone -- it detaches the pod from
 shadow.

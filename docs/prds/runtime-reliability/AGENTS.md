@@ -155,9 +155,11 @@ process verbs are not primary UX.
   until a measured need justifies a Datahike-owned transaction-leading index.
 - `my.kb` facts are ordinary database facts and must be browsable through
   `/data`; a later focused KB surface must not restore a global inventory block.
-- Three skill trees drift. One importer persists canonical `SKILL.md` source;
-  `seon-skills` is the shipped corpus and tool-facing trees are generated or
-  validated adapters. Import does not imply a standing skills context block.
+- Skill adapter drift is mechanically closed. `seon-skills` is the shipped
+  runtime authority; `bin/seon skills sync` generates shared tool views and the
+  operator gate runs `bin/seon skills check`. Import does not imply a standing
+  skills context block. Persisting imported bodies instead of checkout paths is
+  still open.
 - `/` already points at root's system canvas. The remaining target is one short
   root-role block, namespace-led orchestration/navigation context, one ordinary
   first-run agent, and database-backed per-tab location so root can switch the

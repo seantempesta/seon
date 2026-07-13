@@ -1,6 +1,6 @@
 ---
 name: datahike
-description: "Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty/unexpected results, designing a schema, or working with seon.db / seon.schema. Use for schema/register!, db/transact!, db/query, db/pull, db/entity, db/store-inventory, lookup-refs, refs/components/identity, upsert, retract, cardinality-many, CAS fences, as-of/since history, listen!/triggers, or any 'where do I put this data / how do I read it back' question in the CLJS pod."
+description: "Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty/unexpected results, designing a schema, or working with seon.db / seon.schema. Use for schema/register!, db/transact!, db/query, db/pull, db/entity, installed-schema, lookup-refs, refs/components/identity, upsert, retract, cardinality-many, CAS fences, as-of/since history, listen!/triggers, or any 'where do I put this data / how do I read it back' question in the CLJS pod."
 ---
 
 # Datahike — Seon Database Patterns
@@ -10,45 +10,45 @@ You write to a database through ONE namespace: `seon.db` (alias it `db`).
 shape — you NEVER hand-write datahike schema. This skill owns the
 database-specific facts: query/pull/transact in the pod, `register!` + the
 Malli→datahike bridge, refs/components/identity, provenance/scope, discovery,
-and the pod↔wire-server read/write split.
+and the pod↔database-server read/write split.
 
 > Hand-offs (single-ownership of facts — don't duplicate them here):
 > the general data-oriented mindset (errors-as-values, derive-don't-store, no
 > bare keys) → **`data-oriented-clojure`**; `^:async`/`await`/self-host eval /
-> a Promise leaking into output → **`clojurescript`**.
+> a Promise leaking into output → **`clojurescript`**; test fixtures/generators
+> → **`clojure-testing`**. The Datalog/Datomic mindset, source-grounded, is
+> `docs/prds/agent-fsm/research/datahike-primer.md` — read it once.
 
-## The runtime: one connection, reads local, writes over a wire
+## The runtime: one connection, local reads, typed database writes
 
 The ACTIVE runtime is the **CLJS pod** (a long-running Node process). It does
 **NOT** embed datahike. The picture:
 
-- **Your universe is ONE connection.** `seon.db/*conn*` is bound for you before
+- **Your database is ONE connection.** `seon.db/*conn*` is bound for you before
   your code runs. Never thread it, never open another. Every `db/` fn defaults
   to `*conn*`, so you omit it.
 - **Reads are SYNC and local.** `query`/`pull`/`entity` resolve against the
-  current db value (`@*conn*`) — a lazy, immutable snapshot reconstituted from
-  the store with LRU node fetch (memory ∝ working set, not whole-DB). Compose
+  current db value (`@*conn*`) — a lazy, immutable snapshot backed by shared
+  Konserve data with LRU node fetch (memory follows the working set). Compose
   reads in straight-line code.
-- **Writes return a Promise envelope over a wire.** `transact!` is `^:async`;
-  it forwards the tx over a Unix socket to the **wire-server** (the single JVM
-  writer; durable file-backed store at `data/clusters/default/store`). You get
-  back a data ENVELOPE, never a throw.
+- **Writes return a Promise envelope through the database protocol.**
+  `transact!` is `^:async`; it forwards pure transaction data over a Unix socket
+  to `seon.db.server`, the sole JVM writer for the durable database at
+  `data/clusters/default/db`. You get back a data envelope, never a throw.
 
-A db is a **value, not a place**. The "race" you think you have ("the DB
-moved between deciding and acting") is almost always re-reading `@*conn*`
-three times instead of threading one value. To act on a value the writer
-can confirm hasn't moved, use a CAS fence (below).
+A db is a **value, not a place** (`datahike-primer.md` §1). The "race" you
+think you have ("the DB moved between deciding and acting") is almost always
+re-reading `@*conn*` three times instead of threading one value. To act on a
+value the writer can confirm hasn't moved, use a CAS fence (below).
 
 ## There are NO entity kinds — only attributes + connections
-
-The no-`:kind` floor rule is always in your context; here is how it plays out in
-queries and transacts.
 
 The most-repeated correction. An entity has no type/class/kind — it is an id
 plus a set of datoms. What it "is" comes entirely from which attributes it
 carries and how refs connect it. Schema attaches to **attributes**, never to
 entities; an entity is open (it can carry attrs from several domains at once).
-Full mindset + the OO reflexes to drop: **`data-oriented-clojure`**.
+(Full mindset + the OO reflexes to drop: `data-oriented-clojure`. Datahike
+specifics: `datahike-primer.md` §0.)
 
 Applied to datahike, four moves replace every "for each kind":
 
@@ -59,32 +59,31 @@ Applied to datahike, four moves replace every "for each kind":
 - **RELATE / REMOVE** → follow **refs**. Cascade is a property of the
   connection (`:db/isComponent` retracts children), never a kind operation.
 - **SCOPE** is two independent axes, don't conflate them:
-  - **provenance** — `:seon.db/origin` on the *transaction* (`:agent`,
-    `:core-seed`, `:user`, …), auto-stamped via `with-tx-context`/`with-agent`.
-    Answers "where did this fact come from". Drives `store-inventory`'s
-    user-vs-system split.
-  - **ownership** — a domain ref like `:my.plan/agent` pointing at the
+  - **provenance** — `:seon.db/user` and `:seon.db/process` refs on the
+    transaction, selected by `with-agent`/`with-tx-context`. They answer who
+    caused the facts and which stable process accepted them. Boot/config facts
+    are derived by joining the process ref.
+  - **ownership** — a domain ref like `:seon.agent.todo/owner` pointing at the
     owning entity. Answers "whose row is this". Per-agent filtering.
 
 If you catch yourself writing a `:type`/`:kind` field or a per-kind loop, stop
 and reframe in attributes + connections + provenance.
 
-**ENUMERATE stored data the right way** — `store-inventory`'s actual job is to
-group the live attributes BY THEIR NAMESPACE (a display grouping, not an entity
-type) and, when you want the entities themselves, scan one identity attr's index.
-REPL-proven against the live store:
+**Inspect database contents by attribute.** Use the installed schema to discover
+attributes, then query by attribute presence. REPL-proven against the live
+database:
 
 ```clojure
-;; "what holds data?" — attr namespaces + counts (no entity kind anywhere)
-(seon.db/store-inventory)
-; ⟹ {:seon.db/attr-groups   [{:seon.db/attr-ns :my.kb
-;;                              :seon.db/attrs {:my.kb/question 3 :my.kb/answer 3}} …]
-;;     :seon.db/attr-ns-count 9 :seon.db/attr-count 53 :seon.db/datom-count 124}
+;; every installed domain attribute, including attrs with no live values
+(->> (keys (seon.db/installed-schema @seon.db/*conn*))
+     (filter keyword?)
+     (filter #(= "my.kb" (namespace %)))
+     sort)
 
 ;; enumerate entities BY ID-ATTR PRESENCE (scan that attr's index)
 (seon.db/query {:seon.db/query '[:find ?id :where [?e :seon.agent/id ?id]]})
 
-;; group the whole store by which identity attr each entity carries
+;; group the whole database by which identity attr each entity carries
 (->> (seon.db/query {:seon.db/query '[:find ?a :where [?s :seon.schema/key ?a]]})
      (map first)
      (filter seon.schema/identity-attr?)
@@ -92,12 +91,11 @@ REPL-proven against the live store:
              (let [n (count (seon.db/query
                               {:seon.db/query [:find '?e :where ['?e a]]}))]
                (when (pos? n) [a n])))))
-; ⟹ ([:seon.fn/sym 614] [:seon.eval/id 317] [:my.kb.runtime/slug 7] …)
+;; => ([:seon.fn/sym 614] [:seon.eval/id 317] [:my.kb.runtime/slug 7] …)
 ```
 
-The grouping label is always an **attribute** (a namespace or an id-attr), never a
-"kind". `store-inventory` returns `:seon.db/attr-groups` keyed by `:seon.db/attr-ns`
-for exactly this reason.
+The grouping label is always an **attribute** (a namespace or an id-attr), never
+a "kind".
 
 ## Quick start — register, transact (check the envelope), read back
 
@@ -120,19 +118,19 @@ Inside namespace `my.kb.source` you write `::id` and the reader expands it to
   (if ok? :saved error))
 
 ;; 3. QUERY — SYNC, db auto-injected (omit it). Pick the :find shape:
-(db/query '[:find ?t :where [?e ::title ?t]])           ; ⟹ #{["Alpha"]}     relation
-(db/query '[:find [?t ...] :where [?e ::title ?t]])     ; ⟹ ["Alpha"]        collection
-(db/query '[:find (count ?e) . :where [?e ::id]])       ; ⟹ 1                scalar
+(db/query '[:find ?t :where [?e ::title ?t]])           ;=> #{["Alpha"]}     relation
+(db/query '[:find [?t ...] :where [?e ::title ?t]])     ;=> ["Alpha"]        collection
+(db/query '[:find (count ?e) . :where [?e ::id]])       ;=> 1                scalar
 
 ;; 4. PULL / ENTITY — read one entity by lookup-ref [identity-attr value]:
-(db/pull '[*] [::id "s1"])                ; ⟹ {:db/id N :my.kb.source/id "s1" …}
-(db/entity [::id "s1"])                   ; ⟹ touched plain map
+(db/pull '[*] [::id "s1"])                ;=> {:db/id N :my.kb.source/id "s1" …}
+(db/entity [::id "s1"])                   ;=> touched plain map
 ```
 
-`my.kb` is the runnable, test-exercised manual — every recipe compiles.
-`my.plan` is the EXEMPLAR store/retrieve ns (identity, refs, tree/DAG
-queries, derived datalog rules) — browse its `ns-publics`/docstrings for
-live idiom.
+`my.kb` (`src/my/kb.cljs`) is the runnable, test-exercised manual — every
+recipe compiles. `seon.agent.todo` (`src/seon/agent/todo.cljs`) is the exemplar
+database-backed namespace (identity, refs, tree/DAG queries, derived datalog rules).
+Read those for live idiom.
 
 ## Schema: register! is the single source of truth
 
@@ -171,7 +169,8 @@ the Malli registry — see the uninstalled-attr gotcha below).
 
 Shapes used in two+ schemas get **registered once and referenced** — never
 inlined twice. The canonical examples: `:seon.db/ref` (every ref attr
-references it) and `:seon.db/id` (every id attr).
+references it) and `:seon.db/id` (every id attr). If the bridge can't map a
+shape you need, **fix the bridge** (`src/seon/db/internal.cljs`) — don't inline.
 
 ### Banned types
 
@@ -218,17 +217,16 @@ as `{::db/ok? false ::db/error <error-map>}`. Success is COMPACT DATA
 you get the envelope directly; writing `await` at the top level is an error
 (it's a macro, valid only inside an `^:async` body — see `clojurescript`).
 
-### The CAS work-fence (commit iff the world hasn't moved)
+### The CAS work-fence (commit iff the database fact has not moved)
 
 A `[:db.fn/cas ref attr old new]` with **`old == new`** is an in-tx assertion
 "this value is STILL `old`". Lead a work-tx with it and the whole tx commits
 atomically at the single writer iff the assertion holds; otherwise it aborts
 (`:transact/cas`) and surfaces as `{::db/ok? false …}`. This is the database —
 not a pre-read predicate — telling the writer it lost authority. CAS is pure
-data, so it crosses the write wire (an inline `:db.fn/call` closure would NOT
-— it carries a JS closure that can't serialize). Proven live: a matching
-`old`/`new` commits the whole tx; a stale `old` aborts with a
-`:transact/cas` error and the rest of that tx never lands.
+data, so it crosses the write wire (an inline `:db.fn/call` closure would NOT).
+Source: `reference-code/datahike/src/datahike/db/transaction.cljc:873`. Full
+pattern + the live proof table: `datahike-primer.md` §3 and `db/cas-assert`.
 
 ## Read path — Datalog, sync, db auto-injected
 
@@ -237,10 +235,10 @@ data, so it crosses the write wire (an inline `:db.fn/call` closure would NOT
 
 ```clojure
 ;; relation / scalar / collection / single-tuple — chosen by :find shape:
-(db/query '[:find ?n ?r :where [?e ::name ?n] [?e ::rank ?r]])   ; ⟹ #{["A" 1] …}
-(db/query '[:find ?n . :where [?e ::name ?n]])                   ; ⟹ "A"  (one scalar)
-(db/query '[:find [?n ...] :where [?e ::name ?n]])               ; ⟹ ["A" "B"]
-(db/query '[:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]]) ; ⟹ ["A" 1]
+(db/query '[:find ?n ?r :where [?e ::name ?n] [?e ::rank ?r]])   ;=> #{["A" 1] …}
+(db/query '[:find ?n . :where [?e ::name ?n]])                   ;=> "A"  (one scalar)
+(db/query '[:find [?n ...] :where [?e ::name ?n]])               ;=> ["A" "B"]
+(db/query '[:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]]) ;=> ["A" 1]
 
 ;; :in parameter — pass inputs AFTER the query:
 (db/query '[:find [?n ...] :in $ ?min
@@ -254,7 +252,7 @@ data, so it crosses the write wire (an inline `:db.fn/call` closure would NOT
 ```
 
 Advanced shapes (aggregates, rules, `not`/`or`, the `:with` aggregate footgun)
-→ `references/querying.md`. `my.plan`'s `rules` is a live datalog-rules
+→ `references/querying.md`. `seon.agent.todo`'s `rules` is a live datalog-rules
 example (transitive tree closure, ready/blocked derivation).
 
 ### Two read traps that bite everyone
@@ -274,29 +272,18 @@ Results are CLIPPED (~50 rows) for context. Want a number? `(count …)` in the
 query, don't list-then-count. Empty `#{}` on a query that should match? The
 attr keyword is almost certainly misspelled (the guard below catches it).
 
-## Discovery — consult the store BEFORE registering a new shape
+## Discovery — inspect the database before registering a new shape
 
 ```clojure
-;; store-inventory: WHICH attribute namespaces hold data RIGHT NOW (so you know
-;; what you can query, and which shapes to REUSE rather than fork). Default
-;; scope = data added after the core seed.
-(db/store-inventory)
-; ⟹ {:seon.db/attr-groups [{:seon.db/attr-ns :my.kb :seon.db/attrs {:my.kb/question 3 …}} …]
-;;    :seon.db/attr-ns-count … :seon.db/attr-count … :seon.db/datom-count … :seon.db/topology …}
-
-;; installed-schema: EVERY attr installed on the db, including
-;; registered-but-dataless ones store-inventory omits. Filter keyword? — the
+;; installed-schema: EVERY attr installed on the db, including attrs with no
+;; live values. Filter keyword? — the
 ;; map is also keyed by numeric attr-eid (a datahike internal):
 (->> (keys (db/installed-schema @db/*conn*)) (filter keyword?)
-     (filter #(= "my.plan" (namespace %))) sort)
-; ⟹ (:my.plan/agent :my.plan/completed-at :my.plan/created-at :my.plan/description
-;;    :my.plan/expect :my.plan/from :my.plan/goal :my.plan/id :my.plan/message
-;;    :my.plan/needs :my.plan/pace :my.plan/parent :my.plan/status :my.plan/title)
+     (filter #(= "seon.agent.todo" (namespace %))) sort)
 ```
 
-An attr namespace that already holds data means data you can datalog (its listed
-attrs ARE the `:where` keywords) and a shape to REUSE. Check before inventing an
-attr.
+An installed attr is a shape to reuse. Query its presence to learn whether live
+entities carry it. Check before inventing an attr.
 
 ## Common errors and gotchas
 
@@ -315,35 +302,35 @@ attr.
 - **Schema evolution** — add attrs any time; you cannot change an existing
   attr's value type, and adding uniqueness fails if duplicates exist.
 
-## Transaction metadata — provenance rides on the tx entity
+## Transaction metadata — two durable provenance refs
 
-Every datom's 4th field names its **transaction**, and the transaction is a
-real entity: datahike turns `:tx-meta` into datoms ON the tx and auto-stamps
-a monotonic `:db/txInstant`. Seon **already auto-merges
-provenance into every `transact!`**: the active `with-agent`/`with-tx-context`
-scope (the agent loop sets it for you) stamps `:seon.db/agent-id`,
-`:seon.db/session-id`, `:seon.db/turn-id`, `:seon.db/eval-id`,
-`:seon.db/origin`, `:seon.db/replay?`, `:seon.db/resume-marker?` — and it
-survives the wire to the JVM writer.
+Every datom's fourth field names its transaction, and the transaction is a real
+entity. Datahike turns `:tx-meta` into datoms on that entity and stamps
+`:db/txInstant`. Seon persists exactly two ordinary provenance facts:
 
-So WHO/WHAT/WHEN-wrote-this is a **join, not an attribute**:
+- `:seon.db/user` — a ref to the existing human/root or agent entity; and
+- `:seon.db/process` — a ref to a stable `:seon.db.process/id` such as
+  `:seon.db.process/repl`, `/boot`, or `/config`.
+
+The active `with-agent`/`with-tx-context` scope selects those refs. Turn, eval,
+test, replay, and other execution values remain process-local unless they are
+real domain facts. Who/process/when wrote a datom is therefore a join:
 
 ```clojure
-;; which agent wrote this entity's title? Bind the datom's ?tx from the
-;; value-bearing clause, then join the tx entity:
-(db/query '[:find ?agent ?tx
+;; which database user and process wrote this title?
+(db/query '[:find ?user ?process-id ?at
             :where [?e :my.kb.source/id "src-1"]
                    [?e :my.kb.source/title _ ?tx]
-                   [?tx :seon.db/agent-id ?agent]])
-;; WHEN is [?tx :db/txInstant ?at] — auto-stamped, no attr of yours needed.
+                   [?tx :seon.db/user ?user]
+                   [?tx :seon.db/process ?process]
+                   [?process :seon.db.process/id ?process-id]
+                   [?tx :db/txInstant ?at]])
 ```
 
-**DON'T register provenance attrs on domain entities** — a
-`:my.thing/created-by-agent`, `/created-at`, `/updated-at`, or `/source-turn`
-duplicates what the tx already records (the derive-don't-store violation in
-temporal form). Custom per-tx facts (an import batch, a source label) also go
-on the tx: include `{:db/id :db/current-tx :my.ingest/source "…"}` in the
-tx-data — see `references/data-modeling.md` "Transactions".
+Do not register provenance projections such as `created-by`, `created-at`,
+`updated-at`, or `source-turn` on domain entities. Join the transaction. A real
+custom transaction fact such as an import batch may be written on
+`:db/current-tx`; it is not another Seon provenance mechanism.
 
 **The one exception:** a PRE-event snapshot coordinate — an application fact
 about a db value observed BEFORE the entity's own tx (canonical example:
@@ -367,14 +354,16 @@ coordinate). Genuinely underivable → a real domain attr.
 `seon.trigger/register!` (triggers persisted as DB entities). The canonical
 reaction is an agent's wake-up on new `:seon.agent.message/to` datoms.
 
-## Live namespaces to browse for idiom
+## Key files
 
-| Namespace | What it gives you |
-|---|---|
-| `seon.db` | the whole API you call — every fn's docstring is the reference (`(:doc (meta (resolve 'seon.db/pull)))` etc.) |
-| `seon.schema` | `register!`, the registry, entity-schema decomposition |
-| `my.kb` | a runnable manual you can browse — copy a recipe, swap your attrs |
-| `my.plan` | EXEMPLAR: identity, refs, tree/DAG, rules |
+| File | Purpose |
+|------|---------|
+| `src/seon/db.cljs` | The whole agent-facing API — read its docstrings, they're the reference |
+| `src/seon/schema.cljc` | `register!`, the registry, entity-schema decomposition |
+| `src/seon/db/internal.cljs` | the Malli→datahike bridge + tx validation gate |
+| `src/my/kb.cljs` | runnable manual — copy a recipe, swap your attrs |
+| `src/seon/agent/todo.cljs` (+ `todo/internal.cljs`) | EXEMPLAR: identity, refs, tree/DAG, rules |
+| `reference-code/datahike/` | the fork's source — read it, don't guess semantics |
 
 ## When to read references
 
@@ -385,4 +374,4 @@ reaction is an agent's wake-up on new `:seon.agent.message/to` datoms.
   relationships, reified-tx provenance, intra-tx tempids vs lookup-refs, a
   worked example in pod idiom.
 - `references/datahike-internals.md` — EAV/datoms, value types, schema-as-datoms,
-  history, the pod↔wire-server split, and where to read in the fork.
+  history, the pod↔database-server split, and where to read in the fork.
