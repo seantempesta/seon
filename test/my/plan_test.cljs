@@ -631,6 +631,75 @@
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
+(deftest needs-preflights-every-dependency-before-writing
+  (async done
+    (let [st        (atom {})
+          missing-a "missing-dependency-a"
+          missing-b "missing-dependency-b"]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/step! {:my.plan/title "dependent"})
+                  (.then (fn [{id :my.plan/id}]
+                           (swap! st assoc :dependent id)
+                           (plan/step! {:my.plan/title "existing dependency"})))
+                  (.then (fn [{id :my.plan/id}]
+                           (swap! st assoc :existing id)
+                           (plan/needs!
+                             {:my.plan/id (:dependent @st)
+                              :my.plan/on [[:my.plan/id id]
+                                           [:my.plan/id missing-a]
+                                           [:my.plan/id missing-b]]})))
+                  (.then
+                    (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                      (is (false? ok?)
+                          "one bad dependency rejects the complete edge operation")
+                      (is (and (str/includes? error "needs!")
+                               (str/includes? error missing-a)
+                               (str/includes? error missing-b)
+                               (str/includes? error ":my.plan/on"))
+                          "the envelope identifies the operation, every bad id, and retry field")
+                      (is (nil? (:my.plan/needs
+                                  (d/pull @db/*conn* '[*]
+                                          [:my.plan/id (:dependent @st)])))
+                          "preflight writes no valid prefix when another target is missing"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest move-preflights-the-requested-parent-before-writing
+  (async done
+    (let [st             (atom {})
+          missing-parent "missing-parent"]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/step! {:my.plan/title "original parent"})
+                  (.then (fn [{id :my.plan/id}]
+                           (swap! st assoc :parent id)
+                           (plan/step!
+                             {:my.plan/title "child"
+                              :my.plan/parent [:my.plan/id id]})))
+                  (.then (fn [{id :my.plan/id}]
+                           (swap! st assoc :child id)
+                           (plan/move!
+                             {:my.plan/id id
+                              :my.plan/parent [:my.plan/id missing-parent]})))
+                  (.then
+                    (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                      (is (false? ok?)
+                          "a missing parent is an agent-facing failure envelope")
+                      (is (and (str/includes? error "move!")
+                               (str/includes? error missing-parent)
+                               (str/includes? error ":my.plan/parent"))
+                          "the envelope identifies the operation, bad parent id, and retry field")
+                      (is (= (:parent @st)
+                             (get-in
+                               (d/pull @db/*conn*
+                                       '[{:my.plan/parent [:my.plan/id]}]
+                                       [:my.plan/id (:child @st)])
+                               [:my.plan/parent :my.plan/id]))
+                          "a rejected move preserves the existing parent fact"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
 ;; --- planning redesign (deps as `needs`, :active position, windowed render).
 ;; --- Assert MECHANISM (anchor derives, frontier caps, interior drops,
 ;; --- stored :blocked excludes from ready), never exact rendered phrasing.

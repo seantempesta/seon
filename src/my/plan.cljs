@@ -465,10 +465,17 @@
                               " — (my.plan/tree {}) lists every step id. needs! "
                               "adds dependency edges: {:my.plan/id \"<step>\" "
                               ":my.plan/on [[:my.plan/id \"<dep>\"]]}."))
-      (->> (await (db/transact!
-                    {:seon.db/tx-data
-                     (mapv (fn [ref] [:db/add [::id id] ::needs ref]) on)}))
-           (internal/write-result "needs!" id)))))
+      (let [db      @db/*conn*
+            missing (internal/unresolved-step-refs db on)]
+        (if (seq missing)
+          (internal/fail
+            (str "needs!: dependency step(s) do not exist " (pr-str missing)
+                 " — (my.plan/tree {}) lists every step id; retry with "
+                 ":my.plan/on [[:my.plan/id \"<dependency-id>\"]]."))
+          (->> (await (db/transact!
+                        {:seon.db/tx-data
+                         (mapv (fn [ref] [:db/add [::id id] ::needs ref]) on)}))
+               (internal/write-result "needs!" id)))))))
 
 (defn ^:async move!
   "Move a step under a new parent step.
@@ -483,8 +490,15 @@
       nil (internal/fail (str "move!: no step " (pr-str id)
                               " — (my.plan/tree {}) lists every step id (the step "
                               "AND its new :my.plan/parent must both exist)."))
-      (->> (await (db/transact! {:seon.db/tx-data [{::id id ::parent parent}]}))
-           (internal/write-result "move!" id)))))
+      (let [db      @db/*conn*
+            missing (internal/unresolved-step-refs db [parent])]
+        (if (seq missing)
+          (internal/fail
+            (str "move!: parent step does not exist " (pr-str parent)
+                 " — (my.plan/tree {}) lists every step id; retry with "
+                 ":my.plan/parent [:my.plan/id \"<parent-id>\"]."))
+          (->> (await (db/transact! {:seon.db/tx-data [{::id id ::parent parent}]}))
+               (internal/write-result "move!" id)))))))
 
 (defn ^:async drop!
   "Delete a step and its whole subtree from the plan.

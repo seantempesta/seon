@@ -81,6 +81,21 @@
                                       [?t :my.plan/status ?s]]
                      :seon.db/args  [id]})))
 
+(defn unresolved-step-refs
+  "Refs that do not resolve to stored plan steps in database value `db`.
+
+   A related step must resolve to an entity carrying `:my.plan/id`; a ref to
+   another entity is not a dependency or parent. Malformed lookup refs are
+   unresolved user input, not exceptions allowed to escape an agent verb."
+  [db refs]
+  (into []
+        (remove
+          (fn [ref]
+            (try
+              (boolean (:my.plan/id (db/entity db ref)))
+              (catch :default _ false))))
+        refs))
+
 (defn write-result
   "transact! envelope → :my.plan/write-response (tx-report stays
    off this surface)."
