@@ -4,6 +4,7 @@
     [cljs.test :refer [async deftest is testing]]
     [clojure.string :as str]
     [datahike.api :as d]
+    [seon.agent :as agent]
     [seon.agent.run :as run]
     [seon.agent.ctx :as agent-ctx]
     [seon.agent.ctx.render-fns :as render-fns]
@@ -25,6 +26,11 @@
                      (= id (:id (second element))))
             element))
         elements))
+
+(defn- hiccup-elements
+  "All hiccup elements in one rendered tree."
+  [root]
+  (filter vector? (tree-seq coll? seq root)))
 
 (defn- selection-for [block-name]
   (surface/selection-key block-name))
@@ -301,6 +307,31 @@
                [(surface "context-transcript" "transcript" 0 0)
                 (surface "canvas" "canvas" 0 0)]))))))
 
+(deftest accepted-human-message-advances-transcript-focus
+  (async done
+    (-> (with-agents
+          [[agent-a
+            [{:seon.agent.ctx/name :transcript
+              :seon.agent.ctx/priority 10
+              :seon.render/html [:div "transcript"]}]]]
+          (fn [conn]
+            (let [original db/*conn*
+                  _ (set! db/*conn* conn)]
+              (-> (agent/message!
+                    {:seon.agent.message/from agent/user-ref
+                     :seon.agent.message/to [:seon.agent/id agent-a]
+                     :seon.agent.message/content "new work"})
+                (.then
+                  (fn [result]
+                    (is (true? (:seon.agent.message/ok? result)))
+                    (is (= (selection-for :transcript)
+                           (surface/latest-focus-selection
+                             (surface/surface-catalog @conn agent-a)))
+                        "the accepted inbound fact becomes the newest deliberate surface")))
+                (.finally (fn [] (set! db/*conn* original)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
 (deftest view-renders-html-blocks-and-omits-ai-only-blocks
   (async done
     (-> (with-agents
@@ -328,6 +359,27 @@
                            dual-selection "&#39;\"")))
                 (is (str/includes? s
                       "data-show=\"$selected !== &#39;canvas&#39;\""))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest primary-surface-has-an-explicit-page-focus-pin
+  (async done
+    (-> (with-agents
+          [[agent-a []]]
+          (fn [conn]
+            (let [view (agent-view/agent-view @conn agent-a)
+                  primary (some #(when (= "agent-view-primary-canvas"
+                                          (:id (second %)))
+                                   %)
+                                (hiccup-elements view))
+                  pin (some #(when (= :button (first %)) %)
+                            (hiccup-elements primary))
+                  attrs (second pin)]
+              (is (some? primary))
+              (is (= "button" (:type attrs)))
+              (is (string? ((keyword "data-on:click") attrs)))
+              (is (string? ((keyword "data-attr:aria-pressed") attrs)))
+              (is (str/includes? (:data-class attrs) "$pinnedselection")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 

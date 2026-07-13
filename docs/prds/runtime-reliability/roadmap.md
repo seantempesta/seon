@@ -437,11 +437,11 @@ canvas. Omitted detail is explicit, never mistaken for an absent agent.
 Each browser tab has one database-backed UI-session identity. The session stores
 one normalized local location fact plus a ref to the human; the transaction
 already supplies recency/provenance, so no duplicate `updated-at` or active flag
-is stored. On an agent page, a manual surface choice is encoded in that
-location's query component; page focus is the valid session selector when
-present and the shared agent-derived focus otherwise. A root card never claims
-to mirror another tab's selector. Scroll position, open disclosures, and form
-signals remain transient.
+is stored. On an agent page, an explicit surface pin is encoded in that
+location's query component; page focus is the valid session pin when present
+and the shared agent-derived focus otherwise. A root card never claims to mirror
+another tab's pin. Unpinned selection, scroll position, open disclosures, and
+form signals remain transient.
 A human message carries the originating session ref, and each turn records the
 exact inbound message it is assigned to answer. Root's fully-specified
 navigation function follows turn → cause-message → web-session through normal
@@ -582,7 +582,7 @@ is evaluated behaviorally, not by asserting prose.
 | local write, lost reply | one commit and one same-ID receipt | retry identical request and catch the local reader up to accepted coordinate | different-payload ID reuse rejects; every disconnect edge is at-most-once commit |
 | browser action | one typed command/transaction and receipt | Datastar call → writer → commit notification → affected unit morph | no manual refresh, duplicate client state, or silent handler failure |
 | root navigation | upsert the originating UI session's normalized location | the same session feed applies one redirect patch to the reverse-routed agent URL | another tab is unchanged; reload derives the selected location from the database |
-| root fleet view | none beyond normal agent/session facts | cheap all-agent catalog; visible non-root card units materialize the compact agent-derived focus; bounded AI detail derives separately | every agent is represented in structured summary data; a card equals a no-session-override agent page and never claims parity with another tab's manual selection; unrelated cards do not render; token caps are proven without prose assertions |
+| root fleet view | none beyond normal agent/session facts | cheap all-agent catalog; visible non-root card units materialize the compact agent-derived focus; bounded AI detail derives separately | every agent is represented in structured summary data; a card equals a no-session-pin agent page and never claims parity with another tab's pinned selection; unrelated cards do not render; token caps are proven without prose assertions |
 | debug route closed/open | none | closed owns no debug render/listener; open activates only requested units | prompt/raw/HTML/token work is absent while closed |
 | as-of/fork/restore | branch/head/intent facts through Datahike primitives | quiesce, drain, attach exact coordinate, rebuild process state | stale writers/cursors cannot cross head movement; external effects are not undone/replayed |
 | stop/reset | only explicit lifecycle facts | reverse-order drain, verify PID+start stamp/process group, then mutate the named database | no global nuke, reused-PID signal, orphan child, or deletion under a live writer |
@@ -882,8 +882,10 @@ agents idle and one exact notice visible to root.
    readable right rail, bounded fonts/code, compact plan disclosures,
    transcript bottom anchoring, no visible focused duplicate, and no live-bar
    overlap.
-17. Prove agent-derived focus: canvas/domain writes select canvas; an agent reply
-   selects transcript; human selection stays locally sticky until invalid.
+17. Prove agent-derived focus: canvas/domain writes select canvas; accepted
+    human messages and agent replies select transcript; an unpinned rail choice
+    yields to the next deliberate update, while the explicit per-tab pin remains
+    until released or its surface disappears.
 18. Prove every `my.canvas` control with valid, invalid, rejected, rapid, and
     throwing handlers. Feedback is structured and visible to the agent.
 19. Add one optional root system-status surface only after the operator owns a

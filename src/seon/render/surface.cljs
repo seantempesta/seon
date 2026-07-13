@@ -132,8 +132,8 @@
         0)
     0))
 
-(defn- assistant-reply-touch
-  "Latest real reply from this agent to the human user."
+(defn- conversation-touch
+  "Latest human conversation message involving this agent."
   [dbv agent-id]
   (or
     (ffirst
@@ -145,12 +145,16 @@
            :where
            [?agent :seon.agent/id ?aid]
            [?user :seon.user/id "user"]
-           [?message :seon.agent.message/from ?agent]
-           [?message :seon.agent.message/to ?user]
            [?message :seon.agent.message/content _ ?tx]
-           [?tx :seon.db/user ?author]
-           [(= ?author ?agent)]
-           [?tx :seon.db/process ?repl]]
+           (or-join [?message ?agent ?user ?tx ?repl]
+             (and
+               [?message :seon.agent.message/from ?user]
+               [?message :seon.agent.message/to ?agent])
+             (and
+               [?message :seon.agent.message/from ?agent]
+               [?message :seon.agent.message/to ?user]
+               [?tx :seon.db/user ?agent]
+               [?tx :seon.db/process ?repl]))]
          :seon.db/args [agent-id (repl-process-eid dbv)]}))
     0))
 
@@ -276,7 +280,7 @@
      ::touch touch
      ::focus-touch
      (if (= block-name :transcript)
-       (assistant-reply-touch dbv agent-id)
+       (conversation-touch dbv agent-id)
        touch)}))
 
 (defn- context-surface-sources

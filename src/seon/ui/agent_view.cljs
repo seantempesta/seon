@@ -96,16 +96,50 @@
   [touch]
   (str "setTimeout(() => { $el.scrollTop = $el.scrollHeight }, 0); " touch))
 
+(defn- pin-icon
+  "Small current-color pushpin used by the page-local focus control."
+  []
+  [:svg {:viewBox "0 0 24 24"
+         :width "14"
+         :height "14"
+         :fill "none"
+         :stroke "currentColor"
+         :stroke-width "1.8"
+         :stroke-linecap "round"
+         :stroke-linejoin "round"
+         :aria-hidden "true"}
+   [:path {:d "M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"}]
+   [:path {:d "M12 14v7"}]])
+
+(defn- pin-button
+  "Explicitly keep or release one surface as this tab's primary selection."
+  [selection]
+  [:button {:type "button"
+            :aria-label "Keep this surface selected"
+            :title "Keep this surface selected"
+            :class (str "absolute top-2 right-2 z-10 grid place-items-center "
+                        "size-7 rounded border border-base-700 bg-base-900/90 "
+                        "text-text-500 hover:text-amber-300 hover:border-amber-700")
+            :data-class (str "{'text-amber-300 border-amber-700': "
+                             "$pinnedselection === '" selection "'}")
+            (keyword "data-attr:aria-pressed")
+            (str "$pinnedselection === '" selection "'")
+            (keyword "data-on:click")
+            (str "$pinnedselection = $pinnedselection === '" selection
+                 "' ? '' : '" selection "'")}
+   (pin-icon)])
+
 (defn- primary-panel
   "One selectable primary-panel body. Transcript bodies follow their tail."
   [selection block-name expanded touch]
   [:section (cond-> {:id (str "agent-view-primary-" selection)
                      :data-agent-primary selection
                      :data-show (str "$selected === '" selection "'")
-                     :class (str "agent-view-surface surface-focus min-h-0 overflow-auto border "
+                     :class (str "agent-view-surface surface-focus relative min-h-0 overflow-auto border "
                                  "border-base-800 rounded-md bg-base-900 p-2 h-full")}
               (transcript-block? block-name)
               (assoc :data-effect (bottom-effect touch)))
+   (pin-button selection)
    expanded])
 
 (defn- rail-button
@@ -120,12 +154,10 @@
          :style (str "order:" (- touch))
          :data-show (str "$selected !== '" selection "'")
          :data-class (str "{'border-amber-700': $selected === '" selection "'}")
-         (keyword "data-on:click") (str "$selected = '" selection
-                                         "'; $manualselection = true")
+         (keyword "data-on:click") (str "$selected = '" selection "'")
          (keyword "data-on:keydown")
          (str "if ($event.key === 'Enter' || $event.key === ' ') "
-              "{ $event.preventDefault(); $selected = '" selection
-              "'; $manualselection = true }")}
+              "{ $event.preventDefault(); $selected = '" selection "' }")}
    [:div {:class "px-2 py-1 border-b border-base-800 text-2xs text-text-400 font-mono"}
     label]
    ;; The HTML twin may itself contain buttons/forms. The rail is a visual
@@ -210,7 +242,7 @@
          :style "display:none"
          :data-effect
          (str "if ($seenrevision !== " touch ") { "
-              "if (!$manualselection) $selected = '" selection "'; "
+              "$selected = $pinnedselection || '" selection "'; "
               "$seenrevision = " touch " }")}])
 
 (defn- surface-elements [surface]
@@ -228,11 +260,15 @@
           :data-signals__ifmissing
           (str "{selected: '" latest-selection
                "', seenrevision: " latest-touch
-               ", manualselection: false}")
-          :data-effect (str "if ($selected !== 'canvas' && "
-                            "!document.querySelector('[data-agent-primary=\"' + "
-                            "$selected + '\"]')) { $selected = 'canvas'; "
-                            "$manualselection = false }")}
+               ", pinnedselection: ''}")
+          :data-effect
+          (str "if ($pinnedselection && "
+               "!document.querySelector('[data-agent-primary=\"' + "
+               "$pinnedselection + '\"]')) { "
+               "$pinnedselection = ''; $selected = '" latest-selection "' } "
+               "else if ($selected !== 'canvas' && "
+               "!document.querySelector('[data-agent-primary=\"' + "
+               "$selected + '\"]')) { $selected = '" latest-selection "' }")}
    system-header
    header/header-spacer
    (focus-marker latest-selection latest-touch)

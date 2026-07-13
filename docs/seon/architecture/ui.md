@@ -158,25 +158,27 @@ is a surface. All pages are agent views — one mechanism, a tree of routes:
 
 - **agent view** (`/agent/{id}`) — one agent: a large primary panel plus a right
   rail containing every current HTML context-block render ordered by database
-  transaction recency. Selecting a rail card sets this tab's **page focus** and
-  displays that render in the primary panel. Missing and AI-only renders are
-  omitted. The canvas is NOT a `(slot :canvas)` block — it is the agent's focal
-  surface projection.
+  transaction recency. Selecting a rail card previews that render in the
+  primary panel; its explicit pin control keeps it selected across subsequent
+  updates. Missing and AI-only renders are omitted. The canvas is NOT a
+  `(slot :canvas)` block — it is the agent's focal surface projection.
 
   Two focus values are deliberately distinct. **Agent-derived focus** is shared
   database meaning: the agent's `:seon.render.canvas/content` pin when present,
   otherwise its **last agent-updated surface**, otherwise
-  `seon.render.canvas/welcome`. **Page focus** is this tab's valid manual surface
-  selector when present, otherwise agent-derived focus. The selector is scoped
-  to the tab's database-backed web-session location; it never changes another
-  tab or becomes an agent-global selected-surface projection.
+  `seon.render.canvas/welcome`. **Page focus** is this tab's valid explicit
+  surface pin when present, otherwise agent-derived focus. An unpinned rail
+  selection is transient and the next deliberate surface update replaces it.
+  The pin is scoped to the tab's database-backed web-session location; it never
+  changes another tab or becomes an agent-global selected-surface projection.
 
   Renderer recency is the latest transaction by this agent through the REPL,
   found by a bounded indexed history lookup over scoped inputs captured by the
   renderer's current runtime-observed database reads; canvas writes share that
   same coordinate. Content recency orders the rail, while focus recency treats
-  an agent-to-human reply as a transcript update and a canvas/domain write as a
-  canvas update; eval bookkeeping alone never steals focus.
+  either direction of the human-agent conversation as a transcript update and a
+  canvas/domain write as a canvas update; eval bookkeeping alone never steals
+  focus.
   `seon.render.surface/last-updated-surface` is pure over the db value plus the
   runtime-derived read plan (see [[context]]). Pinning is the exact durable
   override; retracting the pin falls back to recency. The page-focused surface
@@ -351,13 +353,14 @@ auto-removing control patch that clears only this tab's Seon session tuple and
 reloads the current local route through the same bootstrap; it never preserves
 a ghost cursor or client-upserts the missing identity.
 
-An agent page's manual surface selection is the one meaningful sub-route state:
-it is encoded in the normalized location's query component. With no selection
-parameter, the page uses agent-derived focus. Clicking a rail card updates the
-URL/session fact and the Datastar signal together; reload restores that tab's
-selection, and root can query it through the originating session, but a fleet
-card does not adopt it. Scroll position, disclosure state, and form signals stay
-browser-transient and are not falsely promoted to database facts.
+An agent page's explicit surface pin is the one meaningful sub-route state: it
+is encoded in the normalized location's query component. With no pin parameter,
+the page uses agent-derived focus. Clicking a rail card changes only the
+transient selection; pinning it updates the URL/session fact and Datastar signal
+together. Reload restores that tab's pin, and root can query it through the
+originating session, but a fleet card does not adopt it. Unpinned selection,
+scroll position, disclosure state, and form signals stay browser-transient and
+are not falsely promoted to database facts.
 
 Opening/navigating a route reconciles that same session location. A human message
 links to the originating session, and each turn records the exact inbound
