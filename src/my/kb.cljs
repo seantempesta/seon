@@ -131,7 +131,9 @@
 ;;; ALWAYS read it: an eval can succeed yet `:seon.db/ok? false`.
 
 (defn remember-sources!
-  "Add source entities, linking two refs the idiomatic way.
+  "Store the sample sources, linking authors and findings by ref.
+
+   The two idiomatic ref links:
 
    - SAME-TX link (author not committed yet): give the author a `:db/id`
      TEMPID and put that SAME tempid in the source's `:my.kb.source/author`
@@ -207,15 +209,16 @@
       env)))
 
 (defn retitle-source!
-  "UPSERT by identity — the same `:my.kb.source/id` updates in place.
+  "Rename one source's title in place, by its id.
 
-   No duplicate. Omitted keys are left unchanged (absent ≠ retract)."
+   UPSERT by identity — the same `:my.kb.source/id` updates in place, no
+   duplicate. Omitted keys are left unchanged (absent ≠ retract)."
   {:malli/schema [:=> [:catn [::id :string] [::new-title :string]] :any]}
   [id new-title]
   (db/transact! {::db/tx-data [{:my.kb.source/id id :my.kb.source/title new-title}]}))
 
 (defn clear-rating!
-  "Clear ONE attr — retraction is EXPLICIT.
+  "Remove one source's rating, an explicit retraction.
 
    `[:db/retract ref attr]` (no value) removes the current value (omitting
    a key only leaves it unchanged)."
@@ -224,7 +227,7 @@
   (db/transact! {::db/tx-data [[:db/retract [:my.kb.source/id id] :my.kb.source/rating]]}))
 
 (defn replace-topics!
-  "Replace a cardinality-many attr.
+  "Replace a source's whole topics set with a new one.
 
    Transacting topics only ADDS to the set; to REPLACE, retract every
    current value first — `[:db/retract ref attr]` (no value) — bundled
@@ -236,7 +239,10 @@
                    {:my.kb.source/id id :my.kb.source/topics topics}]}))
 
 (defn forget-source!
-  "Delete the whole entity — component children (findings) cascade with it."
+  "Delete one source and all its findings, by id.
+
+   `:db.fn/retractEntity` removes the whole entity; component children
+   (the findings) cascade with it."
   {:malli/schema [:=> [:catn [::id :string]] :any]}
   [id]
   (db/transact! {::db/tx-data [[:db.fn/retractEntity [:my.kb.source/id id]]]}))
@@ -246,24 +252,28 @@
 ;;; one column as a vector; `?x .` = a single scalar.
 
 (defn titles
-  "FIND by attribute presence: every entity asserting `:my.kb.source/title`.
+  "List every stored source title.
+
+   FIND by attribute presence: every entity asserting `:my.kb.source/title`.
    Collection find `[?t ...]` → one column as a vector."
   {:malli/schema [:=> [:cat] [:vector :string]]}
   []
   (db/query '[:find [?t ...] :where [?e :my.kb.source/title ?t]]))
 
 (defn title+rating
-  "Relation find — a SET of `[title rating]` tuples.
+  "List every source's title and rating as `[title rating]` pairs.
 
-   JOINING two attrs on one entity (`?e` binds both clauses)."
+   Relation find — a SET of tuples, JOINING two attrs on one entity
+   (`?e` binds both clauses)."
   {:malli/schema [:=> [:cat] [:set [:tuple :string :int]]]}
   []
   (db/query '[:find ?title ?rating
               :where [?e :my.kb.source/title ?title] [?e :my.kb.source/rating ?rating]]))
 
 (defn titles-by-author
-  "`:in`-bound input + REF-JOIN.
+  "List the titles of every source by the named author.
 
+   `:in`-bound input + REF-JOIN.
    A ref stores an EID — match the author by NAME by JOINING through
    `:my.kb.source/author`, never by putting the name in the ref slot."
   {:malli/schema [:=> [:catn [::author-name :string]] [:vector :string]]}
@@ -275,9 +285,10 @@
             author-name))
 
 (defn source-stats
-  "Aggregate toward a question — the analysis built ON TOP of stored data.
+  "Summarize stored sources: count, rating total, and topic tally.
 
-   Delegates to my.data, so you never hand-roll a datalog aggregate:
+   Aggregation toward a question — the analysis built ON TOP of stored
+   data. Delegates to my.data, so you never hand-roll a datalog aggregate:
    `rows` pulls each source to a MAP, then `sum-by` totals the ratings and a
    plain `frequencies` tallies the (cardinality-many) topics. Pulling to
    maps first makes the `(sum ?r)`/`:with` dedup collapse structurally
@@ -332,7 +343,7 @@
        vec))
 
 (defn ^:async recall
-  "Find what you already know about a topic — ranked facts with sources.
+  "Find what you already know about a topic: ranked facts with sources.
 
    \"What do we know about X?\" in ONE call. Map-in:
      ::about  the topic/question, plain words.
@@ -397,8 +408,9 @@
 ;;; which IS the "by name" addressing.
 
 (defn source-detail
-  "Pull by LOOKUP-REF.
+  "Fetch one source with its author and findings, by id.
 
+   Pull by LOOKUP-REF.
    `[*]` inlines every attr; a COMPONENT child comes back as a nested map,
    a PLAIN ref as `{:db/id N}` until you NAME it with a sub-pattern to pull
    its fields."
@@ -408,8 +420,9 @@
            [:my.kb.source/id id]))
 
 (defn source-entity
-  "Look up an entity by lookup-ref — a touched map, nil if unresolved.
+  "Fetch one source as a plain map, nil when the id is unknown.
 
+   Looks up the entity by lookup-ref.
    The touched map is `:db/id` + every attr. A ref reads back as
    `{:db/id N}`; drill in with a follow-up `entity`/`pull`."
   {:malli/schema [:=> [:catn [::id :string]] :any]}
@@ -433,7 +446,7 @@
 ;;; into a domain, register its schema, transact rows, run your analysis fn.
 
 (defn ^:async build-kb-example!
-  "End-to-end: register the schema, seed rows, run [[source-stats]] over them.
+  "Run the end-to-end example: register, seed rows, run [[source-stats]].
    `^:async` because it AWAITS the write before reading. Resolves to the stats
    summary, or the failure envelope if rejected. Run it once, then build your
    OWN domain the same way."

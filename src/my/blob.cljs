@@ -245,9 +245,10 @@
                        "blob file written but the projection tx was rejected")})))))
 
 (defn get
-  "Full blob content by hash (sync) — for CODE, not for your reply.
+  "Fetch a stored text's full content by hash, for use in code.
 
-   Bind the content and process it with fns; to SHOW a slice, use the
+   Sync, for CODE, never for your reply:
+   bind the content and process it with fns; to SHOW a slice, use the
    paged [[text]]. Returns
    `{:my.blob/ok? true :my.blob/hash h :my.blob/content s :my.blob/tokens n}`
    or the not-found/bad-hash error value."
@@ -285,8 +286,9 @@
                      media (assoc ::media media)))))))
 
 (defn text
-  "A paged line window of a blob (sync) — honest totals, never the lot.
+  "Read a stored blob page by page, as a bounded line window.
 
+   Sync, with honest totals, never the whole document at once.
    Defaults to the FIRST `default-max-lines` lines; pass a 1-based
    `:my.blob/from-line` + `:my.blob/max-lines` to walk the rest. The
    response always carries `:my.blob/total-lines` and the whole blob's
@@ -322,9 +324,10 @@
              (page-lines (::content env) from-line max-lines)))))
 
 (defn stat
-  "The blob's DB projection — exists?, tokens, media, at; no disk touched.
+  "Check whether a blob exists, and its size, without reading it.
 
-   `exists?` answers \"is this hash recorded?\" — a missing hash is
+   The blob's DB projection — exists?, tokens, media, at; no disk
+   touched. `exists?` answers \"is this hash recorded?\" — a missing hash is
    `{:my.blob/ok? true :my.blob/exists? false}`, an answer, not an error.
    Budget on `:my.blob/tokens` BEFORE reading: page a big blob with
    [[text]] instead of pulling it whole."

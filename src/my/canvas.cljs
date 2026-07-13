@@ -147,7 +147,7 @@
 (schema/register! ::save-response :seon.db/transact-response)
 
 (defn ^:async save!
-  "Merge qualified values onto YOUR agent entity and return the tx envelope.
+  "Merge qualified values onto YOUR agent entity; returns the envelope.
 
    `:seon.agent/id` is injected. Every attribute must already have a registered
    schema. Example:
@@ -188,8 +188,10 @@
    [::placeholder {:optional true} ::placeholder]])
 
 (defn input
-  "A text field for a surrounding [[form]]. `::field` is a qualified keyword;
-   the routing adapter preserves that exact key in the handler request map."
+  "A text field for a surrounding [[form]].
+
+   `::field` is a qualified keyword; the routing adapter preserves that
+   exact key in the handler request map."
   {:malli/schema [:=> [:cat ::input-request] ::control]}
   [{::keys [field label placeholder]}]
   [:label {:class field-wrap-class}
@@ -220,7 +222,7 @@
    [::label {:optional true} ::label]])
 
 (defn toggle
-  "A boolean checkbox whose qualified `::field` is preserved in the handler map."
+  "A boolean checkbox; its qualified `::field` reaches the handler map."
   {:malli/schema [:=> [:cat ::toggle-request] ::control]}
   [{::keys [field label]}]
   [:label {:class "flex flex-row gap-2 items-center cursor-pointer select-none"}
@@ -235,8 +237,9 @@
    [::controls ::controls]])
 
 (defn form
-  "Stack controls into a form that sends one fully-namespaced field map to
-   YOUR handler fn. The field map is the handler's direct argument, not a
+  "Stack controls into a form that submits a field map to your handler.
+
+   The fully-namespaced field map is the handler's direct argument, not a
    `:my.canvas/data` wrapper. Ambient page signals are excluded by the call
    adapter."
   {:malli/schema [:=> [:cat ::form-request] ::control]}

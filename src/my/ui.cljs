@@ -89,7 +89,7 @@
    [::tone {:optional true} ::tone]])
 
 (defn status-line
-  "One labelled status line — `label: value`, value tinted by `tone`.
+  "One labelled status line: `label: value`, tinted by `tone`.
    The dual render of a single fact.
 
      (status-line {:my.ui/label \"Status\" :my.ui/value \"All systems go\"
@@ -142,7 +142,7 @@
    [::tone {:optional true} ::tone]])
 
 (defn badge
-  "A small status pill — `label` tinted by `tone` (default :info).
+  "A small status pill: `label` tinted by `tone` (default :info).
 
    The dual render of one labelled state: a bordered pill for the human,
    `[tone] label` for you.
@@ -193,7 +193,7 @@
    [::tone {:optional true} ::tone]])
 
 (defn progress
-  "A labelled progress bar — `current` of `total`.
+  "A labelled progress bar showing `current` of `total`.
 
    The fill is tinted by `tone` (default :signal). The dual render of a
    ratio: a filled bar for the human, `label: current/total (pct%)` for you.
@@ -225,8 +225,9 @@
    [::table-data ::table-data]])
 
 (defn table
-  "A multi-column table — generalises `kv-table` to N columns.
+  "A table of N labelled columns, built from rows of cell maps.
 
+   Generalises `kv-table` to N columns.
    `columns` is `[[row-key header] …]`, `table-data` a seq of maps keyed by
    those row-keys (cells already strings, like `kv-table`). The dual render
    of a grid: a styled table for the human, monospace-aligned text rows for

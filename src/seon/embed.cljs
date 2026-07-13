@@ -109,7 +109,7 @@
   '[*])
 
 (defn enabled?
-  "True when embedding features are enabled — `SEON_EMBED` is present.
+  "True when embedding features are enabled (`SEON_EMBED` is present).
 
    Present = any value. The SAME single switch the wire-server reads, so one
    env var gates the feature across both processes. UNSET ⇒ every semantic
@@ -147,9 +147,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defn ^:async search
-  "Embedding KNN search (P2-C).
+  "Find stored entities semantically similar to a text query.
 
-   Resolves `:seon.embed/where` (datalog clauses
+   Embedding KNN search. Resolves `:seon.embed/where` (datalog clauses
    binding `?e`) to an eid type-scope on the LOCAL db, then sends the query TEXT
    + `k` + the eid scope over the wire — the wire-server embeds the query (with
    the retrieval instruction) and runs KNN, returning the nearest eids. The pod
