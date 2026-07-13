@@ -219,7 +219,9 @@
   nil)
 
 (defn register!
-  "Register a single schema in the global registry.
+  "Define a new attribute so facts using it can be saved and queried.
+
+   Registers a single schema in the global registry.
 
    Arguments:
      k - Schema keyword (use `::name` for auto-namespacing)

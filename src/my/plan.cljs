@@ -276,9 +276,10 @@
 ;; --- Public API
 
 (defn ^:async step!
-  "Mint one OPEN plan step (agent = caller; blank title refused).
+  "Add a new step to the plan.
 
-   Omit `:seon.agent/id` and the boundary fills in YOU; pass another id
+   Mints one `:open` step (a blank title is refused). Omit
+   `:seon.agent/id` and the boundary fills in YOU; pass another id
    to scope elsewhere. `:parent`/`:needs` lookup-refs place it in the
    tree/DAG; `:expect` states its falsifiable outcome — all optional.
    → {::ok? true ::id _} or a fail envelope."
@@ -406,11 +407,12 @@
              (internal/write-result "active!" id))))))
 
 (defn ^:async done!
-  "Mark a step done; may unblock its dependents next turn.
+  "Record that a plan step is finished and complete.
 
    VERIFY the step's `::expect` first — done means the outcome holds, not
-   that you performed an action. Stamps `::completed-at`. Already-done is
-   idempotent success; unknown id → fail envelope."
+   that you performed an action. Stamps `::completed-at` and may unblock
+   the step's dependents next turn. Already-done is idempotent success;
+   unknown id → fail envelope."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
   [{::keys [id] :as request}]
   (or
@@ -592,9 +594,10 @@
                                           :seon.error/message]))))))))))))))
 
 (defn next
-  "Your focus queue: READY leaves (open, unblocked), oldest first.
+  "Get the next plan steps to work on.
 
-   Omit `:seon.agent/id` and the boundary fills in YOU — the work to act
+   Your focus queue: READY leaves (open, unblocked), oldest first. Omit
+   `:seon.agent/id` and the boundary fills in YOU — the work to act
    on now. [] when no agent id resolves. `active!` the one you take up."
   {:malli/schema [:=> [:cat ::next-request] [:vector ::step-ref]]}
   [{agent-id :seon.agent/id}]

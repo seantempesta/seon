@@ -429,9 +429,10 @@
   [:db.fn/cas ref attr value value])
 
 (defn ^:async transact!
-  "Commit tx-data — forwarded to the JVM writer, returns an envelope.
+  "Save records to the database, persisting new facts durably.
 
-   Two call shapes:
+   Commits `::db/tx-data` (entity maps and/or tx ops) through the one
+   writer and returns an envelope. Two call shapes:
 
    - map-in / map-out (preferred):
        (db/transact! {::db/tx-data [{::name \"A\"}]
@@ -623,9 +624,9 @@
 (declare assert-known-query-attrs!)
 
 (defn query
-  "Run a Datalog query, returning the result set.
+  "Ask the database a question: find, count, or sum stored facts.
 
-   Two call shapes:
+   Runs a Datalog query and returns the result set. Two call shapes:
 
    - map-in:  (db/query {::db/query '[:find ?n :where [?e ::name ?n]]
                          ::db/db <db> | ::db/conn <conn>   ; default *conn*
@@ -1050,8 +1051,9 @@
     (into {:db/id (:db/id e)} e)))
 
 (defn entity
-  "Look up an entity by eid or lookup-ref, as a plain map (sync).
+  "Fetch one stored record by its id, with all its fields.
 
+   Looks up an entity by eid or lookup-ref, as a plain map (sync).
    Returns `:db/id` plus every attr on the entity (a TOUCHED snapshot), nil if the
    ref doesn't resolve. The agent reads data, never a lazy datahike handle
    — a raw Entity prints opaquely and re-reads as `[object Object]`. Drill
