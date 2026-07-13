@@ -694,7 +694,9 @@ or discover archived behavior.
 
 1. Finish one exact desired-population compiler: scalar, cardinality-many,
    component, removal, full-head fence, bounded reread/recompile, and
-   transact-if-nonempty.
+   transact-if-nonempty. The full-head primitive is now implemented in the
+   maintained Datahike writer and carried through the canonical UDS protocol;
+   the exact compiler and bounded retry remain.
 2. **Runtime boundary complete:** external config is operation-scoped and
    optional. A config-free boot preserves database facts, the singleton now
    stores agent/root context and skill selection needed for later births, fresh

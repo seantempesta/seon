@@ -886,7 +886,11 @@ Config owns only its declared populations/attributes. A selected startup or expl
 retracts omitted managed values and stale exclusive rows, repairs partial state,
 and submits nothing when equal; agents/messages/plans/knowledge and every other
 outside fact survive untouched. The resulting transaction is `{user root,
-process config}`. Live database edits are visible until that next apply.
+process config}`. The compiler reads one immutable database value and sends its
+basis as `:seon.db/expected-basis-t`; Datahike checks that full-head precondition
+inside the serialized writer, so a concurrent winner causes a bounded
+reread/recompile rather than a stale desired transaction. Live database edits
+are visible until that next apply.
 
 The real manifest carries a dial per config concern (not just seeds) — a new
 concern = ONE `:seon.config/<section>` schema + one resolver fn + one key here:

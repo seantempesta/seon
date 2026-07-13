@@ -31,6 +31,7 @@
 (def internal-error :seon.db.protocol.error/internal)
 (def not-found-error :seon.db.protocol.error/not-found)
 (def request-conflict-error :seon.db.protocol.error/request-conflict)
+(def stale-basis-error :seon.db.protocol.error/stale-basis)
 (def generated-candidate-conflict-error
   :seon.db.protocol.error/generated-candidate-conflict)
 
@@ -57,6 +58,8 @@
 (schema/register! ::backend [:enum :memory :file])
 (schema/register! ::basis-t [:int {:min 0}])
 (schema/register! ::basis-t-before [:int {:min 0}])
+(schema/register! ::expected-basis-t [:int {:min 0}])
+(schema/register! ::current-basis-t [:int {:min 0}])
 (schema/register! ::since-t [:int {:min 0}])
 (schema/register! ::through-t [:int {:min 0}])
 (schema/register! ::continuation-t [:int {:min 0}])
@@ -82,7 +85,8 @@
 (schema/register!
  ::error-kind
  [:enum protocol-error database-error internal-error not-found-error
-  request-conflict-error generated-candidate-conflict-error])
+  request-conflict-error stale-basis-error
+  generated-candidate-conflict-error])
 (schema/register! ::error [:string {:min 1}])
 (schema/register!
  ::status
@@ -124,6 +128,7 @@
   [::database-name ::database-name]
   [::request-id ::request-id]
   [::transaction-data ::transaction-data]
+  [::expected-basis-t {:optional true} ::expected-basis-t]
   [::transaction-meta {:optional true} ::transaction-meta]
   [::generated-candidates {:optional true} ::generated-candidates]])
 (schema/register!
@@ -155,7 +160,9 @@
  [:map
   [::success? [:= false]]
   [::error-kind ::error-kind]
-  [::error ::error]])
+  [::error ::error]
+  [::expected-basis-t {:optional true} ::expected-basis-t]
+  [::current-basis-t {:optional true} ::current-basis-t]])
 (schema/register!
  ::ping-response
  [:map
@@ -229,6 +236,7 @@
   [::database-name ::database-name]
   [::request-id ::request-id]
   [::transaction-data ::transaction-data]
+  [::expected-basis-t {:optional true} ::expected-basis-t]
   [::transaction-meta {:optional true} ::transaction-meta]
   [::generated-candidates {:optional true} ::generated-candidates]])
 (schema/register!
@@ -268,12 +276,13 @@
   {:malli/schema [:=> [:cat ::transaction-request-input]
                   ::transaction-request]}
   [{::keys [database-name request-id transaction-data transaction-meta
-            generated-candidates]
+            expected-basis-t generated-candidates]
     :as input}]
   (cond-> {::operation transact-operation
            ::database-name database-name
            ::request-id request-id
            ::transaction-data transaction-data}
+    (some? expected-basis-t) (assoc ::expected-basis-t expected-basis-t)
     (seq transaction-meta) (assoc ::transaction-meta transaction-meta)
     (contains? input ::generated-candidates)
     (assoc ::generated-candidates generated-candidates)))
@@ -372,6 +381,7 @@
   (hasch/uuid
    {::version current-version
     ::transaction-data (::transaction-data request)
+    ::expected-basis-t (::expected-basis-t request)
     ::transaction-meta (or (::transaction-meta request) {})
     ::generated-candidates (or (::generated-candidates request) [])}))
 

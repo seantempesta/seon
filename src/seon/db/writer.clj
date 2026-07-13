@@ -403,6 +403,7 @@
   (locking connection
     (let [transaction-data (::protocol/transaction-data request)
           transaction-meta (::protocol/transaction-meta request)
+          expected-basis-t (::protocol/expected-basis-t request)
           request-id (::protocol/request-id request)
           candidates (::protocol/generated-candidates request)
           generated? (contains? request ::protocol/generated-candidates)
@@ -437,6 +438,8 @@
              transaction
              (cond-> {:tx-data data-with-receipts
                       :tx-meta transaction-meta*}
+               (some? expected-basis-t)
+               (assoc :datahike/expected-basis-t expected-basis-t)
                generated?
                (assoc ::id/generated-candidates candidates))]
          (try
@@ -658,8 +661,23 @@
         (id/assert-allocation-writer! connection))
       (protocol/success (transact-once! runtime connection request))
       (catch Throwable throwable
-        (let [failure-kind (::failure-kind (ex-data throwable))]
+        (let [^Throwable cause (loop [^Throwable cause throwable]
+                                 (if-let [next-cause (.getCause cause)]
+                                   (recur next-cause)
+                                   cause))
+              cause-data (ex-data cause)
+              failure-kind (::failure-kind (ex-data throwable))]
           (cond
+            (= :transaction/stale-basis (:error cause-data))
+            (protocol/failure
+             {::protocol/error-kind protocol/stale-basis-error
+              ::protocol/error (.getMessage cause)
+              ::protocol/body
+              {::protocol/expected-basis-t
+               (:datahike/expected-basis-t cause-data)
+               ::protocol/current-basis-t
+               (:datahike/current-basis-t cause-data)}})
+
             (= failure-kind protocol/request-conflict-error)
             (protocol/failure
              {::protocol/error-kind protocol/request-conflict-error

@@ -17,7 +17,29 @@
 
    Run via `seon.test.runner/run-vars` over MCP."
   (:require [cljs.test :as t :refer [deftest is testing async]]
-            [seon.db :as db]))
+            [datahike.api :as d]
+            [seon.agent]
+            [seon.agent.message]
+            [seon.db :as db]
+            [seon.schema :as schema]))
+
+(schema/register! :seon.db.precondition/id
+                  [:string {:seon.db/identity true}])
+(schema/register! :seon.db.precondition/value :string)
+
+(defn- fresh-conn
+  []
+  (let [cfg {:store {:backend :memory :id (random-uuid)}
+             :schema-flexibility :write
+             :keep-history? true}]
+    (-> (d/create-database cfg)
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then
+          (fn ^:async prepare [conn]
+            ;; transact! carries ambient user/process refs; install their
+            ;; lookup identities before exercising the public write path.
+            (await (db/ensure-provenance! {:seon.db/conn conn}))
+            conn)))))
 
 (defn- envelope-error
   "Call `transact!` with `arg`; deliver the resolved envelope's error
@@ -87,3 +109,55 @@
           (.catch (fn [e]
                     (is false (str "unexpected rejection: " e))
                     (done)))))))
+
+(deftest expected-basis-fences-the-whole-database-head
+  (async done
+    (-> (fresh-conn)
+        (.then
+          (fn [conn]
+            ;; First use installs the registered attrs before writing data.
+            ;; Freeze the basis only after that preparatory schema work.
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   [{:seon.db.precondition/id "one"
+                     :seon.db.precondition/value "initial"}]})
+                (.then
+                  (fn [seed]
+                    (is (true? (:seon.db/ok? seed)))
+                    (let [frozen (db/basis-t @conn)]
+                      (-> (db/transact!
+                            {:seon.db/conn conn
+                             :seon.db/expected-basis-t frozen
+                             :seon.db/tx-data
+                             [{:seon.db.precondition/id "one"
+                               :seon.db.precondition/value "accepted"}]})
+                          (.then
+                            (fn [accepted]
+                              (is (true? (:seon.db/ok? accepted))
+                                  "the current basis is accepted")
+                              (let [committed (db/basis-t @conn)]
+                                (-> (db/transact!
+                                      {:seon.db/conn conn
+                                       :seon.db/expected-basis-t frozen
+                                       :seon.db/tx-data
+                                       [{:seon.db.precondition/id "one"
+                                         :seon.db.precondition/value
+                                         "must-not-land"}]})
+                                    (.then
+                                      (fn [rejected]
+                                        (is (false? (:seon.db/ok? rejected))
+                                            "a stale basis resolves to an error value")
+                                        (is (= committed (db/basis-t @conn))
+                                            "the rejected transaction advances no state")
+                                        (is (= "accepted"
+                                               (:seon.db.precondition/value
+                                                 (db/entity
+                                                   @conn
+                                                   [:seon.db.precondition/id
+                                                    "one"])))
+                                            "none of the stale transaction lands"))))))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e]
+                  (is false (str "unexpected rejection: " e))
+                  (done))))))

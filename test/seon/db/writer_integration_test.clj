@@ -167,3 +167,77 @@
         (writer/stop! server)
         (.delete (File. request-path))
         (.delete (File. publish-path))))))
+
+(deftest expected-basis-is-enforced-inside-the-serialized-writer
+  (let [database-name (str "writer-fence-" (random-uuid))
+        request-path (socket-path "fence-request")
+        publish-path (socket-path "fence-publish")
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})
+        ^SocketChannel request-channel (uds/connect! request-path)]
+    (try
+      (let [opened
+            (call! request-channel
+                   (protocol/ensure-database-request
+                    {::protocol/database-name database-name
+                     ::protocol/backend :memory}))
+            schema
+            (call! request-channel
+                   (protocol/transaction-request
+                    {::protocol/database-name database-name
+                     ::protocol/request-id "fence/schema"
+                     ::protocol/transaction-data
+                     [{:db/ident :writer.fence/id
+                       :db/valueType :db.type/string
+                       :db/cardinality :db.cardinality/one
+                       :db/unique :db.unique/identity}
+                      {:db/ident :writer.fence/value
+                       :db/valueType :db.type/string
+                       :db/cardinality :db.cardinality/one}]}))
+            frozen (::protocol/basis-t schema)
+            accepted
+            (call! request-channel
+                   (protocol/transaction-request
+                    {::protocol/database-name database-name
+                     ::protocol/request-id "fence/accepted"
+                     ::protocol/expected-basis-t frozen
+                     ::protocol/transaction-data
+                     [{:writer.fence/id "one"
+                       :writer.fence/value "accepted"}]}))
+            committed (::protocol/basis-t accepted)
+            rejected
+            (call! request-channel
+                   (protocol/transaction-request
+                    {::protocol/database-name database-name
+                     ::protocol/request-id "fence/rejected"
+                     ::protocol/expected-basis-t frozen
+                     ::protocol/transaction-data
+                     [{:writer.fence/id "one"
+                       :writer.fence/value "must-not-land"}]}))
+            connection
+            (::registry/conn
+             (registry/lookup-connection
+              {::registry/database-name (keyword database-name)}))
+            stored (d/pull (d/db connection) '[*]
+                           [:writer.fence/id "one"])]
+        (is (true? (::protocol/success? opened)))
+        (is (true? (::protocol/success? accepted)))
+        (is (protocol/valid-response? rejected))
+        (is (= protocol/stale-basis-error
+               (::protocol/error-kind rejected)))
+        (is (= frozen (::protocol/expected-basis-t rejected)))
+        (is (= committed (::protocol/current-basis-t rejected)))
+        (is (= committed (:max-tx (d/db connection)))
+            "the rejected request creates no receipt or transaction")
+        (is (= "accepted" (:writer.fence/value stored))
+            "none of the stale request lands"))
+      (finally
+        (try (.close request-channel) (catch Throwable _))
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
