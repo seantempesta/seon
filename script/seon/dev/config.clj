@@ -108,7 +108,13 @@
 
                       true
                       (assoc "SEON_SHELL" (get environment "SEON_SHELL" "1")
-                             "SEON_WEB" (get environment "SEON_WEB" "1")))
+                             "SEON_WEB" (get environment "SEON_WEB" "1")
+                             ;; `bin/seon` is the source-checkout development
+                             ;; operator. Render failures must surface at their
+                             ;; first boundary here; a future packaged runtime
+                             ;; can explicitly set this to 0 for graceful mode.
+                             "SEON_RENDER_STRICT"
+                             (get environment "SEON_RENDER_STRICT" "1")))
         embed (get environment "SEON_EMBED")]
     (cond-> environment
       (or (nil? embed) (str/blank? embed) (= "0" embed))

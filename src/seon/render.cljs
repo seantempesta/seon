@@ -829,7 +829,14 @@
             ;; recorded? skips the datom when the SCI bounding funnel already
             ;; recorded an agent canvas-fn failure (re-thrown at :sci/error).
             ;; Record BEFORE strict-fail! (re-throws in strict mode).
-            (when-not (err/recorded? e)
+            ;; SCI already recorded the underlying failure before returning its
+            ;; error envelope. The wrapper ex-info below is necessarily a new
+            ;; JS object, so `recorded?` alone cannot see through it. Treat the
+            ;; carried error value as the same occurrence; otherwise every
+            ;; derived render writes a fresh error datom, which invalidates the
+            ;; same view and forms an unbounded render→error→render loop.
+            (when-not (or (err/recorded? e)
+                          (contains? (ex-data e) :seon/error))
               (err/record! {:seon.error/raw   e
                             :seon.error/fault (if (or (err/agent-authored-sym? value)
                                                       (vector? value))

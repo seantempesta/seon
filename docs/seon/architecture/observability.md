@@ -141,7 +141,7 @@ suppresses only a contract fault caused by that same write chain; it cannot drop
 an unrelated agent's simultaneous fault. None of these markers is persisted.
 
 The `:seon.config/on-core-error` dial (manifest; `:crash | :gate |
-:log`, shipped `:gate`) governs `:core` faults only — `:agent` faults
+:log`) governs `:core` faults only — `:agent` faults
 never escalate in any mode. Under `:gate` the pod keeps running but the
 CI-shaped wrappers fail any run that accumulated a new `:core` fault
 (`bin/test-cljs` greps the run transcript for the `SEON-CORE-FAULT`
@@ -150,6 +150,17 @@ marker; the dev hook brackets the pod log by byte offset). The derived
 when the last `:core` fault predates the latest user message — no
 acknowledgement state. Design + rulings:
 `docs/prds/agent-ctx/research/error-blame-strict-gate-2026-07-03.md`.
+
+Render-boundary strictness is a separate development dial, not another fault
+classification system. `SEON_RENDER_STRICT=1` makes every caught renderer or
+converter failure rethrow at its first guarded boundary; `0` keeps the same
+persisted error fact but returns the production fallback surface. The source
+checkout operator (`bin/seon`) defaults it to `1` and honors an explicit `0`.
+The core-error dial then decides whether a rethrown `:core` fault crashes,
+gates, or logs; agent-authored faults never gain core authority. An error
+envelope already recorded by an inner boundary remains the same occurrence
+when an outer boundary wraps it—derived rerenders must not emit another error
+transaction and invalidate themselves.
 
 The persisted message is the DEEPEST real cause (`seon.error/deepest-message`
 walks the `:seon.error/cause` chain past cljs.js's generic wrappers), so the

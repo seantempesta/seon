@@ -1157,12 +1157,20 @@
                   elements (if active?
                              (into [(active-unit target)] inactive-elements)
                              [(inactive-stub target)])
-                  body (->> elements (map html/->string) (str/join "\n"))
+                  body (->> elements
+                            (map html/->string)
+                            (str/join "\n")
+                            patch-elements)
                   feed-id (:seon.web.feed/id view)]
               (swap! !feeds
                      update-owned-view view-id feed-id
                      #(assoc % ::active-tokens (::active-tokens transition)))
-              (write-unit-response! res 200 "text/html; charset=utf-8" body))
+              ;; Datastar fetch actions consume event streams. Returning bare
+              ;; HTML here succeeded at HTTP while doing nothing in the DOM,
+              ;; leaving expanded debug disclosures as empty stubs.
+              (write-unit-response! res 200
+                                    "text/event-stream; charset=utf-8"
+                                    body))
             (catch :default e
               (log/error-console! "seon.web.datastar" "unit producer failed" e)
               (write-unit-response! res 500 "text/plain; charset=utf-8"

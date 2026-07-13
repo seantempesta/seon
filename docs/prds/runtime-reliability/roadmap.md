@@ -790,7 +790,13 @@ agents idle and one exact notice visible to root.
    Hiccup or SCI work. **Partial:** agent surfaces already transition by exact
    observed read result; the current whole debug/data targets now use the same
    observer and normalized subscriptions suppress identical consecutive
-   morphs. Debug panes and database details still need their own coordinates
+   morphs. `/view/unit` activation now returns the Datastar SSE patch protocol
+   rather than inert bare HTML, so expanded debug disclosures actually mount.
+   A canvas SCI failure is recorded once at the bounding source; its outer
+   fallback wrapper cannot transact again and create a render/error
+   invalidation loop. The source-checkout operator also restores fail-loud
+   development rendering by default while retaining an explicit graceful-mode
+   override. Debug panes and database details still need their own coordinates
    and bounded projections.
 8. Keep installed-schema and direct attribute-presence queries as the small
    composable agent/domain discovery tools. A later KB surface must be a focused

@@ -408,6 +408,12 @@ in `seon.web.datastar`.
   (unit id + params + attachment/commit), so truly shared units such as the header own
   one read/output cache across different page keys and render once. Frozen as-of
   subscriptions do no current work.
+- **Lazy activation uses the same protocol.** A collapsed debug or database
+  unit is only a stable stub. Its Datastar fetch action calls `/view/unit`,
+  which returns one `text/event-stream` response containing a
+  `datastar-patch-elements` event for the complete active unit. Bare HTML is
+  not a Datastar action response and is never a second update path. Closing the
+  unit restores its stub and releases its observed reads from the view plan.
 - **gzip + immediate flush.** The stream is long-lived and `Content-Encoding:
   gzip`: each event is written then sync-flushed (`Z_SYNC_FLUSH`) so the
   compressed bytes reach the browser connection at once; the browser transparently gunzips before

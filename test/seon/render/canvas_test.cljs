@@ -26,6 +26,7 @@
     [seon.error :as error]
     [seon.render :as render]
     [seon.render.canvas :as canvas]
+    [seon.render.sci :as render-sci]
     [seon.repl.internal :as repl.internal]
     [seon.schema :as schema]
     [seon.ui.html :as html]))
@@ -543,6 +544,46 @@
                                  "response carries the error envelope")
                              (is (re-find #"throwing-tile" (str ai))
                                  "twin names the broken renderer"))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest render-agent-canvas-sci-envelope-is-not-recorded-again
+  ;; `invoke-bounded` owns recording and deduping an SCI failure. The canvas
+  ;; guard wraps its returned envelope in a fresh ex-info so it can enter the
+  ;; normal fallback path; that wrapper must not look like a new occurrence.
+  ;; Before the regression fix, every reactive render called record! here,
+  ;; whose transaction invalidated the same view and formed an unbounded
+  ;; render→error→render loop.
+  (async done
+    (-> (with-agent-conn "tilelop-000001"
+          (fn [conn]
+            (let [outer-records (atom [])
+                  envelope {:seon.error/message "bounded fixture failed"}]
+              (with-redefs
+                [canvas/wired-content
+                 (fn [_]
+                   {:seon.render.canvas/value
+                    'my.agent.tilelop-000001/broken-canvas})
+                 render-sci/bounding-enabled? (constantly true)
+                 render-sci/invoke-bounded
+                 (fn
+                   ([_ _] {:seon.render.sci/error envelope})
+                   ([_ _ _] {:seon.render.sci/error envelope})
+                   ([_ _ _ _] {:seon.render.sci/error envelope}))
+                 error/record! #(swap! outer-records conj %)]
+                (binding [db/*conn* conn]
+                  (dotimes [_ 2]
+                    (let [{:seon.render/keys [hiccup error]}
+                          (render/render-agent-canvas
+                            {:seon.db/db @conn
+                             :seon.agent/id "tilelop-000001"})]
+                      (is (vector? hiccup)
+                          "the agent still receives the graceful error surface")
+                      (is (= envelope
+                             (get-in error [:seon.error/data :seon/error]))
+                          "the fallback preserves the source SCI envelope as its cause")))))
+              (is (empty? @outer-records)
+                  "the outer canvas guard never records the same SCI occurrence"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
