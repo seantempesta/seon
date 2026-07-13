@@ -37,6 +37,22 @@
 (schema/register! :seon.derive/state
   [:enum :idle :running :paused :terminated])
 
+(schema/register! :seon.derive/agent-state-read-attrs
+  [:set :qualified-keyword])
+
+(def agent-state-read-attrs
+  "Stored attributes read by [[derive-state]].
+
+   Reactive consumers use this one colocated dependency definition instead of
+   maintaining UI-specific guesses about what can change an agent's derived
+   state. The state itself remains a pure projection of a database value; this
+   is only its immutable read-set, never cached status."
+  #{:seon.agent/id
+    :seon.agent/run
+    :seon.agent/terminated-at
+    :seon.agent.run/status
+    :seon.agent.run/paused-at})
+
 ;; The three primitives `state-from-primitives` projects. Keys carry the real
 ;; attr names; their VALUE schemas are base types so this shape has no
 ;; load-time dependency on the attr registrations in seon.agent /

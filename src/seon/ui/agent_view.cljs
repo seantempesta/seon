@@ -25,11 +25,13 @@
 (schema/register! ::surface-attrs [:set :qualified-keyword])
 (schema/register! ::structural-attrs [:set :qualified-keyword])
 (schema/register! ::header-attrs [:set :qualified-keyword])
+(schema/register! ::agent-state-attrs [:set :qualified-keyword])
 (schema/register! ::dependencies
   [:map
    [::surface-attrs ::surface-attrs]
    [::structural-attrs ::structural-attrs]
-   [::header-attrs ::header-attrs]])
+   [::header-attrs ::header-attrs]
+   [::agent-state-attrs ::agent-state-attrs]])
 (schema/register! ::selection [:string {:min 1}])
 (schema/register! ::label [:string {:min 1}])
 (schema/register! ::read-attrs [:set :qualified-keyword])
@@ -60,18 +62,38 @@
   {:running    {:dot "●" :class "text-signal"   :label "running"}
    :idle       {:dot "●" :class "text-text-400" :label "idle"}
    :paused     {:dot "⚠" :class "text-warning"  :label "paused"}
-   :terminated {:dot "✗" :class "text-text-500" :label "terminated"}})
+   :terminated {:dot "✗" :class "text-text-500" :label "terminated"}
+   :unknown    {:dot "?" :class "text-warning" :label "unknown"}})
 
 (defn- status-chip
   "The agent's derived FSM state as a dot and label."
-  [db agent-id]
-  (let [state (try (derive/derive-state db agent-id) (catch :default _ :idle))
-        {:keys [dot class label]} (or (state-display state)
+  [state]
+  (let [{:keys [dot class label]} (or (state-display state)
                                       {:dot "●" :class "text-text-400"
                                        :label (name state)})]
-    [:span {:class "flex items-center gap-1 text-xs font-mono"}
+    [:span {:class "flex items-center gap-1 text-xs font-mono"
+            :data-agent-state (name state)}
      [:span {:class class} dot]
      [:span {:class "text-text-200"} label]]))
+
+(defn- agent-header
+  "The stable per-agent header render unit derived from one database value."
+  [dbv agent-id]
+  (let [state (try
+                (derive/derive-state dbv agent-id)
+                (catch :default _ :unknown))]
+    [:header {:id "agent-view-header"
+              :data-agent-state (name state)
+              :class "flex items-center justify-between border-b border-base-800 pb-1"}
+     [:div {:class "flex items-center gap-2 min-w-0"}
+      [:a {:href "/agents" :class "text-text-400 text-xs font-mono shrink-0"}
+       "← all agents"]
+      [:span {:class "text-text-500 text-2xs uppercase tracking-wider"} "agent"]
+      [:span {:class "text-signal text-sm font-semibold font-mono truncate"} agent-id]
+      [:a {:href (str "/agent/" agent-id "/debug")
+           :class "text-text-500 hover:text-amber-300 text-2xs font-mono"}
+       "debug"]]
+     (status-chip state)]))
 
 (defn- selection-key
   "Stable browser selection key for one resolved context block."
@@ -383,17 +405,17 @@
 
    The datom inventory is intentionally sampled on these meaningful changes,
    not on every program-graph bookkeeping transaction."
-  #{:seon.agent/id
-    :seon.agent.run/agent
-    :seon.agent.run/closed-at
-    :seon.agent.run/closed-reason
-    :seon.agent.run/paused-at
-    :seon.agent.run/resumed-at
-    :seon.agent.turn/at
-    :seon.agent.turn/status
-    :seon.agent.turn/llm-usage
-    :seon.eval/id
-    :seon.eval/ok?})
+  (set/union
+    derive/agent-state-read-attrs
+    #{:seon.agent.run/agent
+      :seon.agent.run/closed-at
+      :seon.agent.run/closed-reason
+      :seon.agent.run/resumed-at
+      :seon.agent.turn/at
+      :seon.agent.turn/status
+      :seon.agent.turn/llm-usage
+      :seon.eval/id
+      :seon.eval/ok?}))
 
 (defn agent-view-dependencies
   "Cached-gradient dependency projection for one live agent feed.
@@ -425,7 +447,8 @@
     {::surface-attrs (into #{:seon.render.canvas/content}
                            (concat context-attrs canvas-attrs))
      ::structural-attrs structural-attrs
-     ::header-attrs header-attrs}))
+     ::header-attrs header-attrs
+     ::agent-state-attrs derive/agent-state-read-attrs}))
 
 (defn- context-surface-metadata
   "Surface facts from a block name and its dependency renderer identity."
@@ -690,7 +713,10 @@
         (into (cond-> [(focus-marker (::selection latest)
                                       (::focus-touch latest))]
                 (seq (set/intersection header-attrs changed-attrs))
-                (conj (header/system-header dbv)))
+                (conj (header/system-header dbv))
+                (seq (set/intersection derive/agent-state-read-attrs
+                                       changed-attrs))
+                (conj (agent-header dbv agent-id)))
               (mapcat surface-elements)
               affected)))))
 
@@ -729,17 +755,7 @@
        (header/system-header db)
        header/header-spacer
        (focus-marker latest-selection latest-touch)
-       [:header {:id "agent-view-header"
-                 :class "flex items-center justify-between border-b border-base-800 pb-1"}
-        [:div {:class "flex items-center gap-2 min-w-0"}
-         [:a {:href "/agents" :class "text-text-400 text-xs font-mono shrink-0"}
-          "← all agents"]
-         [:span {:class "text-text-500 text-2xs uppercase tracking-wider"} "agent"]
-         [:span {:class "text-signal text-sm font-semibold font-mono truncate"} agent-id]
-         [:a {:href (str "/agent/" agent-id "/debug")
-              :class "text-text-500 hover:text-amber-300 text-2xs font-mono"}
-          "debug"]]
-        (status-chip db agent-id)]
+       (agent-header db agent-id)
        [:div {:id "agent-view-layout"
               :class "grid grid-cols-3 gap-2 min-h-0 flex-1"}
         [:div {:id "agent-view-primary"

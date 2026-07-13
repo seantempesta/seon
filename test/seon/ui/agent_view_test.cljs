@@ -4,6 +4,7 @@
     [cljs.test :refer [async deftest is testing]]
     [clojure.string :as str]
     [datahike.api :as d]
+    [seon.agent.run :as run]
     [seon.agent.ctx :as agent-ctx]
     [seon.agent.ctx.render-fns :as render-fns]
     [seon.client :as client]
@@ -16,6 +17,14 @@
 
 (def ^:private agent-a "view-aaaa00001")
 (def ^:private agent-b "view-bbbb00002")
+(defn- element-by-id
+  "The complete hiccup element carrying DOM `id`, or nil."
+  [elements id]
+  (some (fn [element]
+          (when (and (vector? element)
+                     (= id (:id (second element))))
+            element))
+        elements))
 
 (defn- selection-for [block-name]
   (str "context-"
@@ -395,6 +404,56 @@
                   (:seon.ui.agent-view/surface-attrs
                     (agent-view/agent-view-dependencies @conn agent-a))]
               (is (contains? deps :seon.render.canvas/content)))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest derived-state-transition-patches-both-status-headers
+  (async done
+    (-> (with-agents
+          [[agent-a []]]
+          (fn [conn]
+            (let [prior-conn db/*conn*
+                  open-attrs #{:seon.agent/run
+                               :seon.agent.run/id
+                               :seon.agent.run/agent
+                               :seon.agent.run/status}
+                  closed-attrs #{:seon.agent/run
+                                 :seon.agent.run/status
+                                 :seon.agent.run/closed-reason
+                                 :seon.agent.run/closed-at}]
+              (set! db/*conn* conn)
+              (-> (run/open-run!
+                    {:seon.agent/id agent-a
+                     :seon.agent.run/trigger :message})
+                  (.then
+                    (fn [opened]
+                      (let [deps (agent-view/agent-view-dependencies @conn agent-a)
+                            changes (agent-view/agent-view-changes
+                                      @conn agent-a open-attrs)
+                            fleet-header (element-by-id changes "system-header")
+                            agent-header (element-by-id changes "agent-view-header")]
+                        (is (contains?
+                              (::agent-view/agent-state-attrs deps)
+                              :seon.agent/run)
+                            "the current-run pointer is a declared state dependency")
+                        (is (vector? fleet-header)
+                            "running transition patches the fleet header")
+                        (is (vector? agent-header)
+                            "running transition patches the local agent header")
+                        (is (= 1 (:data-running-agents (second fleet-header))))
+                        (is (= "running" (:data-agent-state (second agent-header)))))
+                      (run/close-run!
+                        {:seon.agent.run/id (:seon.agent.run/id opened)
+                         :seon.agent.run/closed-reason :completed})))
+                  (.then
+                    (fn [_closed]
+                      (let [changes (agent-view/agent-view-changes
+                                      @conn agent-a closed-attrs)
+                            fleet-header (element-by-id changes "system-header")
+                            agent-header (element-by-id changes "agent-view-header")]
+                        (is (zero? (:data-running-agents (second fleet-header))))
+                        (is (= "idle" (:data-agent-state (second agent-header)))))))
+                  (.finally (fn [] (set! db/*conn* prior-conn)))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 

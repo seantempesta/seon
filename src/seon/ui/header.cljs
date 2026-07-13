@@ -236,8 +236,14 @@
   (try
     (let [fleet (system/fleet-summary db)
           thru  (throughput db)
-          brand (brand/info db)]
+          brand (brand/info db)
+          state-counts (::system/state-counts fleet)]
       [:header {:id    "system-header"
+                :data-agent-count (count (::system/agents fleet))
+                :data-idle-agents (get state-counts :idle 0)
+                :data-running-agents (get state-counts :running 0)
+                :data-paused-agents (get state-counts :paused 0)
+                :data-terminated-agents (get state-counts :terminated 0)
                 :style "top:0"
                 :class (str "fixed left-0 right-0 z-20 flex items-center gap-x-4 gap-y-1 "
                             "flex-wrap border-b border-base-800 bg-base-900/95 backdrop-blur "

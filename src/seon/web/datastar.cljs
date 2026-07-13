@@ -1247,7 +1247,8 @@
                     {dbv :seon.db/db attrs :seon.db/changed-attrs}]
                  (let [{surface :seon.ui.agent-view/surface-attrs
                         structural :seon.ui.agent-view/structural-attrs
-                        header :seon.ui.agent-view/header-attrs}
+                        header :seon.ui.agent-view/header-attrs
+                        agent-state :seon.ui.agent-view/agent-state-attrs}
                        dependencies]
                    (cond
                      (seq (set/intersection attrs structural))
@@ -1255,7 +1256,8 @@
                       ::dependencies
                       (agent-view/agent-view-dependencies dbv id)}
 
-                     (seq (set/intersection attrs surface))
+                     (or (seq (set/intersection attrs surface))
+                         (seq (set/intersection attrs agent-state)))
                      {::elements (agent-view/agent-view-changes dbv id attrs)}
 
                      (seq (set/intersection attrs header))
