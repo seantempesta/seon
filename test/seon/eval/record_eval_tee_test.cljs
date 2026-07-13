@@ -1317,6 +1317,9 @@
                   prev  db/*conn*
                   uniq  (str "probe.teeedge" (rand-int 1000000000))
                   fq    (str uniq "/watcher")
+                  lookup-shaped-source
+                  (str "(defn watcher [m]"
+                       " [(:seon.agent/id m) (:seon.db/tx-data m)])")
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) tee-edge-agent
                                                      (fixture-turn-id conn) nil))
@@ -1359,7 +1362,47 @@
                       (testing "the redef evals ok"
                         (is (= 1 (:seon.eval/n-ok b3)) (pr-str b3)))
                       (testing "the read-set tracks the redef exactly (stale literal retracted)"
-                        (is (= #{:seon.agent/purpose} (read-attrs))))))
+                        (is (= #{:seon.agent/purpose} (read-attrs))))
+                      ;; Datahike map shorthand treats an exactly-two-item
+                      ;; collection whose first value is an identity attr as
+                      ;; ONE lookup ref. :seon.fn/read-attrs stores keywords,
+                      ;; so the old vector-valued entity map failed the whole
+                      ;; tee here. The scalar-op diff must persist both.
+                      (batch lookup-shaped-source)))
+                  (.then
+                    (fn [b4]
+                      (testing "a two-attr read-set beginning with an identity attr tees"
+                        (is (= 1 (:seon.eval/n-ok b4)) (pr-str b4))
+                        (is (= #{:seon.agent/id :seon.db/tx-data}
+                               (read-attrs))))
+                      ;; Simulate the process-local var disappearing, then
+                      ;; rebuild it only from the stored program graph.
+                      (seval/eval cs (str "(set! " fq " nil)")
+                                  {:seon.eval/starting-ns (symbol uniq)
+                                   :seon.eval/analyze-deps? false})))
+                  (.then
+                    (fn [cleared]
+                      (is (:seon.eval/ok? cleared) "the live fn slot was cleared")
+                      (client/replay-program-graph!
+                        {:seon.client/conn conn
+                         :seon.client/compile-state cs
+                         :seon.client/agent-id tee-edge-agent})))
+                  (.then
+                    (fn [stats]
+                      (testing "the accepted definition survives reconstitution"
+                        (is (= 0 (:seon.client/replay-n-fail stats))
+                            (pr-str stats)))
+                      (seval/eval
+                        cs
+                        (str "(" fq
+                             " {:seon.agent/id \"agent\" :seon.db/tx-data []})")
+                        {:seon.eval/starting-ns 'cljs.user
+                         :seon.eval/analyze-deps? false})))
+                  (.then
+                    (fn [replayed]
+                      (testing "the reconstituted fn executes its stored body"
+                        (is (:seon.eval/ok? replayed) (pr-str replayed))
+                        (is (= ["agent" []] (:seon.eval/value replayed))))))
                   (.finally (fn [] (set! db/*conn* prev)))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

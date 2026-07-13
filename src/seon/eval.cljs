@@ -2541,11 +2541,14 @@
    `new-kws`.
 
    Diff discipline (cardinality-many
-   accumulates on plain upsert): additions ride an identity upsert,
-   removals get explicit retracts, `[]` when unchanged. Emitted at the
-   tee site for every teed `:seon.fn` row, so a REDEF that drops a
-   keyword literal sheds the stale watch — and a legacy row self-
-   backfills on its first replay/re-eval."
+   accumulates on plain upsert): additions and removals are explicit
+   scalar ops, `[]` when unchanged. Scalar adds avoid Datahike's entity-map
+   ambiguity where an exactly-two-value collection beginning with an identity
+   attr is read as ONE lookup ref rather than two cardinality-many values.
+   Emitted after the owning fn entity at the tee site, so the lookup-ref is
+   resolvable even on the first definition. A REDEF that drops a keyword
+   literal sheds the stale watch, and a legacy row self-backfills on its first
+   replay/re-eval."
   {:malli/schema
    [:=> [:catn [::db :any] [::sym-str :string]
          [::new-kws [:set :qualified-keyword]]]
@@ -2561,10 +2564,10 @@
                                   db sym-str))
         additions (set/difference new-kws current)
         removals  (set/difference current new-kws)]
-    (vec (concat (when (seq additions)
-                   [{:seon.fn/sym        sym-str
-                     :seon.fn/read-attrs (vec additions)}])
-                 (for [k removals]
+    (vec (concat (for [k (sort-by str additions)]
+                   [:db/add [:seon.fn/sym sym-str]
+                    :seon.fn/read-attrs k])
+                 (for [k (sort-by str removals)]
                    [:db/retract [:seon.fn/sym sym-str]
                     :seon.fn/read-attrs k])))))
 
@@ -4104,9 +4107,11 @@
                             (analyzer-info/ns-require-edges
                               compile-state ending-ns)))
               ;; Declared read-set diff (C28) for every teed :seon.fn
-              ;; row — additions ride an identity upsert, stale
-              ;; keywords are retracted (a plain cardinality-many
-              ;; upsert would accumulate forever).
+              ;; row — scalar additions and stale-keyword retractions
+              ;; follow the owning fn entity in this same ordered tx.
+              ;; Scalar adds avoid Datahike's two-item collection /
+              ;; lookup-ref ambiguity; diffing avoids cardinality-many
+              ;; accumulation.
               ;; `::kw`/`::alias/kw` literals resolve against the ENDING
               ;; ns's analyzer require-edges (C37) — the same facts the
               ;; M4 structural store tees, read once per entry.
