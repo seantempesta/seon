@@ -2684,8 +2684,8 @@
      at runtime (an agent's `(require …)` goog.globalEvals bundle JS,
      the relink-registry! incident class); without this guard those
      re-registrations would convert boot-indexed rows into never-
-     prunable, replayable `(…)` call rows. Same provenance rule as
-     `seon.client/prune-core-ghosts!`.
+     core-managed, replayable `(…)` call rows. Same current-source
+     provenance rule as `seon.client/core-program-tx`.
    - IDENTICAL stored source → nil (idempotent re-registration; no
      no-op upsert churn).
 

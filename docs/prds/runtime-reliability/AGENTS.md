@@ -8,11 +8,13 @@ tags: [orchestrator, prd, database, flow, agent]
 
 ## Current state
 
-The CLJS pod works end to end, but process boot, agent mint/resume, program
-reconciliation, schema restoration, and live rendering still contain duplicate
-or overly broad paths. A warm web mint spends roughly eight seconds doing
-cluster-wide work. A grown-store open feed repeatedly invokes expensive
-render/SCI work and produces transient RSS sawtoothing around 1.4–2.5 GB.
+The CLJS pod works end to end, but schema restoration and live rendering still
+contain duplicate or overly broad paths. Warm agent mint is split from cold
+cluster work. Core program add/change/remove now compiles through one desired
+graph and one transaction; the second complete source build and boot-time
+ghost-pruning pass are deleted. A grown-store open feed can still repeatedly
+invoke expensive render/SCI work and produce transient RSS sawtoothing around
+1.4–2.5 GB.
 
 The core source/live audits, integrated design, ID study, and Datahike
 fork/restore study are complete. The baseline runtime cleanup, exact
@@ -60,8 +62,10 @@ bridge does not proxy it reliably.
 
 - `/agents/new` currently re-enters cluster startup. About 7.8–8.1 seconds of an
   8.43–8.89 second mint is unrelated cluster work.
-- Core function/test builders reread files per var and run again inside ghost
-  pruning. Deletion should be an exact reconciliation result, not a second scan.
+- Core program reconciliation builds the three source-derived slices once per
+  selected boot. Removed boot declarations are retractions in that same delta;
+  agent home namespaces and current REPL-authored declaration sources are
+  outside its ownership boundary.
 - Native Datahike schema and persistent indexes already reopen from the
   Konserve root. Complete schema reassertion on every open is redundant.
 - Transaction metadata is processed against `db-before`; the provenance attrs

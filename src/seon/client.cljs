@@ -284,6 +284,11 @@
 
 (declare rehost-agent-runtimes!)
 
+(defn- instrumentation-summary
+  "Drop per-function inventories from instrumentation status logs."
+  [stats]
+  (dissoc stats ::instrument/data ::instrument/accepted-syms))
+
 (defn ^:dev/after-load after-reload
   {:malli/schema [:=> [:cat] :any]}
   []
@@ -308,7 +313,7 @@
     (let [stats (instrument/refresh-live-coverage! @conn)]
       (log/info-console! "seon.client"
                          (str "reload: instrumentation gaps refreshed "
-                              (pr-str stats)))))
+                              (pr-str (instrumentation-summary stats))))))
   (start-heartbeat!))
 
 (defn ^:async mem-db
@@ -1766,7 +1771,7 @@
    `:seon.db/ref`); it is never a bare keyword.
 
    Boot-time DEDUP (the \"fresh agent, same conn\" guard) is applied by the
-   caller via [[core-index-tx]], which drops rows already present on the
+   caller via [[core-program-tx]], which drops rows already present on the
    conn so a later `start-runtime!` against the same store seeds nothing.
    Keeping THIS fn conn-free preserves its role as a pure tx-data builder (the
    shape the index-core-test guards rely on).
@@ -1823,7 +1828,7 @@
    registered Malli FORM (pr-str), so the full shape of every attr is one
    entity-read away for the agent.
 
-   Pure tx-data builder; the boot dedup in [[core-index-tx]] drops
+   Pure tx-data builder; the boot reconcile in [[core-program-tx]] protects
    keys already present on the conn, so an agent's own
    `(seon.schema/register! …)` tee row (whose :source is the replayable
    call form) is NEVER overwritten by the boot index."
@@ -1893,7 +1898,7 @@
    `#'`-literal vars (default: the preload-populated `!indexed-test-vars` —
    every deftest the pod build loads). Same shape the detect-and-tee path
    writes, so downstream readers never branch on origin. Pure tx-data
-   builder; [[core-index-tx]] dedups against the conn."
+   builder; [[core-program-tx]] reconciles against the conn."
   {:malli/schema [:function
                   [:=> [:cat] :any]
                   [:=> [:catn [::vars :any]] :any]]}
@@ -1905,16 +1910,15 @@
          ns-rows (map ns-row (sort ns-syms))]
      (vec (concat ns-rows rows)))))
 
-(defn ^:async core-index-tx
-  "Boot-time core index tx-data: [[index-core!]] + [[index-schemas]]
-   + [[index-tests]] filtered to the rows not yet present on `conn`. This is
-   the idempotency guard for the
-   \"fresh agent, same conn\" path — on the FIRST boot of a conn it returns the
-   full set; on later cold starts against a store that already holds the
-   `*conn*`, or a reconnect to a persistent store that already holds the
-   core index) it returns ONLY rows whose `:seon.fn/sym` / `:seon.ns/name`
-   identity is absent or whose stored fields have DRIFTED from the freshly
-   derived ones — typically `[]`.
+(defn ^:async core-program-tx
+  "Return the exact core-program transaction for the current source.
+
+   [[index-core!]], [[index-schemas]], and [[index-tests]] are evaluated once
+   to form one desired program graph. Against `conn`, this function derives
+   the complete atomic delta: add missing declarations, replace drifted
+   declaration fields, retract omitted optional fields/components, and remove
+   boot-authored declarations absent from the desired graph. A fresh store
+   receives the complete graph; a converged restart returns `[]`.
 
    Querying the conn's CURRENT identity set and emitting only the gap means a
    re-index never re-transacts a core row against the populated store —
@@ -1927,11 +1931,20 @@
    for `:seon.fn` rows the WHOLE derived set (source, spec, doc, arglists,
    private?). Identity upsert re-asserts changed datoms in place; an optional
    fn spec or schema generator policy that DISAPPEARED is explicitly retracted
-   (upsert cannot remove a datom). Fn/test re-emits are provenance-guarded
-   the same way [[prune-core-ghosts!]] is: only rows whose `:source`
-   datom's transaction refs the boot process are overwritten — an
+   (upsert cannot remove a datom). Replacements and removals are guarded by
+   the CURRENT `:source` datom's transaction: only a declaration whose current
+   source was written by the boot process is managed. An
    agent-authored row (detect-and-tee, runner) with a core sym is NEVER
-   clobbered by the boot index. Returns a Promise of the tx-data vector."
+   clobbered by the boot index.
+
+   A boot-created agent home namespace is domain data, not compiled-program
+   data. Home names are derived from the current `:seon.agent/id` facts and
+   excluded from removal. Process provenance says HOW a fact arrived; desired
+   identities plus domain connections say WHICH population owns it.
+
+   The namespace/function/schema desired populations must be non-empty before
+   any removal is compiled. Tests may legitimately be absent from a build, so
+   an empty test roster is preserve-only. Returns a Promise of tx-data."
   {:malli/schema [:=> [:catn [::conn :any]] :any]}
   [conn]
   (let [all       (concat (index-core!)
@@ -2027,6 +2040,23 @@
                                   [?e :seon.test/sym ?t]
                                   [?e :seon.test/source ?src]]
                                 db))
+        desired-identities
+        (into #{}
+              (keep (fn [row]
+                      (some (fn [a]
+                              (when (contains? row a) [a (get row a)]))
+                            [:seon.ns/name :seon.fn/sym
+                             :seon.schema/key :seon.test/sym])))
+              all)
+        desired-values
+        (reduce (fn [m [a v]] (update m a (fnil conj #{}) v))
+                {} desired-identities)
+        _ (doseq [a [:seon.ns/name :seon.fn/sym :seon.schema/key]]
+            (when-not (seq (get desired-values a))
+              (throw (ex-info
+                       (str "core program snapshot has no " a
+                            " declarations; refusing removal")
+                       {:seon.client/missing-program-population a}))))
         kept      (vec (remove
                          (fn [row]
                            (or (when-some [stored (get have-fns (:seon.fn/sym row))]
@@ -2047,7 +2077,7 @@
         ;; stored row carries a spec: identity upsert re-asserts the other
         ;; fields but can't REMOVE a datom — retract the stale spec
         ;; explicitly so PRESENT ⇒ specced stays honest.
-        retracts
+        field-retracts
         (into []
               (keep
                 (fn [row]
@@ -2086,117 +2116,50 @@
                                     (seval/ns-require-edges-tx
                                       db (:seon.ns/name row) (set edges)))))
                         all)
-        kept      (mapv #(dissoc % :seon.ns/require-edges) kept)]
-    (-> kept (into edge-tx) (into retracts))))
-
-(defn ^:async prune-core-ghosts!
-  "Boot-index GC (open-issues 2026-06-11, agent-reported row 5): retract
-   program-graph rows the boot indexers ONCE wrote but whose source
-   ns/fn/test/schema no longer exists in the booting code. `core-index-tx`
-   re-emits rows when source CHANGES (drift-healing) but never retracts —
-   renames and deletions left ghosts that rendered into every context
-   forever (live incident: the deleted `my.kb.instruction` ns kept
-   injecting its dead teachings until manually retracted; the removed
-   `:seon.render.chat/bubble` registration left a stale `:seon.schema` row).
-
-   A stored row is a GHOST iff ALL of:
-
-     1. CORE-CLAIMED — its `:source` datom's transaction refs the stable boot
-        process and root user. Agent-authored rows (detect-and-tee,
-        declaration loading, runner) use the REPL process and are NEVER candidates —
-        even when their shape is identical and their ns is absent from
-        this build.
-     2. ABSENT FROM THIS BOOT — its ident (`:seon.ns/name` /
-        `:seon.fn/sym` / `:seon.test/sym` / `:seon.schema/key`) is not in
-        the freshly-built index set (the same pure builders
-        `core-index-tx` transacts from). A rename prunes the old
-        ident and keeps the new one.
-     3. NOT an agent `(…)` registration call — `:seon.schema` rows keep
-        replay's `registration-call-source?` discriminator (Step 4):
-        a `(seon.schema/register! …)` tee row is agent corpus, never
-        pruned, regardless of provenance.
-
-   A kind whose freshly-built ident set is EMPTY is skipped entirely
-   (degenerate-boot guard: an unreadable source tree must not mass-prune
-   the store; `:test` is legitimately empty in builds without the preload).
-
-   Runs BEFORE `replay-program-graph!` in `start-runtime!` — load-bearing:
-   a deleted ns falls OUT of `(core-ns-set)`, so its ghost rows would
-   otherwise be misclassified as agent corpus and REPLAYED back into the
-   live compile-state.
-
-   Idempotent: pruned rows are gone, so the second boot finds zero
-   candidates. Loud: one `:seon.log` info names every pruned row and why.
-   Returns a Promise of `{:seon.client/pruned [[kind ident] …]}`."
-  {:malli/schema [:=> [:catn [::conn :any]] :any]}
-  [conn]
-  (let [idx    (index-core!)
-        tsts   (index-tests)
-        live   {:ns     (into #{} (keep :seon.ns/name) (concat idx tsts))
-                :fn     (into #{} (keep :seon.fn/sym) idx)
-                :test   (into #{} (keep :seon.test/sym) tsts)
-                :schema (into #{} (keep :seon.schema/key) (index-schemas))}
-        db     (await (d/db conn))
-        rows   (d/q '[:find ?e ?ident ?source ?kind
-                      :where
-                      (or-join [?e ?ident ?source ?kind ?tx]
-                        (and [?e :seon.ns/name   ?ident]
-                             [?e :seon.ns/source ?source ?tx]
-                             [(ground :ns) ?kind])
-                        (and [?e :seon.fn/sym    ?ident]
-                             [?e :seon.fn/source ?source ?tx]
-                             [(ground :fn) ?kind])
-                        (and [?e :seon.test/sym    ?ident]
-                             [?e :seon.test/source ?source ?tx]
-                             [(ground :test) ?kind])
-                        (and [?e :seon.schema/key    ?ident]
-                             [?e :seon.schema/source ?source ?tx]
-                             [(ground :schema) ?kind]))
-                      [?tx :seon.db/process ?process]
-                      [?process :seon.db.process/id :seon.db.process/boot]]
-                    db)
-        ghosts (->> rows
-                    (keep (fn [[e ident source kind]]
-                            (let [fresh (get live kind)]
-                              (when (and (seq fresh)
-                                         (not (contains? fresh ident))
-                                         (not (and (= :schema kind)
-                                                   (seval/registration-call-source? source))))
-                                {::e e ::ghost-kind kind ::ident ident}))))
-                    (sort-by (fn [{::keys [ghost-kind ident]}] [ghost-kind (str ident)]))
-                    vec)]
-    (when (seq ghosts)
-      (await (log/info!
-               {:seon.log/source  ::prune-core-ghosts!
-                :seon.log/message
-                (str "boot-index GC: pruned " (count ghosts)
-                     " core ghost row(s) — core-seeded "
-                     "program-graph rows whose source no longer exists "
-                     "in the booting code: "
-                     (str/join ", " (map (fn [{::keys [ghost-kind ident]}]
-                                           (str (name ghost-kind) " " (pr-str ident)))
-                                         ghosts)))}))
-      ;; Boot maintenance runs outside any inherited agent scope and names
-      ;; root/boot explicitly.
-      (let [res (await (db/without-agent
-                         (fn []
-                           (db/with-tx-context
-                             {:seon.db/user [:seon.agent/id "root"]
-                              :seon.db/process
-                              (db.process/lookup-ref :seon.db.process/boot)}
-                             (fn []
-                               (db/transact!
-                                 conn
-                                 (mapv (fn [{::keys [e]}] [:db/retractEntity e])
-                                       ghosts)))))))]
-        ;; Boot maintenance stays fail-loud (same posture as the seed
-        ;; transacts): a silent half-prune would leave the store lying.
-        (when-not (:seon.db/ok? res)
-          (throw (ex-info (str "boot-index GC retract failed: "
-                               (get-in res [:seon.db/error :seon.error/message]))
-                          {:seon.client/pruned (mapv (juxt ::ghost-kind ::ident) ghosts)
-                           :seon.db/error      (:seon.db/error res)})))))
-    {:seon.client/pruned (mapv (juxt ::ghost-kind ::ident) ghosts)}))
+        kept      (mapv #(dissoc % :seon.ns/require-edges) kept)
+        agent-home-names
+        (into #{}
+              (map (fn [id] (keyword (str (home/home-ns id)))))
+              (d/q '[:find [?id ...] :where [?a :seon.agent/id ?id]] db))
+        boot-rows
+        (d/q '[:find ?e ?identity-attr ?ident ?source
+               :where
+               (or-join [?e ?identity-attr ?ident ?source ?tx]
+                 (and [?e :seon.ns/name ?ident]
+                      [?e :seon.ns/source ?source ?tx]
+                      [(ground :seon.ns/name) ?identity-attr])
+                 (and [?e :seon.fn/sym ?ident]
+                      [?e :seon.fn/source ?source ?tx]
+                      [(ground :seon.fn/sym) ?identity-attr])
+                 (and [?e :seon.schema/key ?ident]
+                      [?e :seon.schema/source ?source ?tx]
+                      [(ground :seon.schema/key) ?identity-attr])
+                 (and [?e :seon.test/sym ?ident]
+                      [?e :seon.test/source ?source ?tx]
+                      [(ground :seon.test/sym) ?identity-attr]))
+               [?tx :seon.db/process ?process]
+               [?process :seon.db.process/id :seon.db.process/boot]]
+             db)
+        stale-eids
+        (into #{}
+              (comp
+                (filter
+                  (fn [[_ identity-attr ident source]]
+                    (and (seq (get desired-values identity-attr))
+                         (not (contains? desired-identities
+                                         [identity-attr ident]))
+                         (not (and (= :seon.ns/name identity-attr)
+                                   (contains? agent-home-names ident)))
+                         (not (and (= :seon.schema/key identity-attr)
+                                   (seval/registration-call-source? source))))))
+                (map first))
+              boot-rows)
+        stale-entities
+        (mapv (fn [e] [:db.fn/retractEntity e]) (sort stale-eids))]
+    (-> kept
+        (into edge-tx)
+        (into field-retracts)
+        (into stale-entities))))
 
 (schema/register! ::llm-fn        fn?)
 (schema/register! ::compile-state :any)
@@ -2253,7 +2216,7 @@
           :entity-schemas  — `schema/all-entity-schemas-tx-data`.
           :core-seed  — `seed-core!` (user entity +
                              my.kb.shared instruction singleton).
-          :core-index — `core-index-tx` (`:seon.ns` /
+          :core-index — `core-program-tx` (`:seon.ns` /
                              `:seon.fn` / `:seon.schema` / `:seon.test`
                              rows, conn-deduped so an Nth boot on the
                              same store re-seeds nothing).
@@ -2285,7 +2248,7 @@
         (let [prev-conn db/*conn*]
           (set! db/*conn* conn)
           (try
-            (let [index-tx (await (core-index-tx conn))
+            (let [index-tx (await (core-program-tx conn))
                   ;; The OPTIONAL loadout manifest, read ONCE and threaded to
                   ;; the route + skills steps below ({} when config/system.edn
                   ;; is absent ⇒ every resolve-* is the identity ⇒
@@ -2441,7 +2404,6 @@
                 (throw (ex-info "start-runtime!: root birth failed" root-result)))
             created-ids (if root-ready-before? [] ["root"])
             compile-state (await compile-promise)
-            prune-stats (await (prune-core-ghosts! conn))
             resumable-ids (agent/resumable-agent-ids {:seon.db/db @conn})
             all-ids (->> (db/query
                            {:seon.db/db @conn
@@ -2450,10 +2412,6 @@
                               :where [?a :seon.agent/id ?id]]})
                          sort vec)
             primary (or (first resumable-ids) (first all-ids) "root")]
-        (log/info-console! "seon.client/start-runtime!"
-                           (str "boot-index GC: "
-                                (count (:seon.client/pruned prune-stats))
-                                " ghost row(s) pruned"))
         (let [replay-stats
               (await (replay-program-graph!
                        {::conn conn
@@ -2476,9 +2434,8 @@
                                         ;; rejected rows; the database remains
                                         ;; the detailed source of truth.
                                         (pr-str
-                                          (dissoc instrument-stats
-                                                  ::instrument/data
-                                                  ::instrument/accepted-syms))))
+                                          (instrumentation-summary
+                                            instrument-stats))))
               results
               (let [!results (volatile! [])]
                 (doseq [id resumable-ids]

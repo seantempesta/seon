@@ -456,6 +456,14 @@ when a desired population is empty, so removing the final route or skill still
 produces the correct retraction without sweeping another population written by
 the same process.
 
+Core program ownership is narrower than boot provenance. The current source
+datom must be boot-authored and its identity must belong to the selected desired
+program population. Agent home namespace names are derived from
+`:seon.agent/id` and excluded even when root birth correctly occurred through
+the boot process; a declaration whose current source was authored through the
+REPL is likewise preserved. Thus one desired-program delta performs additions,
+changes, and removals without treating every boot transaction as compiled code.
+
 Instrumentation follows effective definitions. Boot performs the one complete
 pass. Thereafter a new/redefined function is filtered-unstrumented from Malli's
 recorded original and instrumented once; a changed schema key reinstruments only

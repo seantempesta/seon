@@ -505,6 +505,17 @@ deletion.
 
 ## Phase 7 — build one program snapshot and delete ghost pruning
 
+Progress on 2026-07-12: add/change/delete are now one
+`seon.client/core-program-tx` delta built from one invocation of each program
+builder. The former later pruning call and its second complete build are
+deleted. Removal is scoped by the current source datom's boot-process
+provenance; database-derived agent home namespaces and REPL-authored current
+sources are preserved. Required namespace/function/schema populations fail
+before mass removal, while a build with no test preload treats its empty test
+slice as preserve-only. Fresh, converged, removed-source, root-home, and
+REPL-authored behaviors are mechanically covered. File-grouped single reads
+and exact whole-row declaration replacement remain in this phase.
+
 - Group compiled vars/tests by source file and read each file once per
   selected current-core generation. Do not build this source snapshot during a
   populated preserve-target/no-overlay restart.
@@ -532,8 +543,8 @@ deletion.
   root/boot-authored; and reassert everything on explicit reset. Leave
   `my.agent.<id>` outside core reconciliation.
 - Reuse the same snapshot to select hot-reload definitions/instrumentation.
-- Delete `prune-core-ghosts!`, the second complete builder pass,
-  `core-index-tx`'s parallel partial-diff policy, and stale comments/tests.
+- Delete the remaining per-var repeated source reads and partial-field diff
+  policy after the deterministic file-grouped declaration snapshot lands.
 
 Exit proof: injected reader counts one source read per file for a selected
 generation and zero source-snapshot reads/reconciliation writes for a populated
