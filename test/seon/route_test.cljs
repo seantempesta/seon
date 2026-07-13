@@ -21,10 +21,12 @@
   "name → [pattern method] — the authoritative seeded core route set. `/`
    is the root agent view and the fleet roster lives at `/agents` +
    `/agents/feed`. The seed is `/` + the roster page + its `…/feed` stream +
-   the per-agent page + its separate `…/feed` SSE stream + the one POST door."
+   the generic unit door + the per-agent page + its separate `…/feed` SSE
+   stream + the one POST door."
   {:seon.route/root        ["/" :get]
    :seon.route/agents      ["/agents" :get]
    :seon.route/agents-feed ["/agents/feed" :get]
+   :seon.route/view-unit   ["/view/unit" :get]
    :seon.route/agent       ["/agent/{id}" :get]
    :seon.route/agent-feed  ["/agent/{id}/feed" :get]
    :seon.route/agent-call  ["/agent/{id}/call" :post]})
@@ -107,7 +109,7 @@
                                                           [?e :seon.route/name :seon.route/agent]
                                                           [?e :seon.route/handler ?h]]
                                                         :seon.db/conn conn}))]
-                           (is (= 6 (count names)) "six entities after a double seed — no duplicates")
+                           (is (= 7 (count names)) "seven entities after a double seed — no duplicates")
                            (is (= (set (keys expected)) (set names)))
                            (is (symbol? h) "handler reads back as a native symbol")
                            (is (= 'seon.web.datastar/serve-agent-page! h))))))))

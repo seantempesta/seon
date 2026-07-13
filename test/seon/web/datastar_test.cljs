@@ -72,6 +72,26 @@
                      (.then (fn [_] (body conn))))
                  (body conn))))))
 
+(defn- response-probe
+  "Node response double plus its fully namespaced observation atom."
+  []
+  (let [observed (atom {})
+        res #js {:writeHead
+                 (fn [status headers]
+                   (swap! observed assoc
+                          ::response-status status
+                          ::response-headers (js->clj headers)))
+                 :end
+                 (fn [body]
+                   (swap! observed assoc ::response-body (or body "")))}]
+    [res observed]))
+
+(defn- unit-ring-request
+  "Minimal Ring boundary request for one unit-control call."
+  [res view-id token active]
+  {:query-string (str "view=" view-id "&unit=" token "&active=" active)
+   :seon.http/node-res res})
+
 ;; ============================================================
 ;; 1. View-unit contracts — stable coordinates and zero speculative work.
 ;; ============================================================
@@ -169,6 +189,97 @@
     (is (= (datastar/active-fingerprint (into #{} tokens))
            (datastar/active-fingerprint (into #{} (reverse tokens))))
         "active membership, not discovery order, keys shared subscriptions")))
+
+(deftest unknown-view-and-unit-never-invoke-producers
+  (let [renders (atom 0)
+        catalog (datastar/unit-catalog
+                  [{::datastar/coordinate
+                    {:seon.agent/id agent-a
+                     :seon.agent.ctx/name :seon.agent.ctx/transcript}
+                    ::datastar/producer #(do (swap! renders inc)
+                                             [:div {:id "unexpected"}])}])
+        known-token (::datastar/token (first catalog))
+        [closed-res closed] (response-probe)
+        [missing-res missing] (response-probe)]
+    (with-redefs [datastar/!feeds
+                  (atom {"known-view"
+                         {::datastar/view-id "known-view"
+                          ::datastar/catalog catalog
+                          ::datastar/active-tokens #{}
+                          :seon.web.feed/id
+                          #uuid "00000000-0000-0000-0000-000000000001"}})]
+      (datastar/handle-view-unit!
+        (unit-ring-request closed-res "closed-view" known-token "1"))
+      (datastar/handle-view-unit!
+        (unit-ring-request missing-res "known-view" "not-in-catalog" "1"))
+      (is (= 410 (::response-status @closed))
+          "a released view is gone rather than reconstructed from client input")
+      (is (= 404 (::response-status @missing))
+          "an opaque token must resolve through the trusted catalog")
+      (is (zero? @renders) "neither miss crosses a producer boundary"))))
+
+(deftest unit-activation-materializes-once-and-deactivation-restores-a-stub
+  (let [renders (atom 0)
+        definition (fn [block-name]
+                     {::datastar/coordinate
+                      {:seon.agent/id agent-a
+                       :seon.agent.ctx/name block-name}
+                      ::datastar/exclusive-group :seon.web.unit.group/mainstage
+                      ::datastar/producer
+                      #(do (swap! renders inc)
+                           [:section {:data-produced true}])})
+        catalog (datastar/unit-catalog
+                  [(definition :seon.agent.ctx/transcript)
+                   (definition :seon.agent.ctx/plan)])
+        by-block (fn [block-name]
+                   (some #(when (= block-name
+                                   (get-in % [::datastar/coordinate
+                                              :seon.agent.ctx/name]))
+                            %)
+                         catalog))
+        prior (by-block :seon.agent.ctx/transcript)
+        requested (by-block :seon.agent.ctx/plan)
+        prior-token (::datastar/token prior)
+        requested-token (::datastar/token requested)
+        view-id "activation-view"
+        feed-id #uuid "00000000-0000-0000-0000-000000000002"
+        [active-res active-observed] (response-probe)
+        [inactive-res inactive-observed] (response-probe)]
+    (with-redefs [datastar/!feeds
+                  (atom {view-id
+                         {::datastar/view-id view-id
+                          ::datastar/catalog catalog
+                          ::datastar/active-tokens #{prior-token}
+                          :seon.web.feed/id feed-id}})]
+      (datastar/handle-view-unit!
+        (unit-ring-request active-res view-id requested-token "1"))
+      (let [body (::response-body @active-observed)]
+        (is (= 200 (::response-status @active-observed)))
+        (is (str/includes? (get (::response-headers @active-observed)
+                                "Content-Type")
+                           "text/html"))
+        (is (= 1 @renders) "one activation invokes exactly one producer")
+        (is (str/includes? body (::datastar/dom-id requested))
+            "the active content is wrapped by its stable target")
+        (is (str/includes? body (::datastar/dom-id prior))
+            "the exclusive prior target returns as a sibling stub")
+        (is (str/includes? body "data-seon-unit-active=\"false\"")
+            "exclusive deactivation returns an inactive stable root")
+        (is (= #{requested-token}
+               (::datastar/active-tokens (get @datastar/!feeds view-id)))
+            "the view owns the transitioned active set"))
+      (datastar/handle-view-unit!
+        (unit-ring-request inactive-res view-id requested-token "0"))
+      (is (= 1 @renders) "deactivation never invokes a content producer")
+      (is (str/includes? (::response-body @inactive-observed)
+                         (::datastar/dom-id requested))
+          "deactivation returns the same stable target")
+      (is (str/includes? (::response-body @inactive-observed)
+                         "data-seon-unit-active=\"false\"")
+          "the returned target is an inactive stub, not stale content")
+      (is (empty? (::datastar/active-tokens
+                    (get @datastar/!feeds view-id)))
+          "deactivation removes future subscription work"))))
 
 ;; ============================================================
 ;; 2. patch-elements — the datastar-patch-elements wire framing (pure).
@@ -318,7 +429,7 @@
 ;; ============================================================
 
 (deftest broadcast-with-zero-connections-is-a-noop
-  (with-redefs [datastar/!feeds (atom [])]
+  (with-redefs [datastar/!feeds (atom {})]
     (is (nil? (@#'datastar/broadcast!
                 {:seon.db/db nil :seon.db/changed-attrs #{}}))
         "broadcast! over an empty feed registry is a silent no-op (no throw)")
@@ -334,9 +445,13 @@
                          [:div {:id "second-target"} "two"]])
         conn {:seon.web.feed/key [:agent agent-a]
               :seon.web.feed/live? true
+              ::datastar/active-tokens #{}
               :seon.web.feed/render-change render-change}]
-    (with-redefs [datastar/!feeds (atom [(assoc conn :seon.web.feed/id #uuid "00000000-0000-0000-0000-000000000001")
-                                         (assoc conn :seon.web.feed/id #uuid "00000000-0000-0000-0000-000000000002")])
+    (with-redefs [datastar/!feeds
+                  (atom {"view-a" (assoc conn :seon.web.feed/id
+                                         #uuid "00000000-0000-0000-0000-000000000001")
+                         "view-b" (assoc conn :seon.web.feed/id
+                                         #uuid "00000000-0000-0000-0000-000000000002")})
                   datastar/push-event! (fn [_ event]
                                          (is (str/includes? event "first-target"))
                                          (is (str/includes? event "second-target"))
@@ -346,13 +461,36 @@
       (is (= 1 @renders) "equivalent feeds share one render")
       (is (= 2 @pushes) "the shared event reaches every equivalent feed"))))
 
+(deftest broadcast-separates-different-active-fingerprints
+  (let [renders (atom 0)
+        pushes (atom 0)
+        render-change (fn [_]
+                        (swap! renders inc)
+                        [[:div {:id "target"}]])
+        base {:seon.web.feed/key [:agent agent-a]
+              :seon.web.feed/live? true
+              :seon.web.feed/render-change render-change}]
+    (with-redefs [datastar/!feeds
+                  (atom {"view-a" (assoc base
+                                         ::datastar/active-tokens #{"unit-a"})
+                         "view-b" (assoc base
+                                         ::datastar/active-tokens #{"unit-b"})})
+                  datastar/push-event! (fn [_ _] (swap! pushes inc))]
+      (@#'datastar/broadcast!
+        {:seon.db/db nil :seon.db/changed-attrs #{:example/value}})
+      (is (= 2 @renders)
+          "views with different demanded units do not share a render")
+      (is (= 2 @pushes) "each active fingerprint receives its own event"))))
+
 (deftest broadcast-ignores-frozen-feeds
   (let [renders (atom 0)]
     (with-redefs [datastar/!feeds
-                  (atom [{:seon.web.feed/key [:agent agent-a :as-of 1]
+                  (atom {"frozen-view"
+                         {:seon.web.feed/key [:agent agent-a :as-of 1]
                           :seon.web.feed/live? false
+                          ::datastar/active-tokens #{}
                           :seon.web.feed/render-change
-                          (fn [_] (swap! renders inc) [])}])]
+                          (fn [_] (swap! renders inc) [])}})]
       (@#'datastar/broadcast!
         {:seon.db/db nil :seon.db/changed-attrs #{:example/value}})
       (is (zero? @renders) "as-of feeds never rerender on current commits"))))
@@ -381,6 +519,51 @@
     (@on-drain)
     (is (= ["first" "latest"] @writes)
         "drain sends only the newest derived state")))
+
+(deftest reconnect-replaces-stale-ownership-and-final-close-releases-view
+  (let [EventEmitter (.-EventEmitter (js/require "node:events"))
+        PassThrough (.-PassThrough (js/require "node:stream"))
+        req-a (new EventEmitter)
+        req-b (new EventEmitter)
+        res-a (new PassThrough)
+        res-b (new PassThrough)
+        _write-a (aset res-a "writeHead" (fn [_ _] nil))
+        _write-b (aset res-b "writeHead" (fn [_ _] nil))
+        view-id "reconnect-view"
+        catalog (datastar/unit-catalog
+                  [{::datastar/coordinate
+                    {:seon.agent/id agent-a
+                     :seon.web.unit/face :seon.web.unit.face/expanded}
+                    ::datastar/producer (fn [] [:div])}])
+        token (::datastar/token (first catalog))
+        base {:seon.web.feed/key [:agent agent-a]
+              :seon.web.feed/live? true
+              :seon.web.feed/render-full (fn [] [:main {:id "app-view"}])
+              :seon.web.feed/render-change (constantly [])
+              ::datastar/view-id view-id}]
+    (with-redefs [datastar/!feeds (atom {})
+                  datastar/push-full! (fn [_] nil)]
+      (@#'datastar/open-feed!
+        req-a res-a (assoc base
+                           ::datastar/catalog catalog
+                           ::datastar/active-tokens #{token}))
+      (let [first-owner (:seon.web.feed/id (get @datastar/!feeds view-id))]
+        (@#'datastar/open-feed! req-b res-b base)
+        (let [second-owner (:seon.web.feed/id (get @datastar/!feeds view-id))]
+          (is (= 1 (count @datastar/!feeds))
+              "one view id has exactly one current socket owner")
+          (is (not= first-owner second-owner)
+              "reconnect replaces rather than appends socket ownership")
+          (is (= #{token}
+                 (::datastar/active-tokens (get @datastar/!feeds view-id)))
+              "reconnect inherits the view's active state")
+          (.emit req-a "close")
+          (is (= second-owner
+                 (:seon.web.feed/id (get @datastar/!feeds view-id)))
+              "a stale close cannot release the replacement")
+          (.emit req-b "close")
+          (is (empty? @datastar/!feeds)
+              "closing the final owner releases catalog and active state"))))))
 
 ;; ============================================================
 ;; 5. PER-CONNECTION views — the streamer renders EACH connection's OWN

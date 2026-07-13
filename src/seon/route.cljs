@@ -105,6 +105,11 @@
     ::handler 'seon.web.datastar/serve-agents-page!}
    {::pattern "/agents/feed"     ::method :get  ::name ::agents-feed
     ::handler 'seon.web.datastar/open-roster-feed!}
+   ;; Generic one-shot Datastar HTML door. The client sends only an opaque
+   ;; catalog token; the handler resolves it through the open server view and
+   ;; never decodes client input into a renderer symbol.
+   {::pattern "/view/unit"       ::method :get  ::name ::view-unit
+    ::handler 'seon.web.datastar/handle-view-unit!}
    {::pattern "/agent/{id}"      ::method :get  ::name ::agent
     ::handler 'seon.web.datastar/serve-agent-page!}
    {::pattern "/agent/{id}/feed" ::method :get  ::name ::agent-feed

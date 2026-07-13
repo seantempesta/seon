@@ -103,6 +103,16 @@
    [::activated-tokens ::activated-tokens]
    [::deactivated-tokens ::deactivated-tokens]])
 (schema/register! ::fingerprint [:string {:min 1}])
+(schema/register! ::view-id [:string {:min 1 :max 128}])
+(schema/register! ::view-state
+  [:map
+   [::view-id ::view-id]
+   [::catalog ::catalog]
+   [::active-tokens ::active-tokens]])
+(schema/register! ::views [:map-of ::view-id ::view-state])
+;; Ring is a third-party request boundary; Seon's owned unit state above is
+;; fully named and uses concrete schemas.
+(schema/register! ::ring-request :map)
 
 (defn- canonical-coordinate
   "A coordinate's entries in one platform-independent EDN order."
@@ -186,14 +196,15 @@
   (base64url (pr-str (vec (sort active-tokens)))))
 
 ;; ============================================================
-;; Connection registry — one descriptor per open gzip stream. Render fns are
-;; grouped by `:seon.web.feed/key`, so equivalent tabs render once per tx.
+;; Connection registry — one view descriptor per open gzip stream. A view id
+;; owns its catalog, active set, and current socket. Render fns are grouped by
+;; feed key + active fingerprint, so equivalent tabs render once per tx.
 ;; ============================================================
 
-(defonce ^{:doc "Vector of fully namespaced feed descriptors — one per open
-                  stream. Live descriptors sharing `:seon.web.feed/key` also
-                  share one transaction-derived render."}
-  !feeds (atom []))
+(defonce ^{:doc "Map of ephemeral view ids to fully namespaced descriptors.
+                  Reconnecting one id replaces its stale socket ownership;
+                  closing the current socket releases the complete view."}
+  !feeds (atom {}))
 
 ;; ============================================================
 ;; SSE framing — the datastar-patch-elements builder.
@@ -387,10 +398,13 @@
 (defn- broadcast!
   "Render one targeted patch per unique live view and fan it to its feeds."
   [change]
-  (let [groups (->> @!feeds
+  (let [groups (->> (vals @!feeds)
                     (filter :seon.web.feed/live?)
-                    (group-by :seon.web.feed/key))]
-    (doseq [[view-key conns] groups]
+                    (group-by
+                      (fn [view]
+                        [(:seon.web.feed/key view)
+                         (active-fingerprint (::active-tokens view))])))]
+    (doseq [[[view-key _active-fingerprint] conns] groups]
       (try
         (let [started (.now js/performance)
               render-change (:seon.web.feed/render-change (first conns))
@@ -656,6 +670,56 @@
   (shim-html "agents" "bg-base-950 text-text-200 font-mono p-3" "/agents/feed"
              (new-agent-bar-html)))
 
+(def ^:private safe-view-id-re #"[A-Za-z0-9._~-]{1,128}")
+
+(defn- safe-view-id?
+  "True when a client view id is safe as an ephemeral registry key."
+  [view-id]
+  (boolean (and view-id (re-matches safe-view-id-re view-id))))
+
+(defn- prepare-feed
+  "Attach inherited view state and one fresh socket to a feed descriptor."
+  [feed previous view-id feed-id gz res]
+  (let [catalog (if (contains? feed ::catalog)
+                  (::catalog feed)
+                  (or (::catalog previous) []))
+        available (into #{} (map ::token) catalog)
+        requested-active (if previous
+                           (::active-tokens previous)
+                           (or (::active-tokens feed) #{}))
+        active-tokens (set/intersection requested-active available)]
+    (assoc feed
+           ::view-id view-id
+           ::catalog catalog
+           ::active-tokens active-tokens
+           :seon.web.feed/id feed-id
+           :seon.web.feed/gzip gz
+           :seon.web.feed/response res
+           :seon.web.feed/pending-event (atom nil)
+           :seon.web.feed/draining? (atom false)
+           :seon.web.feed/opened-at (js/Date.))))
+
+(defn- replace-feed!
+  "Make `conn` the sole socket owner for its view and return the prior owner."
+  [conn]
+  (let [view-id (::view-id conn)
+        previous (get @!feeds view-id)]
+    (swap! !feeds assoc view-id conn)
+    previous))
+
+(defn- release-feed!
+  "Release a view only when `feed-id` still owns its current socket."
+  [view-id feed-id]
+  (if (= feed-id (:seon.web.feed/id (get @!feeds view-id)))
+    (do (swap! !feeds dissoc view-id) true)
+    false))
+
+(defn- close-feed-socket!
+  "End one gzip socket without changing view ownership."
+  [conn]
+  (when-let [gz (:seon.web.feed/gzip conn)]
+    (try (.end ^js gz) (catch :default _ nil))))
+
 (defn- open-feed!
   "Open a long-lived gzip SSE stream from one derived-view descriptor."
   [^js req ^js res feed]
@@ -664,33 +728,128 @@
                            "Cache-Control"     "no-store"
                            "Connection"        "keep-alive"
                            "X-Accel-Buffering" "no"})
-  (let [gz   (.createGzip zlib)
-        id   (random-uuid)
-        conn (assoc feed
-                    :seon.web.feed/id id
-                    :seon.web.feed/gzip gz
-                    :seon.web.feed/response res
-                    :seon.web.feed/pending-event (atom nil)
-                    :seon.web.feed/draining? (atom false)
-                    :seon.web.feed/opened-at (js/Date.))]
+  (let [gz (.createGzip zlib)
+        feed-id (random-uuid)
+        supplied-view-id (::view-id feed)
+        view-id (if (safe-view-id? supplied-view-id)
+                  supplied-view-id
+                  (str (random-uuid)))
+        previous (get @!feeds view-id)
+        conn (prepare-feed feed previous view-id feed-id gz res)]
     (.on gz "error"  (fn [e] (log/error-console! "seon.web.datastar" "gz error" e)))
     (.on res "error" (fn [e] (log/error-console! "seon.web.datastar" "res error" e)))
     (.pipe gz res)
-    (swap! !feeds conj conn)
+    (when-let [replaced (replace-feed! conn)]
+      (close-feed-socket! replaced))
     (log/info-console! "seon.web.datastar" "FEED OPEN"
-                       {:seon.web.feed/id (str id)
+                       {:seon.web.feed/id (str feed-id)
+                        :seon.web.datastar/view-id view-id
                         :seon.web.feed/count (count @!feeds)})
     ;; First paint immediately so the page populates without waiting for a tx.
     (push-full! conn)
     (.on req "close"
          (fn []
-           (swap! !feeds
-                  (fn [cs]
-                    (vec (remove #(= (:seon.web.feed/id %) id) cs))))
-           (try (.end gz) (catch :default _ nil))
-           (log/info-console! "seon.web.datastar" "FEED CLOSE"
-                              {:seon.web.feed/id (str id)
-                               :seon.web.feed/count (count @!feeds)})))))
+           (let [released? (release-feed! view-id feed-id)]
+             (close-feed-socket! conn)
+             (log/info-console! "seon.web.datastar" "FEED CLOSE"
+                                {:seon.web.feed/id (str feed-id)
+                                 :seon.web.datastar/view-id view-id
+                                 :seon.web.feed/released? released?
+                                 :seon.web.feed/count (count @!feeds)}))))
+    view-id))
+
+(defn- query-value
+  "Decoded query value named `parameter`, or nil when absent or malformed."
+  [query-string parameter]
+  (try
+    (.get (js/URLSearchParams. (or query-string "")) parameter)
+    (catch :default _ nil)))
+
+(defn- requested-view-id
+  "Safe `view` query value from one node request, or nil."
+  [^js req]
+  (try
+    (let [url (or (.-url req) "")
+          qidx (str/index-of url "?")
+          view-id (when qidx (query-value (subs url (inc qidx)) "view"))]
+      (when (safe-view-id? view-id) view-id))
+    (catch :default _ nil)))
+
+(defn- descriptor-by-token
+  "Trusted catalog descriptor for `token`, or nil."
+  [catalog token]
+  (some #(when (= token (::token %)) %) catalog))
+
+(defn- active-element
+  "Materialize one descriptor behind its complete stable unit wrapper."
+  [{token ::token dom-id ::dom-id producer ::producer}]
+  [:div {:id dom-id
+         :data-seon-unit token
+         :data-seon-unit-active "true"}
+   (producer)])
+
+(defn- write-unit-response!
+  "Finish one unit-control response with explicit status and content type."
+  [^js res status content-type body]
+  (.writeHead res status #js {"Content-Type" content-type
+                              "Cache-Control" "no-store"})
+  (.end res body)
+  nil)
+
+(defn handle-view-unit!
+  "Activate or deactivate one trusted unit in an open ephemeral view."
+  {:malli/schema [:=> [:catn [::ring-request ::ring-request]] :nil]}
+  [r]
+  (let [^js res (:seon.http/node-res r)
+        query-string (:query-string r)
+        view-id (query-value query-string "view")
+        token (query-value query-string "unit")
+        active-value (query-value query-string "active")
+        active? (case active-value "1" true "0" false ::invalid-active)]
+    (cond
+      (or (not (safe-view-id? view-id))
+          (not (seq token))
+          (= ::invalid-active active?))
+      (write-unit-response! res 400 "text/plain; charset=utf-8" "invalid unit request")
+
+      (nil? (get @!feeds view-id))
+      (write-unit-response! res 410 "text/plain; charset=utf-8" "view is closed")
+
+      :else
+      (let [view (get @!feeds view-id)
+            catalog (::catalog view)
+            target (descriptor-by-token catalog token)]
+        (if-not target
+          (write-unit-response! res 404 "text/plain; charset=utf-8" "unknown unit")
+          (try
+            (let [transition (transition-active-set
+                               {::catalog catalog
+                                ::active-tokens (::active-tokens view)
+                                ::token token
+                                ::active? active?})
+                  deactivated (::deactivated-tokens transition)
+                  inactive-elements (into []
+                                          (comp (filter #(contains? deactivated
+                                                                    (::token %)))
+                                                (map inactive-stub))
+                                          catalog)
+                  elements (if active?
+                             (into [(active-element target)] inactive-elements)
+                             [(inactive-stub target)])
+                  body (->> elements (map html/->string) (str/join "\n"))
+                  feed-id (:seon.web.feed/id view)]
+              (swap! !feeds
+                     (fn [feeds]
+                       (if (= feed-id
+                              (:seon.web.feed/id (get feeds view-id)))
+                         (assoc-in feeds [view-id ::active-tokens]
+                                   (::active-tokens transition))
+                         feeds)))
+              (write-unit-response! res 200 "text/html; charset=utf-8" body))
+            (catch :default e
+              (log/error-console! "seon.web.datastar" "unit producer failed" e)
+              (write-unit-response! res 500 "text/plain; charset=utf-8"
+                                    "unit render failed"))))))))
 
 ;; ============================================================
 ;; Per-agent view (/agent/{id}) — the shim page + the feed bound to
@@ -800,46 +959,51 @@
   (ensure-installed!)
   (let [^js req (:seon.http/node-req r)
         ^js res (:seon.http/node-res r)
-        id      (get-in r [:path-params :id])]
+        id      (get-in r [:path-params :id])
+        view-id (requested-view-id req)]
     (if (and (safe-id? id) (agent-exists? id))
       (let [t (parse-t req)]
         (if t
           (let [frozen (db/as-of @db/*conn* t)]
             (open-feed!
               req res
-              {:seon.web.feed/key [:agent id :as-of t]
-               :seon.web.feed/live? false
-               :seon.web.feed/render-full
-               #(agent-view/agent-view frozen id)
-               :seon.web.feed/render-change (constantly [])}))
+              (cond->
+                {:seon.web.feed/key [:agent id :as-of t]
+                 :seon.web.feed/live? false
+                 :seon.web.feed/render-full
+                 #(agent-view/agent-view frozen id)
+                 :seon.web.feed/render-change (constantly [])}
+                view-id (assoc ::view-id view-id))))
           (open-feed!
             req res
             (let [!dependencies
                   (atom (agent-view/agent-view-dependencies @db/*conn* id))]
-              {:seon.web.feed/key [:agent id]
-               :seon.web.feed/live? true
-               :seon.web.feed/render-full
-               #(agent-view/agent-view @db/*conn* id)
-               :seon.web.feed/render-change
-               (fn [{dbv :seon.db/db attrs :seon.db/changed-attrs}]
-                 (let [{surface :seon.ui.agent-view/surface-attrs
-                        structural :seon.ui.agent-view/structural-attrs
-                        header :seon.ui.agent-view/header-attrs}
-                       @!dependencies]
-                   (cond
-                     (seq (set/intersection attrs structural))
-                     (let [elements (agent-view/agent-view-changes dbv id attrs)]
-                       (reset! !dependencies
-                               (agent-view/agent-view-dependencies dbv id))
-                       elements)
+              (cond->
+                {:seon.web.feed/key [:agent id]
+                 :seon.web.feed/live? true
+                 :seon.web.feed/render-full
+                 #(agent-view/agent-view @db/*conn* id)
+                 :seon.web.feed/render-change
+                 (fn [{dbv :seon.db/db attrs :seon.db/changed-attrs}]
+                   (let [{surface :seon.ui.agent-view/surface-attrs
+                          structural :seon.ui.agent-view/structural-attrs
+                          header :seon.ui.agent-view/header-attrs}
+                         @!dependencies]
+                     (cond
+                       (seq (set/intersection attrs structural))
+                       (let [elements (agent-view/agent-view-changes dbv id attrs)]
+                         (reset! !dependencies
+                                 (agent-view/agent-view-dependencies dbv id))
+                         elements)
 
-                     (seq (set/intersection attrs surface))
-                     (agent-view/agent-view-changes dbv id attrs)
+                       (seq (set/intersection attrs surface))
+                       (agent-view/agent-view-changes dbv id attrs)
 
-                     (seq (set/intersection attrs header))
-                     [(header/system-header dbv)]
+                       (seq (set/intersection attrs header))
+                       [(header/system-header dbv)]
 
-                     :else [])))}))))
+                       :else [])))}
+                view-id (assoc ::view-id view-id))))))
       (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"
                                    "Cache-Control" "no-store"})
           (.end res "unknown agent id")))))
@@ -865,10 +1029,13 @@
   [r]
   (ensure-installed!)
   (let [^js req (:seon.http/node-req r)
-        ^js res (:seon.http/node-res r)]
+        ^js res (:seon.http/node-res r)
+        view-id (requested-view-id req)]
     (open-feed! req res
-                {:seon.web.feed/key [:roster]
-                 :seon.web.feed/live? true
-                 :seon.web.feed/render-full #(roster-view @db/*conn*)
-                 :seon.web.feed/render-change
-                 (fn [{dbv :seon.db/db}] [(roster-view dbv)])})))
+                (cond->
+                  {:seon.web.feed/key [:roster]
+                   :seon.web.feed/live? true
+                   :seon.web.feed/render-full #(roster-view @db/*conn*)
+                   :seon.web.feed/render-change
+                   (fn [{dbv :seon.db/db}] [(roster-view dbv)])}
+                  view-id (assoc ::view-id view-id)))))

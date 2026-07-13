@@ -4,8 +4,9 @@
 
    The route vector is `(into (db->routes db) (static-supplement h))`:
    [[db->routes]] is a PURE projection of the seeded `:seon.route/*` datoms
-   (the core routes — `/`, `/agents`, `/agents/feed`, `/agent/{id}`,
-   `/agent/{id}/feed`, `/agent/{id}/call`), and the static supplement carries
+   (the core routes — `/`, `/agents`, `/agents/feed`, `/view/unit`,
+   `/agent/{id}`, `/agent/{id}/feed`, `/agent/{id}/call`), and the static
+   supplement carries
    the routes NOT yet seeded as datoms (static assets, the secondary POST
    doors, `/sse`, the flat `/call`). The router is cached in `!ring-handler`
    and is a pure derived value of those datoms — [[rebuild!]] re-derives it
@@ -54,7 +55,7 @@
     [seon.log :as log]
     ;; Build-inclusion only (no alias): db->routes resolves datastar's core
     ;; handler SYMBOLS (`serve-root!`, `serve-agents-page!`, `open-roster-feed!`,
-    ;; `serve-agent-page!`, `open-agent-feed!`) at request time via
+    ;; `handle-view-unit!`, `serve-agent-page!`, `open-agent-feed!`) at request time via
     ;; eval/lookup-value, so the ns must be compiled into the build. router is
     ;; its sole requirer.
     [seon.web.datastar]
@@ -231,7 +232,7 @@
 ;; datoms, so nothing 404s: static assets, the secondary state-changing POST
 ;; doors (each `:seon.route/same-origin`-gated), `/sse`, the back-compat
 ;; flat `/call`, and the operator dev tools (`/data` + `/agent/{id}/debug`,
-;; `seon.web.debug`). db->routes supplies the six core routes; this supplies
+;; `seon.web.debug`). db->routes supplies the seven core routes; this supplies
 ;; the rest. FLAG (coordination → Core): the secondary POST doors below should
 ;; be seeded as `:seon.route/*` datoms for fully data-driven routing — until
 ;; then they live here.
@@ -335,7 +336,7 @@
    handlers + the latest route datoms). `config` keys:
    `:seon.web.router/{sse static chat stop resume clear log create-agent
    complete}` (the serve handler fns) + `:seon.web.router/same-origin?` (the
-   predicate). The six CORE routes are NOT in `config` — they project from the
+   predicate). The seven CORE routes are NOT in `config` — they project from the
    `:seon.route/*` datoms via [[db->routes]]."
   {:malli/schema [:=> [:catn [::config :map]] :nil]}
   [config]
