@@ -34,13 +34,27 @@ fi
 
 WRITER_TEST_LIST=$(IFS=,; echo "${WRITER_TESTS[*]}")
 
-RUNNER='(let [namespaces (mapv symbol (.split (System/getenv "SEON_WRITER_TEST_NAMESPACES") ","))
+RUNNER='(let [log-fn-var (requiring-resolve (quote taoensso.trove/*log-fn*))
+              get-log-fn (requiring-resolve (quote taoensso.trove.console/get-log-fn))
+              base-log-fn (get-log-fn)]
+          ;; Expected transaction conflicts are asserted as values by the
+          ;; retained tests. Suppress only the full Datahike write-error payload
+          ;; for those cases; every other library log and the clojure.test
+          ;; verdict remain visible.
+          (alter-var-root
+            log-fn-var
+            (constantly
+              (fn [ns* coords level id payload]
+                (when-not (and (= "datahike.writer" ns*)
+                               (= :datahike/write-error id))
+                  (base-log-fn ns* coords level id payload)))))
+          (let [namespaces (mapv symbol (.split (System/getenv "SEON_WRITER_TEST_NAMESPACES") ","))
               run-tests (requiring-resolve (quote clojure.test/run-tests))]
-          (doseq [test-ns namespaces] (require test-ns))
-          (let [{:keys [fail error]} (apply run-tests namespaces)
-                exit-code (if (zero? (+ fail error)) 0 1)]
-            (shutdown-agents)
-            (System/exit exit-code)))'
+            (doseq [test-ns namespaces] (require test-ns))
+            (let [{:keys [fail error]} (apply run-tests namespaces)
+                  exit-code (if (zero? (+ fail error)) 0 1)]
+              (shutdown-agents)
+              (System/exit exit-code))))'
 
 SEON_WRITER_TEST_NAMESPACES="$WRITER_TEST_LIST" \
   clojure -M:writer:writer-test -e "$RUNNER"

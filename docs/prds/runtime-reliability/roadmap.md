@@ -131,6 +131,10 @@ artifact, Markdown, and docstring behavior; it no longer leaves the two linter
 suites orphaned. The underlying focused scripts remain implementation doors,
 not competing harnesses.
 
+The writer test process now suppresses only `datahike.writer` error logging:
+expected transaction-conflict cases remain behavioral assertions, while their
+repeated full stack traces no longer dominate a successful focused run.
+
 The source-grounded system audits are complete and committed:
 
 - [[research/database-runtime-responsiveness-audit-2026-07-13]]
