@@ -22,6 +22,8 @@
     [clojure.test.check :as tc]
     [clojure.test.check.generators :as gen]
     [clojure.test.check.properties :as prop :include-macros true]
+    [datahike.api :as d]
+    [datahike.db :as datahike]
     [seon.client :as client]
     [seon.agent.debug :as agent-debug]
     [seon.db :as db]
@@ -840,6 +842,197 @@
             "explicit and datom-derived changed attributes are unioned")
         (is (true? (:seon.web.broadcast/structural? merged))
             "a later ordinary commit cannot downgrade structural work")))))
+
+(defn- test-datom
+  "One effective datom-shaped value for coalescer tests."
+  [entity attr value tx added?]
+  {:seon.db/e entity
+   :seon.db/a attr
+   :seon.db/v value
+   :seon.db/tx tx
+   :seon.db/added? added?})
+
+(defn- running-eval-change
+  "One eval-record commit with its turn component link and ancillary tee."
+  [n db-before db-after]
+  (let [turn-eid 700
+        eval-eid (+ 800 n)
+        tx (+ 900 n)
+        eval-id-datom (test-datom eval-eid :seon.eval/id
+                                  (str "eval-" n) tx true)
+        turn-link-datom (test-datom turn-eid :seon.agent.turn/evals
+                                   eval-eid tx true)
+        tee-datom (test-datom (+ 1000 n) :seon.fn/source
+                              (str "(defn f" n " [])") tx true)]
+    {:seon.db/db-before db-before
+     :seon.db/db db-after
+     :seon.db/datoms [eval-id-datom turn-link-datom tee-datom]
+     :seon.db/attr-index
+     {:seon.eval/id [eval-id-datom]
+      :seon.agent.turn/evals [turn-link-datom]
+      :seon.fn/source [tee-datom]}}))
+
+(defn- running-turn-db
+  "Fresh immutable database value with only a running turn status installed."
+  []
+  (-> (datahike/empty-db
+        {:seon.agent.turn/status {}})
+      (d/db-with [[:db/add 700 :seon.agent.turn/status :running]])))
+
+(deftest running-eval-commits-wait-for-the-terminal-turn-frame
+  (let [clock (atom 0)
+        next-handle (atom 0)
+        scheduled (atom [])
+        cleared (atom [])
+        broadcasts (atom [])
+        running-db (running-turn-db)
+        terminal-datom (test-datom 700 :seon.agent.turn/status
+                                   :done 2000 true)
+        terminal-change
+        {:seon.db/db-before :example.db/eval-5
+         :seon.db/db :example.db/terminal
+         :seon.db/datoms [terminal-datom]
+         :seon.db/attr-index {:seon.agent.turn/status [terminal-datom]}}]
+    (with-redefs [datastar/!coalescer
+                  (atom @#'datastar/empty-coalescer)
+                  datastar/monotonic-ms (fn [] @clock)
+                  datastar/set-broadcast-timeout!
+                  (fn [callback delay-ms]
+                    (let [handle (swap! next-handle inc)]
+                      (swap! scheduled conj [handle delay-ms callback])
+                      handle))
+                  datastar/clear-broadcast-timeout!
+                  #(swap! cleared conj %)
+                  datastar/broadcast! #(swap! broadcasts conj %)]
+      (doseq [n (range 1 6)]
+        (reset! clock (* n 500))
+        (@#'datastar/schedule-broadcast!
+          (running-eval-change
+            n
+            (if (= n 1) :example.db/zero
+                running-db)
+            running-db)))
+      (is (empty? @scheduled)
+          "running eval records retain evidence without creating timers")
+      (is (empty? @broadcasts)
+          "many durable eval records do not invoke presentation work")
+      (is (identical? running-db
+                      (get-in @datastar/!coalescer
+                              [::datastar/pending-change :seon.db/db]))
+          "the held window tracks the latest committed database value")
+
+      (reset! clock 3000)
+      (@#'datastar/schedule-broadcast! terminal-change)
+      (is (= 1 (count @scheduled))
+          "the terminal turn fact schedules exactly one final frame")
+      (is (empty? @cleared)
+          "no nonexistent eval timer was manufactured or cancelled")
+      ((nth (first @scheduled) 2))
+      (is (= 1 (count @broadcasts))
+          "the terminal frame drains all held eval evidence once")
+      (let [broadcast (first @broadcasts)]
+        (is (= :example.db/zero (:seon.db/db-before broadcast))
+            "the final frame retains the earliest pre-eval database value")
+        (is (= :example.db/terminal (:seon.db/db broadcast))
+            "the final frame renders the terminal database value")
+        (is (= #{:seon.eval/id :seon.agent.turn/evals
+                 :seon.fn/source :seon.agent.turn/status}
+               (:seon.db/changed-attrs broadcast))
+            "the final frame contains every held dependency signal")))))
+
+(deftest running-eval-never-postpones-an-existing-frame
+  (let [clock (atom 0)
+        next-handle (atom 0)
+        scheduled (atom [])
+        cleared (atom [])
+        broadcasts (atom [])
+        running-db (running-turn-db)
+        domain-datom (test-datom 600 :my.note/text "before" 10 true)
+        domain-change {:seon.db/db-before :example.db/zero
+                       :seon.db/db :example.db/domain
+                       :seon.db/datoms [domain-datom]
+                       :seon.db/attr-index {:my.note/text [domain-datom]}}]
+    (with-redefs [datastar/!coalescer
+                  (atom @#'datastar/empty-coalescer)
+                  datastar/monotonic-ms (fn [] @clock)
+                  datastar/set-broadcast-timeout!
+                  (fn [callback delay-ms]
+                    (let [handle (swap! next-handle inc)]
+                      (swap! scheduled conj [handle delay-ms callback])
+                      handle))
+                  datastar/clear-broadcast-timeout!
+                  #(swap! cleared conj %)
+                  datastar/broadcast! #(swap! broadcasts conj %)]
+      (@#'datastar/schedule-broadcast! domain-change)
+      (let [owned-timer (::datastar/timer @datastar/!coalescer)
+            owned-due (::datastar/due-at @datastar/!coalescer)]
+        (reset! clock 5)
+        (@#'datastar/schedule-broadcast!
+          (running-eval-change 1 :example.db/domain running-db))
+        (is (= 1 (count @scheduled))
+            "an eval commit does not replace the already-earned timer")
+        (is (empty? @cleared)
+            "the existing timer is neither cancelled nor postponed")
+        (is (= owned-timer (::datastar/timer @datastar/!coalescer)))
+        (is (= owned-due (::datastar/due-at @datastar/!coalescer)))
+        ((nth (first @scheduled) 2)))
+      (is (= 1 (count @broadcasts)))
+      (is (identical? running-db
+                      (:seon.db/db (first @broadcasts)))
+          "the unchanged timer still renders the latest committed state")
+      (is (= #{:my.note/text :seon.eval/id
+               :seon.agent.turn/evals :seon.fn/source}
+             (:seon.db/changed-attrs (first @broadcasts)))
+          "the unchanged timer owns both deliberate and eval evidence"))))
+
+(deftest intervening-non-eval-change-schedules-and-carries-held-evidence
+  (let [clock (atom 0)
+        next-handle (atom 0)
+        scheduled (atom [])
+        broadcasts (atom [])
+        running-db (running-turn-db)
+        canvas-datom (test-datom 600 :seon.render.canvas/content
+                                 "my.canvas/render" 30 true)
+        canvas-change {:seon.db/db-before :example.db/eval-1
+                       :seon.db/db :example.db/canvas
+                       :seon.db/datoms [canvas-datom]
+                       :seon.db/attr-index
+                       {:seon.render.canvas/content [canvas-datom]}}]
+    (with-redefs [datastar/!coalescer
+                  (atom @#'datastar/empty-coalescer)
+                  datastar/monotonic-ms (fn [] @clock)
+                  datastar/set-broadcast-timeout!
+                  (fn [callback delay-ms]
+                    (let [handle (swap! next-handle inc)]
+                      (swap! scheduled conj [handle delay-ms callback])
+                      handle))
+                  datastar/clear-broadcast-timeout! (fn [_] nil)
+                  datastar/broadcast! #(swap! broadcasts conj %)]
+      (@#'datastar/schedule-broadcast!
+        (running-eval-change 1 :example.db/zero running-db))
+      (is (empty? @scheduled) "the eval record starts as held evidence")
+
+      (reset! clock 100)
+      (@#'datastar/schedule-broadcast! canvas-change)
+      (is (= 1 (count @scheduled))
+          "a deliberate canvas transaction promptly earns a frame")
+      (is (= 16 (second (first @scheduled)))
+          "the existing ordinary settle policy remains the scheduling path")
+
+      (reset! clock 105)
+      (@#'datastar/schedule-broadcast!
+        (running-eval-change 2 :example.db/canvas running-db))
+      (is (= 1 (count @scheduled))
+          "later eval bookkeeping cannot postpone the deliberate frame")
+      ((nth (first @scheduled) 2))
+      (is (= 1 (count @broadcasts)))
+      (let [broadcast (first @broadcasts)]
+        (is (= :example.db/zero (:seon.db/db-before broadcast)))
+        (is (identical? running-db (:seon.db/db broadcast)))
+        (is (= #{:seon.eval/id :seon.agent.turn/evals
+                 :seon.fn/source :seon.render.canvas/content}
+               (:seon.db/changed-attrs broadcast))
+            "the deliberate frame preserves evidence from both eval sides")))))
 
 (deftest continuous-structural-commits-cannot-move-the-maximum-deadline
   (let [clock (atom 0)

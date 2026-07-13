@@ -554,8 +554,9 @@
 
 ;; ============================================================
 ;; Coalescing — one lifecycle-owned state collapses a tx burst into one
-;; morph. The first enqueue fixes a maximum deadline; later commits may move
-;; the trailing edge toward that deadline, but never beyond it.
+;; morph. Running eval-record commits can retain evidence without a timer.
+;; The first render-worthy enqueue fixes a maximum deadline; later ordinary
+;; commits may move the trailing edge toward it, but never beyond it.
 ;; ============================================================
 
 (def ^:private normal-settle-ms 16)
@@ -565,7 +566,7 @@
 (def ^:private empty-coalescer {})
 
 (defonce ^{:private true
-           :doc "One pending Datastar broadcast and its owned timer."}
+           :doc "One pending Datastar broadcast and its optional timer."}
   !coalescer (atom empty-coalescer))
 
 (defn- monotonic-ms [] (.now js/performance))
@@ -606,6 +607,46 @@
            (agent-view/structural-change? (change-attrs change)))}
       (some? db-before) (assoc :seon.db/db-before db-before))))
 
+(defn- running-eval-record-commit?
+  "True when one commit records eval children of still-running turns."
+  [change]
+  (try
+    (let [datoms (or (:seon.db/datoms change) [])
+          post-db (:seon.db/db change)
+          eval-eids
+          (into #{}
+                (comp
+                  (filter :seon.db/added?)
+                  (filter #(= :seon.eval/id (:seon.db/a %)))
+                  (map :seon.db/e))
+                datoms)
+          eval-links
+          (into []
+                (comp
+                  (filter :seon.db/added?)
+                  (filter #(= :seon.agent.turn/evals (:seon.db/a %)))
+                  (filter #(contains? eval-eids (:seon.db/v %))))
+                datoms)
+          linked-eval-eids (into #{} (map :seon.db/v) eval-links)
+          owner-turn-eids (into #{} (map :seon.db/e) eval-links)]
+      (and post-db
+           (seq eval-eids)
+           (= eval-eids linked-eval-eids)
+           (seq owner-turn-eids)
+           (every?
+             (fn [turn-eid]
+               (= :running
+                  (:seon.agent.turn/status
+                    (db/pull {:seon.db/db post-db
+                              :seon.db/pull-pattern
+                              [:seon.agent.turn/status]
+                              :seon.db/ref turn-eid}))))
+             owner-turn-eids)))
+    (catch :default _
+      ;; Recognition is an optimization. Any malformed or unreadable change
+      ;; remains render-worthy rather than risking a suppressed update.
+      false)))
+
 (defn- broadcast-due-at
   [enqueued-at now structural?]
   (min (+ enqueued-at maximum-coalesce-ms)
@@ -617,34 +658,48 @@
   (let [now (monotonic-ms)
         current @!coalescer
         pending (merge-change (::pending-change current) change)
-        enqueued-at (or (::enqueued-at current) now)
-        due-at (broadcast-due-at
-                 enqueued-at now
-                 (:seon.web.broadcast/structural? pending))]
-    (if (and (::timer current) (= due-at (::due-at current)))
-      ;; Once the maximum deadline is reached, keep its already-owned timer.
-      ;; Clearing and recreating a zero-delay timer here would let continuous
-      ;; transaction callbacks starve the render indefinitely.
-      (reset! !coalescer
-              (assoc current
-                     ::pending-change pending
-                     ::enqueued-at enqueued-at))
-      (let [timer-token (random-uuid)
-            delay-ms (max 0 (- due-at now))
-            timer (set-broadcast-timeout!
-                    #(drain-coalescer! timer-token)
-                    delay-ms)]
-        ;; Publish pending data + timer ownership as one value. Node cannot run
-        ;; the new timeout until this stack returns; a queued old callback is
-        ;; fenced by timer-token and becomes inert after this reset.
-        (reset! !coalescer
-                {::pending-change pending
-                 ::timer timer
-                 ::timer-token timer-token
-                 ::enqueued-at enqueued-at
-                 ::due-at due-at})
-        (when-let [old-timer (::timer current)]
-          (clear-broadcast-timeout! old-timer))))))
+        running-eval? (running-eval-record-commit? change)]
+    (cond
+      (and running-eval? (::timer current))
+      ;; A prior deliberate change already earned this frame. Merge the eval
+      ;; evidence, but never postpone or replace the timer that owns it.
+      (reset! !coalescer (assoc current ::pending-change pending))
+
+      running-eval?
+      ;; Eval outcomes remain durable database facts. While their owning turn
+      ;; is running, retain their presentation evidence until a non-eval fact
+      ;; (normally the terminal turn status) schedules the existing renderer.
+      (reset! !coalescer {::pending-change pending})
+
+      :else
+      (let [enqueued-at (or (::enqueued-at current) now)
+            due-at (broadcast-due-at
+                     enqueued-at now
+                     (:seon.web.broadcast/structural? pending))]
+        (if (and (::timer current) (= due-at (::due-at current)))
+          ;; Once the maximum deadline is reached, keep its already-owned timer.
+          ;; Clearing and recreating a zero-delay timer here would let continuous
+          ;; transaction callbacks starve the render indefinitely.
+          (reset! !coalescer
+                  (assoc current
+                         ::pending-change pending
+                         ::enqueued-at enqueued-at))
+          (let [timer-token (random-uuid)
+                delay-ms (max 0 (- due-at now))
+                timer (set-broadcast-timeout!
+                        #(drain-coalescer! timer-token)
+                        delay-ms)]
+            ;; Publish pending data + timer ownership as one value. Node cannot
+            ;; run the new timeout until this stack returns; a queued old
+            ;; callback is fenced by timer-token and becomes inert after reset.
+            (reset! !coalescer
+                    {::pending-change pending
+                     ::timer timer
+                     ::timer-token timer-token
+                     ::enqueued-at enqueued-at
+                     ::due-at due-at})
+            (when-let [old-timer (::timer current)]
+              (clear-broadcast-timeout! old-timer))))))))
 
 (defn- drain-coalescer! [timer-token]
   (let [[before _]
