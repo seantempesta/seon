@@ -24,11 +24,12 @@ prompt is a render of data; the UI is a reactive projection of data. The context
 unit is the **block** (`:seon.agent.ctx/block`); the prompt, an agent’s **view**,
 and the **root agent's** view (`/`) are each a derivation of the same blocks.
 
-It is **dual-track**: a CLJ **JVM server** (the DB writer + render/serve + Integrant
-lifecycle + heavy processing, data-only) and CLJS **agent executors** (isolated),
-sharing the `.cljc` **schema** layer. The derived-state rule and the transition
-table are CLJS (`seon.derive` / `seon.agent.loop`), reached from the device the same
-way every read is — through the database protocol against the replica.
+It is **dual-runtime**: a CLJ **JVM database server** (the authoritative writer +
+heavy data processing, data-only) and a CLJS **agent and web runtime**, sharing
+the `.cljc` **schema** layer. The JVM does not carry a second application or
+renderer. The derived-state rule and transition table are CLJS (`seon.derive` /
+`seon.agent.loop`), reached from the device the same way every read is — through
+the database protocol against the replica.
 
 **Client/server is the shape.** The pod is a **read-only datahike replica** of the
 single JVM **writer** (reads local off the replica, writes forwarded through the
@@ -196,7 +197,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
         │  listen! → derive view → whole-element morph → push  the only browser-facing HTTP/SSE
         ▲                                                    (derives every page; runs NO agent code)
         │  database protocol (RPC + tx-feed, attachment/commit cursor)
-   JVM DATABASE SERVER ── single-writer datahike + heavy processing (embeddings/LLM/indexing) + Integrant
+   JVM DATABASE SERVER ── single-writer datahike + bounded heavy processing (embeddings/indexing)
         ▲   the bus + authoritative writer; handles only DATA, never agent code
         │
    ISOLATED PER-AGENT NODE RUNTIMES ── each its own SCI cage + event loop; the ONE exec service
@@ -207,8 +208,8 @@ Three roles, decoupled in principle, co-located in one pod for v1:
 
 - **JVM database server** — the sole authoritative datahike writer (durable,
   bitemporal)
-  plus heavy processing (embeddings, LLM, indexing) and Integrant lifecycle. Data
-  only; it never executes agent code.
+  plus bounded heavy processing (embeddings and indexing). Data only; it never
+  executes agent code or serves a second web application.
 - **Node UI-host** — the browser's single front door: a read-only replica + one
   tx-listener that derives every agent’s **view** (including the root agent’s view
   at `/`) from `:seon.agent/ctx`, holds the route table, and streams patches. The
@@ -250,7 +251,10 @@ branch-local tx replay from the bitemporal log (this is the pod↔writer
 replication layer—the dropped event
 is the wake trigger, so it must not be lost; the browser stream needs no UI-side
 `since-t`, it just repaints `view = f(db)` on reconnect). **No agent code ever touches
-an SSE connection** — agents write facts; the UI-host derives and streams.
+an SSE connection** — agents write facts; the UI-host derives and streams. The
+writer publishes raw committed-transaction frames and bounded replay pages; it
+does not persist query subscriptions, changed-row summaries, or another
+in-process invalidation bus.
 
 ### Derive everything
 

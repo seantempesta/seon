@@ -28,21 +28,26 @@ compensate for unclear functions.
 
 ## Current position
 
-**Current phase: plan review and clean-base freeze (phase 1 of 6).** The owner
-decisions are resolved. Production implementation starts from the coordinated
-clean-base proof; remote replication, cloud topology, browser replicas, offline
-mutation, mobile packaging, and the full paid Inspect AI battery are explicit
-follow-on work rather than completion gates for this branch.
+**Current phase: isolate the permanent JVM server (phase 2 of 6).** The owner
+decisions are resolved and the coordinated clean-base proof is tagged. Remote
+replication, cloud topology, browser replicas, offline mutation, mobile
+packaging, and the full paid Inspect AI battery are explicit follow-on work
+rather than completion gates for this branch.
 
-The shared ACME/plan/REPL work is now checkpointed at `3e0e0bff`; the directly
+The shared ACME/plan/REPL work is checkpointed at `3e0e0bff`; the directly
 affected schema, plan, and AI dispatch CLJS namespaces pass their focused tests,
 and `runtime-reliability-pre-refactor-2026-07-13` anchors the complete
 `b4efd4f5` handoff. The Phase 1 baseline is
-[[research/phase-1-baseline-2026-07-13]]. Since that capture, `writer-uber` has
-been corrected to use the exact live `[:simd :fork-deps :writer]` composition;
-it now builds and reaches the expected opt-in embedding gate. Live transition
-proof, profiling, dependency slimming, and a published artifact manifest remain
-outstanding.
+[[research/phase-1-baseline-2026-07-13]]. Since that capture, `writer-uber` and
+source launch have converged on one complete `:writer` basis. The writer closure
+is down from 188 libraries/194 classpath roots to 111/117, resolves the exact
+maintained Datahike/Konserve SHAs, and has one SLF4J provider. `bin/test-writer`
+runs only the twelve retained writer suites; its current proof is 107 tests and
+596 assertions. The unused query-subscription engine and its second in-process
+subscriber bus are deleted, leaving raw committed-transaction fanout plus
+bounded replay. The atomic database-protocol vocabulary cut, remaining dead
+operation/backend pruning, typed administration, live transition proof, and a
+published artifact manifest remain outstanding.
 
 The source-grounded system audits are complete and committed:
 
@@ -385,10 +390,10 @@ is evaluated behaviorally, not by asserting prose.
 
 | Area | Current defect |
 |---|---|
-| JVM source | The retained writer reaches thirteen namespaces; one is the unused second reactive system. The old Integrant/core.async/agent/web application remains searchable and on broad classpaths. |
-| JVM artifact | The corrected uberjar uses the live fork/SIMD/writer basis, but still inherits the broad base dependency graph, emits multiple SLF4J providers, and has no published launch manifest. |
-| Dependencies | Heavy paused-app dependencies live in base `:deps`; the writer, CLJS build, tools, and tests do not have honest narrow closures. |
-| Writer protocol | Dead query subscriptions, in-process subscriber routing, duplicate Transit helpers, unused read/filter/batch operations, an unwired agent registry, and a fake SQLite backend remain. |
+| JVM source | The retained writer reaches twelve namespaces. The old Integrant/core.async/agent/web application remains searchable until the archive cut. |
+| JVM artifact | Source and uberjar use the same complete `:writer` basis with the maintained forks and one SLF4J provider, but no published launch manifest yet records the artifact/runtime contract. |
+| Dependencies | The writer and writer-test closures are honest and narrow. Heavy paused-app dependencies still live in the base graph used by old JVM/tools, and CLJS/tool ownership is not yet fully separated. |
+| Writer protocol | Raw transaction fanout plus bounded replay is now the only live update channel. Duplicate Transit helpers, unused read/filter/batch operations, an unwired agent registry, and a fake SQLite backend remain. |
 | Database vocabulary | `seon.store.wire`, `:seon.store.wire/*`, `{store-id, ...}`, `db/store-inventory`, `seon.server.store`, `/store` paths, and matching docs/UI/skills expose a second name for the database. |
 | Database browser | The inventory context block, `db/store-inventory`, `my.kb/inventory`, root-canvas “STORE” panel, header count, and `/data` repeat broad namespace/count scans. `/data` also retains a second legacy SSE connection registry instead of the canonical lazy render-unit feed. |
 | Developer hooks | Active hook config still calls the paused nREPL JVM on port 7888, so several claimed checks silently do not run. |

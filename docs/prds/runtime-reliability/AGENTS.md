@@ -16,21 +16,24 @@ JVM server, canonical CLJS runtime/UI, archive boundary, local and remote
 database synchronization, client distribution, test authority, and exact
 canvas/surface/card cutover.
 
-This PRD is in **phase 1 of 6: plan review and clean-base freeze**. The owner
-decisions are resolved; production implementation starts from the coordinated
-clean-base proof. The active plan replaces mechanisms in place and deletes their
-superseded paths; it does not create compatibility namespaces or parallel
-architectures.
+This PRD is in **phase 2 of 6: isolate the permanent JVM server**. The owner
+decisions are resolved and the coordinated clean-base proof is tagged. The
+active plan replaces mechanisms in place and deletes their superseded paths; it
+does not create compatibility namespaces or parallel architectures.
 
 The previously shared ACME/plan/REPL work is checkpointed at `3e0e0bff` and the
 tree was clean immediately afterward. Focused `seon.schema-test`,
 `my.plan-test`, and `seon.ai.dispatch-test` runs pass. The annotated
 `runtime-reliability-pre-refactor-2026-07-13` tag anchors the complete
-`b4efd4f5` handoff. The first artifact correction is also landed in the working
-lane: `writer-uber` now builds successfully from the exact live
-`:simd:fork-deps:writer` basis and reaches the expected opt-in embedding gate.
-Live transition proof, profiling, dependency slimming, and artifact-manifest
-truth remain. The exact starting evidence is
+`b4efd4f5` handoff. The writer now has one complete `:writer` basis for source
+launch and `writer-uber`: 111 libraries/117 roots instead of 188/194, the exact
+maintained Datahike/Konserve SHAs, and one SLF4J provider. `bin/test-writer`
+proves the twelve retained suites (107 tests/596 assertions). The unused query
+subscription engine and its second in-process subscriber bus are deleted; raw
+transaction fanout plus bounded replay is the one retained update channel.
+Protocol/database vocabulary convergence, remaining dead operation/backend
+pruning, typed administration, live transition proof, profiling, and
+artifact-manifest truth remain. The exact starting evidence is
 [[research/phase-1-baseline-2026-07-13]].
 
 Foundational gains already landed and are the baseline:
@@ -85,14 +88,15 @@ process verbs are not primary UX.
 - The permanent Java component is a small JVM database/heavy-compute server,
   not the old JVM application. The canonical agent/runtime/renderer remains
   CLJS and server agents run as Node processes beside the JVM.
-- The retained writer currently reaches thirteen namespaces; deleting the
-  unused second reactive system reduces that closure to twelve. Base aliases
-  and the writer artifact still include misleading paused dependencies.
+- The retained writer reaches twelve namespaces. Its complete `:writer` basis
+  excludes the paused application and is also the `writer-uber` basis.
 - `writer-uber` originally built from `[:writer]` while runtime used the
-  maintained fork/SIMD composition. It now uses one explicit
-  `[:simd :fork-deps :writer]` basis and builds/preflights; the remaining
-  artifact defect is its broad inherited dependency closure and lack of one
-  published launch manifest.
+  maintained fork/SIMD composition. Source and artifact now resolve identical
+  111-library/117-root graphs and build/preflight; the remaining artifact defect
+  is the lack of one published launch manifest.
+- The writer publishes committed transaction frames and serves bounded replay.
+  There is no durable query-subscription engine or second in-process subscriber
+  bus.
 - `bin/seon` is a 2,186-line shell program. The replacement is a small shell
   launcher over a Babashka process graph with explicit transitions,
   readiness, locks, and scoped reset.
