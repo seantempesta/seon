@@ -25,6 +25,32 @@ made here must be cherry-picked back onto the post-refactor main.
   the refactor agent's active territory** — reconcile against their version
   before applying; cherry-pick both commits (or squash). Small and localized.
 
+- **`2bf4eb14` — `plan!` refuses a same-title duplicate.** `src/my/plan.cljs`
+  + `test/my/plan_test.cljs`. `plan!` had no idempotency guard, so a model
+  re-emitting its plan (common — eval results arrive next turn) silently wrote
+  a second full tree. Title-scoped guard: an OPEN same-title root ⇒ fail
+  envelope naming the existing root id + routing to reconcile!/document/step!/
+  done! (a distinct second plan is still allowed — legitimate forest).
+
+- **`39fd81ec` — cut the markdown reconcile path; crisp plan!/reconcile!
+  docstrings.** `src/my/plan.cljs`, `src/my/plan/internal.cljs`,
+  `test/my/plan_test.cljs`. Removed `reconcile!`'s `:my.plan/markdown` parse
+  end to end (schema, arg, cond branches, the whole internal parser) — `:tree`
+  is the one update format. Docstrings: reconcile! = the UPDATE door (diff by
+  id), plan! = CREATE-once + "results arrive NEXT turn, render in the :plan
+  block, don't re-call to check the response."
+
+- **`61813a97` — `long_term_planning` as a first-class inspect `@task`.**
+  `src-inspect-ai/…/tasks/long_term_planning.py` + `offline_proof.py`. Wraps
+  `pod_planning_driver` in a custom `@solver` so planning runs via `inspect
+  eval` like its siblings; mock:good/bad offline proof. (src-inspect-ai, not
+  shared refactor territory — clean apply.)
+
+- **`c8b907ea` — swebench arm egress follows the active provider, not a
+  deepseek hardcode.** `src-inspect-ai/…/swebench_arm.py` + test. Plus
+  **`pyproject.toml`** gained `openai` (standard-mode model access). (Both
+  src-inspect-ai — clean apply.)
+
 ## Already in the shared codebase (pre-pin, no action)
 
 - `3e0e0bff` — schema-reference closure (`ctx/referenced-schema-block`),
