@@ -13,15 +13,17 @@ made here must be cherry-picked back onto the post-refactor main.
 
 ## Cherry-pick list (commits after the `b4efd4f5` pin)
 
-- **`dd8bc8a7` — fix(ctx): compact cards render fully-qualified keywords,
-  never `::`.** `src/seon/agent/ctx/namespaces.cljs` +
+- **`dd8bc8a7` + `8d1631cf` — compact cards render fully-qualified keywords,
+  never `::` (fix + dead-code removal).** `src/seon/agent/ctx/namespaces.cljs`,
+  `src/seon/repl/autocomplete.cljs`, `src/my/ns.cljs`,
   `test/seon/agent/ctx/namespaces_test.cljs`. `abbrev-ns-kws` rewrote
   `:seon.db/tx-data` → `::tx-data` in compact cards; a card is read from the
   AGENT'S ns, so `::` resolves to the wrong ns and models fumbled it into
-  malformed `::seon.db/tx-data`. Neutered to a no-op + dropped the conditional
-  `::` in `compact-schema-line`. **`namespaces.cljs` is in the refactor
-  agent's active territory** — reconcile against their version before applying;
-  the change is small and localized (two helpers + their docstrings).
+  malformed `::seon.db/tx-data`. Removed the function outright and its `ns-str`
+  plumbing (the `::ns-str` schema and the param on `compact-schema-line` /
+  `compact-fn-head`, plus the two external callers). **`namespaces.cljs` is in
+  the refactor agent's active territory** — reconcile against their version
+  before applying; cherry-pick both commits (or squash). Small and localized.
 
 ## Already in the shared codebase (pre-pin, no action)
 
