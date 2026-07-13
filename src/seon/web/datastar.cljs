@@ -9,16 +9,10 @@
 
    ## The surfaces (seeded `:seon.route/*` datoms → this ns's handlers)
 
-     GET /agents       → the agents shim page ([[serve-agents-page!]]): loads
-                         datastar.js + opens the feed via
-                         `data-init=\"@get('/agents/feed')\"`, empty
-                         `<main id=\"app-view\">` morph target.
-     GET /agents/feed  → the long-lived gzip agents SSE stream
-                         ([[open-agents-feed!]] → [[agents-view]]).
      GET /agent/{id}   → one agent's view ([[serve-agent-page!]]); its
      GET /agent/{id}/feed  gzip feed ([[open-agent-feed!]] → agent-view).
      GET /             → root's view ([[serve-root!]]); `/` IS root's
-                         dashboard, so `/agents` is the explicit agent list.
+                         dashboard and fleet list.
 
    ## Wire format (grounded in datastar consts.clj + the proven ds-spike.js)
 
@@ -40,9 +34,7 @@
     [clojure.set :as set]
     [clojure.string :as str]
     [seon.db :as db]
-    [seon.derive :as derive]
     [seon.log :as log]
-    [seon.render :as render]
     [seon.schema :as schema]
     [seon.ui.header :as header]
     [seon.ui.html :as html]
@@ -252,105 +244,6 @@
 ;; ============================================================
 ;; view = f(db) — the live agents view as `[:main#app-view …rows…]`.
 ;; ============================================================
-
-(def ^:private agent-state-dot
-  "DERIVED FSM state → the Phosphor dot color class for an agent row."
-  {:running    "text-signal"
-   :idle       "text-text-400"
-   :paused     "text-warning"
-   :terminated "text-text-500"})
-
-(defn- agent-canvas-preview
-  "Agent `id`'s canvas as a clipped compact face for its row, or nil.
-
-   The canvas = the agent's canvas — `render/render-agent-canvas` (the ONE
-   canvas entry point: the pinned `:seon.render.canvas/content`, else the
-   derived last-updated surface, else the welcome card; throw-safe). Clipped to
-   a fixed height (inline style — no matching Tailwind class in the built
-   vocabulary) with a stretched inset-0 anchor to `/agent/<id>` (the
-   system-view card pattern: agent hiccup can CONTAIN `<a>`, and nested
-   anchors split in the parser). Skipped for root: root's canvas is the `/`
-   dashboard itself (`system-view`), which renders this list's agents —
-   embedding it in a row would recurse the whole dashboard into the list.
-   Guarded: any failure → nil (row renders without a preview)."
-  [db id]
-  (when (not= id "root")
-    (try
-      (when-let [hiccup (:seon.render/hiccup
-                          (render/render-agent-canvas
-                            {:seon.db/db db :seon.agent/id id}))]
-        [:div {:id    (str "app-agent-" id "-canvas")
-               :class "relative overflow-hidden border-t border-base-800/60 bg-base-950/40"
-               :style "max-height:7rem"}
-         hiccup
-         [:a {:href       (str "/agent/" id)
-              :aria-label (str "open agent " id)
-              :class      "absolute inset-0"}]])
-      (catch :default _ nil))))
-
-(defn- agent-card
-  "One agent row for `id` — a LINK to that agent's view (`/agent/<id>`)
-   showing its id, DERIVED FSM state as a dot+text chip, its purpose line-1
-   (when set), and its canvas compact face ([[agent-canvas-preview]] — the agent's
-   canvas, morphed live with every commit). `derive-state`, the purpose
-   pull, and the preview are each guarded so a single bad agent can never
-   abort the whole-view render (the never-crash floor). Keeps the
-   `app-agent-<id>` id so idiomorph anchors the card."
-  [db id]
-  (let [state   (try (derive/derive-state db id) (catch :default _ :unknown))
-        purpose (try (:seon.agent/purpose
-                       (db/pull db '[:seon.agent/purpose] [:seon.agent/id id]))
-                     (catch :default _ nil))
-        p1      (when (seq purpose) (first (str/split-lines purpose)))
-        dot-cls (get agent-state-dot state "text-text-500")]
-    [:li {:id (str "app-agent-" id) :class "border-b border-base-800"}
-     [:a {:href  (str "/agent/" id)
-          :class "flex items-center gap-3 px-3 py-2 hover:bg-base-900 text-xs font-mono"}
-      [:span {:class "text-signal font-semibold shrink-0 w-40 truncate"} id]
-      [:span {:class (str "flex items-center gap-1 shrink-0 w-24 " dot-cls)}
-       [:span "●"] [:span (name state)]]
-      [:span {:class "text-text-400 truncate min-w-0"} (or p1 "")]]
-     (agent-canvas-preview db id)]))
-
-(defn agents-view
-  "The live agents view (`/agents`) as `[:main#app-view …rows…]` = f(db).
-
-   Every agent is a card (id, DERIVED FSM state, purpose line-1, and its
-   canvas compact face — the agent's canvas) linking to its
-   `/agent/<id>` view.
-
-   Pure of external state — reads only the supplied db value, so the same
-   db always renders the same hiccup. NEVER throws (the whole-view morph
-   engine must be crash-proof): a render error degrades to a visible error
-   card inside `#app-view`. Root id is the morph target the shim
-   page declares."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] :any]}
-  [db]
-  (try
-    (let [ids (->> (db/query {:seon.db/db    db
-                              :seon.db/query '[:find ?id
-                                               :where [?a :seon.agent/id ?id]]})
-                   (map first)
-                   sort)]
-      [:main {:id "app-view" :class "flex flex-col gap-3 w-full"}
-       (header/system-header db)
-       header/header-spacer
-       [:header {:class "flex items-center justify-between border-b border-base-800 pb-2"}
-        [:div {:class "flex items-center gap-2"}
-         [:a {:href "/" :class "text-text-400 text-xs font-mono"} "← home"]
-         [:span {:class "text-text-500 text-2xs uppercase tracking-wider"} "agents"]]
-        [:span {:id "app-count" :class "text-text-400 text-xs font-mono tabular-nums"}
-         (str (count ids) " agent" (when (not= 1 (count ids)) "s"))]]
-       (if (seq ids)
-         (into [:ul {:id "app-agents"
-                     :class "flex flex-col border border-base-800 rounded-md bg-base-900 overflow-hidden"}]
-               (map #(agent-card db %) ids))
-         [:div {:id "app-empty" :class "text-text-500 text-xs font-mono"}
-          "no agents yet"])])
-    (catch :default e
-      [:main {:id "app-view" :class "flex flex-col gap-3 w-full"}
-       [:div {:id "app-error" :class "text-error text-xs font-mono"}
-        (str "render error: " (.-message e))]])))
 
 (defn- view-fn-patch
   "Render a connection's bound 0-arg `view-fn` → its `#app-view` SSE morph
@@ -917,7 +810,7 @@
 ;; OPERATE (not just observe). Each lives OUTSIDE `<main id=\"app-view\">` (a
 ;; SIBLING in <body>) so the feed's whole-`#app-view` morph never clobbers the
 ;; input's focus/value. They reuse the already-routed, same-origin-gated
-;; POST endpoints (`/chat`, `/agents/new`) — no Core change. A fixed bottom
+;; POST endpoints (`/chat`, `/agents`) — no Core change. A fixed bottom
 ;; bar + an inline-style spacer reserves scroll room so the last card is never
 ;; hidden behind the bar. Only output.css-present utilities are used (the
 ;; spacer height is an inline style, not a Tailwind class).
@@ -971,51 +864,6 @@
       [:div {:id "app-agent-feed"
              :style "display:none"
              :data-init (str "@get('" feed "', " opts ")")}])))
-
-(defn- new-agent-bar-html
-  "The `/agents` view's new-agent affordance, as a raw HTML string.
-
-   A fixed bottom bar (outside the morph) whose button INLINE-FETCH POSTs the
-   existing `/agents/new` (optional form-urlencoded `purpose=`) then navigates
-   to the new `/agent/<id>` on the 200 id-body. Inline JS (not datastar
-   `@post`) because the response is the new id as plain text that we must READ
-   and navigate to — copied from the web UI mission-control button. The
-   endpoint is same-origin-gated and serializes creates (409 while one is in
-   flight); errors land in the button's own text, never swallowed."
-  []
-  (html/->string
-    (list
-      [:div {:style "height:3.25rem"}]
-      [:div {:id    "app-new-agent"
-             :class "fixed bottom-0 left-0 right-0 z-10 flex items-center gap-2 border-t border-base-800 bg-base-900 px-3 py-2"}
-       [:input {:id           "app-new-agent-purpose"
-                :type         "text"
-                :autocomplete "off"
-                :placeholder  "purpose (optional)…"
-                :class "flex-1 bg-base-950 border border-base-800 rounded px-2 py-1 text-text-100 text-xs font-mono"}]
-       [:button {:id      "app-new-agent-btn"
-                 :type    "button"
-                 :class   "bg-base-800 hover:bg-base-700 text-signal border border-base-700 px-3 py-1 rounded text-xs font-mono"
-                 :onclick (str "var b=this;b.disabled=true;b.textContent='booting…';"
-                               "var p=document.getElementById('app-new-agent-purpose');"
-                               "var body=p&&p.value?'purpose='+encodeURIComponent(p.value):'';"
-                               "fetch('/agents/new',{method:'POST',"
-                               "headers:{'Content-Type':'application/x-www-form-urlencoded'},"
-                               "body:body})"
-                               ".then(function(r){if(r.ok){r.text().then(function(id){"
-                               "window.location='/agent/'+id.trim();});}"
-                               "else{r.text().then(function(t){b.disabled=false;"
-                               "b.textContent='\\u2717 '+(t||('HTTP '+r.status));});}})"
-                               ".catch(function(e){b.disabled=false;b.textContent='\\u2717 '+e;});")}
-        "+ new agent"]])))
-
-(defn- agents-page-html
-  "The `/agents` shim page (brand-aware head — see [[shim-html]]). Its feed
-   effect opens `/agents/feed` → [[agents-view]]; carries the new-agent
-   bar (P1c) as its OUTSIDE-the-morph human affordance."
-  []
-  (shim-html "agents" "bg-base-950 text-text-200 font-mono p-3" "/agents/feed"
-             (new-agent-bar-html)))
 
 (def ^:private safe-view-id-re #"[A-Za-z0-9._~-]{1,128}")
 
@@ -1323,6 +1171,13 @@
              (str (chat-form-html id)
                   (agent-feed-opener-html id))))
 
+(defn- write-agent-page!
+  "Write the shared agent shim for already-validated `id`."
+  [^js res id]
+  (.writeHead res 200 #js {"Content-Type"  "text/html; charset=utf-8"
+                           "Cache-Control" "no-store, no-cache, must-revalidate"})
+  (.end res (agent-page-html id)))
+
 (defn serve-agent-page!
   "Serve the per-agent view shim page (the seeded :seon.route/agent handler).
    A Ring handler: takes the Ring request `r`, self-extracts the node res + the
@@ -1332,34 +1187,34 @@
   (let [^js res (:seon.http/node-res r)
         id      (get-in r [:path-params :id])]
     (cond
+      (= id "root")
+      (do (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
+          (.end res ""))
+
       ;; A malformed id (injection attempt, junk path segment) → home.
       (not (safe-id? id))
       (do (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
           (.end res ""))
-      ;; #28 — a well-formed but UNKNOWN agent (stale bookmark, reset store,
+      ;; #28 — a well-formed but unknown agent (stale bookmark, reset database,
       ;; typo) gracefully redirects HOME rather than serving an empty view or
-      ;; a raw 404. "root" always resolves (seeded), so it is never redirected.
+      ;; a raw 404.
       (not (agent-exists? id))
       (do (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
           (.end res ""))
-      :else
-      (do (.writeHead res 200 #js {"Content-Type"  "text/html; charset=utf-8"
-                                   "Cache-Control" "no-store, no-cache, must-revalidate"})
-          (.end res (agent-page-html id))))))
+      :else (write-agent-page! res id))))
 
 (defn serve-root!
   "Serve `/` — root's view (the all-agents dashboard).
 
    `root = /`
-   `/` is the root agent's view, so it reuses the per-agent
+   `/` is the root agent's view, so it reuses the shared agent
    shim page bound to the literal id \"root\". The page's feed effect opens
    `/agent/root/feed` (already seeded), whose `agent-view` renders root's
    canvas = `seon.render.system/system-view` (root's seeded canvas content).
-   ONE mechanism — no `/`-special page, no `/`-special feed. A Ring handler:
-   injects the `\"root\"` path-param and delegates to [[serve-agent-page!]].
+   One mechanism and no root-special feed; `/agent/root` canonicalizes to `/`.
    Public — db->routes resolves its symbol at request time."
   [r]
-  (serve-agent-page! (assoc-in r [:path-params :id] "root")))
+  (write-agent-page! (:seon.http/node-res r) "root"))
 
 (defn open-agent-feed!
   "Open the per-agent view gzip feed.
@@ -1430,35 +1285,3 @@
       (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"
                                    "Cache-Control" "no-store"})
           (.end res "unknown agent id")))))
-
-(defn serve-agents-page!
-  "Serve GET /agents — the live agents shim page.
-
-   The seeded :seon.route/agents handler. A Ring handler: self-extracts the
-   node res. Public — db->routes resolves its symbol at request time."
-  [r]
-  (let [^js res (:seon.http/node-res r)]
-    (.writeHead res 200 #js {"Content-Type"  "text/html; charset=utf-8"
-                             "Cache-Control" "no-store, no-cache, must-revalidate"})
-    (.end res (agents-page-html))))
-
-(defn open-agents-feed!
-  "Open GET /agents/feed — the gzip feed bound to [[agents-view]].
-
-   The seeded :seon.route/agents-feed handler — the SAME whole-`#app-view` morph
-   engine the per-agent view rides, so a new/terminated agent appears/updates
-   live. A Ring handler: self-extracts node-req/node-res; lazily installs the
-   tx-listener. Public — db->routes resolves its symbol."
-  [r]
-  (let [^js req (:seon.http/node-req r)
-        ^js res (:seon.http/node-res r)
-        view-id (requested-view-id req)]
-    (open-feed! req res
-                (cond->
-                  {:seon.web.feed/key [:seon.web.feed/agents]
-                   :seon.web.feed/live? true
-                   :seon.web.feed/render-full #(agents-view @db/*conn*)
-                   :seon.web.feed/render-change
-                   (fn [_subscription {dbv :seon.db/db}]
-                     {::elements [(agents-view dbv)]})}
-                  view-id (assoc ::view-id view-id)))))

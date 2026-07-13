@@ -320,7 +320,7 @@
               (is (str/includes?
                     s (str "data-agent-primary=\"" dual-selection "\"")))
               (testing "the global new-agent action avoids unsupported modal APIs"
-                (is (str/includes? s "fetch(&#39;/agents/new&#39;"))
+                (is (str/includes? s "fetch(&#39;/agents&#39;"))
                 (is (not (str/includes? s "prompt("))))
               (testing "the focused surface is reactively omitted from the rail"
                 (is (str/includes? s

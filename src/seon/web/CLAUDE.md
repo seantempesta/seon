@@ -21,10 +21,10 @@ note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
   authorizes the fn. New pages = new route datoms + layouts, not new
   handlers.
 - **Route truth (the ONE place — link here, don't restate):** `/` is root's
-  agent view (`datastar/serve-root!`, not a redirect); `/agents` +
-  `/agents/feed` is the agents view (`agents-view`); `/agent/{id}` +
-  `/agent/{id}/feed` is a per-agent view; `/agent/{id}/call` is the action
-  door. Route changes are `:seon.route/*` datom seeds, so a
+  fleet/agent view (`datastar/serve-root!`); `/agent/{id}` +
+  `/agent/{id}/feed` is an ordinary agent view; `POST /agents` is the browser
+  birth door and `/agent/{id}/call` is the canvas action door. Route changes
+  are `:seon.route/*` datom seeds, so a
   `bin/seon cluster reset default` is required for a new/renamed route to land.
 - **`datastar.cljs`** — the live channel: one tx-listener on the replica
   derives the WHOLE element (`view = f(db-as-of t)`) and pushes one gzip

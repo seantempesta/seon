@@ -55,7 +55,7 @@
               :data-agent-state (name state)
               :class "flex items-center justify-between border-b border-base-800 pb-1"}
      [:div {:class "flex items-center gap-2 min-w-0"}
-      [:a {:href "/agents" :class "text-text-400 text-xs font-mono shrink-0"}
+      [:a {:href "/" :class "text-text-400 text-xs font-mono shrink-0"}
        "← all agents"]
       [:span {:class "text-text-500 text-2xs uppercase tracking-wider"} "agent"]
       [:span {:class "text-signal text-sm font-semibold font-mono truncate"} agent-id]

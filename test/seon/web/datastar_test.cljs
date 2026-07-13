@@ -4,18 +4,12 @@
    `datastar-patch-elements` wire framing that morphs `#app-view`.
 
    Style: assert MECHANISM — the structural
-   SSE framing markers, presence/absence of an agent in the agents view,
-   pure-fn-of-db determinism, and NEVER-CRASH — via `str/includes?` /
+   SSE framing markers, per-agent view behavior,
+   pure-fn-of-db determinism, and never-crash behavior — via `str/includes?` /
    line-splitting. NEVER pin the exact rendered HTML or prose (these are
    refactoring surfaces). The db is a fresh ISOLATED `:memory` conn carrying
    the pod's full schema (`client/open-agent-conn!`), never the live cluster
-   store — so the pod's state is irrelevant and the test is self-contained.
-
-   The bare-agent + throwing-derive cases are the never-crash floor: the
-   whole-view morph engine can never abort on one under-populated or failing
-   agent. The guard is `agent-card`'s per-card try/catch — proven here by
-   forcing `derive-state` to throw and asserting the OTHER agent + the
-   degraded card still renders (the whole-view error fallback is NOT hit)."
+   database — so the pod's state is irrelevant and the test is self-contained."
   (:require
     [cljs.test :refer [deftest is testing async]]
     [clojure.string :as str]
@@ -27,7 +21,6 @@
     [seon.client :as client]
     [seon.agent.debug :as agent-debug]
     [seon.db :as db]
-    [seon.derive :as derive]
     [seon.render.surface :as surface]
     [seon.ui.agent-view :as agent-view]
     [seon.ui.html :as html]
@@ -66,8 +59,7 @@
   "Fresh isolated `:memory` conn (full pod schema). Transact each id in
    `agent-ids` as a BARE agent (only `:seon.agent/id`), then call
    `(body conn)` (→ Promise|value). Returns a Promise. No `db/*conn*`
-   juggling — `agents-view` reads the explicit db value we hand it, so the
-   tests stay pure functions of a db value."
+   juggling — tested views read the explicit db value we hand them."
   [agent-ids body]
   (-> (client/open-agent-conn!)
       (.then (fn [conn]
@@ -481,119 +473,6 @@
           "exactly one data: elements dataline per HTML line — the framing contract")
       (is (= (mapv #(str "data: elements " %) lines) datalines)
           "each HTML line is carried verbatim behind the data: elements prefix"))))
-
-;; ============================================================
-;; 2. agents-view = f(db) — APPEAR / VANISH, empty list, determinism.
-;; Each test reads ONLY the db value it is handed; assert an agent's card by
-;; its derived id marker (`app-agent-<id>`), never the rendered copy.
-;; ============================================================
-
-(deftest agents-view-has-a-row-for-every-agent
-  (async done
-    (-> (with-conn [agent-a agent-b]
-          (fn [conn]
-            (let [view (datastar/agents-view @conn)
-                  s    (html/->string view)]
-              (testing "the root is the #app-view morph target (datastar morphs by id)"
-                (is (vector? view) "agents-view returns hiccup, not a thrown error")
-                (is (= "app-view" (:id (second view)))
-                    "root element carries id=view — the morph target the shim page declares"))
-              (testing "every agent in the db gets a row keyed by its id"
-                (is (str/includes? s "id=\"app-agents\"")
-                    "the agents list has one stable morph anchor")
-                (is (str/includes? s (str "app-agent-" agent-a)))
-                (is (str/includes? s (str "app-agent-" agent-b)))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest agents-view-appears-and-vanishes-with-the-db
-  (async done
-    (-> (with-conn [agent-a]
-          (fn [conn]
-            (let [s (html/->string (datastar/agents-view @conn))]
-              (testing "A present, the absent B never appears"
-                (is (str/includes? s (str "app-agent-" agent-a))
-                    "the agent in the db is in the agents view")
-                (is (not (str/includes? s agent-b))
-                    "an agent NOT in the db is absent from the agents view")))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest agents-view-empty-db-is-a-valid-view
-  (async done
-    (-> (with-conn []
-          (fn [conn]
-            (let [view (datastar/agents-view @conn)
-                  s    (html/->string view)]
-              (testing "an empty db still renders a valid, non-crashing view"
-                (is (vector? view) "no agents → still a hiccup view, never a throw")
-                (is (seq s) "the empty agents view renders a non-empty HTML string")
-                (is (some? (re-find #"\d+\s+agent" s))
-                    "the view surfaces an agent count even at zero")))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest agents-view-is-deterministic-over-a-db-value
-  (async done
-    (-> (with-conn [agent-a agent-b]
-          (fn [conn]
-            (let [dbv @conn]
-              (testing "same db value twice → identical output (pure fn of db)"
-                (is (= (html/->string (datastar/agents-view dbv))
-                       (html/->string (datastar/agents-view dbv))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-;; ============================================================
-;; 3. NEVER-CRASH regression — the whole-view morph engine must survive an
-;; under-populated or failing agent. (A bare agent does NOT currently make
-;; `derive-state` throw — it derives :idle — but the streamer's per-card
-;; guard is the load-bearing floor; the second test forces the throw so the
-;; regression holds regardless of which future shape breaks derive-state.)
-;; ============================================================
-
-(deftest regression-bare-agent-never-crashes-agents-view
-  ;; A bare agent (only :seon.agent/id — no run, no turn) must render in the
-  ;; agents view. agents-view derives each card's FSM state; this is the never-crash
-  ;; floor for the whole-view morph.
-  (async done
-    (-> (with-conn [agent-a]
-          (fn [conn]
-            (let [view (try (datastar/agents-view @conn)
-                            (catch :default e {:threw (str e)}))
-                  s    (html/->string view)]
-              (testing "a bare agent renders WITHOUT throwing"
-                (is (vector? view) "agents-view returned a view, not a thrown error")
-                (is (str/includes? s (str "app-agent-" agent-a))
-                    "the bare agent still gets its row")))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest regression-agents-view-survives-a-throwing-derive-state
-  ;; The load-bearing guard: a single agent whose derived-state read throws must
-  ;; NOT abort the whole-view render. `agent-card` catches per-card (→ degraded
-  ;; state), so the agents view — and every OTHER agent — still renders, and the
-  ;; whole-view error fallback (`#app-error`) is NOT triggered. Force the
-  ;; throw via with-redefs so the regression holds no matter what future shape
-  ;; makes derive-state throw.
-  (async done
-    (-> (with-conn [agent-a]
-          (fn [conn]
-            (let [dbv @conn]
-              (with-redefs [derive/derive-state
-                            (fn [_ _] (throw (js/Error. "derive boom")))]
-                (let [view (try (datastar/agents-view dbv)
-                                (catch :default e {:propagated (str e)}))
-                      s    (html/->string view)]
-                  (testing "the per-card throw is CONTAINED — agents-view never propagates it"
-                    (is (vector? view) "render did not propagate the per-card throw"))
-                  (testing "the per-card guard (not the whole-view catch) handled it"
-                    (is (str/includes? s (str "app-agent-" agent-a))
-                        "the agent's card still renders despite its failed derive")
-                    (is (not (str/includes? s "app-error"))
-                        "whole-view error fallback NOT triggered — the per-card guard caught it")))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
 ;; 4. broadcast! — zero open connections is a silent no-op.
@@ -1321,69 +1200,35 @@
 ;; ============================================================
 
 ;; ============================================================
-;; 4b. Agent rows carry the agent's canvas COMPACT FACE (2026-07-11):
-;; each non-root card embeds `render/render-agent-canvas`'s hiccup (the
-;; agent's canvas — pinned content, else derived, else the welcome
-;; card) clipped + stretch-linked to `/agent/{id}`. Root is skipped by
-;; design (root's canvas is the `/` dashboard, which itself renders this
-;; agents view — embedding would recurse). Assert the MECHANISM (the preview
-;; wrapper's stable id, presence for a bare agent via the welcome
-;; fallback, absence for root) — not the rendered face.
-;; ============================================================
-
-(deftest agents-view-row-carries-the-agent-canvas-compact-face
-  (async done
-    (-> (with-conn [agent-a "root"]
-          (fn [conn]
-            (let [s (html/->string (datastar/agents-view @conn))]
-              (testing "both agents render a row"
-                (is (str/includes? s (str "app-agent-" agent-a)))
-                (is (str/includes? s "app-agent-root")))
-              (testing "a bare agent still gets a compact face (welcome fallback)"
-                (is (str/includes? s (str "app-agent-" agent-a "-canvas"))
-                    "the preview wrapper renders with its stable DOM id"))
-              (testing "root gets NO embedded face (its canvas is / itself)"
-                (is (not (str/includes? s "app-agent-root-canvas"))
-                    "no preview wrapper for root")))))
-        (.then done))))
-
-;; ============================================================
-;; 5b. The shim's feed OPENER lives OUTSIDE the morph target (2026-07-11
-;; regression): a `data-init` ON `#app-view` is stripped by the feed's own
-;; first whole-element morph (the pushed `[:main#app-view …]` carries no
-;; data-init), so datastar cancels the stream ~100ms after open and the
-;; agents page goes permanently dead. The opener must be a SIBLING of
-;; `<main id="app-view">`.
-;; ============================================================
-
-(deftest regression-shim-feed-opener-is-outside-the-morph-target
-  (async done
-    (-> (client/open-agent-conn!)
-        (.then
-          (fn [conn]
-            (let [orig db/*conn*]
-              (set! db/*conn* conn)
-              (let [view (@#'datastar/agents-page-html)]
-                (testing "#app-view itself carries NO data-init (the morph would strip it)"
-                  (is (str/includes? view "<main id=\"app-view\">")
-                      "the morph target is a bare <main id=app-view>"))
-                (testing "the feed opener is a sibling element carrying the data-init"
-                  (is (str/includes? view "app-feed-opener")
-                      "the opener div is present")
-                  (is (str/includes? view "@get('/agents/feed'")
-                      "the opener opens /agents/feed")))
-              (set! db/*conn* orig)
-              (done)))))))
-
-;; ============================================================
 ;; 6. The view SHIM heads route through the seon.web.brand seams (#13) —
-;; the page users actually navigate to (/agents and /agent/{id}) must carry
+;; the pages users navigate to (`/` and `/agent/{id}`) must carry
 ;; the downstream brand the same way the debug view does: SEON_BRAND_CSS
 ;; inlined in the <head>, the brand NAME in the <title>, and `data-theme`
 ;; from the brand row. Absent brand row + env → the shipped seon defaults.
 ;; Assert the brand MECHANISM (css present, name in title, theme attr) — not
 ;; the surrounding shim markup, which is a refactoring surface.
 ;; ============================================================
+
+(deftest root-has-one-canonical-page
+  (async done
+    (-> (with-conn []
+          (fn [conn]
+            (let [[redirect-res redirect] (response-probe)
+                  [root-res root-response] (response-probe)
+                  orig db/*conn*]
+              (set! db/*conn* conn)
+              (try
+                (datastar/serve-agent-page!
+                  {:seon.http/node-res redirect-res :path-params {:id "root"}})
+                (is (= 302 (::response-status @redirect)))
+                (is (= "/" (get (::response-headers @redirect) "Location")))
+                (datastar/serve-root! {:seon.http/node-res root-res})
+                (is (= 200 (::response-status @root-response)))
+                (is (str/includes? (::response-body @root-response)
+                                   "/agent/root/feed"))
+                (finally (set! db/*conn* orig))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest view-shim-heads-route-through-the-brand-seams
   (async done
@@ -1397,13 +1242,13 @@
                 (set! db/*conn* conn)
                 ;; --- DEFAULT (unbranded): no brand row, no SEON_BRAND_CSS.
                 (js-delete env "SEON_BRAND_CSS")
-                (let [view (@#'datastar/agents-page-html)
+                (let [view (@#'datastar/agent-page-html "root")
                       agent (@#'datastar/agent-page-html agent-a)]
                   (testing "unbranded → seon defaults, NO brand <style> inlined"
                     (is (str/includes? view "data-theme=\"phosphor\"")
                         "the default phosphor theme rides the <html> tag")
-                    (is (str/includes? view "<title>seon · agents</title>")
-                        "the agents title falls back to the seon brand name")
+                    (is (str/includes? view "<title>seon · agent root</title>")
+                        "the root title falls back to the seon brand name")
                     (is (str/includes? agent
                                        (str "<title>seon · agent " agent-a "</title>"))
                         "the agent title falls back to the seon brand name")
@@ -1419,13 +1264,13 @@
                                           ::brand/theme "midnight"}]})
                     (.then
                       (fn [_]
-                        (let [view (@#'datastar/agents-page-html)
+                        (let [view (@#'datastar/agent-page-html "root")
                               agent (@#'datastar/agent-page-html agent-a)]
                           (testing "branded → SEON_BRAND_CSS inlined, brand name + theme in head"
                             (is (str/includes? view "#38bdf8")
-                                "the SEON_BRAND_CSS content is inlined in the agents <head>")
-                            (is (str/includes? view "Acme · agents")
-                                "the brand name flows into the agents <title>")
+                                "the SEON_BRAND_CSS content is inlined in the root <head>")
+                            (is (str/includes? view "Acme · agent root")
+                                "the brand name flows into the root <title>")
                             (is (str/includes? view "data-theme=\"midnight\"")
                                 "the brand theme rides the <html> tag")
                             (is (str/includes? agent "#38bdf8")

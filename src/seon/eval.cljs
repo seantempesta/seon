@@ -842,7 +842,7 @@
    `malli.registry` — stomping the registry with a
    default-schemas-only snapshot and severing every seon-registered
    schema process-wide (`m/schema :seon.db/conn` → invalid-schema; broke
-   replay, record-eval!, and POST /agents/new). Relinking after every
+   replay, record-eval!, and POST /agents). Relinking after every
    load is idempotent and cheap; it runs synchronously before the
    compiled form continues, so no code observes the stomped registry.
 

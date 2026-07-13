@@ -813,6 +813,11 @@ agents idle and one exact notice visible to root.
     Make `/` + its one feed the only fleet/root view. Delete the separate
     `/agents` GET/feed; keep `POST /agents` as the sole HTTP birth action, and
     canonicalize `/agent/root` to `/` before opening a feed.
+    **Route cut complete:** the duplicate fleet renderer, shim, feed, route
+    datoms, and display-only tests are deleted; the shared header now calls
+    `POST /agents`, and `/agent/root` redirects to `/`. Remaining work in this
+    step is the concise root role block, bounded lazy card detail, and session-
+    aware navigation.
 12. Add one fully specified database-backed UI-session model owned by its web
     namespace: per-tab identity, human ref, and normalized local location only.
     Keep `{database-id, branch, session-id}` in `sessionStorage`. Bootstrap reuses

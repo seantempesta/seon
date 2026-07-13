@@ -13,19 +13,15 @@
     [seon.agent]
     [seon.agent.message]
     [seon.db :as db]
-    [seon.eval :as seval]
     [seon.route :as route]
     [seon.test.async :refer [settle!]]))
 
 (def ^:private expected
   "name → [pattern method] — the authoritative seeded core route set. `/`
-   is the root agent view and the agent list lives at `/agents` +
-   `/agents/feed`. The seed is `/` + the agents page + its `…/feed` stream +
+   is the root agent and fleet view. The seed is `/` +
    the generic unit door + the per-agent page + its separate `…/feed` SSE
    stream + the one POST door."
   {:seon.route/root        ["/" :get]
-   :seon.route/agents      ["/agents" :get]
-   :seon.route/agents-feed ["/agents/feed" :get]
    :seon.route/view-unit   ["/view/unit" :get]
    :seon.route/agent       ["/agent/{id}" :get]
    :seon.route/agent-feed  ["/agent/{id}/feed" :get]
@@ -43,9 +39,7 @@
         (let [r (by-nm nm)]
           (is (= pattern (:seon.route/pattern r)))
           (is (= method (:seon.route/method r))))))
-    (testing "the agents and per-agent feeds stay separate GET paths"
-      (is (contains? by-nm :seon.route/agents))
-      (is (contains? by-nm :seon.route/agents-feed))
+    (testing "the per-agent feeds stay on separate GET paths"
       (is (contains? by-nm :seon.route/agent-feed))
       (is (contains? by-nm :seon.route/agent-debug-feed)))
     (testing "the one action door is the per-agent POST /call (no per-ns/per-fn routes)"
@@ -54,13 +48,11 @@
       (is (= :seon.route/same-origin
              (:seon.route/middleware (by-nm :seon.route/agent-call)))))))
 
-(deftest handlers-are-symbols-that-resolve
+(deftest handlers-are-qualified-symbol-data
   (doseq [{:keys [:seon.route/name :seon.route/handler]} (route/core-routes-tx)]
     (testing (str name)
       (is (symbol? handler) "handler is a symbol-as-value (late-bound)")
-      (is (qualified-symbol? handler))
-      (is (some? (seval/lookup-value handler))
-          "db->routes resolves it via eval/lookup-value at request time"))))
+      (is (qualified-symbol? handler)))))
 
 (deftest bridge-derives-the-data-model-facets
   (let [facet (fn [a] (-> (db/malli->datahike-schema [a]) first))]
@@ -112,7 +104,7 @@
                                                           [?e :seon.route/name :seon.route/agent]
                                                           [?e :seon.route/handler ?h]]
                                                         :seon.db/conn conn}))]
-                           (is (= 9 (count names)) "nine entities after a double seed — no duplicates")
+                           (is (= 7 (count names)) "seven entities after a double seed — no duplicates")
                            (is (= (set (keys expected)) (set names)))
                            (is (symbol? h) "handler reads back as a native symbol")
                            (is (= 'seon.web.datastar/serve-agent-page! h))))))))

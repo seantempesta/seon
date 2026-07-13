@@ -47,7 +47,7 @@
   !server (atom nil))
 
 ;; ============================================================
-;; Agent creation — POST /agents/new
+;; Agent creation — POST /agents
 ;;
 ;; `seon.agent/start!` is the one birth→resume transition for both web and
 ;; programmatic callers. The route requires the domain owner directly; no
@@ -258,13 +258,13 @@
                        (str "clear failed: " e))))))
 
 (defn- handle-create-agent!
-  "POST /agents/new — atomically mint, commit, and resume one live agent.
+  "POST /agents — atomically mint, commit, and resume one live agent.
 
    Responds 200 with the new id as plain text. This transition does no cluster
    seed, program replay, or global instrumentation, so concurrent requests rely
    on the sole writer's allocator serialization rather than a web-process lock."
   [req res]
-  (log/info-console! "seon.web.serve" "POST /agents/new — creating agent" {})
+  (log/info-console! "seon.web.serve" "POST /agents — creating agent" {})
   (-> (read-body req)
       (.then
         (fn [body]
@@ -277,17 +277,17 @@
         (fn [{id :seon.agent/id :as result}]
           (if (and id (not= false (:seon.agent.runtime/resumed? result)))
             (do
-              (log/info-console! "seon.web.serve" "POST /agents/new OK"
+              (log/info-console! "seon.web.serve" "POST /agents OK"
                                  {:agent id})
               (write-status! res 200 "text/plain; charset=utf-8" (str id)))
             (let [message (or (get-in result [:seon.db/error :seon.error/message])
                               (:seon.agent.runtime/error result)
                               "agent creation returned no id")]
-              (log/error-console! "seon.web.serve" "/agents/new refused" message)
+              (log/error-console! "seon.web.serve" "POST /agents refused" message)
               (write-status! res 500 "text/plain; charset=utf-8" message)))))
       (.catch
         (fn [err]
-          (log/error-console! "seon.web.serve" "/agents/new failed" err)
+          (log/error-console! "seon.web.serve" "POST /agents failed" err)
           (write-status! res 500 "text/plain; charset=utf-8"
                          (str "create agent failed: " err))))))
 
@@ -771,7 +771,7 @@
    `tmp/seon-port`). Idempotent — when a server is already LISTENING
    the call resolves with the existing binding (restarting would drop
    every open SSE stream AND kill the in-flight request when a second
-   agent is born via POST /agents/new → seon.agent/start!). A dead
+   agent is born via POST /agents → seon.agent/start!). A dead
    (closed) server object is replaced.
 
    The server binds to 127.0.0.1 by default (loopback only — browsers on
@@ -807,7 +807,7 @@
                 ;; request. `handle-request` derefs the cached reitit
                 ;; ring-handler, which `router/install!` rebuilds on every
                 ;; serve hot-reload — so a reloaded route never 404s until
-                ;; pod restart (the live 2026-06-10 /agents/new failure mode).
+                ;; pod restart (the live 2026-06-10 agent-birth failure mode).
                 server (.createServer http (fn [req res] (router/handle-request req res)))
                 port   (requested-port)]
             (.once server "error"

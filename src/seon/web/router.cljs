@@ -4,7 +4,7 @@
 
    The route vector is `(into (db->routes db) (static-supplement h))`:
    [[db->routes]] is a PURE projection of the seeded `:seon.route/*` datoms
-   (the core routes — `/`, `/agents`, `/agents/feed`, `/view/unit`,
+   (the core routes — `/`, `/view/unit`,
    `/agent/{id}`, `/agent/{id}/feed`, `/agent/{id}/call`), and the static
    supplement carries
    the routes NOT yet seeded as datoms (static assets, the secondary POST
@@ -55,7 +55,7 @@
     [seon.eval :as seval]
     [seon.log :as log]
     ;; Build-inclusion only (no alias): db->routes resolves datastar's core
-    ;; handler SYMBOLS (`serve-root!`, `serve-agents-page!`, `open-agents-feed!`,
+    ;; handler symbols (`serve-root!`,
     ;; `handle-view-unit!`, `serve-agent-page!`, `open-agent-feed!`) at request time via
     ;; eval/lookup-value, so the ns must be compiled into the build. router is
     ;; its sole requirer.
@@ -288,7 +288,7 @@
      ["/resume"      {:post {:middleware [:seon.route/same-origin] :handler (post-handler resume)}}]
      ["/clear"       {:post {:middleware [:seon.route/same-origin] :handler (post-handler clear)}}]
      ["/log"         {:post {:middleware [:seon.route/same-origin] :handler (post-handler log)}}]
-     ["/agents/new"  {:post {:middleware [:seon.route/same-origin] :handler (post-handler create-agent)}}]
+     ["/agents"      {:post {:middleware [:seon.route/same-origin] :handler (post-handler create-agent)}}]
      ;; The one-shot composition door: start-or-reuse an agent in THE pod's
      ;; own cluster, deliver the input via the real wake path, run its OWN
      ;; FSM to idle, return the truthful reply + turn/eval metadata as JSON.

@@ -64,8 +64,7 @@
 ;;
 ;; `root = /` (root-os-vision, owner 2026-06-28): the all-agents overview IS the
 ;; root agent's view, so `/` IS the dashboard and `/agent/{id}` is uniform for
-;; EVERY agent including `/agent/root`. The agent list lives at `/agents` +
-;; `/agents/feed`. `/`'s handler serves root's agent-view shim page
+;; every ordinary agent. `/`'s handler serves root's agent-view shim page
 ;; (the per-agent page bound to the literal id "root"); the page's feed opens
 ;; `/agent/root/feed`, whose agent-view renders root's canvas =
 ;; `seon.render.system/system-view`. (`/` stays a CORE route datom here; if root's
@@ -98,13 +97,6 @@
   []
   [{::pattern "/"                ::method :get  ::name ::root
     ::handler 'seon.web.datastar/serve-root!}
-   ;; The explicit agent list — id + DERIVED state + purpose line-1 per
-   ;; agent, linking to each `/agent/{id}` view. `/` stays root's own dashboard;
-   ;; `/agents` is where the fleet enumerates. Shim page + gzip feed sibling.
-   {::pattern "/agents"          ::method :get  ::name ::agents
-    ::handler 'seon.web.datastar/serve-agents-page!}
-   {::pattern "/agents/feed"     ::method :get  ::name ::agents-feed
-    ::handler 'seon.web.datastar/open-agents-feed!}
    ;; Generic one-shot Datastar HTML door. The client sends only an opaque
    ;; catalog token; the handler resolves it through the open server view and
    ;; never decodes client input into a renderer symbol.

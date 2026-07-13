@@ -13,7 +13,7 @@
                   `seon.render.system/fleet-summary` — DRY, one counter).
      DATABASE   — the current index's maintained datom count (links `/data`)
                   + embeddings on/off (`SEON_EMBED`). No broad database scan.
-     ACTIONS    — a `+ new agent` button (POSTs `/agents/new`, then SWITCHES
+     ACTIONS    — a `+ new agent` button (POSTs `/agents`, then switches
                   to the new `/agent/{id}`) + small `/` and `⛁ data` links +
                   a subtle system-health dot.
 
@@ -97,7 +97,7 @@
         [:span {:class "text-text-500"} "erroring"]])]))
 
 (def ^:private new-agent-onclick
-  "Inline new-agent action: POST `/agents/new`, then switch to the new agent.
+  "Inline new-agent action: POST `/agents`, then switch to the new agent.
 
    The universal header creates an unpurposed agent immediately. The agents
    page's outside-the-morph form is the one place for an optional purpose. Inline JS
@@ -105,7 +105,7 @@
    stay visible in the button instead of depending on modal browser APIs."
   (str "var b=this;"
        "b.disabled=true;b.textContent='booting…';"
-       "fetch('/agents/new',{method:'POST',"
+       "fetch('/agents',{method:'POST',"
        "headers:{'Content-Type':'application/x-www-form-urlencoded'},body:''})"
        ".then(function(r){if(r.ok){r.text().then(function(id){"
        "window.location='/agent/'+id.trim();});}"
