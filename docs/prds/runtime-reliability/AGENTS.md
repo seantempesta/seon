@@ -1,73 +1,46 @@
 ---
 type: orchestrator
 status: active
-tags: [orchestrator, prd, database, flow, agent]
+tags: [orchestrator, prd, database, flow, agent, web]
 ---
 
 # Runtime reliability refactor — working context
 
 ## Current state
 
-The CLJS pod works end to end, but schema restoration and the remaining
-debug/data rendering paths still contain duplicate or overly broad work. Warm
-agent mint is split from cold cluster work. Core program add/change/remove now
-compiles through one desired graph and one transaction; the second complete
-source build and boot-time ghost-pruning pass are deleted. The grown-store
-normal agent feed no longer recreates the whole transcript/page on a local
-canvas update: captured patches target the focus marker plus the two canvas
-faces, stay near 3,872 estimated tokens, and return to a stable idle RSS instead
-of the former 1.4–2.5 GB sawtooth.
+The proven CLJS pod is responsive enough to preserve, but the repository still
+contains a paused JVM application, several duplicate runtime paths, broad build
+closures, a large shell operator, stale UI/database vocabulary, and an
+expensive test surface. Source-grounded audits have now mapped the permanent
+JVM server, canonical CLJS runtime/UI, archive boundary, local and remote
+database synchronization, client distribution, test authority, and exact
+canvas/surface/card cutover.
 
-The core source/live audits, integrated design, ID study, and Datahike
-fork/restore study are complete. The baseline runtime cleanup, exact
-instrumentation delta, cold-boot/mint split, immutable read coordinates, and
-wire shutdown drain have landed. The final transaction-provenance cutover is
-implemented and green in focused behavioral gates: one un-attributed genesis
-base installs root/process refs, then every normal write carries only the
-resolvable `:seon.db/user` and `:seon.db/process` refs. Reconciliation now
-requires an explicit identity-attribute scope so an empty desired population is
-both removable and isolated from other config-authored entities. The
-default-store transition proved all 177 historical transactions resolve through
-the final refs, then the one-shot classifier was deleted; normal startup now has
-only fresh genesis and convergence. The coordinated storage forks are now
-integrated: Datahike through upstream 0.8.1729 plus the lifecycle/versioning
-fixes, Konserve through upstream 0.9.356 plus legacy cross-runtime header reads,
-and Konserve-sync 0.1.35. The fake Konserve version shim is gone and both fork
-sources are exact submodules. Datahike transaction reports now omit redundant
-assertions and absent retracts at the transactor, so listeners receive effective
-changed attributes without a Seon-side filter. Cold runtime readiness also
-awaits database-backed AI/provider synchronization before declaring completion.
-Parent and fresh-cluster acceptance are the active gate. The homegrown evaluator
-is now retired atomically: its CLJS
-driver, predicate language, scenarios, scorecards, gated pseudo-tests, scripts,
-and live docs are deleted. Focused production tests already own its deterministic
-regressions; Datahike itself owns the former multi-group join regression. Inspect
-AI is the sole agent/model evaluation control plane. Its restart/resume planning
-journey is implemented; the schema-backed memory and UI journeys remain explicit
-Inspect work rather than reasons to retain a compatibility harness. The
-external supervisor lifecycle is now fenced as well: process instances are
-identified by PID plus OS start stamp, managed process groups drain completely,
-and one atomic lifecycle lock spans restart/reset/nuke through store mutation
-and readiness. Isolated shell coverage exercises idempotent start, descendant
-drain, stale PID reuse, concurrent lifecycle serialization, and nested-lock
-failure cleanup without touching a cluster.
-The pay-for-use web foundation is also live: stable fully namespaced unit
-coordinates compile to opaque tokens and DOM ids without invoking producers;
-one existing gzip-feed registry owns each ephemeral view's catalog and active
-set; and the sole activation door is the reconciled database route
-`GET /view/unit`. Synchronous `seon.db` reads can now be captured as normalized
-immutable observations with no DB/Entity handles, replayed conservatively with
-injective normalized values and exact request contracts. The debug page is the
-first complete pay-for-use cutover: its GET is a shell, its shared gzip feed
-renders AI once, closed raw/HTML bodies are stubs, HTML discovery is metadata
-only, and the final feed close releases the shared listener. Remaining page
-cutovers and unit-index integration are active; inactive surfaces must remain
-stubs.
-The authoritative target is
-[[provenance-and-lifecycle-design]] and the ordered implementation/commit plan
-is [[roadmap]].
+This PRD is in **phase 1 of 8: plan review and clean-base freeze**. Do not begin
+production implementation until the remaining owner decisions in [[roadmap]]
+are answered. The active plan replaces mechanisms in place and deletes their
+superseded paths; it does not create compatibility namespaces or parallel
+architectures.
 
-## How to run it
+Foundational gains already landed and are the baseline:
+
+- one generated-identity allocator and minimal user/process provenance;
+- separate cold boot, agent birth, and agent resume transitions;
+- no second complete program build or ghost-pruning pass;
+- maintained Datahike/Konserve fixes for effective datoms, connections,
+  branches, ordered commits, caches, and shutdown;
+- durable same-request transaction recovery and bounded replay/live overlap;
+- one bounded normal transcript and partly unitized/lazy web rendering;
+- no homegrown gym/evaluator—Inspect AI is the sole agent/model harness; and
+- PID+OS-start/process-group/lock protections in the current supervisor.
+
+The authoritative ordered plan is [[roadmap]]. The durable provenance and
+lifecycle semantics remain [[provenance-and-lifecycle-design]] until phase 4
+folds the final database vocabulary into the architecture docs.
+
+## How to run the current system
+
+These are the current doors while the Babashka operator is still unbuilt:
 
 ```bash
 bin/seon status pod
@@ -76,141 +49,166 @@ bin/test-cljs
 curl -fsS http://127.0.0.1:7890/agents >/dev/null
 ```
 
-Use the default pod/store for live proof. Prove a final build on a destructively
-reset default cluster before rebuilding/restarting ACME; the owner authorized
-that rollout only after default passes. Use the `browser-automation` skill for UI
-drives; verify long-lived gzip SSE with a Node gunzip client because the browser
-bridge does not proxy it reliably.
+Use the authorized default cluster/database for destructive live proof. Do not
+touch ACME while its shared lane is dirty; update it only after the default
+cluster passes. Use the `browser-automation` skill for Seon's own UI and verify
+long-lived gzip SSE with a Node gunzip client because the browser bridge does
+not reliably proxy the feed.
+
+The target primary door, selected by the owner, is:
+
+```bash
+bin/seon up
+bin/seon up --open
+```
+
+`up` starts the complete development stack, waits for real readiness, and
+prints the useful URLs. Only `--open` launches a browser. There is no fake
+production alias and paused/advanced process verbs are not primary UX.
 
 ## Load-bearing findings
 
-- `/agents/new` currently re-enters cluster startup. About 7.8–8.1 seconds of an
-  8.43–8.89 second mint is unrelated cluster work.
-- Core program reconciliation builds the three source-derived slices once per
-  selected boot. Removed boot declarations are retractions in that same delta;
-  agent home namespaces and current REPL-authored declaration sources are
-  outside its ownership boundary.
-- Native Datahike schema and persistent indexes already reopen from the
-  Konserve root. Complete schema reassertion on every open is redundant.
-- Transaction metadata is processed against `db-before`; the provenance attrs
-  and ref targets require one explicit un-attributed genesis base case.
-- The durable provenance model is only `:seon.db/user` plus
-  `:seon.db/process`. User refs the existing root/human/agent; processes are
-  boot, config, and REPL. No duplicate user table and no turn/eval transaction
-  metadata; ordinary durable turn/eval domain records remain.
-- Config is exact authority for declared populations/attributes. It must repair
-  that subset after partial state, preserve outside facts, and write nothing
-  when converged.
-- Malli source is currently overloaded/truncated and entity-schema decomposition
-  is a stale derived projection. Store full canonical forms and rebuild one
-  validated registry/catalog projection.
-- Instrumentation currently scans all functions on every mint and Shadow reload,
-  misses same-key schema changes, and relies on a duplicate Malli roster. The
-  target is one boot-only exact-data call plus one old/new dependency-aware
-  delta operation after committed definition/schema changes.
-- Program reconstruction safely loads strict declarations only. Arbitrary eval
-  effects and process-local values are never replayed.
-- UI state belongs to one subscription per normalized view key. Actual
-  `seon.db` read results, not provenance or keyword literals, determine dirty
-  render units.
-- The current ID has only 140,608 choices per minute and a collision can become
-  a Datahike upsert. Only `:seon.agent/id` gets package-owned readable words;
-  every other generated persistent identity gets the compact package adapter
-  through one schema-driven atomic allocator.
+- The permanent Java component is a small JVM database/heavy-compute server,
+  not the old JVM application. The canonical agent/runtime/renderer remains
+  CLJS and server agents run as Node processes beside the JVM.
+- The retained writer currently reaches thirteen namespaces; deleting the
+  unused second reactive system reduces that closure to twelve. Base aliases
+  and the writer artifact still include misleading paused dependencies.
+- `writer-uber` builds from `[:writer]` while runtime uses the maintained
+  fork/SIMD composition. Artifact and local execution are not presently the
+  same program.
+- `bin/seon` is a 2,186-line shell program. The replacement is a small shell
+  launcher over a Babashka process graph with explicit transitions,
+  readiness, locks, and scoped reset.
+- Active hooks still call the paused JVM nREPL on port 7888, so claimed checks
+  can silently fail to run. Useful checks move to direct bounded tool doors.
+- The UDS writer has the stronger transaction contract: durable request
+  receipts, same-ID recovery, bounded replay, overlap deduplication, and
+  read-your-own-write. Datahike/Kabel has useful immutable-root sync but needs
+  listener, deadline, cancellation, reconnect, and backpressure fixes.
+- Replica state should synchronize immutable Konserve nodes and expose the
+  branch head last. Exact transaction replay remains for receipts, forensics,
+  and genuinely durable processors—not for every projection.
+- The current agent view already has a surface catalog, database-recency focus,
+  and right rail. Rename and finish that mechanism; do not invent a new view.
+- `seon.store.wire`, `:seon.store.wire/*`, `{store-id, ...}`,
+  `seon.server.store`, `/store`, and `db/store-inventory` form a competing
+  database language. Cut them over atomically to db/database/backend terms,
+  with literal upstream `:store` keys confined inside the third-party adapter.
+- The inventory context, `db/store-inventory`, `my.kb/inventory`, root-canvas
+  “STORE” panel, header, and `/data` browser repeat broad namespace/count
+  scans. `/data` also owns a legacy SSE registry. Delete this whole family
+  instead of renaming it. Installed schema plus small attribute-presence/domain
+  queries are the composable discovery primitives.
+- `my.kb` domain facts and provenance are independent of that inventory. A
+  later refined KB may compose purpose-specific database queries without
+  restoring a global default context section.
+- Three skill trees drift. One canonical distributable source must generate or
+  validate tool-facing views; stale live-tile/world/inspector/`my.tile`
+  teaching is deleted.
+- Thin server-rendered web mode is the first remote client. A full browser
+  CLJS/IndexedDB replica and downstream Tauri shell follow from the same
+  renderer and protocol, not from Wasmtime/WIT or a second client runtime.
 
 ## Settled — do not re-litigate
 
-- This is reliability/provenance, not authentication or authorization.
-- Persist resulting facts, not algorithm traces or derived status.
-- Provenance is transaction metadata and is per datom; it is not entity
-  ownership or reconciliation authority.
-- Root is an existing agent/user. Agents are their own user identities.
-- Boot, config, and REPL are process refs, not users or operation enums.
-- Current core and config are independent optional operation overlays, never a
-  stored mode. A crash-recovery intent freezes supplied canonical payloads only
-  until the fenced transition completes; later config-free cold boot preserves
-  database facts without applying current source or `config/system.edn`.
-- The serialized allocator enforces generated-value uniqueness across every
-  generator-managed identity attribute in one logical database/branch through
-  indexed lookups. Lookup refs remain attribute-qualified; no global identity
-  registry or duplicate universal-id datom is added.
-- No arbitrary eval replay and no promise to reconstruct non-database state.
-- No persisted UI dependency/subscription/dirty/output-cache entities.
-- Every mutable runtime cell is classified: irreducible handle, DB-derived
-  projection with rebuild/invalidation, missing fact moved to Datahike, or
-  duplicate deleted. Self-contained ephemeral registries are fine when restart
-  loss is harmless; no atom is a second durable authority.
-- No second implementation, `v2` namespace, or compatibility path. Migrate and
-  delete the superseded live mechanism in the same phase.
-- `datahike.api/with` is a test oracle; production deltas are explicit Clojure
-  data processing.
-- Tests assert structural behavior, not context wording.
-- Commit and live-prove each roadmap phase before starting the next.
+- One product vocabulary: database/db, block/render/surface/canvas/card/slot.
+  No store, tile/live-tile, world, or inspector concepts in active Seon APIs.
+- Third-party implementation names are encapsulated at their adapter boundary;
+  Seon does not fork upstream merely to rename private keys.
+- The old JVM application is archived through a known Git ref and deleted from
+  active source/classpaths/tests. Java remains for database authority and heavy
+  work.
+- The JVM does not grow a parity renderer. CLJS is canonical on server and
+  client.
+- Persist resulting facts, not algorithm traces, dirty flags, rendered output,
+  or derivable lifecycle state.
+- Provenance is only resolvable `:seon.db/user` and `:seon.db/process`
+  transaction metadata. It is not authorization or entity ownership.
+- Config is optional for an existing database. Explicit config apply repairs
+  exactly its declared subset and writes nothing when converged.
+- Native Datahike schema reopens from durable data. Canonical Malli/program
+  forms are database facts; runtime registries are validated projections.
+- No arbitrary eval replay and no promise to reconstruct non-database effects.
+- No persisted UI dependency/subscription/cache entities. Read observation and
+  bounded runtime caches are derived and discardable.
+- Four dormant context-display adapters—findings, inventory, jobs, and
+  testrun—are deleted precisely. The generic inventory API/root panel/header
+  link/`/data` route are deleted with the inventory adapter. Useful
+  domain/runtime facts remain.
+- `my.canvas` is the one permanent agent-facing canvas/control API and injects
+  current agent/database identity.
+- Local UDS and remote WebSocket may both be transport adapters, but one
+  versioned message model and reconnect state machine own semantics.
+- Durable offline mutation is a bounded stable-ID intent outbox plus optimistic
+  projection, not a browser-authoritative database or CRDT.
+- Tests assert facts, transitions, envelopes, DOM identity, omission,
+  idempotency, and rendered structure—not context prose.
+- No migration is needed for current test data. Rename filesystem/database
+  layouts directly after coordinated reset.
+- Every phase commits small gains and finishes with focused plus live proof.
 
-## Open owner choices
+## Open owner decisions
 
-No owner choice remains before implementation. Route
-removal becomes absence in canonical config; protected core schema collisions
-fail loudly; runtime-captured reads are the dependency truth; stored
-`:seon.fn/read-attrs` is deleted after recency proof; expensive HTML twins are
-windowed while exact raw AI text remains available; over-budget agent renders
-fail loudly rather than silently clipping data; the rolling header rate is
-removed; and read-only `as-of`, isolated writable forks, and full known-state
-restore are all in this refactor. The exact branch/switch lifecycle and pinned
-Datahike changes are specified in the completed focused source audit.
+These choices do not block phases 1–5, but they change phases 6–7:
 
-The Phase 5 operator door is deliberately explicit: ordinary
-`bin/seon restart pod` preserves database config; `bin/seon config apply
---config <path>` applies a selected manifest; `--empty` selects the explicit
-empty manifest and is distinct from no input. These config subcommands are
-target semantics and are not available until Phase 5 lands.
+1. Approve immutable Konserve root synchronization as the first remote replica
+   mechanism, deferring exact datom apply unless Datahike gains and proves a
+   native primitive? Recommendation: yes.
+2. Must a successful authoritative transaction wait for durable GCS/S3
+   acceptance, or may a local hot database acknowledge under an explicit
+   nonzero cloud RPO? Recommendation: require zero acknowledged cloud data loss
+   and benchmark direct GCS first.
+3. Approve thin server-rendered mode first, followed by the full
+   browser/IndexedDB/Tauri replica from the same CLJS source? Recommendation:
+   yes.
+
+The owner has already selected the complete-development-stack semantics for
+`bin/seon up`, including readiness/URL output and opt-in `--open`.
 
 ## Ordered next steps
 
-1. Commit the integrated design/research package.
-2. Execute [[roadmap]] Phase 0 baseline observability.
-3. Land the atomic identity allocator, then split cluster boot from mint/resume
-   and live-prove sub-second warm mint.
-4. Land genesis/provenance, then the exact reconciler/config recovery surface.
-5. Correct schema/program/runtime reconstruction and delete pruner/healer paths.
-6. Land as-of simulation, isolated writable forks, and the quiesced full-restore
-   lifecycle.
-7. Unify live subscriptions/feeds, add observed-read invalidation, then bound
-   legitimate renders.
-8. Finish the schema-backed store/retrieve and mechanical UI journeys through
-   Inspect AI; the duplicate homegrown evaluator is already deleted.
-9. Run the full cold/restart/agent-workflow/browser/feed/CPU/RSS acceptance
-   matrix and graduate the PRD.
+1. Review/freeze the Git archive ref, database/UI vocabulary, deletion matrix,
+   and coordinated clean-base evidence.
+2. Isolate and prove the permanent JVM database/heavy-compute server, including
+   the atomic store→database namespace/schema/path cutover.
+3. Replace the operator with Babashka, archive/delete the paused JVM app and
+   rejected prototypes, and split fast CLJS/writer/runtime/browser test doors.
+4. Finish exact config/schema/program/database lifecycle reconstruction,
+   coordinates, as-of, branches, restore, undo, and crash recovery.
+5. Converge canvas/surface/card UI vocabulary, delete weak context/inventory
+   paths, finish pay-for-use rendering, responsive layout, controls, focus, and
+   ACME cutover after default proof.
+6. Harden and adopt one remote writer/replica protocol over UDS/WebSocket
+   adapters.
+7. Ship thin hosted web, browser replica, downstream native shell, and a proven
+   cloud database backend.
+8. Run transition/failure/browser/Inspect AI/profiling acceptance, update the
+   one architecture, and graduate only when active searches find no duplicate
+   mechanism.
 
 ## Entry points
 
-- [[roadmap]] — dependency order, state-transition work, proof, and commit
-  boundaries.
-- [[provenance-and-lifecycle-design]] — authoritative target decisions.
-- [[system-audit-2026-07-12]] — current code writer/reader/effect inventory.
-- [[research/provenance-users-processes-and-ids-2026-07-12]] — live provenance
-  queries, migration evidence, and original compact-ID analysis.
-- [[research/config-schema-runtime-restoration-2026-07-12]] — Datahike reopen,
-  config exactness, genesis ordering, and Malli restoration.
-- [[research/runtime-reconstruction-and-replay-boundary-2026-07-12]] — safe
-  declaration loading vs inspection vs replication recovery.
-- [[research/reactive-ui-dependency-routing-2026-07-12]] — Reitit/Datahike/
-  Datastar/Hyperlith source audit and performance design.
-- [[research/human-readable-word-ids-datahike-and-tokenization-2026-07-12]] —
-  final package, collision, Datahike-index, storage, and tokenizer evidence.
-- [[research/datahike-as-of-fork-and-restore-2026-07-12]] — final Datahike/
-  Konserve branch, simulation, coordinate, and live-restore evidence.
-- [[research/incremental-instrumentation-2026-07-12]] — current global call
-  sites, Malli ref/wrapper behavior, exact-data target, and acceptance matrix.
-- [[research/test-runtime-trim-design-2026-07-12]] — measured full-seed test
-  repetition, immutable-DB test seams, behavioral assertion policy, and the
-  fast/runtime/process suite cutover. Its proposed evaluator refactor is
-  superseded by the completed atomic removal.
-- [[research/evaluation-harness-replacement-2026-07-12]] — why the existing
-  Inspect AI integration is the one replacement control plane, which historical
-  evidence belongs to subsystem tests, and the completed retirement sequence.
-- [[docs/seon/architecture/agent-runtime]], [[docs/seon/architecture/data-model]],
-  and [[docs/seon/architecture/ui]] — ideal system docs to keep current.
-- `src/seon/client.cljs`, `src/seon/state.cljs`, `src/seon/db.cljs`,
-  `src/seon/db/internal.cljs`, and `src/seon/web/datastar.cljs` — main code
-  entry points.
+- [[roadmap]] — authoritative eight-phase order, acceptance transitions, and
+  owner decisions.
+- [[provenance-and-lifecycle-design]] — database provenance/config/lifecycle
+  target semantics.
+- [[research/jvm-archive-boundary-2026-07-13]] — retained/deleted JVM closure,
+  build aliases, tests, and archive sequence.
+- [[research/jvm-server-cljs-client-storage-sync-2026-07-13]] — writer,
+  Datahike/Kabel/Konserve synchronization, protocol, and cloud evidence.
+- [[research/client-distribution-and-server-rendering-boundary-2026-07-13]] —
+  canonical CLJS renderer, browser/Tauri/server-agent boundaries.
+- [[research/surface-vocabulary-and-dead-ui-path-audit-2026-07-13]] — exact
+  UI rename/delete graph and four dormant context adapters.
+- [[research/seon-cli-lifecycle-audit-2026-07-13]] — current shell/process
+  failure modes and Babashka target.
+- [[research/cljs-test-suite-speed-and-quality-audit-2026-07-12]] — active
+  behavioral test authority and runtime tiers.
+- [[research/database-runtime-responsiveness-audit-2026-07-13]],
+  [[research/web-responsiveness-audit-2026-07-13]], and
+  [[research/live-feed-fix-review-2026-07-13]] — performance baselines.
+- [[docs/seon/architecture/architecture]],
+  [[docs/seon/architecture/data-model]],
+  [[docs/seon/architecture/agent-runtime]], and
+  [[docs/seon/architecture/ui]] — ideal system docs updated as phases land.
