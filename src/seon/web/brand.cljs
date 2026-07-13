@@ -10,8 +10,8 @@
    reactive-context: no cached atom, absent row/attr = the shipped
    seon defaults, byte-identical to the pre-C-17 output.
 
-   ENV OWNS THE ROW. [[sync!]] (called from
-   `seon.web.debug/install!` at boot) syncs the row to the
+   ENV OWNS THE ROW. [[sync!]] (awaited directly by `seon.client` at boot)
+   syncs the row to the
    `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE` / `SEON_BRAND_THEME` env
    vars: set → asserted, unset → retracted. Like the identity files'
    live read (`seon.agent.ctx/identity-files-text`), the brand is deployment

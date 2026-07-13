@@ -120,9 +120,9 @@
     ;; Pod HTTP+SSE server — A-5. Required here so the build includes
     ;; it; start-runtime! calls (web.serve/start!) at boot.
     [seon.web.serve :as web.serve]
-    ;; Operator dev tools (/data + /agent/<id>/debug) — installs its own
-    ;; tx-listener that pushes morphs to those pages' SSE streams.
-    [seon.web.debug]
+    ;; Brand configuration is the only web-specific boot synchronization.
+    ;; Debug/data feeds install lazily only while their routes are open.
+    [seon.web.brand :as web.brand]
     ;; Default :seon.render/ai + :seon.render/html for :seon.agent.message
     ;; entities. Referenced by symbol from message tx data.
     [seon.handlers.message]
@@ -299,8 +299,8 @@
   ;; Hot-reload hygiene: re-install the per-agent wake trigger so
   ;; tx-listener closures run the just-reloaded code.
   ;; Async fire-and-forget — logs the re-armed ids / errors.
-  ;; (seon.web.debug re-arms its own ::debug listener via its
-  ;; own ^:dev/after-load — not duplicated here.)
+  ;; Web feeds re-arm their own shared/lazy listeners from their namespace
+  ;; reload hooks; there is no always-on debug listener here.
   (rehost-agent-runtimes!)
   ;; Re-arm the ONE ticker so a hot reload doesn't stack timers and the tick
   ;; body runs just-reloaded code (idempotent — clears the prior interval).
@@ -2456,7 +2456,7 @@
               {:seon.agent/keys [id ns]} (first results)
               {:seon.web/keys [port port-file]} (await (web.serve/start!))]
           (await (ai/sync!))
-          (seon.web.debug/install!)
+          (await (web.brand/sync!))
           (agent-loop/install-ticker!)
           (log/info-console! "seon.client" "runtime started"
                              {:resumed resumable-ids

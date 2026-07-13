@@ -56,8 +56,13 @@ coordinates compile to opaque tokens and DOM ids without invoking producers;
 one existing gzip-feed registry owns each ephemeral view's catalog and active
 set; and the sole activation door is the reconciled database route
 `GET /view/unit`. Synchronous `seon.db` reads can now be captured as normalized
-immutable observations with no DB/Entity handles. Page cutovers and exact read
-replay/invalidation are the active work; inactive surfaces must remain stubs.
+immutable observations with no DB/Entity handles, replayed conservatively with
+injective normalized values and exact request contracts. The debug page is the
+first complete pay-for-use cutover: its GET is a shell, its shared gzip feed
+renders AI once, closed raw/HTML bodies are stubs, HTML discovery is metadata
+only, and the final feed close releases the shared listener. Remaining page
+cutovers and unit-index integration are active; inactive surfaces must remain
+stubs.
 The authoritative target is
 [[provenance-and-lifecycle-design]] and the ordered implementation/commit plan
 is [[roadmap]].

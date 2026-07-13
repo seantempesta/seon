@@ -50,7 +50,10 @@
 (schema/register! ::error :string)
 
 (schema/register! :seon.agent.debug/request
-  [:map [:seon.agent/id {:optional true} :seon.agent/id]])
+  [:map
+   [:seon.agent/id {:optional true} :seon.agent/id]
+   [:seon.render/formats {:optional true}
+    [:enum #{:ai} #{:ai :html}]]])
 
 ;; One resolved context block, carrying either or both rendered formats.
 (schema/register! :seon.agent.debug/rendered-context-block
@@ -75,7 +78,7 @@
 
 (defn- ctx-preview*
   "The resolved-id body of [[ctx-preview]] — renders the full prompt."
-  [id]
+  [id formats]
   (let [;; THE SAME db the prompt path renders against — the live cluster
         ;; conn, UNFILTERED. The loop renders the prompt over `@*conn*`
         ;; ([[seon.agent.ctx/render-context]] / `render-prompt`); the web UI
@@ -84,13 +87,12 @@
         ;; content whose datom lived in the peer's tx — the web UI lied).
         db  @db/*conn*
         ctx {:seon.agent/id id :seon.db/db db}
-        ;; Render the ordered AI blocks ONCE, assemble the context from those
-        ;; same strings, and add HTML twins only for the current eager debug
-        ;; consumer. The lazy unit cutover will request the twins separately;
-        ;; either way no AI renderer is invoked twice for token accounting.
+        ;; Render the requested formats only. The debug page asks for AI here
+        ;; and materializes individual HTML twins through view units; callers
+        ;; that omit the option retain the original dual-render response.
         {:seon.render/keys [text]
          blocks :seon.agent.ctx/rendered-blocks}
-        (ctx/rendered-context ctx #{:ai :html})
+        (ctx/rendered-context ctx formats)
         ;; Block 1 — the resolved system message, via the EXACT fn the
         ;; adapters call (no re-implementation, no drift). No override is
         ;; passed, so this returns the cluster's `:seon.config/system-text`
@@ -134,9 +136,9 @@
    values: no id and no agent scope returns `::ok? false` plus a
    guiding `::error` — nothing throws."
   {:malli/schema [:=> [:cat :seon.agent.debug/request] :seon.agent.debug/ctx-response]}
-  [{:seon.agent/keys [id]}]
+  [{:seon.agent/keys [id] formats :seon.render/formats}]
   (if-let [id (or id (db/current-agent-id))]
-    (ctx-preview* id)
+    (ctx-preview* id (or formats #{:ai :html}))
     {::ok?   false
      ::error (str "seon.agent.debug/ctx-preview: no agent-id — pass "
                   ":seon.agent/id or call inside (seon.db/with-agent id ...).")}))

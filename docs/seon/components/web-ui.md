@@ -15,25 +15,26 @@ tags: [component, web]
 | `/` | `serve-root!` → root `agent-view` | Root's ordinary agent view; its pinned `seon.render.system/system-view` canvas is the cluster dashboard. |
 | `/agents` | `agents-page-html` → `roster-view` | The live roster: status header plus one agent row with the agent's compact canvas preview. The new-agent purpose bar is outside the morph target. |
 | `/agent/<id>` | `agent-page-html` → `seon.ui.agent-view/agent-view` | A large primary surface and a scrollable rail of every context block that has an HTML twin. The most recently agent-updated surface is selected initially; selecting a rail card is browser-local state. |
-| `/agent/<id>/debug` | `debug-page!` → `debug-shell` | A separate operator page: exact AI prompt blocks on the left, HTML twins on the right, token breakdown, activity, and chat. |
+| `/agent/<id>/debug` | `debug-page!` → `/agent/<id>/debug/feed` | A cheap operator shell: lazy exact AI text and HTML twins, token breakdown, activity, and chat. |
 | `/data` | `data-page!` → `data-browser-fragment` | The live database browser. |
 
-Routing: `seon.web.serve` hosts the HTTP front door and supplies handlers to `seon.web.router`. Seeded `:seon.route/*` datoms own the main agent and roster routes; static assets, operator pages, and POST actions are the router's static supplement. Handler symbols resolve late, so a redefinition takes effect without a parallel route path.
+Routing: `seon.web.serve` hosts the HTTP front door and supplies handlers to `seon.web.router`. Seeded `:seon.route/*` datoms own the agent, roster, unit, and per-agent debug page/feed routes. Static assets, `/data`, and POST actions are the router's static supplement. Handler symbols resolve late, so a redefinition takes effect without a parallel route path.
 
 ## SSE morphing
 
 - `seon.web.datastar/install!` owns the gzip feed listener for `/`, `/agents`, and `/agent/<id>`. A 50 ms trailing window coalesces transaction bursts. Equivalent tabs share one derived render; each gzip stream has latest-wins backpressure.
 - Agent feeds keep renderer read-sets. Ordinary transactions send only complete, ID-addressed surfaces whose read attributes changed; structural context/program changes send the full `#app-view`.
-- `seon.web.debug/install!` owns the operator listener. It only schedules agents with an open debug SSE connection, so a normal agent page does not build prompt previews or HTML debug cards. `/data` likewise renders only for its own open connections.
-- The debug left pane comes from `seon.agent.debug/ctx-preview`: the same system-message and context producers used by the LLM call, rendered from one unfiltered database snapshot.
+- Per-agent debug uses the same `seon.web.datastar` gzip registry, listener, unit activation door, reconnect fencing, and backpressure as ordinary pages. The final feed close removes the listener; no open feed means no transaction callback work.
+- The debug left pane comes from one AI-only `seon.agent.debug/ctx-preview`: the same system-message and context producers used by the LLM call, rendered from one unfiltered database snapshot. One lazy unit exposes the exact assembled prompt; the other sections break down the retained source-block bodies without rerendering them.
+- `/data` retains its own temporary plain-SSE path, but installs that listener only on first open and removes it on final close.
 
 ## Brand consumption
 
-Every shell reads `brand/info` from [[components/web-brand]] for `<title>` (`brand/page-title`), `data-theme` on `[:html]`, and the optional downstream stylesheet after `output.css` so its token overrides win. `seon.web.debug/install!` kicks `brand/sync!` at boot.
+Every shell reads `brand/info` from [[components/web-brand]] for `<title>` (`brand/page-title`), `data-theme` on `[:html]`, and the optional downstream stylesheet after `output.css` so its token overrides win. `seon.client` awaits `brand/sync!` directly at boot; debug owns no boot hook.
 
 ## Debug is pay-for-use
 
-The ordinary agent header links to `/agent/<id>/debug`; it does not embed an iframe or open a second stream. The debug page computes its initial snapshot only when that route is requested, then opens `/agent/<id>/debug/sse`. Leaving the page closes the connection, so later transactions do no debug rendering for that agent. Escape returns to the ordinary agent view.
+The ordinary agent header links to `/agent/<id>/debug`; it does not embed an iframe or open a second stream. The page GET returns only a shell and view id. Its `/debug/feed` performs one exact AI projection, publishes closed raw bodies and every HTML twin as inactive stubs, and materializes only units the operator expands through `GET /view/unit`. HTML discovery reads metadata rather than block bodies. Leaving the page closes the feed and, when it was the final live page, removes the shared listener. Escape returns to the ordinary agent view.
 
 ## Canvas and context surfaces
 
@@ -44,4 +45,4 @@ The ordinary agent header links to `/agent/<id>/debug`; it does not embed an ifr
 ## Dependencies
 
 - Uses: `seon.db`, `seon.agent.debug`, `seon.render`, `seon.ui.agent-view`, `seon.ui.header`, `seon.ui.html`, `seon.web.brand`, `seon.web.router`, Node HTTP, and Node zlib.
-- Used by: `seon.client/start-runtime!` starts `seon.web.serve` and installs the Datastar and debug listeners after the database is ready.
+- Used by: `seon.client/start-runtime!` starts `seon.web.serve`; page feeds install their shared listener lazily after the database is ready.

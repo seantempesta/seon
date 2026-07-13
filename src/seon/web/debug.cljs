@@ -6,7 +6,7 @@
                                   rendered context-block html twins (right),
                                   plus the per-block token + cache-line
                                   audit bar along the bottom.
-     GET /agent/<id>/debug/sse  — SSE stream that re-morphs the debug panes.
+     GET /agent/<id>/debug/feed — shared gzip Datastar feed for the debug view.
      GET /data                  — the live datom browser: the kinds the
                                   cluster stored with row counts, drill-down
                                   to a kind's attrs + paginated rows.
@@ -21,13 +21,13 @@
    come from the same frozen DB projection as the prompt. The left pane shows
    exact AI text; the right pane shows only blocks declaring an HTML twin.
 
-   Reactive: a single tx-listener subscribes to every commit. Per-agent tx fan
-   out to that agent's open debug streams; core/seed tx fan out to ALL watching
-   agents; the `::data` pseudo-agent watches EVERY commit so its row counts tick
-   live. Pushes are coalesced per-agent on a 100ms trailing timer."
+   Debug is dormant until its route is opened. It uses the same view-unit
+   catalog, gzip feed registry, tx listener, backpressure, and morph framing as
+   every normal page. Raw AI bodies and HTML twins are inactive stubs until the
+   operator expands them. The legacy data browser keeps a lazy listener only
+   while `/data` is open; it is the remaining page awaiting unit cutover."
   (:require
     [clojure.string :as str]
-    [datahike.api :as d]
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.usage :as ctx-usage]
@@ -35,37 +35,34 @@
     [seon.derive :as derive]
     [seon.agent.debug :as agent-debug]
     [seon.log :as log]
-    [seon.render :as render]
+    [seon.schema :as schema]
+    [seon.ui.agent-view :as agent-view]
     [seon.ui.components :as comp]
     [seon.ui.header :as header]
     [seon.ui.html :as html]
-    [seon.web.brand :as brand]))
+    [seon.web.brand :as brand]
+    [seon.web.datastar :as datastar]))
 
 ;; ============================================================
-;; SSE connection registry — per-agent (+ the `::data` pseudo-agent).
-;; Distinct from the main /sse registry in seon.web.serve so the
-;; existing broadcast keeps behaving unchanged.
-;;
-;; Shape: atom of {agent-id -> [{:id <uuid> :res <ServerResponse>} ...]}
+;; Remaining legacy /data connections. Agent debug has no registry here: it
+;; rides seon.web.datastar's one feed registry. The data listener installs on
+;; first open and uninstalls after the last close, so closed operator tools cost
+;; no per-transaction work.
 ;; ============================================================
 
-(defonce ^:private !sse-by-agent (atom {}))
+(defonce ^:private !data-connections (atom []))
+(defonce ^:private !data-listener-installed? (atom false))
 
-(defn- add-conn! [agent-id conn]
-  (swap! !sse-by-agent update agent-id (fnil conj []) conn))
+(defn- add-data-conn! [conn]
+  (swap! !data-connections conj conn))
 
-(defn- remove-conn! [agent-id conn-id]
-  (swap! !sse-by-agent update agent-id
+(defn- remove-data-conn! [conn-id]
+  (swap! !data-connections
          (fn [conns] (vec (remove #(= conn-id (:id %)) conns)))))
 
-(defn- watching-agents
-  "Set of agent-ids (incl. the `::data` pseudo-agent) that currently have
-   at least one open SSE stream."
-  []
-  (->> @!sse-by-agent
-       (filter (fn [[_ conns]] (seq conns)))
-       (map first)
-       set))
+(schema/register! ::ring-request :map)
+(schema/register! ::debug-format [:enum :ai :html])
+(schema/register! ::debug-block-index :int)
 
 ;; ============================================================
 ;; Data sources — one snapshot per render.
@@ -134,8 +131,8 @@
       ::provider-shape kw|nil}
 
    `::live-cached-tokens` is nil when no turn has run / usage is absent."
-  [agent-id block-texts]
-  (let [segs   (mapv (fn [{nm :seon.agent.ctx/name
+  [agent-id block-texts total-tokens]
+  (let [body-segs (mapv (fn [{nm :seon.agent.ctx/name
                             priority :seon.agent.ctx/priority
                             txt :seon.render/text}]
                        (let [t (or txt "")]
@@ -144,7 +141,13 @@
                           ::stable? (<= (or priority js/Number.MAX_SAFE_INTEGER)
                                         (ctx/cache-breakpoint))}))
                      block-texts)
-        total  (reduce + 0 (map ::tokens segs))
+        body-total (reduce + 0 (map ::tokens body-segs))
+        assembly-tokens (max 0 (- total-tokens body-total))
+        segs (cond-> body-segs
+               (pos? assembly-tokens)
+               (conj {::name :prompt-assembly
+                      ::tokens assembly-tokens
+                      ::stable? false}))
         ;; Structural cache-line = cumulative tokens of every block up to
         ;; AND INCLUDING the last stable one, in render order. (Blocks
         ;; sort static→volatile, so the stable prefix is contiguous.)
@@ -162,26 +165,21 @@
                      (ctx/current-turn {:seon.agent/id agent-id})))
                  (catch :default _ nil))]
     {::segments           segs
-     ::total-tokens       total
+     ::total-tokens       total-tokens
      ::cache-line-tokens  cache-line
      ::live-cached-tokens (some-> usage :seon.agent.ctx.usage/cached)
      ::provider-shape     (some-> usage :seon.agent.ctx.usage/provider-shape)}))
 
 (defn- snapshot
-  "Compute one render snapshot for `agent-id`:
-     {:ai-text <string>
-      :block-texts [{:seon.agent.ctx/name … :seon.render/text …} ...]
-      :token-est <int>
-      :html-cards [<card-map> ...]  ; one per BLOCK html twin, in render order
-      :agent <pulled entity or nil>}
-   Each card-map: `{::hiccup ::kind ::card-key}` — the block's html
-   twin, its name, and a stable card-key for idiomorph (the right pane
-   mirrors the left's block set)."
+  "Compute the exact AI projection and cheap debug diagnostics for one agent.
+
+   HTML twins and the canvas are deliberately absent: each is an independent
+   view-unit producer and is invoked only while its `<details>` is open."
   [agent-id]
-  (let [db @db/*conn*
-        {:seon.render/keys [text token-estimate]
+  (let [{:seon.render/keys [text token-estimate]
          rendered-blocks :seon.agent.ctx/rendered-blocks}
-        (agent-debug/ctx-preview {:seon.agent/id agent-id})
+        (agent-debug/ctx-preview {:seon.agent/id agent-id
+                                  :seon.render/formats #{:ai}})
         ;; Display-only: the single 49k-token :namespaces blob dwarfs every
         ;; other block into an unreadable sliver — split it into one entry
         ;; per ns so the breakdown (both panes + the bottom bar) shows the
@@ -190,26 +188,8 @@
         block-texts (expand-namespaces-block
                         (filterv #(contains? % :seon.render/text)
                                  (or rendered-blocks [])))
-        ;; HTML cards are the same resolved blocks filtered by format presence.
-        cards (->> rendered-blocks
-                   (keep (fn [{nm :seon.agent.ctx/name h :seon.render/hiccup}]
-                           (when h
-                           {::name     nm
-                            ::hiccup   h
-                            ::kind     (str nm)
-                            ::card-key (str "context-block-" (clojure.core/name nm))})))
-                   vec)
         turn-durs []
-        ;; The agent's OWN tile — rendered explicitly (the agent entity is
-        ;; not a context block, so it has no block twin). Wired
-        ;; `:seon.render.canvas/content` wins; default is the core welcome.
-        tile  (:seon.render/hiccup
-                (render/render-agent-canvas {:seon.db/db db
-                                           :seon.agent/id agent-id}))
-        ;; Just the ONE agent entity. State is DERIVED (no stored enum), so
-        ;; the snapshot carries the projected state + turn count the header
-        ;; fragments render.
-        agent (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})
+        db @db/*conn*
         state (derive/derive-state db agent-id)
         turn-count (derive/agent-turn-count db agent-id)]
     {:ai-text   (or text "")
@@ -217,16 +197,9 @@
      :agent-turn-count turn-count
      :block-texts (or block-texts [])
      :token-est  (or token-estimate 0)
-     :context-bar (context-bar-data agent-id (or block-texts []))
-     :html-cards cards
-     :turn-durs  turn-durs
-     ;; No render-cap elision on the right pane — the block twins ARE the
-     ;; prompt blocks (the transcript twin self-bounds via the transcript
-     ;; block's :seon.agent.ctx.transcript/tiers). Kept at 0 so the pane's
-     ;; existing elided-note branch is a no-op.
-     :elided    0
-     :agent-tile tile
-     :agent      agent}))
+     :context-bar (context-bar-data agent-id (or block-texts [])
+                                    (or token-estimate 0))
+     :turn-durs  turn-durs}))
 
 ;; ============================================================
 ;; Page rendering — full page (for initial GET) AND morph fragments
@@ -283,16 +256,6 @@
      [:a {:href "/agents"
           :class "text-xs text-amber-500 hover:text-amber-300"} "← all agents"]]))
 
-(def ^:private open-ai-blocks
-  "Left-pane blocks that render EXPANDED by default — the dynamic
-   tail. Everything else (system, capabilities, catalogs, ns-context,
-   warnings) is static bulk the user has already read; it collapses to
-   a one-line summary. `:context` is the divergence-fallback pseudo-
-   block carrying the whole joined text; `:soul-system` is the live
-   SOUL system message (block 1 of every LLM call) — kept open so the
-   debug view shows the soul the agent actually receives."
-  #{:soul-system :transcript :prompt :context})
-
 (defn- fmt-int
   "`3214` → `\"3,214\"` — comma-grouped integer for summaries."
   [n]
@@ -303,60 +266,140 @@
          (str/join ",")
          (str/reverse))))
 
+(defn- unit-url
+  "The trusted one-shot activation URL for an open debug view unit."
+  [view-id descriptor]
+  (str "/view/unit?view=" (js/encodeURIComponent view-id)
+       "&unit=" (js/encodeURIComponent (::datastar/token descriptor))
+       "&active="))
+
+(defn- unit-toggle-expression
+  "Activate while this exact details element is open; deactivate on close."
+  [view-id descriptor]
+  (str "if (evt.target === el) { @get('"
+       (unit-url view-id descriptor)
+       "' + (el.open ? '1' : '0'), {retry: 'never'}) }"))
+
+(defn- raw-block-body
+  "Current exact AI body for one stable snapshot block coordinate."
+  [!snapshot block-index block-name]
+  (let [snap @!snapshot
+        blocks (:block-texts snap)
+        indexed (when (<= 0 block-index) (nth blocks block-index nil))
+        block (cond
+                (= -1 block-index)
+                {:seon.render/text (:ai-text snap)}
+
+                (= block-name (:seon.agent.ctx/name indexed)) indexed
+
+                :else
+                (some #(when (= block-name (:seon.agent.ctx/name %)) %) blocks))]
+    [:pre {:class (str "whitespace-pre-wrap text-xs font-mono "
+                       "text-text-100 mt-0.5")}
+     (or (:seon.render/text block) "(block no longer present)")]))
+
+(defn- debug-definitions
+  "Cheap unit definitions for raw AI bodies and HTML-capable surfaces."
+  [agent-id !snapshot surface-catalog]
+  (let [exact-def
+        {::datastar/coordinate
+         {:seon.agent/id agent-id
+          ::debug-format :ai
+          ::debug-block-index -1
+          :seon.agent.ctx/name :exact-prompt}
+         ::datastar/label "exact prompt"
+         ::datastar/order 0
+         ::datastar/producer
+         #(raw-block-body !snapshot -1 :exact-prompt)}
+        raw-defs
+        (map-indexed
+          (fn [index {block-name :seon.agent.ctx/name}]
+            {::datastar/coordinate
+             {:seon.agent/id agent-id
+              ::debug-format :ai
+              ::debug-block-index index
+              :seon.agent.ctx/name block-name}
+             ::datastar/label (name block-name)
+             ::datastar/order (inc index)
+             ::datastar/producer
+             #(raw-block-body !snapshot index block-name)})
+          (:block-texts @!snapshot))
+        html-defs
+        (keep-indexed
+          (fn [index {selection ::agent-view/selection
+                      label ::agent-view/label}]
+            (when (not= "canvas" selection)
+              {::datastar/coordinate
+               {:seon.agent/id agent-id
+                ::debug-format :html
+                ::agent-view/selection selection}
+               ::datastar/label label
+               ::datastar/order index
+               ::datastar/producer
+               #(agent-view/materialize-surface
+                  {:seon.db/db @db/*conn*
+                   :seon.agent/id agent-id
+                   ::agent-view/selection selection
+                   ::agent-view/face :expanded})}))
+          surface-catalog)]
+    (vec (concat [exact-def] raw-defs html-defs))))
+
+(defn- debug-projection
+  "One exact AI snapshot plus the non-rendering HTML surface catalog."
+  [agent-id !snapshot]
+  (let [snap (snapshot agent-id)
+        _ (reset! !snapshot snap)
+        surfaces (agent-view/surface-catalog @db/*conn* agent-id)
+        catalog (datastar/unit-catalog
+                  (debug-definitions agent-id !snapshot surfaces))]
+    {:seon.web.debug/snapshot snap
+     :seon.web.debug/catalog catalog}))
+
+(defn- descriptors-for
+  [catalog format]
+  (filterv #(= format (get (::datastar/coordinate %) ::debug-format)) catalog))
+
 (defn- ai-block-details
-  "One `<details>` per context block. `data-seon-key` keys the
-   client-side open-state guard (user toggles survive SSE morphs)."
-  [{sec-name :seon.agent.ctx/name sec-text :seon.render/text}]
-  (let [open? (contains? open-ai-blocks sec-name)]
+  "One lazy `<details>` per exact AI block."
+  [view-id active-tokens descriptor
+   {sec-name :seon.agent.ctx/name sec-text :seon.render/text}]
+  (let [active? (contains? active-tokens (::datastar/token descriptor))]
     [:details (cond-> {:class "mb-1"
-                       :data-seon-key (str "ai-sec-" (name sec-name))}
-                open? (assoc :open true))
+                       :data-seon-key (str "ai-sec-" (::datastar/token descriptor))
+                       :data-on:toggle (unit-toggle-expression view-id descriptor)}
+                active? (assoc :open true))
      [:summary {:class (str "cursor-pointer select-none text-xs font-mono "
                             "text-text-400 hover:text-text-200 py-0.5")}
       (str (name sec-name) " (" (fmt-int (tokens/estimate sec-text)) " tokens)")]
-     [:pre {:class "whitespace-pre-wrap text-xs font-mono text-text-100 mt-0.5"}
-      sec-text]]))
+     (datastar/unit-element descriptor active?)]))
 
 (defn- ai-pane-fragment
-  [agent-id {:keys [ai-text block-texts]}]
+  [agent-id view-id {:keys [ai-text block-texts]} catalog active-tokens]
+  (let [descriptors (descriptors-for catalog :ai)
+        displayed-blocks
+        (into [{:seon.agent.ctx/name :exact-prompt
+                :seon.render/text ai-text}]
+              block-texts)]
   [:div {:id (ai-pane-id agent-id)
          :class "flex flex-col h-full overflow-hidden border-r border-base-800"}
    [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
-    ":seon.render/ai  (what the LLM sees)"]
+    ":seon.render/ai  (exact prompt and source-block breakdown)"]
    (cond
      (str/blank? ai-text)
      [:pre {:class (str "flex-1 overflow-auto p-3 text-xs font-mono "
                         "whitespace-pre-wrap text-text-100 bg-base-950")}
       "(empty context)"]
 
-     (seq block-texts)
+     (seq displayed-blocks)
      (into [:div {:class "flex-1 overflow-auto p-3 bg-base-950"}]
-           (map ai-block-details)
-           block-texts)
+           (map (fn [[descriptor block]]
+                  (ai-block-details view-id active-tokens descriptor block)))
+           (map vector descriptors displayed-blocks))
 
      :else
      [:pre {:class (str "flex-1 overflow-auto p-3 text-xs font-mono "
                         "whitespace-pre-wrap text-text-100 bg-base-950")}
-      ai-text])])
-
-(defn- context-block-card
-  "Render one BLOCK HTML TWIN as a right-pane card: a block-name label
-   + the block's hiccup. Stable `:id` (`block-<name>`) so idiomorph
-   PRESERVES the node across SSE morphs and only genuinely-new blocks
-   animate in. The hiccup is the block's `:seon.render/html` twin (or a
-   banner if it threw — the composer's guard never hands us nil)."
-  [{::keys [name hiccup kind card-key]}]
-  [:div {:id card-key
-         :class (str "border-l-2 border-amber-700/40 pl-2 py-1 "
-                     "animate-appear")}
-   [:div {:class "text-xs font-mono font-semibold text-text-400 mb-0.5"}
-    kind]
-   [:div (cond-> {:class "mt-0.5"}
-           (= name :transcript)
-           (assoc :data-seon-scroll "1"
-                  :class "mt-0.5 overflow-auto"
-                  :style "max-height:min(55vh,36rem)"))
-    hiccup]])
+      ai-text])]))
 
 (defn- thinking-bubble
   "Placeholder bubble pinned under the newest card while the agent is
@@ -371,27 +414,36 @@
    (str "thinking — turn " (inc turns) " …")])
 
 (defn- html-pane-fragment
-  [agent-id {:keys [html-cards agent-tile elided agent-state agent-turn-count]}]
-  (let [running? (= :running agent-state)]
+  [agent-id view-id {:keys [agent-state agent-turn-count]} catalog active-tokens]
+  (let [running? (= :running agent-state)
+        descriptors (descriptors-for catalog :html)]
     [:div {:id (html-pane-id agent-id)
            :class "flex flex-col h-full overflow-hidden"}
      [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
-      ":seon.render/html  (rendered view)"]
+     ":seon.render/html  (rendered view)"]
      [:div {:id (str "debug-cards-" agent-id)
             :class "seon-agent-content flex-1 overflow-auto p-2 text-xs bg-base-950"}
-      (when agent-tile
-        [:div {:class (str "border border-amber-700/60 rounded p-1 mb-2 "
-                           "bg-base-900/60")}
-         agent-tile])
-      (when (and elided (pos? elided))
-        [:div {:class "text-text-500 italic text-xs font-mono px-2 py-0.5"}
-         (str "… " elided " older " (if (= 1 elided) "entity" "entities")
-              " elided")])
-      (if (seq html-cards)
+      (if (seq descriptors)
         (into [:div {:class "flex flex-col gap-2"}]
-              (map context-block-card html-cards))
+              (map (fn [descriptor]
+                     (let [active? (contains? active-tokens
+                                              (::datastar/token descriptor))]
+                       [:details
+                        (cond-> {:class (str "border-l-2 border-amber-700/40 "
+                                             "pl-2 py-1 animate-appear")
+                                 :data-seon-key
+                                 (str "html-sec-" (::datastar/token descriptor))
+                                 :data-on:toggle
+                                 (unit-toggle-expression view-id descriptor)}
+                          active? (assoc :open true))
+                        [:summary {:class (str "cursor-pointer select-none text-xs "
+                                               "font-mono font-semibold text-text-400 "
+                                               "hover:text-text-200")}
+                         (::datastar/label descriptor)]
+                        (datastar/unit-element descriptor active?)])))
+              descriptors)
         [:div {:class "text-text-500 italic p-2"}
-         "ask this agent something ↓ — every block the agent sees renders its html twin here live"])
+         "no context block currently declares an HTML twin"])
       (when running?
         (thinking-bubble (or agent-turn-count 0)))]]))
 
@@ -565,10 +617,10 @@
     [:style (html/raw css)]))
 
 (defn- page-head
-  "Shared <head> for the debug shell: output.css (+ the optional downstream
-   brand stylesheet), highlight.js (+ the Clojure language module — NOT in
-   the core CDN build), marked.js for `data-markdown` bodies, the Phosphor
-   style overrides, and the Datastar module."
+  "Shared debug head: local output CSS, brand overrides, and Datastar only.
+
+   Markdown and Clojure highlighting are rendered server-side, so a collapsed
+   debug page downloads no legacy CDN renderers."
   [title]
   [:head
    [:meta {:charset "utf-8"}]
@@ -576,74 +628,26 @@
    [:title title]
    [:link {:rel "stylesheet" :href "/css/output.css"}]
    (brand-css-style)
-   [:link {:rel "stylesheet"
-           :href "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css"}]
-   [:script {:src "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"}]
-   [:script {:src "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/clojure.min.js"}]
-   [:script {:src "https://cdn.jsdelivr.net/npm/marked/marked.min.js"}]
    [:style (html/raw page-style-css)]
    [:script {:type "module" :src "/js/datastar.js"}]])
 
-(def ^:private page-script-js
-  "Inline page JS for the debug shell — the re-highlight / markdown /
-   details-open-state / bottom-autoscroll passes plus the Cmd/Ctrl+Enter
-   chat submit. Every pass is a no-op on nodes whose state already matches,
-   so the MutationObserver settles instead of looping."
-  (str "function seonHighlightAll(){"
-       "if(!window.hljs)return;"
-       "document.querySelectorAll('pre code.language-clojure').forEach(function(el){"
-       "var t=el.textContent;"
-       "if(el.__hlSrc===t)return;"
-       "el.removeAttribute('data-highlighted');"
-       "window.hljs.highlightElement(el);"
-       "el.__hlSrc=t;});}"
-       "function seonMarkdownAll(){"
-       "if(!window.marked)return;"
-       "document.querySelectorAll('[data-markdown]').forEach(function(el){"
-       "var src=el.getAttribute('data-markdown')||'';"
-       "if(el.__mdSrc===src&&el.childNodes.length>0)return;"
-       "var esc=src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');"
-       "el.innerHTML=window.marked.parse(esc);"
-       "el.__mdSrc=src;});}"
-       "window.seonOpen=window.seonOpen||{};"
-       "document.addEventListener('click',function(e){"
-       "var s=e.target&&e.target.closest?e.target.closest('summary'):null;"
-       "if(!s)return;var d=s.parentElement;"
-       "if(d&&d.tagName==='DETAILS'&&d.hasAttribute('data-seon-key')){"
-       "setTimeout(function(){"
-       "window.seonOpen[d.getAttribute('data-seon-key')]=d.open;},0);}});"
-       "function seonReapplyOpen(){"
-       "document.querySelectorAll('details[data-seon-key]').forEach(function(d){"
-       "var k=d.getAttribute('data-seon-key');"
-       "if(k in window.seonOpen&&d.open!==window.seonOpen[k]){"
-       "d.open=window.seonOpen[k];}});}"
-       "document.addEventListener('scroll',function(e){"
-       "var c=e.target;"
-       "if(c&&c.hasAttribute&&c.hasAttribute('data-seon-scroll')){"
-       "c.__seonAtBottom=(c.scrollTop+c.clientHeight>=c.scrollHeight-40);}},true);"
-       "function seonAutoscroll(){"
-       "document.querySelectorAll('[data-seon-scroll]').forEach(function(c){"
-       "if(c.__seonAtBottom!==false){c.scrollTop=c.scrollHeight;}});}"
-       "document.addEventListener('DOMContentLoaded',function(){"
-       "seonHighlightAll();seonMarkdownAll();"
-       "seonReapplyOpen();seonAutoscroll();});"
-       "new MutationObserver(function(muts){"
-       "var any=false;for(var i=0;i<muts.length;i++){"
-       "if(muts[i].type==='childList'){any=true;break;}}"
-       "if(any){seonHighlightAll();seonMarkdownAll();"
-       "seonReapplyOpen();seonAutoscroll();}"
-       "}).observe(document.body,{subtree:true,childList:true});"
-       "document.addEventListener('keydown',function(e){"
-       "if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){"
-       "var f=document.getElementById('seon-chat-form');"
-       "if(f){e.preventDefault();f.requestSubmit();}}});"))
+(defn- debug-app-view
+  "The live debug morph target. Only active unit producers run."
+  [agent-id view-id snap catalog active-tokens]
+  [:main {:id "app-view"
+          :class "flex-1 min-h-0 flex flex-col overflow-hidden"}
+   (header/system-header @db/*conn*)
+   header/header-spacer
+   (header-fragment agent-id snap)
+   [:div {:class "flex-1 grid h-0 min-h-0"
+          :style "grid-template-columns: 1fr 1fr;"}
+    (ai-pane-fragment agent-id view-id snap catalog active-tokens)
+    (html-pane-fragment agent-id view-id snap catalog active-tokens)]
+   (context-bar-fragment agent-id snap)])
 
 (defn- debug-shell
-  "The full page for `/agent/<id>/debug` — the two-pane debug view
-   (raw context blocks left, rendered cards right) + the context-bar
-   audit instrument + a chat bar. The header is inside the morph zone so
-   it updates too; Esc returns to the agent's agent view."
-  [agent-id snap]
+  "Cheap `/agent/<id>/debug` page shell; its feed performs the first projection."
+  [agent-id view-id]
   (let [b (brand/info)]
     (str
       "<!DOCTYPE html>"
@@ -651,29 +655,26 @@
         [:html {:lang "en" :data-theme (::brand/theme b)}
          (page-head (brand/page-title b (str "agent " agent-id " · debug")))
          [:body {:class "h-screen bg-base-950 text-text-50 font-sans antialiased flex flex-col"}
-          ;; The persistent global status bar (fixed top) — a request-time
-          ;; snapshot here (this page is server-rendered, not morphed). The
-          ;; shrink-0 spacer reserves room under the fixed bar.
-          (header/system-header (deref db/*conn*))
-          [:div {:class "shrink-0" :style "height:2.25rem"}]
-          [:div {:data-init (str "@get('/agent/" agent-id "/debug/sse')")
-                 :data-on:online__window (str "@get('/agent/" agent-id "/debug/sse')")}]
-          (header-fragment agent-id snap)
-          [:div {:class "flex-1 grid h-0 min-h-0"
-                 :style "grid-template-columns: 1fr 1fr;"}
-           (ai-pane-fragment   agent-id snap)
-           (html-pane-fragment agent-id snap)]
-          (context-bar-fragment agent-id snap)
+          [:main {:id "app-view"
+                  :class "flex-1 min-h-0 flex items-center justify-center text-xs font-mono text-text-500"}
+           "loading debug view…"]
+          [:div {:id "debug-feed-opener"
+                 :style "display:none"
+                 :data-init
+                 (str "@get('/agent/" agent-id "/debug/feed?view=" view-id
+                      "', {retryMaxCount: Infinity, openWhenHidden: false})")}]
           (chat-bar-fragment agent-id)
           [:div {:class (str "shrink-0 px-2 py-0.5 text-right text-[10px] "
                              "font-mono text-text-500 bg-base-900 "
                              "border-t border-base-800")}
            "esc → agent"]
-          [:script (html/raw page-script-js)]
           [:script (html/raw
                      (str "document.addEventListener('keydown',function(e){"
                           "if(e.key==='Escape'){window.location='/agent/"
-                          agent-id "';}});"))]]]))))
+                          agent-id "';return;}"
+                          "if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){"
+                          "var f=document.getElementById('seon-chat-form');"
+                          "if(f){e.preventDefault();f.requestSubmit();}}});"))]]]))))
 
 ;; ============================================================
 ;; /data — the live data browser. Level 1: the kinds the cluster stored,
@@ -953,39 +954,13 @@
          "data: elements " (str/replace html-str "\n" "\ndata: elements ")
          "\n\n")))
 
-(defn- debug-payloads
-  "The debug view's morph fragments (header + both panes + context bar)
-   as one SSE payload string."
-  [agent-id snap]
-  (str (patch-fragment (header-fragment agent-id snap))
-       (patch-fragment (ai-pane-fragment agent-id snap))
-       (patch-fragment (html-pane-fragment agent-id snap))
-       (patch-fragment (context-bar-fragment agent-id snap))))
-
-(defn- push-agent!
-  "Re-render and write the debug morph fragments to every connection
-   watching `agent-id`. The snapshot is computed at most once per push.
-   Best-effort per-connection."
-  [agent-id]
-  (try
-    (let [conns   (get @!sse-by-agent agent-id)
-          payload (when (seq conns) (debug-payloads agent-id (snapshot agent-id)))]
-      (doseq [{:keys [res]} conns]
-        (try (some->> payload (.write res))
-             (catch :default e
-               (log/error-console! "seon.web.debug" "write failed" e))))
-      (log/info-console! "seon.web.debug" "push"
-                         {:agent agent-id :conns (count conns)}))
-    (catch :default e
-      (log/error-console! "seon.web.debug" "push! threw" e))))
-
 (defn- push-data!
   "Re-render and write the `#data-browser` morph fragment to every
    connection watching /data. Each conn carries ITS view's params
    (kind/page/system) — identical param sets render once."
   []
   (try
-    (doseq [[params cs] (group-by :params (get @!sse-by-agent ::data))]
+    (doseq [[params cs] (group-by :params @!data-connections)]
       (let [payload (patch-fragment (data-browser-fragment params))]
         (doseq [{:keys [res]} cs]
           (try (.write res payload)
@@ -994,93 +969,77 @@
     (catch :default e
       (log/error-console! "seon.web.debug" "push-data! threw" e))))
 
-(defonce ^:private !pending (atom {}))
+(defonce ^:private !data-pending? (atom false))
 
-(defn- schedule-push! [agent-id]
-  ;; First arrival in the window starts a 100ms trailing timer. Later
-  ;; arrivals inside the window just keep `!pending` set; the timer's
-  ;; callback drains it. `::data` is the data-browser pseudo-agent.
-  (let [was-pending? (get @!pending agent-id)]
-    (swap! !pending assoc agent-id true)
-    (when-not was-pending?
+(defn- schedule-data-push! []
+  (when (compare-and-set! !data-pending? false true)
       (js/setTimeout
         (fn []
-          (swap! !pending dissoc agent-id)
-          (case agent-id
-            ::data (push-data!)
-            (push-agent! agent-id)))
-        100))))
+          (reset! !data-pending? false)
+          (when (seq @!data-connections) (push-data!)))
+        100)))
 
-(defn- on-tx
-  "Schedule every active view after a committed database change.
+(defn- on-data-tx [{:seon.db/keys [datoms]}]
+  (when (and (seq datoms) (seq @!data-connections))
+    (schedule-data-push!)))
 
-   Transaction user/process provenance is historical truth, not a rendering
-   dependency graph: one agent's write may change another agent's derived
-   context. The later observed-read subscription layer narrows this candidate
-   set from actual query results; until then this correctness-first listener
-   batches all currently watched views through the existing trailing window."
-  [{:seon.db/keys [db datoms]}]
-  (when (seq datoms)
-    (doseq [aid (watching-agents)]
-      (schedule-push! aid))))
+(defn- ensure-data-listener! []
+  (when (compare-and-set! !data-listener-installed? false true)
+    (db/listen! {:seon.db/key ::data-view :seon.db/handler on-data-tx})))
 
-(defn install!
-  "Install the debug tx-listener and kick off the brand env sync.
-
-   Idempotent — re-installing replaces the prior handler. The SEON_BRAND_*
-   env vars own the `:seon.web.brand` row, and install! is the web
-   surface's boot hook (called after boot-seed! with the root conn bound).
-   Fire-and-forget — sync! never rejects and logs its own failures."
-  []
-  (brand/sync!)
-  (db/listen! {:seon.db/key     ::debug
-               :seon.db/handler on-tx}))
+(defn- release-data-listener! []
+  (when (and (empty? @!data-connections)
+             (compare-and-set! !data-listener-installed? true false))
+    (db/unlisten! {:seon.db/key ::data-view})))
 
 (defn uninstall!
-  "Remove the debug tx-listener."
+  "Remove the data browser's lazy listener, when present."
   []
-  (db/unlisten! {:seon.db/key ::debug}))
+  (when (compare-and-set! !data-listener-installed? true false)
+    (db/unlisten! {:seon.db/key ::data-view})))
 
 (defn ^:dev/before-load before-reload
-  "Uninstall the debug tx-listener before a hot reload."
+  "Uninstall the data browser's lazy listener before a hot reload."
   []
   (try (uninstall!) (catch :default _ nil)))
 
 (defn ^:dev/after-load after-reload
-  "Reinstall the debug tx-listener after a hot reload."
+  "Restore only the listener required by an already-open data browser."
   []
-  (try (install!) (catch :default _ nil)))
+  (try
+    (when (seq @!data-connections) (ensure-data-listener!))
+    (catch :default _ nil)))
 
 ;; ============================================================
-;; HTTP handlers — wired as plain reitit routes by seon.web.router's
-;; static supplement.
+;; HTTP handlers. Debug page/feed are database-derived core routes; /data is
+;; the one remaining static operator surface until its unit cutover.
 ;; ============================================================
 
-(defn- open-agent-sse!
-  "Open a debug SSE stream for `agent-id` (`/agent/<id>/debug/sse`).
-   Registers in the per-agent registry; `push-agent!` writes the debug
-   fragment set on every relevant tx."
-  [^js req ^js res agent-id]
-  (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
-                           "Cache-Control"     "no-cache"
-                           "Connection"        "keep-alive"
-                           "X-Accel-Buffering" "no"})
-  (.write res ": connected\n\n")
-  (let [conn {:id (random-uuid) :res res :opened-at (js/Date.)}]
-    (add-conn! agent-id conn)
-    (log/info-console! "seon.web.debug" "SSE OPEN"
-                       {:agent agent-id
-                        :conn-id (str (:id conn))
-                        :total (count (get @!sse-by-agent agent-id))})
-    (.on req "close"
-         (fn []
-           (remove-conn! agent-id (:id conn))
-           (log/info-console! "seon.web.debug" "SSE CLOSE"
-                              {:agent agent-id :conn-id (str (:id conn))})))
-    (try
-      (.write res (debug-payloads agent-id (snapshot agent-id)))
-      (catch :default e
-        (log/error-console! "seon.web.debug" "initial render failed" e)))))
+(defn- debug-feed-definition
+  [agent-id view-id]
+  (let [!snapshot (atom {})
+        initial (debug-projection agent-id !snapshot)
+        initial-catalog (:seon.web.debug/catalog initial)]
+    {:seon.web.feed/key [:seon.web.feed/debug agent-id view-id]
+     :seon.web.feed/live? true
+     ::datastar/view-id view-id
+     ::datastar/catalog initial-catalog
+     ::datastar/active-tokens #{}
+     :seon.web.feed/render-full
+     #(debug-app-view agent-id view-id
+                      (:seon.web.debug/snapshot initial)
+                      initial-catalog
+                      (datastar/view-active-tokens view-id))
+     :seon.web.feed/render-change
+     (fn [_change]
+       (let [projection (debug-projection agent-id !snapshot)
+             catalog (:seon.web.debug/catalog projection)
+             active (datastar/reconcile-view-catalog!
+                      {::datastar/view-id view-id
+                       ::datastar/catalog catalog})]
+         [(debug-app-view agent-id view-id
+                          (:seon.web.debug/snapshot projection)
+                          catalog active)]))}))
 
 (defn- open-data-sse!
   "SSE stream for the /data browser. The connection pins ITS view's query
@@ -1095,36 +1054,47 @@
   (let [params (data-params req)
         conn   {:id (random-uuid) :res res :params params
                 :opened-at (js/Date.)}]
-    (add-conn! ::data conn)
-    (.on req "close" (fn [] (remove-conn! ::data (:id conn))))
+    (add-data-conn! conn)
+    (ensure-data-listener!)
+    (.on req "close"
+         (fn []
+           (remove-data-conn! (:id conn))
+           (release-data-listener!)))
     (try
       (.write res (patch-fragment (data-browser-fragment params)))
       (catch :default e
         (log/error-console! "seon.web.debug" "data initial render failed" e)))))
 
 (defn debug-page!
-  "GET /agent/<id>/debug — render the two-pane debug view.
+  "GET /agent/<id>/debug — serve a cheap shell with no debug projection.
 
-   Guards a stale `<id>` (no entity in this store) with a clean 404 page
-   rather than a 500 out of `snapshot`'s lookup-ref pull."
-  [^js _req ^js res agent-id]
+   The separate feed performs the first AI render and publishes only stubs for
+   closed raw/HTML bodies."
+  {:malli/schema [:=> [:cat ::ring-request] :any]}
+  [r]
+  (let [^js res (:seon.http/node-res r)
+        agent-id (get-in r [:path-params :id])]
   (if (str/blank? agent-id)
     (write-status! res 404 "text/plain; charset=utf-8" "missing agent id")
     (if-not (agent-exists? agent-id)
       (write-status! res 404 "text/html; charset=utf-8" (agent-not-found-page agent-id))
       (write-status! res 200 "text/html; charset=utf-8"
-                     (debug-shell agent-id (snapshot agent-id))))))
+                     (debug-shell agent-id (datastar/new-view-id)))))))
 
-(defn debug-sse!
-  "GET /agent/<id>/debug/sse — open the debug view's SSE stream.
+(defn debug-feed!
+  "GET /agent/<id>/debug/feed — open the shared gzip Datastar view.
 
-   A stale `<id>` 404s cleanly (never registers a connection for a
-   nonexistent agent — every later tx would re-render it and throw)."
-  [^js req ^js res agent-id]
+   A stale id never registers a view or invokes a producer."
+  {:malli/schema [:=> [:cat ::ring-request] :any]}
+  [r]
+  (let [^js res (:seon.http/node-res r)
+        agent-id (get-in r [:path-params :id])
+        view-id (or (datastar/request-view-id r)
+                    (datastar/new-view-id))]
   (if (or (str/blank? agent-id) (not (agent-exists? agent-id)))
     (write-status! res 404 "text/plain; charset=utf-8"
                    (str "agent " agent-id " not found"))
-    (open-agent-sse! req res agent-id)))
+    (datastar/open-view-feed! r (debug-feed-definition agent-id view-id)))))
 
 (defn data-page!
   "GET /data — the live datom browser."

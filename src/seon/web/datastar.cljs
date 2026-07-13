@@ -47,7 +47,8 @@
     [seon.ui.header :as header]
     [seon.ui.html :as html]
     [seon.ui.agent-view :as agent-view]
-    [seon.web.brand :as brand]))
+    [seon.web.brand :as brand]
+    [seon.web.view-unit :as view-unit]))
 
 ;; ============================================================
 ;; View units — stable, pure presentation coordinates.
@@ -59,11 +60,9 @@
 ;; never decodes client input into code.
 ;; ============================================================
 
-(schema/register! ::coordinate-value
-  [:or :string :keyword :symbol :boolean :int :uuid])
-(schema/register! ::coordinate
-  [:map-of {:min 1} :qualified-keyword ::coordinate-value])
-(schema/register! ::token [:string {:min 1}])
+(schema/register! ::coordinate-value :seon.web.view-unit/coordinate-value)
+(schema/register! ::coordinate :seon.web.view-unit/coordinate)
+(schema/register! ::token :seon.web.view-unit/token)
 (schema/register! ::dom-id [:string {:min 1}])
 (schema/register! ::label :string)
 (schema/register! ::order :int)
@@ -104,34 +103,43 @@
    [::deactivated-tokens ::deactivated-tokens]])
 (schema/register! ::fingerprint [:string {:min 1}])
 (schema/register! ::view-id [:string {:min 1 :max 128}])
+(schema/register! ::optional-view-id [:maybe ::view-id])
 (schema/register! ::view-state
   [:map
    [::view-id ::view-id]
    [::catalog ::catalog]
    [::active-tokens ::active-tokens]])
 (schema/register! ::views [:map-of ::view-id ::view-state])
+(schema/register! ::feed-key
+  [:or
+   [:tuple [:= :seon.web.feed/agent] :seon.agent/id]
+   [:tuple [:= :seon.web.feed/agent] :seon.agent/id
+    [:= :seon.web.feed/as-of] :int]
+   [:tuple [:= :seon.web.feed/roster]]
+   [:tuple [:= :seon.web.feed/debug] :seon.agent/id ::view-id]])
+(schema/register! ::render-full [:fn fn?])
+(schema/register! ::render-change [:fn fn?])
+(schema/register! ::live? :boolean)
+(schema/register! ::feed-definition
+  [:map
+   [:seon.web.feed/key ::feed-key]
+   [:seon.web.feed/live? ::live?]
+   [:seon.web.feed/render-full ::render-full]
+   [:seon.web.feed/render-change ::render-change]
+   [::view-id {:optional true} ::view-id]
+   [::catalog {:optional true} ::catalog]
+   [::active-tokens {:optional true} ::active-tokens]])
+(schema/register! ::reconcile-catalog-request
+  [:map [::view-id ::view-id] [::catalog ::catalog]])
 ;; Ring is a third-party request boundary; Seon's owned unit state above is
 ;; fully named and uses concrete schemas.
 (schema/register! ::ring-request :map)
-
-(defn- canonical-coordinate
-  "A coordinate's entries in one platform-independent EDN order."
-  [coordinate]
-  (->> coordinate
-       (sort-by (comp str key))
-       (mapv (fn [[k v]] [k v]))))
-
-(defn- base64url
-  "UTF-8 text encoded with Node's RFC 4648 base64url implementation."
-  [text]
-  (-> (js/Buffer.from text "utf8")
-      (.toString "base64url")))
 
 (defn unit-token
   "Stable opaque token derived from a canonical unit coordinate."
   {:malli/schema [:=> [:catn [::coordinate ::coordinate]] ::token]}
   [coordinate]
-  (base64url (pr-str (canonical-coordinate coordinate))))
+  (view-unit/coordinate-token coordinate))
 
 (defn unit-dom-id
   "Stable DOM id derived from a unit coordinate."
@@ -193,7 +201,7 @@
   "Order-independent fingerprint of an ephemeral active unit set."
   {:malli/schema [:=> [:catn [::active-tokens ::active-tokens]] ::fingerprint]}
   [active-tokens]
-  (base64url (pr-str (vec (sort active-tokens)))))
+  (view-unit/encode-text (pr-str (vec (sort active-tokens)))))
 
 ;; ============================================================
 ;; Connection registry — one view descriptor per open gzip stream. A view id
@@ -485,9 +493,11 @@
   (try (uninstall!) (catch :default _ nil)))
 
 (defn ^:dev/after-load after-reload
-  "Reinstall the view tx-listener after a hot reload."
+  "Restore the view tx-listener only when a feed survived hot reload."
   []
-  (try (install!) (catch :default _ nil)))
+  (try
+    (when (seq @!feeds) (install!))
+    (catch :default _ nil)))
 
 ;; ============================================================
 ;; HTTP handlers — called from seon.web.serve when route? matched.
@@ -751,6 +761,8 @@
          (fn []
            (let [released? (release-feed! view-id feed-id)]
              (close-feed-socket! conn)
+             (when (and released? (empty? @!feeds))
+               (uninstall!))
              (log/info-console! "seon.web.datastar" "FEED CLOSE"
                                 {:seon.web.feed/id (str feed-id)
                                  :seon.web.datastar/view-id view-id
@@ -775,18 +787,34 @@
       (when (safe-view-id? view-id) view-id))
     (catch :default _ nil)))
 
+(defn request-view-id
+  "The validated ephemeral `view` query value from one Ring request."
+  {:malli/schema [:=> [:cat ::ring-request] ::optional-view-id]}
+  [r]
+  (requested-view-id (:seon.http/node-req r)))
+
 (defn- descriptor-by-token
   "Trusted catalog descriptor for `token`, or nil."
   [catalog token]
   (some #(when (= token (::token %)) %) catalog))
 
-(defn- active-element
+(defn active-unit
   "Materialize one descriptor behind its complete stable unit wrapper."
+  {:malli/schema [:=> [:catn [::descriptor ::descriptor]]
+                  :seon.render.canvas/hiccup]}
   [{token ::token dom-id ::dom-id producer ::producer}]
   [:div {:id dom-id
          :data-seon-unit token
          :data-seon-unit-active "true"}
    (producer)])
+
+(defn unit-element
+  "Render one descriptor as either an inactive stub or its active content."
+  {:malli/schema [:=> [:catn [::descriptor ::descriptor]
+                             [::active? ::active?]]
+                  :seon.render.canvas/hiccup]}
+  [descriptor active?]
+  (if active? (active-unit descriptor) (inactive-stub descriptor)))
 
 (defn- write-unit-response!
   "Finish one unit-control response with explicit status and content type."
@@ -834,7 +862,7 @@
                                                 (map inactive-stub))
                                           catalog)
                   elements (if active?
-                             (into [(active-element target)] inactive-elements)
+                             (into [(active-unit target)] inactive-elements)
                              [(inactive-stub target)])
                   body (->> elements (map html/->string) (str/join "\n"))
                   feed-id (:seon.web.feed/id view)]
@@ -850,6 +878,46 @@
               (log/error-console! "seon.web.datastar" "unit producer failed" e)
               (write-unit-response! res 500 "text/plain; charset=utf-8"
                                     "unit render failed"))))))))
+
+(defn reconcile-view-catalog!
+  "Replace one open view's trusted catalog and retain only still-present active units.
+
+   Returns the retained active tokens, or the empty set when the view closed
+   before reconciliation. Producers are never invoked."
+  {:malli/schema [:=> [:cat ::reconcile-catalog-request] ::active-tokens]}
+  [{view-id ::view-id catalog ::catalog}]
+  (let [available (into #{} (map ::token) catalog)
+        retained (atom #{})]
+    (swap! !feeds
+           (fn [feeds]
+             (if-let [view (get feeds view-id)]
+               (let [active (set/intersection (::active-tokens view) available)]
+                 (reset! retained active)
+                 (assoc feeds view-id
+                        (assoc view ::catalog catalog ::active-tokens active)))
+               feeds)))
+    @retained))
+
+(defn view-active-tokens
+  "The current ephemeral active-unit set for one open view."
+  {:malli/schema [:=> [:catn [::view-id ::view-id]] ::active-tokens]}
+  [view-id]
+  (or (::active-tokens (get @!feeds view-id)) #{}))
+
+(defn new-view-id
+  "Mint one ephemeral browser-view identity."
+  {:malli/schema [:=> [:cat] ::view-id]}
+  []
+  (str (random-uuid)))
+
+(defn open-view-feed!
+  "Open one derived view on the shared gzip Datastar feed registry."
+  {:malli/schema [:=> [:catn [::ring-request ::ring-request]
+                             [::feed-definition ::feed-definition]]
+                  ::view-id]}
+  [r feed]
+  (ensure-installed!)
+  (open-feed! (:seon.http/node-req r) (:seon.http/node-res r) feed))
 
 ;; ============================================================
 ;; Per-agent view (/agent/{id}) — the shim page + the feed bound to
@@ -968,7 +1036,8 @@
             (open-feed!
               req res
               (cond->
-                {:seon.web.feed/key [:agent id :as-of t]
+                {:seon.web.feed/key [:seon.web.feed/agent id
+                                     :seon.web.feed/as-of t]
                  :seon.web.feed/live? false
                  :seon.web.feed/render-full
                  #(agent-view/agent-view frozen id)
@@ -979,7 +1048,7 @@
             (let [!dependencies
                   (atom (agent-view/agent-view-dependencies @db/*conn* id))]
               (cond->
-                {:seon.web.feed/key [:agent id]
+                {:seon.web.feed/key [:seon.web.feed/agent id]
                  :seon.web.feed/live? true
                  :seon.web.feed/render-full
                  #(agent-view/agent-view @db/*conn* id)
@@ -1033,7 +1102,7 @@
         view-id (requested-view-id req)]
     (open-feed! req res
                 (cond->
-                  {:seon.web.feed/key [:roster]
+                  {:seon.web.feed/key [:seon.web.feed/roster]
                    :seon.web.feed/live? true
                    :seon.web.feed/render-full #(roster-view @db/*conn*)
                    :seon.web.feed/render-change

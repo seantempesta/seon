@@ -29,6 +29,8 @@
    :seon.route/view-unit   ["/view/unit" :get]
    :seon.route/agent       ["/agent/{id}" :get]
    :seon.route/agent-feed  ["/agent/{id}/feed" :get]
+   :seon.route/agent-debug ["/agent/{id}/debug" :get]
+   :seon.route/agent-debug-feed ["/agent/{id}/debug/feed" :get]
    :seon.route/agent-call  ["/agent/{id}/call" :post]})
 
 (deftest seed-set-is-the-corrected-contract
@@ -44,7 +46,8 @@
     (testing "the roster and per-agent feeds stay separate GET paths"
       (is (contains? by-nm :seon.route/agents))
       (is (contains? by-nm :seon.route/agents-feed))
-      (is (contains? by-nm :seon.route/agent-feed)))
+      (is (contains? by-nm :seon.route/agent-feed))
+      (is (contains? by-nm :seon.route/agent-debug-feed)))
     (testing "the one action door is the per-agent POST /call (no per-ns/per-fn routes)"
       (is (= [:seon.route/agent-call]
              (mapv :seon.route/name (filter #(= :post (:seon.route/method %)) rows))))
@@ -109,7 +112,7 @@
                                                           [?e :seon.route/name :seon.route/agent]
                                                           [?e :seon.route/handler ?h]]
                                                         :seon.db/conn conn}))]
-                           (is (= 7 (count names)) "seven entities after a double seed — no duplicates")
+                           (is (= 9 (count names)) "nine entities after a double seed — no duplicates")
                            (is (= (set (keys expected)) (set names)))
                            (is (symbol? h) "handler reads back as a native symbol")
                            (is (= 'seon.web.datastar/serve-agent-page! h))))))))

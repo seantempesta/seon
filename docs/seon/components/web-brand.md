@@ -31,7 +31,7 @@ All schemas registered via `schema/register!` in the ns. Optional = absent: a mi
 
 ## Env sync — env OWNS the row
 
-`sync!` runs at boot (kicked from `seon.web.debug/install!`, after `boot-seed!` with the root conn bound, fire-and-forget). Per attr against `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE` / `SEON_BRAND_THEME`:
+`sync!` is awaited directly by `seon.client` at boot after the root connection is ready. Per attr against `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE` / `SEON_BRAND_THEME`:
 
 - env set and ≠ row value → assert (identity upsert)
 - env unset but row has a value → retract

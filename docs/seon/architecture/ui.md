@@ -209,9 +209,13 @@ is a tile. All pages are agent views — one mechanism, a tree of routes:
   collapsible blocks, with HTML twins alongside when present. It also derives
   the total prompt token estimate, per-block token breakdown, cache boundary,
   agent state, and turn diagnostics. It is available for every agent and does
-  not alter the prompt. Raw AI text remains exact; expensive HTML twins are
-  windowed/loaded on demand. It uses the same gzip Datastar subscription graph
-  as every other live page, not a provenance-routed debug listener.
+  not alter the prompt. Its page GET is an empty shell: the feed renders AI
+  once, retains the exact assembled prompt behind a lazy raw unit, and exposes
+  source-block bodies plus HTML twins as closed stubs. HTML discovery projects
+  metadata only; opening one twin materializes only that current renderer.
+  It uses the same gzip Datastar subscription graph and activation door as every
+  other live page, not a provenance-routed debug listener. With no open page it
+  owns no listener or render work.
 - **roster** (`/agents`) — the live agent list, backed by `/agents/feed` and
   the same whole-element Datastar morph mechanism.
 - **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler

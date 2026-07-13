@@ -232,7 +232,7 @@
 ;; datoms, so nothing 404s: static assets, the secondary state-changing POST
 ;; doors (each `:seon.route/same-origin`-gated), `/sse`, the back-compat
 ;; flat `/call`, and the operator dev tools (`/data` + `/agent/{id}/debug`,
-;; `seon.web.debug`). db->routes supplies the seven core routes; this supplies
+;; `seon.web.debug`). db->routes supplies the core routes; this supplies
 ;; the rest. FLAG (coordination → Core): the secondary POST doors below should
 ;; be seeded as `:seon.route/*` datoms for fully data-driven routing — until
 ;; then they live here.
@@ -253,18 +253,10 @@
      ["/js/{*path}"  {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/sse"         {:get {:handler (fn [r] (sse (node-req r) (node-res r)) hijacked)}}]
 
-     ;; Operator dev tools (seon.web.debug) — the datom browser + the
-     ;; per-agent two-pane debug view. Plain leaf handlers (no serve
-     ;; state), required directly; distinct paths from the seeded
-     ;; `/agent/{id}` family, so no reitit conflict.
+     ;; The data browser is the remaining static operator route. Per-agent
+     ;; debug page/feed routes are ordinary database-derived core routes.
      ["/data"     {:get {:handler (fn [r] (debug/data-page! (node-req r) (node-res r)) hijacked)}}]
      ["/data/sse" {:get {:handler (fn [r] (debug/data-sse! (node-req r) (node-res r)) hijacked)}}]
-     ["/agent/{id}/debug"     {:get {:handler (fn [r] (debug/debug-page! (node-req r) (node-res r)
-                                                                         (get-in r [:path-params :id]))
-                                               hijacked)}}]
-     ["/agent/{id}/debug/sse" {:get {:handler (fn [r] (debug/debug-sse! (node-req r) (node-res r)
-                                                                        (get-in r [:path-params :id]))
-                                               hijacked)}}]
 
      ["/chat"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler chat)}}]
      ["/stop"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler stop)}}]
@@ -336,7 +328,7 @@
    handlers + the latest route datoms). `config` keys:
    `:seon.web.router/{sse static chat stop resume clear log create-agent
    complete}` (the serve handler fns) + `:seon.web.router/same-origin?` (the
-   predicate). The seven CORE routes are NOT in `config` — they project from the
+   predicate). The CORE routes are NOT in `config` — they project from the
    `:seon.route/*` datoms via [[db->routes]]."
   {:malli/schema [:=> [:catn [::config :map]] :nil]}
   [config]

@@ -816,6 +816,13 @@ whole view. `GET /view/unit` is a reconciled `:seon.route/*` fact, resolves only
 through the trusted open catalog, and returns complete stable-id HTML roots.
 Unknown/closed views and units invoke no producer. Individual page cutovers are
 in progress; no page-specific unit endpoint or second feed registry was added.
+The per-agent debug page is now cut over completely: its GET performs no context
+or HTML render, `/debug/feed` uses the shared gzip registry/listener, raw bodies
+and HTML twins begin as inactive stubs, one lazy unit exposes the exact assembled
+prompt, HTML discovery reads only metadata, and active twins materialize one
+current renderer. The old `/debug/sse` registry/listener/timer/framing path is
+deleted. The final live feed close also removes the shared tx listener; `/data`
+keeps its legacy stream temporarily but installs it only while that page is open.
 
 - Decompose the global header, roster membership/rows/previews, agent shell,
   each surface pair, focus controller, debug raw/HTML/diagnostic panes, and data
@@ -854,9 +861,11 @@ pull, touched/lazy entity, installed-schema, temporal, and basis reads. An
 unbound read allocates no observation data; nested scopes compose; requests and
 results normalize immutable instants, UUIDs, bigints, bytes, and collections;
 DB handles and lazy entities never escape. Foreign, lazy, temporal, and opaque
-reads are conservatively non-replayable. Semantic replay/result comparison and
-unit subscription indexes are the next step; no speculative result cache has
-been introduced ahead of that correctness boundary.
+reads are conservatively non-replayable. Semantic replay now validates exact
+per-operation requests, uses injective tagged values, rejects lossy collection
+normalization, and compares current results without recursively capturing its
+own reads. Unit subscription indexes are the next step; no speculative result
+cache has been introduced ahead of that correctness boundary.
 
 - Add a synchronous observer at every `seon.db` read boundary with no
   meaningful overhead when unbound.

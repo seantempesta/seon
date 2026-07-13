@@ -23,11 +23,14 @@
     [clojure.test.check.generators :as gen]
     [clojure.test.check.properties :as prop :include-macros true]
     [seon.client :as client]
+    [seon.agent.debug :as agent-debug]
     [seon.db :as db]
     [seon.derive :as derive]
+    [seon.ui.agent-view :as agent-view]
     [seon.ui.html :as html]
     [seon.web.brand :as brand]
-    [seon.web.datastar :as datastar]))
+    [seon.web.datastar :as datastar]
+    [seon.web.debug :as debug]))
 
 (defn- check-property
   "Assert a deterministic test.check property and surface its shrink."
@@ -139,6 +142,140 @@
         "an inactive unit is a complete hiccup target")
     (is (zero? @renders)
         "catalog and stub construction never speculate behind the unit door")))
+
+(deftest unit-element-and-catalog-reconciliation-pay-only-for-active-content
+  (let [renders (atom 0)
+        catalog (datastar/unit-catalog
+                  [{::datastar/coordinate
+                    {:seon.agent/id agent-a
+                     :seon.agent.ctx/name :seon.agent.ctx/transcript}
+                    ::datastar/producer
+                    #(do (swap! renders inc) [:div "rendered"])}])
+        descriptor (first catalog)
+        token (::datastar/token descriptor)]
+    (is (vector? (datastar/unit-element descriptor false)))
+    (is (zero? @renders) "an inactive unit is only a stub")
+    (is (vector? (datastar/unit-element descriptor true)))
+    (is (= 1 @renders) "activation crosses exactly one producer boundary")
+    (reset! renders 0)
+    (with-redefs [datastar/!feeds
+                  (atom {"catalog-view"
+                         {::datastar/view-id "catalog-view"
+                          ::datastar/catalog catalog
+                          ::datastar/active-tokens #{token "removed-token"}}})]
+      (is (= #{token}
+             (datastar/reconcile-view-catalog!
+               {::datastar/view-id "catalog-view"
+                ::datastar/catalog catalog})))
+      (is (zero? @renders)
+          "catalog refresh intersects active membership without rendering"))))
+
+(deftest debug-page-get-is-a-shell-and-never-renders-debug-content
+  (async done
+    (-> (with-conn [agent-a]
+          (fn [conn]
+            (let [original db/*conn*
+                  calls (atom 0)
+                  [res observed] (response-probe)]
+              (set! db/*conn* conn)
+              (try
+                (with-redefs [agent-debug/ctx-preview
+                              (fn [_]
+                                (swap! calls inc)
+                                {:seon.agent.debug/ok? true
+                                 :seon.render/text "must-not-render"})]
+                  (debug/debug-page!
+                    {:seon.http/node-res res
+                     :path-params {:id agent-a}})
+                  (is (= 200 (::response-status @observed)))
+                  (is (str/includes? (::response-body @observed) "/debug/feed?view="))
+                  (is (not (str/includes? (::response-body @observed)
+                                          "must-not-render")))
+                  (is (zero? @calls)
+                      "opening the page shell performs no AI or HTML projection"))
+                (finally
+                  (set! db/*conn* original))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest debug-feed-projection-renders-ai-once-and-html-only-when-active
+  (async done
+    (-> (with-conn [agent-a]
+          (fn [conn]
+            (let [original db/*conn*
+                  ai-renders (atom 0)
+                  html-renders (atom 0)
+                  !snapshot (atom {})]
+              (set! db/*conn* conn)
+              (try
+                (with-redefs
+                  [agent-debug/ctx-preview
+                   (fn [request]
+                     (is (= #{:ai} (:seon.render/formats request)))
+                     (swap! ai-renders inc)
+                     {:seon.agent.debug/ok? true
+                      :seon.render/text "ai"
+                      :seon.render/token-estimate 5
+                      :seon.agent.ctx/rendered-blocks
+                      [{:seon.agent.ctx/name :probe
+                        :seon.agent.ctx/priority 1
+                        :seon.render/text "ai"}]})
+                   agent-view/surface-catalog
+                   (fn [_ _]
+                     [{::agent-view/selection "context-probe"
+                       ::agent-view/label "probe"
+                       ::agent-view/read-attrs #{}
+                       ::agent-view/touch 0
+                       ::agent-view/focus-touch 0}
+                      {::agent-view/selection "canvas"
+                       ::agent-view/label "canvas"
+                       ::agent-view/read-attrs #{}
+                       ::agent-view/touch 0
+                       ::agent-view/focus-touch 0}])
+                   agent-view/materialize-surface
+                   (fn [_]
+                     (swap! html-renders inc)
+                     [:div "html"])]
+                  (let [projection (@#'debug/debug-projection agent-a !snapshot)
+                        catalog (:seon.web.debug/catalog projection)
+                        exact-unit (some #(when (= -1
+                                                    (get (::datastar/coordinate %)
+                                                         :seon.web.debug/debug-block-index))
+                                            %)
+                                         catalog)
+                        html-unit (some #(when (= :html
+                                                   (get (::datastar/coordinate %)
+                                                        :seon.web.debug/debug-format))
+                                           %)
+                                        catalog)]
+                    (@#'debug/debug-app-view
+                      agent-a "debug-test-view"
+                      (:seon.web.debug/snapshot projection)
+                      catalog #{})
+                    (is (= 1 @ai-renders)
+                        "AI blocks are projected once for prompt and diagnostics")
+                    (is (zero? @html-renders)
+                        "all closed HTML twins remain producer-free stubs")
+                    (is (str/includes?
+                          (html/->string (datastar/unit-element exact-unit true))
+                          "ai")
+                        "the exact assembled prompt is available behind one lazy unit")
+                    (let [bar (get-in projection
+                                      [:seon.web.debug/snapshot :context-bar])]
+                      (is (= (::debug/total-tokens bar)
+                             (reduce + 0 (map ::debug/tokens
+                                              (::debug/segments bar))))
+                          "the visible breakdown sums to the exact prompt total"))
+                    (@#'debug/debug-app-view
+                      agent-a "debug-test-view"
+                      (:seon.web.debug/snapshot projection)
+                      catalog #{(::datastar/token html-unit)})
+                    (is (= 1 @html-renders)
+                        "one active HTML twin invokes exactly one selected producer")))
+                (finally
+                  (set! db/*conn* original))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
 
 (deftest exclusive-activation-deactivates-the-prior-unit
   (let [renders (atom 0)
@@ -443,7 +580,7 @@
                         (swap! renders inc)
                         [[:div {:id "first-target"} "one"]
                          [:div {:id "second-target"} "two"]])
-        conn {:seon.web.feed/key [:agent agent-a]
+        conn {:seon.web.feed/key [:seon.web.feed/agent agent-a]
               :seon.web.feed/live? true
               ::datastar/active-tokens #{}
               :seon.web.feed/render-change render-change}]
@@ -467,7 +604,7 @@
         render-change (fn [_]
                         (swap! renders inc)
                         [[:div {:id "target"}]])
-        base {:seon.web.feed/key [:agent agent-a]
+        base {:seon.web.feed/key [:seon.web.feed/agent agent-a]
               :seon.web.feed/live? true
               :seon.web.feed/render-change render-change}]
     (with-redefs [datastar/!feeds
@@ -486,7 +623,8 @@
   (let [renders (atom 0)]
     (with-redefs [datastar/!feeds
                   (atom {"frozen-view"
-                         {:seon.web.feed/key [:agent agent-a :as-of 1]
+                         {:seon.web.feed/key [:seon.web.feed/agent agent-a
+                                              :seon.web.feed/as-of 1]
                           :seon.web.feed/live? false
                           ::datastar/active-tokens #{}
                           :seon.web.feed/render-change
@@ -536,12 +674,14 @@
                      :seon.web.unit/face :seon.web.unit.face/expanded}
                     ::datastar/producer (fn [] [:div])}])
         token (::datastar/token (first catalog))
-        base {:seon.web.feed/key [:agent agent-a]
+        uninstalls (atom 0)
+        base {:seon.web.feed/key [:seon.web.feed/agent agent-a]
               :seon.web.feed/live? true
               :seon.web.feed/render-full (fn [] [:main {:id "app-view"}])
               :seon.web.feed/render-change (constantly [])
               ::datastar/view-id view-id}]
     (with-redefs [datastar/!feeds (atom {})
+                  datastar/uninstall! (fn [] (swap! uninstalls inc))
                   datastar/push-full! (fn [_] nil)]
       (@#'datastar/open-feed!
         req-a res-a (assoc base
@@ -563,7 +703,9 @@
               "a stale close cannot release the replacement")
           (.emit req-b "close")
           (is (empty? @datastar/!feeds)
-              "closing the final owner releases catalog and active state"))))))
+              "closing the final owner releases catalog and active state")
+          (is (= 1 @uninstalls)
+              "the final close releases the otherwise-idle tx listener"))))))
 
 ;; ============================================================
 ;; 5. PER-CONNECTION views — the streamer renders EACH connection's OWN

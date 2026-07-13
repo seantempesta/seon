@@ -114,6 +114,10 @@
     ::handler 'seon.web.datastar/serve-agent-page!}
    {::pattern "/agent/{id}/feed" ::method :get  ::name ::agent-feed
     ::handler 'seon.web.datastar/open-agent-feed!}
+   {::pattern "/agent/{id}/debug" ::method :get ::name ::agent-debug
+    ::handler 'seon.web.debug/debug-page!}
+   {::pattern "/agent/{id}/debug/feed" ::method :get ::name ::agent-debug-feed
+    ::handler 'seon.web.debug/debug-feed!}
    {::pattern "/agent/{id}/call" ::method :post ::name ::agent-call
     ::handler    'seon.web.reactive.call/handle!
     ::middleware [::same-origin]}])
