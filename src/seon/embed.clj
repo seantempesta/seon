@@ -1254,18 +1254,15 @@
 (wire/register-tx-augmenter! augment-tx-with-embeddings)
 
 ;; 2. The on-ensure-db hook: install! the attr+index, then a BOUNDED backfill of
-;;    any already-stored embeddable entities. MUST fire BEFORE `::reactive`
-;;    (registration order = fire order in the registry): boot.clj requires
-;;    `seon.embed` BEFORE `seon.server.reactive`, so this ::embed registration
-;;    runs first. install!/backfill! are idempotent + restore-safe.
+;;    any already-stored embeddable entities. install!/backfill! are idempotent
+;;    and restore-safe.
 ;;
 ;;    THE LOAD-BEARING OFF-BY-DEFAULT GATE: when `SEON_EMBED` is UNSET the hook
 ;;    does NOTHING — no `install!`, so NO Proximum `:seon.embed/index` is ever
 ;;    declared on the cluster store, and no `backfill!`. A fresh consumer who
 ;;    has not opted in gets ZERO embedding machinery on their store; the seam is
 ;;    registered (so flipping `SEON_EMBED=1` and restarting the wire-server
-;;    activates it cleanly) but inert. The hook is still registered before
-;;    `::reactive` so the fire-order guarantee holds whenever it IS enabled.
+;;    activates it cleanly) but inert.
 (registry/register-on-ensure-db-hook!
   {:seon.server.registry/hook-key ::embed
    :seon.server.registry/hook-fn

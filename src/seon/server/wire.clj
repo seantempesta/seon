@@ -293,8 +293,8 @@
   ;; reseeding. db-name's VALUE is a string on the wire (the CLUSTER name);
   ;; default backend :file (the settled pod-attachable default — pass
   ;; `backend "memory"` explicitly for a JVM-side ephemeral). On open,
-  ;; registry's on-ensure-db hook installs this conn's ::raw-broadcast listener
-  ;; (+ any ::reactive one).
+  ;; registry's on-ensure-db hooks install this conn's base schema,
+  ;; ::raw-broadcast listener, and optional embedding index.
   (let [db-name (some-> (:seon.store.wire/db-name req) keyword)
         backend (some-> (:seon.store.wire/backend req) keyword)
         path    (:seon.store.wire/path req)]
@@ -641,11 +641,9 @@
 ;;
 ;; Broadcast is no longer imperative at the transact call sites. Each conn
 ;; carries a `d/listen!`-registered `::raw-broadcast` callback that fires
-;; synchronously on every commit and emits the db-name-tagged `tx` event. This
-;; is the seam the reactive engine plugs a SECOND listener (`::reactive`) into
-;; — distinct keys, both fire off the same TxReport. The durable wire id rides
-;; tx-meta (`:seon.store.wire/id`) because the listener runs on the writer
-;; thread.
+;; synchronously on every commit and emits the db-name-tagged `tx` event. The
+;; durable wire id rides tx-meta (`:seon.store.wire/id`) because the listener
+;; runs on the writer thread.
 
 (defn raw-broadcast-listener-fn
   "Return a `d/listen!` callback `(fn [tx-report])` that emits the raw
@@ -663,8 +661,7 @@
 
 ;; Register the wire-server's ::raw-broadcast listener as an on-ensure-db hook,
 ;; so EVERY conn the registry opens gets broadcast wired — without the registry
-;; requiring this ns. The reactive engine registers its own ::reactive hook the
-;; same way. Runs at every ns load — registration is key-based idempotent
+;; requiring this ns. Runs at every ns load — registration is key-based idempotent
 ;; (re-registering ::raw-broadcast replaces in place), so reloads can't
 ;; accumulate copies AND can't strand an emptied hook vector (the 2026-06-10
 ;; hook-loss bug: a defonce guard here blocked re-registration until JVM
@@ -1174,7 +1171,7 @@
         _    (println "[writer] starting with" opts)
         ;; The ambient conn is a REGISTRY entry like every other cluster db —
         ;; one open mechanism. ensure-db! creates/connects and fires the
-        ;; on-ensure-db hooks (::raw-broadcast + ::reactive + schema seeds),
+        ;; on-ensure-db hooks (::raw-broadcast + schema/index seeds),
         ;; and db-name-routed requests to this cluster resolve to the SAME
         ;; conn the unrouted (ambient) path uses.
         entry (registry/ensure-db!

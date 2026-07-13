@@ -650,9 +650,9 @@
 
 (defn- feed-event-dispatch!
   ;; Apply one pub frame: `tx` events for this pod's cluster route into
-  ;; handle-feed-event!; everything else (other clusters' txs, reactive
-  ;; changed-summaries) is ignored. The pub stream is db-agnostic — this is
-  ;; the client-side db-name demux the replay-tx reply keys.
+  ;; handle-feed-event!; other clusters' transactions are ignored. The pub
+  ;; stream is db-agnostic — this is the client-side db-name demux the
+  ;; replay-tx reply keys.
   [conn db-name ev]
   (when (and (= "tx" (:seon.store.wire/event ev))
              (= db-name (:seon.store.wire/db-name ev)))

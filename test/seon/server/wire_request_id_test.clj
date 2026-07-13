@@ -1,14 +1,10 @@
 (ns seon.server.wire-request-id-test
   "R1 (platform / wire-side): the single `transact` op must stamp the request's
-   wire id into the commit's tx-meta as `:seon.store.wire/id`, so the
-   per-conn `::reactive` listener (`reactive/on-tx!`) can read it off the
-   TxReport and carry it on the `changed-summaries` event for own-tx dedup
-   (review issue 1 — load-bearing).
+   wire id into the commit's tx-meta as `:seon.store.wire/id`. The raw
+   transaction listener carries that id on both the response and pub event,
+   which lets readers deduplicate their own writes.
 
-   The reactive-SIDE of this (on-tx! surfaces tx-meta's wire id on the event)
-   is covered by `reactive-test/request-id-rides-the-event`. This pins the
-   WIRE-SIDE: that `handle-op \"transact\"` actually puts it in tx-meta, mirroring
-   the `transact-batch` path.
+   This pins the writer side: `handle-op \"transact\"` puts the id in tx-meta.
 
    It also pins the production seal: cluster conns are `:schema-flexibility :write`
    (`store.clj`), and `seed-base-schema!` installs `:seon.store.wire/id` so

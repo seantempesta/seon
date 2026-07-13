@@ -1,37 +1,14 @@
 (ns seon.server.boot
-  "Wire-server boot entry — the platform-lane glue that composes the listener
-   contributors WITHOUT coupling them to each other.
+  "Wire-server boot entry and transaction-feed gap-recovery ops.
 
-   Why this ns exists: `seon.server.wire` deliberately does NOT `require`
-   `seon.server.reactive` (the P1 decoupling — platform must boot/test the
-   wire-server with no reactive ns present). But at runtime both need to load so
-   each registers its OWN `register-on-ensure-db-hook!` (wire → `::raw-broadcast`,
-   reactive → `::reactive`) and its OWN schema. Requiring reactive from a thin
-   boot ns — not from `wire.clj` — keeps `wire.clj` reactive-free while ensuring
-   reactive is actually on the load path when the server starts.
-
-   This ns is ALSO the home of the reactive op-wrappers (`handle-op` defmethods),
-   as the original boot docstring planned — they need both `wire` (the
-   multimethod) and `reactive`/`broadcast` (the pure fns + the pub fanout), so
-   defining them here keeps `wire.clj` decoupled. Two families of ops live here:
-
-   1. TX-FEED GAP RECOVERY: `replay-tx` — the req-socket sibling of the
-      pub-socket push feed (`broadcast/start-pub-server!`). The pod's feed
-      adapter calls it on every (re)connect with its last-applied basis-t
-      watermark and gets every missed tx back DIRECTLY in the reply (DE-2
-      lossless wake). Live delivery itself is push-only over the pub socket;
-      there is no polled per-subscriber queue.
-
-   2. QUERY SUBSCRIPTIONS (the reactive engine — changed query rows):
-      `register-subscription` / `unregister-subscription`, delegating to
-      `seon.server.reactive`. The `::reactive` on-ensure-db hook (installed here)
-      gives every conn the registry opens a reactive engine wired alongside the
-      raw broadcaster.
+   `replay-tx` is the request-socket sibling of the live transaction feed. The
+   pod calls it on every reconnect with its last-applied basis-t and receives a
+   bounded page of missed transactions. Live delivery remains push-only over
+   the pub socket; there is no polled per-subscriber queue.
 
    The wire-server is launched via `:writer` → `-m seon.server.boot` (deps.edn);
    `-main` delegates straight to `wire/-main`."
-  (:require [datahike.api :as d]
-            ;; Register the :proximum secondary-index type with datahike's
+  (:require ;; Register the :proximum secondary-index type with datahike's
             ;; `datahike.index.secondary` multimethods BEFORE any cluster conn
             ;; opens. seon.embed/install! bakes a :proximum index into a
             ;; cluster store's schema; without this require, restoring that
@@ -44,14 +21,9 @@
             [seon.server.registry :as registry]
             ;; seon.embed installs the embed-on-write tx-augmenter into
             ;; wire.clj AND registers the ::embed on-ensure-db hook (install! +
-            ;; bounded backfill). It MUST be required BEFORE seon.server.reactive
-            ;; so the ::embed hook registers (and therefore FIRES) before
-            ;; ::reactive — embeddings are part of the write, reactive summaries
-            ;; derive from the post-write db. Registration order = fire order.
-            [seon.embed]
-            [seon.server.broadcast :as bcast]
-            [seon.server.reactive :as reactive]
-            [taoensso.timbre :as log])
+            ;; bounded backfill). Loading it before the server opens a conn makes
+            ;; the hook part of that conn's one-time initialization.
+            [seon.embed])
   (:gen-class))
 
 ;; ---------------------------------------------------------------------------
@@ -109,111 +81,9 @@
            (or (:seon.store.wire/error-kind (ex-data error)) "protocol")})))))
 
 ;; ---------------------------------------------------------------------------
-;; Query subscriptions (the reactive engine) — register/unregister + the
-;; ::reactive on-ensure-db hook. Per-conn engine state, keyed by db-name.
-;; ---------------------------------------------------------------------------
-
-;; db-name (str) -> reactive engine state atom. One engine per conn/cluster.
-(defonce ^:private !engines (atom {}))
-
-(defn- engine-for [db-name]
-  (or (get @!engines db-name)
-      (let [st (reactive/new-engine-state db-name)]
-        (swap! !engines assoc db-name st)
-        (get @!engines db-name))))
-
-(defn- seed-subscription-schema!
-  "Install the durable subscription attrs into a conn so the reactive engine's
-   `register-subscription!` can persist a subscription datom under
-   `:schema-flexibility :write` (the wire-server conn flavor). Idempotent — a
-   re-seed transacts the same :db/idents (a no-op datahike upsert). The reactive
-   ns registers these in the Seon Malli registry; this installs the datahike
-   schema on the actual conn."
-  [conn]
-  (d/transact conn [{:db/ident       :seon.subscription/id
-                     :db/valueType   :db.type/string
-                     :db/unique      :db.unique/identity
-                     :db/cardinality :db.cardinality/one}
-                    {:db/ident       :seon.subscription/query
-                     :db/valueType   :db.type/string
-                     :db/cardinality :db.cardinality/one}
-                    {:db/ident       :seon.subscription/active?
-                     :db/valueType   :db.type/boolean
-                     :db/cardinality :db.cardinality/one}]))
-
-;; Install the reactive engine as a per-conn ::reactive d/listen! via the
-;; registry's on-ensure-db hook. Runs at every ns load — registration is
-;; key-based idempotent (re-registering ::reactive replaces in place), so
-;; reloads can't accumulate copies AND can't strand an emptied hook vector
-;; (the 2026-06-10 hook-loss bug: a defonce guard here blocked
-;; re-registration until JVM restart) — mirrors wire.clj's ::raw-broadcast
-;; hook. Each commit routes through the engine's two-gate dispatch and emits
-;; a changed-summaries event on the SAME pub fanout (db-name-tagged), so
-;; changed query rows ride the existing broadcast. Hook failures are caught +
-;; logged by `run-on-ensure-db-hooks!`.
-(registry/register-on-ensure-db-hook!
- {:seon.server.registry/hook-key ::reactive
-  :seon.server.registry/hook-fn
-  (fn [conn db-name]
-    (let [db-name-str (if (keyword? db-name) (subs (str db-name) 1) (str db-name))
-          state       (engine-for db-name-str)]
-      ;; seed the durable subscription attrs so register-subscription!
-      ;; can persist its datom under :schema-flexibility :write.
-      (seed-subscription-schema! conn)
-      ;; reconstitute the engine cache from any persisted active subs
-      ;; (a file-backed conn may already hold subscription datoms).
-      (try (reactive/rebuild! state conn)
-           (catch Throwable t
-             (log/warn t "reactive engine rebuild! failed on ensure-db — engine starts empty"
-                       {:seon.server.registry/db-name db-name})))
-      (d/listen conn ::reactive
-                (fn [report]
-                  (reactive/on-tx!
-                   {:db-name db-name-str
-                    :conn conn
-                    :state state
-                    :emit! (fn [ev]
-                             ;; tag the changed-summaries event with the
-                             ;; db-name for pub routing; the reactive map
-                             ;; (keywords/rows) rides natively under the
-                             ;; uniform Transit frame — no inner encode.
-                             (bcast/broadcast!
-                              {:seon.store.wire/event   "changed-summaries"
-                               :seon.store.wire/db-name db-name-str
-                               :seon.store.wire/basis-t (:seon.server.reactive/basis-t ev)
-                               :seon.store.wire/payload ev}))}
-                   report)))))})
-
-(defmethod wire/handle-op "register-subscription" [conn req]
-  (let [sub-id (:seon.store.wire/sub-id req)
-        query  (:seon.store.wire/query req)   ; SOURCE STRING (code-as-data)
-        db-name (db-name-for-req req)
-        state   (engine-for db-name)
-        resp    (reactive/register-subscription
-                 state conn
-                 {:seon.server.reactive/sub-id sub-id
-                  :seon.server.reactive/query  query})]
-    {:seon.store.wire/ok true
-     :seon.store.wire/sub-id  (:seon.subscription/id resp)
-     :seon.store.wire/basis-t (:seon.server.reactive/basis-t resp)
-     :seon.store.wire/payload resp}))
-
-(defmethod wire/handle-op "unregister-subscription" [conn req]
-  (let [sub-id (:seon.store.wire/sub-id req)
-        db-name (db-name-for-req req)
-        state   (engine-for db-name)
-        resp    (reactive/unregister-subscription
-                 state conn {:seon.server.reactive/sub-id sub-id})]
-    {:seon.store.wire/ok true
-     :seon.store.wire/sub-id (:seon.subscription/id resp)
-     :seon.store.wire/payload resp}))
-
-;; ---------------------------------------------------------------------------
 
 (defn -main
-  "Boot the wire-server. Loading this ns registered the tx-feed `replay-tx` +
-   query-subscription `handle-op` defmethods, the reactive `::reactive`
-   on-ensure-db hook, and both reactive + raw-broadcast schemas.
+  "Boot the wire-server with transaction replay and live socket fanout.
 
    `--preflight`: instead of starting the server, run the embedding-feature
    self-check (`seon.embed.preflight/run-preflight!`) and System/exit with its code (0 =

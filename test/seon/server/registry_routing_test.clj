@@ -21,7 +21,7 @@
 
 (defn ^:private isolate [t]
   ;; Snapshot BEFORE resetting hooks — restore-registry! puts the live
-  ;; hooks (::raw-broadcast, ::reactive, ...) back from the snapshot, so
+  ;; hooks (::raw-broadcast, ::embed, ...) back from the snapshot, so
   ;; running this suite in a live JVM no longer strands an empty hook
   ;; vector (one of the 2026-06-10 hook-loss vectors).
   (let [{::reg/keys [snapshot]} (reg/snapshot-registry {})]
@@ -175,8 +175,8 @@
 
 (deftest on-ensure-db-hook-can-install-a-listener-that-gets-the-tx-report
   (testing "the canonical use: a hook registers a d/listen! that receives the
-            full synchronous TxReport on every commit (the ::raw-broadcast /
-            ::reactive seam)"
+            full synchronous TxReport on every commit (the ::raw-broadcast
+            seam)"
     (let [reports (atom [])]
       (reg/register-on-ensure-db-hook!
        {::reg/hook-key ::test-listener
