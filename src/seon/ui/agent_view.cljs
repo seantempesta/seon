@@ -29,6 +29,28 @@
    [::surface-attrs ::surface-attrs]
    [::structural-attrs ::structural-attrs]
    [::header-attrs ::header-attrs]])
+(schema/register! ::selection [:string {:min 1}])
+(schema/register! ::label [:string {:min 1}])
+(schema/register! ::read-attrs [:set :qualified-keyword])
+(schema/register! ::touch :int)
+(schema/register! ::focus-touch :int)
+(schema/register! ::surface
+  [:map
+   [::selection ::selection]
+   [::label ::label]
+   [::read-attrs ::read-attrs]
+   [::touch ::touch]
+   [::focus-touch ::focus-touch]])
+(schema/register! ::surface-catalog [:vector {:min 1} ::surface])
+(schema/register! ::face [:enum :compact :expanded])
+(schema/register! ::materialize-surface-request
+  [:map
+   [:seon.db/db :seon.db/db-val]
+   [:seon.agent/id :string]
+   [::selection ::selection]
+   [::face ::face]])
+(schema/register! ::materialized-surface
+  [:or [:enum nil] :seon.render.canvas/hiccup])
 
 (declare agent-view)
 
@@ -325,8 +347,8 @@
      ::structural-attrs structural-attrs
      ::header-attrs header-attrs}))
 
-(defn- context-surface-specs
-  "Unrendered HTML surface descriptors from the agent's context root."
+(defn- context-surface-sources
+  "Unrendered HTML surface sources from the agent's context root."
   [dbv agent-id]
   (let [ctx  {:seon.db/db dbv :seon.agent/id agent-id}
         root (agent-ctx/context-root ctx)]
@@ -338,70 +360,121 @@
                      displayed-renderer (:seon.render/html child)
                      dependency-renderer (or (::render-fns/fn-sym child)
                                              displayed-renderer)]
-                 {:seon.ui.surface/selection (selection-key nm)
-                  :seon.ui.surface/label (name nm)
-                  :seon.ui.surface/node child
-                  :seon.ui.surface/root root
-                  :seon.ui.surface/renderer displayed-renderer
-                 :seon.ui.surface/read-attrs
+                 {::selection (selection-key nm)
+                  ::label (name nm)
+                  ::node child
+                  ::root root
+                  ::read-attrs
                   (cond-> (renderer-attrs dbv dependency-renderer)
                     (symbol? dependency-renderer)
                     (conj :seon.fn/source :seon.fn/read-attrs))
-                  :seon.ui.surface/touch
+                  ::touch
                   (renderer-touch dbv agent-id dependency-renderer)
-                  :seon.ui.surface/focus-touch
+                  ::focus-touch
                   (if (= nm :transcript)
                     (assistant-reply-touch dbv agent-id)
                     (renderer-touch dbv agent-id dependency-renderer))}))))
          vec)))
 
-(defn- canvas-surface-spec [dbv agent-id]
-  (let [renderer (canvas-renderer dbv agent-id)]
-    {:seon.ui.surface/selection "canvas"
-     :seon.ui.surface/label "canvas"
-     :seon.ui.surface/renderer renderer
-     :seon.ui.surface/read-attrs
+(defn- canvas-surface-source [dbv agent-id]
+  (let [renderer (canvas-renderer dbv agent-id)
+        touch (canvas-touch dbv agent-id)]
+    {::selection "canvas"
+     ::label "canvas"
+     ::read-attrs
      (cond-> (conj (renderer-attrs dbv renderer)
                    :seon.render.canvas/content)
        (symbol? renderer) (conj :seon.fn/source :seon.fn/read-attrs))
-     :seon.ui.surface/touch (canvas-touch dbv agent-id)
-     :seon.ui.surface/focus-touch (canvas-touch dbv agent-id)}))
+     ::touch touch
+     ::focus-touch touch}))
 
-(defn- surface-specs [dbv agent-id]
-  (conj (context-surface-specs dbv agent-id)
-        (canvas-surface-spec dbv agent-id)))
+(defn- surface-sources [dbv agent-id]
+  (conj (context-surface-sources dbv agent-id)
+        (canvas-surface-source dbv agent-id)))
 
-(defn- latest-focus
+(def ^:private catalog-keys
+  #{::selection ::label ::read-attrs ::touch ::focus-touch})
+
+(defn- catalog-from-sources
+  "Public surface facts projected away from their private render sources."
+  [sources]
+  (mapv #(select-keys % catalog-keys) sources))
+
+(defn surface-catalog
+  "Cheap surface facts for one agent without invoking content renderers."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/id :string]]
+                  ::surface-catalog]}
+  [dbv agent-id]
+  (catalog-from-sources (surface-sources dbv agent-id)))
+
+(defn- latest-focus-surface
   "Most recently deliberately updated surface; canvas wins an untouched tie."
   [surfaces]
   (last
-    (sort-by (juxt :seon.ui.surface/focus-touch
-                   #(if (= "canvas" (:seon.ui.surface/selection %)) 1 0)
-                   :seon.ui.surface/label)
+    (sort-by (juxt ::focus-touch
+                   #(if (= "canvas" (::selection %)) 1 0)
+                   ::label)
              surfaces)))
 
+(defn latest-focus-selection
+  "Selection of the most recently deliberately updated catalog surface."
+  {:malli/schema [:=> [:catn [::surface-catalog ::surface-catalog]]
+                  ::selection]}
+  [catalog]
+  (::selection (latest-focus-surface catalog)))
+
+(defn- render-surface-hiccup
+  "Invoke one current surface source exactly once, returning raw hiccup."
+  [dbv agent-id source]
+  (let [selection (::selection source)]
+    (if (= selection "canvas")
+      (:seon.render/hiccup
+        (render/render-agent-canvas
+          {:seon.agent/id agent-id :seon.db/db dbv}))
+      (let [root (::root source)
+            ctx  {:seon.db/db dbv
+                  :seon.agent/id agent-id
+                  :seon.agent/entity (:seon.agent/entity root)}]
+        (render/render :seon.render/html ctx (::node source))))))
+
+(defn- current-surface-source
+  "Current render source selected without deriving unrelated surface metadata."
+  [dbv agent-id selection]
+  (if (= selection "canvas")
+    {::selection "canvas"}
+    (let [root (agent-ctx/context-root
+                 {:seon.db/db dbv :seon.agent/id agent-id})]
+      (some (fn [child]
+              (when (and (contains? child :seon.render/html)
+                         (= selection
+                            (selection-key (:seon.agent.ctx/name child))))
+                {::selection selection ::node child ::root root}))
+            (:seon.agent.ctx/children root)))))
+
+(defn materialize-surface
+  "Materialize one current surface face, or nil when it is unavailable."
+  {:malli/schema [:=> [:cat ::materialize-surface-request]
+                  ::materialized-surface]}
+  [{dbv :seon.db/db agent-id :seon.agent/id
+    selection ::selection requested-face ::face}]
+  (when-let [source (current-surface-source dbv agent-id selection)]
+    (some-> (render-surface-hiccup dbv agent-id source)
+            (face requested-face))))
+
 (defn- render-surface
-  "Render one descriptor once, then project its compact/expanded faces."
-  [dbv agent-id spec]
-  (let [selection (:seon.ui.surface/selection spec)
-        h (if (= selection "canvas")
-            (:seon.render/hiccup
-              (render/render-agent-canvas
-                {:seon.agent/id agent-id :seon.db/db dbv}))
-            (let [root (:seon.ui.surface/root spec)
-                  ctx  {:seon.db/db dbv
-                        :seon.agent/id agent-id
-                        :seon.agent/entity (:seon.agent/entity root)}]
-              (render/render :seon.render/html ctx
-                             (:seon.ui.surface/node spec))))
-        h (if (= selection "canvas")
-            (or h [:div {:class "p-2 text-text-500 text-xs"}
-                   "No canvas render yet."])
-            h)]
-    (when h
-      (assoc spec
-             :seon.ui.surface/compact (face h :compact)
-             :seon.ui.surface/expanded (face h :expanded)))))
+  "Render one source once, then project its compact and expanded faces."
+  [dbv agent-id source]
+  (let [selection (::selection source)
+        rendered (render-surface-hiccup dbv agent-id source)
+        rendered (if (= selection "canvas")
+                   (or rendered [:div {:class "p-2 text-text-500 text-xs"}
+                                 "No canvas render yet."])
+                   rendered)]
+    (when rendered
+      (assoc source
+             ::compact (face rendered :compact)
+             ::expanded (face rendered :expanded)))))
 
 (defn- focus-marker [selection touch]
   [:div {:id "agent-view-focus-revision"
@@ -412,11 +485,11 @@
               "$seenrevision = " touch " }")}])
 
 (defn- surface-elements [surface]
-  (let [selection (:seon.ui.surface/selection surface)
-        label (:seon.ui.surface/label surface)
-        touch (:seon.ui.surface/touch surface)]
-    [(primary-panel selection (:seon.ui.surface/expanded surface) touch)
-     (rail-button selection label (:seon.ui.surface/compact surface) touch)]))
+  (let [selection (::selection surface)
+        label (::label surface)
+        touch (::touch surface)]
+    [(primary-panel selection (::expanded surface) touch)
+     (rail-button selection label (::compact surface) touch)]))
 
 (defn agent-view-changes
   "Complete ID-addressed elements affected by one coalesced transaction batch.
@@ -431,21 +504,23 @@
   [dbv agent-id changed-attrs]
   (if (structural-change? changed-attrs)
     [(agent-view dbv agent-id)]
-    (let [specs (surface-specs dbv agent-id)
-          affected-specs
+    (let [sources (surface-sources dbv agent-id)
+          catalog (catalog-from-sources sources)
+          affected-sources
           (filterv #(seq (set/intersection
                            changed-attrs
-                           (:seon.ui.surface/read-attrs %)))
-                   specs)
-          affected (mapv #(render-surface dbv agent-id %) affected-specs)
-          latest (latest-focus specs)]
+                           (::read-attrs %)))
+                   sources)
+          affected (mapv #(render-surface dbv agent-id %) affected-sources)
+          latest-selection (latest-focus-selection catalog)
+          latest (some #(when (= latest-selection (::selection %)) %) catalog)]
       ;; A formerly-present conditional renderer returning nil requires a shell
       ;; morph so Datastar removes both of its old faces. Ordinary updates stay
       ;; on the small, ID-addressed path.
       (if (some nil? affected)
         [(agent-view dbv agent-id)]
-        (into (cond-> [(focus-marker (:seon.ui.surface/selection latest)
-                                      (:seon.ui.surface/focus-touch latest))]
+        (into (cond-> [(focus-marker (::selection latest)
+                                      (::focus-touch latest))]
                 (seq (set/intersection header-attrs changed-attrs))
                 (conj (header/system-header dbv)))
               (mapcat surface-elements)
@@ -458,16 +533,21 @@
                   :any]}
   [db agent-id]
   (try
-    (let [surfaces (->> (surface-specs db agent-id)
+    (let [sources (surface-sources db agent-id)
+          catalog (catalog-from-sources sources)
+          surfaces (->> sources
                         (keep #(render-surface db agent-id %))
-                        (sort-by (juxt (comp - :seon.ui.surface/touch)
-                                       :seon.ui.surface/label))
+                        (sort-by (juxt (comp - ::touch)
+                                       ::label))
                         vec)
-          latest (or (latest-focus surfaces)
-                     {:seon.ui.surface/selection "canvas"
-                      :seon.ui.surface/focus-touch 0})
-          latest-selection (:seon.ui.surface/selection latest)
-          latest-touch (:seon.ui.surface/focus-touch latest)]
+          present-selections (into #{} (map ::selection) surfaces)
+          present-catalog (filterv #(contains? present-selections
+                                               (::selection %))
+                                   catalog)
+          latest-selection (latest-focus-selection present-catalog)
+          latest (some #(when (= latest-selection (::selection %)) %)
+                       present-catalog)
+          latest-touch (::focus-touch latest)]
       [:main {:id "app-view"
               :class "flex flex-col gap-2 w-full min-h-0 flex-1 overflow-hidden"
               :data-signals__ifmissing
@@ -497,19 +577,19 @@
         [:div {:id "agent-view-primary"
                :class "col-span-2 min-h-0 h-full overflow-hidden"}
          (doall
-           (map (fn [{selection :seon.ui.surface/selection
-                      expanded :seon.ui.surface/expanded
-                      touch :seon.ui.surface/touch}]
+           (map (fn [{selection ::selection
+                      expanded ::expanded
+                      touch ::touch}]
                   (primary-panel selection expanded touch))
                 surfaces))]
         [:aside {:id "agent-view-context"
                  :class (str "agent-view-rail col-span-1 flex flex-col gap-2 "
                              "min-h-0 h-full overflow-y-auto")}
          (doall
-           (map (fn [{selection :seon.ui.surface/selection
-                      label :seon.ui.surface/label
-                      compact :seon.ui.surface/compact
-                      touch :seon.ui.surface/touch}]
+           (map (fn [{selection ::selection
+                      label ::label
+                      compact ::compact
+                      touch ::touch}]
                   (rail-button selection label compact touch))
                 surfaces))]]])
     (catch :default e
