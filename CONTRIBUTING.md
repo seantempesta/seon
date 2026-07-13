@@ -29,7 +29,7 @@ Read [`CLAUDE.md`](CLAUDE.md) first — it is the real contributor orientation
 active runtime is the **CLJS pod** (a long-running Node process, `src/seon/*.cljs`,
 web UI on `http://localhost:7890`) backed by the JVM Datahike database server;
 the JVM main-app (`src/seon/*.clj`) is a **paused** track. `bin/seon`
-supervises both — `bin/seon start all`, `status`, `tail pod`, `restart pod`.
+manages both — `bin/seon up`, `status`, `logs pod --follow`, `restart`.
 For the mental model, see [`docs/seon/architecture/overview.md`](docs/seon/architecture/overview.md).
 
 ## Practical contribution guidelines
@@ -58,5 +58,5 @@ These are documented for agents in `CLAUDE.md` but easy to trip over as a human:
   pathspecs (`git add path/to/file …`).
 - **The pod can wedge.** Overlapping `cljs.test` runs or a never-resolving
   Promise can jam the pod's shared async continuation — recover with
-  `bin/seon restart pod` (a pristine run), or `bin/seon cluster reset default`
+  `bin/seon restart` (a pristine run), or `bin/seon cluster reset default`
   for a fresh world.

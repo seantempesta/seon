@@ -77,10 +77,13 @@ membership registry and derives MCP addressing from database agent facts;
 `6c1079c8` removes the paused Integrant/core.async application, its entrypoints,
 resources, dependency aliases, and obsolete tests. The surviving writer gate
 passes 47 tests/295 assertions, direct Markdown tooling passes 22/340, and the
-runtime-addressing gate passes 4/16. The shell supervisor has been pruned and
-renamed around `database-server`, but it is still a large Bash implementation;
-phase 3 remains open until the in-place Babashka replacement and cold live proof
-land.
+runtime-addressing gate passes 4/16. The large Bash supervisor is now replaced
+in place by a seven-line launcher over one Babashka process graph. Kernel file
+locking, exact process identity, bounded readiness-log reads, relevant-
+environment digests, artifact manifests, scoped reset, and fail-closed process-
+group ownership pass 10 focused tests/29 assertions. Phase 3 remains open for
+active caller migration and the default-cluster cold live proof; ACME and
+Inspect follow only after that default proof.
 
 The source-grounded system audits are complete and committed:
 
@@ -436,7 +439,7 @@ is evaluated behaviorally, not by asserting prose.
 | Database vocabulary | The protocol/backend/replica path is canonical and the managed leaf is `/db`; the root/header labels are clean, while `db/store-inventory`, skills, paused JVM code, and downstream ACME still expose obsolete vocabulary. |
 | Database browser | The root inventory panel is deleted and the header now reads Datahike's maintained index count without building an inventory. The inventory context block, `db/store-inventory`, `my.kb/inventory`, and `/data` still repeat broad namespace/count scans. `/data` also retains a second legacy SSE connection registry instead of the canonical lazy render-unit feed. |
 | Developer hooks | Active hook config still calls the paused nREPL JVM on port 7888, so several claimed checks silently do not run. |
-| Operator | `bin/seon` is a 2,186-line shell program exposing implementation processes and a destructive global nuke. |
+| Operator | The Babashka graph and thin launcher are built and focused-tested; active caller migration plus default/ACME/Inspect live proof remain. |
 | Tests | The retained writer gate is 47 tests/295 assertions after deleting 14 legacy server suites, but disabled and paused-application tests plus noisy expected-failure logging still need removal. |
 | UI | Surface/focus machinery exists, but active symbols, CSS, DOM, docs, skills, and ACME still say tile; four dead context renderers still load. |
 | Live rendering | Agent view unitization/read-observation is incomplete; legitimate work still needs bounded caching, layout/focus/browser proof, and grown-database profiling. |

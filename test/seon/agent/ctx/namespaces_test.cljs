@@ -292,6 +292,8 @@
     (is (str/includes? card "map-in"))
     (is (str/includes? card ":seon.db/query"))
     (is (str/includes? card ":seon.db/args?"))
+    (is (not (str/includes? card "::"))
+        "compact contracts never depend on the reader's current namespace")
     (is (not-any? #(str/includes? card %) [":=>" ":cat" "…"]))))
 
 (deftest compact-namespace-card-is-inert-at-the-reply-parser-boundary

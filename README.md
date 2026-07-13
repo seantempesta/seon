@@ -105,22 +105,16 @@ Run the core, talk to an agent, watch it work:
 ```bash
 git clone https://github.com/seantempesta/seon && cd seon
 npm install
-bin/seon prep             # one-time full build prep: clones + Java-preps the
-                          #   datahike fork (:writer + :cljs), warms the
-                          #   classpath, builds the bootstrap-CLJS bundle
 cp .env.example .env      # the config surface — edit it for keys/provider/ports
 export DEEPSEEK_API_KEY=sk-...   # (env vars override .env; either works)
-bin/seon start all        # CLJS build → database server → agent pod
+bin/seon up               # full build → database server → agent pod
 open http://localhost:7890/agents
 ```
 
-Every build artifact is supervised: `bin/seon start` checks for missing or
-stale pieces (git deps, the bootstrap-CLJS bundle the pod's self-host eval
-loads from `out/bootstrap`, the CSS) and builds them synchronously before
-spawning — so `bin/seon start all` on a fresh clone works even if you skip
-`prep`; `prep` just does the slow parts up front, loudly. The first pod boot
-also seeds the cluster store from the indexed codebase (a few seconds);
-`bin/seon status` shows what's alive, `bin/seon tail pod` follows the boot.
+`bin/seon up` builds and publishes the complete writer, CLJS, bootstrap, and
+CSS artifact closure before reconciling the managed processes. The first pod
+boot also reconciles the configured database facts. `bin/seon status` shows
+live health; `bin/seon logs pod --follow` follows boot.
 To verify a build end-to-end, `bin/test-cljs` runs the full suite in a
 fresh process (~3 min).
 
@@ -155,10 +149,9 @@ library you fork. The universal agent mechanics (how the REPL-as-output
 works) are baked into the core's system prompt, so you can freely edit
 or even empty your identity files without breaking anything.
 
-The optional JVM seat (`bin/run`, nREPL 7888) is for development and
-orchestration, not required to run agents. `bin/seon status|tail|stop`
-manage the processes; state lives under `data/` (delete it for a
-fresh world).
+`bin/seon status|logs|down` operate the complete local system; database state
+lives under `data/clusters/`. Use the scoped `bin/seon cluster reset <name>`
+transition for a fresh database.
 
 ## Status
 

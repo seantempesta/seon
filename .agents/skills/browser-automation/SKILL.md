@@ -26,7 +26,7 @@ So: confirm a feed actually pushes **server-side**, not in the browser.
 
 - A tiny Node client that GETs the `/feed` URL, gunzips the stream, and prints
   the `datastar-patch-elements` frames (the feed is `Content-Encoding: gzip`).
-- `bin/seon tail pod` — the `FEED OPEN` / `broadcast` log lines prove the
+- `bin/seon logs pod --follow` — the `FEED OPEN` / `broadcast` lines prove the
   tx-listener fired and pushed.
 - A human eyeball on the real page.
 

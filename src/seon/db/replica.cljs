@@ -120,7 +120,7 @@
 ;; pod that can't reach its writer must not boot against a local writer.
 ;;
 ;; The ping retries within a fixed budget before the fail-loud throw:
-;; `bin/seon start all` brings the database server and pod up in order, but
+;; `bin/seon up` brings the database server and pod up in order, but
 ;; the pod can exec before the writer's UDS socket accepts (or while a freshly
 ;; sha-bumped JVM warms up). Boot stays fail-loud, just not
 ;; fail-instant — after the budget the same error throws.
@@ -176,7 +176,7 @@
                          "after " n " attempts. "
                          "The pod boots only against the cluster database — there is "
                          "no local fallback. Start the database server with: "
-                         "bin/seon start wire-server")
+                         "bin/seon up")
                     {::socket-path default-request-socket-path
                      ::attempts  n
                      :seon.error/kind :core-bug}))))))

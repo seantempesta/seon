@@ -176,13 +176,12 @@ agent, and task agents; coordination flows through database facts.
 ### Supervisor Commands — `bin/seon`
 
 ```bash
-bin/seon status                 # which processes are alive, PIDs, pod port
-bin/seon start pod              # idempotent — no-op if already running
-bin/seon restart pod            # wait for "auto-boot ready" in logs/pod.log
-bin/seon restart cljs-watch
-bin/seon stop pod
-bin/seon tail pod               # tail -f logs/pod.log
-bin/seon logs all
+bin/seon up                     # rebuild + reconcile the whole dev system
+bin/seon status                 # live identities, readiness, and URL
+bin/seon restart                # drain, rebuild, and reconcile
+bin/seon down                   # drain the whole dev system
+bin/seon logs pod --follow      # follow the current pod lifetime
+bin/seon logs
 ```
 
 ### Fresh database — cluster reset
@@ -199,9 +198,9 @@ fresh runtime and database are required.
 ### Logs for Debugging
 
 ```bash
-bin/seon tail pod               # pod boot + agent activity
+bin/seon logs pod --follow      # pod boot + agent activity
 tail -f logs/cljs-watch.log     # CLJS rebuild status
-bin/seon logs all               # merged supervised logs
+bin/seon logs                   # bounded current process logs
 ```
 
 ---

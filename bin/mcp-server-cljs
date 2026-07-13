@@ -561,10 +561,10 @@
   []
   (str "No CLJS runtime connected to shadow-cljs watcher.\n"
        "Likely causes:\n"
-       "  - The pod isn't running. Start with: bin/seon start pod\n"
+       "  - The pod isn't running. Start with: bin/seon up\n"
        "  - The pod was compiled with `clj -M:cljs compile` "
        "(no REPL client). Restart cljs-watch + pod: "
-       "bin/seon restart cljs-watch && bin/seon restart pod\n"
+       "bin/seon restart\n"
        "  - Pod just started and websocket is still connecting "
        "(wait 1-2s, retry)."))
 
@@ -622,7 +622,7 @@
                           "'default/root' — a qualified id only matches a "
                           "runtime advertising that cluster). "
                           "Check (seon.client/runtime-advertisement) on the "
-                          ":client runtime, or bin/seon status / restart pod.")))))))
+                          ":client runtime, or bin/seon status / restart.")))))))
 
 (defn execute-eval [{:keys [code session_id timeout_ms agent_id]}]
   (let [port (require-port!)

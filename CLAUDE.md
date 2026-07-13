@@ -245,7 +245,7 @@ manual ns are self-describing). What stays fixed is the SHAPE of a good drive:
 
 - **Long-term planning** — a task with several steps that must survive
   interruption. The agent should break the work into durable plan items up front
-  and close them as each lands, so a mid-task `bin/seon restart pod` lets it
+  and close them as each lands, so a mid-task `bin/seon restart` lets it
   RESUME from what's still open without re-planning. Win condition: continuity
   across turns and restarts, not finishing in one shot.
 
@@ -628,7 +628,7 @@ then run the focused test door for the code you changed.
 
 `cljs-watch` recompiles `.cljs` on every save; the
 running pod picks up the new build. If the pod gets into a bad state,
-`bin/seon restart pod` (wait for `auto-boot ready` in `logs/pod.log`). A
+`bin/seon restart` (the command returns only after observed readiness). A
 fresh database is `bin/seon cluster reset default`.
 
 ---
@@ -758,29 +758,11 @@ bracket reds the gate — that's the forcing function, never blanket-suppress.
 unit. Green now means two things: assertions pass AND zero un-expected core
 faults accumulated during the run.
 
-**When a core fault fires (the triage chain — use it, don't log-dig):**
-`bin/seon watch-faults` (the orchestrator's standing background task) hands
-you the marker → `(seon.agent.inspect/errors)` → `(… /error {::eid N})`
-(envelope + frames + the turn join; `inspect/turn` replays the byte-exact
-prompt) → `(… /repro {::eid N})` (the frozen as-of db + a ready-to-eval
-repro expression + a `::fork-hint`) → run the hint verbatim:
-`bin/seon cluster fork default <t>` boots a LIVE, WRITABLE copy of the
-database snapshot at the failure moment (own pod/store; the error datom is absent
-inside its own fork — `at` precedes the recording tx). Fix there, verify,
-`bin/seon cluster destroy <fork>` — the source store is untouched by
-construction. This whole loop is acceptance-drill-proven end to end
-(`docs/prds/agent-ctx/research/error-workflow-drill-2026-07-05.md`).
-
-**Forking a cluster (supervisor-only):** use this for a counterfactual, never
-for a normal fresh sample. First obtain the source basis-t — preferably the
-`::fork-hint` from `inspect/repro`, whose `:seon.error/at` is the exact db
-value the failure saw — then run:
-
-```bash
-bin/seon cluster fork default <basis-t> fork-default-<basis-t>
-# patch source/config as needed; drive the same stimulus against the fork pod
-bin/seon cluster destroy fork-default-<basis-t>
-```
+**When a core fault fires:** `bin/seon status` and `bin/seon logs pod` expose
+the failed lifetime. Then use `(seon.agent.inspect/errors)` → `(… /error
+{::eid N})` → `(… /repro {::eid N})` for the recorded envelope, exact turn,
+as-of database, and reproduction form. The writable-fork operator transition
+is phase-4 work; do not emulate it by copying live database files.
 
 `cluster fork` copies the source store and turn-capture blobs, preserves eids
 and tx ids at the requested basis, starts a separate writable pod on a fresh
@@ -836,14 +818,16 @@ authoritative database writes; it is not a second application.
 
 ### Process management — `bin/seon`
 
-**Use `bin/seon` as the supervisor.** It's idempotent, multi-agent-safe (mkdir-mutex per process), and replaces ad-hoc `pkill` + `nohup` patterns. Any number of agents can call `start`/`stop`/`restart` simultaneously — the supervisor arbitrates. Logs go to `logs/<process>.log` (consistent path; any agent can `bin/seon tail <process>` from anywhere). See [[docs/seon/process-management]] for the full protocol.
+**Use `bin/seon` as the one development operator.** It reconciles the complete
+watcher → database-server → pod graph under one kernel lock and replaces ad-hoc
+per-process commands. See [[docs/seon/process-management]] for the protocol.
 
 ```bash
-bin/seon start pod         # idempotent — no-op if already running
-bin/seon status            # which processes are alive, PIDs, pod port
-bin/seon tail pod          # tail -f logs/pod.log
-bin/seon restart cljs-watch
-bin/seon stop pod
+bin/seon up                # rebuild and reconcile the complete system
+bin/seon status            # live process identity, readiness, and URL
+bin/seon logs pod --follow # follow the current pod lifetime
+bin/seon restart           # drain, rebuild, and reconcile
+bin/seon down              # drain the complete system
 ```
 
 The supervisor owns the pod, database server, and CLJS build watcher. Use
@@ -860,32 +844,28 @@ indexed codebase on boot. Agent-authored facts in that database are deleted.
 
 The dev pod runs `:seon.config/on-core-error :crash` — a `:core` fault
 persists its datom, prints `SEON-CORE-FAULT <deepest cause> @t=<basis-t>`,
-and EXITS the pod. **At session start the orchestrator runs
-`bin/seon watch-faults` as a background task**: it blocks until the first
-NEW un-expected marker (starts at end-of-file; `SEON-EXPECTED-CORE-FAULT`
-fixture prints are NOT alarms), prints it + the last ~20 log lines, and
-exits 0 — so the harness re-invokes you when the pod dies on our own bug.
+and exits the pod. `bin/seon status` reports the degraded target and
+`bin/seon logs pod` shows the bounded lifetime log.
 Triage via `seon.agent.inspect`: `(errors)` (compact recent list) →
 `(error {:seon.agent.inspect/eid N})` (full envelope + turn/agent joins) →
 `(repro {:seon.agent.inspect/eid N})` (the as-of db frozen at the failure +
-a ready-to-eval repro expression). Then `bin/seon restart pod`.
-`--cluster <name>` watches another cluster's pod log.
+a ready-to-eval repro expression). Then `bin/seon restart`.
 
 ### Log Files for Debugging
 
 ```bash
-bin/seon tail pod                                # pod boot + agent activity
-tail -f logs/cljs-watch.log                      # CLJS rebuild status
-bin/seon logs all                                # merged supervised logs
+bin/seon logs pod --follow                       # pod boot + agent activity
+bin/seon logs watcher --follow                   # CLJS rebuild status
+bin/seon logs                                    # bounded logs for all processes
 ```
 
 ---
 
 ## Logging
 
-Supervised processes write their own files under `logs/`. Use `bin/seon logs
-all` for a merged view and `bin/seon logs <process>` or `tail <process>` for one
-process. Do not rely on the archived JVM application's log files.
+Managed processes write lifetime logs under `logs/operator/`. Use
+`bin/seon logs` for all current lifetimes or `bin/seon logs <process>
+--follow` for one. Do not rely on archived JVM application logs.
 
 ---
 

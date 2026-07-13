@@ -16,7 +16,7 @@ JVM server, canonical CLJS runtime/UI, archive boundary, local and remote
 database synchronization, client distribution, test authority, and exact
 canvas/surface/card cutover.
 
-This PRD is in **phase 2 of 6: isolate the permanent JVM server**. The owner
+This PRD is in **phase 3 of 6: replace and cold-prove the operator**. The owner
 decisions are resolved and the coordinated clean-base proof is tagged. The
 active plan replaces mechanisms in place and deletes their superseded paths; it
 does not create compatibility namespaces or parallel architectures.
@@ -60,11 +60,11 @@ folds the final database vocabulary into the architecture docs.
 
 ## How to run the current system
 
-These are the current doors while the Babashka operator is still unbuilt:
+These are the current Babashka operator doors:
 
 ```bash
-bin/seon status pod
-bin/seon restart pod
+bin/seon status
+bin/seon restart
 bin/test-cljs
 curl -fsS http://127.0.0.1:7890/agents >/dev/null
 ```
@@ -75,7 +75,7 @@ cluster passes. Use the `browser-automation` skill for Seon's own UI and verify
 long-lived gzip SSE with a Node gunzip client because the browser bridge does
 not reliably proxy the feed.
 
-The target primary door, selected by the owner, is:
+The primary door, selected by the owner, is:
 
 ```bash
 bin/seon up
@@ -103,9 +103,9 @@ process verbs are not primary UX.
 - The writer publishes committed transaction frames and serves bounded replay.
   There is no durable query-subscription engine or second in-process subscriber
   bus.
-- `bin/seon` is a 2,186-line shell program. The replacement is a small shell
-  launcher over a Babashka process graph with explicit transitions,
-  readiness, locks, and scoped reset.
+- `bin/seon` is now a seven-line launcher over the Babashka process graph. Its
+  lifecycle gate passes 10 tests/29 assertions; default cold proof and
+  downstream ACME/Inspect caller migration remain before phase 3 closes.
 - Active hooks still call the paused JVM nREPL on port 7888, so claimed checks
   can silently fail to run. Useful checks move to direct bounded tool doors.
 - The UDS writer has the stronger transaction contract: durable request

@@ -158,12 +158,12 @@
                (when (.exists port-file)
                  (some-> port-file slurp str/trim parse-long))
                (die 2 (str "✗ seon-server-call: no --port and no " port-file
-                           " — is the database server running? (bin/seon start database-server)")))
+                           " — is the system running? (bin/seon up)")))
       deadline (+ (System/currentTimeMillis) (* 1000 (or timeout-secs 30)))
       raw (try (repl-round-trip port expr deadline)
                (catch ConnectException _
                  (die 2 (str "✗ seon-server-call: database-server REPL not reachable on 127.0.0.1:" port
-                             " — is the database server running? (bin/seon start database-server)")))
+                             " — is the system running? (bin/seon up)")))
                (catch SocketTimeoutException _
                  (die 2 (str "✗ seon-server-call: connect to 127.0.0.1:" port " timed out")))
                (catch clojure.lang.ExceptionInfo e

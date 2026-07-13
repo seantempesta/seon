@@ -33,9 +33,9 @@ Use the shared supervisor for observation:
 
 ```bash
 bin/seon status
-bin/seon logs all 120
-bin/seon logs pod 200
-bin/seon logs database-server 200
+bin/seon logs --lines 120
+bin/seon logs pod --lines 200
+bin/seon logs writer --lines 200
 ```
 
 Do not start, stop, restart, reset, or delete a database unless the task grants
