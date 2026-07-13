@@ -45,25 +45,25 @@ export SEON_RUNTIME_ROOT=/path/to/seon   # artifacts from the seon checkout
 export SEON_EXTRA_SRC=/path/to/acme      # their deps.edn project
 export SEON_EXTRA_PRELOAD=acme.pod       # their entry ns
 export SEON_EXTRA_NPM=/path/to/acme/node_modules  # only if npm deps
-cd /path/to/seon && bin/seon restart cljs-watch && bin/seon restart pod
+cd /path/to/seon && bin/seon restart
 ```
 
-The entry ns (`acme.pod`) `:require`s their whole surface and registers
-it (mirrors `seon.dev.test-preload`):
+The entry ns (`acme.pod`) `:require`s its whole compiled surface and registers
+the public functions that belong to the downstream prefix:
 
 ```clojure
 (ns acme.pod
   (:require [acme.core] [acme.vendor.x]
             [clojure.string :as str]
             [seon.client :as client])
-  (:require-macros [seon.indexing :refer [specced-fn-vars]]))
+  (:require-macros [seon.indexing :refer [public-fn-vars]]))
 
 (reset! client/!extra-core-vars
         ;; filter to OWN prefix: the macro's closure also sees the seon
         ;; surface (those dedup away at boot-index, but filtering keeps
         ;; the registration honest)
         (filterv #(str/starts-with? (str (:ns (meta %))) "acme.")
-                 (specced-fn-vars)))
+                 (public-fn-vars)))
 ```
 
 ## Mechanics (each grounded in the research doc)
@@ -73,8 +73,8 @@ it (mirrors `seon.dev.test-preload`):
   into every `clj -M:cljs` invocation (deps mode: the tools.deps
   classpath IS the build's source set) plus
   `--config-merge '{:devtools {:preloads [<SEON_EXTRA_PRELOAD>]}}'`
-  (deep-merge CONCATS vectors — `seon.dev.test-preload` is kept). All
-  env unset = byte-identical commands (`bin/seon print-cmd <name>`).
+  so the downstream entry namespace runs after the ordinary product preload.
+  All env unset = the ordinary core build.
 - Boot indexer: registered extra vars get `:seon.fn` rows, their nses
   get FULL-SOURCE `:seon.ns` rows, and they join the core ns-set
   (replay-skipped — compiled code is never re-evaluated from the database).
@@ -97,9 +97,9 @@ it (mirrors `seon.dev.test-preload`):
 - **Reserved prefixes:** `seon.*` (core) and `my.*` (the agent-authored
   database corpus) are refused at boot-index time — the pod
   fails loudly naming the offending ns. Use your own root prefix.
-- Changing `SEON_EXTRA_SRC` requires `bin/seon restart cljs-watch`
-  (classpath fixed at watcher launch); file edits inside the root hot
-  reload like seon's own.
+- Changing `SEON_EXTRA_SRC` requires `bin/seon restart` because the classpath
+  is fixed when the watcher launches; file edits inside the root hot reload
+  like seon's own.
 - `bin/test-cljs` with the env set sweeps the downstream's `-test$`
   nses too (feature). Run core-only CI from an environment with the
   `SEON_EXTRA_*` vars unset.

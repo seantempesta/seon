@@ -142,6 +142,9 @@ process verbs are not primary UX.
 - Test dependencies are facts or they do not exist. Source-substring scans no
   longer invent fn↔test relationships for reruns or status rendering; newly
   defined tests still run from the exact analyzer diff.
+- Compiled product boot does not import the platform test suite into the
+  database. Agent-defined tests enter once through the analyzer tee; the old
+  preload, deftest enumeration macro, boot atom, and test indexer are deleted.
 - Database-browser pages use EAVT/AEVT/AVET cursors, never Datalog
   offset/limit. Add a general upstreamable Datahike `count-datoms` API over its
   existing O(log n) subtree count-slice; keep transaction bodies lazy/capped

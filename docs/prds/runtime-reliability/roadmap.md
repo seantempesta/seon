@@ -145,6 +145,12 @@ rerun selection and function status rendering. Newly defined tests still run
 from the exact analyzer diff; existing-test reruns wait for durable analyzer-
 derived reference facts rather than manufacturing relationships from text.
 
+Platform tests are no longer a boot-time program-graph population. The obsolete
+test preload, compile-time deftest enumerator, `!indexed-test-vars`, and
+`index-tests` builder are deleted. Agent-defined tests enter through the same
+analyzer tee as other declarations; the compiled snapshot reconciler removes
+legacy boot-authored test rows while preserving agent-authored ones.
+
 The source-grounded system audits are complete and committed:
 
 - [[research/database-runtime-responsiveness-audit-2026-07-13]]

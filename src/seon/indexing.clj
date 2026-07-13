@@ -15,8 +15,6 @@
 
      - `public-fn-vars` in seon.client → every public fn the pod
        actually loads (specced or not).
-     - `deftest-vars` in seon.dev.test-preload → every deftest var the pod
-       build pulls in (the preload's requires define the test namespaces).
 
    Freshness: shadow recompiles a ns when anything in its dependency
    closure changes, so the expansion stays current for code edits. The one
@@ -136,21 +134,3 @@
                              (boolean (some #(.startsWith p ^String %)
                                             (first-party-roots))))))))]
     `[~@(sort (map str (filter fp? reach)))]))
-
-(defmacro deftest-vars
-  "Expand to a vector of `#'`-literals: every deftest var (a def carrying
-   `:test` metadata) across every `seon.*` namespace in the calling ns's
-   transitive require closure. Invoke from `seon.dev.test-preload`, whose
-   requires define the pod's test namespaces."
-  []
-  (let [nss   (analyzer-namespaces)
-        reach (transitive-requires nss (-> &env :ns :name))
-        syms  (sort
-                (for [n     reach
-                      [_ d] (:defs (get nss n))
-                      :let  [m (def-meta d)]
-                      :when (and (some? (:test m))
-                                 (first-party-file? (:file m))
-                                 (:line m))]
-                  (:name d)))]
-    `[~@(map (fn [s] (list 'var s)) syms)]))

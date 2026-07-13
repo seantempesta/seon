@@ -622,14 +622,16 @@ The entity identity/required/render catalog is derived once per validated Malli
 registry generation from those canonical forms. It is process-local projection
 data, not a second append-only schema decomposition in Datahike.
 
-**Index everything, show `my.*` in full.** The boot analyzer indexes EVERY
-namespace's valid forms into the program graph (`:seon.ns` / `:seon.fn` /
-`:seon.schema` / `:seon.test`), so the whole code corpus is queryable as data
-(the runtime IS the database). The agent's context renders only `my.*` members in
-FULL source — the agent's own code, the thing it edits — while the rest of the
-graph is indexed-but-summarized: discoverable by query, not expanded into the
-prompt. The render policy (what expands in context) is owned by [[ui]]; the index
-is the data fact here.
+**Index compiled declarations; tee authored declarations.** At boot, the
+analyzer-derived snapshot reconciles every compiled namespace, public function,
+and registered schema into the program graph. Agent-authored namespace,
+function, schema, and test forms enter through the eval analyzer tee. The
+platform test suite belongs only to the dedicated test build; it is not loaded
+into a product pod or copied into the database at boot. The whole live code
+corpus is therefore queryable without a second test registry. Agent context
+renders only `my.*` members in full source while compiled members stay
+indexed-but-summarized. The render policy is owned by [[ui]]; the declaration
+facts are owned here.
 
 ### 4.11 completed restore — `:seon.db.restore/*`
 

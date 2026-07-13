@@ -172,6 +172,9 @@ REPL moves work:
   projection row in place (body-only redefs rescued for deftests too); an
   incompatible `register!` re-shape of an installed attr surfaces as a
   `:seon.db/schema-divergence` envelope naming the migration move.
+- **Tests enter through this same analyzer tee** — a product boot does not load
+  or index the platform test suite. A test becomes a database fact when the
+  agent defines it; the dedicated test build remains ordinary build input.
 - **`ns-unmap` removes** — live var + analyzer def gone, the
   `:seon.fn`/`:seon.test` row retracted (resume + instrumentation forget
   it); compiled-core fns are refused (the override-guard symmetry).

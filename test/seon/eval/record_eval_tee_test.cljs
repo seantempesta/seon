@@ -570,10 +570,9 @@
 ;; ALWAYS nil — so agent deftests teed only as :seon.fn rows, never
 ;; :seon.test rows: the :seon.test replay lane and the
 ;; auto-run never saw agent tests. These tests pin the fix: a deftest evaled
-;; through the eval surface tees EXACTLY one :seon.test row (core
-;; index-tests shape: sym/ns/source/created-at) and NO :seon.fn row —
-;; matching the core's disjoint core-vars/!indexed-test-vars split
-;; and keeping resume single-lane. A plain defn still tees :seon.fn only.
+;; through the eval surface tees EXACTLY one :seon.test row
+;; (sym/ns/source/created-at) and NO :seon.fn row, keeping resume single-lane.
+;; A plain defn still tees :seon.fn only.
 ;; ---------------------------------------------------------------------------
 
 (defn- tee-for
@@ -652,13 +651,13 @@
                       (testing "EXACTLY one :seon.test row for the deftest"
                         (is (= 1 (count test-rows)))
                         (is (= "probe.teetest/tee-probe-test" (:seon.test/sym row))))
-                      (testing "core index-tests shape: sym/ns/source/created-at"
+                      (testing "test fact shape: sym/ns/source/created-at"
                         (is (= {:seon.ns/name :probe.teetest} (:seon.test/ns row))
                             "nested-map ns upsert, same as every tee row")
                         (is (= "(cljs.test/deftest tee-probe-test (cljs.test/is (= 1 1)))"
                                (:seon.test/source row)))
                         (is (some? (:seon.test/created-at row))))
-                      (testing "NO :seon.fn row — deftests are test-lane only, like core"
+                      (testing "NO :seon.fn row — deftests use the test lane only"
                         (is (= [] (vec fn-rows))))
                       ;; And the row LANDS: record-eval! with this tee →
                       ;; :seon.test row queryable on a fresh conn.

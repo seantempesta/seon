@@ -27,10 +27,7 @@
     [datahike.api :as d]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.schema :as schema]
-    ;; The exemplar TEST SIBLING — required so its deftest vars are
-    ;; available as #'-literals for the test-sibling full-source guard.
-    [my.plan-test]))
+    [seon.schema :as schema]))
 
 ;; index-core! / index-schemas are PURE, DETERMINISTIC builders that do full
 ;; runtime introspection (file-read + paren-parse over the whole build
@@ -43,9 +40,6 @@
 ;; @schemas-tx for the pure count comparisons.
 (def core-tx (delay (client/index-core!)))
 (def schemas-tx (delay (client/index-schemas)))
-;; index-tests has no other delay; the three builders share ONE realized
-;; snapshot per ns run via these delays (see freeze-builders! below).
-(def tests-tx (delay (client/index-tests)))
 
 (defn- transact-through
   "Transact `tx-data` on `conn` through a stable database process."
@@ -61,9 +55,9 @@
 ;;; HERMETICITY (issue #69 — same env-coupling class as the search_test fix
 ;;; b5c3a3a4).
 ;;;
-;;; index-core! / index-schemas / index-tests are "pure" only relative to the
+;;; index-core! / index-schemas are "pure" only relative to the
 ;;; LIVE program graph: they read var-meta + on-disk source lines, the global
-;;; schema registry (schema/registered-schemas), and @!indexed-test-vars. The
+;;; schema registry (schema/registered-schemas). The
 ;;; async tests below build `first-tx` from these builders at one instant (T1)
 ;;; and then RE-RUN the same builders inside core-program-tx
 ;;; at a later instant (T2) and assert the two agree (idempotent no-op, exactly
@@ -73,7 +67,7 @@
 ;;; row as a ghost / re-emits a fn row, flaking the assertions — even though
 ;;; each conn here is a fresh per-test :memory store.
 ;;;
-;;; Fix (test-only — the index source is Core's): pin the three builder vars to
+;;; Fix (test-only — the index source is Core's): pin the two builder vars to
 ;;; ONE realized snapshot (the file-level delays) for the test's duration, so
 ;;; T1 and T2 read identical sets regardless of any concurrent process. with-
 ;;; redefs can't be used — its `finally` restores before the Promise chain's
@@ -81,40 +75,32 @@
 ;;; (the `done*` thunk every async test below funnels through).
 ;;; -------------------------------------------------------------------------
 (defn- freeze-builders!
-  "Snapshot index-core! / index-schemas / index-tests to the shared ns-level
+  "Snapshot index-core! / index-schemas to the shared ns-level
    delays and pin each var to it. Returns a 0-arg `restore!` thunk. Realizes
    the delays via the ORIGINAL vars (the let bindings run before the set!s) so
    there is no re-entrant deref."
   []
   (let [oc      client/index-core!
         os      client/index-schemas
-        ot      client/index-tests
         core    @core-tx
-        schemas @schemas-tx
-        tests   @tests-tx]
+        schemas @schemas-tx]
     ;; Explicit-arity fns — NOT (constantly …). CLJS statically dispatches the
     ;; same-ns call sites in core-program-tx to
     ;; `.cljs$core$IFn$_invoke$arity$0()`; a variadic `(constantly …)` lacks
     ;; that method and the optimized call throws "arity$0 is not a function".
-    ;; index-tests is multi-arity (0 + [vars]) — pin both so a 1-arity call
-    ;; inside the freeze window can't break either.
     (set! client/index-core!   (fn [] core))
     (set! client/index-schemas (fn [] schemas))
-    (set! client/index-tests   (fn ([] tests) ([_] tests)))
     (fn restore! []
       (set! client/index-core!   oc)
-      (set! client/index-schemas os)
-      (set! client/index-tests   ot))))
+      (set! client/index-schemas os))))
 
 ;;; -------------------------------------------------------------------------
 ;;; ORDER-INDEPENDENCE (issue #75). The three async tests below pin the builder
 ;;; vars to frozen `(fn [] snapshot)` thunks for their cross-await window and
 ;;; restore in their terminal then/catch. If that restore is skipped or runs
 ;;; late (a rejected-Promise path, a concurrent suite run), the frozen snapshot
-;;; LEAKS into a later test — `client/index-tests` left pinned to the empty
-;;; node-test `@tests-tx` makes a direct `(index-tests [#'var])` return [] (so
-;;; index-tests-builds-rows-from-deftest-vars reads no source), and a leaked
-;;; builder skews core-program-tx's desired set. Both then fail ONLY when run
+;;; LEAKS into a later test and a leaked builder skews core-program-tx's
+;;; desired set. Both then fail ONLY when run
 ;;; after a freezing test.
 ;;;
 ;;; Fix (test-only — the index source is Core's): a `:each` map fixture
@@ -126,14 +112,12 @@
 ;;; real fns (so its restore can't cascade a frozen state forward).
 (def ^:private og-index-core!   client/index-core!)
 (def ^:private og-index-schemas client/index-schemas)
-(def ^:private og-index-tests   client/index-tests)
 
 (defn- thaw-builders!
-  "Reset the three builder vars to their real (unfrozen) implementations."
+  "Reset the two builder vars to their real (unfrozen) implementations."
   []
   (set! client/index-core!   og-index-core!)
-  (set! client/index-schemas og-index-schemas)
-  (set! client/index-tests   og-index-tests))
+  (set! client/index-schemas og-index-schemas))
 
 (t/use-fixtures :each
   {:before (fn [] (thaw-builders!))
@@ -320,37 +304,6 @@
       (is (contains? syms "my.plan/step!")
           "plan's step! is an indexed :seon.fn member"))))
 
-(deftest test-sibling-ns-rows-ride-their-base-full-source-rule
-  ;; Test siblings ride the SAME full-source rule as their subject ns (the
-  ;; `-test` suffix is stripped to the base — seon.agent.ctx.namespaces/full-source-ns?):
-  ;;   (a) a `-test` sibling of a WHITELISTED base (my.plan-test →
-  ;;       my.plan, a full-source-whitelist member) carries its REAL
-  ;;       FULL FILE TEXT, so the deep render-namespace view has the real test
-  ;;       bodies on hand;
-  ;;   (b) a `-test` sibling of a NON-whitelisted, non-my.* base
-  ;;       (seon.index-core-test → seon.index-core) gets the minimal `(ns x)`
-  ;;       stub from index-tests — dropped from render, indexed only.
-  ;; Either way the deftest member rows live on the :seon.test rows.
-  (let [;; (a) whitelisted base → FULL source.
-        srows (client/index-tests
-                [#'my.plan-test/step-stores-a-fully-formed-open-step])
-        srow  (first (filter #(= :my.plan-test (:seon.ns/name %)) srows))
-        ssrc  (:seon.ns/source srow)
-        ;; (b) non-whitelisted base → minimal stub. Any deftest in THIS ns
-        ;; works (its base seon.index-core is not whitelisted); use one
-        ;; defined ABOVE so the `#'` var resolves at compile time.
-        irows (client/index-tests [#'no-stub-source-anywhere])
-        irow  (first (filter #(= :seon.index-core-test (:seon.ns/name %)) irows))
-        isrc  (:seon.ns/source irow)]
-    (is (some? srow) "an owning :seon.ns row is emitted for the whitelisted test ns")
-    (is (and (not= "(ns my.plan-test)" ssrc)
-             (str/starts-with? (str/triml ssrc) "(ns my.plan-test")
-             (str/includes? ssrc "deftest"))
-        "a whitelisted-base test sibling carries its REAL full file text")
-    (is (some? irow) "an owning :seon.ns row is emitted for the non-whitelisted test ns")
-    (is (= "(ns seon.index-core-test)" isrc)
-        "a non-whitelisted-base test sibling source is the minimal (ns x) stub")))
-
 (deftest pure-index-emits-valid-refs
   ;; index-core! is a PURE builder: every :seon.fn/ns it emits is a
   ;; [:seon.ns/name <kw>] lookup-ref (a single :seon.db/ref), NEVER a bare
@@ -424,21 +377,6 @@
             :db/cardinality :db.cardinality/one}
            (select-keys installed [:db/valueType :db/cardinality]))
         "the persisted policy attr is installed by the pod bootstrap schema")))
-
-(deftest index-tests-builds-rows-from-deftest-vars
-  ;; Fix b: deftest vars → :seon.test rows via the same file-read
-  ;; introspection. Driven here with an explicit var (the preload-populated
-  ;; default deftest-var vector is empty in the :node-test build).
-  (let [rows (client/index-tests [#'pure-index-emits-valid-refs])
-        row  (first (filter :seon.test/sym rows))]
-    (is (= "seon.index-core-test/pure-index-emits-valid-refs"
-           (:seon.test/sym row)))
-    (is (= [:seon.ns/name :seon.index-core-test] (:seon.test/ns row))
-        "owning ns as a lookup-ref")
-    (is (str/starts-with? (:seon.test/source row) "(deftest pure-index-emits-valid-refs")
-        "source is the REAL (deftest …) text read from the test file")
-    (is (some #(= :seon.index-core-test (:seon.ns/name %)) rows)
-        "an owning :seon.ns row is emitted alongside")))
 
 (deftest core-program-tx-idempotent-across-boots
   ;; The "fresh agent, same conn" guard: core-program-tx drops rows already
@@ -523,6 +461,8 @@
   ;; removal boundary is the CURRENT source-datom transaction, plus the
   ;; database-derived agent-home set. This flow proves:
   ;;   - removed boot declarations are retracted in the normal program tx;
+  ;;   - obsolete boot-authored tests are removed while agent-authored tests
+  ;;     survive;
   ;;   - a boot-created root home namespace survives;
   ;;   - REPL-authored declarations survive, including a prior boot identity
   ;;     whose complete source was subsequently authored through the REPL;
@@ -547,6 +487,10 @@
                              :seon.fn/source "(defn gone [] 1)"}
                             {:seon.schema/key    :seon.removed/value
                              :seon.schema/source "[:string]"}
+                            {:seon.test/sym        "seon.removed/old-test"
+                             :seon.test/ns         {:seon.ns/name :seon.removed}
+                             :seon.test/source     "(deftest old-test (is true))"
+                             :seon.test/created-at (js/Date.)}
                             {:seon.schema/key    :my.agentish/teed
                              :seon.schema/source "(seon.schema/register! :my.agentish/teed :string)"}
                             ;; Root birth is correctly attributed to the boot
@@ -572,13 +516,17 @@
                              :seon.ns/source "(ns seon.repl-owned) ;; authored"}
                             {:seon.fn/sym    "seon.repl-owned/keep"
                              :seon.fn/ns     {:seon.ns/name :seon.repl-owned}
-                             :seon.fn/source "(defn keep [] :agent)"}])))
+                             :seon.fn/source "(defn keep [] :agent)"}
+                            {:seon.test/sym        "my.todo-app/kept-test"
+                             :seon.test/ns         {:seon.ns/name :my.todo-app}
+                             :seon.test/source     "(deftest kept-test (is true))"
+                             :seon.test/created-at (js/Date.)}])))
                 (.then (fn [_] (client/core-program-tx conn)))
                 (.then
                   (fn [delta]
-                    (is (= 3 (count (filter #(= :db.fn/retractEntity (first %))
+                    (is (= 4 (count (filter #(= :db.fn/retractEntity (first %))
                                             delta)))
-                        "the normal core delta retracts the three removed declarations")
+                        "the normal core delta retracts removed compiled declarations and the legacy test")
                     (transact-through conn :seon.db.process/boot delta)))
                 (.then
                   (fn [_]
@@ -588,7 +536,9 @@
                           fn-syms (into #{} (map first)
                                         (d/q '[:find ?s :where [?e :seon.fn/sym ?s]] db'))
                           sch-keys (into #{} (map first)
-                                         (d/q '[:find ?k :where [?e :seon.schema/key ?k]] db'))]
+                                         (d/q '[:find ?k :where [?e :seon.schema/key ?k]] db'))
+                          test-syms (into #{} (map first)
+                                          (d/q '[:find ?s :where [?e :seon.test/sym ?s]] db'))]
                       (is (not (contains? ns-names :seon.removed)))
                       (is (not (contains? fn-syms "seon.removed/gone")))
                       (is (not (contains? sch-keys :seon.removed/value))
@@ -600,7 +550,11 @@
                       (is (contains? fn-syms "seon.repl-owned/keep")
                           "a REPL-authored current source survives its boot origin")
                       (is (contains? sch-keys :my.agentish/teed)
-                          "an agent registration-call schema survives"))))
+                          "an agent registration-call schema survives")
+                      (is (not (contains? test-syms "seon.removed/old-test"))
+                          "the obsolete boot-authored test is gone")
+                      (is (contains? test-syms "my.todo-app/kept-test")
+                          "the agent-authored test survives"))))
                 (.then (fn [_] (client/core-program-tx conn)))
                 (.then
                   (fn [second-delta]

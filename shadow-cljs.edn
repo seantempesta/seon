@@ -21,7 +21,7 @@
  :js-package-dirs ["node_modules" #shadow/env ["SEON_EXTRA_NPM" "node_modules"]]
 
  ;; When a runtime connects (e.g. the pod's websocket client after
- ;; `bin/seon restart pod`), make it the default REPL target. Without
+ ;; `bin/seon restart`), make it the default REPL target. Without
  ;; this, shadow keeps the first-ever runtime's id as :default-runtime-id
  ;; and a restarted pod isn't auto-routable — MCP eval fails with
  ;; "No available JS runtime" until the session is manually recreated.

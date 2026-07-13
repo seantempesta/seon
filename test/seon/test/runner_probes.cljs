@@ -8,8 +8,8 @@
    recurse (each real test calls `r/run!`; if those re-selected the
    enclosing ns, the run would never terminate).
 
-   This namespace contains ONLY probes — no driver invocations, no
-   recording. Loaded into the live pod via `seon.dev.test-preload`."
+   This namespace contains ONLY probes — no driver invocations and no
+   recording. It is compiled into the dedicated test build."
   (:require
     [cljs.test :as t :refer [deftest is async]]))
 

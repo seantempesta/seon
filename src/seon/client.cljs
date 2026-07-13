@@ -1106,18 +1106,11 @@
    sym-unique, so no dedup pass is needed."
   (public-fn-vars))
 
-;; Deftest vars the pod build loads, populated at load time by
-;; `seon.dev.test-preload` (the ONE ns whose require closure contains the
-;; test namespaces — a macro expanded HERE can't see nses compiled after this
-;; file). Empty in builds without the preload (e.g. :node-test), where
-;; tests index themselves via the runner's run-and-record path instead.
-(defonce !indexed-test-vars (atom []))
-
 ;; Downstream extra-core vars (task #36 — SEON_EXTRA_SRC; spec:
 ;; docs/prds/agent-runtime/research/extra-src-research-2026-06-12.md §d).
 ;; A downstream consumer's entry ns (named by SEON_EXTRA_PRELOAD, loaded
 ;; via the :devtools :preloads slot bin/seon --config-merges in) registers
-;; its specced surface here — the same precedent as `!indexed-test-vars`:
+;; its specced surface here:
 ;;
 ;;   (reset! client/!extra-core-vars
 ;;           (filterv #(str/starts-with? (str (:ns (meta %))) "acme.")
@@ -1195,8 +1188,8 @@
 
 (defn core-ns-set
   "The set of namespace keywords owned by the COMPILED core, derived
-   from `core-vars` + the preload's deftest vars — the SAME sources of
-   truth the boot indexers write from, so they can never drift. Used by
+   from the build closure and downstream extension vars — the SAME sources
+   of truth the boot indexer writes from, so they can never drift. Used by
    [[agent-ns-set]] as the DB-layer load discriminator: a `:seon.ns/name`
    row whose ns is in this set is a COMPILED core ns (already in the
    bundle from module-load; indexed for DISPLAY only) and is EXCLUDED
@@ -1205,10 +1198,9 @@
    the real compiled fn, so core is never loaded; only agent-authored
    corpus (in `my.agent.<id>` / agent domain nses) loads.
 
-   A fn (not a def) because `!indexed-test-vars` is populated by the
-   preload AFTER this ns loads; robust by construction either way — it's
-   NOT tx-meta and NOT a hand-typed ns list. Three computed sources
-   union: [[compiled-first-party-ns-strs]] (the BUILD-DERIVED closure —
+   A fn (not a def) because downstream extension vars load at runtime. It is
+   NOT tx-meta and NOT a hand-typed ns list. Three computed sources union:
+   [[compiled-first-party-ns-strs]] (the BUILD-DERIVED closure —
    covers every compiled ns including fn-less register!-only roots),
    the runtime-scanned extra-src nses, and the live var-meta `:ns` of
    the indexed vars (covers test/preload/extra vars whose nses sit
@@ -1224,7 +1216,7 @@
               ;; re-eval'd on load.
               (map keyword) (extra-src-ns-strs))
         (map #(keyword (str (:ns (meta %)))))
-        (concat core-vars @!indexed-test-vars @!extra-core-vars)))
+        (concat core-vars @!extra-core-vars)))
 
 (defn- read-src-file
   "Read a core source file given a var-meta `:file` (classpath-relative,
@@ -1886,57 +1878,11 @@
                                {:seon.ns/name (keyword (namespace k))}))))))
           (schema/registered-schemas))))
 
-(defn- var->test-row
-  "Build a `:seon.test` row for a deftest `#'`-literal from runtime
-   introspection (same mechanism as [[var->fn-row]]: real source file-read
-   at the var's `:file`/`:line`). Returns nil (and logs) when the source
-   can't be read — no stub is ever persisted."
-  [v now]
-  (let [m   (meta v)
-        sym (str (:ns m) "/" (:name m))
-        txt (read-src-file (:file m))
-        src (when txt (extract-form-at-line txt (:line m)))]
-    (if (nil? src)
-      (do (if (ghost-var? txt (:line m))
-            (log/warn!
-              {:seon.log/source  ::var->test-row
-               :seon.log/message
-               (str "ghost test var " sym " — `:line` " (:line m) " points "
-                    "past file " (pr-str (:file m)) " (a deftest deleted from "
-                    "a hot-reloaded ns; shadow left the stale var bound). "
-                    "Skipped from the indexed test vars.")})
-            (log/error-console!
-              "seon.client/var->test-row"
-              (str "could not read real source for " sym
-                   " (file " (pr-str (:file m)) " line " (:line m) ") — OMITTING")))
-          nil)
-      {:seon.test/sym        sym
-       :seon.test/ns         [:seon.ns/name (keyword (str (:ns m)))]
-       :seon.test/source     src
-       :seon.test/created-at now})))
-
-(defn index-tests
-  "Tx-data for `:seon.test` + owning `:seon.ns` rows from deftest
-   `#'`-literal vars (default: the preload-populated `!indexed-test-vars` —
-   every deftest the pod build loads). Same shape the detect-and-tee path
-   writes, so downstream readers never branch on origin. Pure tx-data
-   builder; [[core-program-tx]] reconciles against the conn."
-  {:malli/schema [:function
-                  [:=> [:cat] :any]
-                  [:=> [:catn [::vars :any]] :any]]}
-  ([] (index-tests @!indexed-test-vars))
-  ([vars]
-   (let [now     (js/Date.)
-         rows    (keep #(var->test-row % now) vars)
-         ns-syms (into #{} (map #(first (str/split (:seon.test/sym %) #"/" 2)) rows))
-         ns-rows (map ns-row (sort ns-syms))]
-     (vec (concat ns-rows rows)))))
-
 (defn ^:async core-program-tx
   "Return the exact core-program transaction for the current source.
 
-   [[index-core!]], [[index-schemas]], and [[index-tests]] are evaluated once
-   to form one desired program graph. Against `conn`, this function derives
+   [[index-core!]] and [[index-schemas]] are evaluated once to form one desired
+   compiled program graph. Against `conn`, this function derives
    the complete atomic delta: add missing declarations, replace drifted
    declaration fields, retract omitted optional fields/components, and remove
    boot-authored declarations absent from the desired graph. A fresh store
@@ -1947,10 +1893,10 @@
    removing the re-seed interaction that the Run-3 findings traced to a
    malformed `:seon.fn/ns` value.
 
-   DRIFT-HEALING is uniform across every row kind: a stored row re-emits
+   DRIFT-HEALING is uniform across every compiled row: a stored row re-emits
    whenever ANY freshly-derived field differs from what the store holds —
-   `:seon.ns/source`, schema source/generator policy, `:seon.test/source`, and
-   for `:seon.fn` rows the WHOLE derived set (source, spec, doc, arglists,
+   `:seon.ns/source`, schema source/generator policy, and for `:seon.fn` rows
+   the WHOLE derived set (source, spec, doc, arglists,
    private?). Identity upsert re-asserts changed datoms in place; an optional
    fn spec or schema generator policy that DISAPPEARED is explicitly retracted
    (upsert cannot remove a datom). Replacements and removals are guarded by
@@ -1965,13 +1911,13 @@
    identities plus domain connections say WHICH population owns it.
 
    The namespace/function/schema desired populations must be non-empty before
-   any removal is compiled. Tests may legitimately be absent from a build, so
-   an empty desired test-var set is preserve-only. Returns a Promise of tx-data."
+   any removal is compiled. Tests belong to the agent-authored program graph,
+   not the compiled boot snapshot. Legacy boot-authored test rows are removed;
+   agent-authored test rows are preserved. Returns a Promise of tx-data."
   {:malli/schema [:=> [:catn [::conn :any]] :any]}
   [conn]
   (let [all       (concat (index-core!)
-                          (index-schemas)
-                          (index-tests))
+                          (index-schemas))
         db        (await (d/db conn))
         ;; Fn rows dedup on sym AND every derived field. Sym-only dedup was
         ;; the stale-spec bug (live incident 2026-07-02: seon.agent.shell's
@@ -2012,11 +1958,8 @@
         core-syms (into #{} (map first)
                         (d/q '[:find ?sym
                                :where
-                               (or-join [?sym ?tx]
-                                 (and [?f :seon.fn/sym ?sym]
-                                      [?f :seon.fn/source _ ?tx])
-                                 (and [?f :seon.test/sym ?sym]
-                                      [?f :seon.test/source _ ?tx]))
+                               [?f :seon.fn/sym ?sym]
+                               [?f :seon.fn/source _ ?tx]
                                [?tx :seon.db/process ?process]
                                [?process :seon.db.process/id :seon.db.process/boot]]
                              db))
@@ -2056,19 +1999,12 @@
                          :seon.db.id/generator
                          (get schema-generators k no-generator)}]))
               schema-sources)
-        ;; Test rows dedup on sym AND source (same drift rule as ns rows).
-        have-tsts (into {} (d/q '[:find ?t ?src
-                                  :where
-                                  [?e :seon.test/sym ?t]
-                                  [?e :seon.test/source ?src]]
-                                db))
         desired-identities
         (into #{}
               (keep (fn [row]
                       (some (fn [a]
                               (when (contains? row a) [a (get row a)]))
-                            [:seon.ns/name :seon.fn/sym
-                             :seon.schema/key :seon.test/sym])))
+                            [:seon.ns/name :seon.fn/sym :seon.schema/key])))
               all)
         desired-values
         (reduce (fn [m [a v]] (update m a (fnil conj #{}) v))
@@ -2090,10 +2026,7 @@
                                (when-some [stored (get have-schs (:seon.schema/key row))]
                                  (or (= stored (schema-fields row))
                                      (seval/registration-call-source?
-                                       (:seon.schema/source stored))))
-                               (when-some [stored (get have-tsts (:seon.test/sym row))]
-                                 (or (= stored (:seon.test/source row))
-                                     (not (contains? core-syms (:seon.test/sym row)))))))
+                                       (:seon.schema/source stored))))))
                          all))
         ;; A drifted fn row whose FRESH derivation is unspecced while the
         ;; stored row carries a spec: identity upsert re-asserts the other
@@ -2167,7 +2100,8 @@
               (comp
                 (filter
                   (fn [[_ identity-attr ident source]]
-                    (and (seq (get desired-values identity-attr))
+                    (and (or (= :seon.test/sym identity-attr)
+                             (seq (get desired-values identity-attr)))
                          (not (contains? desired-identities
                                          [identity-attr ident]))
                          (not (and (= :seon.ns/name identity-attr)
@@ -2218,7 +2152,7 @@
 (schema/register! ::boot-seed-response [:map [::seeded? ::seeded?]])
 
 (defn ^:async boot-seed!
-  "THE core boot seed — one code path for reconciling a store's managed
+  "THE core boot seed — one code path for reconciling a database's managed
    startup facts, shared by `start-runtime!` and isolated runtime setup so
    callers cannot drift. The agent's identity is NOT seeded — SOUL.md /
    AGENTS.md are read LIVE as context sections every render
@@ -2227,16 +2161,16 @@
 
    Steps, in boot order. TWO provenance layers:
 
-   APPEND-ONLY (origin `:core-seed`) — introspection, never a desired
-   set, never retracted (three transacts, each its own tx so the core
-   prefix stays a stable sequence of tx-times):
+   BOOT-MANAGED (process `:seon.db.process/boot`) — three transactions, each
+   with its own tx so the startup sequence remains observable:
           :entity-schemas  — `schema/all-entity-schemas-tx-data`.
           :core-seed  — `seed-core!` (user entity +
                              my.kb.shared instruction singleton).
           :core-index — `core-program-tx` (`:seon.ns` /
-                             `:seon.fn` / `:seon.schema` / `:seon.test`
-                             rows, conn-deduped so an Nth boot on the
-                             same store re-seeds nothing).
+                             `:seon.fn` / `:seon.schema` rows). This is the
+                             compiled desired graph: drift is repaired and
+                             absent boot-authored declarations are retracted.
+                             Agent-authored declarations are never swept.
 
    DECLARATIVE DESIRED SET (origin `:config`) — the routes
    (`route/core-routes-tx`, curated by the manifest) + the skills corpus
@@ -2246,9 +2180,8 @@
    desired row by its own `:db.unique/identity` (`:seon.route/name` /
    `:my.skills/name`) AND RETRACTS any managed row absent from the desired
    set — so dropping a route from the manifest, or a skill from disk,
-   removes the stale datom (it can no longer persist across boots). The
-   `:core-seed` introspection above is NOT in this scope and is never
-   touched.
+   removes the stale datom (it can no longer persist across boots). The boot
+   populations above are outside this config scope.
 
    Pins the root `db/*conn*` to `conn` for the duration, restoring in
    `finally`. ENVELOPE CONTRACT
@@ -2299,7 +2232,7 @@
                                       :seon.db/tx-data (seed-core!)})))
                     ;; No soul seed: the agent's identity is read LIVE from
                     ;; SOUL.md / AGENTS.md as context sections every render
-                    ;; (seon.agent.ctx/file-block), never seeded into the store.
+                    ;; (seon.agent.ctx/file-block), never seeded into the database.
                     (check! :core-index
                             (await (db/transact!
                                      {:seon.db/conn conn
