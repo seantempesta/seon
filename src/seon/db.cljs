@@ -1210,10 +1210,9 @@
 (schema/register! ::time-point :any)
 
 (defn history
-  "Get a db value spanning all of time, retractions included.
+  "A db value spanning ALL of time — assertions and retractions.
 
-   Every datom ever asserted or retracted, not just the now-true view.
-   Read it with a 5-tuple `:where` so the tx and
+   Every datom ever, not just the now-true view. Read it with a 5-tuple `:where` so the tx and
    the add/retract flag bind. The db is injected from your one connection;
    omit it:
 
@@ -1234,7 +1233,7 @@
      result)))
 
 (defn as-of
-  "Get the database as it was at time `t`, for time-travel reads.
+  "A db value as it was AT `t` — time-travel for reads.
 
    `t` is a tx-id, Date, or txInstant. query/pull/entity against it see only what was true then:
 
@@ -1255,10 +1254,9 @@
      result)))
 
 (defn since
-  "Get a db value of only the datoms added after time `t`.
+  "The complement of [[as-of]] — a db value of datoms added after `t`.
 
-   The complement of [[as-of]] — diff \"what changed since\" a tx you
-   remembered:
+   Diff \"what changed since\" a tx you remembered:
 
      (db/query '[:find ?e :where [?e ::status :done]] (db/since last-seen-tx))
 
@@ -1310,7 +1308,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn listen!
-  "Install a tx-listener — safe by default, never crashes the pod.
+  "Install a tx-listener; safe by default, never crashes the pod.
 
    Handler throws / rejections are caught and logged. `::db/handler` is a fn
    of one map:
@@ -1339,7 +1337,7 @@
   (listen! request))
 
 (defn listen-async!
-  "Intent-revealing alias for [[listen!]] (Promise handler, fire-and-forget)."
+  "Alias of [[listen!]] for a Promise handler (fire-and-forget)."
   {:malli/schema [:=> [:cat ::listen-request] ::listen-response]}
   [request]
   (listen! request))
@@ -1520,7 +1518,7 @@
    [::conn        {:optional true} ::conn]])
 
 (defn managed-identities
-  "Map of `managed-eid → #{[identity-attr identity-value] …}`.
+  "Map each managed eid to its `[identity-attr identity-value]` set.
 
    Every entity
    whose FIRST-assertion (min-tx) process is in `:seon.db/managed-scope`,
