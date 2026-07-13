@@ -287,7 +287,7 @@
 ;;     cross-agent reactive-context precedent), admitted ROUND-ROBIN per
 ;;     ns (every toolkit ns gets its top function before any ns gets its
 ;;     second) so one chatty ns cannot crowd the rest out. Zero-usage
-;;     worlds fall back to (ns-name, fn-name) order — honest, documented.
+;;     stores without eval history fall back to (ns-name, fn-name) order.
 ;;
 ;; ONE numbering across both groups (decided here, P6): the rendered
 ;; section numbers recent + toolkit entries through the SAME glyph

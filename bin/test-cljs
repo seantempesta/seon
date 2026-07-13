@@ -185,7 +185,7 @@ fi
 # and still have accumulated one; under the manifest dial
 # :seon.config/on-core-error :gate (the default) that run FAILS. :log
 # disables the gate (prod/demo posture). The transcript IS the run bracket
-# here — the node-test world is hermetic per-test in-memory conns, so datom
+# here — node tests use hermetic per-test in-memory conns, so datom
 # counting has no stable store to bracket; the marker is the observable.
 # ---------------------------------------------------------------------------
 # Count SEON-CORE-FAULT markers but NOT the SEON-EXPECTED-CORE-FAULT variant

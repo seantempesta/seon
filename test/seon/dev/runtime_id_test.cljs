@@ -137,7 +137,7 @@
     (testing "unhosted id → :none"
       (is (= :none (:seon.dev.runtime-id/resolution
                      (select "zzz-2606101599" [default-pod bench-pod])))))
-    (testing "single pod world → bare root still resolves (default stays trivially addressable)"
+    (testing "single pod runtime → bare root still resolves (default stays trivially addressable)"
       (let [res (select "root" [default-pod])]
         (is (= :match (:seon.dev.runtime-id/resolution res)))
         (is (= default-pod (:seon.dev.runtime-id/runtime res)))))))

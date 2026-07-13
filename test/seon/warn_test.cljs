@@ -225,7 +225,7 @@
 ;; ONE conn ONCE; every pure reader derefs the resolved post-seed db
 ;; VALUE (warn checks take `:seon.db/db` explicitly — no conn needed).
 ;; The :once :before awaits the seed so no body races it. Tests that
-;; mutate their own world (provenance, unmarked-entity-kinds,
+;; mutate their own store (provenance, unmarked-entity-kinds,
 ;; tile-unresolved) still open their own isolated conn below.
 (def ^:private seeded-db
   "Memoized Promise: opens one :memory conn, seeds it with `(seed-tx)`,

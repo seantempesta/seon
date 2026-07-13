@@ -689,7 +689,7 @@
 ;; singleton datom at boot — config-through-DB) owns its system message as
 ;; DB state (live-tunable by a transact, replay-visible); absent the datom,
 ;; the shipped default is `seon.agent.ctx/system-text` (byte-identical to
-;; the pre-datom world). SOUL.md / AGENTS.md are FILE-LOADED CONTEXT
+;; the pre-datom database state). SOUL.md / AGENTS.md are FILE-LOADED CONTEXT
 ;; sections (`seon.agent.ctx/file-block`), wired into
 ;; the manifest-declared context blocks — they ride the user-message context,
 ;; not here. There is NO per-call file read in this path: the datom read is

@@ -357,7 +357,7 @@
 ;; because bounded evals run in the current global context. The RUNNER itself is evaluated IN-SESSION (not
 ;; host-side) so every cljs.test value it touches belongs to the ONE
 ;; bootstrap-loaded cljs.test instance the deftests reference — host-side
-;; keyword/map access on bootstrap-world values would cross two cljs.core
+;; keyword/map access on bootstrap-runtime values would cross two cljs.core
 ;; instances and silently fail equality.
 ;; ============================================================
 
@@ -397,7 +397,7 @@
    `(require '[cljs.test])` call. Swaps `cljs.test/report` — the compiled
    `is` calls `cljs.test.report` DIRECTLY (decompiled live; `do-report` is
    bypassed) — for a capturing fn (counters + failure maps read INSIDE the
-   session world), restores it in a `finally`, and returns a
+   session runtime), restores it in a `finally`, and returns a
    `js/JSON.stringify` STRING — the one value shape that crosses the
    bootstrap/host boundary losslessly. Async deftests are reported as
    errors (the strictly-sequential line server cannot await a CPS test)."

@@ -51,9 +51,9 @@
 ;;     they resolve against it; unset, they stay CWD-relative (seon's
 ;;     own usage — the pod runs from the repo root).
 ;;
-;;   DATA — the running world's OWN state: the store, tmp/ (port
+;;   DATA — the running cluster's OWN state: the store, tmp/ (port
 ;;     files, sockets), logs/. These NEVER route through here; a
-;;     downstream consumer running the pod from its world root keeps
+;;     downstream consumer running the pod from its project root keeps
 ;;     its data CWD-relative and points SEON_RUNTIME_ROOT at the seon
 ;;     checkout that owns the compiled artifacts.
 ;; ============================================================

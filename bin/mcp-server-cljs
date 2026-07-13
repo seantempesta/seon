@@ -366,7 +366,7 @@
           ;; default pod). When OTHER clusters' runtimes are live but ours
           ;; isn't, FAIL LOUD (an unpinned fallback would silently ride
           ;; :latest onto a foreign pod — the exact C27 hazard). The
-          ;; unpinned fallback remains only for the legacy world where NO
+          ;; unpinned fallback remains only for an old bundle where NO
           ;; runtime advertises a cluster (pre-C27 bundles, mid-boot).
           (let [cands (try (filterv #(= (:build %) default-build-id)
                                     (probe-advertisements! port))

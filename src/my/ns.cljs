@@ -1,7 +1,7 @@
 (ns my.ns
   "What code exists, as data — ask the live program graph, not a file.
 
-   Every namespace and function in this world is indexed as `:seon.ns` /
+   Every namespace and function in this runtime is indexed as `:seon.ns` /
    `:seon.fn` rows (code-as-data), including fns defined this session that
    exist in no source file. [[functions]] turns one namespace's rows into
    the SAME one-line cards the `:namespaces` context section renders

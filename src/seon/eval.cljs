@@ -403,7 +403,7 @@
   []
   (let [state          (cljs/empty-state)
         ;; SEON_RUNTIME_ROOT-aware: a downstream pod running from its
-        ;; own world root finds the bootstrap output in the seon
+        ;; own project root finds the bootstrap output in the seon
         ;; checkout; unset = "out/bootstrap" (CWD-relative) as before.
         bootstrap-path (platform/artifact-path "out/bootstrap")]
     (await (js/Promise.
@@ -3774,7 +3774,7 @@
    (`:def-emits-var true` writes `:defs` during analysis), so every
    trial's phantoms are removed before returning — the real eval's
    `defs-before` snapshot and the detect-and-tee diff stay
-   byte-identical to a no-preflight world."
+   byte-identical to a run without preflight."
   [compile-state source ns-sym]
   (await (ensure-analyzer-ns! compile-state ns-sym))
   (let [defs-before (analyzer-info/snapshot-defs compile-state)

@@ -11,10 +11,10 @@ store).** The broader JVM main-app integration is **PAUSED** — we will
 resume it later (when we do, this section gets updated to "resuming JVM
 core-systems integration"). Until then, assume CLJS-pod context unless a
 task is explicitly JVM-track. Operational sections below that describe the
-paused world are tagged **[JVM track — paused]**.
+paused track are tagged **[JVM track — paused]**.
 
 - **CLJS pod (ACTIVE)** — `src/seon/*.cljs`, a long-running Node process:
-  agent loop, bootstrap CLJS compiler, loopback HTTP+SSE inspector UI on
+  agent loop, bootstrap CLJS compiler, loopback HTTP+SSE web UI on
   `http://127.0.0.1:7890`. Backed by the **central JVM datahike store**
   (the `wire-server` process; file-backed datahike on
   `data/clusters/default/store`). The JVM is the sole writer — the pod
@@ -324,7 +324,7 @@ rule in `docs/conventions.md` "Comment levels — prose vs code".
 seon/
 ├── src/seon/
 │   ├── *.cljs                ; CLJS pod (ACTIVE) — client, agent, eval, db,
-│   │                         ;   ctx, render, repl, warn, web/ (inspector/serve)
+│   │                         ;   ctx, render, repl, warn, web/ (debug/serve)
 │   ├── core.clj              ; [JVM track] system entry, protocols
 │   ├── system.clj            ; [JVM track] Integrant system map
 │   ├── config.clj            ; [JVM track] Aero config loading
@@ -433,7 +433,7 @@ Any git operation that changes branch, discards files, or modifies history affec
 
 `seon.*` surfaces use **`.cljs` files alongside `.clj` files** — CLJS reads `.cljs`, CLJ reads `.clj`, neither compiler sees the other's. Two lanes:
 
-- **CLJS pod (active):** owns the `.cljs` files (`seon.client`, `seon.db`, `seon.eval`, `seon.ctx`, `seon.agent.*`, `seon.web.inspector`/`serve`, …) and the genuinely-shared `.cljc` files.
+- **CLJS pod (active):** owns the `.cljs` files (`seon.client`, `seon.db`, `seon.eval`, `seon.ctx`, `seon.agent.*`, `seon.web.debug`/`serve`, …) and the genuinely-shared `.cljc` files.
 - **`[JVM track — paused]`:** owns the `.clj` files under `src/seon/`.
 
 Promote a file to `.cljc` only when it's genuinely platform-portable (e.g. `seon.schema`, `seon.instrument`); don't author a `.cljc` for a namespace that has a live `.clj` sibling on the other track unless both sides converge on its shape.
@@ -545,7 +545,7 @@ After every Edit/Write, the hook automatically reloads code, runs affected tests
 **CLJS pod (active):** `cljs-watch` recompiles `.cljs` on every save; the
 running pod picks up the new build. If the pod gets into a bad state,
 `bin/seon restart pod` (wait for `agent roster` in `logs/pod.log`). A
-fresh world is `bin/seon cluster reset default`.
+fresh store is `bin/seon cluster reset default`.
 
 **`[JVM track — paused]`** uses the dev hook + REPL verbs (you rarely reload manually):
 
@@ -614,7 +614,7 @@ checkpoint, not per edit.
 
 ## UI Development
 
-Seon uses a **Phosphor Terminal** theme — warm blacks, cream text, amber accents. Read `docs/prds/namespace-ui/design-system.md`. The pod's UI is `src/seon/web/inspector.cljs` + `serve.cljs` (hiccup); the JVM track uses `src/seon/web/components.clj`. Invoke `/datastar-web-ui` for SSE patterns.
+Seon uses a **Phosphor Terminal** theme — warm blacks, cream text, amber accents. Read `docs/prds/namespace-ui/design-system.md`. The pod web UI is `src/seon/web/{datastar,debug,serve}.cljs` (hiccup); the JVM track uses `src/seon/web/components.clj`. Invoke `/datastar-web-ui` for SSE patterns.
 
 Key rules: density over whitespace (`p-3` not `p-6`), small text (`text-xs` primary), warm colors (`bg-base-*`, never `bg-white`), dot+text status (`● running`), monospace everywhere.
 
@@ -639,7 +639,7 @@ The precise coverage contract (don't overclaim it):
 
 - **Structural async opt-out** (`seon.instrument/async-unwrappable?`, computed — never a name list): a `^:async` fn with a non-simple shape (`:function` / multi-arity / variadic) registers NO wrapper — today `seon.db/transact!`, `seon.eval/eval`, `seon.client/mem-db`. Their `:malli/schema` stays the discoverable contract; **their own body is the validation boundary** and they return error ENVELOPES, never throw (the C40 net: an observe-only Promise-aware wrapper would collapse the rule — deferred, owner-gated).
 - **`*.internal` fns are deliberately unspecced** — they are private machinery, outside the contract surface.
-- **Coverage is a derived invariant, not a snapshot**: the root world's `:instrumentation-gaps` section (`seon.instrument/coverage-gaps`) recomputes "specced fn with a live var but no wrapper" at every render and surfaces any gap; empty in a healthy runtime.
+- **Coverage is a derived invariant, not a snapshot**: the root agent's `:instrumentation-gaps` section (`seon.instrument/coverage-gaps`) recomputes "specced fn with a live var but no wrapper" at every render and surfaces any gap; empty in a healthy runtime.
 - **`SEON_INSTRUMENT=0/false/off/no` is a kill-switch** (boot + tee). It exists ONLY to bail out if a wrapper ever destabilizes the pod — never set it to silence a validation error; fix the schema or the call.
 
 Public functions fully spec and validate every argument and the return. Two shapes are allowed: **map-in / map-out** (one namespaced-keyword map in, one out — preferred for API-like surfaces) OR **named positional** (each slot specced via Malli `:catn` inside a `:=>`/`:function` schema — fine for ordinary data-processing fns and for mimicking a well-known API). Multi-arity is allowed when every arity is fully specced (use a `:function` schema). The invariant is completeness of specs, not map-wrapping; an unspecced or bare-keyword argument is the violation, not a positional one.
@@ -699,7 +699,7 @@ you the marker → `(seon.agent.inspect/errors)` → `(… /error {::eid N})`
 prompt) → `(… /repro {::eid N})` (the frozen as-of db + a ready-to-eval
 repro expression + a `::fork-hint`) → run the hint verbatim:
 `bin/seon cluster fork default <t>` boots a LIVE, WRITABLE copy of the
-world at the failure moment (own pod/store; the error datom is absent
+database snapshot at the failure moment (own pod/store; the error datom is absent
 inside its own fork — `at` precedes the recording tx). Fix there, verify,
 `bin/seon cluster destroy <fork>` — the source store is untouched by
 construction. This whole loop is acceptance-drill-proven end to end
@@ -769,7 +769,7 @@ Registered processes: `pod` (CLJS pod via Node), `cljs-watch` (CLJS rebuild watc
 
 `bin/seon cluster reset [name]` (default `default`) — stops pod + wire-server,
 **wipes the store**, restarts both; the pod re-seeds the core from the indexed
-codebase on boot. Use for a fresh world. Wipes agent-authored work in that
+codebase on boot. Use for a fresh store. Wipes agent-authored work in that
 store (agent fns, soul edits, chat) — the core seed regenerates, that does not.
 
 ### Core-fault watch (active track)

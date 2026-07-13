@@ -3,7 +3,7 @@
 
      1. PROJECTION DETERMINISM — `context` is a pure function of the db
         VALUE: rendered twice over the same `(db/as-of db rendered-as-of)`
-        it is byte-identical, shows the world BEFORE the turn (the prior
+        it is byte-identical, shows the database BEFORE the turn (the prior
         turn's eval, not the turn's own), and fits the ~700-token budget.
      2. EXPORT ROW SHAPE — `export!` writes one JSONL row per ok-eval
         turn: context/cards/target/meta, target = the turn's ok sources
@@ -120,7 +120,7 @@
           (is (str/includes? c1 "(+ 11 22)")
               "the PREVIOUS turn's eval source is the recent tail")
           (is (not (str/includes? c1 "(* 3 4)"))
-              "the turn's OWN forms are absent — this is the PRE-turn world")
+              "the turn's OWN forms are absent — this is the PRE-turn database")
           (is (not (str/includes? c1 "=> "))
               "no live readline — the one moving line is off in this profile")
           (is (not (str/includes? c1 "result/"))

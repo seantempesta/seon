@@ -494,7 +494,7 @@
 (schema/register! ::fn-sym     :symbol)
 (schema/register! ::repro-expr :string)
 (schema/register! ::note       :string)
-;; The exact supervisor command that boots this error's world as a live,
+;; The exact supervisor command that boots this error's database snapshot as a live,
 ;; writable, disposable cluster: `bin/seon cluster fork <cluster> <at>`.
 ;; `:seon.error/at` is the basis-t at the CATCH site — the db the failing
 ;; code SAW — so the fork holds everything up to the failure but NOT the

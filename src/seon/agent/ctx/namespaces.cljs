@@ -100,7 +100,7 @@
                  (str/includes? s ".internal.")))))
 
 (defn my-ns-name?
-  "Rule 2: `my.*` is the human's world — always shown.
+  "Rule 2: `my.*` is human-authored code and data — always shown.
 
    Provenance is not consulted (one name rule, no special cases)."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
@@ -159,7 +159,7 @@
   "True when `ns-name` carries its REAL FULL FILE TEXT as `:seon.ns/source`.
 
    Accepts a string, symbol, or ns-name keyword. Every `my.*` ns (the
-   human's world — always inlined), INCLUDING `.internal` siblings and
+   human-authored code and data — always inlined), INCLUDING `.internal` siblings and
    `-test` siblings (the `-test` suffix is stripped to the subject ns
    first), AND every non-hidden seon.* ns the config policy lists in
    `:seon.config/always` ([[always-full?]] — e.g. `:seon.agent.message`, so

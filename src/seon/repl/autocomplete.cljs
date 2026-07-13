@@ -384,7 +384,7 @@
    basis; turns rated `:excluded` are dropped. Per row:
 
      context — [[context]] rendered against `(db/as-of db rendered-as-of)`
-               (the pre-turn world the model actually saw)
+               (the pre-turn database snapshot the model actually saw)
      target  — the turn's ok eval sources, in order, newline-joined
      cards   — compact fn cards for the fns the target CALLS (direct +
                home-alias + refer resolution) plus `::distractors`

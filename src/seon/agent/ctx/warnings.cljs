@@ -74,7 +74,7 @@
    The derived strict-gate surface of the error-blame design (RULED
    2026-07-04): a `seon.error/record!` with fault `:core` is OUR bug
    (never an agent's), and this section makes it loud on the root
-   world's context until the fix lands — then the query returns empty
+   agent's context until the fix lands — then the query returns empty
    and the section VANISHES (no acknowledgement state, nothing to
    clear). Root-only by config wiring: the block rides ONLY in
    `:seon.config/root-context` (other agents see nothing — core bugs

@@ -129,7 +129,7 @@
                                         (mapv :seon.instrument/sym gaps)))
                                  (is (= [:seon.instrument/unwrapped]
                                         (mapv :seon.instrument/reason gaps)))))
-                             (testing "the block renders the gap (root-world surface)"
+                             (testing "the block renders the gap (root-agent surface)"
                                (let [out (warnings/instrumentation-gaps-block {:seon.db/db dbv})]
                                  (is (str/includes? out "INSTRUMENTATION GAPS"))
                                  (is (str/includes? out "seon.agent.ctx.warnings-test/gap-probe"))))

@@ -3,7 +3,7 @@
    the exact sibling of `seon.ui.markdown/md->hiccup`: source string in,
    `[:pre [:code …]]` hiccup out, no client JS pass.
 
-   Why server-side (not the CDN highlight.js the legacy `/debug` shell loads):
+   Why server-side (not the CDN highlight.js the old `/debug` shell loads):
    the new agent view's shim ships ONLY `datastar.js` — no hljs — so eval
    source there is unhighlighted, and any client pass races idiomorph after
    every SSE morph. A pure server tokenizer is morph-safe by construction,

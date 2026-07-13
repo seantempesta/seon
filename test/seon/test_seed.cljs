@@ -1,17 +1,17 @@
 (ns seon.test-seed
-  "Hermetic-world seed for tests that RENDER agent context.
+  "Hermetic-store seed for tests that RENDER agent context.
 
    SCI bounding is FAIL-LOUD: a `my.*` render fn with no stored
    `:seon.fn/source` renders a `:seon/error` block in place instead of
    falling back to the unbounded compiled path (a hang there would wedge
    the single-threaded pod). The default ctx blocks reference `my.*` fns
    (`my.kb.shared/instructions-block`, `my.plan.internal/plan-block`,
-   `my.skills/catalog-block` / `skill-block`), so a hermetic test world
+   `my.skills/catalog-block` / `skill-block`), so a hermetic test store
    that renders context must carry their source rows — exactly what the
    pod's boot indexer stores. [[my-core-rows]] is the `my.*` slice of
    `seon.client/index-core!` (the ONE indexer — no hand-written rows to
    drift), memoized once per test process (index-core! reads source
-   files; per-world recomputation would slow the suite)."
+   files; per-store recomputation would slow the suite)."
   (:require
     [clojure.string :as str]
     [seon.client :as client]))

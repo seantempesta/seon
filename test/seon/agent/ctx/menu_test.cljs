@@ -2,7 +2,7 @@
   "Behavior tests for the typeahead menu block family
    (`seon.agent.ctx.menu` — diffusion-typeahead P3a).
 
-   Covers: empty-world suppression (the section returns \"\" and
+   Covers: empty-history suppression (the section returns \"\" and
    vanishes), the function-menu derivation (eval-log ranking, alias
    resolution via stored require-edges, private/failed-eval exclusion,
    glyph numbering), and the `:seon.typeahead/policy` override row
@@ -109,8 +109,8 @@
        :seon.eval/ns     :my.agent.menutestagent
        :seon.eval/source "(my.plan/drop! {:my.plan/id \"nope\"})"}]}))
 
-(deftest empty-world-menu-vanishes
-  ;; A fresh world has no eval log — the section must return "" (the
+(deftest empty-history-menu-vanishes
+  ;; A fresh store has no eval log — the section must return "" (the
   ;; composer drops it; the reactive vanish costs zero).
   (async done
     (-> (with-conn

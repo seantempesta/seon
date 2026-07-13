@@ -10,8 +10,8 @@
 
 ;; The consolidated pod context manifest — read by seon.config via aero
 ;; (`SEON_CONFIG` overrides the path; a per-cluster variant is a SEPARATE file,
-;; not a `#profile`). ABSENT → the pod boots byte-identically to a no-config
-;; world (full env-dir skill scan + the default context tree). PRESENT → the
+;; not a `#profile`). ABSENT → the pod boots into the default state
+;; (full env-dir skill scan + the default context tree). PRESENT → the
 ;; OPTIONAL override below. Every key fully namespaced. Add a new concern = add
 ;; ONE key here + a resolver in seon.config (the "add more things to it"
 ;; contract).
@@ -101,7 +101,7 @@
  ;;            4-file catch-site sweep drains the backlog)
  ;;   :gate  — pod stays alive; bin/test-cljs + the dev hook fail any run that
  ;;            accumulated a new :core-fault (SEON-CORE-FAULT marker). SHIPPED.
- ;;   :log   — datom + the root-world derived section only (prod/demo).
+ ;;   :log   — datom + the root-agent derived section only (prod/demo).
  ;; :agent faults never escalate in ANY mode. The SUITE/CI runner stays :gate
  ;; via config/test.edn (bin/test-cljs default) — a mid-run :core fault must
  ;; not .exit the shared node-test runner. This DEV manifest flips to :crash
@@ -219,7 +219,7 @@
     :seon.render/ai seon.agent.ctx.canvas/canvas-block
     :seon.render.canvas/content seon.render.system/system-view}
    ;; ROOT-ONLY (owner ruling, error-blame-strict-gate 2026-07-04): the
-   ;; :core-fault section renders on the root world only — other agents see
+   ;; :core-fault section renders for the root agent only — other agents see
    ;; nothing (core bugs are not theirs to fix; the affected agent already
    ;; got its in-place :seon/error envelope). Derived; vanishes when the
    ;; last :core fault predates the latest user message.
@@ -229,7 +229,7 @@
    ;; specced fns whose live var lost its malli wrapper (structural async
    ;; opt-outs excluded). Recomputed from the db + live JS vars at render;
    ;; vanishes when coverage is re-asserted. A gap is system-wide, so it
-   ;; rides the root world only, like :core-faults.
+   ;; rides the root agent only, like :core-faults.
    {:seon.agent.ctx/name :instrumentation-gaps :seon.agent.ctx/priority 42
     :seon.render/ai seon.agent.ctx.warnings/instrumentation-gaps-block}
    ;; ROOT-ONLY (multiagent-context Piece 4): live agents whose parent is

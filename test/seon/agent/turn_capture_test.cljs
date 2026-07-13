@@ -250,7 +250,7 @@
                                       :seon.agent.debug/to   (:seon.agent.turn/id t2)})]
           (is (true? (:seon.agent.debug/ok? d)))
           (is (pos? (:seon.agent.debug/basis-t-delta d))
-              "turn 2 rendered over a LATER basis-t — the world advanced")
+              "turn 2 rendered over a LATER basis-t — the database advanced")
           (is (int? (:seon.agent.debug/prompt-token-delta d))
               "prompt drift summarized in TOKENS")
           (is (int? (:seon.agent.debug/prompt-lines-added d))

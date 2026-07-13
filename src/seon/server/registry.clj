@@ -438,8 +438,8 @@
    Semantics of `::at` for error forensics: `:seon.error/at` is the
    basis-t at the CATCH site — the db value the failing code SAW. The
    error datom itself was recorded in a LATER tx, so it does NOT exist
-   inside its own fork; the fork is the world the failure arose from,
-   not the world that already contains its record.
+   inside its own fork; the fork is the snapshot the failure arose from,
+   not the later snapshot that already contains its record.
 
    The fork is NOT registered here — the fork pod's own boot `ensure-db`
    registers/connects it, the same one creation path `cluster create`

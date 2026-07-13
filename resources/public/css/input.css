@@ -8,7 +8,7 @@
 @plugin "@tailwindcss/typography";
 
 /* Scan Clojure source files for classes — .clj (JVM), .cljs (pod UI),
-   .cljc (shared components). The pod inspector lives in .cljs files;
+   .cljc (shared components). The pod web UI lives in .cljs files;
    without these globs its classes silently fall out of output.css. */
 @source "../../../src/**/*.clj";
 @source "../../../src/**/*.cljs";
@@ -58,7 +58,7 @@
   /* Fonts - JetBrains Mono for terminal aesthetic */
   --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace;
 
-  /* `text-2xs` — the dense label size used ~everywhere in the tile/inspector UI.
+  /* `text-2xs` — the dense label size used throughout the tile/web UI.
      Tailwind v4 has no built-in 2xs, so without this token the class generated
      NOTHING and every `text-2xs` label silently fell back to the inherited size. */
   --text-2xs: 0.625rem;
@@ -475,7 +475,7 @@ details.tool-call-details[open] .tool-preview {
 
 /* Tile-console variant: an inset panel over a DIM backdrop (the console
    shows through the padding, so a backdrop click — the overlay element
-   itself, outside the iframe — closes it). The inspector's full-bleed
+   itself, outside the iframe — closes it). The web UI's full-bleed
    variant (no `.tile` class) keeps the base rule above untouched. */
 #seon-debug-overlay.tile {
   background: rgba(8, 8, 7, 0.84);
@@ -521,7 +521,7 @@ details.tool-call-details[open] .tool-preview {
    The taught path is "write semantic hiccup, zero classes needed";
    the safelisted utility vocabulary (top of this file) layers on
    top — utilities beat these rules (cascade layer order).
-   In `base` so Tailwind utilities and the inspector's inline
+   In `base` so Tailwind utilities and the web UI's inline
    .markdown overrides both win ties.
    ============================================================ */
 @layer base {

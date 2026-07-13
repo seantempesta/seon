@@ -1141,11 +1141,11 @@
 ;; The two ENDS of a time-travel domain (the `as-of`/`since` `t` range).
 ;; `basis-t` is the latest tx reflected in a db value — the \"now\" end of a
 ;; scrubber. `origin-t` is datahike's origin tx (`tx0`) — the floor; the first
-;; user tx is `origin-t`+1, so an `as-of` below it is the empty/pre-seed world.
+;; user tx is `origin-t`+1, so an `as-of` below it is the empty/pre-seed database.
 ;; Both are valid [[time-point]]s usable directly with `as-of`/`since`.
 
 (def ^{:doc "Datahike's origin tx-id (`tx0`) — the floor of any time-travel
-   domain. `(as-of … origin-t)` is the empty world before the first user tx."}
+   domain. `(as-of … origin-t)` is the empty database before the first user tx."}
   origin-t dconst/tx0)
 
 (defn basis-t
