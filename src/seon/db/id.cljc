@@ -42,15 +42,14 @@
 ;; The third JVM segment may be numeric. Syntax deliberately does not copy
 ;; either dependency's vocabulary.
 (schema/register! ::word-value
-                  [:and :string
-                   [:re word-pattern]])
+                  [:string {:min 5 :max 200}])
 
 ;; CUID2's leading letter keeps the value readable as `result/<eval-id>`; the
 ;; remaining alphabet excludes every character whose CLJS munge is ambiguous.
 ;; Non-agent attrs also accept their preserved legacy values during migration.
 (schema/register! ::compact-value
                   [:or ::legacy-value
-                   [:and :string [:re compact-pattern]]])
+                   [:string {:min 12 :max 12}]])
 
 (schema/register! ::agent-value
                   [:or [:= "root"] ::legacy-value ::word-value])

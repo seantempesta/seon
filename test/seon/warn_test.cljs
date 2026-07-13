@@ -386,7 +386,7 @@
                   {:seon.db/conn conn
                    :seon.db/tx-data
                    [{:seon.schema/key :my.workout/date
-                     :seon.schema/source
+                     :seon.schema/form
                      "(seon.schema/register! :my.workout/date :string)"
                      :seon.schema/created-at (js/Date.)}
                     {:my.workout/date "2026-06-10"}]})))

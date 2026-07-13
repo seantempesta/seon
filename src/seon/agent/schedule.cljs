@@ -282,10 +282,10 @@
    ;; schedule-fire turn (`:seon.agent.turn/scheduled? true` — doesn't count
    ;; toward turn-limit) on the just-opened run. AWAITED (so the fire's effect
    ;; lands before the LLM drive). Absent (tests) ⇒ open-only, no fn-exec.
-   [:seon.agent.schedule/exec-fn! {:optional true} fn?]
+   [:seon.agent.schedule/exec-fn! {:optional true} 'fn?]
    ;; The run driver (seon.agent.loop/drive-run!), injected by the ticker to
    ;; avoid a require cycle. Absent (tests) ⇒ open-only, no drive.
-   [:seon.agent.schedule/drive! {:optional true} fn?]])
+   [:seon.agent.schedule/drive! {:optional true} 'fn?]])
 
 (schema/register! ::fire-due-response
   [:map [:seon.agent.schedule/fired [:vector ::fired-entry]]])

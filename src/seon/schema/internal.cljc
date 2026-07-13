@@ -12,7 +12,8 @@
    `schemas` map so this namespace never requires `seon.schema` (no cycle:
    schema → schema.internal only)."
   (:require [clojure.string :as str]
-            [malli.core :as m]))
+            [malli.core :as m]
+            [malli.registry :as mr]))
 
 (defn attr-form-properties
   "The Malli props map from an attr-schema form, or nil. Mirrors
@@ -116,14 +117,18 @@
 
 (defn assert-compilable-schema!
   "register!-time gate: reject invalid Malli forms so an agent never
-   'successfully' registers something the system can't use. Compiles `v`
-   against the live registry; failure throws a legible `:user-input`
+   'successfully' registers something the system can't use. Compiles `k`
+   against a complete candidate containing `schemas` plus `[k v]`; failure
+   throws a legible `:user-input`
    ex-info naming the key, the bad form, and common storable types.
-   Requires any referenced schema to already be registered (the load-order
-   convention)."
-  [k v]
+   Requires any referenced schema to exist in that candidate (the load-order
+   convention), without depending on Malli's process-global default."
+  [schemas k v]
   (try
-    (m/schema v)
+    (let [registry (mr/composite-registry
+                     (m/default-schemas)
+                     (mr/fast-registry (assoc schemas k v)))]
+      (m/schema k {:registry registry}))
     nil
     (catch #?(:clj Exception :cljs :default) e
       (throw (ex-info
@@ -138,7 +143,7 @@
                     "keyword first.")
                {:seon.schema/error :seon.schema/invalid-schema
                 :seon.schema/key   k
-                :seon.schema/form  v
+                :seon.schema/definition v
                 :seon.error/kind   :user-input}
                e)))))
 
@@ -183,7 +188,7 @@
                     "entirely when there is no value.")
                {:seon.schema/error :seon.schema/nilable-value-schema
                 :seon.schema/key   k
-                :seon.schema/form  v
+                :seon.schema/definition v
                 :seon.error/kind   :user-input})))))
 
 (defn assert-multi-segment-namespace!

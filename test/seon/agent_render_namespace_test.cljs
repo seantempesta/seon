@@ -62,7 +62,7 @@
     :seon.fn/private? false}
    {:seon.schema/key :test.parent/name
     :seon.schema/ns [:seon.ns/name :test.parent]
-    :seon.schema/source "(seon.schema/register! :test.parent/name :string)"}
+    :seon.schema/form ":string"}
    {:seon.ns/name :test.child
     :seon.ns/source
     "(ns test.child (:require [test.parent :as p] [test.missing :as m]))"}
@@ -137,7 +137,7 @@
                       {:seon.fn/sym "test.runtime/go" :seon.fn/ns [:seon.ns/name :test.runtime]
                        :seon.fn/arglists "([a])" :seon.fn/source "(defn go [a] a)"}
                       {:seon.schema/key :test.runtime/id :seon.schema/ns [:seon.ns/name :test.runtime]
-                       :seon.schema/source "(seon.schema/register! :test.runtime/id :string)"}]})
+                       :seon.schema/form ":string"}]})
                   (.then
                     (fn [_]
                       (let [text (:seon.render/text

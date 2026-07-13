@@ -1,8 +1,11 @@
 (ns seon.schema
-  "Global Malli schema registry for Seon — the SINGLE SOURCE OF TRUTH for
-   every attribute schema.
+  "Malli declaration and runtime-projection boundary for Seon.
 
-   Namespaces register their schemas here with `register!`, making them
+   Canonical schema forms are database facts. During module loading this
+   namespace collects compiled declarations; after database reconciliation it
+   validates and activates one immutable projection of those facts.
+
+   Namespaces declare schemas here with `register!`, making them
    available for `:malli/schema` fn validation, generative testing, and
    runtime validation. The `::` syntax expands to the current namespace,
    so `::user-id` in `seon.trading.core` becomes
@@ -17,7 +20,9 @@
    Malli-form helpers)."
   (:require [malli.core :as m]
             [malli.registry :as mr]
-            [seon.schema.internal :as internal]))
+            [seon.schema.internal :as internal]
+            #?(:clj [clojure.edn :as edn]
+               :cljs [cljs.reader :as reader])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Registry Setup
@@ -25,6 +30,12 @@
 
 ;; All registered domain schemas. `defonce` survives namespace reloads.
 (defonce ^:private *schemas (atom {}))
+
+;; The one disposable compiled projection of the current database schema facts.
+;; During initial module loading this is nil and register! collects declarations
+;; in `*schemas`; after database reconciliation it is a complete immutable
+;; registry/catalog candidate.
+(defonce ^:private !projection (atom nil))
 
 ;; THE one registry seon installs as malli's process-global default: malli's
 ;; built-in schemas + seon's mutable `*schemas` (read live on every lookup, so
@@ -37,54 +48,27 @@
    (mr/mutable-registry *schemas)))
 
 (defn relink-registry!
-  "(Re)point malli's global default registry at [[seon-registry]].
+  "Repoint Malli's convenience default to Seon's current projection.
 
-   Combines malli's default schemas + seon's mutable `*schemas`. Idempotent;
-   registered schemas live in `*schemas` and survive the relink.
-
-   Re-callable, not just load-time init: `malli.core` runs
-   `(mr/set-default-registry! …)` as a TOP-LEVEL load side effect. In the
-   CLJS pod, the bootstrap self-host compiler can re-execute it (an agent
-   `(require '[malli.core :as m])` goog.globalEvals the bundle's
-   `malli.core$macros.js`), stomping the registry with a default-only
-   snapshot and severing every `:seon.*` schema process-wide
-   (`:malli.core/invalid-schema`). `seon.eval`'s bootstrap `:load` wrapper
-   calls this after every load to re-assert the invariant; in CLJS the
-   stomp-guard watch installed here makes the invariant hold even BETWEEN
-   loads — see the watch comment below.
-
-   CLOSE THE STOMP WINDOW (CLJS pod). A foreign `(mr/set-default-registry!
-   …)` — the bootstrap load of `malli.core$macros.js` re-running
-   malli.core's top-level registry init — `(reset! malli.registry/registry*
-   …)`s seon's schemas away. A watch on that atom re-asserts
-   [[seon-registry]] the INSTANT it is replaced: ClojureScript runs
-   `add-watch` fns SYNCHRONOUSLY inside the stomping `reset!`, before any
-   other form observes the severed registry — so there is no window to be
-   resilient to, no severed state to heal. The `identical?` guard makes the
-   re-assert's own `reset!` a no-op (one bounce, no recursion). Installed
-   HERE (not a top-level `defonce`) and keyed by keyword so it is idempotent
-   AND re-attaches to the live `registry*` on every relink — a stale watch
-   can never be orphaned onto a replaced atom. This is the structural form
-   of the per-load relink: the relink covers boot ordering, the watch covers
-   any stomp from a path that never routes through the `:load` wrapper."
+   During initial module loading this uses the mutable declaration collector;
+   after database reconciliation it uses the immutable validated candidate.
+   The bootstrap load wrapper calls this after Malli bundle loads that reset
+   their own default. The old private-atom watch is deliberately gone."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (mr/set-default-registry! seon-registry)
-  #?(:cljs
-     (add-watch malli.registry/registry* ::seon-stomp-guard
-       (fn [_ _ _ new-registry]
-         (when-not (identical? new-registry seon-registry)
-           (mr/set-default-registry! seon-registry))))
-     :clj nil)
+  (mr/set-default-registry!
+    (or (:seon.schema.projection/registry @!projection)
+        seon-registry))
   true)
 
 ;; Initialize the global registry once at load time.
 (defonce ^:private _registry-init (relink-registry!))
 
-;; :inst as a keyword type (Malli only provides the inst? predicate), for
-;; consistency with :string, :int, etc.
+;; :inst as a keyword type (Malli only provides the `inst?` predicate), for
+;; consistency with :string, :int, etc. The quoted predicate is pure data and
+;; round-trips through the canonical database schema fact.
 (defonce ^:private _inst-type
-  (swap! *schemas assoc :inst (m/-simple-schema {:type :inst :pred inst?})))
+  (swap! *schemas assoc :inst 'inst?))
 
 ;; :seon.db/lookup-ref-value — the value position in a lookup-ref. Datahike
 ;; accepts strings, uuids, keywords, and ints as unique-attr values.
@@ -127,13 +111,13 @@
 
 ;; Positional-arg slot shapes for this ns's register/introspection fns — each
 ;; named-positional `:catn` slot in a `:malli/schema` below references one of
-;; these (db.cljs's `::conn`/`::tx-data` slot-schema pattern). `:seon.schema/form`
-;; (a Malli schema DEFINITION) is a recursive, heterogeneous structure —
+;; these (db.cljs's `::conn`/`::tx-data` slot-schema pattern). A Malli schema
+;; DEFINITION is a recursive, heterogeneous structure —
 ;; genuinely opaque, hence `:any` (the documented third-party-shape exception).
 (defonce ^:private _registry-key-type
   (swap! *schemas assoc :seon.schema/registry-key :keyword))
-(defonce ^:private _form-type
-  (swap! *schemas assoc :seon.schema/form :any))
+(defonce ^:private _definition-type
+  (swap! *schemas assoc :seon.schema/definition :any))
 (defonce ^:private _namespace-name-type
   (swap! *schemas assoc :seon.schema/namespace-name :string))
 (defonce ^:private _kvs-type
@@ -167,42 +151,10 @@
   [attr-key]
   (internal/enum-members (get @*schemas attr-key)))
 
-;;; --- register! self-tee hook -----------------------------------------------
-;;; The registry is in-memory and dies with the process. Durability for
-;;; RUNTIME registrations (agent evals, REPL-scope register! via MCP eval)
-;;; comes from a `:seon.schema` program-graph row whose `:seon.schema/source`
-;;; is the replayable `(seon.schema/register! …)` call — the same row shape
-;;; detect-and-tee writes, identity-upsert on `:seon.schema/key`.
-;;;
-;;; This ns must not require seon.db (cycle: db→schema), so the tee is a
-;;; late-bound hook: `seon.eval` installs [[set-tee-fn!]] at load. The
-;;; installed fn is conn-gated (no bound `seon.db/*conn*` → no-op), so the
-;;; ~500 boot-time register! calls from compiled-ns loads run untouched;
-;;; boot indexing (seon.client/index-schemas) owns the core rows.
-
-(defonce ^:private !tee-fn (atom nil))
-
-(defonce !last-tee
-  ;; The most recent tee invocation's return (a Promise in CLJS, nil when
-  ;; the tee skipped). register! stays synchronous — tests and live proofs
-  ;; `await` this to observe the row land deterministically.
-  (atom nil))
-
-(defn set-tee-fn!
-  "Install the registration self-tee hook, called once at load.
-
-   The conn-owning side (seon.eval) installs it. `f` is `(fn [k form] …)`;
-   it must never throw (a tee/durability failure must not fail the in-memory
-   registration). Idempotent."
-  {:malli/schema [:=> [:cat fn?] :nil]}
-  [f]
-  (reset! !tee-fn f)
-  nil)
-
 (defn register!
   "Define a new attribute so facts using it can be saved and queried.
 
-   Registers a single schema in the global registry.
+   Adds one canonical declaration to the current candidate collector.
 
    Arguments:
      k - Schema keyword (use `::name` for auto-namespacing)
@@ -210,40 +162,125 @@
 
    Returns the registered keyword `k`.
 
-   When `v` is a `:map` schema DECLARED a stored entity kind via
-   `{:seon.db/entity true}` in its properties (same opt-in family as
-   `{:seon.db/identity true}`), the stored schema is rewritten to carry
-   `{:seon.entity/id-attr <k>}` pointing at its identity-attr entry — so
-   the renderer enumerates instances by walking the AEVT index for that
-   id-attr, no per-row `:seon.entity/kind` stamp. Maps WITHOUT the marker
-   (request/response envelopes, view inputs) never become catalogued kinds;
-   register! is silent about them. The nudge toward the marker lives where
-   rows exist: `seon.warn/check-unmarked-entity-kinds`.
+   Entity-map render metadata stays in the authored form. The activated
+   projection derives its id attribute and renderer catalog without persisting
+   a second decomposition. Maps without `{:seon.db/entity true}` are ordinary
+   request/response or view schemas and do not enter that catalog.
 
    Example:
      (register! ::api-key [:string {:min 1}])
      (register! ::timeout [:int {:min 1000 :max 600000}])
      (register! :seon.eval [:map {:seon.db/entity true
                                   :seon.render/ai 'foo}
-                            [:seon.eval/id ...] ...])  ;; →
-       ;; stored props {:seon.db/entity true
-       ;;               :seon.render/ai 'foo
-       ;;               :seon.entity/id-attr :seon.eval/id}"
-  {:malli/schema [:=> [:catn [::registry-key ::registry-key] [::form ::form]] ::registry-key]}
+                            [:seon.eval/id ...] ...])"
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]
+                         [::definition ::definition]]
+                  ::registry-key]}
   [k v]
   ;; CLJS-only until the JVM's legacy `:form/*` registrations are renamed.
   #?(:cljs (internal/assert-multi-segment-namespace! k)
      :clj  nil)
-  (internal/assert-compilable-schema! k v)
+  (let [encoded (pr-str v)
+        decoded (try
+                  (#?(:clj edn/read-string :cljs reader/read-string) encoded)
+                  (catch #?(:clj Exception :cljs :default) e
+                    (throw
+                      (ex-info
+                        (str "schema/register! " k
+                             ": schema forms must be readable EDN; "
+                             "function objects and executable values belong "
+                             "at function boundaries")
+                        {:seon.schema/error :seon.schema/unreadable-form
+                         :seon.schema/key k
+                         :seon.schema/definition v
+                         :seon.error/kind :user-input}
+                        e))))]
+    (when-not (= v decoded)
+      (throw
+        (ex-info
+          (str "schema/register! " k
+               ": schema form does not round-trip as EDN")
+          {:seon.schema/error :seon.schema/non-round-tripping-form
+           :seon.schema/key k
+           :seon.schema/definition v
+           :seon.error/kind :user-input}))))
+  (internal/assert-compilable-schema! @*schemas k v)
   (internal/assert-non-nilable-value-schema! @*schemas k v)
-  (swap! *schemas assoc k (internal/with-entity-id-attr @*schemas v))
-  ;; Self-tee (durability): hand the ORIGINAL form to the hook — replay
-  ;; re-derives :seon.entity/id-attr by re-running register!. No hook
-  ;; installed (JVM, pure-registry, boot ns-loads before seon.eval) →
-  ;; registers exactly as before, no tee, no error.
-  (when-some [f @!tee-fn]
-    (reset! !last-tee (f k v)))
+  (swap! *schemas assoc k v)
   k)
+
+(defn form-string
+  "Canonical, full EDN encoding of registered schema `k`, or nil when absent.
+
+   Registration already proves the value round-trips, so this never truncates
+   or replaces runtime objects with display placeholders. This is the durable
+   `:seon.schema/form` value."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]]
+                  [:maybe :string]]}
+  [k]
+  (some-> (get @*schemas k) pr-str))
+
+(defn build-projection
+  "Build and validate one immutable runtime projection from `{key form}`.
+
+   Every key compiles against the complete candidate registry, so validation
+   is independent of declaration order. The entity catalog is derived from
+   authored forms; it is never transacted as a second schema model. Pure: no
+   atom, default-registry, database, or var mutation."
+  {:malli/schema [:=> [:catn [::forms :map]] :map]}
+  [forms]
+  (let [registry (mr/composite-registry
+                   (m/default-schemas)
+                   (mr/fast-registry forms))
+        options  {:registry registry}
+        _        (doseq [k (sort (keys forms))]
+                   (m/schema k options))
+        catalog  (->> forms
+                      (keep
+                        (fn [[k raw]]
+                          (let [form (internal/with-entity-id-attr forms raw)
+                                props (when (internal/map-shape? form)
+                                        (internal/schema-properties form))
+                                id-attr (:seon.entity/id-attr props)]
+                            (when (and (:seon.db/entity props) id-attr)
+                              (cond->
+                                {:seon.schema.catalog/key k
+                                 :seon.schema.catalog/id-attr id-attr
+                                 :seon.schema.catalog/required-attrs
+                                 (set (internal/map-required-attrs form))}
+                                (:seon.render/ai props)
+                                (assoc :seon.schema.catalog/render-ai
+                                       (:seon.render/ai props))
+
+                                (:seon.render/html props)
+                                (assoc :seon.schema.catalog/render-html
+                                       (:seon.render/html props)))))))
+                      (sort-by :seon.schema.catalog/key)
+                      vec)
+        fingerprint (hash (pr-str (sort-by key forms)))]
+    {:seon.schema.projection/forms forms
+     :seon.schema.projection/registry registry
+     :seon.schema.projection/catalog catalog
+     :seon.schema.projection/fingerprint fingerprint}))
+
+(defn activate!
+  "Validate and atomically activate a complete `{schema-key form}` set.
+
+   The candidate is fully built before either the collector or Malli default
+   registry changes. Returns the activated projection."
+  {:malli/schema [:=> [:catn [::forms :map]] :map]}
+  [forms]
+  (let [candidate (build-projection forms)]
+    (reset! *schemas forms)
+    (reset! !projection candidate)
+    (mr/set-default-registry! (:seon.schema.projection/registry candidate))
+    candidate))
+
+(defn current-projection
+  "The active disposable projection, or nil during initial module loading."
+  {:malli/schema [:=> [:cat] [:maybe :map]]}
+  []
+  @!projection)
 
 (defn current-keys
   "Snapshot of all currently-registered schema keywords.
@@ -254,20 +291,29 @@
   []
   (set (keys @*schemas)))
 
-(defn discard-registrations!
-  "Drop `ks` from the in-memory registry.
+(defn snapshot
+  "Immutable `{schema-key form}` snapshot for one eval transition."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  @*schemas)
 
-   The schema analog of
-   `analyzer-info/remove-phantom-defs!`. A FAILED eval that ran
-   `register!` must define NOTHING: the DB self-tee already DEFERS to
-   the gated detect-and-tee (so nothing persisted), and this removes the
-   in-session registry entries too, so a re-eval of the fixed form
-   registers cleanly. `ks` is the keys NEWLY registered during the
-   failed eval (post-eval `current-keys` minus the pre-eval snapshot),
-   so a pre-existing key is never in `ks`. Returns nil."
-  {:malli/schema [:=> [:catn [::discarded-keys [:set :keyword]]] :nil]}
-  [ks]
-  (swap! *schemas #(apply dissoc % ks))
+(defn changed-keys
+  "Schema keys whose canonical form differs from `before`, including new keys."
+  {:malli/schema [:=> [:catn [::before :map]] [:set :keyword]]}
+  [before]
+  (into #{}
+        (keep (fn [[k form]]
+                (when (not= form (get before k ::absent)) k)))
+        @*schemas))
+
+(defn restore!
+  "Restore an exact registry snapshot after a failed eval.
+
+   This restores redefinitions as well as removing new keys; the previous
+   key-set-only rollback left failed redefinitions live."
+  {:malli/schema [:=> [:catn [::before :map]] :nil]}
+  [before]
+  (reset! *schemas before)
   nil)
 
 (defn register-all!
@@ -314,7 +360,8 @@
    not refer to an entity-shape :map (no id-attr derivable)."
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
   [k]
-  (let [v (get @*schemas k)]
+  (let [v (some->> (get @*schemas k)
+                   (internal/with-entity-id-attr @*schemas))]
     (when (and v (internal/map-shape? v))
       (let [props       (internal/schema-properties v)
             id-attr     (:seon.entity/id-attr props)
@@ -345,10 +392,11 @@
   {:malli/schema [:=> [:cat] [:vector :keyword]]}
   []
   (->> @*schemas
-       (keep (fn [[k v]]
-               (when (and (internal/map-shape? v)
-                          (:seon.entity/id-attr (internal/schema-properties v)))
-                 k)))
+       (keep (fn [[k raw]]
+               (let [v (internal/with-entity-id-attr @*schemas raw)]
+                 (when (and (internal/map-shape? v)
+                            (:seon.entity/id-attr (internal/schema-properties v)))
+                   k))))
        sort
        vec))
 

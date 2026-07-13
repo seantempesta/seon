@@ -541,7 +541,7 @@
 
    Function-valued Malli predicates are the common source. New live forms are
    projected through [[einstrument/pr-str-readable]] before this backstop; the
-   regex also heals already-indexed `:seon.schema/source` / `:seon.fn/spec`
+   regex also heals already-indexed `:seon.schema/form` / `:seon.fn/spec`
    strings without a database migration. Bounded to one line so a malformed
    tag can never consume a following compact record."
   #"#object\[[^\]\n]*\]")
@@ -563,19 +563,19 @@
 
    The database is the rendering authority. Both boot-indexed raw forms and
    runtime-indexed `(seon.schema/register! ...)` calls normalize through
-   [[ctx/normalize-schema-source]]; unreadable legacy rows are scrubbed rather
+   [[ctx/normalize-schema-form]]; unreadable rows are scrubbed rather
    than replaced from Malli's mutable process registry."
   [source]
   (if (str/blank? source)
     "<not indexed>"
-    (if-some [form (ctx/normalize-schema-source source)]
+    (if-some [form (ctx/normalize-schema-form source)]
       (omit-runtime-object-tags (einstrument/pr-str-readable form))
       (omit-runtime-object-tags (str/trim source)))))
 
 (defn- compact-schema-line
   "One inert `schema <key> = <form>` record for a schema the ns owns.
 
-   `<form>` comes only from persisted `:seon.schema/source`. Every keyword
+   `<form>` comes only from persisted `:seon.schema/form`. Every keyword
    stays fully qualified because a compact card is read from the caller's
    CURRENT ns, not necessarily the namespace it describes. It is deliberately
    NOT a synthetic `register!` form: compact cards describe callable code but
@@ -745,7 +745,7 @@
                        '[{:seon.fn/_ns     [:seon.fn/sym :seon.fn/arglists
                                             :seon.fn/doc :seon.fn/spec
                                             :seon.fn/private?]
-                          :seon.schema/_ns [:seon.schema/key :seon.schema/source]}]})
+                          :seon.schema/_ns [:seon.schema/key :seon.schema/form]}]})
             schemas (->> (:seon.schema/_ns pull)
                          (filter (fn [{:seon.schema/keys [key]}]
                                    (= (namespace key) ns-str)))

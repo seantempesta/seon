@@ -25,27 +25,21 @@
 (def ^:private dependent-source-attr :idtest.namespace/source)
 (def ^:private compact-generator :seon.db.id.generator/compact)
 
-(def ^:private allocation-schema-keys
-  #{identity-attr
-    other-identity-attr
-    :idtest.record/source
-    dependent-identity-attr
-    dependent-source-attr})
-
 #?(:clj
    (use-fixtures
      :once
      (fn [run-tests]
-       (try
-         (run-tests)
-         (finally
-           (schema/discard-registrations! allocation-schema-keys)))))
+       (let [before (schema/snapshot)]
+         (try
+           (run-tests)
+           (finally
+             (schema/restore! before))))))
    :cljs
-   (use-fixtures
-     :once
-     {:after
-      (fn []
-        (schema/discard-registrations! allocation-schema-keys))}))
+   (let [!before (atom nil)]
+     (use-fixtures
+       :once
+       {:before (fn [] (reset! !before (schema/snapshot)))
+        :after  (fn [] (schema/restore! @!before))})))
 
 (defn- allocation-schema-transaction []
   [{:db/ident :seon.schema/key

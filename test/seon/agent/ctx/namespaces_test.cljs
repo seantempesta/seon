@@ -141,21 +141,21 @@
             :seon.fn/spec "[:=> [:cat :ctx.fixture/a :my.helper/local-contract] :my.helper/output]"}
            {:seon.schema/key    :my.helper/local-contract
             :seon.schema/ns     [:seon.ns/name :my.helper]
-            :seon.schema/source
+            :seon.schema/form
             "(seon.schema/register! :my.helper/local-contract [:map [:my.helper/input :string]])"}
            ;; A raw boot-indexed form, a replayable register! call, then a
            ;; raw form closing a cycle. The map label has a real schema row so
            ;; the test catches a structural walker that mistakes labels for
            ;; schema positions.
            {:seon.schema/key    :ctx.fixture/a
-            :seon.schema/source "[:map [:ctx.fixture/value :ctx.fixture/b]]"}
+            :seon.schema/form "[:map [:ctx.fixture/value :ctx.fixture/b]]"}
            {:seon.schema/key    :ctx.fixture/b
-            :seon.schema/source
+            :seon.schema/form
             "(seon.schema/register! :ctx.fixture/b [:tuple :ctx.fixture/c :string])"}
            {:seon.schema/key    :ctx.fixture/c
-            :seon.schema/source "[:or :ctx.fixture/a :int]"}
+            :seon.schema/form "[:or :ctx.fixture/a :int]"}
            {:seon.schema/key    :ctx.fixture/value
-            :seon.schema/source ":keyword"}]
+            :seon.schema/form ":keyword"}]
           (fn [conn]
             (let [dbv        @conn
                   refs       #{:ctx.fixture/a :ctx.fixture/b :ctx.fixture/c}
@@ -303,7 +303,7 @@
             :seon.schema/ns [:seon.ns/name :my.helper]
             ;; Simulate an already-indexed legacy source. The live definition
             ;; below independently exercises the function-valued Malli path.
-            :seon.schema/source "[:fn #object[Function]]"}]
+            :seon.schema/form "[:fn #object[Function]]"}]
           (fn [conn]
             (let [original schema/schema-definition
                   card (with-redefs

@@ -30,8 +30,8 @@
 (schema/register! ::socket-path [:string {:min 1}])
 (schema/register! ::message :map)
 (schema/register! ::timeout-ms [:int {:min 1}])
-(schema/register! ::on-message [:fn fn?])
-(schema/register! ::on-close [:fn fn?])
+(schema/register! ::on-message 'fn?)
+(schema/register! ::on-close 'fn?)
 (schema/register! ::failure :keyword)
 (schema/register! ::frame-bytes [:int {:min 0}])
 (schema/register!

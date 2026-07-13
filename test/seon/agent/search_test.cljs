@@ -515,7 +515,7 @@
                                    :seon.fn/source "(defn gadget-make [] :gadgetized)"
                                    :seon.fn/doc "uses widget internally"}
                                   {:seon.schema/key :test.alpha/widget-size
-                                   :seon.schema/source "(schema/register! :test.alpha/widget-size :int)"}]})))
+                                   :seon.schema/form ":int"}]})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-graph

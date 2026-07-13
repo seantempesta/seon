@@ -94,20 +94,25 @@
 
 ;; --- {:seon.db/entity true} — declared entity kinds (P2/#11) ---
 
-(deftest declared-entity-derives-id-attr
+(deftest declared-entity-keeps-canonical-form-and-derives-catalog-entry
   (schema/register! :schematest.entity/id [:string {:seon.db/identity true}])
   (schema/register! :schematest.entity/label :string)
   (schema/register! :schematest.entity
     [:map {:seon.db/entity true}
      [:schematest.entity/id    :schematest.entity/id]
      [:schematest.entity/label :schematest.entity/label]])
-  (testing "marker present → id-attr derived into the stored props"
+  (testing "canonical form preserves only authored properties"
     (let [props (second (schema/schema-definition :schematest.entity))]
       (is (= true (:seon.db/entity props)) "declared marker preserved")
-      (is (= :schematest.entity/id (:seon.entity/id-attr props))
-          "id-attr derived from the identity-attr entry")))
+      (is (not (contains? props :seon.entity/id-attr))
+          "derived catalog metadata is not written into the canonical form")))
   (testing "declared kind enters the catalog"
-    (is (contains? (set (schema/entity-schema-keys)) :schematest.entity)))
+    (is (contains? (set (schema/entity-schema-keys)) :schematest.entity))
+    (is (some #(= [:db/add "schema-:schematest.entity"
+                    :seon.schema/id-attr :schematest.entity/id]
+                  %)
+              (schema/entity-schema-tx-data :schematest.entity))
+        "the disposable catalog derives the identity attribute"))
   (unregister! :schematest.entity/id :schematest.entity/label
                :schematest.entity))
 

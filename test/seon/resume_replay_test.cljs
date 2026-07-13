@@ -9,7 +9,8 @@
    row minus `(core-ns-set)`), topo-sorts by the STORED `:seon.ns/require-edges`,
    and for each ns evals its reconstituted whole source
    (`seon.eval/reconstitute-ns-source` — ns form + every current
-   `:seon.fn`/`:seon.schema`/`:seon.test` source). cljs.js's own load-fn
+   `:seon.fn`/`:seon.test` source). Canonical `:seon.schema/form` facts
+   activate as one validated runtime projection before code replay. cljs.js's own load-fn
    (the DB branch of `seon.eval/guarded-load`) supplies any transitive agent
    require's source on demand, in dependency order, with cycle detection +
    load-once. There is NO per-definition replay loop, NO tx-order sort, NO
@@ -71,13 +72,23 @@
    ;; CORE test row — must NOT be loaded.
    {:seon.test/sym "seon.test.runner/run!"
     :seon.test/ns [:seon.ns/name :seon.test.runner]
-    :seon.test/source "(cljs.test/deftest should-not-load (cljs.test/is true))"}])
+   :seon.test/source "(cljs.test/deftest should-not-load (cljs.test/is true))"}])
+
+(defn- open-replay-conn!
+  "Open a production-shaped replay database with canonical schema facts."
+  []
+  (-> (client/open-agent-conn!)
+      (.then
+        (fn [conn]
+          (-> (db/transact! {:seon.db/conn conn
+                             :seon.db/tx-data (client/index-schemas)})
+              (.then (fn [_] conn)))))))
 
 (defn- with-seeded-conn
   "Open a fresh conn, seed `seed-tx`, run `body` (1-arg `conn`). Returns a
    Promise. `db/*conn*` is bound for the transact so lookup-refs resolve."
   [body]
-  (-> (client/open-agent-conn!)
+  (-> (open-replay-conn!)
       (.then (fn [conn]
                (binding [db/*conn* conn]
                  (-> (db/transact! {:seon.db/tx-data seed-tx})
@@ -213,7 +224,7 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
-            (-> (client/open-agent-conn!)
+            (-> (open-replay-conn!)
                 (.then
                   (fn [conn]
                     (binding [db/*conn* conn]
@@ -269,7 +280,7 @@
 ;; ---------------------------------------------------------------------------
 ;; C30 — keyword-namespace schema STUBS are excluded from the replay set.
 ;; `index-schemas` mints a `:seon.ns/name` row per NAMESPACED schema key as
-;; a `:seon.schema/ns` backref (`:seon.fn/spec` → `:seon.ns/name :seon.fn`).
+;; a `:seon.schema/ns` backref.
 ;; Those namespaces are NOT compiled nses, so `agent-ns-set` (which only
 ;; subtracts `core-ns-set`) keeps them — but they reconstitute to "" (no
 ;; source, no fn/test members, their core shape-literal schema rows fail
@@ -282,7 +293,7 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
-            (-> (client/open-agent-conn!)
+            (-> (open-replay-conn!)
                 (.then
                   (fn [conn]
                     (binding [db/*conn* conn]
@@ -295,20 +306,22 @@
                                :seon.fn/ns [:seon.ns/name :my.agent.c30]
                                :seon.fn/source "(defn f [] 1)"
                                :seon.fn/arglists "([])" :seon.fn/doc "" :seon.fn/private? false}
-                              ;; a C30 STUB ns — keyword-only, no source; its
-                              ;; only member a CORE shape-literal schema row
-                              ;; (source "[…]" fails registration-call-source?),
-                              ;; exactly what index-schemas' :seon.schema/ns
-                              ;; backref mints.
-                              {:seon.ns/name :seon.fn}
-                              {:seon.schema/key    :seon.fn/spec
-                               :seon.schema/source "[:vector :any]"
-                               :seon.schema/ns     [:seon.ns/name :seon.fn]}]})
+                              ;; a C30 STUB ns — keyword-only, no source. Use a
+                              ;; unique schema key; overwriting a real core attr
+                              ;; would correctly change the next runtime
+                              ;; projection now that the database is authority.
+                              {:seon.ns/name :probe.c30.schema}
+                              {:seon.schema/key  :probe.c30.schema/example
+                               :seon.schema/form ":string"
+                               :seon.schema/ns   [:seon.ns/name :probe.c30.schema]}]})
                           (.then
                             (fn [_]
-                              (is (contains? ((deref #'client/agent-ns-set) @conn) :seon.fn)
+                              (is (contains? ((deref #'client/agent-ns-set) @conn)
+                                             :probe.c30.schema)
                                   "the stub IS in agent-ns-set — only the replay filter drops it")
-                              (is (str/blank? (seval/reconstitute-ns-source @conn :seon.fn))
+                              (is (str/blank?
+                                    (seval/reconstitute-ns-source
+                                      @conn :probe.c30.schema))
                                   "the keyword-only stub ns reconstitutes to nothing")
                               (is (not (str/blank? (seval/reconstitute-ns-source @conn :my.agent.c30)))
                                   "a real agent ns reconstitutes non-blank")
@@ -362,43 +375,23 @@
       "blank + duplicate messages collapse"))
 
 ;; ---------------------------------------------------------------------------
-;; Registry stomp guard — a foreign (mr/set-default-registry! …) is the exact
-;; side effect a bootstrap load of malli.core$macros.js re-runs, severing every
-;; seon-registered schema. relink-registry! installs a watch on malli's
-;; registry* atom that re-asserts seon's registry SYNCHRONOUSLY inside the
-;; stomping reset!, so there is no window where validation is broken.
+;; Registry relink boundary — a bootstrap Malli bundle load may reset its
+;; convenience default. The bootstrap loader explicitly relinks afterward;
+;; no code watches Malli's private registry atom.
 ;; ---------------------------------------------------------------------------
 
-(deftest stomp-guard-closes-the-window
-  ;; relink (re)installs the guard on the live registry* atom.
+(deftest explicit-relink-restores-malli-default
   (is (true? (schema/relink-registry!)))
-  ;; Simulate the stomp the way malli.core's top-level (def default-registry …)
-  ;; does it — default schemas + var-registry, no seon mutable layer.
-  (mr/set-default-registry!
-   (mr/composite-registry (mr/fast-registry (m/default-schemas)) (mr/var-registry)))
-  ;; NO manual relink here. The watch must have already healed, in the same
-  ;; reset! the stomp triggered — so resolution NEVER broke.
-  (is (some? (m/schema :seon.db/conn))
-      "seon-registered keywords resolve immediately after a stomp — window closed")
-  (is (true? (m/validate :seon.db/id "abc1234567890a"))
-      "value validation against a seon schema still works post-stomp")
-  (is (false? (m/validate :seon.db/id "x"))
-      "and still rejects — the real seon schema, not a default fallthrough"))
-
-(deftest relink-registry!-restores-after-the-guard-is-removed
-  ;; With the guard detached, the stomp DOES sever — proving (a) the stomp is
-  ;; real and (b) relink-registry! heals it (and re-arms the guard).
   (try
-    (remove-watch malli.registry/registry* :seon.schema/seon-stomp-guard)
     (mr/set-default-registry! (m/default-schemas))
     (is (thrown? js/Error (m/schema :seon.db/conn))
-        "guard removed: the stomp severs seon-registered keywords")
+        "a foreign default does not contain Seon's projection")
     (finally
-      ;; relink heals AND re-installs the guard — MUST run even if the assert
-      ;; above throws, or the rest of the suite breaks.
       (is (true? (schema/relink-registry!)))))
   (is (some? (m/schema :seon.db/conn))
-      "after relink-registry!, seon-registered keywords resolve again"))
+      "the explicit loader boundary restores Seon's projection")
+  (is (true? (m/validate :seon.db/id "abc1234567890a")))
+  (is (false? (m/validate :seon.db/id "x"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Downstream bug #14 (2026-06-11) — agent corpus whose (ns …) row REQUIRES a
@@ -414,7 +407,7 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
-            (-> (client/open-agent-conn!)
+            (-> (open-replay-conn!)
                 (.then
                   (fn [conn]
                     (binding [db/*conn* conn]
@@ -460,7 +453,7 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
-            (-> (client/open-agent-conn!)
+            (-> (open-replay-conn!)
                 (.then
                   (fn [conn]
                     (binding [db/*conn* conn]

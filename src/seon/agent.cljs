@@ -217,7 +217,7 @@
 
 (schema/register! :seon.schema/key        [:keyword {:seon.db/identity true}])
 (schema/register! :seon.schema/ns         :seon.db/ref)
-(schema/register! :seon.schema/source     :string)
+(schema/register! :seon.schema/form     :string)
 (schema/register! :seon.schema/created-at :inst)
 
 ;; ============================================================
@@ -302,7 +302,7 @@
          :seon.render/ai   'seon.handlers.schema/render-ai
          :seon.render/html 'seon.handlers.schema/render-html}
    [:seon.schema/key    :seon.schema/key]
-   [:seon.schema/source :seon.schema/source]
+   [:seon.schema/form :seon.schema/form]
    [:seon.schema/ns         {:optional true} :seon.schema/ns]
    [:seon.schema/created-at {:optional true} :seon.schema/created-at]])
 

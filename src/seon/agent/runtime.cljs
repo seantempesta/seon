@@ -16,7 +16,7 @@
     [seon.schema :as schema]))
 
 (schema/register! ::wake? [:boolean {:default true}])
-(schema/register! ::llm-fn fn?)
+(schema/register! ::llm-fn 'fn?)
 (schema/register! ::compile-state :any)
 (schema/register! ::resumed? :boolean)
 (schema/register! ::unhosted? :boolean)

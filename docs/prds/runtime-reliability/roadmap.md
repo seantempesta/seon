@@ -686,9 +686,13 @@ or discover archived behavior.
    `bin/seon config apply <path>` is explicit. Remaining: freeze the payload in
    the supervisor intent and fold singleton attribute removal into the exact
    desired-state compiler.
-3. Persist full canonical Malli forms and native backend signatures in the
-   database. Reopen installed Datahike schema instead of reasserting it.
-4. Build one validated Malli/catalog candidate from the database and swap only
+3. **Canonical form cut complete:** every schema row now persists the full
+   EDN-round-tripping `:seon.schema/form`; runtime function/regex objects are
+   rejected as durable definitions, schema source replay and the async self-tee
+   are removed, failed redefinitions restore exactly, and replay activates
+   database forms before code. Native backend reopening remains.
+4. **Candidate cut in progress:** build one validated Malli/catalog candidate
+   from the database and swap only
    after durable validation succeeds. The candidate contains the immutable
    Malli registry, compiled validation, missing compatible Datahike attributes,
    entity render catalog, dependency indexes, and a stable schema fingerprint.

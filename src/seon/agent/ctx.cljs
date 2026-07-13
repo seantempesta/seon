@@ -465,7 +465,7 @@
    it. `limit` is CHARS (the ctx cap plumbing — `seon.config` render caps);
    markers speak TOKENS (Token Reporting rule). Nil-safe."
   {:malli/schema [:=> [:catn [::s :any] [::limit :int]
-                       [::full? :boolean] [::marker [:fn fn?]]] :string]}
+                       [::full? :boolean] [::marker 'fn?]] :string]}
   [s limit full? marker]
   (let [s (str s)]
     (if (or full? (<= (count s) limit))
@@ -1729,7 +1729,7 @@
                                               :seon.fn/doc :seon.fn/source
                                               :seon.fn/private? :seon.fn/spec
                                               :seon.fn/schema-error]
-                            :seon.schema/_ns [:seon.schema/key :seon.schema/source]}]})
+                            :seon.schema/_ns [:seon.schema/key :seon.schema/form]}]})
           ;; :seon.test is now a real entity kind (Step 3): `:seon.test/ns`
           ;; IS registered, so this reverse-ref pull resolves. Kept as a
           ;; SEPARATE guarded call (vs. inlining into the `core` pull) for
@@ -1802,7 +1802,7 @@
 ;;; PURE FUNCTION OF THE DB VALUE (byte-identical train/serve): references are
 ;;; detected with malli's own RefSchema walk (`m/-ref-schema?` / `m/-ref`),
 ;;; supplied an isolated placeholder registry rather than Malli's live one, and definitions are
-;;; resolved from `:seon.schema/source` in the db — NOT the live `*schemas`
+;;; resolved from `:seon.schema/form` in the db — NOT the live `*schemas`
 ;;; registry. (Malli's native transitive walk, `::m/walk-refs`, resolves refs
 ;;; THROUGH the registry to descend; using it would couple the render to live
 ;;; registry state. So we use malli only for per-form DIRECT detection and do
@@ -1862,40 +1862,23 @@
   [s]
   (or (some-> s read-schema-form schema-form-refs) #{}))
 
-(defn- registration-call-form?
-  "True when `form` is one persisted three-argument `register!` call."
-  [form]
-  (and (seq? form)
-       (= 3 (count form))
-       (symbol? (first form))
-       (= "register!" (name (first form)))
-       (keyword? (second form))))
-
-(defn normalize-schema-source
-  "Normalize one persisted schema source to its Malli form.
-
-   Boot indexing stores the raw Malli form while the runtime tee stores the
-   replayable `(seon.schema/register! key form)` call. Parse once and return
-   the same definition shape for both. The database row's key remains the
-   identity; the call's key is deliberately not projected as another fact."
-  {:malli/schema [:=> [:catn [:seon.schema/source :string]] :any]}
+(defn normalize-schema-form
+  "Read one canonical persisted Malli form."
+  {:malli/schema [:=> [:catn [:seon.schema/form :string]] :any]}
   [source]
-  (when-let [read-form (read-schema-form source)]
-    (if (registration-call-form? read-form)
-      (nth read-form 2)
-      read-form)))
+  (read-schema-form source))
 
 (defn- schema-definition-in-db
   "The normalized persisted definition for schema key `k`, or nil."
   [db k]
   (when (keyword? k)
     (try
-      (when-let [source (:seon.schema/source
+      (when-let [source (:seon.schema/form
                           (db/entity-lazy
                             {:seon.db/db db
                              :seon.db/ref [:seon.schema/key k]}))]
         {::schema-source source
-         ::schema-form   (normalize-schema-source source)})
+         ::schema-form   (normalize-schema-form source)})
       (catch :default _ nil))))
 
 (defn- schema-definition-text
@@ -1905,7 +1888,7 @@
 
 (defn- schema-ref-closure
   "Transitive closure of registered schema keys reachable from `seed`, resolved
-   over the db's `:seon.schema/source`. `own-keys` are TRAVERSED (so their
+   over the db's `:seon.schema/form`. `own-keys` are TRAVERSED (so their
    cross-ns children still surface) but never EMITTED — the ns already shows them
    as its own `register!` block / in its source. Cycle-safe via a `seen` set;
    bounded at [[referenced-schema-cap]]. Returns
@@ -1965,16 +1948,9 @@
       (str/join "\n" lines))))
 
 (defn- schema-block-ai
-  "One schema rendered for the :ai form: `[schema :ns/key]  <malli form>`.
-   Pulls the live shape from the registry; falls back to the persisted
-   `:seon.schema/source` when the registry has no entry."
-  [{:seon.schema/keys [key source]}]
-  (let [shape (when (keyword? key)
-                (try (schema/schema-definition key) (catch :default _ nil)))
-        form  (cond
-                shape                       (pr-str shape)
-                (not (str/blank? source))   (str/trim source)
-                :else                       "<not registered>")]
+  "One schema rendered from the supplied database row."
+  [{:seon.schema/keys [key form]}]
+  (let [form (if (str/blank? form) "<not registered>" (str/trim form))]
     (str "[schema " (pr-str key) "]  " form)))
 
 (defn- test-block-ai

@@ -70,8 +70,10 @@
     [::replace        {:optional true} ::replace]]
    ;; ::all? and ::expected-count answer the SAME question two ways — a
    ;; request carrying both is incoherent, refused at the boundary.
-   [:fn {:error/message "::all? and ::expected-count are mutually exclusive"}
-    (fn [m] (not (and (contains? m ::expected-count) (contains? m ::all?))))]])
+   [:not
+    [:map
+     [::expected-count ::expected-count]
+     [::all? ::all?]]]])
 
 (schema/register! ::decision
   [:or

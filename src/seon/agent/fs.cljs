@@ -268,9 +268,10 @@
     [:seon.agent.fs/near           {:optional true} :seon.agent.fs.match/near]
     [:seon.agent.fs/file-sha       {:optional true} :seon.agent.fs/file-sha]
     [:seon.agent.fs/encoding       {:optional true} :string]]
-   [:fn {:error/message ":seon.agent.fs/all? and :seon.agent.fs/expected-count are mutually exclusive"}
-    (fn [m] (not (and (contains? m :seon.agent.fs/expected-count)
-                      (contains? m :seon.agent.fs/all?))))]])
+   [:not
+    [:map
+     [:seon.agent.fs/expected-count :seon.agent.fs.match/expected-count]
+     [:seon.agent.fs/all? :seon.agent.fs/all?]]]])
 
 (schema/register! :seon.agent.fs/insert-request
   [:map

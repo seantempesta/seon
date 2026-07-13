@@ -40,17 +40,17 @@
 ;;; builder (a `:sequential` walk would hang on `(iterate …)`).
 ;;; ============================================================
 
-(schema/register! :seon.retry/strategy [:fn sequential?])
+(schema/register! :seon.retry/strategy 'sequential?)
 (schema/register! :seon.retry/delay-ms :int)
 ;; a growth factor (2, 1.5, …) or jitter fraction (0.0–1.0) — a number,
 ;; not necessarily integral, so `:int` would be too tight.
-(schema/register! :seon.retry/factor [:fn number?])
-(schema/register! :seon.retry/jitter [:fn number?])
+(schema/register! :seon.retry/factor 'number?)
+(schema/register! :seon.retry/jitter 'number?)
 (schema/register! :seon.retry/count  :int)
 (schema/register! :seon.retry/attempt :int)
 ;; a callable slot (thunk / predicate / hook) at a third-party-ish
 ;; boundary — a bare fn value, validated as `fn?`.
-(schema/register! :seon.retry/callable [:fn fn?])
+(schema/register! :seon.retry/callable 'fn?)
 
 ;;; ============================================================
 ;;; BUILDERS — seed a strategy.

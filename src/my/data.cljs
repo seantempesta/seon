@@ -45,7 +45,7 @@
 (schema/register! ::key       :keyword)             ; reducers: the numeric field to aggregate
 (schema/register! ::group-key :keyword)             ; group-sum: the field to group BY
 (schema/register! ::group     :any)                 ; output: a grouped value (e.g. :dining)
-(schema/register! ::total     number?)              ; output: a per-group sum
+(schema/register! ::total     'number?)             ; output: a per-group sum
 
 (schema/register! ::group-row [:map [::group ::group] [::total ::total]])
 

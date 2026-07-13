@@ -59,7 +59,7 @@
 (schema/register! ::label :string)
 (schema/register! ::order :int)
 (schema/register! ::exclusive-group :qualified-keyword)
-(schema/register! ::producer [:fn fn?])
+(schema/register! ::producer 'fn?)
 (schema/register! ::definition
   [:map
    [::coordinate ::coordinate]
@@ -112,8 +112,8 @@
    [:tuple [:= :seon.web.feed/agents]]
    [:tuple [:= :seon.web.feed/data] [:maybe :string] :int :boolean]
    [:tuple [:= :seon.web.feed/debug] :seon.agent/id ::view-id]])
-(schema/register! ::render-full [:fn fn?])
-(schema/register! ::render-change [:fn fn?])
+(schema/register! ::render-full 'fn?)
+(schema/register! ::render-change 'fn?)
 (schema/register! ::live? :boolean)
 (schema/register! ::feed-definition
   [:map

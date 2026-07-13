@@ -59,7 +59,7 @@
 (schema/register! ::budget [:int {:min 0}])
 ;; (fn [budget-tokens total-tokens] -> string) appended at the cut — a
 ;; caller's LOUD marker (e.g. seon.agent.ctx's truncation guides).
-(schema/register! ::marker-fn [:fn fn?])
+(schema/register! ::marker-fn 'fn?)
 
 (defn- ellipsis-marker
   "The default cut marker — a bare ellipsis."

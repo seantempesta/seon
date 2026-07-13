@@ -348,8 +348,8 @@
     (is (contains? ks :seon.db/id) "attr-level shape (:seon.db/id) indexed")
     (is (contains? ks :seon.eval) "entity kind (:seon.eval) indexed")
     (is (= (pr-str (schema/schema-definition :seon.db/id))
-           (:seon.schema/source (first (filter #(= :seon.db/id (:seon.schema/key %)) rows))))
-        ":seon.schema/source is derived from the registered Malli form")
+           (:seon.schema/form (first (filter #(= :seon.db/id (:seon.schema/key %)) rows))))
+        ":seon.schema/form is derived from the registered Malli form")
     (is (every? (fn [{k :seon.schema/key ns-ref :seon.schema/ns}]
                   (if (namespace k)
                     (= {:seon.ns/name (keyword (namespace k))} ns-ref)
@@ -466,7 +466,7 @@
   ;;   - a boot-created root home namespace survives;
   ;;   - REPL-authored declarations survive, including a prior boot identity
   ;;     whose complete source was subsequently authored through the REPL;
-  ;;   - an agent registration-call schema survives;
+  ;;   - an agent-authored canonical schema survives;
   ;;   - the next reconciliation is an exact no-op.
   (async done
     (let [restore! (freeze-builders!)
@@ -486,13 +486,11 @@
                              :seon.fn/ns     {:seon.ns/name :seon.removed}
                              :seon.fn/source "(defn gone [] 1)"}
                             {:seon.schema/key    :seon.removed/value
-                             :seon.schema/source "[:string]"}
+                             :seon.schema/form "[:string]"}
                             {:seon.test/sym        "seon.removed/old-test"
                              :seon.test/ns         {:seon.ns/name :seon.removed}
                              :seon.test/source     "(deftest old-test (is true))"
                              :seon.test/created-at (js/Date.)}
-                            {:seon.schema/key    :my.agentish/teed
-                             :seon.schema/source "(seon.schema/register! :my.agentish/teed :string)"}
                             ;; Root birth is correctly attributed to the boot
                             ;; process, but its home declaration is agent-domain
                             ;; data and must never enter the core desired set.
@@ -517,6 +515,8 @@
                             {:seon.fn/sym    "seon.repl-owned/keep"
                              :seon.fn/ns     {:seon.ns/name :seon.repl-owned}
                              :seon.fn/source "(defn keep [] :agent)"}
+                            {:seon.schema/key  :my.agentish/teed
+                             :seon.schema/form ":string"}
                             {:seon.test/sym        "my.todo-app/kept-test"
                              :seon.test/ns         {:seon.ns/name :my.todo-app}
                              :seon.test/source     "(deftest kept-test (is true))"
@@ -550,7 +550,7 @@
                       (is (contains? fn-syms "seon.repl-owned/keep")
                           "a REPL-authored current source survives its boot origin")
                       (is (contains? sch-keys :my.agentish/teed)
-                          "an agent registration-call schema survives")
+                          "an agent-authored canonical schema survives")
                       (is (not (contains? test-syms "seon.removed/old-test"))
                           "the obsolete boot-authored test is gone")
                       (is (contains? test-syms "my.todo-app/kept-test")

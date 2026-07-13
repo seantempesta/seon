@@ -424,7 +424,7 @@
 
 (defn- schema-hits [re]
   (->> (db/query '[:find ?k ?src
-                   :where [?e :seon.schema/key ?k] [?e :seon.schema/source ?src]])
+                   :where [?e :seon.schema/key ?k] [?e :seon.schema/form ?src]])
        (keep (fn [[k src]]
                (when (.test re (str k "\n" src))
                  (hit :seon.schema (or (namespace k) (name k)) (str k) src re))))))

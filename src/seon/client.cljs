@@ -27,6 +27,7 @@
         :seon.agent.message/to      [[:seon.agent/id \"<agent-id>\"]]
         :seon.agent.message/content \"hello\"})"
   (:require
+    [cljs.reader :as reader]
     [clojure.set :as set]
     [clojure.string :as str]
     [datahike.api :as d]
@@ -550,7 +551,7 @@
    :seon.fn/created-at
    :seon.schema/key
    :seon.schema/ns
-   :seon.schema/source
+   :seon.schema/form
    :seon.schema/created-at
    ;; Meta-schema attrs (schemas-as-queryable-data, 2026-05-27). Every
    ;; entity-shape :map schema is decomposed at boot into a :seon.schema
@@ -821,29 +822,16 @@
       (visit ns-kw #{}))
     @!order))
 
-(defn ^:private standalone-schema-sources
-  "The replayable `:seon.schema/source` strings for agent schema rows
-   that own NO `:seon.ns` membership — single-segment ENTITY-schema keys
-   (`:my.garden.watering`, a `:map {:seon.db/entity true}` registration)
-   whose `(namespace k)` is nil, so the tee files them with no
-   `:seon.schema/ns` link ([[seon.eval/reconstitute-ns-source]] joins
-   schema members through that link, so these would otherwise never
-   load). Only call-shaped sources (an agent's `(seon.schema/register!
-   …)` tee) — boot-indexed shape literals are rebuilt from the registry.
-   Returns each fully-qualified registration call; eval'd from
-   `cljs.user` (the key carries its own namespace)."
-  {:malli/schema [:=> [:catn [::db :any]] :any]}
+(defn ^:private schema-forms-in-db
+  "Canonical `{schema-key form}` read from one immutable database value."
   [db]
-  (->> (db/query '[:find ?src
-                   :where
-                   [?s :seon.schema/key ?k]
-                   [?s :seon.schema/source ?src]
-                   (not [?s :seon.schema/ns _])]
-                 db)
-       (map first)
-       (filter #(str/starts-with? (str/trim (str %)) "("))
-       distinct
-       vec))
+  (into {}
+        (map (fn [[k form]] [k (reader/read-string form)]))
+        (db/query '[:find ?k ?form
+                    :where
+                    [?s :seon.schema/key ?k]
+                    [?s :seon.schema/form ?form]]
+                  db)))
 
 (defn- error-chain-message
   "Human-readable message for a `seon.error/->map` map, composed from
@@ -950,6 +938,10 @@
      :seon.eval/replay?  true}
     (fn ^:async run-replay! []
       (let [db       @conn
+            ;; Schema facts are data, not replayable code. Validate and
+            ;; activate the complete immutable projection before loading any
+            ;; stored namespace/function source.
+            _        (schema/activate! (schema-forms-in-db db))
             agents   (agent-ns-set db)
             ;; Reconstitute each agent ns ONCE (frozen db value). A BLANK
             ;; source = nothing to replay: a member-less sourceless
@@ -959,18 +951,17 @@
             ;; `:seon.error.malli`, …); those are NOT compiled nses, so
             ;; `agent-ns-set` (which subtracts only `core-ns-set`) can't
             ;; drop them, and `reconstitute-ns-source` yields "" (no
-            ;; `:seon.ns/source`, no fn/test members, their core
-            ;; shape-literal schema rows fail `registration-call-source?`).
+            ;; `:seon.ns/source` and no fn/test members). Schema membership
+            ;; never makes a namespace replayable.
             ;; Eval'ing "" is a harmless no-op — skipping it (computed, no
             ;; name list) keeps replay-n honest. A REAL agent ns always
-            ;; reconstitutes non-blank (source or a fn/test/register!
-            ;; member), so nothing real is skipped.
+            ;; reconstitutes non-blank (source or a fn/test member), so
+            ;; nothing real is skipped.
             src-of   (into {}
                            (map (fn [k] [k (seval/reconstitute-ns-source db k)]))
                            agents)
             order    (->> (topo-sort-nses (agent-ns-requires db agents))
                           (filterv (fn [k] (not (str/blank? (get src-of k))))))
-            standalone (standalone-schema-sources db)
             !n-fail  (volatile! 0)]
         ;; Whole-namespace, dependency-ordered load (the spine).
         (doseq [ns-kw order]
@@ -999,28 +990,7 @@
                   ;; throwing is a core defect (:core); the load continues
                   ;; (a double-fault must not abort the rest of the replay).
                   (error/record! {:seon.error/raw e :seon.error/fault :core}))))))
-        ;; Standalone (ns-less) entity-schema rows — fully-qualified
-        ;; register! calls evaled from cljs.user.
-        (doseq [src standalone]
-          (let [r (try (await (seval/eval compile-state src
-                                    {:seon.eval/starting-ns 'cljs.user}))
-                       ;; bulk-load machinery throwing (not the normal
-                       ;; ok?=false path) is OUR defect (:core); the row still
-                       ;; degrades and log-replay-failure! runs below.
-                       (catch :default e
-                         (when-not (error/recorded? e)
-                           (error/record! {:seon.error/raw e :seon.error/fault :core}))
-                         {:seon.eval/ok? false :seon/error e}))]
-            (when-not (:seon.eval/ok? r)
-              (vswap! !n-fail inc)
-              (try
-                (await (log-replay-failure!
-                         agent-id :standalone-schema (load-error->log (:seon/error r))))
-                (catch :default e
-                  ;; double-fault: OUR log write itself throwing is a core
-                  ;; defect (:core); the load continues.
-                  (error/record! {:seon.error/raw e :seon.error/fault :core}))))))
-        (let [total (+ (count order) (count standalone))]
+        (let [total (count order)]
           {:seon.client/replay-n-total total
            :seon.client/replay-n-ok    (- total @!n-fail)
            :seon.client/replay-n-fail  @!n-fail})))))
@@ -1824,20 +1794,14 @@
         ns-rows (map ns-row (sort ns-syms))]
     (vec (concat ns-rows fn-rows))))
 
-(def ^:private schema-source-cap
-  "Char cap for the pr-str'd shape persisted as a boot-indexed
-   `:seon.schema/source`. Registered forms are small (a type keyword or a
-   short vector); the cap is a backstop against a pathological entity :map."
-  1000)
-
 (defn index-schemas
   "Tx-data for a `:seon.schema` row per REGISTERED schema — every key in
    `seon.schema/registered-schemas`, attr-level and request/response shapes
    included, not just the entity `:map` kinds (`all-entity-schemas-tx-data`
    covers those separately with id-attr/required-attrs; identity upsert on
-   `:seon.schema/key` merges the two). `:seon.schema/source` is the
-   registered Malli FORM (pr-str), so the full shape of every attr is one
-   entity-read away for the agent.
+   `:seon.schema/key` merges the two). `:seon.schema/form` is the full,
+   canonical registered Malli form, so the complete shape of every attr is one
+   entity-read away for the agent. It is never display-truncated.
 
    Pure tx-data builder; the boot reconcile in [[core-program-tx]] protects
    keys already present on the conn, so an agent's own
@@ -1849,23 +1813,14 @@
     (into []
           (keep (fn [[k v]]
                   (when (keyword? k)
-                    (let [form (try (if (m/schema? v) (m/form v) v)
-                                    ;; probe: a registered value whose m/form
-                                    ;; can't be computed falls back to the raw
-                                    ;; value — the source is still captured
-                                    ;; (pr-str below); expected graceful
-                                    ;; degradation, not a defect.
-                                    (catch :default _ v))
+                    (let [form v
                           properties
                           (schema.internal/attr-form-properties form)
                           generator-present?
                           (contains? properties :seon.db.id/generator)
-                          s    (pr-str form)
-                          src  (if (> (count s) schema-source-cap)
-                                 (str (subs s 0 schema-source-cap) " …")
-                                 s)]
+                          form-string (schema/form-string k)]
                       (cond-> {:seon.schema/key        k
-                               :seon.schema/source     src
+                               :seon.schema/form       form-string
                                :seon.schema/created-at now}
                         generator-present?
                         (assoc :seon.db.id/generator
@@ -1931,7 +1886,7 @@
         no-generator :seon.db.id.generator/absent
         schema-fields
         (fn [row]
-          {:seon.schema/source (:seon.schema/source row)
+          {:seon.schema/form (:seon.schema/form row)
            :seon.db.id/generator
            (get row :seon.db.id/generator no-generator)})
         have-fns  (into {}
@@ -1960,6 +1915,15 @@
                                [?tx :seon.db/process ?process]
                                [?process :seon.db.process/id :seon.db.process/boot]]
                              db))
+        core-schema-keys
+        (into #{} (map first)
+              (d/q '[:find ?k
+                     :where
+                     [?s :seon.schema/key ?k]
+                     [?s :seon.schema/form _ ?tx]
+                     [?tx :seon.db/process ?process]
+                     [?process :seon.db.process/id :seon.db.process/boot]]
+                   db))
         ;; ns rows dedup on name AND source: a `:seon.ns` row re-emits when
         ;; its stored `:seon.ns/source` differs from the freshly-built one —
         ;; this keeps the stored source tracking the build (e.g. a my.*
@@ -1971,17 +1935,16 @@
                                   [?n :seon.ns/name ?nm]
                                   [?n :seon.ns/source ?src]]
                                 db))
-        ;; Schema rows dedup on source AND persisted generator policy. A
-        ;; partial store missing the policy fact re-emits even when source is
+        ;; Schema rows dedup on canonical form AND persisted generator policy. A
+        ;; partial database missing the policy fact re-emits even when form is
         ;; unchanged; removing a policy emits an explicit retract below because
-        ;; identity upsert cannot remove a card-one datom. An agent's own
-        ;; `(seon.schema/register! …)` TEE row remains protected by its
-        ;; replayable call-form source discriminator.
-        schema-sources
-        (into {} (d/q '[:find ?k ?src
+        ;; identity upsert cannot remove a card-one datom. Agent-authored rows
+        ;; are protected by transaction provenance, not by overloading the form.
+        schema-forms
+        (into {} (d/q '[:find ?k ?form
                         :where
                         [?s :seon.schema/key ?k]
-                        [?s :seon.schema/source ?src]]
+                        [?s :seon.schema/form ?form]]
                       db))
         schema-generators
         (into {} (d/q '[:find ?k ?generator
@@ -1991,11 +1954,11 @@
                       db))
         have-schs
         (into {}
-              (map (fn [[k src]]
-                     [k {:seon.schema/source src
+              (map (fn [[k form]]
+                     [k {:seon.schema/form form
                          :seon.db.id/generator
                          (get schema-generators k no-generator)}]))
-              schema-sources)
+              schema-forms)
         desired-identities
         (into #{}
               (keep (fn [row]
@@ -2022,8 +1985,8 @@
                                        (:seon.ns/source row)))
                                (when-some [stored (get have-schs (:seon.schema/key row))]
                                  (or (= stored (schema-fields row))
-                                     (seval/registration-call-source?
-                                       (:seon.schema/source stored))))))
+                                     (not (contains? core-schema-keys
+                                                     (:seon.schema/key row)))))))
                          all))
         ;; A drifted fn row whose FRESH derivation is unspecced while the
         ;; stored row carries a spec: identity upsert re-asserts the other
@@ -2084,7 +2047,7 @@
                       [?e :seon.fn/source ?source ?tx]
                       [(ground :seon.fn/sym) ?identity-attr])
                  (and [?e :seon.schema/key ?ident]
-                      [?e :seon.schema/source ?source ?tx]
+                      [?e :seon.schema/form ?source ?tx]
                       [(ground :seon.schema/key) ?identity-attr])
                  (and [?e :seon.test/sym ?ident]
                       [?e :seon.test/source ?source ?tx]
@@ -2096,15 +2059,14 @@
         (into #{}
               (comp
                 (filter
-                  (fn [[_ identity-attr ident source]]
+                  (fn [[_ identity-attr ident _source]]
                     (and (or (= :seon.test/sym identity-attr)
                              (seq (get desired-values identity-attr)))
                          (not (contains? desired-identities
                                          [identity-attr ident]))
                          (not (and (= :seon.ns/name identity-attr)
                                    (contains? agent-home-names ident)))
-                         (not (and (= :seon.schema/key identity-attr)
-                                   (seval/registration-call-source? source))))))
+                         )))
                 (map first))
               boot-rows)
         stale-entities
@@ -2114,7 +2076,7 @@
         (into field-retracts)
         (into stale-entities))))
 
-(schema/register! ::llm-fn        fn?)
+(schema/register! ::llm-fn        'fn?)
 (schema/register! ::compile-state :any)
 (defn- rehost-agent-runtimes!
   "Reconstruct every nonterminated agent after a code reload.

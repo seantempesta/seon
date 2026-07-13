@@ -23,7 +23,7 @@
    [:seon.ai/ctx :seon.ai/ctx]
    [:seon.ai/stream? {:optional true} :seon.ai/stream?]])
 (schema/register! ::arg [:or :string ::request])
-(schema/register! ::llm-fn fn?)
+(schema/register! ::llm-fn 'fn?)
 
 ;; `:text` is the established turn-loop adapter result key. Provider adapters
 ;; may add raw/error fields; the deterministic stub returns only this minimum.

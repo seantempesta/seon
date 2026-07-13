@@ -121,7 +121,7 @@
 ;; PLATFORM LAW (2026-06-11, sci-not-available incident): registered
 ;; schema forms must be PURE DATA — no `[:fn]`, no function objects,
 ;; nothing whose form needs evaluation to reconstruct. Registered
-;; forms round-trip as forms (boot index → :seon.schema/source →
+;; forms round-trip as forms (boot index → :seon.schema/form →
 ;; re-read), and the pod has no sci: a fn in a registered form
 ;; serializes as a symbol or `#object[...]` and dies (or degrades to
 ;; garbage) on every subsequent read. Deep-structure validation that

@@ -326,26 +326,6 @@
   (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
     (AsyncLocalStorage.)))
 
-;; The eval recorder is the durability boundary for schema registrations made
-;; while an agent form runs. It cannot use a not-yet-committed eval id as an
-;; execution marker: identity now belongs to record-eval!, after the form has
-;; executed exactly once. This private ALS marker follows the form across
-;; Promise/await boundaries and tells the eager schema self-tee to stand down;
-;; the successful form's detect-and-tee rows then commit with its eval row.
-;; It is deliberately separate from print-als because capture routing and
-;; durability ownership are independent execution scopes.
-(defonce ^:private record-boundary-als
-  (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
-    (AsyncLocalStorage.)))
-
-(defn- record-boundary-active?
-  []
-  (true? (.getStore record-boundary-als)))
-
-(defn- run-with-record-boundary
-  [body-fn]
-  (.run record-boundary-als true body-fn))
-
 ;; The ORIGINAL print fns (route to pod stdout). Captured ONCE on first
 ;; install; reused on every hot-reload reinstall so the dispatcher always
 ;; wraps the real sink, never a prior dispatcher (which would recurse).
@@ -708,20 +688,6 @@
   [ns-sym]
   (some? (js/goog.getObjectByName (str (cljs.core/munge ns-sym)))))
 
-(defn registration-call-source?
-  "TRUE when a stored `:seon.schema/source` is an eval-able call.
-
-   An `(…)`
-   registration call (an agent's `(seon.schema/register! …)` tee row)
-   rather than a boot-indexed shape literal (`[:string {…}]`, `:keyword`).
-   Only call-shaped schema rows are loadable; shape literals are rebuilt
-   from the live registry each boot. The ONE rule both the DB-layer load
-   (reconstitution) AND `seon.client`'s core-indexer use to distinguish a
-   replayable register! call from a boot-indexed shape literal."
-  {:malli/schema [:=> [:catn [::source :string]] :boolean]}
-  [source]
-  (str/starts-with? (str/trim (str source)) "("))
-
 (defn ns-rows-in-db?
   "TRUE when `ns-sym` has a `:seon.ns/name` row in `db`.
 
@@ -787,10 +753,9 @@
         data-ns / schema-key stub, C30) stays headless — synthesizing
         `(ns seon.fn)`-style heads for keyword-namespace stubs would
         mint junk analyzer namespaces.
-     + every CURRENT member source for the ns: `:seon.fn/source` rows,
-       `:seon.schema/source` rows that pass [[registration-call-source?]]
-       (agent `register!` calls, not boot shape literals), and
-       `:seon.test/source` rows.
+     + every CURRENT member source for the ns: `:seon.fn/source` and
+       `:seon.test/source` rows. Schema facts are activated as one immutable
+       database projection before program replay; they are never eval'd.
 
    Pure string CONCATENATION — no parsing. Same-ns forward refs resolve
    in one `eval-str` pass (LIVE-PROVEN). Member rows are deduped (a batch
@@ -818,13 +783,11 @@
                                 db ns-kw)
                       (map first)))
         fns     (member :seon.fn/source     :seon.fn/ns)
-        schemas (filter registration-call-source?
-                        (member :seon.schema/source :seon.schema/ns))
         tests   (member :seon.test/source   :seon.test/ns)
         head    (or ns-src
                     (when (seq (concat fns tests))
                       (synthesized-ns-head db ns-kw)))]
-    (->> (concat [head] fns schemas tests)
+    (->> (concat [head] fns tests)
          (remove str/blank?)
          (map str/trim)
          (distinct)
@@ -1793,10 +1756,9 @@
     (catch :default _ nil)))
 
 (defn- schema-tee-row
-  "ONE builder for the `:seon.schema` program-graph row both tee paths
-   write (detect-and-tee in [[build-tee-entities]]; the register!
-   self-tee in [[tee-registered-schema!]]). Identity-upsert on
-   `:seon.schema/key` keeps the two idempotent.
+  "ONE builder for the canonical `:seon.schema` program-graph row written by
+   successful detect-and-tee. Identity-upsert on `:seon.schema/key` makes a
+   redefinition replace the prior form.
 
    `:seon.schema/ns` uses the NESTED-MAP upsert form and is included
    ONLY when `k` HAS a keyword namespace — matching
@@ -1808,10 +1770,10 @@
    silently dropping the tee row (opus run2 live stack,
    open-issues-prd-2026-06-11 — resume-durability loss for every
    agent-authored entity schema)."
-  [k form source at]
+  [k form at]
   (let [properties (schema.internal/attr-form-properties form)]
     (cond-> {:seon.schema/key        k
-             :seon.schema/source     source
+             :seon.schema/form       (pr-str form)
              :seon.schema/created-at at}
       (contains? properties :seon.db.id/generator)
       (assoc :seon.db.id/generator
@@ -2207,7 +2169,7 @@
         new-defs    (remove (fn [{:seon.analyzer-info/keys [ns]}]
                               (contains? transient-ns-syms ns))
                             new-defs)
-        new-schemas (set/difference (schema/current-keys) schemas-before)
+        new-schemas (schema/changed-keys schemas-before)
         fn-entities (for [{:seon.analyzer-info/keys [ns var-map]} new-defs
                           ;; Classify on the FORM HEAD, not the analyzer's
                           ;; `:test` marker (B9, db-is-the-running-system PRD).
@@ -2310,8 +2272,7 @@
         ;; one. Entity-kind keys (nil keyword namespace) carry NO ns
         ;; link at all — see [[schema-tee-row]].
         schema-entities (for [k new-schemas]
-                          (schema-tee-row k (schema/schema-definition k)
-                                          source at))
+                          (schema-tee-row k (schema/schema-definition k) at))
         ;; Deftest defs carry
         ;; the analyzer's top-level `:test true` marker (see
         ;; [[deftest-def?]] — the old `(:test (:meta var-map))` check was
@@ -2585,7 +2546,7 @@
 ;; row — it would clobber the core display row and take ephemeral live effect.
 ;; Detect by process: a sym whose CURRENT `:seon.fn/source` datom's tx came
 ;; through `:seon.db.process/boot` is compiled core/third-party (same provenance
-;; rule [[tee-registered-schema!]] uses for the schema self-tee). A NEW sym
+;; used by the core desired-state reconciler). A NEW sym
 ;; (no row) or an agent-authored sym is NOT blocked — agents freely define and
 ;; redefine in their OWN namespaces; only redefining an existing boot-authored
 ;; sym is denied.
@@ -2646,23 +2607,6 @@
               true)))
         tee-entities))))
 
-;; ============================================================
-;; register! self-tee (open-issues 2026-06-12, task #24 symptom 1).
-;;
-;; Detect-and-tee only covers AGENT evals (record-eval!'s ::tee arg).
-;; A REPL-scope `(seon.schema/register! …)` — the MCP eval surface,
-;; any non-turn caller — registered in-memory only: NO :seon.schema
-;; row, so the attr VANISHED from the registry on restart while its
-;; datoms stayed readable (new transacts rejected as unregistered —
-;; silently write-dead; orchestrator-verified live 2026-06-12).
-;;
-;; register! now tees its OWN row through a hook this ns installs
-;; (seon.schema can't require seon.db — cycle). One mechanism with
-;; the eval tee: same row shape ([[schema-tee-row]]), identity-upsert
-;; on :seon.schema/key, so an agent-eval registration writing through
-;; BOTH paths still yields exactly one row.
-;; ============================================================
-
 ;; Stamped on a partially-recorded eval row when its program-graph tee
 ;; rows could not be persisted (record-eval! stage-2 recovery) — the
 ;; honest record of the dropped tee. Registered here: seon.eval owns
@@ -2670,99 +2614,6 @@
 ;; upsert on :seon.eval/id), so lazy attr-install covers it without a
 ;; boot-schema entry.
 (schema/register! :seon.eval/record-error :string)
-
-(defn- tee-registered-schema!
-  "The register! self-tee hook body (installed via
-   `seon.schema/set-tee-fn!` at load). Conn-gated and boot-composed:
-
-   - NO bound `seon.db/*conn*` → nil (pure-registry contexts, JVM-side
-     compile, the ~500 boot ns-load registrations before a conn
-     exists — boot semantics unchanged; `seon.client/index-schemas`
-     remains the owner of core rows).
-   - REPLAY scope (`:seon.eval/replay? true` in execution context) → nil.
-     Replayed `(seon.schema/register! …)` sources re-run register!;
-     re-teeing them would write a no-op upsert per schema per boot,
-     re-anchoring row tx-ids (the exact churn the replay design's
-     'detect-and-tee doesn't re-fire' invariant exists to avoid).
-   - EVAL RECORD scope ([[record-boundary-active?]]) → nil. `eval-batch!`
-     wraps each form in the private ALS boundary before it executes. The
-     gated detect-and-tee path writes the :seon.schema row only with a
-     SUCCESSFUL eval. The self-tee must stand down there or a `register!`
-     in a later-failing form would persist its schema/`:seon.ns` rows
-     anyway (#39 — the eval is the transaction boundary). The self-tee
-     is the durability path only for bare eval/REPL scope outside that
-     boundary.
-   - CORE-CLAIMED row (current `:seon.schema/source` datom's tx
-     was written through `:seon.db.process/boot`) → nil. The bootstrap
-     self-host compiler can re-execute compiled-bundle registrations
-     at runtime (an agent's `(require …)` goog.globalEvals bundle JS,
-     the relink-registry! incident class); without this guard those
-     re-registrations would convert boot-indexed rows into never-
-     core-managed, replayable `(…)` call rows. Same current-source
-     provenance rule as `seon.client/core-program-tx`.
-   - IDENTICAL stored source → nil (idempotent re-registration; no
-     no-op upsert churn).
-
-   Otherwise transacts ONE [[schema-tee-row]] whose source is the
-   replayable call form `(seon.schema/register! <k> <form>)` — the
-   discriminator [[registration-call-source?]] selects it for the
-   DB-layer load (reconstitution), closing the registry/store disagreement.
-
-   Never throws; a tee tx failure is surfaced via console.error (the
-   in-memory registration already succeeded — durability failed, and
-   that fact must be loud, not fatal). Returns the transact Promise,
-   or nil when skipped — register! stashes it in `seon.schema/!last-tee`
-   for deterministic test/proof awaiting."
-  [k form]
-  (when-some [conn db/*conn*]
-    (when-not (or (::replay? (db/current-tx-context))
-                  ;; #39: inside the private per-form record boundary the
-                  ;; gated detect-and-tee path owns this schema row and writes
-                  ;; it only with a successful eval. No pre-minted eval id is
-                  ;; required merely to mark execution scope.
-                  (record-boundary-active?))
-      (let [source (pr-str (list 'seon.schema/register! k form))
-            stored-src
-            (db/query {:seon.db/query
-                       '[:find ?src .
-                         :in $ ?k
-                         :where
-                         [?s :seon.schema/key ?k]
-                         [?s :seon.schema/source ?src]]
-                       :seon.db/conn conn
-                       :seon.db/args [k]})
-            boot-authored?
-            (boolean
-              (db/query {:seon.db/query
-                         '[:find ?s .
-                           :in $ ?k
-                           :where
-                           [?s :seon.schema/key ?k]
-                           [?s :seon.schema/source _ ?tx]
-                           [?tx :seon.db/process ?process]
-                           [?process :seon.db.process/id
-                            :seon.db.process/boot]]
-                         :seon.db/conn conn
-                         :seon.db/args [k]}))]
-        (when-not (or boot-authored?
-                      (= stored-src source))
-          (-> (db/transact!
-                {:seon.db/tx-data [(schema-tee-row k form source (js/Date.))]
-                 :seon.db/conn    conn})
-              (.then
-                (fn [r]
-                  (when-not (:seon.db/ok? r)
-                    (js/console.error
-                      "[seon.eval/tee-registered-schema!] self-tee tx FAILED —"
-                      "registration of" (str k) "is IN-MEMORY ONLY (will not"
-                      "survive a restart):"
-                      (-> r :seon.db/error :seon.error/message)))
-                  r))))))))
-
-;; Install at load — idempotent (a bundle re-execution re-installs the
-;; same fn). At THIS point in load order seon.schema is long loaded and
-;; no conn is bound yet, so nothing tees during boot ns-loads.
-(schema/set-tee-fn! tee-registered-schema!)
 
 (def database-edn-cap
   "Store-time char cap for any pr-str'd string persisted as a datom
@@ -3930,7 +3781,7 @@
             ;; so detect-and-tee (v1.md §2.2 / Phase B item 10)
             ;; can diff after. Cheap reads — keyset extraction.
             defs-before    (analyzer-info/snapshot-defs compile-state)
-            schemas-before (schema/current-keys)
+            schemas-before (schema/snapshot)
             ;; (fix f) println/prn capture — a REPL shows print output next
             ;; to the result; `*print-fn*` otherwise routes to the pod's
             ;; stdout (logs/pod.log), invisible to the agent. Capture the
@@ -4025,15 +3876,10 @@
         ;; nothing. Pre-existing defs (in defs-before) are untouched.
         (when-not (::ok? result)
           (analyzer-info/remove-phantom-defs! compile-state defs-before @current-ns)
-          ;; #39: the schema analog of the phantom-def rollback. A failed
-          ;; eval that ran `schema/register!` must define NOTHING. The
-          ;; self-tee already DEFERRED its DB write (record boundary in scope), so
-          ;; nothing persisted; drop the in-memory registry entries too —
-          ;; diff is THIS form's newly-registered keys only (current-keys
-          ;; minus the pre-eval snapshot) — so a re-eval of the fixed form
-          ;; registers cleanly and a pre-existing schema is never touched.
-          (schema/discard-registrations!
-            (set/difference (schema/current-keys) schemas-before)))
+          ;; Restore the exact prior registry. This removes new keys AND
+          ;; reverses failed redefinitions; key-set rollback could not restore
+          ;; a previous form and left the runtime ahead of the database.
+          (schema/restore! schemas-before))
         ;; Advance the accumulator on successful ns switch.
         ;; Failed evals leave the accumulator untouched —
         ;; the form ran in @current-ns and we record that
@@ -4154,7 +4000,17 @@
                             ::pending?     pending?
                             ::output       output
                             ::tee          tee}))
-              eval-id (:seon.eval/id recorded)]
+              eval-id (:seon.eval/id recorded)
+              changed-schemas (schema/changed-keys schemas-before)]
+          ;; A declaration becomes runtime-authoritative only when its schema
+          ;; fact landed in the same accepted transaction. record-eval! may
+          ;; preserve the transcript by retrying without a broken tee; in that
+          ;; recovery case the database did NOT accept the declaration, so the
+          ;; collector must roll back instead of leaving a process-only schema.
+          (when (seq changed-schemas)
+            (if (and (:seon.db/ok? recorded) (::tee-recorded? recorded))
+              (schema/activate! (schema/snapshot))
+              (schema/restore! schemas-before)))
           ;; Bind only the committed id. A failed recorder leaves no orphaned
           ;; result slot; a rejected allocation candidate is never observable.
           (when (and (:seon.db/ok? recorded) (::ok? result))
@@ -4715,8 +4571,8 @@
             (db/with-tx-context
               {::db/user [:seon.agent/id agent-id]
                ::db/process (db.process/lookup-ref ::db.process/repl)}
-              (fn ^:async run-in-record-boundary! []
-                (await (run-with-record-boundary body-fn))))))
+              (fn ^:async run-with-provenance! []
+                (await (body-fn))))))
         append-record!
         (fn [recorded]
           (when (:seon.db/ok? recorded)
