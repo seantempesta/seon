@@ -53,9 +53,9 @@ replay. The evaluator's global timeout and duplicate result-membership registry
 are gone; timeout ownership follows the value and result membership is derived
 from the runtime namespace. The web host now has one normalized feed registry,
 database-fact-driven route invalidation, and one explicitly owned replica-feed
-attachment lifecycle. Focused proofs cover 46 evaluator/feed tests with 179
-assertions, 15 replica tests with 87 assertions, and 5 route tests with 74
-assertions. Writer database initialization, transaction transformation, KNN,
+attachment lifecycle. The focused Datastar gate covers 38 behavioral tests
+with 182 assertions. Fifteen replica tests cover 87 assertions, and 5 route tests cover
+74 assertions. Writer database initialization, transaction transformation, KNN,
 and publication now enter through one immutable boot-composed runtime; the
 load-order callback registries are deleted, and initialization failure can no
 longer publish a half-initialized connection. The live web channel now also has
@@ -93,6 +93,21 @@ feed with zero replay gap, replayed 2/2 forms, instrumented 772 definitions with
 zero bad specs, resumed `root` and `little-cars-laugh` idle, and preserved the
 agent's database-backed canvas. `/`, `/agents`, and `/data` returned HTTP 200;
 the agent feed returned gzip and an immediate `datastar-patch-elements` event.
+
+The canonical live-feed cut now includes `/data`: its separate connection atom,
+listener flag, coalescer, uncompressed `/data/sse`, and the unused generic
+`/sse` registry are deleted. A cheap `/data` shell opens `/data/feed`, which
+uses the same gzip, heartbeat, latest-wins backpressure, response-owned cleanup,
+and normalized subscription cache as agent/debug views. Live proof observed a
+database transaction produce a second data-browser morph and then retracted the
+proof row. A first-paint ownership bug discovered during that proof is fixed at
+the shared feed boundary: pre-normalized sockets can no longer alias through a
+nil cache key and receive another page's HTML. Twenty-four equivalent agent
+feeds completed first paint within a 1 ms spread, closed back to empty view and
+subscription registries, and used about 66 MB less heap than the prior
+comparable run. The optional Caddy edge served the same gzip feed over HTTP/2
+with immediate flushing; it remains outside the default development process
+graph.
 
 The source-grounded system audits are complete and committed:
 
@@ -446,7 +461,7 @@ is evaluated behaviorally, not by asserting prose.
 | Dependencies | The writer and writer-test closures are honest and narrow. Heavy paused-app dependencies still live in the base graph used by old JVM/tools, and CLJS/tool ownership is not yet fully separated. |
 | Writer protocol | The semantic protocol, JVM writer/server, CLJS replica, and UDS transports are separated and the duplicate operations/helpers are deleted. A typed supervisor administration surface and cold process proof remain. |
 | Database vocabulary | The protocol/backend/replica path is canonical and the managed leaf is `/db`; the root/header labels are clean, while `db/store-inventory`, skills, paused JVM code, and downstream ACME still expose obsolete vocabulary. |
-| Database browser | The root inventory panel is deleted and the header now reads Datahike's maintained index count without building an inventory. The inventory context block, `db/store-inventory`, `my.kb/inventory`, and `/data` still repeat broad namespace/count scans. `/data` also retains a second legacy SSE connection registry instead of the canonical lazy render-unit feed. |
+| Database browser | The root inventory panel is deleted and the header now reads Datahike's maintained index count without building an inventory. `/data` now uses the canonical shared gzip feed and cheap shell, but the inventory context block, `db/store-inventory`, `my.kb/inventory`, and its current projection still repeat broad namespace/count scans. Index-backed bounded projections and lazy detail units remain. |
 | Developer hooks | Active hook config still calls the paused nREPL JVM on port 7888, so several claimed checks silently do not run. |
 | Operator | The Babashka graph and thin launcher are built and focused-tested; active caller migration plus default/ACME/Inspect live proof remain. |
 | Tests | The retained writer gate is 47 tests/295 assertions after deleting 14 legacy server suites, but disabled and paused-application tests plus noisy expected-failure logging still need removal. |
@@ -658,11 +673,12 @@ agents idle and one exact notice visible to root.
    The root panel and header inventory scan are already deleted; keep the
    header's cheap database link, but make `/data` the only exploration surface.
 4. Port `/data` in place to the canonical render-unit and shared gzip Datastar
-   feed lifecycle. Delete `/data/sse`, `!data-connections`, its listener flag,
-   broadcast loop, and full `[?e ?a]` rescan. The route returns a cheap shell;
-   `/data/feed` owns one normal view descriptor; `/view/unit` activates only
-   visible/expanded database units; URL params remain the shareable navigation
-   state.
+   feed lifecycle. **Feed cut complete:** `/data/sse`, `!data-connections`, its
+   listener flag, broadcast loop, and the generic `/sse` registry are deleted;
+   the route returns a cheap shell and `/data/feed` owns one normalized view
+   descriptor. **Remaining:** replace the full `[?e ?a]` scan with the bounded
+   projections in step 5, then let `/view/unit` activate only visible/expanded
+   database details. URL params remain the shareable navigation state.
 5. Add fully specified, read-only `seon.db.browser` projections backed by
    Datahike indexes and bounded pages: installed attributes/schema, attribute
    values and carrier entities, entity facts/outbound and reverse refs,

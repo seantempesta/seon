@@ -409,7 +409,10 @@ in `seon.web.datastar`.
   compressed bytes reach the browser connection at once; the browser transparently gunzips before
   datastar reads. The streamer is crash-proofed — error handlers on the gzip
   stream + the response, a `writableEnded` guard before every write, and
-  `req.on('close')` ends the gzip stream and deregisters the connection. A
+  response `close` / request `aborted` lifecycle ends the gzip stream and
+  deregisters the connection. One shared heartbeat timer emits inert SSE
+  comments for every writable feed, so reverse proxies can keep otherwise-idle
+  views open without one timer per socket. A
   backpressured connection retains only its newest derived event and resumes on
   `drain`; stale UI states never form an unbounded write queue.
 - **Observed reads + exact result change.** Each unit renders under a synchronous
@@ -463,6 +466,14 @@ views. There is no provenance-routed debug stream or unused generic `/sse`
 registry. Transaction user/process is relevant to agent-derived focus semantics,
 never to dependency invalidation. Legitimate expensive units are bounded before
 building hidden hiccup; collapsed markup alone is not a compute bound.
+
+An optional Caddy edge terminates TLS and multiplexes browser connections over
+HTTP/2 or HTTP/3 while proxying to the one Node HTTP/1.1 implementation. It does
+not render, route application actions, recompress, or buffer events. The pod
+remains the application server and owns gzip plus `Z_SYNC_FLUSH`; Caddy uses
+immediate proxy flushing. Local development stays on the direct loopback URL by
+default because hidden Datastar tabs close their feeds and do not justify a
+mandatory TLS process.
 
 The streamer is a **role, not a process** — any process holding a read-replica + a
 tx-listener can play it, so the UI-host is relocatable and can split into N
