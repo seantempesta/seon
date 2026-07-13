@@ -940,28 +940,33 @@
   [agent-id view-id]
   (let [!snapshot (atom {})
         initial (debug-projection agent-id !snapshot)
-        initial-catalog (:seon.web.debug/catalog initial)]
+        initial-catalog (:seon.web.debug/catalog initial)
+        render-debug
+        (fn []
+          (let [projection (debug-projection agent-id !snapshot)
+                catalog (:seon.web.debug/catalog projection)
+                active (datastar/reconcile-view-catalog!
+                         {::datastar/view-id view-id
+                          ::datastar/catalog catalog})]
+            (debug-app-view agent-id view-id
+                            (:seon.web.debug/snapshot projection)
+                            catalog active)))]
     {:seon.web.feed/key [:seon.web.feed/debug agent-id view-id]
      :seon.web.feed/live? true
      ::datastar/view-id view-id
      ::datastar/catalog initial-catalog
      ::datastar/active-tokens #{}
      :seon.web.feed/render-full
-     #(debug-app-view agent-id view-id
-                      (:seon.web.debug/snapshot initial)
-                      initial-catalog
-                      (datastar/view-active-tokens view-id))
+     #(datastar/render-observed
+        {:seon.db/db @db/*conn*
+         ::datastar/render-thunk render-debug})
      :seon.web.feed/render-change
-     (fn [_subscription _change]
-       (let [projection (debug-projection agent-id !snapshot)
-             catalog (:seon.web.debug/catalog projection)
-             active (datastar/reconcile-view-catalog!
-                      {::datastar/view-id view-id
-                       ::datastar/catalog catalog})]
-         {::datastar/elements
-          [(debug-app-view agent-id view-id
-                           (:seon.web.debug/snapshot projection)
-                           catalog active)]}))}))
+     (fn [{observations ::datastar/dependencies}
+          {dbv :seon.db/db}]
+       (datastar/transition-observed
+        {:seon.db/db dbv
+         ::datastar/dependencies observations
+         ::datastar/render-thunk render-debug}))}))
 
 (defn- data-feed-definition
   "One normalized render authority for an exact /data query projection."
@@ -973,10 +978,18 @@
    :seon.web.feed/live? true
    ::datastar/view-id view-id
    :seon.web.feed/render-full
-   #(data-browser-fragment @db/*conn* params)
+   #(datastar/render-observed
+      {:seon.db/db @db/*conn*
+       ::datastar/render-thunk
+       (fn [] (data-browser-fragment @db/*conn* params))})
    :seon.web.feed/render-change
-   (fn [_subscription {dbv :seon.db/db}]
-     {::datastar/elements [(data-browser-fragment dbv params)]})})
+   (fn [{observations ::datastar/dependencies}
+        {dbv :seon.db/db}]
+     (datastar/transition-observed
+      {:seon.db/db dbv
+       ::datastar/dependencies observations
+       ::datastar/render-thunk
+       (fn [] (data-browser-fragment dbv params))}))})
 
 (defn debug-page!
   "GET /agent/<id>/debug — serve a cheap shell with no debug projection.

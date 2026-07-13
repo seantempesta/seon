@@ -542,6 +542,104 @@
           "views with different demanded units do not share a render")
       (is (= 2 @pushes) "each active fingerprint receives its own event"))))
 
+(deftest broadcast-suppresses-an-identical-consecutive-morph
+  (let [renders (atom 0)
+        pushes (atom 0)
+        feed (test-feed
+               "identical-output"
+               {:seon.web.feed/render-change
+                (fn [_subscription _change]
+                  (swap! renders inc)
+                  {::datastar/elements
+                   [[:div {:id "stable-target"} "unchanged"]]})})]
+    (with-redefs [datastar/!feeds (atom (feed-registry [feed]))
+                  datastar/push-event! (fn [_ _] (swap! pushes inc))]
+      (@#'datastar/broadcast!
+        {:seon.db/db nil :seon.db/changed-attrs #{:example/first}})
+      (@#'datastar/broadcast!
+        {:seon.db/db nil :seon.db/changed-attrs #{:example/second}})
+      (is (= 2 @renders) "the producer remains the output authority")
+      (is (= 1 @pushes)
+          "an identical consecutive event does not cross the socket twice"))))
+
+(deftest observed-transition-replays-real-read-results
+  (async done
+    (-> (with-conn
+          [agent-a]
+          (fn [conn]
+            (let [render
+                  (fn [dbv]
+                    (datastar/render-observed
+                      {:seon.db/db dbv
+                       ::datastar/render-thunk
+                       (fn []
+                         [:div {:id "observed-target"}
+                          (or (db/query
+                                {:seon.db/db dbv
+                                 :seon.db/query
+                                 '[:find ?purpose .
+                                   :in $ ?id
+                                   :where
+                                   [?e :seon.agent/id ?id]
+                                   [?e :seon.agent/purpose ?purpose]]
+                                 :seon.db/args [agent-a]})
+                              "absent")])}))
+                  initial (render @conn)]
+              (-> (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data [{:seon.agent/id agent-b}]})
+                  (.then
+                    (fn [_]
+                      (let [unchanged
+                            (datastar/transition-observed
+                              {:seon.db/db @conn
+                               ::datastar/dependencies
+                               (::datastar/dependencies initial)
+                               ::datastar/render-thunk
+                               (fn []
+                                 [:div {:id "observed-target"}
+                                  (db/query
+                                    {:seon.db/db @conn
+                                     :seon.db/query
+                                     '[:find ?purpose .
+                                       :in $ ?id
+                                       :where
+                                       [?e :seon.agent/id ?id]
+                                       [?e :seon.agent/purpose ?purpose]]
+                                     :seon.db/args [agent-a]})])})]
+                        (is (empty? (::datastar/elements unchanged))
+                            "an unrelated transaction does not rerender")
+                        (db/transact!
+                          {:seon.db/conn conn
+                           :seon.db/tx-data
+                           [{:seon.agent/id agent-a
+                             :seon.agent/purpose "changed"}]}))))
+                  (.then
+                    (fn [_]
+                      (let [changed
+                            (datastar/transition-observed
+                              {:seon.db/db @conn
+                               ::datastar/dependencies
+                               (::datastar/dependencies initial)
+                               ::datastar/render-thunk
+                               (fn []
+                                 [:div {:id "observed-target"}
+                                  (db/query
+                                    {:seon.db/db @conn
+                                     :seon.db/query
+                                     '[:find ?purpose .
+                                       :in $ ?id
+                                       :where
+                                       [?e :seon.agent/id ?id]
+                                       [?e :seon.agent/purpose ?purpose]]
+                                     :seon.db/args [agent-a]})])})]
+                        (is (= 1 (count (::datastar/elements changed)))
+                            "a changed read emits one complete target")
+                        (is (seq (::datastar/dependencies changed))
+                            "the rerender replaces its read authority"))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
 (deftest broadcast-ignores-frozen-feeds
   (let [renders (atom 0)]
     (with-redefs [datastar/!feeds

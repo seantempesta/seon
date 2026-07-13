@@ -100,9 +100,30 @@
 (schema/register! ::dependencies
                   [:or
                    :seon.ui.agent-view/dependencies
+                   :seon.db/read-observations
                    [:map-of :qualified-keyword [:set :qualified-keyword]]])
 (schema/register! ::element :seon.render.canvas/hiccup)
+(schema/register! ::elements [:vector :seon.render.canvas/hiccup])
 (schema/register! ::event :string)
+(schema/register! ::last-event :string)
+(schema/register! ::render-thunk 'fn?)
+(schema/register! ::observed-render-request
+  [:map
+   [:seon.db/db :seon.db/db-val]
+   [::render-thunk ::render-thunk]])
+(schema/register! ::observed-render-response
+  [:map
+   [::element ::element]
+   [::dependencies :seon.db/read-observations]])
+(schema/register! ::observed-transition-request
+  [:map
+   [:seon.db/db :seon.db/db-val]
+   [::dependencies :seon.db/read-observations]
+   [::render-thunk ::render-thunk]])
+(schema/register! ::observed-transition-response
+  [:map
+   [::elements ::elements]
+   [::dependencies :seon.db/read-observations]])
 (schema/register! ::view-state
   [:map
    [::view-id ::view-id]
@@ -203,6 +224,32 @@
   {:malli/schema [:=> [:catn [::active-tokens ::active-tokens]] ::fingerprint]}
   [active-tokens]
   (view-unit/encode-text (pr-str (vec (sort active-tokens)))))
+
+(defn render-observed
+  "Render one synchronous view and retain its immutable database reads."
+  {:malli/schema [:=> [:cat ::observed-render-request]
+                  ::observed-render-response]}
+  [{dbv :seon.db/db thunk ::render-thunk}]
+  (let [capture (db/capture-reads
+                  {:seon.db/db dbv :seon.db/thunk thunk})]
+    {::element (:seon.db/result capture)
+     ::dependencies (:seon.db/read-observations capture)}))
+
+(defn transition-observed
+  "Rerender one view only when one of its captured reads changed."
+  {:malli/schema [:=> [:cat ::observed-transition-request]
+                  ::observed-transition-response]}
+  [{dbv :seon.db/db observations ::dependencies thunk ::render-thunk}]
+  (if (or (empty? observations)
+          (some #(db/read-observation-changed?
+                   {:seon.db/db dbv :seon.db/read-observation %})
+                observations))
+    (let [rendered (render-observed
+                     {:seon.db/db dbv ::render-thunk thunk})]
+      {::elements [(::element rendered)]
+       ::dependencies (::dependencies rendered)})
+    {::elements []
+     ::dependencies observations}))
 
 ;; ============================================================
 ;; Feed registry — socket-owning views consume normalized subscriptions. A
@@ -512,23 +559,44 @@
             ;; can rebind this view while the transition is running; an obsolete
             ;; subscription id must never push its stale patch into the new
             ;; socket, even when the semantic key happens to be identical.
-            (let [registry @!feeds
+            (let [[before registry]
+                  (swap-vals!
+                    !feeds
+                    (fn [registry]
+                      (if (and (= subscription-id
+                                  (get-in registry
+                                          [::subscriptions subscription-key
+                                           ::subscription-id]))
+                               (not= event
+                                     (get-in registry
+                                             [::subscriptions subscription-key
+                                              ::last-event])))
+                        (assoc-in registry
+                                  [::subscriptions subscription-key ::last-event]
+                                  event)
+                        registry)))
                   current-subscription
                   (get-in registry [::subscriptions subscription-key])
+                  previous-event
+                  (get-in before [::subscriptions subscription-key ::last-event])
+                  current-event (::last-event current-subscription)
+                  changed-event? (and (= subscription-id
+                                         (::subscription-id current-subscription))
+                                      (not= previous-event current-event))
                   connections
-                  (when (= subscription-id
-                           (::subscription-id current-subscription))
+                  (when changed-event?
                     (keep #(get-in registry [::views %])
                           (::consumer-view-ids current-subscription)))]
               (doseq [conn connections] (push-event! conn event))
-              (log/info-console! "seon.web.datastar" "broadcast"
-                                 {:seon.web.broadcast/view (first subscription-key)
-                                  :seon.web.broadcast/connections (count connections)
-                                  :seon.web.broadcast/targets (count elements)
-                                  :seon.web.broadcast/changed-attrs
-                                  (sort (:seon.db/changed-attrs change))
-                                  :seon.web.broadcast/render-ms
-                                  (.round js/Math render-ms)}))))
+              (when changed-event?
+                (log/info-console! "seon.web.datastar" "broadcast"
+                                   {:seon.web.broadcast/view (first subscription-key)
+                                    :seon.web.broadcast/connections (count connections)
+                                    :seon.web.broadcast/targets (count elements)
+                                    :seon.web.broadcast/changed-attrs
+                                    (sort (:seon.db/changed-attrs change))
+                                    :seon.web.broadcast/render-ms
+                                    (.round js/Math render-ms)})))))
       (catch :default e
         (log/error-console! "seon.web.datastar"
                             (str "broadcast failed for " subscription-key) e)))))

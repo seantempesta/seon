@@ -541,7 +541,7 @@ is evaluated behaviorally, not by asserting prose.
 | Operator | The Babashka graph and thin launcher are built and focused-tested; active caller migration plus default/ACME/Inspect live proof remain. |
 | Tests | Public pod/database/operator doors delegate to one runner each; focused pod builds use compile-time namespace selection, one bundle lock, and exact freshness fingerprints. Disabled/paused-application tests and remaining intentional expected-failure noise still need removal. |
 | UI | The four dormant context renderers and their unconditional boot load are deleted. Active symbols, CSS, DOM, docs, and ACME still need the tile-to-surface/card vocabulary cut; skill teaching is already converged. |
-| Live rendering | Agent view unitization/read-observation is incomplete; legitimate work still needs bounded caching, layout/focus/browser proof, and grown-database profiling. |
+| Live rendering | Agent surfaces and the whole debug/data targets use runtime-observed reads; normalized subscriptions suppress identical consecutive output. Per-region debug/data unitization, layout/focus browser proof, and grown-database profiling remain. |
 | Recent activity reads | `seon.render.default/recent-messages`, `seon.agent.ctx/messages`, transcript/activity queries, `seon.derive/real-eval-oks`, and the function menu independently scan and sort growing message/eval history before taking a small tail. Root's current cross-agent activity does the same over the whole database. |
 | Root/UI presence | `/` already renders root's system canvas, but first-run routing, concise root role context, originating-tab identity, database-backed current location, and feed-driven agent navigation are not one finished path. |
 | Root context | Root's scalar home-require replacement, sparse system-canvas pin, and ordinary-agent fallback are now distinct. Concise root role context and browser-location awareness remain unfinished. |
@@ -787,7 +787,11 @@ agents idle and one exact notice visible to root.
    immutable past transaction units never rerender. Equivalent tabs compose
    through the existing cache/fan-out; identical output sends no morph.
    Pagination and row windows are bounded, and closed details construct no
-   Hiccup or SCI work.
+   Hiccup or SCI work. **Partial:** agent surfaces already transition by exact
+   observed read result; the current whole debug/data targets now use the same
+   observer and normalized subscriptions suppress identical consecutive
+   morphs. Debug panes and database details still need their own coordinates
+   and bounded projections.
 8. Keep installed-schema and direct attribute-presence queries as the small
    composable agent/domain discovery tools. A later KB surface must be a focused
    domain query through the normal block/render/surface mechanism, not a
