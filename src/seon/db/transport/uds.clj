@@ -12,7 +12,7 @@
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio ByteBuffer]
            [java.nio.channels Channels ServerSocketChannel SocketChannel]
-           [java.util.concurrent.locks ReentrantLock]))
+           [java.util.concurrent ArrayBlockingQueue BlockingQueue]))
 
 (set! *warn-on-reflection* true)
 
@@ -24,7 +24,8 @@
 (schema/register! ::subscribers [:fn some?])
 (schema/register! ::connections [:fn some?])
 (schema/register! ::closed? [:fn some?])
-(schema/register! ::write-lock [:fn some?])
+(schema/register! ::queue [:fn some?])
+(schema/register! ::worker [:fn some?])
 (schema/register! ::nil-result [:fn nil?])
 (schema/register!
  ::publisher
@@ -49,6 +50,7 @@
  [:map [::publisher ::publisher] [::message ::message]])
 
 (def ^:private maximum-frame-bytes (* 16 1024 1024))
+(def ^:private subscriber-queue-capacity 16)
 
 (defn encode
   "Encode one protocol map as Transit JSON bytes."
@@ -209,9 +211,49 @@
   nil)
 
 (defn- close-subscriber!
-  [{::keys [channel]}]
+  [{::keys [channel worker]}]
   (when channel
-    (try (.close ^SocketChannel channel) (catch Throwable _))))
+    (try (.close ^SocketChannel channel) (catch Throwable _)))
+  (when worker
+    (.interrupt ^Thread worker)))
+
+(defn- start-subscriber!
+  [subscribers closed? ^SocketChannel channel]
+  (.configureBlocking channel true)
+  (let [queue (ArrayBlockingQueue. subscriber-queue-capacity)
+        subscriber-holder (atom nil)
+        worker
+        (Thread.
+         ^Runnable
+         (fn []
+           (try
+             (loop []
+               (let [^ByteBuffer frame (.take ^BlockingQueue queue)]
+                 (loop []
+                   (when (.hasRemaining frame)
+                     (.write channel frame)
+                     (recur)))
+                 (recur)))
+             (catch InterruptedException _ nil)
+             (catch java.nio.channels.AsynchronousCloseException _ nil)
+             (catch Throwable throwable
+               (when-not @closed?
+                 (binding [*out* *err*]
+                   (println "[database-publish] subscriber closed:"
+                            (.getMessage throwable)))))
+             (finally
+               (when-let [subscriber @subscriber-holder]
+                 (swap! subscribers disj subscriber))
+               (try (.close channel) (catch Throwable _)))))
+         "database-publish-subscriber")
+        subscriber {::channel channel ::queue queue ::worker worker}]
+    (reset! subscriber-holder subscriber)
+    (locking subscribers
+      (if @closed?
+        (close-subscriber! subscriber)
+        (do
+          (swap! subscribers conj subscriber)
+          (doto worker (.setDaemon true) (.start)))))))
 
 (defn start-publisher!
   "Start a fanout socket and return its explicit publisher resource."
@@ -231,14 +273,7 @@
        (fn []
          (try
            (loop []
-             (let [channel (.accept server)
-                   _ (.configureBlocking ^SocketChannel channel false)
-                   write-lock (ReentrantLock.)]
-               (locking subscribers
-                 (if @closed?
-                   (try (.close ^SocketChannel channel) (catch Throwable _))
-                   (swap! subscribers conj
-                          {::channel channel ::write-lock write-lock}))))
+             (start-subscriber! subscribers closed? (.accept server))
              (recur))
            (catch java.nio.channels.AsynchronousCloseException _ nil)
            (catch Throwable throwable
@@ -253,10 +288,10 @@
 (defn publish!
   "Offer one event to each subscriber without blocking the writer.
 
-   Each publisher channel is nonblocking and permits one complete-frame write
-   at a time. A concurrent or partial write closes that subscriber; its normal
-   reconnect and transaction replay recover the exact missed range. There is
-   no hidden delivery queue and publisher work is bounded per transaction."
+   Each subscriber has one daemon writer and a fixed-capacity queue. The writer
+   completes every accepted frame even when the socket accepts only a partial
+   write. A subscriber that cannot keep up with the bounded queue is closed;
+   its normal reconnect and transaction replay recover the exact missed range."
   {:malli/schema [:=> [:cat ::publish-input] ::nil-result]}
   [{::keys [publisher message]}]
   (let [subscribers (::subscribers publisher)
@@ -265,19 +300,10 @@
       (let [^ByteBuffer frame (message-frame message)
             dead
             (reduce
-             (fn [failed {::keys [channel write-lock] :as subscriber}]
-               (if-not (.tryLock ^ReentrantLock write-lock)
-                 (conj failed subscriber)
-                 (try
-                   (let [^ByteBuffer subscriber-frame (.duplicate frame)]
-                     (.write ^SocketChannel channel subscriber-frame)
-                     (if (.hasRemaining subscriber-frame)
-                       (conj failed subscriber)
-                       failed))
-                   (catch Throwable _
-                     (conj failed subscriber))
-                   (finally
-                     (.unlock ^ReentrantLock write-lock)))))
+             (fn [failed {::keys [queue] :as subscriber}]
+               (if (.offer ^BlockingQueue queue (.duplicate frame))
+                 failed
+                 (conj failed subscriber)))
              []
              snapshot)]
         (when (seq dead)

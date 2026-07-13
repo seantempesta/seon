@@ -4,11 +4,22 @@
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds])
   (:import [java.io File]
+           [java.nio.channels Channels SocketChannel]
            [java.util Date UUID]))
 
 (defn- socket-path
   [label]
   (str "/tmp/seon-" label "-" (random-uuid) ".sock"))
+
+(defn- wait-for-subscriber!
+  [publisher]
+  (let [deadline (+ (System/currentTimeMillis) 2000)]
+    (loop []
+      (cond
+        (seq @(::uds/subscribers publisher)) true
+        (> (System/currentTimeMillis) deadline)
+        (throw (ex-info "publisher did not accept its subscriber" {}))
+        :else (do (Thread/sleep 10) (recur))))))
 
 (deftest canonical-request-validation-is-structural
   (let [ping (protocol/ping-request)
@@ -75,4 +86,21 @@
                  response))))
       (finally
         (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest publisher-delivers-a-complete-large-frame
+  (let [path (socket-path "transport-publish")
+        publisher (uds/start-publisher! path)
+        ^SocketChannel channel (uds/connect! path)
+        message {::large-payload (apply str (repeat (* 4 1024 1024) "x"))}]
+    (try
+      (wait-for-subscriber! publisher)
+      (let [received
+            (future
+              (uds/read-frame (Channels/newInputStream channel)))]
+        (uds/publish! {::uds/publisher publisher ::uds/message message})
+        (is (= message (deref received 5000 ::timed-out))))
+      (finally
+        (.close channel)
+        (uds/close-publisher! publisher)
         (.delete (File. path))))))
