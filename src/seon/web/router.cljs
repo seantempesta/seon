@@ -8,11 +8,12 @@
    `/agent/{id}`, `/agent/{id}/feed`, `/agent/{id}/call`), and the static
    supplement carries
    the routes NOT yet seeded as datoms (static assets, the secondary POST
-   doors, `/sse`, the flat `/call`). The router is cached in `!ring-handler`
-   and is a pure derived value of those datoms — [[rebuild!]] re-derives it
-   from the current db (called post-seed by serve/start! and, when Core wires a
-   route tx-listener, on every route tx). Build-time path/name conflict
-   detection catches overlaps the old `cond` silently shadowed.
+   doors, `/sse`, the flat `/call`). The compiled router is a discardable
+   cache keyed by the exact route projection plus the static supplement
+   config. [[attach!]] installs one stable listener on the database connection;
+   route transactions reconcile that cache synchronously, while unrelated
+   transactions do no routing work. Build-time path/name conflict detection
+   catches overlaps the old `cond` silently shadowed.
 
    ## Handlers resolve LATE — a symbol per route
 
@@ -64,24 +65,21 @@
     [reitit.ring :as rr]))
 
 ;; ============================================================
-;; Process-lifetime state — the cached reitit ring-handler + the
-;; injected same-origin predicate. Both (re)set by install!.
+;; Process-lifetime state — ONE discardable cache owner. The route projection
+;; is database-derived; the config and compiled handler are opaque runtime
+;; resources supplied by serve. No route fact is duplicated here.
 ;; ============================================================
 
-(defonce ^:private !ring-handler (atom nil))
-
 (defonce ^{:private true
-           :doc "The same-origin? predicate, injected by serve (kept there
-                 verbatim because a test pins it). Defaults to allow-all
-                 until install! runs."}
-  !same-origin-pred (atom (constantly true)))
-
-(defonce ^{:private true
-           :doc "The serve handler set last injected by install! (the static
-                 supplement's leaf handlers). Stored so rebuild! can re-derive
-                 the router from fresh route datoms WITHOUT serve re-passing the
-                 config — a route tx-listener calls (rebuild!) with no args."}
-  !router-config (atom {}))
+           :doc "The exact inputs and compiled output of the current router.
+                 Route facts remain authoritative in the database; this atom
+                 owns only the discardable reitit compilation plus serve's
+                 runtime handler functions."}
+  !router-state
+  (atom {::config           {}
+         ::same-origin-pred (constantly true)
+         ::cache-key        nil
+         ::ring-handler     nil}))
 
 ;; ============================================================
 ;; Low-level node writes (the adapter's own minimal helpers — the
@@ -154,7 +152,7 @@
   {:name ::same-origin
    :wrap (fn [handler]
            (fn [r]
-             (if (@!same-origin-pred (node-req r))
+             (if ((::same-origin-pred @!router-state) (node-req r))
                (handler r)
                (do
                  (log/info-console! "seon.web.router" "POST cross-origin REFUSED"
@@ -199,6 +197,49 @@
           (write-text! (node-res r) 500 (str "route handler unresolved: " sym))
           hijacked))))
 
+(defn- route-projection
+  "Canonical routing facts projected from one immutable database value.
+
+   Only attributes that affect dispatch are retained. Stable sorting makes the
+   projection an exact, collision-free cache fingerprint; no database object
+   or transaction coordinate is retained by the router cache."
+  [db]
+  (if-not db
+    []
+    (let [pull-pattern
+          (cond-> [:seon.route/pattern
+                   :seon.route/method
+                   :seon.route/handler]
+            (contains? (db/installed-schema db) :seon.route/middleware)
+            (conj :seon.route/middleware))]
+      (->> (db/query
+             {:seon.db/db db
+              :seon.db/query
+              '[:find [(pull ?e ?pattern) ...]
+                :in $ ?pattern
+                :where [?e :seon.route/pattern]]
+              :seon.db/args [pull-pattern]})
+           (sort-by (juxt :seon.route/pattern
+                          :seon.route/method
+                          #(str (:seon.route/handler %))
+                          #(pr-str (:seon.route/middleware %))))
+           vec))))
+
+(defn- projection->routes
+  "Compile a canonical route projection into reitit's route data."
+  [projection]
+  (->> projection
+       (group-by :seon.route/pattern)
+       (sort-by key)
+       (mapv (fn [[pattern rows]]
+               [pattern
+                (into {}
+                      (map (fn [{:seon.route/keys [method handler middleware]}]
+                             [method (cond-> {:handler (route-handler handler)}
+                                       (seq middleware)
+                                       (assoc :middleware middleware))]))
+                      rows)]))))
+
 (defn db->routes
   "Project the `:seon.route/*` datoms in `db` into a reitit route vector.
 
@@ -210,22 +251,7 @@
    lands)."
   {:malli/schema [:=> [:catn [::db [:maybe :seon.db/db-val]]] [:vector :any]]}
   [db]
-  (if-not db
-    []
-    (->> (db/query '[:find [(pull ?e [:seon.route/pattern :seon.route/method
-                                      :seon.route/handler :seon.route/middleware]) ...]
-                     :where [?e :seon.route/pattern]]
-                   db)
-         (group-by :seon.route/pattern)
-         (sort-by key)
-         (mapv (fn [[pattern rows]]
-                 [pattern
-                  (into {}
-                        (map (fn [{:seon.route/keys [method handler middleware]}]
-                               [method (cond-> {:handler (route-handler handler)}
-                                         (seq middleware)
-                                         (assoc :middleware (vec middleware)))]))
-                        rows)])))))
+  (projection->routes (route-projection db)))
 
 ;; ============================================================
 ;; The static supplement — the routes NOT (yet) seeded as `:seon.route/*`
@@ -297,26 +323,74 @@
 ;; ============================================================
 
 (defn- build-ring-handler
-  "Build the reitit ring-handler for `db` (the route-datom source) + the stored
-   serve config: `(into (db->routes db) (static-supplement config))`, with
-   [[mw-registry]] threaded in for keyword middleware."
+  "Build one reitit handler from exact routing facts and runtime config."
+  [projection config]
+  (rr/ring-handler
+    (rr/router (into (projection->routes projection)
+                     (static-supplement config))
+               {:reitit.middleware/registry mw-registry})
+    not-found))
+
+(defn- cache-key
+  "The complete immutable inputs whose compiled reitit handler is reusable."
+  [projection config]
+  {::route-projection projection
+   ::config           config})
+
+(defn- reconcile-cache!
+  "Recompile only when the exact route projection or runtime config changed."
   [db]
-  (let [config @!router-config]
-    (rr/ring-handler
-      (rr/router (into (db->routes db) (static-supplement config))
-                 {:reitit.middleware/registry mw-registry})
-      not-found)))
+  (let [projection (route-projection db)
+        config     (::config @!router-state)
+        next-key   (cache-key projection config)]
+    (when-not (= next-key (::cache-key @!router-state))
+      (let [handler (build-ring-handler projection config)]
+        (swap! !router-state assoc
+               ::cache-key next-key
+               ::ring-handler handler)
+        true))))
 
-(defn rebuild!
-  "Re-derive and cache the reitit ring-handler from current route datoms.
+(def ^:private routing-attrs
+  "Attributes whose effective datoms can change the compiled route projection."
+  #{:seon.route/pattern
+    :seon.route/method
+    :seon.route/handler
+    :seon.route/middleware})
 
-   A pure value of `:seon.route/*` in `@*conn*` plus the stored serve
-   config. Idempotent. Called post-seed by `seon.web.serve/start!` (the
-   seeded routes land AFTER the top-level install!, when *conn* was still
-   nil) and, when Core wires a route tx-listener, on every route tx."
+(defn- route-change?
+  "Whether one rich database listener event can alter route dispatch."
+  [{:seon.db/keys [attr-index]}]
+  (boolean (some routing-attrs (keys attr-index))))
+
+(defn- on-route-tx
+  "Reconcile from the post-commit database only for routing datoms."
+  [{post-db :seon.db/db :as change}]
+  (when (route-change? change)
+    (reconcile-cache! post-db)))
+
+(defn attach!
+  "Attach route-cache invalidation to the canonical database listener bus.
+
+   The stable listener key makes repeated attach and hot reload replacement
+   idempotent in Datahike itself. No parallel registry or installed flag is
+   maintained. The current database projection is reconciled before return."
   {:malli/schema [:=> [:cat] :nil]}
   []
-  (reset! !ring-handler (build-ring-handler (some-> db/*conn* deref)))
+  (if-let [conn db/*conn*]
+    (do
+      (db/listen! {:seon.db/key     ::routes
+                   :seon.db/handler on-route-tx
+                   :seon.db/conn    conn})
+      (reconcile-cache! @conn))
+    (reconcile-cache! nil))
+  nil)
+
+(defn detach!
+  "Detach route-cache invalidation from the canonical database listener bus."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (when db/*conn*
+    (db/unlisten! {:seon.db/key ::routes :seon.db/conn db/*conn*}))
   nil)
 
 (defn install!
@@ -332,9 +406,10 @@
    `:seon.route/*` datoms via [[db->routes]]."
   {:malli/schema [:=> [:catn [::config :map]] :nil]}
   [config]
-  (reset! !same-origin-pred (or (::same-origin? config) (constantly true)))
-  (reset! !router-config config)
-  (rebuild!)
+  (swap! !router-state assoc
+         ::config config
+         ::same-origin-pred (or (::same-origin? config) (constantly true)))
+  (attach!)
   (log/info-console! "seon.web.router" "router installed"
                      {:supplement (count (static-supplement config))})
   nil)
@@ -349,7 +424,9 @@
    (never crash the single pod thread)."
   [^js req ^js res]
   (try
-    (let [rh (or @!ring-handler (build-ring-handler (some-> db/*conn* deref)))
+    (let [rh (or (::ring-handler @!router-state)
+                 (do (reconcile-cache! (some-> db/*conn* deref))
+                     (::ring-handler @!router-state)))
           result (rh (node->ring req res))]
       (cond
         (nil? result)                  (write-text! res 404 (str "Not found: " (or (.-url req) "/")))

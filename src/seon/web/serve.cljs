@@ -840,13 +840,12 @@
   []
   (js/Promise.
     (fn [resolve reject]
-      ;; Re-derive the router from the NOW-SEEDED route datoms. The top-level
-      ;; (router/install!) ran at module load — before boot-seed! transacted
-      ;; the :seon.route/* rows and before *conn* was set — so its router held
-      ;; only the static supplement. start! runs AFTER boot-seed! (see
-      ;; seon.client/start-runtime!), so the live conn now carries the core
-      ;; routes; rebuild before the server accepts its first request.
-      (router/rebuild!)
+      ;; Attach the router's stable database listener and reconcile the
+      ;; NOW-SEEDED route projection before accepting a request. The top-level
+      ;; install ran before boot-seed! and therefore initially compiled only
+      ;; the static supplement; route transactions after this point update the
+      ;; cache through the same Datahike listener bus as the rest of the pod.
+      (router/attach!)
       (if-let [live-addr (some-> @!server .address)]
         ;; Already listening — reuse (see docstring; a second
         ;; start-runtime! on the same pod must NOT bounce the server).
@@ -887,6 +886,7 @@
 (defn stop!
   "Close the HTTP server, clear the connection registry. Returns nil."
   []
+  (router/detach!)
   (when-let [server @!server]
     (.close server)
     (reset! !server nil))
