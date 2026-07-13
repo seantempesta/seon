@@ -134,11 +134,19 @@
           [[agent-a []]]
           (fn [conn]
             ;; Simulate a corrupted/pre-validation store by bypassing seon.db's
-            ;; registered Malli value gate. The physical slot is a string.
-            (-> (d/transact! conn
-                  {:tx-data
-                   [{:db/id [:seon.agent/id agent-a]
-                     :seon.render.canvas/content "["}]})
+            ;; registered Malli value gate. First install the attribute through
+            ;; the real API, then replace its encoded physical string directly.
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   [{:seon.agent/id agent-a
+                     :seon.render.canvas/content 'my.agent.view/canvas}]})
+                (.then
+                  (fn [_]
+                    (d/transact! conn
+                      {:tx-data
+                       [{:db/id [:seon.agent/id agent-a]
+                         :seon.render.canvas/content "["}]})))
                 (.then
                   (fn [_]
                     (let [recorded (atom nil)]
