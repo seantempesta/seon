@@ -279,8 +279,8 @@ The canonical names (retired coinages in parens — fix on sight):
 | functions, schemas, tests | "verbs" | what Clojure has; `my.plan/done!` is a function |
 | the `db` | "the store", "memory" | `seon.db` — `db/query`, `db/transact!`, `schema/register!` |
 | `warnings` | "attention" | the `:warnings` block / `seon.warn` |
-| `canvas` (agent-side block) / `canvas` (the human's focal slot showing it) | — | `:seon.render.canvas/content`; the primary panel in `seon.ui.agent-view` — the canvas IS the agent's canvas; every other HTML block is a supporting tile. (The diffusion lane's generation workspace is named `code-buffer`; "canvas" means only this UI surface.) |
-| the `web UI` (pages: `dashboard` `/`, `roster` `/agents`, `agent page` `/agent/{id}`, `debug view` `/agent/{id}/debug`, `data browser` `/data`) | older UI names | `seon.web` serves it, `seon.ui` renders it (owner, 2026-07-11) |
+| `canvas` (agent-side block) / `canvas` (the human's focal slot showing it) | — | `:seon.render.canvas/content`; the primary panel in `seon.ui.agent-view` — the canvas IS the agent's canvas; every other HTML block is a supporting surface/card. (The diffusion lane's generation workspace is named `code-buffer`; "canvas" means only this UI surface.) |
+| the `web UI` (pages: `dashboard` `/`, `agents list` `/agents`, `agent page` `/agent/{id}`, `debug view` `/agent/{id}/debug`, `data browser` `/data`) | older UI names | `seon.web` serves it, `seon.ui` renders it (owner, 2026-07-11) |
 | `subagents` | "collaboration", "multi-agent block" | the `:subagents` block |
 | `soul` | "identity" (as a block name) | the `:soul` block / SOUL.md |
 | `:shared-instructions` | "instructions block" | the block's registered name |
@@ -639,8 +639,8 @@ After every Edit/Write, the hook automatically reloads code, runs affected tests
 
 **CLJS pod (active):** `cljs-watch` recompiles `.cljs` on every save; the
 running pod picks up the new build. If the pod gets into a bad state,
-`bin/seon restart pod` (wait for `agent roster` in `logs/pod.log`). A
-fresh store is `bin/seon cluster reset default`.
+`bin/seon restart pod` (wait for `auto-boot ready` in `logs/pod.log`). A
+fresh database is `bin/seon cluster reset default`.
 
 **`[JVM track — paused]`** uses the dev hook + REPL fns (you rarely reload manually):
 

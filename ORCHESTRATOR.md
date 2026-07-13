@@ -174,14 +174,14 @@ The pod does **not** embed datahike. It forwards every write over a Unix socket 
 ```bash
 bin/seon status                 # which processes are alive, PIDs, pod port
 bin/seon start pod              # idempotent — no-op if already running
-bin/seon restart pod            # wait for "agent roster" in logs/pod.log
+bin/seon restart pod            # wait for "auto-boot ready" in logs/pod.log
 bin/seon restart cljs-watch
 bin/seon stop pod
 bin/seon tail pod               # tail -f logs/pod.log
 bin/seon tail wire-server
 ```
 
-### Fresh World — Cluster Reset
+### Fresh database — cluster reset
 
 ```bash
 bin/seon cluster reset default  # stop pod + wire-server, WIPE the store, restart both

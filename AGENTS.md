@@ -544,8 +544,8 @@ After every Edit/Write, the hook automatically reloads code, runs affected tests
 
 **CLJS pod (active):** `cljs-watch` recompiles `.cljs` on every save; the
 running pod picks up the new build. If the pod gets into a bad state,
-`bin/seon restart pod` (wait for `agent roster` in `logs/pod.log`). A
-fresh store is `bin/seon cluster reset default`.
+`bin/seon restart pod` (wait for `auto-boot ready` in `logs/pod.log`). A
+fresh database is `bin/seon cluster reset default`.
 
 **`[JVM track — paused]`** uses the dev hook + REPL verbs (you rarely reload manually):
 

@@ -77,9 +77,9 @@ data's schema.
 ```
 
 Every schema'd public fn is **instrumented at runtime** — the program graph is
-the roster (`seon.instrument/instrument-from-db!` at boot + after every hot
-reload; the eval-tee wraps agent fns inline) and the wrapper validates args +
-return on every call, *throwing* on a mismatch. The exceptions are structural,
+the canonical function-schema source (`seon.instrument/instrument-from-db!` at
+boot + after every hot reload; the eval-tee wraps agent fns inline) and the
+wrapper validates args + return on every call, *throwing* on a mismatch. The exceptions are structural,
 never a name list (see the envelope section below); `SEON_INSTRUMENT` is an
 emergency kill-switch, never a way to silence an error.
 So a wrong schema is a runtime *bug*, not a doc nit: read the instrumentation
