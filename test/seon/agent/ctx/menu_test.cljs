@@ -133,10 +133,12 @@
                                 {:seon.db/db @conn :seon.agent/id a-id})]
                       (is (str/includes? out "select an entry by outputting its glyph")
                           "the optionality teaching is colocated with the block")
-                      (is (str/includes? out "① (my.plan/done! [{:my.plan/keys [id]}] …)")
+                      (is (str/includes? out "① fn my.plan/done! — positional")
                           "most-called fn is glyph ①, aliased calls resolved via stored require-edges")
-                      (is (str/includes? out "② (my.plan/step! [request] …)")
+                      (is (str/includes? out "② fn my.plan/step! — positional")
                           "second-ranked fn is glyph ②")
+                      (is (not (str/includes? out "…"))
+                          "menu entries never teach a fake executable body")
                       (is (str/includes?
                             out "Mark a step done; may unblock its dependents next turn.")
                           "docstring line 1 renders on the entry")
@@ -191,20 +193,23 @@
                     (let [req {:seon.db/db @conn :seon.agent/id a-id}
                           out (menu/function-menu-block req)
                           offers (menu/function-offers @conn a-id)]
-                      (is (str/includes? out "① (my.plan/done!")
+                      (is (str/includes? out "① fn my.plan/done!")
                           "recency group still leads the numbering")
                       (is (str/includes? out "; toolkit — more functions")
                           "the toolkit group renders under its divider")
-                      (is (str/includes? out "③ (my.plan/plan! [request] …)")
+                      (is (str/includes? out "③ fn my.plan/plan! — positional")
                           "an uncalled specced toolkit function gets the NEXT glyph (one numbering)")
                       (is (= 1 (count (re-seq #"my\.plan/done!" out)))
                           "a function already in the recency group is never duplicated")
                       (is (not (str/includes? out "no-spec-fn"))
                           "a spec-less public fn is not a toolkit entry")
-                      (is (= ["my.plan/done!" "my.plan/step!" "my.plan/plan!"]
-                             (mapv #(first (str/split (:seon.typeahead/label %) #" "))
-                                   offers))
-                          "wire offers mirror the rendered concatenation")
+                      (is (every? true?
+                                  (map (fn [sym offer]
+                                         (str/includes?
+                                           (:seon.typeahead/label offer) sym))
+                                       ["my.plan/done!" "my.plan/step!" "my.plan/plan!"]
+                                       offers))
+                          "wire offers mirror the rendered function order")
                       (is (= ["①" "②" "③"]
                              (mapv :seon.typeahead/glyph offers))
                           "offer glyphs are the one continuous numbering"))))
@@ -245,7 +250,7 @@
                           out  (menu/function-menu-block req)]
                       (is (= 1 (:seon.typeahead/menu-cap (menu/policy @conn)))
                           "the policy row overrides the code default")
-                      (is (str/includes? out "① (my.plan/done!")
+                      (is (str/includes? out "① fn my.plan/done!")
                           "the top function still renders")
                       (is (not (str/includes? out "②"))
                           "menu-cap 1 → no second menu entry"))))))

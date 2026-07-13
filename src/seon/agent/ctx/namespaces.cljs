@@ -524,11 +524,17 @@
 ;; ============================================================
 
 (defn- soft-clip
-  "Return `s` unchanged when ≤ `n` chars, else clipped to `n` chars with a
-   trailing `…` (the last char is the ellipsis). Interim guard until the
-   corpus's docstring line 1 reliably complies with the ≤78 convention."
+  "Return `s` unchanged when it fits `n`, else append an explicit clip marker.
+
+   Callable records never use an ellipsis as a pretend body or omission token:
+   models copied that glyph into executable forms. This remains an interim
+   guard until the corpus's docstring line 1 reliably complies with the
+   compact-summary convention."
   [s n]
-  (if (> (count s) n) (str (subs s 0 (dec n)) "…") s))
+  (let [marker " [clipped]"]
+    (if (> (count s) n)
+      (str (subs s 0 (max 0 (- n (count marker)))) marker)
+      s)))
 
 (def ^:private runtime-object-tag-re
   "A legacy/runtime `pr-str` object tag, which `cljs.reader` cannot read.
@@ -583,45 +589,99 @@
   (let [parsed (try (edn/read-string arglists) (catch :default _ nil))]
     (when (and (seq? parsed) (seq parsed) (every? vector? parsed)) parsed)))
 
-(defn- raw-arglists-inner
-  "Best-effort raw arglist text with one enclosing pair of parens removed."
-  [arglists]
-  (let [s (str/trim (or arglists ""))]
-    (if (and (str/starts-with? s "(") (str/ends-with? s ")"))
-      (subs s 1 (dec (count s)))
-      s)))
+(defn- schema-children
+  "A vector Malli form's children, excluding its optional properties map."
+  [form]
+  (when (vector? form)
+    (let [xs (subvec form 1)]
+      (if (map? (first xs)) (subvec xs 1) xs))))
 
-(defn compact-arities
-  "The arity portion of a function-menu entry, from an arglists string.
+(defn- readable-schema
+  "Reader-safe schema text. Inline maps lose only Malli's `:map` wrapper."
+  [form]
+  (if (and (vector? form) (= :map (first form)))
+    (str "{" (str/join ", "
+                       (map (fn [[k & xs]]
+                              (let [props (when (map? (first xs)) (first xs))
+                                    value (if props (second xs) (first xs))]
+                                (str (pr-str k) (when (:optional props) "?")
+                                     " " (pr-str value))))
+                            (schema-children form))) "}")
+    (omit-runtime-object-tags (einstrument/pr-str-readable form))))
 
-   Derived from the stored `:seon.fn/arglists` string
-   (`\"([{:my.kb/keys [a]}])\"`). Single arity → `[args] …`; multi-arity →
-   `([a] …) ([a b] …)`. Errors-as-values: an unreadable arglists string
-   falls back to its raw text (outer parens stripped) with an elided
-   body. Public: the `:function-menu` menu section
-   (`seon.agent.ctx.menu`) renders its glyph entries with this deliberately
-   source-like grammar; compact namespace cards use [[compact-signatures]] so
-   they never present a fake body."
-  {:malli/schema [:=> [:catn [::arglists [:maybe :string]]] :string]}
-  [arglists]
-  (let [parsed (parsed-arglists arglists)]
-    (cond
-      parsed
-      (if (= 1 (count parsed))
-        (str (pr-str (first parsed)) " …")
-        (str/join " " (map (fn [v] (str "(" (pr-str v) " …)")) parsed)))
-      :else
-      (str (raw-arglists-inner arglists) " …"))))
+(defn- arity-specs
+  "The `:=>` forms represented by one persisted function spec string."
+  [spec]
+  (let [form (when-not (str/blank? spec)
+               (try (edn/read-string spec) (catch :default _ nil)))]
+    (when (vector? form)
+      (case (first form)
+        :=> [form]
+        :function (filterv #(and (vector? %) (= :=> (first %)))
+                           (schema-children form))
+        nil))))
 
-(defn- compact-signatures
-  "Inert signature text from stored arglists, with no fake body token."
-  [arglists]
-  (if-let [parsed (parsed-arglists arglists)]
-    (str/join " | " (map pr-str parsed))
-    (let [raw (raw-arglists-inner arglists)]
-      (if (str/blank? raw) "<args unavailable>" raw))))
+(defn- binding-label
+  "A stable label for one source arg binding."
+  [binding i]
+  (cond
+    (symbol? binding) (name binding)
+    (map? binding) "request"
+    (vector? binding) "value"
+    :else (str "arg-" (inc i))))
 
-(schema/register! ::ns-str :string)
+(defn- input-pairs
+  "Argument label/schema pairs from `:cat` or `:catn`."
+  [input arglist]
+  (if-not (vector? input)
+    []
+    (let [children (vec (or (schema-children input) []))]
+      (if (= :catn (first input))
+        (mapv (fn [entry]
+                [(if (keyword? (first entry))
+                   (pr-str (first entry))
+                   (str (first entry)))
+                 (last entry)])
+              children)
+        (mapv (fn [i schema]
+                [(binding-label (get arglist i) i) schema])
+              (range)
+              children)))))
+
+(defn- arity-contract
+  "One function arity without Malli's callable grammar."
+  [arglist spec]
+  (if-not spec
+    (str "positional " (pr-str (or arglist [])) " -> <return unspecified>")
+    (let [[input output] (schema-children spec)
+          pairs          (input-pairs input arglist)
+          map-in?        (and (= 1 (count pairs))
+                              (or (map? (first arglist))
+                                  (and (vector? (second (first pairs)))
+                                       (= :map (first (second (first pairs)))))))]
+      (str (if map-in? "map-in " "positional ")
+           (if map-in?
+             (readable-schema (second (first pairs)))
+             (if (seq pairs)
+               (str "[" (str/join ", "
+                                  (map (fn [[label schema]]
+                                         (str label " " (readable-schema schema)))
+                                       pairs)) "]")
+               (pr-str (or arglist []))))
+           " -> " (readable-schema output)))))
+
+(defn- callable-contract
+  "All persisted arities as one inert callable contract."
+  [arglists spec]
+  (let [args  (vec (or (parsed-arglists arglists) []))
+        specs (vec (or (arity-specs spec) []))
+        n     (max (count args) (count specs))]
+    (if (zero? n)
+      "positional [] -> <return unspecified>"
+      (str/join " OR "
+                (map #(arity-contract (get args %) (get specs %))
+                     (range n))))))
+
 ;; Concrete value shapes, NOT references to the :seon.fn/* attr schemas —
 ;; those register in `seon.agent`, which loads AFTER this ns at boot, and
 ;; register! validates compilability eagerly (forward refs throw here).
@@ -633,24 +693,23 @@
    [:seon.fn/spec     {:optional true} :string]])
 
 (defn compact-fn-head
-  "One fn condensed to an inert single-line signature record.
+  "One fn condensed to an inert, readable callable-contract record.
 
-   `fn full.ns/name [args] — \"<doc line 1>\" — :malli/schema <spec>`.
-   There is no synthetic `defn` and no fake body token for an agent to echo as
-   code. Docstring line 1 is soft-clipped at 78; missing docs/specs are omitted;
-   every keyword remains fully qualified. PUBLIC: the ONE per-fn card renderer —
-   compact namespace cards, `my.ns/functions`, and autocomplete export all use
-   this same inert record."
-  {:malli/schema [:=> [:catn [::ns-str ::ns-str] [::fn-row ::fn-row]] :string]}
-  [_ns-str {:seon.fn/keys [sym arglists doc spec]}]
+   The record names map-in versus positional invocation explicitly, pairs each
+   argument with its type, and names the return type. It never exposes Malli's
+   function grammar (`:=>` / `:cat` / `:catn`), never synthesizes a `defn`, and
+   never emits an ellipsis/fake body token. PUBLIC: the ONE per-fn renderer —
+   compact namespace cards, function menus/offers, `my.ns/functions`, and
+   autocomplete export all consume this exact record."
+  {:malli/schema [:=> [:catn [::fn-row ::fn-row]] :string]}
+  [{:seon.fn/keys [sym arglists doc spec]}]
   (let [doc-1   (when (and doc (not (str/blank? doc)))
-                  (soft-clip (str/trim (first (str/split-lines doc))) 78))
+                  (-> (str/trim (first (str/split-lines doc)))
+                      (str/replace "…" "...")
+                      (soft-clip 78)))
         docpart (if doc-1 (str " — " (pr-str doc-1)) "")
-        specpart (if (and spec (not (str/blank? spec)))
-                   (str " — :malli/schema " (omit-runtime-object-tags spec))
-                   "")
-        arities (compact-signatures arglists)
-        head    (str "fn " sym " " arities docpart specpart)]
+        contract (callable-contract arglists spec)
+        head    (str "fn " sym " — " contract docpart)]
     head))
 
 (schema/register! ::render-one-ns-compact-request
@@ -695,7 +754,7 @@
                          (remove :seon.fn/private?)
                          (sort-by :seon.fn/sym))
             reg-lines (map #(compact-schema-line ns-str %) schemas)
-            fn-lines  (map #(compact-fn-head ns-str %) fns)
+            fn-lines  (map compact-fn-head fns)
             ;; The cross-ns schema DEFINITIONS these fns reference (transitive,
             ;; global — the ns's OWN schemas are already in reg-lines above and
             ;; excluded). Shared closure lives in seon.agent.ctx (one mechanism).

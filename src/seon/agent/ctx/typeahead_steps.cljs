@@ -68,7 +68,7 @@
        "; parse-clean form LOCKS and carries forward; the unfinished tail\n"
        "; stays an editable draft. A selected menu glyph (the menu sections\n"
        "; teach selection; it stays strictly optional) EXPANDS to that\n"
-       "; entry's call template `(fn …)` with a free hole for arguments.\n"
+       "; entry's call template with a free hole for arguments.\n"
        "; Locked forms are eval'd by the pod AFTER the turn — results\n"
        "; arrive next turn as the transcript's bare `⟹ <value>` rows.\n"
        "; `⟹` is runtime output only; `;; =>` is not part of the grammar."))

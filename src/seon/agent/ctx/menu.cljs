@@ -8,8 +8,8 @@
      - `:function-menu` ([[function-menu-block]]) — the agent's most-used
        public fns, derived from its OWN eval log (the `:seon.eval` rows
        the turn loop already persists — no new storage), each rendered
-       as a glyph-numbered entry: glyph, `(fn-sym [args] …)` in the same
-       arity grammar as the compact ns cards, docstring line 1.
+       as a glyph plus the SAME inert callable-contract record as the compact
+       namespace cards.
 
    (The former `:plan-ledger` section retired 2026-07-11 — owner ruling,
    planner-worker-design.md: `:plan` is THE plan surface; its ▶/☐/
@@ -437,18 +437,19 @@
 (def ^:private toolkit-group-header
   "; toolkit — more functions from your required namespaces:")
 
+(defn- compact-row
+  "Materialize the callable fields of a Datahike entity as an ordinary map."
+  [sym-str row]
+  (cond-> {:seon.fn/sym sym-str}
+    (:seon.fn/arglists row) (assoc :seon.fn/arglists (:seon.fn/arglists row))
+    (:seon.fn/doc row)      (assoc :seon.fn/doc (:seon.fn/doc row))
+    (:seon.fn/spec row)     (assoc :seon.fn/spec (:seon.fn/spec row))))
+
 (defn- function-line
-  "One rendered menu entry: `; <glyph> (<sym> [args] …) — <doc line 1>`.
-   The arity grammar is the compact-card one ([[ns-cards/compact-arities]]);
-   a fn with no docstring renders without the ` — …` tail."
+  "One rendered menu entry: glyph plus the canonical compact fn record."
   [glyph sym-str row]
-  (let [doc1 (some->> (:seon.fn/doc row) str/split-lines first str/trim
-                      not-empty)
-        doc1 (when doc1
-               (if (> (count doc1) 78) (str (subs doc1 0 77) "…") doc1))]
-    (str "; " glyph " (" sym-str " "
-         (ns-cards/compact-arities (:seon.fn/arglists row)) ")"
-         (when doc1 (str " — " doc1)))))
+  (str "; " glyph " "
+       (ns-cards/compact-fn-head (compact-row sym-str row))))
 
 (defn function-menu-block
   "The `:function-menu` section — recent + toolkit functions, glyph-listed.
@@ -464,9 +465,10 @@
        recency menu structurally misses (P5: 0/13 fires could select a
        required function).
 
-   Entry grammar per line is unchanged: glyph, `(fn-sym [args] …)`
-   (compact-card arity grammar), docstring line 1. Aliased calls resolve
-   through each eval ns's STORED require-edges; nothing new is stored.
+   Each entry is a glyph plus the canonical inert callable contract (explicit
+   map-in versus positional arguments, input types, return type, doc line 1).
+   Aliased calls resolve through each eval ns's STORED require-edges; nothing
+   new is stored.
    Selection is strictly optional (the header teaches it); REACTIVE:
    both groups empty → \"\" and the composer drops the section. The
    section is named `:function-menu` (renamed from `:recent-verbs`,
@@ -523,8 +525,9 @@
    One offer per [[combined-functions]] entry (recent group then toolkit
    group — the SAME concatenation the section renders, so glyph N on
    the wire is glyph N in the prompt for every offer) — the selection
-   glyph, a `sym [args] …` label, and a `(sym ` + free-args-hole + `)`
-   clamp template the driver expands on selection. [] when the agent
+   glyph, the SAME compact callable-contract label the prompt renders, and a
+   `(sym ` + free-args-hole + `)` clamp template the driver expands on
+   selection. [] when the agent
    has no menu (same guard as the rendered section), so the wire
    carries offers exactly when the prompt shows the menu."
   {:malli/schema [:=> [:catn [::db :seon.db/db] [:seon.agent/id :string]]
@@ -535,9 +538,8 @@
       (map-indexed
         (fn [i [s row]]
           {:seon.typeahead/glyph    (glyphs i)
-           :seon.typeahead/label    (str s " "
-                                         (ns-cards/compact-arities
-                                           (:seon.fn/arglists row)))
+           :seon.typeahead/label    (ns-cards/compact-fn-head
+                                      (compact-row s row))
            :seon.typeahead/template [["clamp" (str "(" s " ")]
                                      ["free" offer-args-free-tokens]
                                      ["clamp" ")"]]})

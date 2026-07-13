@@ -265,23 +265,34 @@
 
 (deftest compact-fn-record-keeps-contract-without-becoming-code
   (let [card (nss/compact-fn-head
-               "my.helper"
                {:seon.fn/sym "my.helper/assist"
                 :seon.fn/arglists "([x] [x y])"
                 :seon.fn/doc "Assist with a value.\n\nDeep implementation notes."
-                :seon.fn/spec "[:=> [:cat [:fn #object[Function]]] :boolean]"})
+                :seon.fn/spec "[:function [:=> [:cat :int] :boolean] [:=> [:catn [:my.helper/x :int] [:my.helper/y :int]] :boolean]]"})
         parsed (repl-internal/parse-forms card)]
     (testing "the useful callable contract remains visible"
       (is (str/includes? card "my.helper/assist"))
-      (is (str/includes? card "[x]"))
-      (is (str/includes? card "[x y]"))
+      (is (str/includes? card "positional"))
+      (is (str/includes? card "x :int"))
+      (is (str/includes? card ":my.helper/x :int"))
       (is (str/includes? card "Assist with a value."))
-      (is (str/includes? card ":malli/schema"))
+      (is (not-any? #(str/includes? card %) [":=>" ":catn" "…"]))
       (is (not (str/includes? card "Deep implementation notes."))))
     (testing "the record is inert and reader-safe when copied"
       (is (not (str/includes? card "#object")))
       (is (not-any? #(contains? #{:form :read} (:seon.repl/kind %)) parsed)
           "a raw fn card is prose, not an executable pseudo-definition"))))
+
+(deftest compact-fn-record-distinguishes-map-in
+  (let [card (nss/compact-fn-head
+               {:seon.fn/sym "seon.db/query"
+                :seon.fn/arglists "([{:seon.db/keys [query args]}])"
+                :seon.fn/spec
+                "[:=> [:cat [:map [:seon.db/query :seon.db/query] [:seon.db/args {:optional true} [:vector :any]]]] :seon.db/query-result]"})]
+    (is (str/includes? card "map-in"))
+    (is (str/includes? card ":seon.db/query"))
+    (is (str/includes? card ":seon.db/args?"))
+    (is (not-any? #(str/includes? card %) [":=>" ":cat" "…"]))))
 
 (deftest compact-namespace-card-is-inert-at-the-reply-parser-boundary
   (async done
