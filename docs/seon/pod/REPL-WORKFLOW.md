@@ -271,7 +271,7 @@ namespaces re-load; `^:dev/after-load` rewires.
 
 `defonce` state survives:
 `!agent-conn`, `!compile-state`, `seon.schema/*schemas`, `seon.fs/!config`,
-`seon.eval/!timeout-ms`, `seon.eval/timeout-sentinel`,
+`seon.eval/timeout-sentinel`,
 `seon.web.serve/!server` + `!sse-connections`, etc.
 
 ### Stopping

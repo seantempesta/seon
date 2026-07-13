@@ -79,7 +79,7 @@
 
 ;; ============================================================
 ;; Per-form wall-clock timeout. Stability guard, not a security
-;; boundary — the agent can mutate `!timeout-ms` from inside eval.
+;; boundary.
 ;;
 ;; CAVEAT: single-threaded Node only preempts **async** hangs (a form
 ;; awaiting a Promise that never resolves — fetch, db call, etc.). A
@@ -90,16 +90,10 @@
 ;; loop indefinitely.
 ;; ============================================================
 
-;; Per-form wall-clock timeout in milliseconds. Default 10000.
-;; Replace via [[set-timeout-ms!]] (persistent) or [[budget]] (an explicit
-;; per-value override that agents call from inside a form).
-(defonce !timeout-ms (atom 10000))
-
-(defn set-timeout-ms!
-  "Replace the per-form wall-clock timeout. Returns the new value."
-  {:malli/schema [:=> [:catn [::ms :int]] :int]}
-  [ms]
-  (reset! !timeout-ms ms))
+;; The immutable fallback for one form. A slow form carries its own deadline
+;; through [[budget]]. A future configurable default must be resolved from the
+;; form's frozen database config, not from process-global mutable state.
+(def ^:private default-timeout-ms 10000)
 
 (deftype ^:private Budgeted [ms value])
 
@@ -108,7 +102,7 @@
 
    Applies to the form's auto-awaited return value. Use when a form
    does a slow async op that legitimately
-   needs more than `@!timeout-ms` (default 10000ms).
+   needs more than the default 10000ms.
 
      ;; default 10s budget
      (some-fs-walk \"/Users/me/dir\")
@@ -1224,7 +1218,7 @@
                     still emits JS that resolves at runtime via the
                     already-loaded globalThis vars (the `:client`
                     bundle's emission).
-     ::timeout-ms    override the default `@!timeout-ms` per-call.
+     ::timeout-ms    override the default timeout for this call.
 
    For setup forms that need cljs.core's macro refers wired up via
    `(ns …)` analysis, pass `::analyze-deps? true` explicitly.
@@ -1246,7 +1240,7 @@
   ([compile-state form-str {::keys [starting-ns analyze-deps? timeout-ms]}]
    (try
      (let [ns      (or starting-ns user-ns-sym)
-           ms      (or timeout-ms @!timeout-ms)
+           ms      (or timeout-ms default-timeout-ms)
            raced   (await (race-timeout
                             (raw-eval compile-state form-str ns
                                       (boolean analyze-deps?))
@@ -1613,7 +1607,7 @@
    CLJS-1.12.145 syntax they don't see. This makes calls to seon.db/*
    feel synchronous from inside agent forms.
 
-   Bounded by `@!timeout-ms` (default) OR the explicit wrapper returned by
+   Bounded by the immutable default OR the explicit wrapper returned by
    [[budget]]. A Promise that exceeds the bound is NOT dropped: it is
    handed back as `::pending-promise` so the caller binds the live handle at
    `result/<id>` (re-reference auto-resolves it later). A `(defer …)`
@@ -1628,7 +1622,7 @@
   [runtime-value]
   (let [budgeted? (instance? Budgeted runtime-value)
         v         (if budgeted? (.-value runtime-value) runtime-value)
-        ms        (if budgeted? (.-ms runtime-value) @!timeout-ms)]
+        ms        (if budgeted? (.-ms runtime-value) default-timeout-ms)]
     (cond
       ;; Explicit opt-out: `(defer expr)` wrapped the Promise. Don't await —
       ;; hand the raw Promise back as a pending handle.
