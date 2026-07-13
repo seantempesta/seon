@@ -60,6 +60,10 @@ Foundational gains already landed and are the baseline:
 - Node tests install the existing library-log gate before any test namespace;
   focused runs no longer serialize Datahike/Konserve trace payloads, and the
   canonical timestamped test-log tail is bounded to 20 files.
+- Focused pod selectors are also Shadow compile inputs. One portable owner lock
+  brackets compile plus execution, and `--no-build` refuses any artifact whose
+  content fingerprint does not match its namespace/source/config/dependency
+  inputs or downstream build flavor.
 
 The authoritative ordered plan is [[roadmap]]. The durable provenance and
 lifecycle semantics remain [[provenance-and-lifecycle-design]] until phase 4

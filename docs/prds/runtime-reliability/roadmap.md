@@ -131,6 +131,13 @@ artifact, Markdown, and docstring behavior; it no longer leaves the two linter
 suites orphaned. The underlying focused scripts remain implementation doors,
 not competing harnesses.
 
+Focused pod selectors now drive Shadow's native compile-time `:namespaces`
+input as well as runtime selection. The one test bundle has a portable
+compile-plus-run owner lock, and `--no-build` requires an exact content
+fingerprint over namespace selection, source/config/dependency inputs, and
+downstream flavor. Concurrent agents cannot overwrite one another's running
+artifact, dead locks recover, and stale bundles fail loudly.
+
 The writer test process now suppresses only `datahike.writer` error logging:
 expected transaction-conflict cases remain behavioral assertions, while their
 repeated full stack traces no longer dominate a successful focused run.
@@ -504,9 +511,9 @@ is evaluated behaviorally, not by asserting prose.
 | Writer protocol | The semantic protocol, JVM writer/server, CLJS replica, and UDS transports are separated and the duplicate operations/helpers are deleted. A typed supervisor administration surface and cold process proof remain. |
 | Database vocabulary | The protocol/backend/replica path is canonical, the managed leaf is `/db`, and the generic `store-inventory` API/context/tooling family is deleted. Skills and downstream ACME still need vocabulary convergence. |
 | Database browser | The root inventory panel, header inventory scan, generic context block, `db/store-inventory`, and `my.kb/inventory` are deleted. `/data` uses the canonical shared gzip feed and cheap shell; index-backed bounded detail projections remain. |
-| Developer hooks | The direct Babashka hook is repository-contained before config/artifact access, runtime-independent, locally deterministic, and log-bounded under a cross-process lock. Automatic model review is deleted. The operator test door still needs to include its Markdown/docstring checks. |
+| Developer hooks | The direct Babashka hook is repository-contained before config/artifact access, runtime-independent, locally deterministic, and log-bounded under a cross-process lock. Automatic model review is deleted. The operator gate includes its Markdown/docstring checks. |
 | Operator | The Babashka graph and thin launcher are built and focused-tested; active caller migration plus default/ACME/Inspect live proof remain. |
-| Tests | The retained writer gate is 47 tests/295 assertions after deleting 14 legacy server suites, but disabled and paused-application tests plus noisy expected-failure logging still need removal. |
+| Tests | Public pod/database/operator doors delegate to one runner each; focused pod builds use compile-time namespace selection, one bundle lock, and exact freshness fingerprints. Disabled/paused-application tests and remaining intentional expected-failure noise still need removal. |
 | UI | Surface/focus machinery exists, but active symbols, CSS, DOM, docs, skills, and ACME still say tile; four dead context renderers still load. |
 | Live rendering | Agent view unitization/read-observation is incomplete; legitimate work still needs bounded caching, layout/focus/browser proof, and grown-database profiling. |
 | Recent activity reads | `seon.render.default/recent-messages`, `seon.agent.ctx/messages`, transcript/activity queries, `seon.derive/real-eval-oks`, and the function menu independently scan and sort growing message/eval history before taking a small tail. Root's current cross-agent activity does the same over the whole database. |

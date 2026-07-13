@@ -30,15 +30,23 @@ cd "$(dirname "$0")/.."
 # A Ctrl-C during the final `node | tee` pipeline used to leave the Node test
 # child reparented to launchd, where it kept a CPU core busy indefinitely.
 # Kill every direct child while this shell still owns them; normal completion
-# has no live children, so the EXIT arm is a no-op.
-cleanup_children() {
+# has no live children, so the EXIT arm is a no-op. The lock is acquired below
+# and released by the same trap so compile and execution remain one bracket.
+TEST_LOCK="tmp/test-cljs.lock"
+LOCK_OWNED=0
+cleanup() {
   local children
   children="$(pgrep -P $$ 2>/dev/null || true)"
   if [ -n "$children" ]; then
     kill $children 2>/dev/null || true
   fi
+  if [ "$LOCK_OWNED" -eq 1 ]; then
+    rm -rf -- "$TEST_LOCK"
+  fi
 }
-trap cleanup_children EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Fail-loud render dial (seon.config/render-strict?): ON by default in the
 # test harness so a swallowed render/converter failure SCREAMS (throws with
@@ -76,6 +84,110 @@ done
 mkdir -p tmp out/test
 TMPOUT="tmp/test-cljs-$(date +%Y%m%d-%H%M%S)-$$.log"
 
+# One output bundle means one compile+run owner. Two agents compiling different
+# focused namespace sets into out/test/test.js can otherwise each run the other
+# agent's artifact. A mkdir lock is atomic and portable to macOS Bash 3.2.
+# Never wait invisibly: an active owner is reported immediately; a dead owner's
+# lock is recovered once.
+acquire_test_lock() {
+  if mkdir "$TEST_LOCK" 2>/dev/null; then
+    printf '%s\n' "$$" > "$TEST_LOCK/pid"
+    LOCK_OWNED=1
+    return 0
+  fi
+
+  local owner=""
+  local owner_command=""
+  if [ -f "$TEST_LOCK/pid" ]; then
+    owner="$(sed -n '1p' "$TEST_LOCK/pid" 2>/dev/null || true)"
+  fi
+  if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+    owner_command="$(ps -p "$owner" -o command= 2>/dev/null || true)"
+    if printf '%s\n' "$owner_command" | grep -q 'test-cljs'; then
+      echo "Another pod test owns $TEST_LOCK (pid $owner); not racing its bundle."
+      exit 2
+    fi
+  fi
+
+  rm -rf -- "$TEST_LOCK"
+  if ! mkdir "$TEST_LOCK" 2>/dev/null; then
+    echo "Could not acquire $TEST_LOCK after removing a stale owner."
+    exit 2
+  fi
+  printf '%s\n' "$$" > "$TEST_LOCK/pid"
+  LOCK_OWNED=1
+}
+
+acquire_test_lock
+
+# Runtime --test selectors also define the compile graph. Shadow's node-test
+# target accepts an explicit :namespaces vector (test_util.clj); using it avoids
+# compiling every -test$ namespace for a focused run. A selector may name a
+# namespace or one fully-qualified var. Comma-separated selectors follow
+# Shadow's own CLI grammar.
+SELECTED_NS=()
+if [ "${#TEST_ARGS[@]}" -gt 0 ]; then
+  for test_arg in "${TEST_ARGS[@]}"; do
+    selector="${test_arg#--test=}"
+    old_ifs="$IFS"
+    IFS=','
+    for selected in $selector; do
+      IFS="$old_ifs"
+      ns="${selected%%/*}"
+      if ! printf '%s\n' "$ns" | grep -Eq '^[A-Za-z_][A-Za-z0-9_.-]*$'; then
+        echo "Invalid CLJS test namespace in selector: $selected"
+        exit 2
+      fi
+      duplicate=0
+      case " ${SELECTED_NS[*]-} " in
+        *" $ns "*) duplicate=1 ;;
+      esac
+      [ "$duplicate" -eq 0 ] && SELECTED_NS+=("$ns")
+      IFS=','
+    done
+    IFS="$old_ifs"
+  done
+fi
+
+NAMESPACE_EDN=""
+if [ "${#SELECTED_NS[@]}" -gt 0 ]; then
+  NAMESPACE_EDN="${SELECTED_NS[*]}"
+fi
+
+# The bundle fingerprint binds --no-build to the exact namespace selection,
+# source/config/dependency inputs, and downstream compile flavor that created
+# it. It is intentionally content-based: timestamps do not make a build stale,
+# while an edit with a preserved mtime still does. Reuse the operator's one
+# streaming digest implementation rather than launching a checksum process per
+# source file.
+build_fingerprint() {
+  local paths=(src test config deps.edn shadow-cljs.edn package.json package-lock.json bb.edn bin/test-cljs)
+  if [ -n "${SEON_EXTRA_SRC:-}" ] && [ -d "$SEON_EXTRA_SRC" ]; then
+    paths+=("$SEON_EXTRA_SRC/src" "$SEON_EXTRA_SRC/test"
+            "$SEON_EXTRA_SRC/deps.edn" "$SEON_EXTRA_SRC/package.json"
+            "$SEON_EXTRA_SRC/package-lock.json")
+  fi
+
+  local source_digest
+  source_digest="$(bb --config bb.edn --deps-root . -e \
+    '(require (quote seon.dev.artifact))
+     (print (seon.dev.artifact/digest-paths
+              (first *command-line-args*)
+              (rest *command-line-args*)))' \
+    -- "$PWD" "${paths[@]}")"
+  {
+    printf 'namespaces=%s\n' "$NAMESPACE_EDN"
+    printf 'extra-src=%s\n' "${SEON_EXTRA_SRC:-}"
+    printf 'extra-preload=%s\n' "${SEON_EXTRA_PRELOAD:-}"
+    printf 'extra-npm=%s\n' "${SEON_EXTRA_NPM:-}"
+    printf 'config=%s\n' "${SEON_CONFIG:-}"
+    printf 'source=%s\n' "$source_digest"
+  } | shasum -a 256 | awk '{print $1}'
+}
+
+FINGERPRINT_FILE="out/test/.seon-test-fingerprint"
+EXPECTED_FINGERPRINT="$(build_fingerprint)"
+
 # Timestamped names sort newest-first. Keep a small bounded diagnostic tail;
 # the latest symlink remains the stable human/tool entrypoint.
 prune_test_logs() {
@@ -93,6 +205,7 @@ COMPILE_ELAPSED=0
 COMPILE_STATUS="skipped (--no-build)"
 
 if [ "$BUILD" = "1" ]; then
+  rm -f -- "$FINGERPRINT_FILE" "$FINGERPRINT_FILE.tmp"
   COMPILE_START=$(date +%s)
   # DEV compile (not `release`): the core resolves fns by walking
   # goog.global at munged paths (seon.eval/lookup-value, malli.instrument's
@@ -103,20 +216,24 @@ if [ "$BUILD" = "1" ]; then
   # the test env faithful to the live core. (2026-06-09)
   #
   # SEON_EXTRA_SRC (task #36): when set, the downstream's deps.edn project
-  # joins the classpath via -Sdeps :local/root — the :test build's
-  # :ns-regexp "-test$" then sweeps THEIR tests too (feature for them).
-  # The
-  # SEON_EXTRA_PRELOAD entry ns is appended to :devtools :preloads via
-  # --config-merge (node-test honors preloads — shadow node_test.clj:50),
-  # so extra-core registration is live for tests that exercise it.
-  # All vars unset = today's command byte-identical.
+  # joins the classpath via -Sdeps :local/root. SEON_EXTRA_PRELOAD is appended
+  # to the node-test dev preload vector so downstream registration is live for
+  # tests that exercise it.
   COMPILE_CMD=(clojure)
   if [ -n "${SEON_EXTRA_SRC:-}" ]; then
     COMPILE_CMD+=(-Sdeps "{:deps {seon.extra/src {:local/root \"$SEON_EXTRA_SRC\"}}}")
   fi
   COMPILE_CMD+=(-M:cljs compile test)
-  if [ -n "${SEON_EXTRA_SRC:-}" ] && [ -n "${SEON_EXTRA_PRELOAD:-}" ]; then
-    COMPILE_CMD+=(--config-merge "{:devtools {:preloads [$SEON_EXTRA_PRELOAD]}}")
+  CONFIG_MERGE="{}"
+  if [ -n "$NAMESPACE_EDN" ] && [ -n "${SEON_EXTRA_SRC:-}" ] && [ -n "${SEON_EXTRA_PRELOAD:-}" ]; then
+    CONFIG_MERGE="{:namespaces [$NAMESPACE_EDN] :devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
+  elif [ -n "$NAMESPACE_EDN" ]; then
+    CONFIG_MERGE="{:namespaces [$NAMESPACE_EDN]}"
+  elif [ -n "${SEON_EXTRA_SRC:-}" ] && [ -n "${SEON_EXTRA_PRELOAD:-}" ]; then
+    CONFIG_MERGE="{:devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
+  fi
+  if [ "$CONFIG_MERGE" != "{}" ]; then
+    COMPILE_CMD+=(--config-merge "$CONFIG_MERGE")
   fi
   echo "== Compiling :test build (shadow-cljs, dev) =="
   if ! "${COMPILE_CMD[@]}" 2>&1 | tee "$TMPOUT"; then
@@ -129,9 +246,23 @@ if [ "$BUILD" = "1" ]; then
     echo "========================================"
     exit 2
   fi
+  printf '%s\n' "$EXPECTED_FINGERPRINT" > "$FINGERPRINT_FILE.tmp"
+  mv "$FINGERPRINT_FILE.tmp" "$FINGERPRINT_FILE"
   COMPILE_END=$(date +%s)
   COMPILE_ELAPSED=$((COMPILE_END - COMPILE_START))
   COMPILE_STATUS="${COMPILE_ELAPSED}s"
+else
+  if [ ! -f "$FINGERPRINT_FILE" ]; then
+    echo "--no-build refused: out/test/test.js has no matching build fingerprint."
+    echo "Run the same command once without --no-build."
+    exit 2
+  fi
+  ACTUAL_FINGERPRINT="$(sed -n '1p' "$FINGERPRINT_FILE")"
+  if [ "$ACTUAL_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
+    echo "--no-build refused: source, config, dependencies, or test selection changed."
+    echo "Run the same command once without --no-build."
+    exit 2
+  fi
 fi
 
 if [ ! -f "out/test/test.js" ]; then

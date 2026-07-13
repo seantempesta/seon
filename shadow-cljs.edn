@@ -219,10 +219,10 @@
   ;; (:require [cljs.js :as cljs]) in seon.client / seon.eval and
   ;; ships there. The bootstrap bundle only provides the
   ;; analysis-cache cljs.js consumes at eval time.
-  ;; CLJS test runner — shadow's :node-test target. Compiles every
-  ;; namespace matching `-test$` under the source paths into a single
-  ;; Node-runnable artifact at `out/test/test.js`. Invoked by
-  ;; `bin/test-cljs` (Wave 4.5 item C — Platform track).
+  ;; CLJS test runner — shadow's :node-test target. A full run compiles every
+  ;; namespace matching `-test$`; bin/test-cljs supplies Shadow's explicit
+  ;; :namespaces vector for a focused run. Both produce one Node artifact at
+  ;; out/test/test.js under one compile+run lock.
   ;;
   ;; The V0 CLJS tests use plain `cljs.test/deftest`, so they're
   ;; compatible with `:node-test` without modification. Tests that

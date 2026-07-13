@@ -25,9 +25,14 @@ suite, nREPL test runner, `user/run-tests`, or fallback `bin/test` path.
 
 `bin/test-cljs` compiles the Shadow `:node-test` target and requires a real
 cljs.test completion summary; a process exit without the summary is an
-incomplete failure, not a pass. Each database test owns a fresh connection or
-explicit fixture. Async tests await the actual Promise and always complete the
-`cljs.test/async` continuation.
+incomplete failure, not a pass. Focused selectors become Shadow's compile-time
+`:namespaces` input, so unrelated test namespaces do not enter the bundle. The
+one output bundle is protected by a compile-plus-run owner lock. `--no-build`
+works only when a content fingerprint proves the namespace selection,
+source/config/dependency inputs, and downstream build flavor match the artifact;
+otherwise it fails loudly and requests a build. Each database test owns a fresh
+connection or explicit fixture. Async tests await the actual Promise and always
+complete the `cljs.test/async` continuation.
 
 `bin/test-writer` loads an explicit list of retained JVM namespaces through the
 `:writer:writer-test` basis. It does not discover or load the archived JVM

@@ -61,11 +61,19 @@
       :else [])))
 
 (defn digest-paths
-  "Hash file paths and bytes in deterministic path order."
+  "Hash file paths and bytes in deterministic path order.
+
+   Relative input paths are resolved against `root`; callers do not need to
+   pre-normalize shell arguments into absolute paths."
   [root paths]
-  (let [root (fs/path root)
+  (let [root (fs/absolutize (fs/path root))
         digest (MessageDigest/getInstance "SHA-256")
-        files (->> paths (mapcat regular-files) distinct sort)]
+        resolve-path (fn [path]
+                       (let [path (fs/path path)]
+                         (if (fs/relative? path)
+                           (fs/path root (str path))
+                           path)))
+        files (->> paths (map resolve-path) (mapcat regular-files) distinct sort)]
     (doseq [path files]
       (update-text! digest (str (fs/relativize root path)))
       (with-open [stream (io/input-stream (str path))]

@@ -13,6 +13,8 @@
       (spit (str second-file) "beta")
       (let [digest (artifact/digest-paths directory [directory])]
         (is (= digest (artifact/digest-paths directory [directory])))
+        (is (= digest (artifact/digest-paths directory ["."]))
+            "relative inputs resolve against the declared digest root")
         (spit (str second-file) "changed")
         (is (not= digest (artifact/digest-paths directory [directory]))))
       (finally (fs/delete-tree directory)))))
