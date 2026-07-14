@@ -55,7 +55,7 @@ Completed and committed on this branch:
 - a green complete CLJS checkpoint of 1,301 tests/6,159 assertions plus focused
   live hook proofs on all three Clojure file types.
 
-The issue authority currently contains 24 open and 86 archived notes. Startup
+The issue authority currently contains 23 open and 87 archived notes. Startup
 triage found one process-safety blocker before broad agent/browser drives:
 `eval-memory-safety.md` still permits an individual database query or pull to
 materialize an unbounded value even though retained result-slot count is
@@ -277,7 +277,7 @@ orchestrator-doc directory and manual current-work indexes are gone; dated
 audits moved into this PRD's research, the private dual-path registry was split
 and archived. At that initial implementation checkpoint, 14 open plus 86
 archived notes passed `bin/issues-index --check`; the current count is the
-24 open plus 86 archived notes recorded above. Root and role instructions now
+23 open plus 87 archived notes recorded above. Root and role instructions now
 require durable parent handoff and one bounded startup triage rather than a
 chat-only finding or second backlog.
 

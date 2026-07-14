@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, mcp, cljs, database, component]
 ---
@@ -69,15 +69,14 @@ closes transient/replaced nREPL sessions, uses an overall CLJ deadline with
 bounded event retention and bounded nREPL response retention, and removes all
 writer REPL arguments from the production container.
 
-Focused proof passes `seon.dev.mcp-test` at 9 tests/36 assertions and
+Focused proof passes `seon.dev.mcp-test` at 9 tests/39 assertions and
 `seon.db.server-test` at 1 test/4 assertions. A live newline-JSON-RPC proof
 against the ready default cluster observed CLJ state `9`, rejected `10 11` as
 `:multiple-forms`, then observed `10` from `(inc framing-proof)` with no queued
 return; a thrown CLJS `js/Error` returned `isError` with `:evaluation`; and a
 64-token bounded CLJ call returned valid JSON with `:bounded`. The earlier
 restart proof also observed explicit named-session loss plus successful default
-CLJ/CLJS recovery. This note remains open only until the owning commit exists;
-archive it with that commit and these behavioral proofs.
+CLJ/CLJS recovery.
 
 ## Owner
 
@@ -110,3 +109,12 @@ writer's development-only `io-prepl` accept boundary. `.mcp.json` and
   clients evaluate one stateful CLJ sequence and one stateful CLJS sequence
   against the intended checkout/cluster. Old sessions fail or reconnect
   explicitly; no request hangs or crosses into another cluster.
+
+## Resolution
+
+Resolved by `4b0d21da`. One portable Babashka MCP server now owns both
+development eval transports; dynamic checkout/cluster port discovery,
+state-preserving input rejection, Shadow sentinel classification, overall
+deadlines, bounded accumulation, and nREPL-session cleanup all passed focused
+and live verification. The canonical container omits the development prepl,
+so production retains only the typed database protocol.

@@ -16,7 +16,7 @@ See `README.md` for the convention.
 |-------|----------|------|
 | [An agent can OOM the pod via unbounded query and eval values](eval-memory-safety.md) | blocker | agent |
 
-## Friction (16)
+## Friction (15)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -28,7 +28,6 @@ See `README.md` for the convention.
 | [Autocomplete worktrees contain unclassified database and model evidence](autocomplete-worktree-evidence-preservation.md) | friction | Core |
 | [Cross-agent planners can reopen worker-completed steps](plan-reopen-cross-agent-authority.md) | friction | agent |
 | [Database query tuple results are hard for agents to read](database-query-tuple-shape-legibility.md) | friction | agent |
-| [Development MCP integration is split and stale](development-mcp-integration-drift.md) | friction | Core |
 | [Embedding boot noise — 232 `:entity-id/missing` errors on fresh seed](embedding-first-write-lookup-noise.md) | friction | agent |
 | [Inspect live callers use retired cluster lifecycle contracts](inspect-live-cluster-caller-drift.md) | friction | agent |
 | [LoRA audit runner depends on a retired Shadow target and pinned checkout](lora-audit-runner-drift.md) | friction | general |
