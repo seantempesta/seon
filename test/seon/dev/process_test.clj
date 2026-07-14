@@ -264,7 +264,8 @@
     (try
       (is (= ["clj" "-M:cljs" "watch" "client" "test"] default-argv))
       (is (= "acme-client" (nth acme-argv 5)))
-      (is (some #(str/includes? % ":cache-root") acme-argv))
+      (is (not-any? #(str/includes? % ":cache-root") acme-argv)
+          "action config cannot select the Shadow server/cache identity")
       (is (some #(str/includes? % "acme.pod") acme-argv))
       (finally (fs/delete-tree directory)))))
 

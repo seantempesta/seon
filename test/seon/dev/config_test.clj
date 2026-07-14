@@ -51,3 +51,20 @@
             Exception #"Unknown Seon artifact flavor"
             (config/artifact-configuration
               root {"SEON_ARTIFACT_FLAVOR" "invented"}))))))
+
+(deftest acme-shadow-cache-is-selected-through-startup-environment
+  (let [root (str (fs/normalize (fs/absolutize ".")))
+        default (config/artifact-configuration root {})
+        acme (config/artifact-configuration
+               root {"SEON_ARTIFACT_FLAVOR" "acme"})
+        ambient {"SHADOW_CLJS" "{:log {:level :debug}}"}
+        default-environment (config/shadow-environment ambient default)
+        acme-environment (config/shadow-environment ambient acme)
+        shadow-config (read-string (get acme-environment "SHADOW_CLJS"))]
+    (is (identical? ambient default-environment)
+        "the default flavor does not rewrite its command environment")
+    (is (= {:level :debug} (:log shadow-config))
+        "unrelated explicit Shadow configuration survives")
+    (is (= (:seon.dev.config/shadow-cache-root acme)
+           (:cache-root shadow-config))
+        "the flavor-owned root overrides ambient cache identity")))

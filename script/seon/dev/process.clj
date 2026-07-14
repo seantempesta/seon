@@ -123,14 +123,10 @@
 (defn- extra-cljs-watch-args [config]
   (let [environment (:seon.dev.config/environment config)
         build-id (:seon.dev.config/client-build-id config)
-        cache-root (:seon.dev.config/shadow-cache-root config)
-        default-flavor? (= :seon.dev.artifact.flavor/default
-                           (:seon.dev.config/artifact-flavor config))
         source (get environment "SEON_EXTRA_SRC")
         preload (get environment "SEON_EXTRA_PRELOAD")
         config-merge
         (cond-> {}
-          (not default-flavor?) (assoc :cache-root cache-root)
           (and (not (str/blank? source)) (not (str/blank? preload)))
           (assoc :devtools {:preloads [(symbol preload)]}))]
     (cond-> []

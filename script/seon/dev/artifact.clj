@@ -145,16 +145,10 @@
 
 (defn- extra-cljs-args [config]
   (let [environment (:seon.dev.config/environment config)
-        flavor (:seon.dev.config/artifact-flavor config)
-        cache-root (:seon.dev.config/shadow-cache-root config)
-        isolated-cache? (and cache-root
-                             (not= flavor
-                                   :seon.dev.artifact.flavor/default))
         source (get environment "SEON_EXTRA_SRC")
         preload (get environment "SEON_EXTRA_PRELOAD")
         config-merge
         (cond-> {}
-          isolated-cache? (assoc :cache-root cache-root)
           (and (not (str/blank? source)) (not (str/blank? preload)))
           (assoc :devtools {:preloads [(symbol preload)]}))]
     (cond-> []

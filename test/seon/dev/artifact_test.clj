@@ -34,10 +34,10 @@
     (is (not-any? #{"bash" "-c"} extended-argv))))
 
 (deftest acme-command-keeps-cache-and-build-identities-together
-  (let [cache-root "/checkout/tmp/shadow/acme"
-        config {:seon.dev.config/artifact-flavor
+  (let [config {:seon.dev.config/artifact-flavor
                 :seon.dev.artifact.flavor/acme
-                :seon.dev.config/shadow-cache-root cache-root
+                :seon.dev.config/shadow-cache-root
+                "/checkout/tmp/shadow/acme"
                 :seon.dev.config/environment
                 {"SEON_EXTRA_SRC" "/checkout/acme"
                  "SEON_EXTRA_PRELOAD" "acme.pod"}}
@@ -47,7 +47,8 @@
     (is (= ["clj" "-Sdeps"] (subvec argv 0 2)))
     (is (= ["-M:cljs" "compile" "acme-client"]
            (subvec argv (- merge-index 3) merge-index)))
-    (is (= cache-root (:cache-root config-merge)))
+    (is (not (contains? config-merge :cache-root))
+        "action config cannot select the Shadow server/cache identity")
     (is (= ['acme.pod] (get-in config-merge [:devtools :preloads])))
     (is (not-any? #{"client"} argv))))
 

@@ -2,6 +2,7 @@
   "Host configuration for the Seon development operator."
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [malli.core :as m]))
 
@@ -117,6 +118,26 @@
         (update :seon.dev.config/shadow-cache-root #(root-path root %))
         (assoc :seon.dev.config/client-output expected-output))))
 
+(defn shadow-environment
+  "Select the artifact flavor's Shadow server cache before JVM startup."
+  {:malli/schema
+   [:=> [:cat [:map-of :string :string] artifact-configuration-schema]
+    [:map-of :string :string]]}
+  [environment artifact]
+  (if (= :seon.dev.artifact.flavor/default
+         (:seon.dev.config/artifact-flavor artifact))
+    environment
+    (let [configured (get environment "SHADOW_CLJS")
+          override (if (str/blank? configured)
+                     {}
+                     (edn/read-string {:default tagged-literal} configured))]
+      (when-not (map? override)
+        (throw (ex-info "SHADOW_CLJS must contain an EDN configuration map."
+                        {:seon.dev.config/shadow-cljs configured})))
+      (assoc environment "SHADOW_CLJS"
+             (pr-str (assoc override :cache-root
+                            (:seon.dev.config/shadow-cache-root artifact)))))))
+
 (defn- command-result [argv]
   (try
     (process/sh {:continue true :out :string :err :string :cmd argv})
@@ -188,6 +209,7 @@
   (let [root (str (fs/normalize (fs/absolutize root)))
         environment (child-environment root)
         artifact (artifact-configuration root environment)
+        environment (shadow-environment environment artifact)
         cluster-dir (get environment "SEON_CLUSTER_DIR"
                          (str (fs/path root "data/clusters/default")))
         cluster-name (str (fs/file-name cluster-dir))
