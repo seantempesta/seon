@@ -36,10 +36,8 @@ QA_RUN_TIMEOUT_S = 240
 # serialization + transit).
 HTTP_MARGIN_S = 30
 
-# Per-sample ephemeral-cluster boot budget: `bin/seon cluster create` measured
-# create→ready 9.3s warm / 23.5s cold (cluster build, 2026-07-03). 60s covers
-# a cold boot with margin; the supervisor's own ready bound (120s) is the hard
-# backstop. Only the per-sample-cluster mode pays this.
+# Historical per-sample boot budget retained for lease implementation tests.
+# Live per-sample mode is paused until the operator publishes that lease.
 CLUSTER_BOOT_BUDGET_S = 60
 
 # Per-POD sample concurrency. One pod per cluster, one cluster = one sample's

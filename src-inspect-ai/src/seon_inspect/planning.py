@@ -40,15 +40,11 @@ Plan snapshot row (plain dict, one per `:my.plan` step of the driven agent):
                                            # (auto-minted, not agent planning)
 
 Run wiring: `run_planning_sample` is the phase-1 → restart → phase-2 →
-snapshot choreography with every effect INJECTED as a callable, so the
-sequencing + metadata assembly are unit-tested offline with fakes. The live
-driver (`pod_planning_driver`) binds those callables to a real ISOLATED
-planning cluster (eval-design: this row restarts its pod by design): create
-the cluster → phase 1 via `POST /agents/run` (capture the minted agent_id) →
-`bin/seon restart pod-<cluster>` → phase 2 via the door with the SAME
-agent_id (the cluster store is durable; boot re-arms the agent) → plan
-snapshot read-back over the wire-server socket REPL (which survives the pod
-restart) → destroy the cluster.
+snapshot choreography with every effect injected as a callable, so the
+sequencing and metadata assembly stay offline-testable. The live driver is
+paused at the cluster boundary until the operator publishes an ownership-
+fenced lease with pinned config/artifact identity and dynamic endpoints. It
+fails before invoking any removed create, per-pod restart, or destroy command.
 """
 
 from __future__ import annotations
@@ -624,15 +620,11 @@ def pod_planning_driver(
     evidence_root: Any = None,
     seon_config: str | None = None,
 ) -> dict[str, Any]:
-    """The LIVE two-phase driver: one planning sample on its own cluster.
+    """The lease-dependent two-phase driver for one planning sample.
 
-    Choreography (the injected-callable wiring of `run_planning_sample`):
-    create a durable planning cluster (never torn down BETWEEN phases; marked
-    ephemeral for leftover sweeps) → phase 1 via `POST /agents/run` on its
-    pod (the minted `agent_id` is the continuity handle) → `bin/seon restart
-    pod-<cluster>` (the interruption; the pod rebinds a fresh ephemeral
-    port) → phase 2 via the door with the SAME agent_id → plan snapshot over
-    the wire REPL → destroy the cluster (always, even on failure).
+    Its first operation requests a cluster through `seon_inspect.cluster`.
+    Until the operator lease exists that request raises
+    `ClusterLeaseUnavailable` before a subprocess or model call.
 
     Returns `run_planning_sample`'s result dict plus `"cluster"` and
     `"agent_id"` (attribution evidence). Feed it to `check_planning` with the

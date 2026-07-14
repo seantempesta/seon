@@ -8,6 +8,7 @@ step-trace metrics, and the kill-criteria verdicts. No model, no cluster.
 import pytest
 
 from seon_inspect.tasks import typeahead_replay as tr
+from seon_inspect import typeahead_corpus as corpus
 from seon_inspect.typeahead_corpus import extract_section, offers_from_menu
 
 PROMPT = """header text
@@ -44,6 +45,29 @@ def test_offers_from_menu_glyph_aligned():
     assert offers[0]["template"] == [["clamp", "(my.plan/done! "],
                                      ["free", 24], ["clamp", ")"]]
     assert offers[1]["label"].startswith("seon.agent.message/user ")
+
+
+def test_corpus_generation_requires_both_dynamic_endpoints(tmp_path):
+    with pytest.raises(RuntimeError, match="explicit cluster, web, and writer"):
+        corpus.generate(cluster="owned", out_path=tmp_path / "corpus.json")
+
+
+def test_endpoint_probe_uses_supplied_url_without_acme_command(monkeypatch):
+    seen = []
+    monkeypatch.setattr(corpus.urllib.request, "urlopen",
+                        lambda url, timeout: seen.append((url, timeout)))
+    corpus.ensure_endpoint("http://127.0.0.1:40123/agents/run")
+    assert seen == [("http://127.0.0.1:40123/", 3)]
+
+
+def test_restart_sample_requires_ownership_fenced_callback(monkeypatch):
+    monkeypatch.setattr(corpus, "pod_run",
+                        lambda *args, **kwargs: {"agent_id": "a", "reply": ""})
+    spec = {"id": "p", "warmups": ["ready"], "restart_between": True}
+    with pytest.raises(RuntimeError, match="ownership-fenced operator lease"):
+        corpus.drive_sample(spec, cluster="owned",
+                            cluster_url="http://127.0.0.1:40123/agents/run",
+                            wire_port=40124)
 
 
 SAMPLE = {

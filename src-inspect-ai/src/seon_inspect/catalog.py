@@ -12,9 +12,9 @@ Two run modes:
 - static URL (`cluster_url` argument or SEON_CLUSTER_URL): every sample drives
   the SAME long-lived cluster's pod (e.g. acme). Nothing is acme-specific —
   any pod that mounts `POST /agents/run` works.
-- `per_sample_cluster=True`: one EPHEMERAL cluster per sample (create → drive
-  → destroy via `bin/seon cluster create|destroy`) — true isolation by
-  construction, at ~config.CLUSTER_BOOT_BUDGET_S boot cost per sample.
+- `per_sample_cluster=True`: reserved for the operator's pending structured
+  lease. It currently fails before mutation; no retired cluster command is
+  used as a compatibility path.
 
 CASE-1 only (this module): benches that need `input text -> final answer` with
 a host-side scorer and NO inspect sandbox/tool-bridge. Code-execution benches

@@ -3,8 +3,8 @@
 typeahead-design.md §Evaluation: the swap-in bench replays a corpus of REAL
 agent turns (byte-exact turn-capture blobs, capability-rung shaped) against
 the diffusion worker in three arms (tasks/typeahead_replay.py). This module
-GENERATES that corpus by driving short live sessions on a long-lived cluster
-(acme; DeepSeek drives are pre-authorized there) and capturing, per sample:
+generates that corpus by driving short live sessions on an explicitly
+provisioned long-lived cluster and capturing, per sample:
 
   - the replay turn's byte-exact prompt blob (hash + provenance — the text
     stays in the cluster blob store, three-tier rule),
@@ -23,8 +23,9 @@ messages (the interruption-resume rung shape).
 
 Artifact: evals/typeahead_replay.corpus.json (the single dataset home).
 
-Run:  .venv/bin/python -m seon_inspect.typeahead_corpus \
-          --cluster-url http://127.0.0.1:7980/agents/run --cluster acme
+The web and writer endpoints are required inputs until the operator publishes
+them in one structured cluster lease. This module never guesses ports or
+starts ACME through its retired process commands.
 """
 
 from __future__ import annotations
@@ -33,11 +34,10 @@ import argparse
 import hashlib
 import json
 import re
-import subprocess
 import time
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from seon_inspect import config
 from seon_inspect.solver import pod_run
@@ -125,10 +125,10 @@ SAMPLES: list[dict[str, Any]] = [
      "predicate": {"kind": "verb-call", "heads": DB_READ_HEADS,
                    "head_nses": []}},
     {"id": "k2", "rung": "kb",
-     "warmups": [("Record durably: the acme pod listens on port 7980 and "
-                  "the wire REPL on 7981.")],
-     "intent": ("What port does the wire REPL use, per your stored facts? "
-                "Answer from the database."),
+     "warmups": [("Record durably: the Zephyr deployment uses the canary "
+                  "channel and its owner is Rivera.")],
+     "intent": ("Which deployment channel does Zephyr use, per your stored "
+                "facts? Answer from the database."),
      "contract_nses": ["my.kb", "seon.db"],
      "predicate": {"kind": "verb-call", "heads": DB_READ_HEADS,
                    "head_nses": []}},
@@ -211,49 +211,26 @@ def read_blob(cluster: str, blob_hash: str) -> str:
     return p.read_text()
 
 
-def ensure_pod(cluster: str) -> None:
-    """Start the acme pod if its door is down, then ready-poll."""
+def ensure_endpoint(cluster_url: str) -> None:
+    """Confirm an explicitly supplied pod door is currently reachable."""
+    root_url = cluster_url.removesuffix("/agents/run") + "/"
     try:
-        urllib.request.urlopen("http://127.0.0.1:7980/", timeout=3)
+        response = urllib.request.urlopen(root_url, timeout=3)
+        if response is not None:
+            response.close()
         return
-    except Exception:
-        pass
-    if cluster != "acme":
-        raise RuntimeError("pod down and auto-start is only wired for acme")
-    subprocess.run(["bin/acme", "start", "pod"], cwd=REPO_ROOT, check=True,
-                   capture_output=True, timeout=180)
-    deadline = time.time() + 120
-    while time.time() < deadline:
-        try:
-            urllib.request.urlopen("http://127.0.0.1:7980/", timeout=3)
-            return
-        except Exception:
-            time.sleep(2)
-    raise RuntimeError("acme pod did not come ready")
-
-
-def restart_pod(cluster: str) -> None:
-    """`bin/acme restart pod` + ready-poll (the interruption-resume rung)."""
-    if cluster != "acme":
-        raise RuntimeError("restart_between is only wired for the acme "
-                           "harness (never the default cluster)")
-    subprocess.run(["bin/acme", "restart", "pod"], cwd=REPO_ROOT, check=True,
-                   capture_output=True, timeout=180)
-    deadline = time.time() + 120
-    while time.time() < deadline:
-        try:
-            urllib.request.urlopen("http://127.0.0.1:7980/", timeout=3)
-            return
-        except Exception:
-            time.sleep(2)
-    raise RuntimeError("acme pod did not come ready after restart")
+    except Exception as error:
+        raise RuntimeError(
+            f"configured pod endpoint is unavailable: {root_url}; Inspect "
+            "will not invoke retired ACME lifecycle commands") from error
 
 
 # ---------------------------------------------------------------------------
 # The drive.
 # ---------------------------------------------------------------------------
 def drive_sample(spec: dict, *, cluster: str, cluster_url: str,
-                 wire_port: int) -> dict:
+                 wire_port: int,
+                 restart_cluster: Callable[[], None] | None = None) -> dict:
     """Drive one sample's session; return the corpus row (loud on defects).
 
     Warmup message(s) mint + season the agent (eval history → a real menu);
@@ -266,7 +243,12 @@ def drive_sample(spec: dict, *, cluster: str, cluster_url: str,
         if r.get("timed_out"):
             raise RuntimeError(f"{spec['id']}: warmup timed out ({agent_id})")
     if spec.get("restart_between"):
-        restart_pod(cluster)
+        if restart_cluster is None:
+            raise RuntimeError(
+                "restart_between requires an ownership-fenced operator lease; "
+                "no restart callback was supplied")
+        restart_cluster()
+        ensure_endpoint(cluster_url)
     t0_ms = int(time.time() * 1000)
     final = pod_run(spec["intent"], DRIVE_TIMEOUT_MS, url=cluster_url,
                     agent_id=agent_id)
@@ -307,17 +289,23 @@ def drive_sample(spec: dict, *, cluster: str, cluster_url: str,
     }
 
 
-def generate(cluster: str = "acme",
+def generate(cluster: str | None = None,
              cluster_url: str | None = None,
-             wire_port: int = 7981,
+             wire_port: int | None = None,
              out_path: Path = CORPUS_PATH,
-             only: list[str] | None = None) -> dict:
+             only: list[str] | None = None,
+             restart_cluster: Callable[[], None] | None = None) -> dict:
     """Drive every sample and write the corpus manifest. Returns it.
 
     `only` re-drives just those sample ids and MERGES them into the
     existing manifest (flake recovery — e.g. a provider timeout killed a
     drive mid-corpus); sample order follows SAMPLES either way."""
-    url = cluster_url or "http://127.0.0.1:7980/agents/run"
+    if not cluster or not cluster_url or wire_port is None:
+        raise RuntimeError(
+            "typeahead corpus generation requires explicit cluster, web, and "
+            "writer endpoints until bin/seon publishes them in a structured "
+            "lease")
+    url = cluster_url
     prior: dict[str, dict] = {}
     if only and out_path.is_file():
         prior = {s["id"]: s
@@ -339,10 +327,11 @@ def generate(cluster: str = "acme",
         # never a score.
         for attempt in (1, 2):
             try:
-                ensure_pod(cluster)
+                ensure_endpoint(url)
                 rows.append(drive_sample(spec, cluster=cluster,
                                          cluster_url=url,
-                                         wire_port=wire_port))
+                                         wire_port=wire_port,
+                                         restart_cluster=restart_cluster))
                 print(f"[corpus] {spec['id']} ok "
                       f"(agent {rows[-1]['agent_id']}, "
                       f"{len(rows[-1]['offers'])} offers)", flush=True)
@@ -380,7 +369,8 @@ _REPLY_FORM = (
     " (println (str \"WIRE-JSON<\" (json/generate-string out) \">WIRE-JSON\"))))")
 
 
-def enrich_replay_replies(cluster: str = "acme", wire_port: int = 7981,
+def enrich_replay_replies(cluster: str | None = None,
+                          wire_port: int | None = None,
                           path: Path = CORPUS_PATH) -> dict:
     """Add each sample's replay-turn RAW LLM reply (`replay_reply`) to the
     manifest — the DeepSeek reference arm (arm0): the same turn whose
@@ -388,6 +378,10 @@ def enrich_replay_replies(cluster: str = "acme", wire_port: int = 7981,
     the turn's reply blob (byte ground truth), post-hoc via the wire
     REPL; idempotent."""
     from seon_inspect.cluster import wire_repl_json
+    if not cluster or wire_port is None:
+        raise RuntimeError(
+            "replay enrichment requires cluster identity and the writer "
+            "endpoint from the owning lease")
     manifest = json.loads(path.read_text())
     for s in manifest["samples"]:
         if s.get("replay_reply"):
@@ -422,10 +416,9 @@ def load_corpus(path: Path = CORPUS_PATH) -> dict:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cluster", default="acme")
-    ap.add_argument("--cluster-url",
-                    default="http://127.0.0.1:7980/agents/run")
-    ap.add_argument("--wire-port", type=int, default=7981)
+    ap.add_argument("--cluster", required=True)
+    ap.add_argument("--cluster-url", required=True)
+    ap.add_argument("--wire-port", type=int, required=True)
     ap.add_argument("--only", help="comma-separated sample ids to re-drive "
                                    "and merge into the existing manifest")
     args = ap.parse_args()

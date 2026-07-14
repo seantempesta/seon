@@ -1,47 +1,38 @@
-"""Cluster lifecycle from the harness — create / restart / destroy + wire REPL.
+"""Inspect's cluster coordinates and writer read-back helpers.
 
-A cluster is the isolation unit (one shared DB + one Node pod; the wire-server
-JVM hosts every cluster's db). The supervisor owns the mechanics — this module
-just drives `bin/seon cluster create|destroy` and `bin/seon restart pod-<n>`
-as subprocesses, reads the per-cluster port file (`tmp/seon-port-<n>`), and
-ready-polls the pod's HTTP door. Per-sample benching = one ephemeral cluster
-per sample (`ephemeral_cluster()`); the planning row keeps ITS cluster alive
-across a mid-sample pod restart (`restart_pod`, which mints a NEW ephemeral
-port — always take the returned Cluster).
+The current operator owns one configured cluster and exposes no per-sample
+lease yet. Lease-dependent entry points therefore fail before invoking a
+subprocess. This is deliberate: the retired create/destroy/per-pod commands
+could mutate the wrong runtime and must not survive as a compatibility path.
 
 The wire-server's loopback socket REPL (port in the per-supervisor file —
 `$SEON_WRITER_REPL_PORT_FILE`, default `tmp/seon-writer-repl-port-default`)
 survives pod restarts and sees every cluster's db through the registry —
 `wire_repl_json` is the read-back channel the planning snapshot uses.
 
-Effects are injectable (`runner=subprocess.run`) so the sequencing is
-unit-tested offline with fakes; nothing here talks to a pod at import time.
+Nothing here talks to a pod at import time.
 """
 
 from __future__ import annotations
 
 import contextlib
-import os
-import http.client
 import json
+import os
 import re
 import socket
 import subprocess
-import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from seon_inspect import config
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SEON_BIN = REPO_ROOT / "bin" / "seon"
 
-# The FROZEN bench bundle (:bench-client shadow build) frozen clusters exec —
-# unwatched, so cljs-watch can never hot-patch a bench pod mid-sample (the
-# 2026-07-03 dominant flake class). bin/seon's build step writes the sha file;
-# `bundle_identity`/`bundle_violation` pin + assert it per run.
+# Temporary observation-only identity for the retired frozen output. The
+# operator does not yet publish an artifact flavor/digest in its target
+# status, so no caller may build this path; `ensure_bench_bundle` fails before
+# mutation. Keeping read-only identity lets existing offline contamination
+# tests remain meaningful until the lease carries the canonical manifest.
 BENCH_BUNDLE = REPO_ROOT / "out-bench" / "client" / "main.js"
 BENCH_BUNDLE_SHA = BENCH_BUNDLE.parent / (BENCH_BUNDLE.name + ".sha256")
 
@@ -51,9 +42,9 @@ _NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 # ---------------------------------------------------------------------------
 # Per-cluster LLM config (the thinking-arm lever) — config-DATA, never env
 # ---------------------------------------------------------------------------
-# The ONE uniform lever for an arm that changes the model config (e.g. armD
-# thinking): after `create_cluster`'s ready gate, transact the cluster's
-# GLOBAL `:seon.ai/id "config"` row over the wire-server REPL. The pod reads
+# The retained config transaction for an arm that changes model data (for
+# example armD thinking). A future lease may call it only after ownership and
+# writer endpoint selection. The pod reads
 # the row PER CALL (seon.ai/current — the agent-override → config-row →
 # shipped-defaults chain), the row survives pod restarts (the planning row's
 # interruption), and boot re-seeding never retracts it (seon.ai/sync-tx-data
@@ -62,8 +53,7 @@ _NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 # through `create_cluster` — one hook, zero plumbing, and no LLM-driven
 # bootstrap turn polluting the sample's cluster db.
 #
-# Set `AI_CONFIG` from the run script for the whole run; None (default) = the
-# hook is inert and clusters keep the pod's shipped defaults.
+# `AI_CONFIG` remains data for callers/tests; cluster creation is paused.
 AI_CONFIG: dict[str, Any] | None = None
 
 # Datahike schema for the config-row attrs, DERIVED (not authored) via the one
@@ -155,29 +145,32 @@ class FrozenBundleChanged(RuntimeError):
         self.logs = logs
 
 
-def bundle_identity() -> dict[str, Any] | None:
-    """The frozen bench bundle's current identity, or None when absent.
+class ClusterLeaseUnavailable(RuntimeError):
+    """A live Inspect operation requires the operator's pending lease seam."""
 
-    {"sha256": …, "mtime": …, "size": …, "path": …} — the sha256 comes from
-    the sha file bin/seon's build step writes (never re-hashed here; a
-    mid-recompile hash would race the compiler), mtime/size from the bundle
-    itself. None = no frozen bundle on disk (watched-only use — nothing to
-    pin, nothing to assert)."""
+
+def _lease_unavailable(operation: str) -> None:
+    raise ClusterLeaseUnavailable(
+        f"Inspect cannot {operation}: bin/seon currently exposes one configured "
+        "target but no structured per-sample lease with cluster identity, "
+        "artifact flavor/digest, dynamic web/CLJ/CLJS endpoints, and "
+        "ownership-fenced restart/release. The retired cluster commands are "
+        "intentionally not invoked.")
+
+
+def bundle_identity() -> dict[str, Any] | None:
+    """Observe the legacy frozen output without building or selecting it."""
     if not BENCH_BUNDLE.is_file():
         return None
-    st = BENCH_BUNDLE.stat()
+    stat = BENCH_BUNDLE.stat()
     sha = (BENCH_BUNDLE_SHA.read_text().strip()
            if BENCH_BUNDLE_SHA.is_file() else None)
-    return {"sha256": sha, "mtime": st.st_mtime, "size": st.st_size,
+    return {"sha256": sha, "mtime": stat.st_mtime, "size": stat.st_size,
             "path": str(BENCH_BUNDLE.relative_to(REPO_ROOT))}
 
 
 def bundle_violation(start: dict[str, Any] | None) -> str | None:
-    """None when the bundle is unchanged since `start`; else what changed.
-
-    `start=None` (no bundle existed at run start) asserts nothing. Any
-    difference — sha, mtime, size, or the bundle vanishing — is a violation:
-    samples before and after it ran DIFFERENT code."""
+    """Report when an observed frozen output changed during an offline run."""
     if start is None:
         return None
     end = bundle_identity()
@@ -190,20 +183,14 @@ def bundle_violation(start: dict[str, Any] | None) -> str | None:
 
 def ensure_bench_bundle(runner: Callable[..., Any] = subprocess.run
                         ) -> dict[str, Any] | None:
-    """Build/refresh the frozen bench bundle ONCE, up front — then create.
-
-    `bin/seon bench-bundle` (staleness-guarded, mutexed supervisor-side) so a
-    bench-cluster-N run never pays — or races — a compile inside a sample's
-    boot window: after this, each concurrent create's own staleness check
-    no-ops. Returns the resulting `bundle_identity()` (the pin the end-of-run
-    assertion checks against)."""
-    _run_seon(["bench-bundle"], runner, timeout_s=330)
-    return bundle_identity()
+    """Fail until the operator can lease a pinned artifact flavor."""
+    del runner
+    _lease_unavailable("prepare a frozen benchmark artifact")
 
 
 @dataclass(frozen=True)
 class Cluster:
-    """A created cluster's coordinates: name + the pod's bound HTTP port."""
+    """Explicit coordinates for one already-owned cluster."""
     name: str
     port: int
 
@@ -218,166 +205,51 @@ def bench_cluster_name(prefix: str = "bench") -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
-def _port_file(name: str) -> Path:
-    return REPO_ROOT / "tmp" / f"seon-port-{name}"
-
-
 def _check_name(name: str) -> str:
     if not _NAME_RE.match(name or ""):
         raise ValueError(f"invalid cluster name: {name!r} (a-zA-Z0-9_- only)")
     return name
 
 
-def _run_seon(args: list[str], runner: Callable[..., Any],
-              timeout_s: int,
-              extra_env: dict[str, str] | None = None) -> None:
-    # extra_env is passed ONLY when set, so injected fake runners in the
-    # offline tests (which don't accept an env kwarg) stay compatible.
-    kwargs: dict[str, Any] = {}
-    if extra_env:
-        import os
-        kwargs["env"] = {**os.environ, **extra_env}
-    proc = runner([str(SEON_BIN), *args], cwd=str(REPO_ROOT),
-                  capture_output=True, text=True, timeout=timeout_s,
-                  **kwargs)
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"bin/seon {' '.join(args)} failed (exit {proc.returncode}):\n"
-            f"{proc.stdout}\n{proc.stderr}")
-
-
-def _pod_answers(port: int) -> bool:
-    try:
-        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
-        try:
-            conn.request("GET", "/")
-            return conn.getresponse().status < 500
-        finally:
-            conn.close()
-    except OSError:
-        return False
-
-
-def wait_pod_ready(name: str, timeout_s: int = config.CLUSTER_BOOT_BUDGET_S,
-                   probe: Callable[[int], bool] = _pod_answers,
-                   clock: Callable[[], float] = time.monotonic,
-                   sleep: Callable[[float], None] = time.sleep) -> int:
-    """Poll until `tmp/seon-port-<name>` exists AND its pod answers HTTP.
-    Returns the bound port; raises TimeoutError past `timeout_s`."""
-    pf = _port_file(name)
-    deadline = clock() + timeout_s
-    while clock() < deadline:
-        if pf.is_file():
-            raw = pf.read_text().strip()
-            if raw.isdigit() and probe(int(raw)):
-                return int(raw)
-        sleep(0.5)
-    raise TimeoutError(
-        f"cluster {name}: pod not ready within {timeout_s}s "
-        f"(port file {pf}, exists={pf.is_file()})")
-
-
 def create_cluster(name: str | None = None, *, ephemeral: bool = True,
                    frozen: bool | None = None,
                    extra_env: dict[str, str] | None = None,
                    runner: Callable[..., Any] = subprocess.run,
-                   ready: Callable[[str], int] = wait_pod_ready) -> Cluster:
-    """`bin/seon cluster create <name> [--ephemeral] [--frozen|--watched]`.
-
-    `frozen=None` (default) leaves the bundle choice to the supervisor's own
-    default — ephemeral ⇒ frozen bench bundle (unwatched; no mid-sample
-    hot-patch), durable ⇒ watched. Pass True/False only to override
-    (`--frozen`/`--watched`). `extra_env` adds host-owned env grants to the
-    create's environment — the spawned pod inherits them (e.g.
-    `{"SEON_SHELL": "0"}` to deny a capability for one bench cluster; web
-    reachability is now a config policy, not env). The supervisor ready-gates the
-    wire-server and the pod itself; the ready poll here is the harness-side
-    confirmation (and yields the bound port)."""
-    name = _check_name(name or bench_cluster_name())
-    args = ["cluster", "create", name] + (["--ephemeral"] if ephemeral else [])
-    if frozen is True:
-        args.append("--frozen")
-    elif frozen is False:
-        args.append("--watched")
-    # create ready-gates wire-server (180s) + pod (120s) internally, plus a
-    # possible frozen-bundle compile (staleness-guarded, ~30s warm).
-    _run_seon(args, runner, timeout_s=330, extra_env=extra_env)
-    cluster = Cluster(name=name, port=ready(name))
-    if AI_CONFIG:
-        # Post-create hook (see AI_CONFIG above): the arm's model config as
-        # config-data on the cluster's own db — applied AFTER the pod's boot
-        # seed so seed-once can't race it, BEFORE any sample drives the pod.
-        apply_ai_config(name, AI_CONFIG)
-    return cluster
+                   ready: Callable[[str], int] | None = None) -> Cluster:
+    """Fail until `bin/seon` exposes a structured owned cluster lease."""
+    _check_name(name or bench_cluster_name())
+    del ephemeral, frozen, extra_env, runner, ready
+    _lease_unavailable("create an Inspect sample cluster")
 
 
 def fork_cluster(source: str, basis_t: int, name: str | None = None, *,
                  runner: Callable[..., Any] = subprocess.run,
-                 ready: Callable[[str], int] = wait_pod_ready) -> Cluster:
-    """Fork `source` at `basis_t` into a disposable, writable cluster.
-
-    This is the counterfactual entry point: the new cluster carries the source
-    database and blob store as they were at the supplied transaction id, while
-    its pod and subsequent writes are isolated. Callers must pin the runtime
-    artifact, manifest, model configuration, and replay stimulus separately;
-    a database fork intentionally restores only durable world state.
-
-    `name` is fresh by default so independent Inspect samples cannot collide.
-    The supervisor starts and ready-gates the fork pod; the returned cluster
-    always uses the fork's newly assigned HTTP port.
-    """
+                 ready: Callable[[str], int] | None = None) -> Cluster:
+    """Validate a fork request, then fail at the pending lease seam."""
     source = _check_name(source)
     if isinstance(basis_t, bool) or not isinstance(basis_t, int) or basis_t < 0:
         raise ValueError(f"basis_t must be a non-negative transaction id, got {basis_t!r}")
-    target = _check_name(name or f"fork-{source}-{basis_t}-{uuid.uuid4().hex[:8]}")
-    _run_seon(["cluster", "fork", source, str(basis_t), target], runner,
-              timeout_s=330)
-    return Cluster(name=target, port=ready(target))
+    _check_name(name or f"fork-{source}-{basis_t}-{uuid.uuid4().hex[:8]}")
+    del runner, ready
+    _lease_unavailable("fork an Inspect sample cluster")
 
 
 def restart_pod(cluster: Cluster, *,
                 extra_env: dict[str, str] | None = None,
                 runner: Callable[..., Any] = subprocess.run,
-                ready: Callable[[str], int] = wait_pod_ready) -> Cluster:
-    """`bin/seon restart pod-<name>` — the planning row's interruption.
-
-    `extra_env` MUST carry the same host-owned env the create used (e.g.
-    `SEON_CONFIG` for a minimal-context cluster) — a bare restart re-exports
-    the default manifest and the boot reconcile re-seeds the config
-    singleton from it, silently swapping the cluster's whole context
-    (the documented minimal.edn gotcha; bit rung 2, 2026-07-10).
-
-    The pod rebinds an EPHEMERAL port on boot, so the stale port file is
-    removed first and the returned Cluster carries the NEW port (the old
-    Cluster's url is dead — always continue with the return value).
-
-    Since 2026-07-04 the SUPERVISOR ready-gates `restart pod-<n>` internally
-    (parity with `create` — its `wait_ready`/`ready_check` blocks up to the
-    pod's 120s bound until the port file is written AND the pod answers HTTP),
-    so `_run_seon` here now returns only once the pod is ready. That closes
-    the restart-vs-create asymmetry that let a tail-latency reboot blow the
-    tight 60s CLUSTER_BOOT_BUDGET_S
-    (docs/prds/agent-ctx/research/cluster-boot-timeout-2026-07-04.md). The
-    180s subprocess timeout accommodates that internal wait; a failed reboot
-    surfaces as a non-zero exit → RuntimeError, not a silent early return.
-
-    `ready(...)` below is KEPT as a cheap backstop, NOT a duplicated wait:
-    the supervisor already gated, so this poll returns on its first tick —
-    its job now is to read the bound port for the returned Cluster (and to
-    cover any sliver between the supervisor's curl-ready and our http.client
-    probe). Defense-in-depth, near-instant in the common path."""
+                ready: Callable[[str], int] | None = None) -> Cluster:
+    """Fail until a lease can restart only its owned sample processes."""
     _check_name(cluster.name)
-    _port_file(cluster.name).unlink(missing_ok=True)
-    _run_seon(["restart", f"pod-{cluster.name}"], runner, timeout_s=180,
-              extra_env=extra_env)
-    return Cluster(name=cluster.name, port=ready(cluster.name))
+    del extra_env, runner, ready
+    _lease_unavailable("restart an Inspect sample cluster")
 
 
 def destroy_cluster(name: str, *,
                     runner: Callable[..., Any] = subprocess.run) -> None:
-    """`bin/seon cluster destroy <name>` — pod stopped, registry db deleted,
-    data/clusters/<name>/ removed (blobs included)."""
-    _run_seon(["cluster", "destroy", _check_name(name)], runner, timeout_s=120)
+    """Fail until lease release is idempotent and ownership-fenced."""
+    _check_name(name)
+    del runner
+    _lease_unavailable("release an Inspect sample cluster")
 
 
 class StubLLMBooted(RuntimeError):
@@ -414,14 +286,9 @@ def ephemeral_cluster(name: str | None = None, *,
                       frozen: bool | None = None,
                       extra_env: dict[str, str] | None = None,
                       runner: Callable[..., Any] = subprocess.run,
-                      ready: Callable[[str], int] = wait_pod_ready
+                      ready: Callable[[str], int] | None = None
                       ) -> Iterator[Cluster]:
-    """create → yield → destroy (destroy always runs — no leaked clusters).
-
-    Ephemeral ⇒ the supervisor's frozen-bundle default applies (see
-    `create_cluster`); `frozen=False` opts a dev inner loop back into the
-    watched bundle. `extra_env` rides through to the create (host-owned
-    grants for this cluster's pod)."""
+    """Lease one sample cluster once the operator provides that transition."""
     cluster = create_cluster(name, ephemeral=True, frozen=frozen,
                              extra_env=extra_env, runner=runner, ready=ready)
     try:
@@ -433,13 +300,9 @@ def ephemeral_cluster(name: str | None = None, *,
 @contextlib.contextmanager
 def ephemeral_fork(source: str, basis_t: int, name: str | None = None, *,
                    runner: Callable[..., Any] = subprocess.run,
-                   ready: Callable[[str], int] = wait_pod_ready
+                   ready: Callable[[str], int] | None = None
                    ) -> Iterator[Cluster]:
-    """fork → yield → destroy a counterfactual cluster.
-
-    The source snapshot remains untouched. The fork's pod is ready before the
-    body runs, and cleanup runs on both normal and exceptional exits.
-    """
+    """Lease one counterfactual cluster once the operator supports it."""
     cluster = fork_cluster(source, basis_t, name, runner=runner, ready=ready)
     try:
         yield cluster
@@ -454,8 +317,7 @@ def ephemeral_fork(source: str, basis_t: int, name: str | None = None, *,
 # Per-supervisor port file (seon registry C48): the harness benches through
 # the DEFAULT supervisor's wire-server, whose file is
 # tmp/seon-writer-repl-port-default; $SEON_WRITER_REPL_PORT_FILE overrides
-# (bin/seon exports it). The old shared tmp/seon-writer-repl-port is dead —
-# a second supervisor (bin/acme) clobbered it.
+# (`bin/seon` exports it). The old unqualified shared file is dead.
 def _wire_repl_port_file() -> Path:
     p = Path(os.environ.get("SEON_WRITER_REPL_PORT_FILE",
                             "tmp/seon-writer-repl-port-default"))
@@ -470,7 +332,7 @@ def wire_repl_port() -> int:
     if not WIRE_REPL_PORT_FILE.is_file():
         raise RuntimeError(
             f"wire-server REPL port file missing: {WIRE_REPL_PORT_FILE} — "
-            "is the wire-server running? (bin/seon start wire-server)")
+            "is the selected cluster running? (bin/seon status)")
     return int(WIRE_REPL_PORT_FILE.read_text().strip())
 
 

@@ -50,6 +50,33 @@ does not create, lease, freeze, restart, or release Inspect sample clusters.
 Live Inspect must consume the operator lifecycle/lease boundary rather than
 shelling through MCP as a substitute supervisor.
 
+The bounded caller migration on 2026-07-14 removed the unsafe fallbacks that
+could be changed independently of that missing seam:
+
+- `cluster.py` no longer invokes removed create, fork, per-pod restart,
+  destroy, or `bench-bundle` operations. Lease-dependent paths raise
+  `ClusterLeaseUnavailable` before any subprocess or model call and name the
+  missing identity, artifact, endpoint, restart, and release fields.
+- `typeahead_corpus.py` no longer starts or restarts ACME, defaults web/writer
+  ports, or embeds the old ACME port pair in a generated sample. Static corpus
+  capture requires explicit endpoints; a restart-bearing sample requires an
+  injected ownership-fenced restart transition.
+- the Inspect README now marks per-sample and live restart modes paused while
+  retaining static explicitly provisioned URL mode and the offline scorer/
+  choreography tests.
+
+The exact remaining blocker is operator-owned rather than Python-owned.
+`bin/seon status --edn` currently reports target status, processes, and the web
+URL for only the configured target. It does not report cluster/database
+identity, canonical artifact flavor/digest, writer or CLJS endpoint, lease
+owner/token, or create/restart/release transitions. The canonical artifact
+manifest is likewise not projected through target status. Consequently the
+caller cannot safely distinguish default from ACME, pin a sample artifact,
+read a writer endpoint without private file knowledge, or prove that cleanup
+owns the process it would stop. The read-only legacy frozen-bundle identity
+helper remains solely for offline contamination fixtures; no live caller can
+build or select that artifact through a removed command.
+
 This is distinct from `acme-operator-migration-drift.md`. That issue owns the
 ACME process/artifact/database migration itself; this issue owns Inspect's
 live consumers after the current operator boundary exists.

@@ -23,27 +23,28 @@ class FakeRunner:
                                            stdout="", stderr="boom")
 
 
-def test_create_cluster_drives_bin_seon_and_ready(monkeypatch):
+def test_create_cluster_refuses_retired_operator_command():
     runner = FakeRunner()
-    c = cl.create_cluster("bench-abc", runner=runner, ready=lambda name: 40123)
-    assert runner.calls == [[str(cl.SEON_BIN), "cluster", "create",
-                             "bench-abc", "--ephemeral"]]
-    assert c == cl.Cluster(name="bench-abc", port=40123)
-    assert c.url == "http://127.0.0.1:40123/agents/run"
+    with pytest.raises(cl.ClusterLeaseUnavailable, match="structured per-sample lease"):
+        cl.create_cluster("bench-abc", runner=runner, ready=lambda name: 40123)
+    assert runner.calls == []
 
 
-def test_create_cluster_non_ephemeral_flag():
+def test_create_cluster_non_ephemeral_still_requires_lease():
     runner = FakeRunner()
-    cl.create_cluster("plan-1", ephemeral=False, runner=runner,
-                      ready=lambda name: 1)
-    assert runner.calls[0][-1] == "plan-1"  # no --ephemeral appended
-
-
-def test_create_cluster_failure_is_loud():
-    with pytest.raises(RuntimeError) as e:
-        cl.create_cluster("bench-x", runner=FakeRunner(returncode=1),
+    with pytest.raises(cl.ClusterLeaseUnavailable):
+        cl.create_cluster("plan-1", ephemeral=False, runner=runner,
                           ready=lambda name: 1)
-    assert "cluster create bench-x" in str(e.value)
+    assert runner.calls == []
+
+
+def test_create_cluster_names_missing_operator_fields():
+    with pytest.raises(cl.ClusterLeaseUnavailable) as error:
+        cl.create_cluster("bench-x", runner=FakeRunner(), ready=lambda name: 1)
+    message = str(error.value)
+    assert "artifact flavor/digest" in message
+    assert "dynamic web/CLJ/CLJS endpoints" in message
+    assert "ownership-fenced restart/release" in message
 
 
 def test_cluster_name_validated():
@@ -61,45 +62,34 @@ def test_bench_cluster_names_are_fresh():
     assert all(cl._NAME_RE.match(n) for n in names)
 
 
-def test_restart_pod_clears_stale_port_and_returns_new(tmp_path, monkeypatch):
-    # the pod rebinds an EPHEMERAL port on restart: the stale file must go,
-    # and the caller must get a NEW Cluster with the re-read port
-    monkeypatch.setattr(cl, "REPO_ROOT", tmp_path)
-    pf = tmp_path / "tmp" / "seon-port-plan-z"
-    pf.parent.mkdir(parents=True)
-    pf.write_text("40001")  # the OLD pod's port
+def test_restart_refuses_retired_per_pod_command():
     runner = FakeRunner()
-    c2 = cl.restart_pod(cl.Cluster("plan-z", 40001), runner=runner,
-                        ready=lambda name: 40777)
-    assert not pf.exists()  # stale port file removed BEFORE the restart
-    assert runner.calls == [[str(cl.SEON_BIN), "restart", "pod-plan-z"]]
-    assert c2.port == 40777 and c2.name == "plan-z"
+    with pytest.raises(cl.ClusterLeaseUnavailable, match="restart"):
+        cl.restart_pod(cl.Cluster("plan-z", 40001), runner=runner,
+                       ready=lambda name: 40777)
+    assert runner.calls == []
 
 
-def test_create_cluster_frozen_default_defers_to_supervisor():
-    # frozen=None (default) sends NO bundle flag — the supervisor's own
-    # default rules (ephemeral ⇒ frozen, durable ⇒ watched)
+def test_create_cluster_frozen_flags_do_not_restore_removed_flavors():
     runner = FakeRunner()
-    cl.create_cluster("bench-f0", runner=runner, ready=lambda n: 1)
-    assert "--frozen" not in runner.calls[0]
-    assert "--watched" not in runner.calls[0]
+    for frozen in (None, True, False):
+        with pytest.raises(cl.ClusterLeaseUnavailable):
+            cl.create_cluster("bench-f0", frozen=frozen, runner=runner,
+                              ready=lambda n: 1)
+    assert runner.calls == []
 
 
-def test_create_cluster_frozen_override_flags():
-    for frozen, flag in ((True, "--frozen"), (False, "--watched")):
-        runner = FakeRunner()
-        cl.create_cluster("bench-f1", frozen=frozen, runner=runner,
-                          ready=lambda n: 1)
-        assert runner.calls[0][-1] == flag
+def test_cluster_coordinates_keep_explicit_dynamic_url():
+    cluster = cl.Cluster(name="owned", port=40123)
+    assert cluster.url == "http://127.0.0.1:40123/agents/run"
 
 
-def test_fork_cluster_drives_supervisor_and_returns_ready_fork():
+def test_fork_cluster_refuses_retired_operator_command():
     runner = FakeRunner()
-    fork = cl.fork_cluster("source-a", 12345, "counterfactual-a",
-                           runner=runner, ready=lambda name: 40123)
-    assert runner.calls == [[str(cl.SEON_BIN), "cluster", "fork", "source-a",
-                             "12345", "counterfactual-a"]]
-    assert fork == cl.Cluster(name="counterfactual-a", port=40123)
+    with pytest.raises(cl.ClusterLeaseUnavailable, match="fork"):
+        cl.fork_cluster("source-a", 12345, "counterfactual-a",
+                        runner=runner, ready=lambda name: 40123)
+    assert runner.calls == []
 
 
 def test_fork_cluster_rejects_invalid_basis_or_names():
@@ -112,126 +102,52 @@ def test_fork_cluster_rejects_invalid_basis_or_names():
         cl.fork_cluster("bad/name", 1, runner=runner, ready=lambda name: 1)
 
 
-def test_ephemeral_cluster_passes_frozen_through():
+def test_ephemeral_cluster_fails_before_yield_or_subprocess():
     runner = FakeRunner()
-    with cl.ephemeral_cluster("bench-f2", frozen=False, runner=runner,
-                              ready=lambda n: 1):
-        pass
-    assert runner.calls[0][-1] == "--watched"
+    with pytest.raises(cl.ClusterLeaseUnavailable):
+        with cl.ephemeral_cluster("bench-f2", frozen=False, runner=runner,
+                                  ready=lambda n: 1):
+            pytest.fail("unleased cluster must never be yielded")
+    assert runner.calls == []
 
 
-def _bundle_fixture(tmp_path, monkeypatch):
-    monkeypatch.setattr(cl, "REPO_ROOT", tmp_path)
-    b = tmp_path / "out-bench" / "client" / "main.js"
-    b.parent.mkdir(parents=True)
-    b.write_bytes(b"code")
-    sha = b.parent / "main.js.sha256"
-    sha.write_text("abc123\n")
-    monkeypatch.setattr(cl, "BENCH_BUNDLE", b)
-    monkeypatch.setattr(cl, "BENCH_BUNDLE_SHA", sha)
-    return b, sha
-
-
-def test_bundle_identity_absent_is_none(tmp_path, monkeypatch):
-    monkeypatch.setattr(cl, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(cl, "BENCH_BUNDLE", tmp_path / "out-bench/client/main.js")
-    monkeypatch.setattr(cl, "BENCH_BUNDLE_SHA",
-                        tmp_path / "out-bench/client/main.js.sha256")
-    assert cl.bundle_identity() is None
-    # nothing pinned at start ⇒ nothing to assert (watched-only use)
-    assert cl.bundle_violation(None) is None
-
-
-def test_bundle_identity_reads_build_step_sha(tmp_path, monkeypatch):
-    _bundle_fixture(tmp_path, monkeypatch)
-    ident = cl.bundle_identity()
-    assert ident["sha256"] == "abc123"
-    assert ident["size"] == 4
-    assert ident["path"] == "out-bench/client/main.js"
-
-
-def test_bundle_violation_detects_mid_run_change(tmp_path, monkeypatch):
-    b, sha = _bundle_fixture(tmp_path, monkeypatch)
-    start = cl.bundle_identity()
-    assert cl.bundle_violation(start) is None  # unchanged ⇒ clean
-    b.write_bytes(b"rebuilt")                  # a tooling-lane save mid-run
-    sha.write_text("def456\n")
-    v = cl.bundle_violation(start)
-    assert v is not None and "frozen_bundle_changed" in v
-
-
-def test_bundle_violation_detects_vanished_bundle(tmp_path, monkeypatch):
-    b, _sha = _bundle_fixture(tmp_path, monkeypatch)
-    start = cl.bundle_identity()
-    b.unlink()
-    assert cl.bundle_violation(start) is not None
-
-
-def test_ensure_bench_bundle_drives_bin_seon(tmp_path, monkeypatch):
-    # the up-front pre-build for bench-cluster-N: one `bin/seon bench-bundle`
-    # call, returning the resulting bundle identity pin
-    _bundle_fixture(tmp_path, monkeypatch)
+def test_ephemeral_fork_fails_before_yield_or_subprocess():
     runner = FakeRunner()
-    ident = cl.ensure_bench_bundle(runner=runner)
-    assert runner.calls == [[str(cl.SEON_BIN), "bench-bundle"]]
-    assert ident["sha256"] == "abc123"
-
-
-def test_destroy_cluster_drives_bin_seon():
-    runner = FakeRunner()
-    cl.destroy_cluster("bench-abc", runner=runner)
-    assert runner.calls == [[str(cl.SEON_BIN), "cluster", "destroy", "bench-abc"]]
-
-
-def test_ephemeral_cluster_always_destroys():
-    runner = FakeRunner()
-    with pytest.raises(RuntimeError, match="sample blew up"):
-        with cl.ephemeral_cluster("bench-boom", runner=runner,
-                                  ready=lambda name: 1):
-            raise RuntimeError("sample blew up")
-    assert runner.calls[-1] == [str(cl.SEON_BIN), "cluster", "destroy",
-                                "bench-boom"]
-
-
-def test_ephemeral_fork_always_destroys():
-    runner = FakeRunner()
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(cl.ClusterLeaseUnavailable):
         with cl.ephemeral_fork("source-a", 12345, "counterfactual-a",
                                runner=runner, ready=lambda name: 40123):
-            raise RuntimeError("boom")
-    assert runner.calls == [
-        [str(cl.SEON_BIN), "cluster", "fork", "source-a", "12345",
-         "counterfactual-a"],
-        [str(cl.SEON_BIN), "cluster", "destroy", "counterfactual-a"],
-    ]
+            pytest.fail("unleased fork must never be yielded")
+    assert runner.calls == []
 
 
-def test_wait_pod_ready_polls_file_then_probe(tmp_path, monkeypatch):
-    monkeypatch.setattr(cl, "REPO_ROOT", tmp_path)
-    pf = tmp_path / "tmp" / "seon-port-w1"
-    pf.parent.mkdir(parents=True)
-    ticks = iter(range(0, 100))
-    seen = []
-
-    def probe(port):
-        seen.append(port)
-        return len(seen) >= 2  # first probe refused (booting), then ready
-
-    def sleep(_s):
-        if not pf.exists():
-            pf.write_text("40555\n")  # the pod writes its port mid-poll
-
-    port = cl.wait_pod_ready("w1", timeout_s=50, probe=probe,
-                             clock=lambda: next(ticks), sleep=sleep)
-    assert port == 40555 and seen == [40555, 40555]
+def test_ensure_bench_bundle_refuses_removed_artifact_flavor():
+    runner = FakeRunner()
+    with pytest.raises(cl.ClusterLeaseUnavailable, match="artifact"):
+        cl.ensure_bench_bundle(runner=runner)
+    assert runner.calls == []
 
 
-def test_wait_pod_ready_times_out_loud(tmp_path, monkeypatch):
-    monkeypatch.setattr(cl, "REPO_ROOT", tmp_path)
-    ticks = iter(range(0, 100))
-    with pytest.raises(TimeoutError, match="w2"):
-        cl.wait_pod_ready("w2", timeout_s=3, probe=lambda p: False,
-                          clock=lambda: next(ticks), sleep=lambda s: None)
+def test_destroy_cluster_refuses_unfenced_release():
+    runner = FakeRunner()
+    with pytest.raises(cl.ClusterLeaseUnavailable, match="release"):
+        cl.destroy_cluster("bench-abc", runner=runner)
+    assert runner.calls == []
+
+
+def test_create_cluster_frozen_override_flags_are_never_shelled():
+    for frozen in (True, False):
+        runner = FakeRunner()
+        with pytest.raises(cl.ClusterLeaseUnavailable):
+            cl.create_cluster("bench-f1", frozen=frozen, runner=runner,
+                              ready=lambda n: 1)
+        assert runner.calls == []
+
+
+def test_absent_legacy_bundle_is_not_an_artifact_identity(tmp_path, monkeypatch):
+    monkeypatch.setattr(cl, "BENCH_BUNDLE", tmp_path / "missing.js")
+    monkeypatch.setattr(cl, "BENCH_BUNDLE_SHA", tmp_path / "missing.sha256")
+    assert cl.bundle_identity() is None
+    assert cl.bundle_violation(None) is None
 
 
 def test_wire_repl_json_sentinel_roundtrip():
@@ -283,26 +199,17 @@ def test_wire_repl_json_no_sentinel_is_loud():
 # ---------------------------------------------------------------------------
 
 
-def test_ai_config_hook_inert_by_default():
-    calls = []
-    cl.create_cluster("bench-noai", runner=FakeRunner(),
-                      ready=lambda name: 1)
-    assert calls == []  # AI_CONFIG is None — no wire REPL traffic
-
-
-def test_ai_config_hook_applied_after_ready(monkeypatch):
+def test_ai_config_can_be_applied_only_to_an_explicit_owned_connection():
     seen = {}
 
     def fake_repl(form):
         seen["form"] = form
         return {"thinking": "true", "timeout_ms": 300000}
 
-    monkeypatch.setattr(cl, "AI_CONFIG",
-                        {"thinking": "true", "timeout_ms": 300000})
-    monkeypatch.setattr(cl, "wire_repl_json", fake_repl)
-    c = cl.create_cluster("bench-armd", runner=FakeRunner(),
-                          ready=lambda name: 40999)
-    assert c.port == 40999
+    row = cl.apply_ai_config(
+        "bench-armd", {"thinking": "true", "timeout_ms": 300000},
+        repl=fake_repl)
+    assert row == {"thinking": "true", "timeout_ms": 300000}
     assert ":bench-armd" in seen["form"]
     assert ':seon.ai/thinking "true"' in seen["form"]
     assert ":seon.ai/timeout-ms 300000" in seen["form"]
