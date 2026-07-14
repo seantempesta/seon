@@ -144,11 +144,12 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   agent↔human communication area.
 - **view** — an agent's page, route `/agent/{id}`: the canvas plus a
   recency-ordered rail of the agent's other html surfaces.
-- **root agent** — ONE `:seon.agent/id "root"` that is BOTH the `/`-view owner (the
-  UI) AND the system orchestrator (lifecycle) — the same elevated grant, never two
-  entities. Its view IS the all-agents overview at route `/`, rendered by the
-  IDENTICAL block/layout/route machinery as any agent's view. It holds the elevated
-  system-level lifecycle functions (`start!`, terminate, cross-agent) in its
+- **root agent** — ONE `:seon.agent/id "root"` that is BOTH the `/` system-view
+  owner (UI) AND the system orchestrator (lifecycle) — the same elevated grant,
+  never two entities. Its all-agents overview uses a dedicated system layout
+  over the SAME blocks, render units, route resolution, and live-morph machinery
+  as ordinary agent pages. It holds the elevated system-level lifecycle
+  functions (`start!`, terminate, cross-agent) in its
   discoverable context; those functions enforce their own caller rules. Its
   registered home callbacks still pass through the ordinary `/call` browser
   gate. It is the root of the render + route
