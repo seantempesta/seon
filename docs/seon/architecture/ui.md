@@ -488,7 +488,8 @@ in `seon.web.datastar`.
 Each SCI render owns its input accessor and deadline closure inside its fresh
 interpreter context. No process-global input/deadline cell can be overwritten by
 a nested or future concurrent render. The one-time interpreter warmup uses its
-own local deadline as well.
+own local deadline as well. Repeated failure logging/recording uses a bounded
+FIFO suppression window; it cannot retain an unbounded set of broken symbols.
 
 The same gzip subscription mechanism serves root, agent, debug, and data
 views. There is no provenance-routed debug stream or unused generic `/sse`

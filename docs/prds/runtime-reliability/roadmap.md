@@ -167,6 +167,10 @@ deleted, including from warmup. Existing bounded-render behavior passes 7 tests
 and 31 assertions, while nested or future concurrent renders can no longer
 cross-contaminate one another.
 
+SCI's process-lifetime “warned” set is also gone. Failure log/error-write
+suppression now uses a 256-key FIFO window: persistent failures do not flood the
+database or logs, and unique failures cannot grow retained memory without bound.
+
 The direct Babashka edit hook now proves repository containment before it loads
 configuration or writes diagnostics, serializes bounded diagnostic writes
 across concurrent hook processes, and cannot throw from its terminal log sink.

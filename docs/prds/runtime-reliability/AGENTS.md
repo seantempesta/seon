@@ -193,6 +193,8 @@ process verbs are not primary UX.
 - SCI render input and deadline are invocation-local closures. The former
   process-global volatiles are deleted, so nested/future concurrent renders
   cannot cross-contaminate input or extend another invocation's budget.
+- SCI failure suppression is a 256-key FIFO window, not an unbounded
+  process-lifetime seen set. Derived error cards remain self-healing.
 
 ## Settled — do not re-litigate
 
