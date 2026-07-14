@@ -20,6 +20,15 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
   standing instruction only after behavioral evidence supports it.
 - **Cache stability.** Aged transcript clips and stable-prefix material remain
   byte-identical. Eviction does not reflow retained content.
+- **Database-deterministic context body.** The same agent rendered from the
+  same immutable database coordinate produces the same cacheable-body bytes.
+  A root-only free dynamic tail may add no more than roughly 50 estimated
+  tokens of live operational telemetry after every cache boundary; the exact
+  sent prompt blob is its historical authority. Filesystem reads and
+  process-local caches never alter the database-derived body.
+- **No synthetic compaction.** Bound raw transcript history by age and total
+  rendered cost. Durable intent and knowledge live as queryable plan/database
+  facts; never replace history with a model-authored summary.
 - **Qualified examples.** Context and worked examples use names that resolve in
   the namespace where the agent will evaluate them.
 

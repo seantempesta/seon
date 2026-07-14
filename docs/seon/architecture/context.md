@@ -13,17 +13,34 @@ tags: [architecture, agent]
 > — and reserves only the names backed by real code (`block` =
 > `:seon.agent.ctx/block`, `render` = `:seon.render/*`, `db` = `seon.db`).
 
-The prompt is nothing more than **functions applied to the db, in a stable
-order**:
+The prompt is nothing more than **functions applied to one immutable db value,
+in a stable order**:
 
 ```clojure
 context = (str/join (map #(% db) (render-fns-in-scope agent)))
 ```
 
-Every turn re-derives the whole thing from one frozen db value. Nothing is
-accumulated. Which functions are in scope, and in what order, is the entire
-design — and whether that set is **complete** is what makes the agent feel
-stateful.
+Every turn re-derives the cacheable body from one frozen db value. Nothing is
+accumulated. The agent, current turn, namespace, window policy, persisted
+timestamps, tool/schema graph, plan, event membership, and block order are facts
+or pure queries over that value. Rendering the same `{database-id, branch,
+commit-id, t}` coordinate for the same agent produces a byte-identical body.
+Filesystem state, process-local cache membership, random ids, and map iteration
+order never leak into it. Which functions are in scope, and in what order, is
+the entire design — and whether that set is **complete** is what makes the agent
+feel stateful.
+
+After that body, a deliberately tiny **free dynamic tail** may report live
+operational state whose value is useful precisely because it is current: wall
+clock, Unix load averages, process memory, and eventually active-child progress.
+It is root-only, comment-shaped, capped at roughly 50 estimated tokens, and
+always occupies the absolute end after every provider cache boundary. It never
+changes context membership, tool availability, plans, or transcript history.
+The sent prompt blob is the byte ground truth for the whole request; the
+recorded coordinate regenerates the body exactly and the captured blob preserves
+the ephemeral tail exactly. This makes prompt diffs, content hashes, cache
+attribution, and failure reproduction ordinary database operations rather than
+transcript archaeology.
 
 ## The projection must be complete — so the agent feels stateful
 
@@ -125,6 +142,24 @@ turn-limit) and non-event changes between turns. Because the transcript already
 carries event-deltas (a message that arrived is already a line), the delta
 surface is only the *non-event* changes. Additive sections layer on the spine;
 they never contradict it.
+
+**Bounded raw history, never synthetic compaction.** Recent transcript events
+render verbatim within a short working window. Result bodies then decay through
+byte-stable age bands to a useful diagnostic stub, and older eval events share
+one fixed total budget spent newest-first. This makes the transcript approach a
+plateau instead of growing by one permanent stub per eval. The complete event,
+value, source, and error remain database/blob facts reachable by targeted
+reads; leaving an event out of the prompt neither deletes nor summarizes it.
+The runtime never replaces conversation history with a model-written compacted
+story. Long continuity comes from the current plan, schemas, namespace source,
+database facts, and explicit retrieval, so a long-lived agent does not depend
+on transcript archaeology.
+
+The budget is over the bytes that actually render, including form source,
+narration, result, and error envelope. Per-result caps alone are insufficient:
+an unlimited number of individually small stubs is still unbounded context.
+Likewise, transcript clipping is a final guardrail; functions return bounded,
+structured, drillable values and errors before rendering.
 
 ## The REPL mode is a datom — and it teaches its own grammar
 
@@ -342,11 +377,31 @@ full skill body is actually wanted; loaded state is derived from block presence.
 
 ## Order = stability, so the cache holds
 
-Position is sorted by **change-time** (a property of the var / the source),
-so the prompt reads most-stable → most-dynamic and the provider prefix-cache
-survives most turns. A fn busts cache only when *its own* code or *its own*
-db-inputs changed — invalidation stays local to the fn that moved, because
-order is deterministic:
+Position is sorted by **observed rendered-byte stability**, so the prompt reads
+most-stable → most-dynamic and the provider prefix-cache survives most turns.
+Every captured turn records each block's name, content hash, estimated tokens,
+position, and cache band as observability facts. The next ordering is a pure
+query over that changelog at the turn's frozen database coordinate; it does not
+guess an arbitrary renderer's dependencies or persist a mutable stability
+field.
+
+For each block, a small Bayesian change/no-change history estimates the chance
+that its hash changes on the next turn. Configured priority supplies the prior
+for a new block. Within a semantic band, the ordering key is change risk per
+cacheable token: `p(change) / (tokens × (1 - p(change)))`. This is the pairwise
+order that maximizes expected reusable prefix tokens: large stable blocks rise,
+small volatile blocks sink. Name is the final deterministic tie-break. The
+learned order freezes for an explicit epoch and a block moves only when the
+score margin clears a hysteresis threshold; otherwise optimization churn would
+destroy the cache it is trying to preserve. The epoch and threshold graduate
+from provider usage plus Inspect outcomes, not intuition.
+
+Semantic bands remain inviolable: the database-derived stable body precedes
+the transcript window, which precedes the free dynamic tail. Declared
+read-attribute analysis remains useful for UI invalidation, but prompt ordering
+trusts the exact bytes the model received. The existing block-chain hash names
+the first invalidated prefix, while provider cache-read usage verifies that the
+learned order improves real reuse. The bands are:
 
 1. **minimal fixed blocks** — the concise role, canvas, plan, and other
    deliberately installed anchors whose queries currently produce a value.
@@ -358,10 +413,11 @@ order is deterministic:
    stable code they belong to. Their output moves with the db, so this is
    where the cache prefix ends.
 4. **the transcript** — recent doing, windowed by age with per-band caps and
-   eval-result decay; **aged clips render byte-identical forever** (re-flowing
-   busts the cache — the cache-stability law). Only the leading edge moves.
-   What must outlive the window goes to the DB (plan, kb, blobs), not
-   transcript residue; a large inbound payload clips to a blob ref.
+   eval-result decay plus a fixed total budget for older events; **content is
+   byte-identical while it remains in an age band** and eviction never rewrites
+   retained events into summaries. Only the leading edge and explicit band
+   transitions move. What must outlive the window goes to the DB (plan, kb,
+   blobs), not transcript residue; a large inbound payload clips to a blob ref.
 5. **pull-first relevance (conditional, not a standing band)** — reference
    code and retrieval beyond the current namespace are explicitly inspected or
    called when needed. Functions whose *input* specs match the shapes the agent
@@ -372,6 +428,10 @@ order is deterministic:
    dial) only if a drive proves the need. When present it competes with nothing
    cached and vanishes when its queries return empty; every element earns its
    place in drives. ([[context-rebuild]] §"Deliberately NOT blocks".)
+6. **the free dynamic tail** — root-only live clock, Unix load averages in the
+   standard 1/5/15-minute order, and bounded process memory. Active-child
+   progress joins this tail only after solo-agent drives graduate; child
+   outcomes themselves remain database facts in the ordinary derived body.
 
 Code grows slowly against tokens spent running things, so groups 1–2 are the
 compounding asset: as the agent persists schemas, fns, and tests, its own
@@ -380,8 +440,9 @@ code becomes the majority of its context — self-reinforcing, cheap, cached.
 ## Multi-agent sections — subagents + orphaned-agents
 
 Two derived sections make the spawn tree visible without any registry or
-notification state (both pure fns of the db, both vanish when their query is
-empty — the reactive rule):
+notification state (both vanish when their query is empty). Their renderer and
+tests exist, but the general block remains dormant until solo-agent drives
+graduate; multi-agent visibility must not obscure the solo navigation signal:
 
 - **`:subagents`** (general agent-context, volatile tail near the transcript) —
   the **direct** children the rendering agent spawned (`:seon.agent/parent` =
@@ -392,8 +453,9 @@ empty — the reactive rule):
   succeeded). A breaker-tripped child shows it. This is the parent's monitoring
   surface: completion is a **fact in the DB**, so a parent that was mid-turn or
   restarted still sees every child result — no acknowledgement, nothing to clear.
-  Childless agents render empty → it costs them zero and rides the general
-  manifest (root gets it too).
+  After solo graduation, childless agents render empty → it costs them zero;
+  the compact running-progress view occupies the free dynamic tail while
+  persisted outcomes remain in the database-derived body.
 - **`:orphaned-agents`** (root-only, config-injected via
   `:seon.config/root-context` like `:core-faults`) — live agents whose
   `:seon.agent/parent` is **terminated**. One line each (id · state · purpose ·

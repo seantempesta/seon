@@ -44,6 +44,33 @@ sixteen configured required namespaces as inert compact cards with public
 function names, named arguments, complete input/output contracts, and schema
 definitions. Its size and relevance have not yet passed the small-model test.
 
+Live transcript inspection found two active policy defects. The configured
+`0→16384`, `2→1500`, `5→200` result decay has no eviction tiers, so old eval
+events remain forever and total context does not plateau. Tier accounting, when
+enabled, charges result EDN rather than the complete rendered event. Separately,
+the idle readline always displays the 20-turn batch fallback even when the
+database selects stream mode; the actual open-run fallback is 60 forms. Both
+ceilings are still too small as ordinary local-agent stopping conditions. The
+architecture now states the target: bounded raw history without synthetic
+compaction, durable continuity through plan/database facts, outcome-oriented
+runs with generous safety ceilings, and local-first execution with explicit
+stronger-model consultation.
+
+A subsequent purity probe found that historical result-handle display depends
+on a process-local cache. The target is now explicit and falsifiable: the same
+agent and resolved database coordinate regenerate a byte-identical cacheable
+body across delay and pod restart. A root-only free dynamic tail may carry live
+clock, Unix 1/5/15-minute load averages, and bounded process memory after every
+cache boundary; prompt blobs preserve those exact ephemeral bytes.
+
+Top-level context ordering is also still manual. The renderer sorts blocks by
+stored integer priority even though namespace/surface recency and block-chain
+hash mechanisms already exist. The candidate general policy records per-turn
+block hashes and sizes, estimates change probability from that database
+changelog, and sorts within semantic bands by change risk per cacheable token.
+Orders freeze for measured epochs with hysteresis so the optimizer cannot
+create more cache churn than it removes.
+
 ## Experimental contract
 
 Inspect AI owns all simulations, tasks, solvers, and scorers. The lane freezes
@@ -70,14 +97,18 @@ benchmark/scorer failure.
    deterministic development, milestone, and blind memberships before tuning.
 3. Establish raw-model and unchanged-Seon baselines with a 4B-or-smaller model,
    then probe 3B, 2B, 1.5B, and sub-1B models where locally practical.
-4. Cluster failures and change the smallest current owner. Verify through a
+4. Compare `:batch` and `:stream` as first-class execution strategies, including
+   task outcome, calls, attempted forms, generated tokens, elapsed time, cache
+   reuse, fabrication, and recovery. Measure transcript decay/plateau schedules
+   from live rendered prompts; never infer success from aggregate token cost.
+5. Cluster failures and change the smallest current owner. Verify through a
    focused mechanical test, the original live ACME REPL form, and the exact
    failed Inspect samples.
-5. Compare equal-budget arms: no explicit plan, small-model-authored plan,
+6. Compare equal-budget arms: no explicit plan, small-model-authored plan,
    large planning proposal encoded by the small executor, and the optional
    pretransacted diagnostic plan. Prove database outcome, provenance,
    expectation-checked close, report-before-close, and restart resumption.
-6. Freeze the surface, open the blind set once, preserve raw logs, dataset and
+7. Freeze the surface, open the blind set once, preserve raw logs, dataset and
    dependency locks, model/artifact identity, scorecard, classifications, and
    ACME restart/read-back evidence.
 

@@ -9,6 +9,7 @@
   (:require
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing]]
+    [seon.ai.tokens :as tokens]
     [seon.agent.message :as message]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.transcript :as t]
@@ -20,6 +21,12 @@
   ([turn kind edn]
    (cond-> {::t/turn-idx turn ::t/kind kind}
      edn (assoc ::t/entity {:seon.eval/result-edn edn}))))
+
+(deftest host-telemetry-is-bounded-unix-load-line
+  (let [line (t/host-telemetry)]
+    (is (re-find #"^; host · load 1m/5m/15m [0-9.]+/[0-9.]+/[0-9.]+ · rss [0-9.]+ (MiB|GiB) · heap [0-9.]+ (MiB|GiB)$"
+                 line))
+    (is (<= (tokens/estimate line) 50))))
 
 (deftest transcript-handles-follow-exact-result-cache-membership
   (let [prior-results (js/Reflect.get js/globalThis
