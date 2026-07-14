@@ -21,8 +21,11 @@ CLJS runtime, public SDK, bootstrap/source corpus, static assets, npm closure,
 base config, and dependency overrides all come from the Seon repository.
 
 The completed evidence and exact source map are
-[[research/independent-acme-distribution-audit-2026-07-14]]. The verified defect
-is [[../../seon/issues/downstream-runtime-package-is-not-self-contained]].
+[[research/independent-acme-distribution-audit-2026-07-14]], grounded by the
+earlier boundary audit
+[[research/client-distribution-and-server-rendering-boundary-2026-07-13]]. The
+verified defect is
+[[../../seon/issues/downstream-runtime-package-is-not-self-contained]].
 Implementation waits for the runtime/database contracts named by the
 high-level [[../runtime-reliability/roadmap]] ledger; research and manifest
 specification may proceed independently.

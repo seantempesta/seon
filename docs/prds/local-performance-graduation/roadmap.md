@@ -23,7 +23,9 @@ retirement remain.
 
 The grounded audit
 [[research/local-performance-source-audit-2026-07-14]] reconciles current
-source with the older profiles. The CLJS JVM cap, canonical build ownership,
+source with the older
+[[research/shadow-compiler-memory-profile-2026-07-13]]. The CLJS JVM cap,
+canonical build ownership,
 bounded transcript, Datahike work/result/cache budgets, retained-result
 admission, effective transaction datoms, normalized subscriptions, and
 one-event feed backpressure are landed and must be regression-tested rather

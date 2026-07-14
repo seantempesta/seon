@@ -1040,7 +1040,7 @@ The source-grounded system audits are complete and committed:
 - [[research/seon-cli-lifecycle-audit-2026-07-13]]
 - [[research/jvm-archive-boundary-2026-07-13]]
 - [[research/jvm-server-cljs-client-storage-sync-2026-07-13]]
-- [[research/client-distribution-and-server-rendering-boundary-2026-07-13]]
+- [[../independent-downstream-distribution/research/client-distribution-and-server-rendering-boundary-2026-07-13]]
 - [[research/surface-vocabulary-and-dead-ui-path-audit-2026-07-13]]
 - [[research/root-view-presence-crash-batch-audit-2026-07-13]]
 - [[research/cljs-test-suite-speed-and-quality-audit-2026-07-12]]

@@ -347,7 +347,7 @@ impact audit is open.
   build aliases, tests, and archive sequence.
 - [[research/jvm-server-cljs-client-storage-sync-2026-07-13]] — writer,
   Datahike/Kabel/Konserve synchronization, protocol, and cloud evidence.
-- [[research/client-distribution-and-server-rendering-boundary-2026-07-13]] —
+- [[../independent-downstream-distribution/research/client-distribution-and-server-rendering-boundary-2026-07-13]] —
   canonical CLJS renderer, browser/Tauri/server-agent boundaries.
 - [[research/surface-vocabulary-and-dead-ui-path-audit-2026-07-13]] — exact
   UI rename/delete graph and four dormant context adapters.
