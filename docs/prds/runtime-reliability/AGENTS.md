@@ -11,14 +11,16 @@ tags: [orchestrator, prd, database, flow, agent, web]
 The old JVM application and its duplicate runtime paths are deleted. The active
 system is the CLJS pod plus the JVM database server, with one database protocol,
 one render path, and Inspect AI as the agent/model harness. Remaining work is
-the seven-slice reliability ledger: reconcile lingering drift, finish reactive
-render-unit correctness and root/system UI, unify automatic CLJ/CLJS/CLJC test
-feedback, profile the retained paths, and close acceptance evidence.
+the ten-unit program ledger: graduate this branch, then deliver database
+lifecycle recovery, reactive render units, the database browser, root workspace
+sessions, canvas interaction, agent runtime correctness, Inspect/autocomplete
+evidence, independent downstream distribution, and final local-performance
+graduation.
 
 This PRD is in **integrated completion**. Work from the original phases 3–5
 landed out of order, so the former “phase 3 of 6” label was retired. The
-authoritative remaining order is the seven-slice **Active execution ledger** at
-the top of [[roadmap]]; slice 0 (reconcile and baseline) is in progress. The
+authoritative remaining order is the **Program task ledger** at the top of
+[[roadmap]]; unit 0 (current branch graduation) is in progress. The
 active plan replaces mechanisms in place and deletes superseded paths; it does
 not create compatibility namespaces or parallel architectures.
 
