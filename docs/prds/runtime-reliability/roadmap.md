@@ -105,8 +105,14 @@ The dependency/Shadow/ACME audit in
 `deps.edn` split and unified dynamic-port MCP boundary. The operator now has one
 explicit default/ACME artifact-flavor record that selects build id, isolated
 Shadow cache, output, and version-2 manifest; the complete operator checkpoint
-passes 92 tests/574 assertions. The flavor also owns the managed watcher build,
-cache, and readiness. `bin/acme` now delegates only semantic target operations;
+passes 94 tests/581 assertions. The flavor also owns the managed watcher build,
+cache, and readiness. The process graph now makes the default watcher the sole
+owner of the canonical `:test` build and publisher: default watches `client`
+plus `test`, while ACME watches only `acme-client`; command construction,
+readiness, and build-failure detection derive from that one flavor-owned build
+vector. The affected operator gate passes 16 tests/55 assertions; concurrent
+live artifact proof remains before the collision issue closes. `bin/acme` now
+delegates only semantic target operations;
 structured status publishes cluster/database/artifact/process identity and
 dynamic web/CLJ/CLJS endpoints; foreign listeners are explicit ownership
 conflicts; and both `up` and reset refuse to create a fresh `db/` beside a

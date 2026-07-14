@@ -192,8 +192,11 @@
 
 (deftest latest-watcher-result-is-readiness-truth
   (let [configuration (test-config)
-        configuration (assoc configuration :seon.dev.config/client-build-id
-                             "client")
+        configuration
+        (assoc configuration
+               :seon.dev.config/client-build-id "client"
+               :seon.dev.config/artifact-flavor
+               :seon.dev.artifact.flavor/default)
         log (fs/path (:seon.dev.test/directory configuration) "watcher.log")
         pid (.pid (java.lang.ProcessHandle/current))
         record {:seon.dev.process/id process/watcher-id
@@ -220,6 +223,31 @@
       (is (not (process/ready? configuration spec record)))
       (spit (str log) "[:test] Build completed.\n" :append true)
       (is (process/ready? configuration spec record))
+      (finally (fs/delete-tree (:seon.dev.test/directory configuration))))))
+
+(deftest acme-watcher-readiness-owns-only-the-acme-client-build
+  (let [configuration (test-config)
+        configuration
+        (assoc configuration
+               :seon.dev.config/client-build-id "acme-client"
+               :seon.dev.config/artifact-flavor
+               :seon.dev.artifact.flavor/acme)
+        log (fs/path (:seon.dev.test/directory configuration) "watcher.log")
+        pid (.pid (java.lang.ProcessHandle/current))
+        record {:seon.dev.process/id process/watcher-id
+                :seon.dev.process/pid pid
+                :seon.dev.process/start-instant (state/process-start-instant pid)
+                :seon.dev.process/log (str log)}
+        spec {:seon.dev.process/id process/watcher-id
+              :seon.dev.process/readiness :seon.dev.process.readiness/watcher}]
+    (try
+      (spit (str log) "[:acme-client] Build completed.\n")
+      (is (process/ready? configuration spec record))
+      (spit (str log) "[:test] Compiling ...\n" :append true)
+      (is (process/ready? configuration spec record)
+          "the ACME watcher neither owns nor awaits the default test build")
+      (spit (str log) "[:acme-client] Compiling ...\n" :append true)
+      (is (not (process/ready? configuration spec record)))
       (finally (fs/delete-tree (:seon.dev.test/directory configuration))))))
 
 (deftest stale-port-file-does-not-advertise-a-url
@@ -263,7 +291,15 @@
                           [process/watcher-id :seon.dev.process/argv])]
     (try
       (is (= ["clj" "-M:cljs" "watch" "client" "test"] default-argv))
-      (is (= "acme-client" (nth acme-argv 5)))
+      (is (= ["acme-client"]
+             (->> acme-argv
+                  (drop-while #(not= "watch" %))
+                  rest
+                  (take-while #(not= "--config-merge" %))
+                  vec))
+          "ACME watches only its flavor-owned client build")
+      (is (not-any? #{"test"} acme-argv)
+          "ACME cannot publish or prune the default test artifact")
       (is (not-any? #(str/includes? % ":cache-root") acme-argv)
           "action config cannot select the Shadow server/cache identity")
       (is (some #(str/includes? % "acme.pod") acme-argv))

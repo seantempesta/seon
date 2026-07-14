@@ -120,9 +120,21 @@
   [config id]
   (:seon.dev.process/log (read-process config id)))
 
+(defn- watcher-build-ids [config]
+  (let [client-build-id
+        (keyword (:seon.dev.config/client-build-id config))]
+    (case (:seon.dev.config/artifact-flavor config)
+      :seon.dev.artifact.flavor/default [client-build-id :test]
+      :seon.dev.artifact.flavor/acme [client-build-id]
+      (throw
+        (ex-info "Unknown artifact flavor for the managed Shadow watcher."
+                 {:seon.dev.config/artifact-flavor
+                  (:seon.dev.config/artifact-flavor config)})))))
+
 (defn- extra-cljs-watch-args [config]
   (let [environment (:seon.dev.config/environment config)
-        build-id (:seon.dev.config/client-build-id config)
+        build-ids (mapv name (watcher-build-ids config))
+        watch-args (into ["-M:cljs" "watch"] build-ids)
         source (get environment "SEON_EXTRA_SRC")
         preload (get environment "SEON_EXTRA_PRELOAD")
         config-merge
@@ -134,7 +146,7 @@
       (into ["-Sdeps" (pr-str {:deps {'seon.extra/src {:local/root source}}})])
 
       true
-      (into ["-M:cljs" "watch" build-id "test"])
+      (into watch-args)
 
       (seq config-merge)
       (into ["--config-merge" (pr-str config-merge)]))))
@@ -282,8 +294,7 @@
 
 (defn- watcher-ready? [config record]
   (let [text (tail-text (:seon.dev.process/log record))]
-    (every? #(build-ready? text %)
-            [(keyword (:seon.dev.config/client-build-id config)) :test])))
+    (every? #(build-ready? text %) (watcher-build-ids config))))
 
 (defn- pod-ready? [config record]
   (let [port-file (:seon.dev.config/http-port-file config)
@@ -304,12 +315,16 @@
          :seon.dev.process.readiness/pod (pod-ready? config record)
          false)))
 
-(defn- readiness-failure [record]
+(defn- readiness-failure [config record]
   (let [log (:seon.dev.process/log record)
-        text (tail-text log)]
+        text (tail-text log)
+        build-failures
+        (mapv #(str "[:" (name %) "] Build failure:")
+              (watcher-build-ids config))]
     (or (some->> (str/split-lines text)
-                 (filter #(or (str/includes? % "[:client] Build failure:")
-                              (str/includes? % "[:test] Build failure:")
+                 (filter #(or (some (fn [needle]
+                                      (str/includes? % needle))
+                                    build-failures)
                               (str/includes? % "auto-boot FAILED")
                               (str/includes? % "SEON-CORE-FAULT ")))
                  last)
@@ -324,10 +339,11 @@
     (loop []
       (cond
         (ready? config spec record) record
-        (readiness-failure record)
+        (readiness-failure config record)
         (throw (ex-info "A Seon process failed before readiness."
                         {:seon.dev.process/id (:seon.dev.process/id spec)
-                         :seon.dev.process/failure (readiness-failure record)
+                         :seon.dev.process/failure
+                         (readiness-failure config record)
                          :seon.dev.process/log (:seon.dev.process/log record)}))
         (< (System/currentTimeMillis) deadline)
         (do (Thread/sleep 200) (recur))
