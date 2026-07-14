@@ -3943,6 +3943,41 @@
                 (omitted-fn-projection-retractions
                   @db/*conn* tee-entities))
               tee-entities (into (vec tee-entities) omitted-fn-tx)
+              changed-schemas (schema/changed-keys schemas-before)
+              old-projection (schema/current-projection)
+              contract-transition
+              (function-contract-transition old-projection tee-entities)
+              changed-function-syms (::changed-syms contract-transition)
+              candidate-outcome
+              (when (or (seq changed-schemas)
+                        (seq changed-function-syms))
+                (try
+                  {::candidate-projection
+                   (schema/build-projection
+                     (schema/snapshot)
+                     (::function-contracts contract-transition))}
+                  (catch :default candidate-error
+                    {::candidate-error candidate-error})))
+              candidate-error (::candidate-error candidate-outcome)
+              _ (when candidate-error
+                  ;; Candidate construction is pure and happens before the
+                  ;; transaction. Restore the declaration collector so the
+                  ;; rejected generation is absent from both DB and runtime.
+                  (schema/restore! schemas-before))
+              result
+              (if candidate-error
+                {::ok? false
+                 :seon/error
+                 (error/->map
+                   (ex-info
+                     (str "Program change rejected before commit: "
+                          (ex-message candidate-error))
+                     {:seon.error/kind :user-input
+                      :seon.schema/candidate-rejected? true}
+                     candidate-error))}
+                result)
+              pending? (and pending? (nil? candidate-error))
+              tee-entities (if candidate-error [] tee-entities)
               ;; Capture the `:seon.ns/require-edges` for the ENDING ns
               ;; on EVERY successful eval — not only `(ns …)` forms —
               ;; so a re-eval'd ns form or a bare `(require '[x])`
@@ -4019,19 +4054,11 @@
                             ::output       output
                             ::tee          tee}))
               eval-id (:seon.eval/id recorded)
-              changed-schemas (schema/changed-keys schemas-before)
-              old-projection (schema/current-projection)
-              contract-transition
-              (function-contract-transition old-projection tee-entities)
-              changed-function-syms (::changed-syms contract-transition)
               new-projection
-              (when (and (or (seq changed-schemas)
-                             (seq changed-function-syms))
+              (when (and (::candidate-projection candidate-outcome)
                          (:seon.db/ok? recorded)
                          (::tee-recorded? recorded))
-                (schema/build-projection
-                  (schema/snapshot)
-                  (::function-contracts contract-transition)))]
+                (::candidate-projection candidate-outcome))]
           ;; A declaration becomes runtime-authoritative only when its schema
           ;; fact landed in the same accepted transaction. record-eval! may
           ;; preserve the transcript by retrying without a broken tee; in that

@@ -720,8 +720,11 @@ or discover archived behavior.
    required/id/render decomposition, its boot transaction, Datalog discovery,
    and the renderer cache atom are deleted. Remaining: compute compatible
    missing Datahike attributes in the candidate, bound
-   historical projections by fingerprint, and stop admission/reconstruct from
-   committed facts if post-commit activation fails. The full evidence and failure matrix are in
+   historical projections by fingerprint. Agent program/schema transitions now
+   build the complete candidate before recording; an invalid dependent contract
+   becomes the eval's user-input failure and commits no declaration facts.
+   Remaining: stop admission/reconstruct from committed facts if the already
+   validated post-commit wrapper publication itself fails. The full evidence and failure matrix are in
    [[research/malli-runtime-schema-authority-audit-2026-07-13]].
 5. Use one analyzer/program snapshot and one exact add/change/remove
    transaction. Verify the ghost-pruning builder and every stale compatibility
@@ -739,14 +742,16 @@ or discover archived behavior.
    when post-commit publication cannot complete.
 7. Reconstruct declarations/program state only. Never replay arbitrary evals or
    process-local values.
-8. Make crash recovery a distinct supervisor transition: fence/close every
+8. **Crash recovery complete:** the cold-start supervisor transition fence/closes every
    interrupted open run, mark its running turn `:interrupted` without executing
    or fabricating an eval, leave every affected agent derived idle, and persist
    one idempotent recovery anchor in that same transaction. Derive affected
    agent/run/turn refs and prior/current coordinates by joining the anchor's
    transaction to its changed datoms and commit parent; root renders that join
-   as the notice. Clean planned restarts quiesce at turn boundaries rather than
-   masquerading as crashes.
+   as the notice. Recovery runs before agent resume, a second pass is a no-op,
+   terminated agents are untouched, and focused tests prove no fabricated
+   messages. Remaining: have clean planned restarts quiesce at turn boundaries
+   rather than masquerading as crashes.
 9. Make batch evaluation explicitly non-fail-fast: attempt every complete parsed
    form in order, persist each success/error at its transcript position, and show
    the complete real batch on the next turn. Later dependent forms may fail
