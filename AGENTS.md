@@ -58,12 +58,17 @@ There are two documentation layers and no third:
   `architecture.md` first, then the relevant domain document. Update it when a
   design decision changes; never put current implementation state, gaps,
   sequencing, evidence, graduation status, or a migration diary there.
+- The active program roadmap (currently
+  `docs/prds/runtime-reliability/roadmap.md`) is the high-level ledger of
+  current state, remaining architecture deltas, dependency order, and success
+  measures. It points to bounded successor PRDs; it does not absorb their
+  detailed audits or implementation plans.
 - `docs/prds/<chunk>/` contains one implementable roadmap chunk on its own
-  branch. Its `roadmap.md` is the sole authority for what is built now, the
-  remaining gaps, implementation order, evidence, graduation status, and the
-  path from current code to the architecture target. Its localized `AGENTS.md`
-  is a tight runbook/index. Finish and merge the chunk before carving the next
-  architecture delta into a new PRD folder and branch.
+  branch. Its `roadmap.md` owns that chunk's exact source inventory, built/gap
+  state, implementation order, evidence, and graduation status. Its localized
+  `AGENTS.md` is a tight runbook/index, and dated audits/raw evidence live in
+  its `research/` directory. Carve the folder before doing deep research for
+  the chunk, then finish and merge it before starting dependent implementation.
 
 After a material change, update the affected architecture target, the active
 PRD roadmap, and any localized authority whose durable guidance changed.
@@ -288,6 +293,38 @@ workflows, not substitutes for source reading. Especially:
 
 Use `rg`/`rg --files` for search and `apply_patch` for edits. If repeated patch
 attempts fail, the function or document is too complex—refactor it.
+
+## REPL-driven development
+
+Develop Clojure from the running system outward. The REPL is the first design
+and diagnosis surface; checked-in source and tests remain the durable authority
+today. The future ability to persist every successful edit directly from the
+REPL is aspirational and must not be described as current behavior.
+
+For each Clojure change:
+
+1. Select the exact cluster and runtime. Use cluster-qualified `eval_cljs` for
+   pod behavior and the selected cluster's `eval_clj` for writer behavior.
+2. Reproduce the failure with one small form. Inspect the complete returned
+   envelope, live database facts, installed schema, and immutable database
+   coordinate before inferring a cause.
+3. Call the existing pure transformation or owning function directly with
+   representative data. Probe dependency behavior from `reference-code/` at
+   this boundary instead of rebuilding its semantics from memory.
+4. Define and evaluate the proposed data shape or transformation in the REPL.
+   Prefer immutable examples that expose inputs and outputs; perform database
+   writes only when the experiment requires them, then inspect `::db/ok?` and
+   the resulting datoms.
+5. Edit the one owning namespace, let hot reload apply it, and rerun the same
+   form against the same live evidence. Restart only for load-time config,
+   bootstrap, process, or artifact behavior that hot reload cannot exercise.
+6. Persist the behavioral regression, run the smallest affected gate, then
+   verify the user-visible page/feed, database fact, log, or process transition.
+
+Use one form at a time unless batch semantics are the subject of the probe.
+Do not leave speculative definitions, sessions, or mutations as hidden proof;
+record the decisive form and result in the active PRD when it changes the plan.
+Losing a named REPL session loses only process-local values, not database truth.
 
 ## Dev feedback and testing
 

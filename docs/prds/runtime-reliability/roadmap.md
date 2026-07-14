@@ -40,6 +40,58 @@ every local ambition. Remote replication, cloud topology, browser replicas,
 offline mutation, mobile packaging, and the full paid Inspect AI battery remain
 explicit follow-on work rather than completion gates.
 
+### Program task ledger
+
+This is the high-level program ledger. Each pending unit gets its own
+`docs/prds/<chunk>/` folder before detailed research or implementation; its
+roadmap then owns the exact files, dependency ledger, evidence, and commits.
+Research may run in parallel across the independent domains named below, but
+implementation follows the dependency edges and never creates competing
+database, renderer, runtime, operator, or packaging mechanisms.
+
+| Order | Unit | State | Depends on | Measurable exit |
+|---|---|---|---|---|
+| 0 | Current branch graduation | **IN PROGRESS** | none | Reconciled docs and successor PRDs; clean full pod/writer/operator/Inspect-offline gates; destructive default reset; live CLJ+CLJS MCP, browser, gzip SSE, database read-back, restart, and retained-result/query-budget proof; legacy lane evidence classified before cleanup. |
+| 1 | `database-lifecycle-recovery` | pending carve | 0 | Fresh, converged, config-free reopen, clean restart, crash recovery, canonical coordinates, as-of/fork/restore/undo, and multi-form transitions pass without replay or duplicate registries. |
+| 2 | `reactive-render-units` | pending carve | 1 | One runtime-observed unit engine serves root, agent, canvas, debug, and data views; helper-indirected reads update; unrelated writes do no work; equivalent tabs share bounded plain-data/output reuse. |
+| 3 | `database-browser` | pending carve | 1, unit contract from 2 | Entity, refs, transactions, provenance, and history are navigable through bounded Datahike index cursors; closed details construct no expensive body; no global scan or second feed exists. |
+| 4 | `root-workspace-sessions` | pending carve | 2 | Root has its distinct system layout and concise context; ordinary-agent cards use the same derived focus; database-backed per-tab locations prove two tabs do not fight. |
+| 5 | `agent-canvas-interaction` | pending carve | 2, 4 | The one `my.canvas` path proves every control, validation/error result, focus/pin/clear transition, reactive update, and narrow/wide layout in a real browser. |
+| 6 | `agent-runtime-correctness` | pending carve | 1 | Raw model replies are preserved; every complete form is attempted; async contracts, plan authority/evidence, retries, errors-as-values, and measured process containment cannot wedge or fabricate agent evidence. |
+| 7 | `inspect-autocomplete-evidence` | pending carve | 0, 6 | Inspect source is content-pinned; preserved lane evidence is classified; the reviewed ACME tool-refinement results land through canonical `my.*` schemas/functions; large-planner/small-executor and simpler-model tool-use trials have reproducible task/scorer/provenance evidence. |
+| 8 | `independent-downstream-distribution` | pending carve | 0, stable runtime/package contracts from 1 and 6 | A clean ACME checkout builds, customizes, starts, MCP-evaluates, restarts, and reads back from released Seon SDK/runtime/writer artifacts while the Seon source checkout is unavailable. |
+| 9 | `local-performance-graduation` | final | 1–8 | Destructive acceptance matrix and real-browser journey pass; explicit cold/warm latency, idle CPU, event-loop, heap/RSS, feed/render, and grown-database budgets are green; superseded worktrees/processes are safely retired. |
+
+Parallel work is deliberately bounded:
+
+- while unit 0 runs, research may independently ground database lifecycle,
+  reactive/Datahike cursor behavior, runtime containment, Inspect/model
+  evaluation, and release packaging in their exact `reference-code/` sources;
+- units 2 and 3 may share a read-only dependency audit, but unit 3 consumes the
+  settled unit contract instead of inventing its own transition/feed path;
+- units 4 and 6 may be implemented in parallel after their database/runtime
+  prerequisites because they own separate UI-session and agent-loop domains;
+- the separately owned ACME tool-refinement lane remains isolated until its
+  commits and evidence are handed back for unit 7 review; and
+- unit 9 is the only final graduation gate and cannot be parallel-claimed from
+  partial subsystem evidence.
+
+Immediate unit-0 queue:
+
+1. Correct the documentation hierarchy, add the practiced REPL-driven
+   workflow, and move detailed audits into their carved successor PRDs.
+2. Reconcile this ledger with the generated open-issue index and archive only
+   findings that have committed behavioral and live proof.
+3. Run one non-overlapping complete default checkpoint: operator, writer, pod,
+   and offline Inspect.
+4. Destructively reset/rebuild the default cluster, then prove routes, browser
+   interactions, gzip feeds, database read-back, restart, and both MCP runtimes.
+5. Classify every retained old-lane commit, ignored database/blob, worktree,
+   and process; preserve required evidence, then produce the explicit safe
+   retirement list. Do not touch the active ACME agent worktree.
+6. Carve the successor PRD folders in dependency order with one grounded
+   dependency ledger and falsifiable acceptance matrix each.
+
 ### Resume checkpoint — 2026-07-14
 
 Completed and committed on this branch:
