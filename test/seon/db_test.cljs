@@ -355,7 +355,11 @@
         (is (= :seon.db/invalid-value (:seon.db/error (ex-data error)))))
       (finally
         (if before-projection
-          (schema/activate-projection! before-projection)
+          (do
+            (schema/activate-projection! before-projection)
+            ;; Candidate declarations may legitimately be newer than the
+            ;; committed projection. Restore both halves of that state.
+            (schema/restore! before-forms))
           (do
             (schema/restore! before-forms)
             (reset! @#'schema/!projection nil)
