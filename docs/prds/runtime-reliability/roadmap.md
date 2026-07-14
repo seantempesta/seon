@@ -853,13 +853,18 @@ agents idle and one exact notice visible to root.
    remains an override through the normal block mechanism.
 10. **Bounded fact-owner readers active:** `seon.agent.message` owns recent
     conversation/global message windows, `seon.eval` owns recent per-agent/global
-    eval windows, and `seon.log/tail` remains the one error-log tail. Datahike's
+    eval windows and bounded error-storm signal, and `seon.log/tail` remains the
+    one error-log tail. Datahike's
     fixed lazy `rseek-datoms` is exposed only through the fully specified
     `seon.db` wrapper; agent context and root system activity now compose these
-    bounded append-order streams without a complete history scan. Remaining:
-    delete the duplicate readers in `seon.render.default`, error-storm,
-    transcript, and menu code. Do not store a recent-list projection or rely on
-    a growing Datalog sort.
+    bounded append-order streams without a complete history scan. Function-menu
+    ranking and header error-storm detection now consume those same fact-owner
+    windows; their duplicate full-history queries and the parallel
+    `:seon.derive/error-storm` vocabulary are deleted. Remaining: bound the
+    transcript's retained HTML work before materialization while preserving the
+    deliberate full AI-history policy, and remove any now-redundant tail step in
+    `seon.render.default`. Do not store a recent-list projection or rely on a
+    growing Datalog sort.
 11. Restore a deliberately small root-only role block after behavioral review:
     root understands the fleet, starts/routes to ordinary agents, and handles
     recovery notices. Keep root's home requirements as one complete curated

@@ -175,10 +175,12 @@ process verbs are not primary UX.
   list every agent; lazily render human detail, and budget AI detail by
   running/erroring/recent priority. CPU/RSS waits for one reusable operator
   status projection and never gets its own feed.
-- Recent messages/evals currently have several duplicate full-history scans.
-  Put bounded reverse-index readers in the fact-owning namespaces, expose
-  Datahike `rseek-datoms` only through `seon.db`, and make transcript, chat,
-  menus, error-storms, activity, and root cards consume those functions.
+- Recent message/eval fact owners now expose bounded reverse-index windows
+  through `seon.db/rseek-datoms`; context evals, chat/default conversation,
+  function menus, error-storms, and root activity consume them. The remaining
+  hotspot is transcript HTML, which still materializes complete message/eval
+  history before applying its retained-turn window; preserve the deliberate AI
+  transcript policy while bounding the human surface earlier.
 
 ## Settled — do not re-litigate
 
