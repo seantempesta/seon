@@ -122,3 +122,26 @@
         (is (str/includes? feedback "changed tests passed"))
         (is (str/includes? feedback "seon.dev.runtime-id-test")))
       (finally (fs/delete-tree directory)))))
+
+(deftest codex-post-edit-loads-the-real-docstring-checker-from-any-path
+  (let [{:seon.dev.hook-test/keys [directory config]} (fixture)
+        source (fs/path directory "missing_doc.clj")
+        path (str (fs/relativize repo-root source))
+        patch (str "*** Begin Patch\n"
+                   "*** Add File: " path "\n"
+                   "*** End Patch")]
+    (try
+      (spit (str source) "(ns hook.missing-doc)\n(defn public-fn [] :ok)\n")
+      (let [result (run-hook
+                     {:hook_event_name "PostToolUse"
+                      :tool_name "apply_patch"
+                      :tool_input {:command patch}}
+                     config)
+            feedback (get-in result
+                             [:seon.dev.hook-test/response
+                              :hookSpecificOutput
+                              :additionalContext])]
+        (is (zero? (:seon.dev.hook-test/exit result)))
+        (is (string? feedback))
+        (is (str/includes? feedback "public-fn")))
+      (finally (fs/delete-tree directory)))))

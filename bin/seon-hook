@@ -236,8 +236,7 @@
   ;; The hook itself stays a fast, dependency-free bb script. Malli is needed
   ;; only because the canonical pure linters carry their public schemas.
   (deps/add-deps
-   {:paths [(str (root-file "src"))]
-    :deps {'metosin/malli {:mvn/version "0.20.0"}}})
+   {:deps {'seon/hook-source {:local/root repo-root}}})
   (require namespace))
 
 (defn- markdown-feedback [event config]
@@ -347,8 +346,11 @@
 (def pod-log-path (root-file "logs/pod.log"))
 
 (defn- core-fault-dial []
-  (let [manifest (io/file repo-root (or (System/getenv "SEON_CONFIG")
-                                        "config/system.edn"))]
+  (let [configured (or (System/getenv "SEON_CONFIG") "config/system.edn")
+        configured-file (io/file configured)
+        manifest (if (.isAbsolute configured-file)
+                   configured-file
+                   (io/file repo-root configured))]
     (or (when (.exists manifest)
           (second (re-find #":seon\.config/on-core-error\s+(:[a-z]+)"
                            (slurp manifest))))
