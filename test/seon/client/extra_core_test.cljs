@@ -26,7 +26,11 @@
   "Restore the exact collector/projection state that preceded replay."
   [forms projection]
   (if projection
-    (schema/activate-projection! projection)
+    (do
+      (schema/activate-projection! projection)
+      ;; The declaration candidate may contain later module-load forms that
+      ;; are intentionally absent from the last committed projection.
+      (schema/restore! forms))
     (do
       (schema/restore! forms)
       (reset! @#'schema/!projection nil)
@@ -161,7 +165,9 @@
           (.finally
             (fn []
               (reset! client/!extra-core-vars before-extra)
-              (restore-schema-state! before-schemas before-projection)))
+              (restore-schema-state! before-schemas before-projection)
+              (is (= before-schemas (schema/snapshot))
+                  "replay cleanup preserves the exact declaration candidate")))
           (settle! done)))))
 
 (defn guard-bait

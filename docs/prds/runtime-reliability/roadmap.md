@@ -185,6 +185,14 @@ resolves an existing eid first, preserving malformed/non-unique-ref errors but
 returning nil for valid absence. The combined database/render gate passes 75
 tests and 411 assertions; canvas rendering again omits a missing agent.
 
+The state/warning cascade had two causes. `extra-core-test` restored the active
+projection but discarded declaration candidates loaded after that projection;
+cleanup now restores both distinct states and asserts exact equality. The
+unmarked-entity warning also still searched canonical schema properties for a
+retired derived id-attr copy; it now consumes the active projection's entity
+catalog. The contaminating replay/state/warning order passes 30 tests and 111
+assertions, including core identity entities and accepted-schema self-healing.
+
 The durable evidence, pinned sources, executable probes, and acceptance gates
 are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]],
 [[research/test-impact-selection-and-runner-audit-2026-07-14]], and

@@ -466,15 +466,15 @@
                  k)))))
 
 (defn- marked-entity-id-attrs
-  "The set of id-attrs DECLARED by registered `:map` schemas carrying
-   `{:seon.db/entity true}` — `register!` derives `:seon.entity/id-attr`
-   into the stored props, so its presence ≡ the marker + an id entry."
+  "The id attrs derived for committed entity-map declarations.
+
+   Canonical schema forms retain only authored properties. The active
+   projection's entity catalog owns the derived identity association; never
+   search canonical forms for the retired `:seon.entity/id-attr` copy."
   []
   (into #{}
-        (keep (fn [[_ v]]
-                (when (and (vector? v) (= :map (first v)) (map? (second v)))
-                  (:seon.entity/id-attr (second v)))))
-        (schema/registered-schemas)))
+        (map :seon.schema.catalog/id-attr)
+        (schema/entity-catalog)))
 
 (defn- unmarked-map-schemas-carrying
   "Registered `:map` schemas that have an entry for `attr` but NO
