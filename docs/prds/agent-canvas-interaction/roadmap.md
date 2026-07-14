@@ -16,8 +16,17 @@ and human across validation, focus, layout, and live updates.
 
 Canvas facts, AI/human twins, Hiccup controls, the reactive call gate, focus
 derivation, pin/clear operations, and a generated canvas skill exist. The full
-control matrix and browser behavior have not been audited or graduated as one
-end-to-end mechanism.
+control matrix and browser behavior have not been graduated as one end-to-end
+mechanism. The source audit confirms eleven indexed public functions with
+registered schemas and a green focused 20-test/61-assertion baseline, but finds
+no helper write/read round trips, visible pending/failure transition, duplicate-
+submit proof, live canvas morph, or narrow/wide browser matrix.
+
+## Research evidence
+
+- [[research/canvas-source-audit-2026-07-14]] — exact dependency ledger,
+  current mechanism, live REPL probes, gap/deletion map, ordered slices, and
+  regression/browser/simple-model matrix.
 
 ## Ordered work
 
