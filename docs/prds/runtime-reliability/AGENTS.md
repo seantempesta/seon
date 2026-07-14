@@ -187,6 +187,9 @@ process verbs are not primary UX.
 - Persisted `:seon.ns/require-edges` are the sole alias/refer authority for SCI,
   replay ordering, and context resolution. The render-time namespace-source
   parser and its fallback-tracking atom are deleted.
+- Persisted `:seon.fn/read-attrs` are the sole declared renderer dependency
+  facts. The render path no longer regex-scans source for old rows; fresh code
+  is indexed or teed once and runtime observed reads remain the exact check.
 
 ## Settled — do not re-litigate
 

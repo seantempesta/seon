@@ -154,6 +154,13 @@ birth or eval. The render-time source parser and its unbounded fallback-note
 atom are deleted; focused require/replay/SCI tests pass 51 tests and 231
 assertions.
 
+The same no-compatibility rule now applies to renderer dependencies. The
+analyzer tee's `:seon.fn/read-attrs` datoms are the sole declared read set;
+recency/invalidation no longer regex-scan persisted source for old rows. This
+removes a second parser and prevents strings, comments, and unresolved aliases
+from inventing dependencies. The focused behavioral gate passes 16 tests and
+49 assertions, including source-only omission and persisted dynamic reads.
+
 The direct Babashka edit hook now proves repository containment before it loads
 configuration or writes diagnostics, serializes bounded diagnostic writes
 across concurrent hook processes, and cannot throw from its terminal log sink.

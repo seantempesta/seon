@@ -444,6 +444,11 @@ in `seon.web.datastar`.
   suppressed. Broad/unknown reads are compared conservatively rather than
   blindly rendering. Coalescing has a bounded maximum wait, so continuous
   structural writes cannot starve a view.
+- **Declared renderer reads are database facts.** The analyzer tee persists
+  qualified keyword reads as `:seon.fn/read-attrs`; recency and the pre-render
+  candidate filter consume only those facts. They never regex-scan function
+  source as a compatibility path. Runtime observation remains the exact
+  correctness check for reads that actually execute.
 - **Separate GET feed path.** The shim page (`/view`, `/agent/{id}`) and its live
   stream (`/view/feed`, `/agent/{id}/feed`) are two GET URLs; the shim's
   `data-init="@get('…/feed')"` opens the stream. Two distinct URLs sidestep the
