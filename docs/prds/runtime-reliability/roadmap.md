@@ -154,6 +154,11 @@ birth or eval. The render-time source parser and its unbounded fallback-note
 atom are deleted; focused require/replay/SCI tests pass 51 tests and 231
 assertions.
 
+A later real Shadow edit exercised the repaired hot path: six affected
+namespaces were selected, 36 replaced definitions were unstrumented and
+re-instrumented, both agent runtimes were rehosted, and the post-reload live
+coverage census remained zero gaps.
+
 The same no-compatibility rule now applies to renderer dependencies. The
 analyzer tee's `:seon.fn/read-attrs` datoms are the sole declared read set;
 recency/invalidation no longer regex-scan persisted source for old rows. This
