@@ -8,7 +8,7 @@ tags: [architecture, agent]
 
 > **Target design** (present tense). The block/render machinery lives in
 > [[ui]]; historical turn reconstruction + inspection in [[observability]]; the measured laws
-> that constrain this in [[laws]]. We-are-here: [[roadmap]]. This doc keeps
+> that constrain this in [[laws]]. Implementation state lives in [[roadmap]]. This doc keeps
 > to Clojure primitives — `ns`, `defn`, `require`, var metadata, a db value
 > — and reserves only the names backed by real code (`block` =
 > `:seon.agent.ctx/block`, `render` = `:seon.render/*`, `db` = `seon.db`).
@@ -128,48 +128,16 @@ they never contradict it.
 
 ## The REPL mode is a datom — and it teaches its own grammar
 
-The agent's turn resolves a form's result in one of two modes, selected per
-cluster by the `:seon.config/repl-mode` datom (`:batch` | `:stream`). The
-manifest-absent DEFAULT is **per-model** (`seon.config/default-repl-mode`,
-measured 2026-07-10): DeepSeek-identity configs default `:stream` (fabrication
-is structurally absent there — 0/42 turns vs 32–48% in `:batch`), everything
-else `:batch` (Spark-class instruction-followers are ~0-fab in `:batch` and
-`:stream` only costs them per-turn latency). An explicit manifest value always
-wins; the suite pins `:batch` in `config/test.edn`.
+`:seon.config/repl-mode` selects `:batch` or `:stream` as database state.
+`:batch` preserves the raw reply, attempts every complete parsed form in source
+order, and records each real value or error in its original position. It never
+regex-rewrites model output, invents a result for an unattempted form, or treats
+a model-authored claim as execution evidence. `:stream` ends the turn after the
+first complete top-level form and counts attempted forms as work.
 
-- **`:batch`** — one LLM call writes N forms. Every model-authored
-  result-claim (a `⟹ …`/`=> …` a model types into the reply, pattern-completing
-  the transcript's `form ⟹ value` grammar) is **stripped at the reply
-  boundary**, before the reply is persisted or eval'd. The forms run; the next
-  turn's transcript interleaves the *real* `⟹ <value> ⟸ result/<id>` rows in
-  those positions. The fabrication never enters the record — a fix at the
-  boundary, not a render-time rewrite. The detector
-  (`seon.agent.ctx/first-result-claim`) skips any match inside a
-  successfully-parsed form span, so a `(println "⟹")` literal or a `:=>` in a
-  `:malli/schema` never fires.
-- **`:stream`** — the SDK stream is consumed delta-by-delta and **aborted the
-  instant one complete top-level form has streamed** (a cheap escape-aware
-  delimiter-balance gate confirmed by `parse-forms`). One form per turn; its
-  value is in the transcript when the agent continues. The eval batch is
-  truncated after the first `:form` entry — a same-delta tail that parses
-  into extra (typically read-error) entries stays byte-intact in the reply
-  blob but never evals. The run's WORK bound is **form-denominated** under
-  `:stream` (`seon.derive/run-form-count` — the loop and the masthead's
-  `loop k/cap` both count forms, so prose/orientation turns burn nothing);
-  `:batch` counts turns as before. Aborting loses the
-  provider's final usage chunk, so those turns carry client-side token
-  estimates (`seon.ai.tokens/estimate`), flagged `:seon.agent.turn/usage-estimated?`.
-
-**The mode teaches its own grammar (colocation).** The instruction that
-describes the mode renders WITH the transcript block it governs — the masthead
-carries `:batch`'s "a result you type is stripped" OR `:stream`'s "your turn
-ends at your first complete form," gated by the same datom. The other mode's
-text is *absent*, not contradicted. This is the general rule: an instruction
-that could conflict is gated by DB-derived state, so it renders exactly when
-the state it describes holds — the same reactive-context discipline as the
-warning blocks. Every turn persists the cost (`prompt_cache_hit_tokens` /
-`prompt_cache_miss_tokens`, forms, `:seon.agent.turn/results-stripped`) so the
-two modes are comparable on identical tasks.
+The transcript masthead derives its grammar instruction from the same mode
+datom, so only the applicable instruction is present. Turn facts retain the
+forms and token usage needed to compare modes without changing prompt truth.
 
 ## A render fn supplies twin projections
 
@@ -309,24 +277,16 @@ contract:
   keys (`:seon.render/node`, `:seon.agent/entity`, …); a semantically
   richer request (e.g. `:seon.agent.debug/request`) stays its own schema.
 
-This rides the **one instrumentation layer** (every schema'd fn whose shape
-takes a wrapper is Malli-instrumented off the program graph—once after runtime
-boot/declaration loading, immediately for a newly evaluated/redefined fn, and
-after hot reload only for unwrapped fn objects in the exact namespace resources
-Shadow's Node client loaded. That resource set is derived from Shadow's
-`:compiled` / `:always-load` / `:never-load` build facts before querying the
-corresponding program rows; browser loaded-source filtering is not used in the
-Node pod. Unrelated program rows are not queried and agent birth never runs
-global instrumentation. The structural
-exception is `^:async` non-simple shapes like `transact!`/`eval`, which
-validate in their own body — and coverage is itself a derived invariant:
-the root view's `:instrumentation-gaps` section recomputes the census per
-render) — inject-then-validate-input, so the filled map satisfies
-the `:map`. The result: a fn's spec IS the honest statement of what it needs,
-the eval log shows real data flowing, and the value is reproducible at its
-resolved coordinate. This is the one boundary of "clear magic" that lets `with-agent`
-/ ALS stay the core's internal *source* for the injection without leaking
-into every fn body.
+This rides the one program-publication instrumentation layer. Boot reconstructs
+wrappers once from committed program facts; a definition or schema transition
+then instruments only changed definitions and schema dependents. The structural
+exceptions are explicit in that transition. A candidate that cannot be
+validated and instrumented does not publish or pass readiness; it records one
+bounded core fault. Context may show that current fault concisely, while the
+detailed coverage diagnosis is pulled on demand through [[observability]].
+Coverage diagnostics are never standing context blocks. Injection happens before input
+validation, so the filled map satisfies the declared request shape and remains
+reproducible at the resolved coordinate.
 
 The **scope-by-signature** rule falls out: a fn that declares `:seon.agent/id`
 reads/writes **per-agent** data (it stamps `:my.plan/agent me` and filters by
@@ -366,7 +326,7 @@ route is also derived into that root view, so root knows what the user is seeing
 Derived root-only warnings still render only when their queries return facts.
 
 This is the quality bar for restoring historical root context: keep a statement
-only when it names root's irreducible role or a currently true state; move
+only when it names root's irreducible role or an actual derived state; move
 operational detail into the namespace that owns the functions; delete generic
 advice and duplicated instructions. Behavior is measured before more standing
 text is admitted.
@@ -388,9 +348,10 @@ survives most turns. A fn busts cache only when *its own* code or *its own*
 db-inputs changed — invalidation stays local to the fn that moved, because
 order is deterministic:
 
-1. **reference-code namespaces** — vendored source, effectively frozen.
-2. **the agent's code namespaces** — current `ns` full source (+ its
-   `require`s as compact cards, + the schemas those fns reference), sorted by
+1. **minimal fixed blocks** — the concise role, canvas, plan, and other
+   deliberately installed anchors whose queries currently produce a value.
+2. **the agent's code namespaces** — current `ns` full source plus its
+   home-required namespaces as compact cards and the schemas those fns reference, sorted by
    last-modified so rarely-touched code sits earliest and edit churn sinks to
    this group's end.
 3. **the current `ns`'s render fns** — the twins above; they *follow* the
@@ -401,8 +362,9 @@ order is deterministic:
    busts the cache — the cache-stability law). Only the leading edge moves.
    What must outlive the window goes to the DB (plan, kb, blobs), not
    transcript residue; a large inbound payload clips to a blob ref.
-5. **pull-first relevance (conditional, not a standing band)** — retrieval
-   beyond the current `ns` — fns whose *input* specs match the shapes the agent
+5. **pull-first relevance (conditional, not a standing band)** — reference
+   code and retrieval beyond the current namespace are explicitly inspected or
+   called when needed. Functions whose *input* specs match the shapes the agent
    is holding (a graph query — [[think-in-clojure]] §1) and embedding neighbors
    for the current activity — is a search the agent CALLS, not a pushed block.
    The context rebuild demoted it from a standing order position to pull-first:

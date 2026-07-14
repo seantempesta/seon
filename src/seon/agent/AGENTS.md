@@ -73,8 +73,11 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
   `config/default-repl-mode`). `:stream` aborts the LLM stream at the first
   complete top-level form and evals ONE form per turn, so the run's work
   bound counts FORMS (`derive/run-form-count`, `run/default-form-limit` 60);
-  `:batch` evals the full parse but strips model-typed result claims at the
-  reply boundary (`ctx/strip-result-claims`) before persist + eval.
+  `:batch` currently strips model-typed result claims at the reply boundary
+  (`ctx/strip-result-claims`) before persistence and eval, then attempts every
+  complete parsed form and records real execution results. The target removes
+  this rewriting; track that cut in the runtime-reliability roadmap rather than
+  pretending source already matches it.
 
 ## Vendored grounding
 

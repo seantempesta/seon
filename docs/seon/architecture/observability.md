@@ -6,12 +6,14 @@ tags: [architecture, agent, database]
 
 # Observability — inspect any agent, any turn
 
-> **Target design** (present tense — the system as it is when built). Current
-> code state + the build order live in [[roadmap]].
+> **Target design** (present tense). Implementation state, gaps, order, and
+> evidence live only in [[roadmap]].
 
 Every question about agent behavior — "what exactly did this agent see at turn
 N?", "what changed between turn N and N+1?", "why did it do that?" — is answered
-by a **query against the DB plus the blob archive**, never by hunting log files.
+by a **query against the database plus the blob archive**. Process logs remain
+necessary operational evidence for startup, readiness, transport, and crashes;
+they are not the durable forensic truth of an agent turn.
 This falls out of the core property: a turn's prompt is a pure render of ONE
 frozen db value, so persisting that value's coordinate makes the whole turn
 reproducible. Observability is not a subsystem bolted on; it is the
@@ -77,8 +79,10 @@ capability instead of ad-hoc log files:
 - **One archive, many producers** — turn capture, oversized eval results, and
   agent-authored artifacts all use the same functions. There is no separate
   "debug capture" file tree; debug persistence IS blob persistence.
-- **Searchable** — blobs are inside the `my.search` grep surface, and any
-  blob-backed attr can be pointed at the embedding index.
+- **Discoverable** — database blob projections are queryable by hash, media,
+  and token estimate. Literal or semantic content search reuses the protected
+  search/embedding capabilities when explicitly requested; `my.blob` does not
+  create another index.
 
 ## Replay, diff, search
 
@@ -127,45 +131,25 @@ drop-oldest buffer rides out conn-less windows) and one caught failure yields
 one deduplicated error record in one recording transaction (propagating
 rejections are dedup-tagged).
 
-Two capture layers need zero per-site work: the malli instrumentation
-wrapper's async arms (rejections + resolved-value output violations —
-both previously invisible) and the process net
+Two capture layers need zero per-site work: the Malli instrumentation
+wrapper's async arms (rejections and resolved-value output violations) and the process net
 (`uncaughtException`/`unhandledRejection` → fault `:core`).
 
-Expected-test faults, dev-REPL classification, and the error-write recursion
-fence are ambient execution facts, not process-wide modes. One
-`AsyncLocalStorage` scope map carries their fully namespaced markers only along
-the Promise/await work spawned inside that scope. Concurrent agents never
-inherit one another's markers. In particular, a pending error persistence write
-suppresses only a contract fault caused by that same write chain; it cannot drop
-an unrelated agent's simultaneous fault. None of these markers is persisted.
+Expected-test classification and the error-write recursion fence are
+invocation-scoped facts. They follow only the asynchronous work spawned by that
+invocation, are never persisted as runtime modes, and cannot suppress another
+agent's concurrent fault.
 
-The `:seon.config/on-core-error` dial (manifest; `:crash | :gate |
-:log`) governs `:core` faults only — `:agent` faults
-never escalate in any mode. Under `:gate` the pod keeps running but the
-CI-shaped wrappers fail any run that accumulated a new `:core` fault
-(`bin/test-cljs` greps the run transcript for the `SEON-CORE-FAULT`
-marker; the dev hook brackets the pod log by byte offset). The derived
-`core-faults-block` section renders on the ROOT view only and vanishes
-when the last `:core` fault predates the latest user message — no
-acknowledgement state. Design + rulings:
-`docs/prds/agent-ctx/research/error-blame-strict-gate-2026-07-03.md`.
+`:seon.config/on-core-error` governs `:core` faults only. Agent faults remain
+values in every mode. A failed program publication or readiness transition
+records one bounded core fault and fails development admission; a production
+render boundary may return the configured bounded fallback after recording the
+same occurrence. An outer boundary does not record an error already recorded by
+its inner owner, so a derived rerender cannot create an error-invalidation loop.
 
-Render-boundary strictness is a separate development dial, not another fault
-classification system. `SEON_RENDER_STRICT=1` makes every caught renderer or
-converter failure rethrow at its first guarded boundary; `0` keeps the same
-persisted error fact but returns the production fallback surface. The source
-checkout operator (`bin/seon`) defaults it to `1` and honors an explicit `0`.
-The core-error dial then decides whether a rethrown `:core` fault crashes,
-gates, or logs; agent-authored faults never gain core authority. An error
-envelope already recorded by an inner boundary remains the same occurrence
-when an outer boundary wraps it—derived rerenders must not emit another error
-transaction and invalidate themselves.
-
-The persisted message is the DEEPEST real cause (`seon.error/deepest-message`
-walks the `:seon.error/cause` chain past cljs.js's generic wrappers), so the
-`SEON-CORE-FAULT <message> @t=<t> commit=<abbrev>` marker and every triage surface name
-the actual failure, never `"ERROR"`.
+Persisted messages name the deepest available real cause rather than a generic
+wrapper. Root context may derive one concise current fault signal; detailed
+frames, arguments, and reproduction data remain on-demand forensic views.
 
 Triage runs through three `seon.agent.debug` functions, three altitudes over
 the same datoms:
@@ -190,12 +174,10 @@ the same datoms:
 
 The as-of db is read-only; when the fix needs a WRITABLE view—re-running
 safe code, patching data, letting a forensic agent act—the fourth step is
-**fork**: `bin/seon cluster fork <cluster> --commit <commit-id>` creates a
-Datahike copy-on-write branch of that database backend with `branch!` at the
-retained commit,
-then boots a branch-qualified debug pod/writer on its own port. It does not copy
-Konserve or define another versioning model. Entity/transaction ids through the
-fork point are identical, but coordinates are always
+**fork**: the operator creates a Datahike copy-on-write branch at the retained
+commit, then attaches a branch-qualified non-autonomous forensic runtime. It
+does not copy Konserve or define another versioning model. Entity/transaction
+ids through the fork point are identical, but coordinates are always
 `{database-id, branch, commit-id}`
 qualified because later transaction ids can diverge/reuse after a reset.
 
@@ -206,31 +188,20 @@ host and never resumes agents, schedules, providers, or external-effect workers.
 
 The coordinate semantics are precise: it is captured at the catch site—the db
 value the failing code saw—while the error datom itself commits later, so the
-error datom does not exist inside its own branch. Prompt/reply blobs are
-content-addressed: the branch reads the source blob layer read-only and writes to
-a branch-local overlay, so destroying the branch cannot delete/mutate source
-content. Before promotion, every target-referenced overlay hash is verified and
-materialized into main's base; blob GC treats every retained branch as a root.
-The full flow is find (`watch-faults`) → `errors` → `error` → `repro` →
-**fork** → fix, then branch destroy stops/releases the branch pod/connection,
-calls `delete-branch!`, and removes only its overlay. The generic database-backend
-destroy door refuses branch-qualified targets.
-
-The standing alarm is `bin/seon watch-faults` — a dependency-free supervisor
-subcommand that tails the pod log from end-of-file (following across
-rotation and pod restarts), blocks until the first NEW un-expected
-`SEON-CORE-FAULT` marker (the `SEON-EXPECTED-CORE-FAULT` fixture marker is
-ignored), prints it with the last ~20 log lines, and exits 0. Run it as a
-background task at session start; when it fires, triage `errors` → `error`
-→ `repro`.
+error datom does not exist inside its own historical view. Branch-local blob
+overlays, promotion, garbage collection, and remote retention are coordinated
+designs owned by the database-lifecycle-recovery and blob-lifecycle PRDs. The
+stable forensic flow is fault list → error detail → reproduction bundle →
+non-autonomous historical attachment; operator command names are not part of
+the data model.
 
 ## The forensic agent
 
 Debugging an agent is done **by another agent given the exact db the target
 saw**, not by a human reading logs:
 
-- Mint a forensic agent in an **ephemeral writable branch** (`bin/seon cluster
-  fork`, its own pod/branch connection) rooted at the target's resolved commit, so it
+- Mint a forensic agent in an **ephemeral writable branch** rooted at the
+  target's resolved commit, so it
   sees exactly what the target saw at that moment.
 - Seed its ctx with the target's **reconstructed context blocks** plus one
   extra **debug-brief block**: the behavior in question and the ask —
@@ -255,22 +226,14 @@ other clusters exist. Database enumeration, fork, release, and deletion are
 typed root/supervisor operations in `seon.db.registry`, never agent protocol
 operations. The supervisor owns the lifecycle:
 
-- `bin/seon cluster create <name> [--ephemeral]` — a db entry (`:file`,
-  ensured at pod boot) + a pod on its own ephemeral HTTP port. ~10s warm,
-  ~25s cold.
-- `bin/seon cluster fork <source> --commit <commit-id> [name]` — same database
-  backend, new Datahike branch + branch-qualified registry/protocol/pod target +
-  blob overlay. A complete resolved coordinate is required; no branch-and-`t`
-  compatibility selector exists.
-- `bin/seon cluster destroy <branch-name>` — for a branch target, stop/release
-  its pod/conn, `delete-branch!`, and remove only its overlay; never delete the
-  shared source-database blobs.
-- `bin/seon cluster destroy <name>` — stop the pod, delete the db from the
-  registry (`seon.db.registry/delete-database!`), remove
-  `data/clusters/<name>/`
-  including `blobs/` (turn capture is per-cluster).
+- creation establishes one registered database attachment and pod;
+- fork requires a complete retained coordinate and creates a writable Datahike
+  branch without physically copying the database;
+- a historical or forensic attachment starts non-autonomously; and
+- destroy quiesces users of the target and removes only resources owned by that
+  attachment. A branch cannot delete source-database content.
 
-`POST /agents/run` is the one-shot composition door on EVERY pod, built
+`POST /agents/run` is the one-shot composition door on every pod, built
 purely from the agent primitives: start-or-reuse an agent in the pod's own
 cluster (optional `agent_id` — durable database, so the same agent can be
 driven again across a pod restart), deliver the input through the real wake
@@ -286,19 +249,14 @@ ephemeral clusters by port through this same production boundary; there is no
 in-process evaluator lifecycle. The answer key never enters the pod — scoring
 stays host-side. Benchmark vocabulary is harness-side only.
 
-Long-term planning is a first-class Inspect task over that same door: its live
-arm creates one ephemeral cluster, drives phase one, restarts the pod, resumes
-the same agent for phase two, and scores the resulting plan/eval facts
-host-side. Frozen good/bad arms exercise the identical scorer offline so its
-discrimination can be proved without a pod or model.
-
-## Build path
+Standard Inspect tasks measure the selected model and scorer. Pod-backed Inspect
+tasks measure Seon's production agent/runtime behavior through this door; the
+two claims are reported separately and no duplicate evaluator is created.
+Long-term planning is a pod-backed Inspect task: one ephemeral cluster spans
+multiple interactions and a pod restart, then host-side scoring reads the
+resulting plan and eval facts. Offline good/bad fixtures exercise the same
+scorer without claiming to measure the pod.
 
 Every turn uses the one complete database coordinate plus prompt/reply blob
 refs. `seon.agent.debug/turn` and `turn-diff` reconstruct and compare turns from
-those facts. The blob refs are the one capture path; Inspect AI and debug
-projections read prompts back by hash. Current implementation gaps and their
-ordered no-alias cutover live in [[roadmap]].
-Source-grounded verification of what datahike's tx metadata already provides
-(and why the pre-turn basis-t is the one thing it doesn't):
-`docs/prds/agent-fsm/research/` tx-metadata findings, 2026-07-02.
+those facts. Inspect and debug projections read the same blobs by hash.

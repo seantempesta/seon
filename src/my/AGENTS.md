@@ -1,24 +1,25 @@
-# src/my — the agent-owned toolkit (renders INTO agent context, in full)
+# src/my — the agent-owned composition toolkit
 
 **Read before editing:** `docs/seon/architecture/toolkit.md` (the function
 catalog + the four shared shapes), `data-model.md` (the `my.kb`/`my.todo`
 schemas + data-agent-ref scoping). Skills: `ui-canvas`,
 `data-oriented-clojure`.
 
-These namespaces are special: **their full source renders into every
-agent's context** (the render-prominence law — a composition function's value
-IS its worked example). That means:
+These namespaces are agent-facing: current namespace source renders in full,
+while home-required namespaces render as compact cards unless selected by the
+one context policy. Composition functions still need complete, useful worked
+examples when relevant. That means:
 
 - **Every line here is agent-facing teaching material.** Code must be the
   cleanest possible worked example of the house style: namespaced keys,
   `schema/register!` first, errors-as-values, derive-don't-store. A hack
   here gets imitated by every agent, forever.
-- **Docstrings render everywhere** — line 1 is a complete ≤72-char sentence
+- **Docstrings are agent-facing** — line 1 is a complete ≤72-char sentence
   ending in punctuation (the compact-card summary). True current-state, no
   dates/issue refs.
 - **Keep `register!` calls in the file** — agents learn the schema pattern
   from seeing them.
-- **Token weight is real**: this corpus is in every prompt. Every fn must
+- **Token weight is real**: this corpus is eligible context. Every fn must
   pull measurable weight; new functions need drive evidence they get used.
 - **New nses must be required into the boot build** (`client.cljs`) or they
   index with ZERO fns and render name-only.

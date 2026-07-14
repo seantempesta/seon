@@ -1,74 +1,17 @@
 ---
 type: decision
-status: implemented
+status: abandoned
 date: 2026-01-15
-tags: [decision, architecture, database, flow]
+tags: [decision, architecture, archive, flow]
 ---
 
-# ADR 005: Selective Adoption of core.async.flow
+# ADR-005: Selective adoption of core.async.flow
 
-> **SUPERSEDED.** The active CLJS pod is core.async-free; the agent loop is a
-> data FSM fold over derived events (see [[agent-runtime]]). core.async.flow
-> survives only on the paused JVM track. Historical record below.
+This decision is superseded. The active CLJS pod has no core.async topology,
+Flow process registry, or second subscriber bus. Agent execution is a data FSM
+fold; database commits and bounded replay are the one update channel; the web UI
+uses the one render-unit and Datastar feed engine.
 
-## Context
-
-Rich Hickey released `core.async.flow` (January 2025) -- a library for building concurrent data processing pipelines with explicit topology, step function separation, and introspection. We evaluated whether it should become the foundational architecture for Seon's agent infrastructure.
-
-## Decision
-
-**Selective adoption, not wholesale replacement.** Use Flow for internal orchestration where its strengths apply. Keep current architecture for agent lifecycle.
-
-## Rationale
-
-### The Fundamental Mismatch
-
-Flow was designed for concurrent data processing pipelines (Clojure threads processing messages). Seon's agents are long-running external processes (Claude CLI subprocesses) with opaque state (Claude's context window).
-
-| Flow Assumption | Seon Reality |
-|-----------------|--------------|
-| Processes are Clojure threads | Agents are external subprocesses |
-| State returns from step functions | State lives in Claude's context window |
-| Channels for all I/O | stdout/stdin for Claude communication |
-| Microsecond message processing | Minutes/hours of agent execution |
-
-### Where Flow Excels (adopted)
-
-- **Internal message routing** -- explicit topology visible as data
-- **Status aggregation** -- decoupled UI updates, ping for debugging
-- **SSE streaming** -- cleaner shutdown, better error handling
-- **Database write coordination** -- serialized access through flow step-fns
-- **Request-reply pattern** -- promise-based topology/request! for cross-boundary calls
-
-### Where Flow Doesn't Apply (kept current approach)
-
-- **Agent lifecycle** -- Integrant for resource management (nREPL, Datahike per agent)
-- **External process management** -- Direct subprocess management for Claude CLI
-- **Persistence** -- Datahike for all data storage
-- **Schema discovery** -- Malli registry (Flow has no contracts concept)
-
-## Consequences
-
-**Benefits:**
-
-- Explicit topology -- process connections visible as data, not hidden in code
-- Centralized error handling via `:error-chan`
-- Introspection via `ping` for debugging live state
-- Hot reload of step functions
-
-**Costs:**
-
-- Learning curve for step function 4-arity protocol (describe/init/transition/transform)
-- Alpha status -- "Names and other details are in flux"
-- Debugging complexity requires flow-monitor and extensive logging
-
-## Implementation
-
-Flow is used for:
-
-- `seon.db.datahike.conn-process` -- serialized per-db reads and writes (one conn-process per db)
-- `seon.db.datahike.flow` -- routing front for `seon.db` requests into the conn-process
-- `seon.flow.topology` -- unified request-reply backbone
-- `seon.web.sse.flow` -- SSE broadcasting
-
-Flow patterns (explicit topology, step function separation) inform design even where the library isn't used directly.
+The removed design is recoverable from Git at
+`runtime-reliability-pre-refactor-2026-07-13`. See [[agent-runtime]], [[ui]],
+and [[architecture/decisions/008-database-protocol]].

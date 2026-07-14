@@ -1,12 +1,13 @@
 ---
-type: prd
+type: architecture
 status: active
-tags: [prd, agent, schema, flow]
+tags: [architecture, agent, schema, flow]
 ---
 
 # Agent runtime — the loop, the run, derived state, and lifecycle
 
-> **Target design** (present tense — the system as it is when built). Current code state + the migration path live in [[roadmap]].
+> **Target design** (present tense). Implementation state, gaps, order, and
+> evidence live only in [[roadmap]].
 
 This doc owns the **runtime**: how an agent runs, how a **run** bounds its work,
 how the loop is a fold over a data **FSM**, how **state is derived** from
@@ -147,7 +148,7 @@ result write. **Ground in** `transaction.cljc:873` (`compare-and-swap`) +
 only values cross the protocol, CAS-as-assertion, never memoize on a db value — is
 [[datahike-primer]].)
 
-### REPL forms — namespaces are places (settled 2026-07-10)
+### REPL forms — namespaces are places
 
 The eval boundary (`seon.eval/dispatch-repl-form!`) implements the real-REPL
 movement/update semantics the transcript teaches, so an agent's reflexive
@@ -255,28 +256,14 @@ run: the earlier message IS the answer (derived from the run's message log, no
 stored flag), so `complete` closes without sending a second, answer-clobbering
 message.
 
-**Complete-gate — a success claim must be BACKED by a real green test run.**
-`complete` is the one function that asserts *success*, so it is REFUSED (an honest
-errors-as-value envelope, never a throw, the run left OPEN so the agent keeps
-working) when the agent's **latest** recognized test run is RED. This is purely
-DERIVED from the agent's own `:seon.agent.testrun` datoms at call time — the max
-testrun eid scoped to the agent (`seon.agent.testrun/latest-run`), refused when
-its `failed > 0` or `errors > 0`; no stored gate flag. It is correctly SCOPED: an
-agent that ran **no** recognized suite (a root orchestrator, a research agent, a
-gsm8k solver) has no testrun datom, so `latest-run` is nil and `complete`
-proceeds normally — the gate never touches non-test work. Latest-wins: a later
-green run supersedes an earlier red (and vice versa) by higher eid. This closes
-the **fabrication hole** (T4): an agent that runs a real red pytest, then in the
-SAME reply fabricates an "all tests pass" echo and calls `complete`, is refused —
-the real red testrun entity persisted via `testrun/record!` (forms eval
-sequentially) BEFORE `complete` evaluated, so the gate reads the truth the
-runtime rendered — the persisted datoms — not the
-model's claim. The refusal is honest and actionable ("your latest test run is
-RED (N failed) … a result you did not see the runtime render does not count"),
-converting an early false-stop into a continued drive. An agent that honestly
-wants to STOP with tests still red is NOT forced to lie: `complete` is the
-success claim, but `pause` and `(message/user …)` are ungated — the agent reports
-its real status through those, and only the success assertion is withheld.
+**Complete-gate.** `complete` asserts success, so current parsed test facts that
+unambiguously show a failing owning gate refuse that assertion with an error
+value and leave the run open. An absent or unrecognized runner is never silently
+treated as proof of success or failure; non-test work remains ungated. The test
+system owns runner recognition and parsed outcome mechanics. Runtime owns only
+the behavioral invariant: a model-authored claim is not execution evidence,
+while an actual current failing result cannot be overwritten by prose. `pause`
+and messaging remain available for an honest incomplete or failing handoff.
 
 **Durable result + outcome routing (multi-agent).** A `complete` also writes the
 result as **DATA on the run** — `:seon.agent.run/result` (the short answer /
@@ -488,9 +475,11 @@ The cluster runtime has one boot entry and a strict durable/runtime split:
    config subset as `{user root, process config}`. Equal state emits no
    transaction. Omitted/removed managed facts are ordinary retractions, so
    there is no ghost-pruning or config-healing pass.
-5. Atomically swap in the complete Malli registry, load only safe persisted
-   declarations, instrument the complete loaded program once, install global services/listeners once,
-   and recover runtime services.
+5. Publish one validated program candidate: atomically swap in its complete
+   Malli registry, load only its safe committed declarations, instrument the
+   complete loaded program once, install global services/listeners once, and
+   recover runtime services. Any validation or instrumentation failure rejects
+   the candidate, records one bounded core fault, and fails admission.
 6. On a provably fresh database only, call the same atomic birth compiler used by
    `start!` to create one ordinary readable-word agent under root/boot
    provenance. Root is the coordinator; this child is the initial work agent.
@@ -518,9 +507,9 @@ the boot process; a declaration whose current source was authored through the
 REPL is likewise preserved. Thus one desired-program delta performs additions,
 changes, and removals without treating every boot transaction as compiled code.
 
-Instrumentation follows effective definitions. Boot performs the one complete
-pass. Thereafter a new/redefined function is filtered-unstrumented from Malli's
-recorded original and instrumented once; a changed schema key reinstruments only
+Instrumentation follows effective definitions. Boot reconstructs wrappers once
+from committed program facts. Thereafter a new or redefined function is
+uninstrumented from Malli's recorded original and instrumented once; a changed schema key reinstruments only
 the transitive function-contract dependents derived through Malli schema refs.
 Removing an optional contract/error fact emits an explicit attribute retraction;
 identity-upsert omission never leaves a stale cold-boot contract behind.
@@ -686,59 +675,33 @@ mechanisms — extended, never duplicated — make every hang a value:
   oldest-first and disappear on restart. A late settlement updates only a slot
   that is still live; it cannot resurrect evicted work.
 
-The honest residual: a **synchronous CPU loop** blocks the event loop the
-watchdog itself lives on — no eval-level mechanism can preempt it. That is
-precisely the fault axis of the isolation tiers below: `eval-batch!` runs
-in a Tier-1 worker, and the deadline-watchdog's `terminate()` is the
-CPU-proof kill an in-process timer can't deliver. Chokepoint bounds handle
-every async park; the worker tier handles the sync runaway; together the
-system has no permanent-wedge class left.
+The honest residual is a synchronous CPU loop: it blocks the pod event loop and
+cannot be preempted by an in-process timer. The local runtime records and
+recovers this as a process-level core fault; it does not claim that SCI is a
+security boundary or that an in-process timeout cancels work.
 
-## Isolation — the execution service's backend tiers
+## Isolation — one execution-service contract
 
-Eval, render fns, and interactions are **three doors to one service** — "run an
-agent-granted fn with args, safely" (the one-service principle is stated in
-[[architecture]]; agent-authored renders and route handlers go the **same** door,
-covered by [[ui]]). The runtime owns the **backend** that actually runs the code,
-and it is **tiered**:
+Eval, agent-authored renders, and interactions call one bounded execution
+service: run a granted function with namespaced arguments and return data. The
+contract owns capability selection, deadline/cancellation signaling, result and
+write bounds, the run CAS fence, structured errors, and cleanup. A backend may
+not bypass the JVM writer or commit an unfenced late result.
 
-| | Tier 1 — worker_threads + SCI (default) | Tier 2 — microVM (opt-in) |
-|---|---|---|
-| weight | ~8MB / ~30ms per worker; `terminate()` ~0.8ms | ~5MB+guest / ~125ms boot; a second kernel |
-| isolation | process boundary (real kill) + SCI cage (hallucination guard) | full kernel isolation — "contain a stranger" |
-| DB reads | in-process, sub-ms (great for reactive readers) | vsock/VM-exit hop (fine for LLM-paced, bad for sub-ms re-render) |
-| npm | direct `require`, shared pnpm store | full Node inside; shared store via virtio-fs RO mount |
-| on macOS | native | libkrun (HVF) / Apple `container` |
-| use for | reactive readers, UI, the trusted single-user agent | untrusted/dangerous code; the multi-tenant case |
+The local pod executes that contract through SCI. Process isolation is a later
+backend change, not a second function surface or database path. Worker threads,
+pool sizing, memory limits, platform-specific microVMs, and kernel containment
+belong to an execution-isolation PRD and require measured behavioral proof. The
+architecture retains only three independent requirements for such a backend:
 
-**Three isolation axes — `worker_threads` alone are NOT a security boundary:**
+- **capability isolation** exposes only explicitly granted functions;
+- **fault isolation** lets a hung execution be terminated without wedging other
+  agents or the web UI; and
+- **resource isolation** bounds CPU and memory.
 
-- **Fault** (a hang/crash can't take down others) → worker_threads + `terminate()`.
-  SCI catches the common interpreted runaway in-process (~0.2ms); `terminate()` is
-  the CPU-proof backstop SCI can't deliver (a native loop, ReDoS) and the
-  deadline-watchdog's only real kill.
-- **Capability** (*what* code may do) → the **SCI curated surface**. Agent code runs
-  in SCI exposing only granted fns (`db/query`, `message!`, the database protocol
-  capabilities);
-  `fs`/`child_process`/`net`/`require` aren't in scope, so a worker can't format the
-  disk — the symbol doesn't resolve. A bare worker has full process perms and
-  `terminate()` can't stop an instant `fs` call, so **untrusted agent code MUST go
-  through SCI**; the bootstrap `cljs.js` compiler is only for *our* trusted code.
-- **Resource** (runaway memory/CPU) → worker `resourceLimits` / the Tier-2 microVM.
-
-Tier-1 covers fault + capability-by-grant + resource for the single-user,
-non-adversarial case. **Tier-2 microVM** is the *kernel* boundary for genuinely
-untrusted / multi-tenant code or defense-in-depth against an SCI escape: a guest
-can format its own disk but not the host's.
-
-**The pool shape** (piscina/tinypool patterns): warm `min 4 / max 8`
-pre-bootstrapped SCI cages; `concurrentTasksPerWorker 1`; recycle = terminate +
-respawn + re-read the DB (DB-stateless — no handoff); an `AbortSignal` →
-terminate on deadline; a bootstrap-failure breaker stops respawn storms. **Eval is
-offloaded**: the SCI `eval-batch!` runs in this pool, and the deadline-watchdog
-terminates a runaway worker — the CPU-proof kill an in-process timer can't deliver.
-The worker buffers its writes and commits them atomically through the same fenced
-tx after it returns, so a terminated worker can't leave a half-committed write.
+All backends return the same data envelope and transact through the same typed,
+fenced database protocol. Backend selection never changes agent-visible
+semantics.
 
 ## What the DB gives us for free — and what we don't adopt
 
@@ -776,8 +739,7 @@ bitemporal, reactive DB. We have one, so:
   SSE live channel.
 - [[toolkit]] — the agent's `my.*` function catalog (purpose, the my.plan planning
   tree, schedules, code lifecycle, recall).
-- [[roadmap]] — current code state, the gap, and the dependency-ordered,
-  replace-in-place migration to this target.
+- [[roadmap]] — implementation state, gaps, work order, and evidence.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db
   is a value, only values cross the protocol, CAS-as-assertion,
   resolved-coordinate caching). Read

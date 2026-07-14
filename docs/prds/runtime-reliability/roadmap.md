@@ -302,6 +302,35 @@ direct checker loading. Tests remain advisory; malformed source skips them.
 
 ### Slice 0 — reconcile and baseline — IN PROGRESS
 
+The architecture documentation correction pass completed on 2026-07-14 without
+closing Slice 0. Architecture now contains aspirational target truth only;
+localized source instructions describe current source behavior and link target
+debt here. The repository Markdown validator accepted all 20 architecture and
+roadmap files with zero violations; 34 active architecture source pointers
+resolve with zero missing paths; explicit date/status/phase/lane/evidence and
+stale-vocabulary searches returned no target-prose hits; and
+`git diff --check` passed. Slice 0 remains in progress for its broader baseline
+and successor-PRD work.
+
+Cross-lane research was reconciled without importing its implementation diary.
+The reviewed repl-autosuggest/plan/Inspect changes already on this branch remain
+the source baseline; standard Inspect tasks measure a model while pod-backed
+tasks measure Seon through the production one-shot door. The protected
+`shared-schema-section-2026-07-13.md` report found only about eight percent
+namespace-block savings, so shared schema placement remains profiling-gated and
+does not create a second context section now. Runtime-observed invalidation,
+dedicated root/session/canvas behavior, database lifecycle, and blob policy stay
+owned by their named successor PRDs. The protected untracked report remains
+unchanged.
+
+One explicit source-to-target gap remains at the batch reply boundary:
+`seon.agent.turn` currently calls `ctx/strip-result-claims` before persistence
+and evaluation, while [[docs/seon/architecture/context]] forbids output
+rewriting in the target. Remove that filter only in the owning runtime unit,
+preserve raw replies, attempt every complete parsed form, and prove that only
+real execution results become evidence. Until that cut lands, localized source
+instructions describe the current filter honestly.
+
 - Reconcile every remaining claim below with active source, tests, routes,
   process/classpath inspection, and the running default cluster. Delete or
   correct stale roadmap claims rather than treating prose as evidence.

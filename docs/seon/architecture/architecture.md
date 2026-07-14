@@ -6,7 +6,8 @@ tags: [architecture, agent, flow, database, web]
 
 # Seon Runtime Architecture
 
-> **Target design** (present tense — the system as it is when built). Current code state + the migration path live in [[roadmap]].
+> **Target design** (present tense). Implementation state, gaps, order, and
+> evidence live only in [[roadmap]].
 
 This is the map, not the territory: the thesis, the one vocabulary, the deployment
 topology, the cross-cutting principles, and one orienting paragraph per domain.
@@ -31,26 +32,14 @@ renderer. The derived-state rule and transition table are CLJS (`seon.derive` /
 `seon.agent.loop`), reached from the device the same way every read is — through
 the database protocol against the replica.
 
-**Client/server is the shape.** The pod is a **read-only datahike replica** of the
-single JVM **writer** (reads local off the replica, writes forwarded through the
-database protocol).
-Agent clusters run on user devices, each a replica the writer feeds datoms to —
-indexes are materialized once per cluster, all writes forwarded to the one writer
-(total order). A **local "system" cluster** does system work; **user clusters** do
-local data processing. A threaded db *value* is location-agnostic; the work-fence is
-arbitrated at the single writer; a full attachment/commit cursor plus verified
-branch-local replay is the network-blip recovery primitive. A client cluster is a **trailing applier**: bootstrap the indexes ONCE,
-then each pushed tx is an incremental index update (persistent structures — never a
-rebuild), so a client applying the writer's stream in order is deterministically
-identical to the writer at that resolved commit. **Bootstrap (settled 2026-07-02): compressed
-full tx-log replay**—the same branch-local replay machinery from the attachment origin, ONE
-mechanism for bootstrap and blip recovery both. Device-scale optimization path
-(cost changes, semantics never): current-state-first (history-less replay or
-filtered snapshot, stamped with its full coordinate so the trailing applier starts
-exactly there) + lazy history backfill — `as-of`/history queries route to the
-writer until backfill completes. An index-root snapshot copy (content-addressed
-konserve nodes, git-style incremental) is equally complete — a persistent value
-transferred instead of recomputed — and stays available as a later optimization.
+**Client/server is the shape.** The pod reads a local immutable Datahike replica
+and forwards writes through the database protocol to the single JVM writer. A
+threaded database value is location-agnostic, and the work fence is arbitrated at
+that writer. A replica attaches at one complete
+`{database-id, branch, commit-id, t}` coordinate, applies committed transactions
+in order, and repairs a gap without inventing state. Remote attachment,
+bootstrap, state transfer, backfill, cancellation, and retention are owned by a
+future remote-replication PRD; no particular remote algorithm is settled here.
 
 ## The core ideas
 
@@ -71,8 +60,9 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    holding" is a Datalog join — relevance is computed, not curated. Prose only
    for what cannot execute. Anchors: `schema/register!` + `:malli/schema`,
    `:seon.fn`/`:seon.ns`, [[toolkit]]. (Trajectory, bounded by the measured
-   present: always-on context beats loadable skills, and composition functions
-   render FULL — [[laws]].)
+   present: the minimal base plus relevant namespace source beats a standing
+   skills manual, and composition functions render their complete relevant
+   value — [[laws]].)
 3. **The agent authors its own environment.** A `defn` returning
    `:seon.render/ai` and/or `:seon.render/hiccup` supplies one or both render
    twins —
@@ -94,12 +84,13 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    measurements, not opinions. Every scorer check must be stated in the agent's
    context, or the bench measures prompt-omission. Endgame: the agent adjusts
    its own initial-context config and the loop selects what works.
-6. **Never crash, always surface; isolate by process, share only data.** The
-   operational spine that keeps 1–5 alive: every failure is a `:seon/error`
-   value in a derived surface; units share *data, never memory*; one writer
-   arbitrates total order; late writes die on the CAS work-fence. Nothing
-   wedges, nothing lies about wedging. Anchors: the cross-cutting principles
-   below, [[agent-runtime]] isolation tiers.
+6. **Failures are data; core faults fail admission.** Agent and user failures
+   become `:seon/error` values in derived surfaces. A failed core publication or
+   readiness transition records one bounded core fault and, in development,
+   may intentionally fail the process/readiness gate. Units share data rather
+   than mutable application state; the writer arbitrates total order and late
+   writes fail the CAS work fence. Anchors: [[agent-runtime]] and
+   [[observability]].
 7. **One human, one bond.** The runtime serves ONE human; the canvas is the
    shared value the pair looks at together. Infrastructure choices answer to
    that relationship — on-device privacy, honest termination, the agent's own
@@ -124,7 +115,9 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   `seon.render`. A render is never stored.
 - **ai render** — a block's prompt-text output (a string, or a symbol late-resolved
   via `seon.eval/lookup-value`). `:seon.render/ai`.
-- **html render** — a block's hiccup output → a surface. `:seon.render/html`.
+- **html render** — `:seon.render/html` selects the function that produces the
+  human render; its response carries `:seon.render/hiccup`, which becomes a
+  surface.
 - **prompt** — the agent's assembled context: ai renders concatenated by priority
   (`seon.agent.ctx/render-context`), prefixed by a system role resolved by
   `seon.ai/effective-system-prompt` — the per-request `:seon.ai/system-prompt`
@@ -164,11 +157,13 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **warnings block** — the block surfacing current problems: an ai render to the
   agent, error cards to the human, one source. `seon.agent.ctx.warnings` + `seon.warn`.
   Self-healing — empty when clean.
-- **`:seon/error`** — the structured value any failure produces: ONE base shape
-  (`:seon.error/message` humanized via `malli.error/humanize`; `:seon.error/data` the
-  explain map; where/symbol/hint), specialized only on real divergence
-  (`:seon.db/error` carries the exception, `:seon.ai/error` the provider fields).
-  Never crash, always surface. See [[data-model]].
+- **`:seon/error`** — the structured value an agent, user, provider, or guarded
+  runtime-boundary failure produces: one base shape
+  (`:seon.error/message`, structured `:seon.error/data`, where/symbol/hint),
+  specialized only on real shape divergence. A core publication/readiness
+  failure instead records one `:seon.error/fault :core` and fails admission in
+  development or returns the configured bounded production fallback. See
+  [[data-model]] and [[observability]].
 - **seed-copy** — the seed/override mechanism: ALL blocks are copied into the agent's
   own `:seon.agent/ctx` at creation; render reads that COMPLETE set sorted by
   priority. There is no render-merge, no separate default set, no provider.
@@ -176,62 +171,40 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   `install!` is scope-aware + variadic (a single map OR a vector-of-maps); idempotent
   upsert-by-`:seon.agent.ctx/name`; at boot/no-scope it builds the default seed set,
   in an agent's scope it targets that agent's `:seon.agent/ctx`. `remove!` drops by
-  name (component cascade). Override = `install!`/`remove!`, period — for seon, for
-  acme (from its own nses via `SEON_EXTRA_SRC`), and for the agents themselves.
+  name (component cascade). Override = `install!`/`remove!`, period — for core,
+  downstream namespaces, and agents themselves.
 - **orchestrator-root** — the lifecycle facet of the root agent: it `start!`s and
   manages child agents through `/call`, writing `:seon.agent/parent`. See
   [[agent-runtime]].
 - **run / turn / derive-state** — the bounded unit of work a trigger opens
   (`seon.agent.run`), the per-iteration value-transform (`seon.agent.loop`), and the
   one projection rule for agent state (`seon.derive`). See [[agent-runtime]].
-- **database-server / pod / tx-listener** — the JVM datahike writer; the Node CLJS
-  runtime; the `listen!→derive→push` streamer role (any replica-holding process can
-  play it).
+- **database server / pod / transaction listener** — the JVM Datahike writer;
+  the Node CLJS agent and web UI runtime; and the
+  `listen! → derive → push` role inside the pod.
 
 ## Deployment topology
 
-```
- browser / Tauri webview
-        │  SSE down (the live channel), POST up (actions)
-        ▼
-   NODE UI-HOST ── read-only replica + ONE tx-listener + the route table (reitit)
-        │  listen! → derive view → whole-element morph → push  the only browser-facing HTTP/SSE
-        ▲                                                    (derives every page; runs NO agent code)
-        │  database protocol (RPC + tx-feed, attachment/commit cursor)
-   JVM DATABASE SERVER ── single-writer datahike + bounded heavy processing (embeddings/indexing)
-        ▲   the bus + authoritative writer; handles only DATA, never agent code
-        │
-   ISOLATED PER-AGENT NODE RUNTIMES ── each its own SCI cage + event loop; the ONE exec service
-     agent-A   agent-B   …   eval / render / interaction → returns DATA (hiccup / result / tx)
-```
-
-Three roles, decoupled in principle, co-located in one pod for v1:
+The normal local cluster has two processes and three logical roles:
 
 - **JVM database server** — the sole authoritative datahike writer (durable,
   bitemporal)
   plus bounded heavy processing (embeddings and indexing). Data only; it never
   executes agent code or serves a second web application.
-- **Node UI-host** — the browser's single front door: a read-only replica + one
+- **Node UI host** — the browser's single front door: a read-only replica + one
   tx-listener that derives every agent’s **view** (including the root agent’s view
   at `/`) from `:seon.agent/ctx`, holds the route table, and streams patches. The
   streamer is a **role, not a process** — any process holding a replica + a
   tx-listener can play it, so the UI-host is relocatable.
-- **Isolated per-agent Node runtimes** — the dangerous part: each runs the one
-  sandboxed-execution service in its own SCI cage + event loop; its output is just
-  data (hiccup, a result, a transaction) handed back through the database
-  protocol. The isolation
-  tiers (worker + SCI / microVM) live in [[agent-runtime]].
+- **Agent execution** — the pod owns the one bounded SCI execution service and
+  agent loops. Per-agent workers or microVMs may later implement the same
+  data-only execution contract; they do not move database authority out of the
+  JVM server.
 
-**v1 = a single pod plays all three roles.** The database protocol + DB-as-bus is
-the only
-boundary. The endgame decouples to a **Node-only user box** (UI-host + isolated
-agents) with the writer/server either remote (a home server over a private network —
-the user's data stays on their own box) or re-homed to Node.
-
-- **Edge node (Tauri, desktop + phone)** — secure transport into the system, native
-  device-data capture (the phone is the data goldmine), the view, and an on-device
-  read replica + local fns. Privacy lever: process the most sensitive data on-device
-  so it never leaves.
+The JVM server is one process. The CLJS pod is the second process and combines
+the UI-host and agent-execution roles. Remote servers, thin clients,
+mobile packaging, and stronger execution isolation are separate target domains,
+not alternate local mechanisms.
 
 ## Cross-cutting principles
 
@@ -270,15 +243,14 @@ query returns empty and the surface vanishes (self-healing). Frozen caches key
 on the full resolved `{database-id, branch, commit-id, t}` coordinate, never on a db
 value or bare t.
 
-### Never crash, always surface
+### Failures are data; core faults are explicit
 
-Every failure — render, eval, transact, capability denial, schema rejection, LLM
-error, a throwing check or handler — is caught at its site and surfaced as a
-**`:seon/error`** value in a derived, agent-visible place, never a process crash (the
-pod is single-threaded; one uncaught throw would blank every agent + the UI-host).
-One source, two renders: the **warnings block** (ai) for the agent and an **error
-card** (html) for the human. The full map of failure-site → where it surfaces
-lives in [[data-model]] §7.
+Agent-authored, provider, input, capability, and handler failures are caught at
+their boundary and represented as `:seon/error` values. A core publication or
+readiness failure is recorded once with `:seon.error/fault :core`; development
+fails loudly at the owning transition, while a production boundary may return a
+bounded fallback. Detailed diagnostics are pulled on demand rather than injected
+as a standing census. The full failure map lives in [[data-model]].
 
 ### Dependency-aware tests, one runner per runtime boundary
 
@@ -360,7 +332,9 @@ abort at commit. The doc owns the run/turn/FSM/derived-state mechanics, creation
 idle-entity, fact-first initialization, the **orchestrator-root** lifecycle
 (`start!` = a core function surfaced to root, writing `:seon.agent/parent` and
 enforcing its own caller/depth rule; roles-as-capabilities; root = the cluster-boot base case;
-UI-root == orchestrator-root), and the isolation tiers. See [[agent-runtime]].
+UI-root == orchestrator-root), and the one execution-service contract. Backend
+isolation choices belong to their owning implementation PRD. See
+[[agent-runtime]].
 
 ### UI — [[ui]]
 
@@ -379,17 +353,19 @@ override model. See [[ui]].
 
 ### Toolkit — [[toolkit]]
 
-The agent's action surface is the **`my.*` function catalog** — thin, agent-owned,
-editable wrappers (`my.code`, `my.kb`, `my.ns`, `my.plan`, `my.schedule`,
-`my.canvas`, `my.shell`, `my.test`, `my.search`, `my.files`) over a protected `seon.*`
-floor, composed on four shared shapes (path, ref, items, the never-throw result
-envelope). See [[toolkit]].
+The agent's editable composition layer is the intended `my.*` corpus:
+`my.blob`, `my.canvas`, `my.data`, `my.kb`, `my.ns`, `my.plan`, `my.skills`, and
+`my.ui`. Protected filesystem, search, shell, web, lifecycle, and evaluation
+capabilities remain under `seon.*` and are exposed only by an agent's curated
+home requirements. Exact function contracts are discoverable program facts,
+not a second catalog in architecture prose.
 
 ### Observability — [[observability]]
 
 Every question about agent behavior — what an agent saw at turn N, what changed
-between turns, why it acted — is answered by a **query against the DB plus the
-blob archive**, never by hunting log files: each turn persists the frozen
+between turns, why it acted — is answered by a **query against the database plus
+the blob archive**. Process logs remain operational evidence rather than turn
+truth. Each turn persists the frozen
 `{database-id, branch, commit-id, t}` coordinate that makes context
 re-derivable, the assembled prompt
 verbatim as a blob, and the raw reply. `agent-debug/turn` reconstructs any turn;
@@ -398,20 +374,19 @@ these queries on demand; the `/agents/run` door drives a reproducible task
 through an agent in the pod's own cluster for an external harness. See
 [[observability]].
 
-## Build path — [[roadmap]]
+## Documentation boundary
 
-The current code state, the gap to this target, and the comprehensive,
-dependency-ordered, replace-in-place migration (file:line, the lane split, the final
-grep-verify + cluster-reset gate) live in [[roadmap]]. It is the only "we are here"
-doc; this one stays pure target.
+Architecture documents own timeless intended mechanisms, vocabulary, and
+boundaries. [[roadmap]] alone owns current implementation state, gaps, work
+order, dates, measurements, and acceptance evidence.
 
 ## Detail docs
 
-- [[data-model]] — entities + attrs + the three relationship kinds, the `:seon/error`
-  model + entity-kind-vs-value-enum, the `my.kb`/`my.plan`/`my.agent` schemas + data-
-  agent-ref scoping, index-everything.
+- [[data-model]] — entity shapes, attributes, relationship forms, error values,
+  and the `my.kb`/`my.plan`/`my.agent` schemas.
 - [[agent-runtime]] — loop/run/turn/FSM/derived-state/two-bounds, creation-as-idle,
-  bootstrap-as-seeded-forms, orchestrator-root lifecycle, isolation tiers.
+  bootstrap-as-seeded-forms, orchestrator-root lifecycle, and the one
+  execution-service contract.
 - [[ui]] — block/render/canvas/slot/layout, the page tree, reitit + the capability gate,
   the gzip-morph SSE live channel, the seed-copy + `install!`/`remove!` override.
 - [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
@@ -425,11 +400,10 @@ doc; this one stays pure target.
 - [[laws]] — the drive-measured empirical laws (render-prominence,
   cache-stability, canvas-first, pass^k, keep-iff-lifts-battery) that
   constrain every design above. Not principles — measurements.
-- [[roadmap]] — we-are-here → the gap → the migration checklist + the final gate.
+- [[roadmap]] — current implementation state, gaps, work order, and evidence.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db is
   a value, only values cross the database protocol, CAS-as-assertion,
   resolved-coordinate caching). Read before
   touching the loop.
-- [[library-grounding]] — the concrete `reference-code/…:LINE` read-map (datahike,
-  malli, SCI, reitit) per phase: every load-bearing claim grounded in real source +
-  the idioms to imitate. **Every build-agent reads its phase's rows before coding.**
+- [[library-grounding]] — the current concept-to-source read map for Datahike,
+  Malli, SCI, Reitit, Datastar, and the test selectors.

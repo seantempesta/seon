@@ -62,8 +62,9 @@ imperative reflexes, guessed library semantics). Ground first:
 
 ## Current known weaknesses (fix the root, don't work around)
 
-- The pod is single-threaded: one uncaught throw blanks every agent + the UI
-  — hence never-crash/always-surface at every boundary.
+- The pod is single-threaded: agent/user failures become values at their
+  boundary. A core publication/readiness fault records once and may fail the
+  development process or readiness gate; do not turn it into a standing census.
 - `seon.db/*conn*` is a single dynamic root — CORRECT by construction: one
   pod = one cluster = one conn (isolation is the process boundary).
   Parallelism = more clusters (`bin/seon cluster create`), never a second

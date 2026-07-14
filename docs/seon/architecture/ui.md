@@ -6,7 +6,8 @@ tags: [architecture, web, agent]
 
 # UI — pages, blocks, renders, and routes
 
-> **Target design** (present tense — the system as it is when built). Current code state + the migration path live in [[roadmap]].
+> **Target design** (present tense). Implementation state, gaps, order, and
+> evidence live only in [[roadmap]].
 
 The human's UI and the agent's prompt are the same data, dual-rendered. Every
 page is a derived projection of the database; nothing rendered is stored. The
@@ -103,10 +104,9 @@ carries (the namespaced key ON the value, never a stored `:kind`): a **message**
 anything else → the data panel (never throws). The transcript and the canvas both
 route their bodies through it, so every surface "just displays the block."
 
-**Markdown renders server-side.** Agent text becomes HTML on the server via
-`seon.ui.markdown/md->hiccup` (the `block` message lane) — the view shim loads NO
-client markdown JS; the old client-side `data-markdown` / marked.js lane is gone from
-the agent-view page. One lane, server-side, for every message/eval body.
+**Markdown renders server-side.** Agent text becomes Hiccup through
+`seon.ui.markdown/md->hiccup`. The view shim does not parse Markdown in the
+browser; every message and eval body uses the same server-side projection.
 
 **The human transcript is chat-first.** Message entities render as the visible
 conversation. Eval entities render as fixed-size one-line activity rows derived
@@ -230,15 +230,15 @@ render-unit, routing, and live-morph mechanism in one route tree:
   deliberately small role context is to understand the fleet, start/select an
   ordinary agent, delegate, and route the originating browser tab there. Root's
   operational detail comes from its orchestration/navigation namespace cards
-  and current-namespace source, not a long root instruction block. The IDENTICAL
-  block/layout/route
-  machinery — NOT a second reactive or routing system. It grounds the render +
+  and current-namespace source, not a long root instruction block. It shares
+  block, render-unit, route-resolution, and feed machinery rather than creating
+  a second reactive or routing system. It grounds the render and
   route tree: root system view (`/`) → per-agent views (`/agent/{id}`) → apps. (Root's
   lifecycle/orchestrator facet lives in [[agent-runtime]]; here it is just the
   agent whose supervising view is `/`.) Its layout differs from an ordinary
   agent page while its rendering and live-update mechanisms remain identical. A
-  first-ever database also contains one ordinary agent; `bin/seon up --open`
-  opens that ordinary agent while `/` remains available as mission control.
+  fresh database also contains one ordinary agent; initial navigation opens
+  that ordinary agent while `/` remains available as mission control.
 
   `system-view`'s AI twin always names every agent and its status/focused
   surface. Within one explicit block budget it adds non-root canvas-AI,
@@ -249,8 +249,8 @@ render-unit, routing, and live-morph mechanism in one route tree:
   session, so root knows what that human is currently seeing.
 
   Host telemetry is a separate optional system-status surface, not prose added
-  to every turn. Once the operator exposes one reusable process-status
-  projection, the surface samples pod/writer liveness, CPU, RSS, uptime, and
+  to every turn. It consumes the operator's one reusable process-status
+  projection and samples pod/writer liveness, CPU, RSS, uptime, and
   feed pressure on demand. It is one independently refreshed unit on the normal
   feed, persists no rolling projection, and contributes to root's AI context
   only when anomalous.
@@ -310,10 +310,10 @@ the route datoms rebuilt on tx via a reloading thunk. This replaces hand-rolled
 `case`/`cond`/`re-matches` dispatch. (The `:seon.route/*` attributes are
 registered per [[data-model]].)
 
-- **Seeded core routes:** `/` + `/agent/root/feed` (root agent’s view), `POST /agents`, and
-  `/agent/{id}` + `/agent/{id}/feed` — GET. Each view is TWO GET routes: the
-  shim page and its long-lived SSE stream at a `…/feed` sibling path (the shim's
-  `data-init="@get('…/feed')"` opens the stream). The one action door is
+- **Seeded core routes:** `/` owns one dedicated root shell and one feed,
+  `POST /agents` creates an agent, and `/agent/{id}` owns the ordinary agent
+  shell and feed. A page shell and its long-lived SSE stream are distinct GET
+  routes. The one action door is
   `/agent/{id}/call` (POST); `POST /agents` is the sole agent-birth HTTP door
   and shares the same database route projection.
   Agents add `/agent/{id}/app/{x}` rows
@@ -407,8 +407,8 @@ move.
 The live channel is **ours** (reitit has no streaming primitives by design): one
 **tx-listener** on a read-replica is the refresh signal, and the view is a pure
 derivation of the DB. The agent only `transact!`s datoms; it never opens or writes
-a stream. The model is hyperlith's `view = f(db)` ported into the Node pod, proven
-in `seon.web.datastar`.
+a stream. The Node pod implements the `view = f(db)` model through
+`seon.web.datastar`.
 
 - **view = f(db-at-coordinate), compiled into stable units.** Reitit route
   match + normalized path/query/resolved coordinate define one view key. Database route,
@@ -491,9 +491,8 @@ in `seon.web.datastar`.
   Transient client state lives in datastar **signals** only, never DOM attrs. Time
   travel is `view = f(db-at-coordinate)` over the bitemporal DB—a different
   resolved commit, the same render. Reconnect needs no numeric `since-t` replay:
-  the first paint fires
-  immediately on open and repaints the current view. **Status: LIVE**
-  (`/agent/{id}`). A historical request carries the complete canonical
+  the first paint fires immediately on open and repaints the current view. A
+  historical request carries the complete canonical
   `{database-id, branch, commit-id, t}`; the server verifies it against the
   registered database attachment and echoes that coordinate in its
   response/bookmark. There is no bare-t compatibility selector. That feed is
@@ -505,9 +504,7 @@ in `seon.web.datastar`.
   `$live`, a transient scrub `$t`, and the last resolved branch/commit/t; only
   the resolved coordinate enters the feed URL/cache key. The slider domain may
   display branch-local t values and human timestamps, but commit id is the
-  durable bookmark. Proven server-side: a resolved pre-creation commit → empty
-  view, a mid-lineage commit → frozen partial view that holds under tx pressure,
-  and no coordinate → live auto-morph. A reconnect whose attachment changed or
+  durable bookmark. A reconnect whose attachment changed or
   whose last commit is not an ancestor receives a full reset, never numeric
   replay across lineages.
 - **The hard invariant: no agent code ever touches an SSE connection.** agent →
@@ -527,23 +524,9 @@ registry. Transaction user/process is relevant to agent-derived focus semantics,
 never to dependency invalidation. Legitimate expensive units are bounded before
 building hidden hiccup; collapsed markup alone is not a compute bound.
 
-An optional Caddy edge terminates TLS and multiplexes browser connections over
-HTTP/2 or HTTP/3 while proxying to the one Node HTTP/1.1 implementation. It does
-not render, route application actions, recompress, or buffer events. The pod
-remains the application server and owns gzip plus `Z_SYNC_FLUSH`; Caddy uses
-immediate proxy flushing. Local development stays on the direct loopback URL by
-default because hidden Datastar tabs close their feeds and do not justify a
-mandatory TLS process.
-
-The streamer is a **role, not a process** — any process holding a read-replica + a
-tx-listener can play it, so the UI-host is relocatable and can split into N
-streamer-processes later (see [[architecture]] for the deployment topology).
-
-**Streamed surfaces are verified server-side, not in a browser agent.** A
-long-lived `text/event-stream` 503s through the in-tool chrome agent's net layer,
-so verify a streamed change with a Node client that opens the gzip stream, gunzips
-the payload, and asserts it changes on a real tx; the final live-morph eyeball is
-the owner's, in real Chrome.
+The streamer is a role inside the CLJS pod: it holds the replica and transaction
+listener, derives render units, and writes browser patches. Page code depends on
+that role's data contract rather than a transport-global registry.
 
 ## Errors render as surfaces
 
@@ -557,40 +540,15 @@ underlying fn is fixed, both the error card and the warning vanish (pure fn of s
 never stored). Route/layout throws flow identically via the error-catch
 middleware.
 
-## Total override — the downstream proof
+## Downstream composition
 
-Every layer is a symbol or a datom; a downstream cluster overrides each by
-reusing the same primitives, with zero `src/seon` edits:
-
-| Layer | Override mechanism | Default |
-|---|---|---|
-| **block set** (supporting surfaces) | `ctx/install!` / `ctx/remove!` from downstream namespaces | the configured DB block set |
-| **initial block tree per cluster** | explicitly applied manifest `:seon.config/agent-context` / `:seon.config/root-context`; omission from the complete route population removes a route | schema/default compiler input materialized as DB facts |
-| **a surface's look** | the block's `:seon.render/html` symbol | Seon's html render fn |
-| **focal `#agent-view-primary-canvas` (the canvas)** | the agent's `:seon.render.canvas/content` symbol | Seon's `welcome` surface |
-| **the calm hero error (a broken canvas)** | `set!` of `seon.render.canvas/error-response` (the calm hero keeps the agent-facing `:seon.render/ai`/`:seon.render/error` and swaps only the human hiccup) | Seon's “canvas is updating” card |
-| **slot / view / entity error cards** | `set!` of `seon.render.canvas/error-card` (the `(fn [:seon/error] → hiccup)` seam the `render` / `slot` / `render-entity-html` catches call) | Seon's `default-error-card` |
-| **root agent’s view (`/`)** | the `/` route handler symbol (root's agent-view layout) | seon's root agent-view layout |
-| **routes / apps** | explicitly applied `:seon.config/routes` → exact `:seon.route/*` rows | config-compiler route input materialized as DB facts |
-| **brand head — name / tagline / CSS** | explicitly applied `:seon.config/brand` → exact `[:seon.web.brand/id "brand"]` DB facts | config-compiler brand input / Phosphor |
-| **client JS** | `SEON_EXTRA_PUBLIC` + scripts | datastar.js |
-
-acme installs at preload in its own namespaces (loaded via `SEON_EXTRA_SRC`),
-where it already wires its overrides. There are **two error seams**, and acme
-`set!`s BOTH so every error surface on the page is branded:
-
-- the **focal `#agent-view-primary-canvas`** flows through the canvas path:
-  `seon.ui.agent-view/agent-view` calls `render-agent-canvas`, resolving the agent's
-  `:seon.render.canvas/content`, and a throwing surface routes through the calm
-  hero seam `seon.render.canvas/error-response` (the human never sees the
-  failure here — it rides the agent twin, so the hero does NOT delegate).
-- the **slot / view / entity error cards** (`render` / `slot` /
-  `render-entity-html` catches) route through the SEPARATE
-  `seon.render.canvas/error-card` var (`(fn [:seon/error] → hiccup)`,
-  defaulting to `default-error-card`).
-
-One `set!` per seam — two lines in `acme.overrides` — brands every error card on
-the page.
+A downstream cluster composes the same public mechanisms: route facts choose
+page handlers, block facts choose renderers, `install!`/`remove!` reconcile a
+block collection, canvas facts select focal content, and an explicitly selected
+manifest supplies brand and route populations. Consumer-specific files,
+launchers, and wiring remain in the downstream repository. Mutable global
+`set!` seams are not target state; a reusable customization becomes a public
+symbol selected by facts or config through the one render engine.
 
 ## Malli throughout
 
@@ -613,5 +571,5 @@ link and read it.
 - [[context-rebuild]] — the measured arc for knowledge-on-demand (cards +
   state-gated teaching + pull); imported `my.skills` bodies remain explicit
   overrides rather than a default context block.
-- [[roadmap]] — current code state + the dependency-ordered migration to this target (Lane U).
+- [[roadmap]] — implementation state, gaps, work order, and evidence.
 - [[datahike-primer]] — the datahike-in-the-grain mindset.
