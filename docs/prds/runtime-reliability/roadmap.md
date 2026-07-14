@@ -79,8 +79,11 @@ Parallel work is deliberately bounded:
 Immediate unit-0 queue:
 
 1. **In progress:** the documentation hierarchy and practiced REPL-driven
-   workflow are corrected. Move the remaining domain audits from this PRD into
-   their carved successor PRDs and repair every backlink.
+   workflow are corrected. The 51-report localization census in
+   [[research/research-localization-classification-2026-07-14]] assigns 23
+   reports to one successor, retains 18 as graduation evidence, and keeps ten
+   cross-owner reports as link-only shared input. Execute those moves in five
+   backlink-checked groups.
 2. **In progress:** reconcile this ledger with the generated open-issue index
    and archive only findings that have committed behavioral and live proof.
 3. **Complete:** run one non-overlapping complete default checkpoint: operator,
