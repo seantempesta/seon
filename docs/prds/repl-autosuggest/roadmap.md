@@ -320,3 +320,22 @@ three-arm drive after current run/turn/database adapters derive the pure scorer
 inputs. The dirty stable fair-scoring implementation is evidence, not imported
 code: it depends on the paused `src-needle` audit lane and must be rebuilt in the
 canonical data-quality pipeline.
+
+## Autocomplete worktree takeover audit — 2026-07-14
+
+The remaining autocomplete-adjacent worktrees were audited commit-by-commit
+and file-by-file in
+[[research/autocomplete-worktree-integration-audit-2026-07-14]]. Most
+function-surface, plan-fix, toolkit-gap, pin, and stable implementation gains
+are already present or superseded; the retired gym is evidence only. Do not
+bulk-merge or restore those lanes.
+
+The current runtime's inert DB-derived function cards are not yet compatible
+with the paused Needle builders and fair scorer, which still parse the removed
+synthetic `defn` display. Exported single-function cards also lack a versioned
+structured contract with referenced-schema closure. The next bounded data
+quality work is to preserve unique ignored display/plan-pilot databases,
+retire equivalent worktrees, then migrate exporter, Needle consumers, and fair
+scoring together onto one DB-derived contract. Inspect remains the sole model
+harness, and model training remains paused until that clean-data path is
+proven.
