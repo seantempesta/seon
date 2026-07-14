@@ -21,7 +21,7 @@ See `README.md` for the convention.
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 
-## Friction (27)
+## Friction (28)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -33,6 +33,7 @@ See `README.md` for the convention.
 | [Autocomplete datasets and scoring bypass canonical runtime projections](autocomplete-data-quality-pipeline-drift.md) | friction | agent |
 | [Autocomplete worktrees contain unclassified database and model evidence](autocomplete-worktree-evidence-preservation.md) | friction | Core |
 | [Canvas controls hide pending and handler failure](canvas-controls-hide-pending-and-failure.md) | friction | UI |
+| [Config apply rebuilds an unchanged runtime](config-apply-rebuilds-unchanged-runtime.md) | friction | general |
 | [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | friction | agent |
 | [Context block order is static](context-block-order-is-static.md) | friction | agent |
 | [Cross-agent planners can reopen worker-completed steps](plan-reopen-cross-agent-authority.md) | friction | agent |

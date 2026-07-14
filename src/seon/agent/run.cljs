@@ -36,6 +36,7 @@
     [seon.agent.ctx :as ctx]
     [seon.agent.message :as msg]
     [seon.ai.tokens :as tokens]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.derive :as derive]
@@ -127,8 +128,10 @@
 (def default-turn-limit
   "Work-bound seed when the agent has no `:seon.agent/default-turn-limit`.
 
-   Denominated in the loop's work unit for repl-mode `:batch`: TURNS."
-  20)
+   Denominated in the loop's work unit for repl-mode `:batch`: TURNS. This is
+   a generous safety ceiling; completion, wait, no-progress, errors, or the
+   deadline normally stop a run first."
+  ctx/default-turn-limit)
 
 (def default-form-limit
   "Work-bound seed under repl-mode `:stream` — denominated in FORMS.
@@ -141,23 +144,21 @@
    report (evals/runs/2026-07-10-minimal-buildup, ds-r1-ns-move-v1-d1).
    An agent-level `:seon.agent/default-turn-limit` or an explicit
    request seed still wins, whatever the mode."
-  60)
+  ctx/default-form-limit)
 
 (def default-deadline-ms
-  "Wall-clock-bound seed (10 min) when the agent has no
+  "Wall-clock-bound seed (30 min) when the agent has no
    `:seon.agent/default-deadline-ms`. Generous on purpose — the turn-limit is
    the usual stopper; the deadline catches a stalled LLM."
-  (* 10 60 1000))
+  (:seon.config.run/deadline-ms (config/default-run-policy)))
 
 ;; ============================================================
-;; Config-driven agent-init CP-1 — run-bound SEED attrs (agent-level).
-;; These seed a run's own live bumpable bounds; nothing reads them yet
-;; (purely additive). ::default-deadline-ms default = the live
-;; [[default-deadline-ms]] const (600000 = 10 min).
+;; Optional agent-local run-bound overrides. The cluster defaults live only in
+;; the database config singleton; these attrs carry no duplicate default.
 ;; ============================================================
 
-(schema/register! ::default-turn-limit  [:int {:default 20 :min 1}])
-(schema/register! ::default-deadline-ms [:int {:default 600000 :min 1}])
+(schema/register! ::default-turn-limit  [:int {:min 1}])
+(schema/register! ::default-deadline-ms [:int {:min 1}])
 
 ;; ============================================================
 ;; Reads — sync over the local db value.
@@ -284,24 +285,22 @@
                        (str "open-run!: no agent " (pr-str id)
                             " — create the agent first.")}}
       (let [now        (js/Date.)
+            policy     (ctx/run-policy @db/*conn*)
             ;; Run-bound SEED (config-driven agent-init, move 9): the new
-            ;; agent-level config datoms `:seon.agent.run/default-turn-limit`
-            ;; / `::default-deadline-ms` (CP-1 defaults 20 / 600000 = the live
-            ;; consts) are the reactive config-on-record source; the legacy
-            ;; runtime attr + the const remain fallbacks so a no-config agent
-            ;; reads byte-identically to today.
+            ;; Agent-level datoms are explicit overrides. Cluster defaults are
+            ;; the frozen config singleton policy above.
             turn-limit (or tl
                            (:seon.agent.run/default-turn-limit a)
                            (:seon.agent/default-turn-limit a)
                            ;; mode-denominated const fallback: forms under
                            ;; :stream, turns under :batch (repl-milestone rung-0 verdict).
                            (if (= :stream (ctx/repl-mode @db/*conn*))
-                             default-form-limit
-                             default-turn-limit))
+                             (:seon.config.run/stream-form-limit policy)
+                             (:seon.config.run/batch-turn-limit policy)))
             deadline   (or dl (js/Date. (+ (.getTime now)
                                            (or (::default-deadline-ms a)
                                                (:seon.agent/default-deadline-ms a)
-                                               default-deadline-ms))))
+                                               (:seon.config.run/deadline-ms policy)))))
             res
             (await
               (db.id/allocate!
@@ -511,10 +510,13 @@
   {:malli/schema [:=> [:cat ::renew-request] :seon.db/transact-response]}
   [{id :seon.agent/id run-id :seon.agent.run/id
     ext :seon.agent.run/deadline-extension-ms}]
-  (let [r      (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})
+  (let [dbv    @db/*conn*
+        policy (ctx/run-policy dbv)
+        r      (db/entity {:seon.db/db dbv :seon.db/ref [:seon.agent.run/id run-id]})
         a      (db/entity {:seon.db/ref [:seon.agent/id id]})
         now    (js/Date.)
-        ext    (or ext (:seon.agent/default-deadline-ms a) default-deadline-ms)
+        ext    (or ext (:seon.agent/default-deadline-ms a)
+                   (:seon.config.run/deadline-ms policy))
         new-tl (inc (:seon.agent.run/turn-limit r))
         new-dl (js/Date. (+ (.getTime now) ext))]
     (await (db/transact!
@@ -591,7 +593,9 @@
        {:seon.error/message
         (str "resume!: run " (pr-str run-id) " is not paused "
              "(no :seon.agent.run/paused-at) — nothing to resume.")}}
-      (let [remain (or (:seon.agent.run/remaining-ms r) default-deadline-ms)
+      (let [remain (or (:seon.agent.run/remaining-ms r)
+                       (:seon.config.run/deadline-ms
+                         (ctx/run-policy @db/*conn*)))
             new-dl (js/Date. (+ (.getTime (js/Date.)) remain))]
         (await (db/transact!
                  {:seon.db/tx-data

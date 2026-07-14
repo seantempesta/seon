@@ -9,12 +9,11 @@ tags: [issue, agent, flow]
 
 ## Problem
 
-The transcript readline reports the batch default of 20 while an idle cluster
-is in stream mode, even though `open-run!` would seed a stream run with its
-separate 60-form fallback. The surface therefore misstates the next run's
-resource unit and budget. More broadly, both small magic counts are poor normal
-stoppers when task completion, stagnation, errors, deadlines, and explicit
-resource policy provide more meaningful outcomes.
+The original transcript readline reported the batch default of 20 while an
+idle cluster was in stream mode, even though `open-run!` seeded a separate
+60-form fallback. The surface therefore misstated the next run's resource unit
+and budget. The immediate mismatch and literal defaults are fixed; measured
+local/paid profiles and outcome-oriented early stops remain open work.
 
 ## Evidence
 
@@ -26,6 +25,13 @@ readline's unconditional `seon.agent.ctx/default-turn-limit` fallback, not a
 stored masking datom. After the cluster switched to `:batch`, newly opened runs
 correctly carried 20. This second probe falsified the initial stored-default
 hypothesis and narrows the defect to presentation plus undersized defaults.
+
+The first repair adds one `:seon.config/run` section whose resolved 100 batch
+turns, 300 stream forms, and 1,800,000 ms deadline are scalar facts on the
+config singleton. `ctx/run-policy`, `open-run!`, renewal/resume, and the idle
+readline consume the frozen database value. Focused config/run/transcript tests
+pass 41 tests and 174 assertions; the isolated live database returned those
+three exact values after restart.
 
 ## Owner
 

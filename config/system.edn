@@ -47,6 +47,18 @@
                            my.plan seon.agent.message seon.agent.lifecycle]
   :seon.config/current-ns :full}
 
+ ;; ── RUN RESOURCE POLICY — safety ceilings, queryable as singleton datoms.
+ ;; Normal runs stop through complete/wait/no-progress/error handling first.
+ ;; Apply a different manifest to tune a local or paid-model cluster; runtime
+ ;; code reads these values from the frozen database, never from this file.
+ :seon.config/run
+ {:seon.config.run/batch-turn-limit
+  #long #or [#env SEON_RUN_BATCH_TURN_LIMIT 100]
+  :seon.config.run/stream-form-limit
+  #long #or [#env SEON_RUN_STREAM_FORM_LIMIT 300]
+  :seon.config.run/deadline-ms
+  #long #or [#env SEON_RUN_DEADLINE_MS 1800000]}
+
  ;; ── RENDER BOUNDS — the GLOBAL, process-wide value/eval/message DISPLAY caps
  ;; (#46). A proper config (not scattered env reads): each cap is a plain literal
  ;; here, read by seon.config's database-edn-cap / eval-render-cap / value-* etc.
@@ -213,10 +225,14 @@
    {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
     :seon.render/ai seon.agent.ctx.transcript/transcript-block
     :seon.render/html seon.agent.ctx.transcript/transcript-block-html
+    :seon.agent.ctx.transcript/turns-retained 25
+    :seon.agent.ctx.transcript/turn-window-size 50
+    :seon.agent.ctx.transcript/turn-eviction-size 25
+    :seon.agent.ctx.transcript/settled-token-cap 8192
     :seon.agent.ctx.transcript/result-decay
-    [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
-     {:seon.agent.ctx.transcript/from-turn-offset 2 :seon.agent.ctx.transcript/token-cap 1500}
-     {:seon.agent.ctx.transcript/from-turn-offset 5 :seon.agent.ctx.transcript/token-cap 200}]}]
+    [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 4096}
+     {:seon.agent.ctx.transcript/from-turn-offset 2 :seon.agent.ctx.transcript/token-cap 1024}
+     {:seon.agent.ctx.transcript/from-turn-offset 5 :seon.agent.ctx.transcript/token-cap 512}]}]
   :seon.eval/home-requires
   [[seon.agent.message :as message]
    [my.plan :as plan]

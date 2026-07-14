@@ -36,6 +36,7 @@
    converter renders the REPL-comment `;;; ◀ from X` / `;;; ▶ to X` line."
   (:require
     [clojure.string :as str]
+    [malli.core :as m]
     [seon.agent.message :as msg]
     [seon.agent.ctx :as ctx]
     [seon.ai.tokens :as tokens]
@@ -78,19 +79,36 @@
 ;; entity, queryable per-element, cascade-deleted with the block.
 (schema/register! ::tiers        [:vector {:seon.db/component true :default []} :seon.db/ref]) ; of ::tier entities
 ;; CP-5 (owner intent — evals "start larger and shrink over time"): the v1
-;; default is the REAL 3-level decay schedule — near-full THIS turn + next
-;; (offset 0→16384), partial at offset 2 (→1500), clipped to a stub at offset 5
-;; (→200, keeping the `result/<id>` handle). This is the safety net that lets
+;; default is the REAL 3-level decay schedule — full-enough THIS turn + next
+;; (offset 0→4096), partial at offset 2 (→1024), then a useful old-result
+;; plateau at offset 5 (→512, keeping identity and diagnostic detail). This lets
 ;; blocks render FULL (escape-clipping) without unbounded transcript growth: an
 ;; old eval body shrinks as it ages out of the working set.
 (schema/register! ::result-decay [:vector {:seon.db/component true
-                                           :default [{::from-turn-offset 0 ::token-cap 16384}
-                                                     {::from-turn-offset 2 ::token-cap 1500}
-                                                     {::from-turn-offset 5 ::token-cap 200}]}
+                                           :default [{::from-turn-offset 0 ::token-cap 4096}
+                                                     {::from-turn-offset 2 ::token-cap 1024}
+                                                     {::from-turn-offset 5 ::token-cap 512}]}
                                   :seon.db/ref]) ; of ::decay-level entities
 
 ;; The transcript window (turns kept verbatim before eviction into summaries).
-(schema/register! ::turns-retained [:int {:default 8 :min 0}])
+(schema/register! ::turns-retained [:int {:default 25 :min 0}])
+
+;; AI transcript rotation: retain at most 50 turns, then evict one complete
+;; 25-turn prefix at a time. The settled chunk shares one budget charged on
+;; actual rendered event text; the current append-only chunk is not charged.
+(schema/register! ::turn-window-size    [:int {:default 50 :min 1}])
+(schema/register! ::turn-eviction-size  [:int {:default 25 :min 1}])
+(schema/register! ::settled-token-cap   [:int {:default 8192 :min 0}])
+
+(defn- schema-default
+  "Read one colocated policy default from its registered Malli schema."
+  [schema-key]
+  (:default (m/properties (m/schema schema-key))))
+
+(def ^:private default-turns-retained     (schema-default ::turns-retained))
+(def ^:private default-turn-window-size   (schema-default ::turn-window-size))
+(def ^:private default-turn-eviction-size (schema-default ::turn-eviction-size))
+(def ^:private default-settled-token-cap  (schema-default ::settled-token-cap))
 
 ;; The folded live readline at the very bottom — the ONE line of the block
 ;; that reads the live `now`. Default true (byte-parity). `false` drops it:
@@ -110,10 +128,10 @@
 
 ;; ============================================================
 ;; Config-driven agent-init CP-3 — reactive config-on-record reads.
-;; The transcript block's `::result-decay` (move 4) and `::tiers` (move 5)
-;; datoms drive the per-result cap and the eviction clip AT RENDER TIME.
-;; v1 defaults reproduce today (single-level decay = 16384; empty tiers =
-;; `:none`, render-all) → byte-parity holds.
+;; The transcript block's `::result-decay`, batched turn-window, and settled
+;; budget datoms drive clipping AT RENDER TIME. `::tiers` remains registered
+;; only while old projection manifests migrate; the AI transcript no longer
+;; reads it.
 ;; ============================================================
 
 (defn block-ent
@@ -132,7 +150,7 @@
    LEVELS (each `{::from-turn-offset ::token-cap}`): the level whose
    `::from-turn-offset` is the LARGEST ≤ `offset` wins; its `::token-cap` is
    the cap. Empty/absent levels → `default-cap` (the v1 default is the SINGLE
-   level 0→16384, so every offset selects 16384 = byte-identical to today).
+   level 0→4096, so every offset selects 4096).
    A negative/nil offset is treated as 0."
   {:malli/schema [:=> [:catn [::levels [:sequential :map]] [::offset [:maybe :int]]
                        [::default-cap :int]] :int]}
@@ -222,6 +240,68 @@
                ;; reduce built it newest-first; restore oldest-first order
                reverse
                vec))))))
+
+(defn turn-window-cutoff
+  "Oldest retained turn index for batched transcript rotation.
+
+   `turn-count < window-size` keeps the complete history. At the window size,
+   and every `eviction-size` turns thereafter, one complete oldest chunk is
+   omitted. For 50/25 this yields cutoffs 0 through turn 49, 25 through turn
+   74, 50 through turn 99, and so on."
+  {:malli/schema [:=> [:catn [::turn-count :int]
+                             [::window-size :int]
+                             [::eviction-size :int]]
+                  :int]}
+  [turn-count window-size eviction-size]
+  (let [n (max 0 turn-count)
+        w (max 1 window-size)
+        e (max 1 eviction-size)]
+    (if (< n w)
+      0
+      (* e (inc (quot (- n w) e))))))
+
+(defn clip-events-by-turn-window
+  "Omit complete old event chunks according to [[turn-window-cutoff]].
+
+   Every event must carry its database-derived `::turn-idx`; an event before
+   the first turn is associated with turn zero. No retained event is rewritten
+   and the complete source facts remain in the database."
+  {:malli/schema [:=> [:catn [::turn-count :int]
+                             [::window-size :int]
+                             [::eviction-size :int]
+                             [::events [:sequential :map]]]
+                  [:vector :map]]}
+  [turn-count window-size eviction-size events]
+  (let [cutoff (turn-window-cutoff turn-count window-size eviction-size)]
+    (filterv #(>= (or (::turn-idx %) 0) cutoff) events)))
+
+(defn clip-rendered-events-by-settled-budget
+  "Keep rendered events newest-first within one settled-chunk token budget.
+
+   Rows at or after `active-start` are the current append-only chunk and always
+   survive. Older retained rows share `token-cap`, charged on their complete
+   rendered `::text` (source, narration, result, and error), not result EDN.
+   Over-budget rows are omitted whole; chronological order and retained bytes
+   do not change."
+  {:malli/schema [:=> [:catn [::active-start :int]
+                             [::token-cap :int]
+                             [::rendered-events [:sequential :map]]]
+                  [:vector :map]]}
+  [active-start token-cap rows]
+  (let [spent (volatile! 0)]
+    (->> rows
+         reverse
+         (reduce
+           (fn [kept row]
+             (if (>= (or (get-in row [::event ::turn-idx]) 0) active-start)
+               (conj kept row)
+               (let [cost (tokens/estimate (::text row))]
+                 (if (<= (+ @spent cost) token-cap)
+                   (do (vswap! spent + cost) (conj kept row))
+                   kept))))
+           [])
+         reverse
+         vec)))
 
 ;; ------------------------------------------------------------
 ;; Masthead — the transcript's in-band opener, rendered every turn as the
@@ -453,6 +533,7 @@
              (if (and sig (>= (count grp) coalesce-min-run))
                [{::kind          :coalesced
                  ::at            (::at (first grp))
+                 ::turn-idx      (::turn-idx (last grp))
                  ::signature     sig
                  ::count         (count grp)
                  ::members       (vec grp)
@@ -464,6 +545,23 @@
 ;; The agent's full event stream, derived once per render: messages +
 ;; evals, flattened, each carrying its FIXED stored time, sorted by it.
 ;; ------------------------------------------------------------
+
+(defn- turn-index-at
+  "Index of the latest turn that began no later than `at`, or zero when the
+   event predates the first turn."
+  [turn-ats at]
+  (if (instance? js/Date at)
+    (let [at-ms (.getTime ^js at)]
+      (or
+        (reduce-kv
+          (fn [found idx turn-at]
+            (if (<= (.getTime ^js turn-at) at-ms)
+              idx
+              (reduced found)))
+          nil
+          (vec turn-ats))
+        0))
+    0))
 
 (defn- message->event
   "Convert one pulled message row into a transcript event, or nil."
@@ -489,7 +587,7 @@
    ::from-label ::to-labels ::content ::id ::outbound?}`. Inbound messages
    pass the [[inbound-msg?]] gate (so a `:core` nudge never renders as a
    fake inbound); outbound messages (from me) always render. ONE query."
-  [db my-eid own-id]
+  [db my-eid own-id turn-ats]
   (when my-eid
     (->> (db/query
            {:seon.db/db db
@@ -509,7 +607,8 @@
               [?m :seon.agent.message/at _]]
             :seon.db/args [my-eid]})
          (map first)
-         (keep #(message->event my-eid own-id %)))))
+         (keep #(message->event my-eid own-id %))
+         (mapv #(assoc % ::turn-idx (turn-index-at turn-ats (::at %)))))))
 
 (defn- eval->event
   "Convert one eval row into a transcript event at its optional turn index."
@@ -625,7 +724,11 @@
                   (reduce + 0 (map (comp count :seon.agent.turn/evals)
                                    (remove :seon.agent.turn/scheduled? run-turns)))
                   :else (count run-turns))
-        cap     (or (:seon.agent.run/turn-limit run) ctx/default-turn-limit)
+        policy  (ctx/run-policy db)
+        cap     (or (:seon.agent.run/turn-limit run)
+                    (if (= :stream (ctx/repl-mode db))
+                      (:seon.config.run/stream-form-limit policy)
+                      (:seon.config.run/batch-turn-limit policy)))
         ;; localized full date+tz so the agent can judge what's expensive.
         ;; This is the ONE legitimate live `now` in the transcript.
         now     (let [tz (ctx/host-timezone)]
@@ -655,7 +758,8 @@
    evals for stable output. The caller flags any inbound newer than the
    agent's last own action as NEW (unanswered)."
   [db own-id my-eid]
-  (let [msgs (or (message-events db my-eid own-id) [])
+  (let [turn-ats (mapv :seon.agent.turn/at (ctx/agent-turns own-id db))
+        msgs (or (message-events db my-eid own-id turn-ats) [])
         evs  (eval-events db own-id)
         kind-rank {:message 0 :eval 1}
         sorted (sort-by (juxt #(.getTime ^js (::at %))
@@ -680,10 +784,11 @@
    inbound gate is [[inbound-msg?]] — the SAME conditions as the wake, so a
    `:core` nudge never shows as a fake inbound.
 
-   NO clipping yet (`:seon.render/clip :none`): the transcript renders ALL
-   events; the sliding window lands later. Every past event renders
-   byte-identical turn-to-turn (times from FIXED stored `:at`), so the
-   prefix caches — only the readline's `now` changes between turns."
+   The AI window rotates only in complete configured chunks and caps the
+   settled chunk by actual rendered tokens. Retained events are never rewritten
+   or summarized. Within a decay band and between rotation boundaries, every
+   past event is byte-identical; only the append-only edge and free dynamic
+   readline move."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.agent/keys [id] db :seon.db/db render-fn :seon.render/render :as input}]
   (let [db       (or db @db/*conn*)
@@ -733,19 +838,27 @@
         ;; seon.repl.autocomplete projection) pass per-render config.
         node     (:seon.render/node input)
         tblock   (block-ent db my-eid :transcript)
-        ;; move 5 / CP-5 — the clip POLICY off `::tiers` + `::turns-retained`:
-        ;; empty tiers (v1 default) → render-all (byte-parity); non-empty →
-        ;; the age-banded window (last `retained` turns verbatim, older evals
-        ;; kept within each tier's token budget).
-        tiers    (or (::tiers node) (::tiers tblock))
-        retained (or (::turns-retained node) (::turns-retained tblock) 8)
-        events*t (clip-events-by-tiers (mapv #(into {} %) tiers) retained events*c)
+        ;; Batched rotation is derived from turn facts. At 50 turns it removes
+        ;; the oldest complete 25-turn chunk; at 75 it removes the next one.
+        ;; This creates 24 append-only/cache-stable turns between membership
+        ;; changes instead of sliding one event out on every turn.
+        turn-count    (count (ctx/agent-turns id db))
+        window-size   (or (::turn-window-size node)
+                          (::turn-window-size tblock)
+                          default-turn-window-size)
+        eviction-size (or (::turn-eviction-size node)
+                          (::turn-eviction-size tblock)
+                          default-turn-eviction-size)
+        settled-cap   (or (::settled-token-cap node)
+                          (::settled-token-cap tblock)
+                          default-settled-token-cap)
+        events*t      (clip-events-by-turn-window
+                        turn-count window-size eviction-size events*c)
         ;; move 4 / CP-5 — the per-eval RESULT-BODY cap off `::result-decay` ×
         ;; the eval's AGE (turn-offset = newest turn − the eval's `::turn-idx`).
-        ;; The v1 default is the 3-level shrink schedule [0→16384, 2→1500,
-        ;; 5→200]: a fresh eval renders near-full, an older one clips to a stub
-        ;; (keeping its `result/<id>` handle) — the "start larger, shrink over
-        ;; time" safety net for full block rendering. Byte-STABLE within a band
+        ;; The default 3-level schedule is [0→4096, 2→1024, 5→512]: a fresh
+        ;; result is large enough to work with and an old result retains useful
+        ;; identity + diagnostics. Byte-STABLE within a band
         ;; (the cap changes only at a level boundary). Injected as
         ;; `:seon.render/result-body-cap` onto each eval event's `::entity`,
         ;; which `eval->renderable` forwards to `format-eval-row`.
@@ -785,10 +898,17 @@
                        events*t)
         ;; Render each event directly. Handle availability is already an exact
         ;; per-eval fact on the event; no run/process boundary is inferred.
+        active-start (if (< turn-count window-size)
+                       0
+                       (* eviction-size (quot turn-count eviction-size)))
         body
         (->> events**
-             (map render*)
-             (remove str/blank?)
+             (keep (fn [ev]
+                     (let [text (render* ev)]
+                       (when-not (str/blank? text)
+                         {::event ev ::text text}))))
+             (clip-rendered-events-by-settled-budget active-start settled-cap)
+             (map ::text)
              (str/join "\n"))
         head (masthead ns-str (ctx/repl-mode db))
         ;; ::readline? false (node first, stored block fallback) drops the
@@ -854,19 +974,6 @@
           (into [preceding] recent)
           recent)))))
 
-(defn- turn-index-at
-  "Index of the latest turn that began no later than `at`, or nil."
-  [turn-ats at]
-  (when (instance? js/Date at)
-    (let [at-ms (.getTime ^js at)]
-      (reduce-kv
-        (fn [found idx turn-at]
-          (if (<= (.getTime ^js turn-at) at-ms)
-            idx
-            (reduced found)))
-        nil
-        (vec turn-ats)))))
-
 (defn- recent-html-source-events
   "Bound message/eval reads before constructing the human transcript DOM.
 
@@ -921,7 +1028,9 @@
         own-id   id
         node     (:seon.render/node input)
         tblock   (block-ent db my-eid :transcript)
-        retained (or (::turns-retained node) (::turns-retained tblock) 8)
+        retained (or (::turns-retained node)
+                     (::turns-retained tblock)
+                     default-turns-retained)
         ;; Project only the ordered fact the window policy needs. Datahike
         ;; entities are associative views, not Clojure maps; keeping them out
         ;; of the pure helper also keeps its public contract storage-agnostic.

@@ -15,6 +15,7 @@
     [datahike.api :as d]
     [malli.core :as m]
     [seon.agent]
+    [seon.agent.ctx :as agent-ctx]
     [seon.agent.message]
     [seon.agent.web]
     [seon.config :as config]
@@ -30,6 +31,9 @@
     (is (m/validate :seon.config/manifest
                     {:seon.config/skills        {:seon.config/dirs ["seon-skills"]}
                      :seon.config/routes        [{:seon.config/removes [:seon.route/agent-call]}]
+                     :seon.config/run           {:seon.config.run/batch-turn-limit 100
+                                                 :seon.config.run/stream-form-limit 300
+                                                 :seon.config.run/deadline-ms 1800000}
                      :seon.config/agent-context
                      {:seon.agent/ctx [{:seon.agent.ctx/name :transcript
                                         :seon.agent.ctx/priority 100}]}})))
@@ -330,6 +334,9 @@
       ;; repl-mode's default is per-MODEL (env-derived) — pinned by its own
       ;; deftest below, not here (this test runs under the suite's ambient env).
       (is (= 1500      (:seon.config.render/eval-cap s)))
+      (is (= 100       (:seon.config.run/batch-turn-limit s)))
+      (is (= 300       (:seon.config.run/stream-form-limit s)))
+      (is (= 1800000   (:seon.config.run/deadline-ms s)))
       (is (= :symbols  (:seon.config.repair/level s)))
       (is (= :public-only (:seon.agent.web/policy s)))
       (is (= 1         (:seon.config/spawn-depth-cap s)))
@@ -347,12 +354,18 @@
           skills {:seon.config/dirs ["seon-skills"]}
           s (config/resolve-config-singleton
               {:seon.config/render {:seon.config.render/eval-cap 42}
+               :seon.config/run {:seon.config.run/batch-turn-limit 7
+                                 :seon.config.run/stream-form-limit 19
+                                 :seon.config.run/deadline-ms 123456}
                :seon.config/on-core-error :log
                :seon.config/system-text "you are a helpful agent"
                :seon.config/skills skills
                :seon.config/agent-context agent-context
                :seon.config/root-context root-context})]
       (is (= 42 (:seon.config.render/eval-cap s)))
+      (is (= 7 (:seon.config.run/batch-turn-limit s)))
+      (is (= 19 (:seon.config.run/stream-form-limit s)))
+      (is (= 123456 (:seon.config.run/deadline-ms s)))
       (is (= :log (:seon.config/on-core-error s)))
       (is (= "you are a helpful agent" (:seon.config/system-text s)))
       (is (= skills (:seon.config/skills s)))
@@ -444,6 +457,9 @@
         (.then
           (fn [conn]
             (let [manifest {:seon.config/render {:seon.config.render/eval-cap 4321}
+                            :seon.config/run {:seon.config.run/batch-turn-limit 17
+                                              :seon.config.run/stream-form-limit 51
+                                              :seon.config.run/deadline-ms 654321}
                             :seon.config/on-core-error :log
                             :seon.config/repair {:seon.config.repair/classes {:foo false}}
                             :seon.config/web {:seon.agent.web/policy :allowlist
@@ -463,6 +479,11 @@
                       (try
                         ;; scalar caps + dials read from the datom
                         (is (= 4321 (config/eval-render-cap)))
+                        (is (= {:seon.config.run/batch-turn-limit 17
+                                :seon.config.run/stream-form-limit 51
+                                :seon.config.run/deadline-ms 654321}
+                               (agent-ctx/run-policy @conn))
+                            "the frozen db value owns the effective run policy")
                         (is (= :log (config/on-core-error)))
                         (is (= 1 (config/spawn-depth-cap)))      ; default, seeded
                         ;; collection knobs decoded off the EDN slot

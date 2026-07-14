@@ -26,10 +26,13 @@ The isolated ACME checkout initially failed because pinned submodules and the
 locked npm closure were absent. After initializing the selected dependency
 sources and running `npm ci`, the current writer, `acme-client`, bootstrap,
 CSS, watcher, writer, and pod built successfully. The ordinary `acme/root`
-MCP coordinate then selected an older checkout's live pod. `bin/acme` now
-honors an explicit `SEON_CLUSTER_DIR`; the lane is live as
-`acme-agentic-tool-refinement` at port 8094 and the repository MCP server
-proved the selected pod's cwd and PID.
+MCP coordinate then selected an older checkout's live pod. A custom
+`SEON_CLUSTER_DIR` previously changed only the database path while retaining
+ACME's shared sockets, process records, logs, and HTTP port file. `bin/acme`
+now derives all of those coordinates from the selected cluster basename while
+preserving the ordinary `acme` paths. The lane is live and operator-ready as
+`acme-agentic-tool-refinement` at port 8094; its writer, pod, sockets, logs,
+and process records are disjoint from every other checkout.
 
 The first fresh ordinary-agent render is the current baseline:
 
@@ -44,17 +47,28 @@ sixteen configured required namespaces as inert compact cards with public
 function names, named arguments, complete input/output contracts, and schema
 definitions. Its size and relevance have not yet passed the small-model test.
 
-Live transcript inspection found two active policy defects. The configured
-`0→16384`, `2→1500`, `5→200` result decay has no eviction tiers, so old eval
-events remain forever and total context does not plateau. Tier accounting, when
-enabled, charges result EDN rather than the complete rendered event. Separately,
-the idle readline always displays the 20-turn batch fallback even when the
-database selects stream mode; the actual open-run fallback is 60 forms. Both
-ceilings are still too small as ordinary local-agent stopping conditions. The
-architecture now states the target: bounded raw history without synthetic
-compaction, durable continuity through plan/database facts, outcome-oriented
-runs with generous safety ceilings, and local-first execution with explicit
-stronger-model consultation.
+The first policy unit now resolves run ceilings through one config manifest
+section and persists three scalar singleton facts. The live isolated database
+reports 100 batch turns, 300 stream forms, and a 1,800,000 ms deadline; both
+`open-run!` and the idle readline query that frozen database policy. The
+manifest values support Aero environment overrides without making the runtime
+read environment state.
+
+The AI transcript now rotates whole raw-history chunks instead of compacting
+or sliding one event per turn. With the current database policy it retains 50
+turns, drops the oldest 25 at each boundary, keeps a 25-turn HTML window, and
+charges the settled chunk against 8,192 estimated tokens using each complete
+rendered event. Result bodies decay `0→4096`, `2→1024`, and `5→512`; complete
+facts and blobs remain queryable. Focused config, run, and transcript tests
+pass 41 tests and 174 assertions, and the rebuilt ACME pod reports the exact
+policy datoms through the repository REPL boundary.
+
+Two applications of the same config exposed a separate operator defect: the
+public `config apply` command performs the complete artifact build/restart
+path, and identical source produced different writer/application digests. The
+database policy converged, but the runtime restarted twice. This is recorded
+as [[../../seon/issues/config-apply-rebuilds-unchanged-runtime]] rather than
+being hidden inside evaluation timing.
 
 A subsequent purity probe found that historical result-handle display depends
 on a process-local cache. The target is now explicit and falsifiable: the same

@@ -9,12 +9,13 @@ tags: [issue, agent, architecture, flow]
 
 ## Problem
 
-The configured transcript decays each eval result body to 200 estimated tokens
-at turn offset five, but an empty tier schedule retains every eval event
-forever. The transcript therefore grows linearly with eval count despite every
-old result reaching a stable per-item size. The tier budget also charges only
-`:seon.eval/result-edn`; form source, narration, and error rendering can bypass
-the claimed token budget.
+The original transcript decayed each eval result body to 200 estimated tokens
+at turn offset five, but an empty tier schedule retained every eval event
+forever. The transcript therefore grew linearly with eval count despite every
+old result reaching a stable per-item size. Tier accounting also charged only
+`:seon.eval/result-edn`; form source, narration, and error rendering bypassed
+the claimed token budget. The mechanical bound is fixed; Inspect schedule
+comparison remains before this issue can close.
 
 ## Evidence
 
@@ -24,6 +25,13 @@ all events unchanged when tiers are empty. When tiers are present it estimates
 only the result EDN while retaining or evicting the whole event. The
 `transcript-block` docstring still says the sliding window "lands later" even
 though decay/tier code now runs, which obscures the active behavior.
+
+The repair derives a 50-turn window from turn facts and evicts complete 25-turn
+prefixes. The retained settled chunk shares an 8,192-token cap charged against
+the complete rendered event; the append-only current chunk remains intact.
+Result decay is `0→4096`, `2→1024`, `5→512`. Pure tests pin the 49/50/74/75
+rotation points and prove that source plus result text, not result EDN alone,
+determines retention. The rebuilt ACME database reports the exact policy.
 
 ## Owner
 

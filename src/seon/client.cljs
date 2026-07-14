@@ -413,7 +413,7 @@
    :seon.agent/parent
    ;; Derived-state primitives: the CURRENT run pointer (fencing token +
    ;; spine of derived state) and the terminate marker. Plus the run-bound
-   ;; seeds (the :seon.agent.run/default-turn-limit config datom, default 20)
+   ;; seeds (the database-owned run policy, with an optional agent override)
    ;; and the self-managed cron vector. The agent's section overrides.
    :seon.agent/run
    :seon.agent/terminated-at
