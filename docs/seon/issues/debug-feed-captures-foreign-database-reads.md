@@ -5,16 +5,16 @@ severity: friction
 tags: [issue, web, database, flow, architecture]
 ---
 
-# Thread one database value through the debug feed
+# Thread one database value through debug and data feeds
 
 ## Problem
 
-The debug feed starts `capture-reads` with one dereferenced replica value but
-its render thunk dereferences the connection again. Those separately
-reconstituted immutable values are not identical, so the observer classifies
-the debug projection's reads as foreign and non-replayable. Every committed
-transaction therefore conservatively rebuilds the open debug view even when
-none of its semantic results changed.
+The debug and data feeds start `capture-reads` with one dereferenced replica
+value but their initial-render thunks dereference the connection again. Those
+separately reconstituted immutable values are not identical, so the observer
+classifies reads made through the second value as foreign and non-replayable.
+Every committed transaction can therefore conservatively rebuild an open
+debug or data view even when none of its semantic results changed.
 
 ## Evidence
 
@@ -23,6 +23,13 @@ none of its semantic results changed.
 calls `debug-projection`, whose implementation reads through the ambient
 connection again. The same definition does not accept and thread the
 transaction's `:seon.db/db` into the complete projection.
+
+`seon.web.debug/data-feed-definition` has the same initial-render shape: it
+passes one `@db/*conn*` value into `render-observed`, then calls
+`data-browser-fragment` with a second `@db/*conn*`. Its change transition is
+already correct because it threads the change's explicit `:seon.db/db` into
+the thunk. The shared defect is therefore the initial feed-plan boundary, not
+either page's database projections.
 
 A read-only CLJS REPL probe against the live default cluster on 2026-07-14
 inspected the one open root-debug subscription. It retained 657 observations:
@@ -41,7 +48,7 @@ debug-specific cache or another listener.
 
 ## Acceptance
 
-- One immutable database value is threaded through debug plan and unit
+- One immutable database value is threaded through debug/data plans and unit
   producers for a transition.
 - Replayable query, pull, entity, schema, and index observations remain
   replayable; genuinely lazy, temporal, or unknown operations stay broad.

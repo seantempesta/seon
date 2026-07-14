@@ -14,24 +14,47 @@ details do no expensive work.
 
 ## Current state
 
-The existing page has one database route, a gzip feed, index-oriented shells,
-and partial lazy detail. Its final coordinate, cursor/count API, transaction
-history navigation, provenance presentation, reactive-unit ownership, and
-grown-database budgets are not yet graduated. Detailed implementation waits on
-the canonical lifecycle coordinate and the settled render-unit contract.
+The existing page has a cheap shell, the canonical normalized gzip feed,
+installed-schema navigation, bounded AEVT attribute pages, URL-owned view
+state, and exact read-result replay. It has no entity/ref/transaction/
+provenance/history navigation yet, and its whole browser remains one render
+unit. The exposed `[entity value tx]` cursor is neither opaque nor tied to a
+database coordinate, while the replica does not yet expose commit id.
+
+A read-only 2026-07-14 default-cluster probe observed basis `536870929` and
+15,851 datoms. The initial compressed feed emitted immediately, but the
+default domain navigator incorrectly included selected Datahike's `:dh.ref`
+implicit system schema. Initial read capture also dereferences the replica
+twice, sharing the foreign-database replay defect already found in debug.
+[[research/database-browser-source-audit-2026-07-14]] grounds the exact index,
+seek, history, count, coordinate, cursor, unit, deletion, and acceptance
+constraints. Detailed implementation waits on the canonical lifecycle
+coordinate and settled render-unit contract.
+
+## Research evidence
+
+- [[research/database-browser-source-audit-2026-07-14]] — selected dependency
+  ledger, live baseline, exact current gaps, coordinate/cursor constraints,
+  deletion map, ordered slices, and acceptance matrix.
 
 ## Ordered work
 
-1. Ground exact Datahike index, count, seek, history, and transaction behavior
-   plus current Seon protocol/replica ownership.
-2. Define stable entity, attribute, transaction, and temporal coordinates over
-   `{database-id, branch, commit-id, t}`.
-3. Implement bounded cursor pages and pay-for-open entity/ref/transaction/
-   provenance/history details through the one render-unit engine.
-4. Delete broad scans, eager details, duplicate feed logic, and page-specific
-   cache/transition paths after parity.
-5. Prove correctness and budgets on fresh and grown databases in the REPL,
-   focused tests, server-side gzip SSE, and a real browser.
+1. Consume the lifecycle coordinate and reactive-unit contracts; mirror exact
+   persistent-sorted-set `0.4.137` source before count implementation.
+2. Harden the current navigator: thread one db value, classify dependency
+   system attrs correctly, and replace the raw tuple with a bounded versioned
+   cursor tied to coordinate/index/prefix/direction.
+3. Add bounded EAVT entity/outbound-ref and AVET reverse-ref units, with raw
+   rendering only for the already selected bounded value.
+4. Add backward transaction navigation, exact transaction metadata,
+   user/process provenance, and a closed capped effective-datom unit.
+5. Add five-component assertion/retraction history and frozen as-of links;
+   expose valid time only through a fully specified `seon.db` boundary.
+6. Add a public Datahike slice-count only where wrapper-correct, counted
+   semantics are proven; counts never gate pagination.
+7. Prove fresh/grown/current/history budgets, focused behavior, server-side
+   gzip SSE, real-browser navigation, and final-close cleanup; delete the
+   superseded whole-browser/cursor/classifier paths after parity.
 
 ## Graduation
 
@@ -43,3 +66,6 @@ the canonical lifecycle coordinate and the settled render-unit contract.
 - Relevant writes morph only affected open units; unrelated writes do no work.
 - Fresh, large, and historical databases meet explicit latency and memory
   budgets with browser and server-side feed evidence.
+- Per-attribute or historical counts are shown only when maintained-index,
+  wrapper-correct behavior is proven; an unavailable count never causes a
+  scan.
