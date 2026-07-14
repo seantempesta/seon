@@ -16,17 +16,19 @@ See `README.md` for the convention.
 |-------|----------|------|
 | [An agent can OOM the pod via unbounded query and eval values](eval-memory-safety.md) | blocker | agent |
 
-## Friction (11)
+## Friction (13)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [ACME cannot migrate safely through the current operator](acme-operator-migration-drift.md) | friction | UI |
 | [AI and HTML render twins may run one derivation twice](render-twin-runs-function-twice.md) | friction | UI |
-| [Address-message steps have no explicit queue priority](plan-address-step-priority.md) | friction | agent |
+| [Address-message steps can displace authored plan work](plan-address-step-priority.md) | friction | agent |
 | [Async structural functions bypass contract validation](async-contract-instrumentation-gap.md) | friction | agent |
 | [Cross-agent planners can reopen worker-completed steps](plan-reopen-cross-agent-authority.md) | friction | agent |
 | [Database query tuple results are hard for agents to read](database-query-tuple-shape-legibility.md) | friction | agent |
+| [Development MCP integration is split and stale](development-mcp-integration-drift.md) | friction | Core |
 | [Embedding boot noise — 232 `:entity-id/missing` errors on fresh seed](embedding-first-write-lookup-noise.md) | friction | agent |
+| [Inspect live callers use retired cluster lifecycle contracts](inspect-live-cluster-caller-drift.md) | friction | agent |
 | [Model can ghost-echo runtime scaffolding into the transcript spine](narration-ghost-echo-not-neutralized.md) | friction | agent |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
 | [Self-host `cljs.test/is` throws inside a dynamically-evaled `:test` thunk](selfhost-cljs-test-is-thunk-resolution.md) | friction | agent |

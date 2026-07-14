@@ -86,6 +86,10 @@ process commands or a parallel supervisor.
   isolated ACME process namespace, ports, sockets, artifact manifest, watcher,
   Java 26 database server, and CLJS pod; no removed named-process command or
   second Shadow lifecycle remains.
+- If selected ACME ports or database paths are held by preserved worktree
+  processes, current-operator status reports the foreign ownership conflict;
+  it must not report merely `down`, overwrite discovery files, or start a
+  competing cluster.
 - The managed artifact includes the downstream source/preload and is invalidated
   by core, overlay, dependency, and build-config changes. The pod executes that
   exact published artifact rather than a presence-only `out-acme` bundle.
