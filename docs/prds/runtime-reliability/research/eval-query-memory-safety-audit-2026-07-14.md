@@ -277,6 +277,14 @@ existing blob archive if profiling proves that hashing/writing does not make a
 second whole-string copy; the current `my.blob/put!` can be reused, not
 duplicated.
 
+Admission must happen before `record-eval!` renders the persisted/transcript
+projection. Today recording precedes `bind-result-var!`; leaving that order
+unchanged would let the bounded renderer promise that a rejected full value is
+available at `result/<id>`. Record and display the admitted value or rejection
+descriptor, while preserving the raw value only for the bounded admission
+decision. A pending Promise may occupy its ordinary small handle slot, but its
+settled value must pass admission in `replace-live-result!`.
+
 The current 5 MiB full-retention test should become two tests: a small value
 round-trips identically, and an overweight value leaves only the bounded
 descriptor/blob handle while the raw slot is absent.
