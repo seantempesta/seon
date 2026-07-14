@@ -54,6 +54,17 @@
          sort
          vec)))
 
+(defn root-runtime-path?
+  "True when a normalized path belongs to Seon's root runtime/test graph.
+
+   `reference-code/` contains independent maintained dependency repositories.
+   Their own tests prove edits there; the root graph becomes responsible only
+   after `deps.edn` advances to a dependency commit. Treating those sources as
+   unknown root CLJS resources needlessly widens every library edit to the
+   complete pod gate."
+  [path]
+  (not (str/starts-with? path "reference-code/")))
+
 (defn- resource-index [manifest]
   (into {} (map (juxt :seon.dev.test.resource/path identity))
         (:seon.dev.test.artifact/resources manifest)))
@@ -462,7 +473,10 @@
   "Run affected pod, writer, and operator tests from current graph facts."
   [configuration paths]
   (let [root (:seon.dev.config/root configuration)
-        paths (normalize-paths root paths)]
+        requested-paths (normalize-paths root paths)
+        paths (filterv root-runtime-path? requested-paths)
+        dependency-source-paths
+        (filterv (complement root-runtime-path?) requested-paths)]
     (persist-report
      root
      (state/with-lock
@@ -514,7 +528,7 @@
                 (and (:seon.dev.changed-test/shadow? shadow)
                      (nil? manifest))
                 (conj (run-pod-fallback! root)))]
-          {:seon.dev.changed-test/paths paths
+          {:seon.dev.changed-test/paths requested-paths
            :seon.dev.changed-test/status (aggregate-status boundary-results)
            :seon.dev.changed-test/boundaries boundary-results
            :seon.dev.changed-test/test-namespaces
@@ -522,8 +536,14 @@
            :seon.dev.changed-test/host-status
            (:seon.dev.changed-test/host-status host-result)
            :seon.dev.changed-test/widening
-           (vec (concat (:seon.dev.changed-test/widening host-selection)
-                        (:seon.dev.changed-test/widening pod-selection)))}))))))
+           (vec
+             (concat
+               (when (seq dependency-source-paths)
+                 [{:seon.dev.changed-test/reason
+                   :independent-reference-repository
+                   :seon.dev.changed-test/paths dependency-source-paths}])
+               (:seon.dev.changed-test/widening host-selection)
+               (:seon.dev.changed-test/widening pod-selection)))}))))))
 
 (defn format-result
   "Format one bounded advisory result for a human or edit hook."

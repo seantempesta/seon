@@ -81,6 +81,13 @@
   (is (true? (changed/potential-shadow-input? "src/example/macros.clj")))
   (is (false? (changed/potential-shadow-input? "test/example/tool_test.clj"))))
 
+(deftest maintained-reference-sources-are-not-root-runtime-inputs
+  (is (false?
+        (changed/root-runtime-path?
+          "reference-code/datahike/src/datahike/query.cljc")))
+  (is (true? (changed/root-runtime-path? "src/seon/db.cljs")))
+  (is (true? (changed/root-runtime-path? "test/seon/db_test.cljs"))))
+
 (deftest host-impact-follows-each-retained-runner-graph
   (let [host-result
         {:seon.dev.changed-test/host-status :available
