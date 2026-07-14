@@ -219,7 +219,7 @@ reproducibility issue; it does not block simultaneous default/ACME runtime
 experiments.
 
 The independent distribution audit in
-[[research/independent-acme-distribution-audit-2026-07-14]] establishes the
+[[../independent-downstream-distribution/research/independent-acme-distribution-audit-2026-07-14]] establishes the
 next ACME boundary: ACME is the representative downstream product and must
 build, run, and customize a released Seon without a Seon source checkout. This
 is not implemented. The writer uberjar and source-checkout customization seams

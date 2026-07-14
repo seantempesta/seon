@@ -37,7 +37,7 @@ operator, compatibility manifest, or one-command release/downstream build.
 - Root `LICENSE` is AGPL-3.0 while `package.json` declares ISC.
 
 Full evidence and the proposed artifact boundary are in
-[[../../prds/runtime-reliability/research/independent-acme-distribution-audit-2026-07-14]].
+[[../../prds/independent-downstream-distribution/research/independent-acme-distribution-audit-2026-07-14]].
 
 ## Owner
 
