@@ -37,6 +37,15 @@ root, agent, canvas, debug, and `/data` define layouts but no custom transition
 logic. Agents never write memoized renderers, and no cache retains a database
 value. See [[roadmap]] slice 2 and [[docs/seon/architecture/ui]].
 
+The completed cache audit proves that active-unit reuse needs no library. Add
+no JVM cache and expose no cache API to renderers. A Node `lru-cache` recent
+layer is allowed only after active-unit profiling proves meaningful reopen
+reuse. The completed test audit proves the common latency tax is a fresh
+Shadow JVM, while the current complete run is independently broken by a Malli
+projection leak and duplicate async completion. Repair that baseline first;
+then reuse the existing managed Shadow process and compiler dependency graph.
+Do not infer function-level test impact from the incomplete runtime graph.
+
 The previously shared ACME/plan/REPL work is checkpointed at `3e0e0bff` and the
 tree was clean immediately afterward. Focused `seon.schema-test`,
 `my.plan-test`, and `seon.ai.dispatch-test` runs pass. The annotated

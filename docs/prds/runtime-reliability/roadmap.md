@@ -88,6 +88,35 @@ These observations are baseline evidence, not accepted target behavior. Each
 must gain an owning behavioral regression plus a repeated real-browser and
 server-side gzip-feed proof before its slice closes.
 
+### Source-grounded implementation decisions — 2026-07-14
+
+The Slice 0 library and runner audits close two design questions before source
+implementation:
+
+- Reactive correctness and active reuse require no cache dependency. One
+  normalized active render unit retains its current plain inputs, renderer
+  digest, exact observed reads/results, and last serialized element until its
+  final consumer closes. Only a measured reopen/cross-subscription hit rate may
+  justify a recent-output LRU. If that gate passes in the Node renderer,
+  `lru-cache` 11.5.2 is the proven candidate behind the existing view-unit
+  owner; no JVM cache or renderer-facing cache API is added.
+- Focused CLJS test latency is repeated Shadow/JVM startup: measured current
+  bundles ran representative focused namespaces in under two seconds after
+  roughly ten-second one-shot compiles. Preserve Shadow and fresh Node
+  isolation, but let the managed Shadow JVM maintain the complete test artifact
+  and compiler graph. Namespace dependency selection is sound today;
+  automatic function-to-test selection is not, because complete call edges do
+  not exist.
+- The complete CLJS gate is not presently trustworthy. A focused
+  `seon.client.extra-core-test` reproduces a process-global Malli projection
+  leak, the full run reports duplicate async completion, and the runner
+  misclassifies the resulting incomplete execution. Slice 4 therefore begins
+  by restoring one green single-process baseline before optimizing selection.
+
+The durable evidence, pinned sources, executable probes, and acceptance gates
+are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]] and
+[[research/test-impact-selection-and-runner-audit-2026-07-14]].
+
 ### Slice 0 — reconcile and baseline — IN PROGRESS
 
 - Reconcile every remaining claim below with active source, tests, routes,
@@ -104,6 +133,10 @@ server-side gzip-feed proof before its slice closes.
   visible failure, request/response, database fact, feed patch, console/log
   evidence, and affected render units rather than treating a successful HTTP
   status or static screenshot as proof of a working interaction.
+- Integrate the completed root/reactive-unit, cache-library, and test-impact
+  audits into the exact source/test inventory. Commit their evidence before
+  source implementation and carry their falsification cases into the owning
+  slice exits.
 
 Exit: one clean, reproducible default-cluster baseline and a source-grounded
 file/test inventory for every later slice. The operator gate, database boundary,
