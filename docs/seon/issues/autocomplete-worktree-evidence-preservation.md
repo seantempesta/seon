@@ -83,6 +83,15 @@ read-only staging proof, and the smaller generated/blob residues still need a
 hash-backed duplicate or supported reproducibility decision. Worktree removal
 therefore remains blocked.
 
+The final read-only retirement classification is recorded in
+[[docs/prds/runtime-reliability/research/legacy-lane-retirement-audit-2026-07-14]].
+It revalidated all registered refs, dirty patches, allocated cluster sizes,
+and live process/port owners. `seon-plan-fix` is the sole old checkout eligible
+for later user-authorized removal now: it is detached, has no patch-unique
+commit, tracked change, database/blob path, or live process, and contains only
+a reproducible untracked `node_modules` symlink to the current checkout. Every
+other old checkout remains evidence-blocked. No cleanup was executed.
+
 The follow-up read-only audit
 [[docs/prds/runtime-reliability/research/legacy-acme-archive-readback-runbook-2026-07-14]]
 captured live database checkpoints through the owning writers without opening a

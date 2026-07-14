@@ -88,10 +88,12 @@ Immediate unit-0 queue:
 4. **Complete for the default cluster:** destructively reset/rebuild, then
    prove routes, browser/static console state, server-side gzip feeds, database
    read-back, restart, and both MCP runtimes.
-5. **Next:** classify every retained old-lane commit, ignored database/blob,
-   worktree,
-   and process; preserve required evidence, then produce the explicit safe
-   retirement list. Do not touch the active ACME agent worktree.
+5. **Complete audit; cleanup not authorized:**
+   [[research/legacy-lane-retirement-audit-2026-07-14]] classifies every
+   retained old-lane commit, ignored database/blob, worktree, and process.
+   Detached `seon-plan-fix` is the sole checkout eligible for later
+   user-authorized removal; all others retain explicit evidence gates. Do not
+   touch the active ACME agent worktree.
 6. **In progress:** carve the successor PRD folders in dependency order with
    one grounded dependency ledger and falsifiable acceptance matrix each.
 
