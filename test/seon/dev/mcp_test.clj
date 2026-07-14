@@ -29,6 +29,64 @@
              (get-in by-name [tool-name :inputSchema :properties
                               :max_output_tokens :type]))))))
 
+(deftest shadow-discovery-derives-every-artifact-flavor-port-file
+  (let [root "/tmp/seon-mcp-root"]
+    (with-redefs [mcp/project-root root]
+      (is (= #{[:seon.dev.artifact.flavor/default
+                "/tmp/seon-mcp-root/.shadow-cljs/nrepl.port"]
+               [:seon.dev.artifact.flavor/acme
+                "/tmp/seon-mcp-root/tmp/shadow/acme/nrepl.port"]}
+             (into #{}
+                   (map (juxt :seon.dev.mcp/artifact-flavor
+                              :seon.dev.mcp/port-file))
+                   (#'mcp/shadow-endpoints)))))))
+
+(deftest agent-resolution-spans-isolated-shadow-servers
+  (let [candidates
+        [{:seon.dev.mcp/port 41001
+          :seon.dev.runtime-id/cluster "default"
+          :seon.dev.runtime-id/ids ["root"]
+          :build ":client"
+          :client-id 1}
+         {:seon.dev.mcp/port 41002
+          :seon.dev.runtime-id/cluster "acme"
+          :seon.dev.runtime-id/ids ["root"]
+          :build ":acme-client"
+          :client-id 2}]]
+    (with-redefs-fn {#'mcp/all-advertisements! (constantly candidates)}
+      (fn []
+        (is (= :ambiguous
+               (:seon.dev.runtime-id/resolution
+                (#'mcp/resolve-agent-runtime! "root"))))
+        (is (= 41002
+               (get-in (#'mcp/resolve-agent-runtime! "acme/root")
+                       [:seon.dev.runtime-id/runtime :seon.dev.mcp/port])))))))
+
+(deftest agent-session-pins-on-the-selected-shadow-server
+  (let [sessions (atom {})
+        pinned (atom [])
+        runtime {:seon.dev.runtime-id/resolution :match
+                 :seon.dev.runtime-id/runtime
+                 {:seon.dev.mcp/port 41002
+                  :seon.dev.runtime-id/cluster "acme"
+                  :seon.dev.runtime-id/ids ["root"]
+                  :build ":acme-client"
+                  :client-id 2}}]
+    (with-redefs-fn {#'mcp/agent-sessions sessions
+                     #'mcp/resolve-agent-runtime! (constantly runtime)
+                     #'mcp/pin-session!
+                     (fn [port build client-id]
+                       (swap! pinned conj [port build client-id])
+                       "acme-session")}
+      (fn []
+        (is (= {:nrepl-session "acme-session"
+                :port 41002
+                :client-id 2
+                :build ":acme-client"
+                :cluster "acme"}
+               (#'mcp/ensure-agent-session! "acme/root")))
+        (is (= [[41002 ":acme-client" 2]] @pinned))))))
+
 (deftest writer-prepl-sessions-are-stateful-bounded-and-restart-aware
   (let [directory (.toFile (java.nio.file.Files/createTempDirectory
                             "seon-mcp-test" (make-array java.nio.file.attribute.FileAttribute 0)))

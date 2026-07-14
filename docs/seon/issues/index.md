@@ -26,6 +26,7 @@ See `README.md` for the convention.
 | [Async structural functions bypass contract validation](async-contract-instrumentation-gap.md) | friction | agent |
 | [Autocomplete datasets and scoring bypass canonical runtime projections](autocomplete-data-quality-pipeline-drift.md) | friction | agent |
 | [Autocomplete worktrees contain unclassified database and model evidence](autocomplete-worktree-evidence-preservation.md) | friction | Core |
+| [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | friction | agent |
 | [Cross-agent planners can reopen worker-completed steps](plan-reopen-cross-agent-authority.md) | friction | agent |
 | [Database query tuple results are hard for agents to read](database-query-tuple-shape-legibility.md) | friction | agent |
 | [Embedding boot noise — 232 `:entity-id/missing` errors on fresh seed](embedding-first-write-lookup-noise.md) | friction | agent |
@@ -35,7 +36,6 @@ See `README.md` for the convention.
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
 | [Self-host `cljs.test/is` throws inside a dynamically-evaled `:test` thunk](selfhost-cljs-test-is-thunk-resolution.md) | friction | agent |
 | [Shadow deps-mode declarations imply inactive build paths](shadow-deps-mode-declaration-drift.md) | friction | docs |
-| [acme cluster has no programmatic SCI eval seam](acme-no-sci-eval-seam.md) | friction | agent |
 
 ## Cleanup (7)
 

@@ -5,12 +5,13 @@
    it no `:seon.ns` row at all → it was SILENTLY invisible to agent
    context + retrieval. This is the BUG-C reproduction case: a third
    party's own code that has no `:malli/schema` anywhere still must be
-   indexed + shown when SEON_EXTRA_SRC is set.")
+   indexed + shown when SEON_EXTRA_SRC is set."
+  (:require [clojure.string :as str]))
 
 (defn slugify
   "Lowercase + dash a label. Unspecced."
   [s]
-  (-> s clojure.string/lower-case (clojure.string/replace #"\s+" "-")))
+  (-> s str/lower-case (str/replace #"\s+" "-")))
 
 (defn note-line
   "Render a single note line. Unspecced."
@@ -20,7 +21,7 @@
 (defn word-count
   "Count words in a string. Unspecced."
   [s]
-  (if (empty? s) 0 (count (clojure.string/split s #"\s+"))))
+  (if (empty? s) 0 (count (str/split s #"\s+"))))
 
 (defn- secret-helper
   "A PRIVATE (defn-) helper. Unspecced, private — the BUG-D reproduction

@@ -118,6 +118,14 @@
         (update :seon.dev.config/shadow-cache-root #(root-path root %))
         (assoc :seon.dev.config/client-output expected-output))))
 
+(defn artifact-configurations
+  "Artifact coordinates for every supported development flavor."
+  {:malli/schema
+   [:=> [:cat :string] [:vector artifact-configuration-schema]]}
+  [root]
+  (mapv #(artifact-configuration root {"SEON_ARTIFACT_FLAVOR" %})
+        (sort (keys artifact-flavors))))
+
 (defn shadow-environment
   "Select the artifact flavor's Shadow server cache before JVM startup."
   {:malli/schema

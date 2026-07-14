@@ -280,9 +280,14 @@ MCP server loaded by `.codex/config.toml` and `.mcp.json`:
   `bin/seon test operator`. MCP eval is the first probe, not another test
   runner.
 
-The server discovers the current checkout's dynamic Shadow and cluster writer
-ports. After changing MCP code or client registration, restart the Codex or
-Claude task: already-running clients do not reload stdio server definitions.
+The server derives every supported artifact flavor's Shadow cache coordinate
+from `seon.dev.config`, discovers each live dynamic nREPL port, and resolves
+cluster-qualified agents across the combined advertisements. A bare id present
+in several clusters must fail as ambiguous; never select Shadow's latest
+runtime. CLJ discovery uses the selected cluster's dynamic writer port file.
+After changing MCP code or client registration, restart the Codex or Claude
+task: already-running clients do not reload stdio server definitions or tool
+schemas.
 
 The edit hook parses changed Clojure files and requests conservative affected
 tests through one public operation:
@@ -306,6 +311,12 @@ Use focused tests while iterating, then one relevant complete checkpoint at the
 natural unit boundary. Never run overlapping CLJS suites inside the live pod.
 Tests assert facts, transitions, envelopes, DOM identity, omission,
 idempotency, and structure—not exact context prose.
+
+The default Shadow watcher is the sole owner of the canonical `test` build and
+`out/test` artifact. A downstream artifact flavor watches only its own client
+build; ACME owns `acme-client`, never `test`. Separate cache roots do not make a
+shared output safe. Build selection, readiness, failure detection, publishing,
+and pruning must consume the same flavor-owned build vector.
 
 When exercising a real agent, use long-term planning plus database-backed
 memory: a multi-step plan that survives restart, and schema'd facts stored then
@@ -332,6 +343,14 @@ watching; only `--open` launches a browser.
 Use project-local `logs/`, `tmp/`, and `data/`; never system `/tmp`. Leave ACME
 alone while another lane owns it. After runtime/source changes, prove the
 default cluster before coordinating a downstream update.
+
+`bin/acme` is a semantic wrapper over the same operator with the ACME artifact
+flavor, not a second supervisor. It owns a separate process directory, cluster,
+Shadow cache, `acme-client` output, and dynamic endpoint files. `acme/deps.edn`
+adds only downstream source/dependencies; the root `:writer` and `:cljs`
+aliases remain the authority for Seon's maintained Datahike, Konserve,
+superv.async, and partial-cps coordinates in both default and ACME. Do not copy
+or override those shared forks downstream.
 
 ## Provider and optional subsystem boundaries
 

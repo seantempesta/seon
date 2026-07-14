@@ -26,14 +26,14 @@ SEON_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 #     .env — those use ${:-} below and a shell-set value still wins. ---
 if [ -f "$SEON_ROOT/.env.acme" ]; then set -a; . "$SEON_ROOT/.env.acme"; set +a; fi
 
-# --- isolation: distinct from the live default (7890/7891, data/clusters/default,
+# --- isolation: distinct from the live default (7890, data/clusters/default,
 #     tmp/seon-cluster-default-*.sock, tmp/proc, logs/). Ports use ${...:-} so a
 #     shell override (SEON_PORT=… SEON_WRITER_REPL_PORT=… bin/acme …) can dodge a
-#     MACHINE-level collision without editing this file. Acme defaults are
-#     7980/7981 — verified free on this machine (7990/7991 collided with an
-#     unrelated downstream deployment already holding those ports). ---
-export SEON_PORT="${SEON_PORT:-7980}"
-export SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7981}"
+#     machine-level collision without editing this file. The web port is stable
+#     for humans; the writer development REPL must bind port zero and publish
+#     its actual cluster-qualified port file. ---
+export SEON_PORT="${SEON_PORT:-7994}"
+export SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-0}"
 export SEON_CLUSTER_DIR=data/clusters/acme
 export SEON_REQ_SOCK=tmp/acme-cluster-req.sock
 export SEON_PUB_SOCK=tmp/acme-cluster-pub.sock

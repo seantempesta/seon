@@ -5,7 +5,8 @@
             [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [seon.dev.config :as config])
   (:import [java.io BufferedOutputStream BufferedReader PushbackInputStream
             PushbackReader]
            [java.net InetSocketAddress Socket SocketTimeoutException]))
@@ -54,8 +55,6 @@
   ;; singleton `default` session pins to the runtime advertising it.
   (rid/dir->cluster-name (or (System/getenv "SEON_CLUSTER_DIR")
                              "data/clusters/default")))
-
-(def shadow-port-file (str project-root "/.shadow-cljs/nrepl.port"))
 
 (def default-build-id ":client")
 (def default-timeout-ms 30000)
@@ -157,16 +156,48 @@
 ;;; Shadow port discovery
 ;;; ---------------------------------------------------------------------------
 
-(defn- read-shadow-port
-  "Returns the current shadow-cljs nREPL port, or nil if no watcher is running."
+(defn- shadow-endpoints
+  "Current Shadow port-file coordinates for every artifact flavor."
   []
-  (try
-    (let [f (java.io.File. shadow-port-file)]
-      (when (.exists f)
-        (some-> (slurp f) str/trim parse-long)))
-    (catch Exception e
-      (log-error "Failed to read shadow port:" (.getMessage e))
-      nil)))
+  (mapv (fn [artifact]
+          (let [port-file (io/file
+                           (:seon.dev.config/shadow-cache-root artifact)
+                           "nrepl.port")]
+            {:seon.dev.mcp/artifact-flavor
+             (:seon.dev.config/artifact-flavor artifact)
+             :seon.dev.mcp/port-file (.getPath port-file)}))
+        (config/artifact-configurations project-root)))
+
+(defn- read-shadow-endpoints
+  "Readable Shadow endpoints, deduplicated by live port."
+  []
+  (->> (shadow-endpoints)
+       (keep (fn [{port-file :seon.dev.mcp/port-file :as endpoint}]
+               (try
+                 (let [file (io/file port-file)
+                       port (when (.isFile file)
+                              (some-> (slurp file) str/trim parse-long))]
+                   (when (and port (<= 1 port 65535))
+                     (assoc endpoint :seon.dev.mcp/port port)))
+                 (catch Exception exception
+                   (log-error "Failed to read Shadow port" port-file ":"
+                              (.getMessage exception))
+                   nil))))
+       (reduce (fn [by-port endpoint]
+                 (assoc by-port (:seon.dev.mcp/port endpoint) endpoint))
+               {})
+       vals
+       (sort-by :seon.dev.mcp/port)
+       vec))
+
+(defn- default-shadow-endpoint []
+  (some #(when (= :seon.dev.artifact.flavor/default
+                  (:seon.dev.mcp/artifact-flavor %))
+           %)
+        (read-shadow-endpoints)))
+
+(defn- read-shadow-port []
+  (:seon.dev.mcp/port (default-shadow-endpoint)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; nREPL bencode plumbing
@@ -353,15 +384,28 @@
     (when clj-sid (nrepl-close-session port clj-sid))
     cands))
 
+(defn- all-advertisements!
+  "Runtime advertisements from every reachable artifact-flavor watcher."
+  []
+  (into []
+        (mapcat
+         (fn [{port :seon.dev.mcp/port :as endpoint}]
+           (try
+             (mapv #(merge endpoint %) (probe-advertisements! port))
+             (catch Exception exception
+               (log-error "Shadow advertisement probe failed on" port ":"
+                          (.getMessage exception))
+               []))))
+        (read-shadow-endpoints)))
+
 (defn- find-cluster-runtime!
-  "client-id of the SINGLE runtime of `build-id` advertising `cluster`,
-   or nil when none or several do (never pick arbitrarily)."
-  [port build-id cluster]
+  "The single runtime of `build-id` advertising `cluster`, if unique."
+  [build-id cluster]
   (let [cands (filterv #(and (= (:build %) build-id)
                              (= cluster (:seon.dev.runtime-id/cluster %)))
-                       (probe-advertisements! port))]
+                       (all-advertisements!))]
     (when (= 1 (count cands))
-      (:client-id (first cands)))))
+      (first cands))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session lifecycle (pivot a fresh nREPL session into CLJS)
@@ -397,6 +441,7 @@
           (let [sid (gen-sid)]
             (swap! sessions assoc sid
                    (cond-> {:nrepl-session nrepl-sid
+                            :port port
                             :build build-id
                             :created-at (System/currentTimeMillis)
                             :pivot-value (:value pivot-resp)}
@@ -408,16 +453,17 @@
 
 (defn- require-port! []
   (or (read-shadow-port)
-      (throw (ex-info "no shadow-cljs watcher running (no .shadow-cljs/nrepl.port)"
-                      {:port-file shadow-port-file}))))
+      (throw (ex-info "no default shadow-cljs watcher is running"
+                      {:seon.dev.mcp/port-files
+                       (mapv :seon.dev.mcp/port-file
+                             (shadow-endpoints))}))))
 
 (defn- get-or-create-session!
   "If sid is provided, look it up. If sid is 'default', use a singleton
    default-build session, creating it lazily when absent. Throws when the
-   default session can't be created (pivot failed) or sid is unknown."
+  default session can't be created (pivot failed) or sid is unknown."
   [sid-arg]
-  (let [port (require-port!)
-        sid (or sid-arg "default")]
+  (let [sid (or sid-arg "default")]
     (or (when-let [s (get @sessions sid)]
           {:sid sid :session-info s})
         (if (= sid "default")
@@ -426,7 +472,8 @@
           ;; whichever pod connected last (a watched bench pod, not the
           ;; default pod). A missing or duplicate runtime fails loudly; an
           ;; unpinned :latest fallback could silently select another cluster.
-          (let [cands (try (filterv #(= (:build %) default-build-id)
+          (let [port (require-port!)
+                cands (try (filterv #(= (:build %) default-build-id)
                                     (probe-advertisements! port))
                            (catch Exception e
                              (log-error "advertisement probe failed:" (.getMessage e))
@@ -473,17 +520,30 @@
    observed). Run on list_sessions/create_session. When the watcher is
    unreachable every tracked session is dead by definition — reap all.
    Sweeps the agent-session resolution cache by the same criterion.
-   Returns {:swept [..sids..] :agent-swept [..agent-ids..]}."
+  Returns {:swept [..sids..] :agent-swept [..agent-ids..]}."
   []
-  (let [port (read-shadow-port)
-        live (when port (nrepl-live-sessions port))
-        ;; No watcher → every cloned session is gone → reap all. Watcher up
-        ;; but ls-sessions errored (nil despite a port) → can't tell → keep
-        ;; everything rather than reap live sessions on a transient failure.
-        dead? (cond
-                (nil? port) (constantly true)
-                (nil? live) (constantly false)
-                :else (fn [info] (not (contains? live (:nrepl-session info)))))
+  (let [current-ports (set (map :seon.dev.mcp/port
+                                (read-shadow-endpoints)))
+        tracked-ports (into #{} (keep :port)
+                            (concat (vals @sessions)
+                                    (vals @agent-sessions)))
+        ports (into current-ports tracked-ports)
+        live-by-port
+        (into {}
+              (map (fn [port]
+                     [port (if (contains? current-ports port)
+                             (nrepl-live-sessions port)
+                             ::absent)]))
+              ports)
+        ;; Missing port file means the owning watcher was replaced or stopped,
+        ;; so its cloned sessions are gone. A reachable port whose
+        ;; `ls-sessions` call transiently fails returns nil and is retained.
+        dead? (fn [info]
+                (let [live (get live-by-port (:port info) ::absent)]
+                  (cond
+                    (= ::absent live) true
+                    (nil? live) false
+                    :else (not (contains? live (:nrepl-session info))))))
         dead (vec (keep (fn [[sid info]] (when (dead? info) sid)) @sessions))
         agent-dead (vec (keep (fn [[aid info]] (when (dead? info) aid)) @agent-sessions))]
     (when (seq dead)
@@ -509,9 +569,9 @@
    \"root\") is ambiguous and FAILS LOUD upstream — never an arbitrary
    pick (registry C27). Survives restart for free: a respawned process
    advertises the same ids under its new client-id."
-  [port agent-id]
+  [agent-id]
   (let [parsed (rid/parse-id agent-id)
-        cands  (probe-advertisements! port)]
+        cands  (all-advertisements!)]
     (rid/select-runtime (assoc parsed :seon.dev.runtime-id/candidates cands))))
 
 (defn- ensure-agent-session!
@@ -521,35 +581,41 @@
    session if the agent's build+client-id are unchanged; otherwise
    re-resolves and re-pins (the no-restart survival path after a
    crash+respawn)."
-  [port agent-id]
-  (let [res (resolve-agent-runtime! port agent-id)]
+  [agent-id]
+  (let [res (resolve-agent-runtime! agent-id)]
     (case (:seon.dev.runtime-id/resolution res)
       :none
       (do
         (when-let [cached (get @agent-sessions agent-id)]
-          (nrepl-close-session port (:nrepl-session cached))
+          (nrepl-close-session (:port cached) (:nrepl-session cached))
           (swap! agent-sessions dissoc agent-id))
         nil)
       :ambiguous
       (do
         (when-let [cached (get @agent-sessions agent-id)]
-          (nrepl-close-session port (:nrepl-session cached))
+          (nrepl-close-session (:port cached) (:nrepl-session cached))
           (swap! agent-sessions dissoc agent-id))
         {:ambiguous (:seon.dev.runtime-id/runtimes res)})
       :match
-      (let [{:keys [build client-id] :as m} (:seon.dev.runtime-id/runtime res)
+      (let [{:keys [build client-id] :as m}
+            (:seon.dev.runtime-id/runtime res)
+            port (:seon.dev.mcp/port m)
             cluster (:seon.dev.runtime-id/cluster m)
             cached  (get @agent-sessions agent-id)]
         (if (and cached
                  (= client-id (:client-id cached))
-                 (= build (:build cached)))
+                 (= build (:build cached))
+                 (= port (:port cached)))
           cached
           (do
             (when cached
-              (nrepl-close-session port (:nrepl-session cached))
+              (nrepl-close-session (:port cached) (:nrepl-session cached))
               (swap! agent-sessions dissoc agent-id))
             (when-let [nrepl-sid (pin-session! port build client-id)]
-            (let [info (cond-> {:nrepl-session nrepl-sid :client-id client-id :build build}
+            (let [info (cond-> {:nrepl-session nrepl-sid
+                                :port port
+                                :client-id client-id
+                                :build build}
                          cluster (assoc :cluster cluster))]
               (swap! agent-sessions assoc agent-id info)
               info))))))))
@@ -825,14 +891,15 @@
    With shadow's `:repl {:runtime-select :latest}` set (see shadow-
    cljs.edn), the fresh session will route to whatever runtime is
    currently connected."
-  [port session_id code timeout]
+  [session_id code timeout]
   (let [sid (or session_id "default")]
     ;; Close the dead/wedged session server-side too — dropping only the
     ;; local entry leaks the cloned session in the shadow JVM.
     (when-let [old (get @sessions sid)]
-      (nrepl-close-session port (:nrepl-session old)))
+      (nrepl-close-session (:port old) (:nrepl-session old)))
     (swap! sessions dissoc sid))
   (let [{:keys [sid session-info]} (get-or-create-session! session_id)
+        port (:port session-info)
         nrepl-sid (:nrepl-session session-info)
         result (nrepl-eval port nrepl-sid code timeout)]
     {:sid sid :result result}))
@@ -875,16 +942,16 @@
    cached pinned session, re-resolve, re-pin, and retry — with a short
    reconnect window so a just-respawned agent's websocket has time to
    re-register. No MCP-server or shadow restart is involved."
-  [port agent-id code timeout]
+  [agent-id code timeout]
   (let [bare (:seon.dev.runtime-id/id (rid/parse-id agent-id))]
     (loop [tries 0]
-      (let [sess (ensure-agent-session! port agent-id)]
+      (let [sess (ensure-agent-session! agent-id)]
         (cond
           (:ambiguous sess)
           (mcp-error (ambiguous-runtime-message agent-id (:ambiguous sess)))
 
           sess
-          (let [{:keys [nrepl-session client-id cluster]} sess
+          (let [{:keys [nrepl-session port client-id cluster]} sess
                 result (nrepl-eval port nrepl-session code timeout)]
             (if (and (stale-runtime? result) (< tries 10))
               (do (nrepl-close-session port nrepl-session)
@@ -913,12 +980,12 @@
     (throw (ex-info "A non-default CLJS cluster requires agent_id '<cluster>/<id>'."
                     {:seon.dev.mcp/cluster cluster
                      :seon.dev.mcp/own-cluster own-cluster})))
-  (let [port (require-port!)
-        timeout (min 120000 (max 1 (or timeout_ms default-timeout-ms)))]
+  (let [timeout (min 120000 (max 1 (or timeout_ms default-timeout-ms)))]
    (if (and agent_id (not (str/blank? agent_id)))
-    (execute-agent-eval port agent_id code timeout)
+    (execute-agent-eval agent_id code timeout)
     (let [{:keys [sid session-info]} (get-or-create-session! session_id)
-        nrepl-sid (:nrepl-session session-info)
+          port (:port session-info)
+          nrepl-sid (:nrepl-session session-info)
         result (nrepl-eval port nrepl-sid code timeout)]
     (if (stale-runtime? result)
       ;; Self-heal: try with a fresh session. With :runtime-select :latest
@@ -926,7 +993,7 @@
       ;; the pod is mid-restart, give it a brief window to reconnect.
       (loop [tries 0]
         (let [{retry-sid :sid retry-result :result}
-              (retry-with-fresh-session! port session_id code timeout)]
+              (retry-with-fresh-session! session_id code timeout)]
           (cond
             (not (stale-runtime? retry-result))
             (render-eval-result retry-result retry-sid)
@@ -941,26 +1008,28 @@
 
 (defn- execute-create-session [{:keys [build cluster]}]
   (sweep-dead-sessions!)
-  (let [port (require-port!)
+  (let [default-port (require-port!)
         build-id (or build default-build-id)]
     (if (and cluster (not (str/blank? cluster)))
       ;; C27: cluster-pinned session — refuse to guess when the cluster's
       ;; runtime isn't uniquely identifiable on this build.
-      (if-let [cid (find-cluster-runtime! port build-id cluster)]
-        (if-let [sid (create-cljs-session! port build-id cid)]
+      (if-let [runtime (find-cluster-runtime! build-id cluster)]
+        (let [port (:seon.dev.mcp/port runtime)
+              cid (:client-id runtime)]
+          (if-let [sid (create-cljs-session! port build-id cid)]
           (mcp-success (str "session=" sid " build=" build-id
                             " cluster=" cluster " client-id=" cid
                             " (use this sid in mcp__seon_cljs__eval's session_id)"))
           (mcp-error (str "failed to clone/pivot CLJS session into " build-id
                           " pinned to cluster " cluster
-                          " (watcher up? build watched? see stderr log)")))
+                          " (watcher up? build watched? see stderr log)"))))
         (mcp-error (str "no SINGLE runtime of build " build-id
                         " advertises cluster '" cluster "'. Live advertisements: "
                         (pr-str (mapv #(select-keys % [:build :client-id
                                                        :seon.dev.runtime-id/cluster
                                                        :seon.dev.runtime-id/ids])
-                                      (probe-advertisements! port))))))
-      (if-let [sid (create-cljs-session! port build-id)]
+                                      (all-advertisements!))))))
+      (if-let [sid (create-cljs-session! default-port build-id)]
         (mcp-success (str "session=" sid " build=" build-id
                           " (use this sid in mcp__seon_cljs__eval's session_id)"))
         (mcp-error (str "failed to clone/pivot CLJS session into " build-id
@@ -970,11 +1039,18 @@
   (let [{:keys [swept agent-swept]} (sweep-dead-sessions!)
         now (System/currentTimeMillis)
         rows (for [[sid info] @sessions]
-               (format "  %s  build=%s  nrepl-sid=%s  age=%.1fs"
-                       sid (:build info) (:nrepl-session info)
+               (format "  %s  port=%s  build=%s  nrepl-sid=%s  age=%.1fs"
+                       sid (:port info) (:build info) (:nrepl-session info)
                        (/ (double (- now (:created-at info))) 1000.0)))
-        port (read-shadow-port)]
-    (mcp-success (str "shadow port: " (or port "<no watcher>")
+        endpoint-lines
+        (map (fn [{flavor :seon.dev.mcp/artifact-flavor
+                   port :seon.dev.mcp/port}]
+               (str "  " flavor "  port=" port))
+             (read-shadow-endpoints))]
+    (mcp-success (str "shadow endpoints:\n"
+                      (if (seq endpoint-lines)
+                        (str/join "\n" endpoint-lines)
+                        "  (none)")
                       "\nsessions:\n" (if (seq rows) (str/join "\n" rows) "  (none)")
                       (when (seq swept)
                         (str "\nswept (dead nREPL session): " (str/join ", " swept)))
@@ -984,13 +1060,13 @@
 (defn- execute-stop-session [{:keys [session_id]}]
   (if-let [info (get @sessions session_id)]
     (do (swap! sessions dissoc session_id)
-        (when-let [port (read-shadow-port)]
-          (nrepl-close-session port (:nrepl-session info)))
+        (nrepl-close-session (:port info) (:nrepl-session info))
         (mcp-success (str "stopped session " session_id)))
     (mcp-error (str "no such session: " session_id))))
 
 (defn- execute-reload-deps [{:keys [session_id]}]
-  (let [port (require-port!)
+  (let [session (get @sessions (or session_id "default"))
+        port (or (:port session) (require-port!))
         ;; Reload-deps runs on the CLJ side (compiler), so we use a bare
         ;; nREPL session (no CLJS pivot) for the JVM eval, then trigger
         ;; the watcher reload of the build the orchestrator is on.
@@ -1004,29 +1080,37 @@
                       (when clj-sid (nrepl-close-session port clj-sid))))]
     (render-eval-result result (or session_id "default"))))
 
+(defn- shadow-build-status
+  [{port :seon.dev.mcp/port :as endpoint}]
+  (let [sid (nrepl-clone-session port)
+        code "(do (require '[shadow.cljs.devtools.api :as shadow]) (pr-str (mapv (fn [b] {:build b :runtimes (count (shadow/repl-runtimes b))}) (shadow/active-builds))))"
+        result (try (nrepl-eval port sid code 10000)
+                    (finally
+                      (when sid (nrepl-close-session port sid))))]
+    (assoc endpoint :seon.dev.mcp/builds (:value result))))
+
 (defn- execute-runtime-status [_args]
-  (let [port (read-shadow-port)
-        info (when port
-               (let [sid (nrepl-clone-session port)
-                     code "(do (require '[shadow.cljs.devtools.api :as shadow]) (pr-str (mapv (fn [b] {:build b :runtimes (count (shadow/repl-runtimes b))}) (shadow/active-builds))))"
-                     r (try (nrepl-eval port sid code 10000)
-                            (finally
-                              (when sid (nrepl-close-session port sid))))]
-                 (:value r)))
-        ;; Per-runtime database projections: the cluster + agent ids each
-        ;; connected pod exposes to agent_id resolution.
-        adverts (when port
-                  (try (probe-advertisements! port)
-                       (catch Exception e
-                         (log-error "advertisement probe failed:" (.getMessage e))
-                         nil)))
-        advert-lines (map (fn [{:keys [build client-id] :as c}]
-                            (str "  " build "#" client-id
-                                 "  cluster=" (or (:seon.dev.runtime-id/cluster c) "?")
-                                 "  ids=" (pr-str (:seon.dev.runtime-id/ids c))))
+  (let [statuses (mapv shadow-build-status (read-shadow-endpoints))
+        status-lines
+        (map (fn [{flavor :seon.dev.mcp/artifact-flavor
+                   port :seon.dev.mcp/port
+                   builds :seon.dev.mcp/builds}]
+               (str "  " flavor "  port=" port
+                    "  builds=" (or builds "<unable to query>")))
+             statuses)
+        adverts (all-advertisements!)
+        advert-lines (map (fn [{:keys [build client-id] :as candidate}]
+                            (str "  port=" (:seon.dev.mcp/port candidate)
+                                 "  " build "#" client-id
+                                 "  cluster="
+                                 (or (:seon.dev.runtime-id/cluster candidate) "?")
+                                 "  ids="
+                                 (pr-str (:seon.dev.runtime-id/ids candidate))))
                           adverts)]
-    (mcp-success (str "shadow nREPL port: " (or port "<no watcher>")
-                      "\nbuilds: " (or info "<unable to query>")
+    (mcp-success (str "shadow endpoints:\n"
+                      (if (seq status-lines)
+                        (str/join "\n" status-lines)
+                        "  (none)")
                       "\nruntime database advertisements (cluster + agent ids):\n"
                       (if (seq advert-lines) (str/join "\n" advert-lines) "  (none)")
                       "\nmcp sessions: " (count @sessions)

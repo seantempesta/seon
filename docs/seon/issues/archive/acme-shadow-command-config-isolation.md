@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, component, agent, flow, cljs]
 ---
@@ -46,7 +46,7 @@ also claimed `.shadow-cljs` and `:client`. After both watchers had used the
 shared cache, the changed-test gate failed before assertions because its
 retained bundle referenced a missing `cljs-runtime/my.plan_test.js` file.
 
-## Partial implementation — 2026-07-14
+## Implementation — 2026-07-14
 
 Artifact configuration now projects the ACME cache coordinate into
 `SHADOW_CLJS` before any managed child starts. An existing environment EDN map
@@ -58,10 +58,7 @@ action-level `--config-merge`; that merge owns only downstream preload data.
 The pod startup message now reads Shadow's compiled
 `shadow.cljs.devtools.client.env/build-id` instead of claiming the default
 cache/build for every flavor. The complete operator checkpoint passes 93 tests
-and 577 assertions. The automatically selected 57-namespace CLJS gate could
-not execute because the already-collided retained artifact was missing
-`my.plan_test.js`; clean dual-watcher live proof remains required before this
-issue can close.
+and 577 assertions.
 
 ## Owner
 
@@ -80,3 +77,11 @@ same pre-command Shadow configuration seam.
   action-level cache-root merge.
 - Live proof can run default and ACME concurrently with distinct nREPL port
   files, CLJS endpoints, active builds, and cluster-qualified runtimes.
+
+## Resolution proof — 2026-07-14
+
+Default remained ready on web port 7890 with Shadow nREPL 61576 while ACME
+restarted ready on web port 7994 with Shadow nREPL 62266. Their managed
+watchers, writers, pods, cache roots, build ids, and dynamic endpoints were
+distinct. The unified MCP then reported and evaluated the cluster-qualified
+runtimes independently.

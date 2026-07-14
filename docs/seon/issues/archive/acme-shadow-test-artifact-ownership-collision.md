@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, cljs, component, flow]
 ---
@@ -46,8 +46,8 @@ the managed test artifact's output ownership.
 - The affected operator gate passes 16 tests/55 assertions, including exact
   default/ACME command-build selection and ACME readiness without `:test`.
 - The complete operator checkpoint passes 94 tests/581 assertions.
-- The issue remains open until concurrent live default/ACME proof confirms the
-  default manifest and bundle remain valid across reload and shutdown.
+- Concurrent live default/ACME proof confirms the default manifest and bundle
+  remain valid across an ACME restart.
 
 ## Owner
 
@@ -68,3 +68,12 @@ separate flavor-specific artifact is explicitly designed and consumed.
   shutdown preserve a valid current manifest and bundle with no cross-flavor
   replacement.
 - Operator tests assert build lists and artifact-publisher ownership by flavor.
+
+## Resolution proof — 2026-07-14
+
+Before and after restarting ACME under its flavor-owned build vector, the
+complete `out/test` tree hashed to
+`8d822f866007a3a8f4a1a728c31831d8fdaad8e67ea9427ac3d888dbc042c5fc`.
+The `current.edn` and `test.js` modification times also remained unchanged.
+Live MCP status showed default owning `:client` plus `:test`, while ACME owned
+only `:acme-client`; both clusters remained ready.

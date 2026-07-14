@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent]
 ---
@@ -41,3 +41,11 @@ eval-tier measurement can run in the isolated cluster as intended.
 - Pure expressions on the default pod's `:client` runtime (no side effects) —
   what the measurement did.
 - Drive a live agent on acme (its turn loop evals) — heavyweight, indirect.
+
+## Resolution — 2026-07-14
+
+The one MCP adapter now discovers every operator-declared artifact flavor's
+Shadow port file and resolves agent ids across their combined runtime
+advertisements. Live concurrent proof evaluated both `default/root` and
+`acme/root`; bare `root` failed as ambiguous with both candidates. No ACME-only
+eval surface was added.

@@ -141,10 +141,30 @@ and historical network-denied read-back recovered basis `536871171`, 220 schema
 attributes, three agents, 44 evals, 14 plans, and all 38 referenced blobs with
 no copy mutation. Its source bytes remain preserved because internal staging
 is not durable promotion. A current ACME boot on alternate port 7994 then
-proved the isolated artifact/watcher/writer path, but the pod failed honestly
-when declarative seed reconciliation exhausted stale-basis retries. That fresh
-runtime defect and a concurrent Shadow nREPL discovery collision are now the
-next ACME blockers; the default cluster remains ready.
+proved the complete current path. Protocol errors now preserve their original
+stale-basis kind, so fresh declarative seed reconciliation retries and the pod
+reaches ready. Default remains ready on 7890 while ACME is ready on 7994 with
+separate process ownership, database, Shadow cache, client build, output, and
+dynamic CLJ/CLJS endpoints.
+
+The post-integration audit in
+[[research/dependency-shadow-mcp-acme-post-integration-audit-2026-07-14]] then
+found and closed two remaining cross-flavor ownership defects. Default alone
+owns `client` plus the canonical `test` artifact; ACME owns only `acme-client`.
+An ACME restart left the complete `out/test` tree byte-identical at
+`8d822f86…`. The one MCP adapter now discovers both flavor-owned Shadow port
+files, evaluates both cluster-qualified CLJS roots and both CLJ writers, and
+rejects bare `root` as ambiguous. Focused MCP proof passes 12 tests/44
+assertions and the complete operator checkpoint passes 94 tests/581
+assertions. Both live CLJS classpaths resolve maintained Datahike `6f90b339…`,
+Konserve `df6818d4…`, superv.async `3e6ed755…`, and partial-cps `1e119b03…`;
+both writer artifacts use the same root `:writer` Datahike/Konserve basis.
+
+Inspect remains deliberately on its previously proven installed framework
+build while the mutable source checkout is newer and dirty. Content-pinning
+that source dependency and recording it in run provenance is an open
+reproducibility issue; it does not block simultaneous default/ACME runtime
+experiments.
 
 Before implementation resumes, reconcile the target architecture from
 [[research/architecture-target-drift-audit-2026-07-14]] in its recommended
