@@ -36,7 +36,9 @@
   ^java.io.File [& parts]
   (apply io/file repo-root parts))
 
-(def config-path (root-file ".claude/seon-hook.edn"))
+(def config-path
+  (or (System/getenv "SEON_HOOK_CONFIG")
+      (str (root-file ".claude/seon-hook.edn"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Logging
@@ -319,12 +321,17 @@
                                   :out :string
                                   :err :string
                                   :continue true})
-              output (str/trim (str (:out result) (:err result)))]
-          (str "ADVISORY — the edit was accepted; tests never gate refactoring.\n"
-               (if (str/blank? output)
-                 (str "Changed-test operation exited " (:exit result)
-                      " without output.")
-                 output)))
+              output (str/trim (str (:out result) (:err result)))
+              message
+              (str "ADVISORY — the edit was accepted; tests never gate refactoring.\n"
+                   (if (str/blank? output)
+                     (str "Changed-test operation exited " (:exit result)
+                          " without output.")
+                     output))
+              max-length (get-in config [:feedback :max-length] 1000)]
+          (if (> (count message) max-length)
+            (str (subs message 0 (max 0 (- max-length 2))) " …")
+            message))
         (catch Exception error
           (str "ADVISORY — changed-test feedback could not run: "
                (.getMessage error)))))))

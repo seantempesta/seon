@@ -76,10 +76,9 @@
     (cond
       (not (cljs-path? path)) (manifest-published-after? manifest file)
       (fs/regular-file? file)
-      (if resource
-        (= (file-sha1 file)
-           (first (:seon.dev.test.resource/cache-key resource)))
-        (manifest-published-after? manifest file))
+      (and resource
+           (= (file-sha1 file)
+              (first (:seon.dev.test.resource/cache-key resource))))
       :else (nil? resource))))
 
 (defn manifest-current?
@@ -151,6 +150,22 @@
     (.destroyForcibly ^java.lang.ProcessHandle handle))
   (.destroyForcibly process))
 
+(defn failure-excerpts
+  "Return bounded cljs.test failure blocks with expected and actual values."
+  [output]
+  (loop [lines (str/split-lines output)
+         excerpts []]
+    (if (or (empty? lines) (= 2 (count excerpts)))
+      excerpts
+      (if (re-find #"^(FAIL|ERROR) in \(" (first lines))
+        (let [block (->> lines
+                         (take 4)
+                         (take-while (complement str/blank?))
+                         (map #(subs % 0 (min 180 (count %))))
+                         (str/join "\n"))]
+          (recur (drop 4 lines) (conj excerpts block)))
+        (recur (rest lines) excerpts)))))
+
 (defn- run-node! [root manifest test-namespaces]
   (let [log-dir (fs/path root "tmp/test-changed")
         log (fs/path log-dir
@@ -175,10 +190,7 @@
         counts (some->> (str/split-lines output)
                         (filter #(re-find #"^[0-9]+ failures, [0-9]+ errors\." %))
                         last)
-        failures (->> (str/split-lines output)
-                      (filter #(re-find #"^(FAIL|ERROR) in \(" %))
-                      (take 8)
-                      vec)
+        failures (failure-excerpts output)
         result
         {:seon.dev.changed-test/status
          (if (and completed? (zero? exit) summary counts
@@ -226,9 +238,9 @@
                 (when (< 8 (count tests)) " …")))
          (when-let [summary (:seon.dev.changed-test/summary result)]
            (str "\n" summary " " (:seon.dev.changed-test/counts result)))
-         (when-let [failures (seq (:seon.dev.changed-test/failures result))]
-           (str "\n" (str/join "\n" failures)))
          (when-let [reason (:seon.dev.changed-test/reason result)]
            (str "\n" reason))
          (when-let [log (:seon.dev.changed-test/log result)]
-           (str "\nlog: " log)))))
+           (str "\nlog: " log))
+         (when-let [failures (seq (:seon.dev.changed-test/failures result))]
+           (str "\n" (str/join "\n" failures))))))

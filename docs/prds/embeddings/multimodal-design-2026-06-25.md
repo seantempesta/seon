@@ -157,7 +157,7 @@ The build must enforce limits BEFORE the call (silent truncation otherwise):
 
 ## JVM-Clojure implementation (proven path)
 
-Verified end-to-end from a standalone JVM (JDK 25, Clojure 1.12) run — all five
+Verified end-to-end from a standalone JVM (the then-current JDK, Clojure 1.12) run — all five
 modalities returned `{:status 200 :dims 3072}`, cross-modal cosines matched the
 curl results, Matryoshka cosine = 1.000000. Minimal deps:
 
@@ -251,6 +251,6 @@ all vectors L2-normalized (norm = 1.0) at 3072 / 1536 / 768
 
 Matryoshka:  cos(API-1536, renormalize(vec3072[:1536])) = 1.000000   (exact prefix)
 
-JVM-Clojure harness (google-auth-library + cheshire + java.net.http, JDK 25):
+JVM-Clojure harness (google-auth-library + cheshire + java.net.http):
   all five modalities -> {:status 200 :dims 3072}; cosines + matryoshka identical to curl.
 ```

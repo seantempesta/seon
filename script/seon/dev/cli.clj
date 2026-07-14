@@ -254,7 +254,7 @@
                 :seon.dev.doctor/npm? (command-available? "npm")
                 :seon.dev.doctor/python? (command-available? "python3")
                 :seon.dev.doctor/curl? (command-available? "curl")
-                :seon.dev.doctor/java-22+?
+                :seon.dev.doctor/java-26?
                 (let [result (shell/sh {:continue true :out :string :err :string
                                         :cmd [(get-in configuration
                                                       [:seon.dev.config/environment "JAVA_CMD"]
@@ -262,7 +262,7 @@
                       major (some-> (re-find #"version \"([0-9]+)"
                                             (str (:out result) (:err result)))
                                     second parse-long)]
-                  (boolean (and major (<= 22 major))))}]
+                  (= 26 major))}]
     {:seon.dev.doctor/healthy? (every? true? (vals checks))
      :seon.dev.doctor/checks checks
      :seon.dev.doctor/artifact-status

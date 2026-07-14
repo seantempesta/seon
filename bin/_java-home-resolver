@@ -9,15 +9,15 @@
 # prepends $JAVA_HOME/bin to PATH (the `clojure` CLI resolves the JVM from
 # `java` on PATH, not from JAVA_HOME). Honors an already-matching JAVA_HOME
 # first. Falls back to whatever `java` is on PATH with a loud WARNING if no
-# matching JDK is found — so a workstation missing the pinned JDK still runs,
-# just unpinned.
+# matching JDK is found. A missing runtime fails immediately with one install
+# instruction instead of reaching a later compiler or database error.
 #
-# Why 25: newest JDK that runs the datahike fork + proximum (HNSW secondary
+# Why 26: current JDK that runs the datahike fork + proximum (HNSW secondary
 # index, class-file v66, Foreign Memory + Vector APIs) and the full test
-# suite — ~7% faster than 22, no behavior change. proximum's hard floor is
-# Java 22 (class v66); bin/seon keeps a >=22 assert as the safety net.
+# suite. One supported runtime keeps compiler flags and production behavior
+# identical across the writer, watcher, tests, and packaged image.
 
-SEON_JAVA_VERSION="25"
+SEON_JAVA_VERSION="26"
 
 # True iff $1 is an executable java whose -version major == SEON_JAVA_VERSION.
 _seon_java_is_pinned() {
@@ -50,11 +50,19 @@ if ! _seon_java_is_pinned "${JAVA_HOME:-}/bin/java"; then
   if [ -n "${_seon_jh:-}" ]; then
     export JAVA_HOME="$_seon_jh"
   else
-    echo "⚠ _java-home-resolver: no JDK ${SEON_JAVA_VERSION} found — falling back to \`java\` on PATH (UNPINNED)." >&2
+    echo "ERROR: Seon requires JDK ${SEON_JAVA_VERSION}; no matching runtime was found." >&2
     echo "  Install JDK ${SEON_JAVA_VERSION}. macOS: brew install openjdk@${SEON_JAVA_VERSION} ·" >&2
     echo "  Debian/Ubuntu/WSL: apt install openjdk-${SEON_JAVA_VERSION}-jdk · or SDKMAN: sdk install java ${SEON_JAVA_VERSION}-open" >&2
+    return 1 2>/dev/null || exit 1
   fi
   unset _seon_jh _seon_c
+fi
+
+# Homebrew exposes JAVA_HOME through a stable symlink while the running JVM
+# reports its resolved Cellar path. Canonicalize once so tools that compare
+# environment and system-property values do not report a false overwrite.
+if [ -n "${JAVA_HOME:-}" ] && [ -d "$JAVA_HOME" ]; then
+  export JAVA_HOME="$(cd "$JAVA_HOME" && pwd -P)"
 fi
 
 # Prepend $JAVA_HOME/bin to PATH (and export JAVA_CMD belt-and-braces) so the

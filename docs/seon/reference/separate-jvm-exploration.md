@@ -341,7 +341,9 @@ Java 24+ has early-access "condensers" that pre-compute class initialization and
 
 **Status as of 2026:** Still in development. JDK 24 has preliminary support but it's not stable for production use, and Clojure's dynamic class loading patterns are among the harder cases for Leyden to handle.
 
-**Verdict: Watch but don't invest yet. Revisit when JDK 25 LTS ships (expected late 2025). Our AOT+AppCDS approach will bridge the gap.**
+**Current verdict:** the forecast date has passed; Seon now targets Java 26,
+while process isolation remains a deployment boundary rather than a reason to
+revive the retired JVM agent application.
 
 ### Recommended Implementation Plan
 

@@ -74,7 +74,7 @@
   (let [configured (get environment "JAVA_HOME")
         mac-home (when (fs/executable? "/usr/libexec/java_home")
                    (let [{:keys [exit out]}
-                         (command-result ["/usr/libexec/java_home" "-v" "25"])]
+                         (command-result ["/usr/libexec/java_home" "-v" "26"])]
                      (when (zero? exit) (str/trim out))))
         globbed (concat
                   (when (fs/directory? "/usr/lib/jvm")
@@ -88,10 +88,12 @@
     (distinct (remove str/blank? (concat [configured mac-home] globbed)))))
 
 (defn- select-java-home [environment]
-  (or (some (fn [home]
-              (when (= 25 (java-major (fs/path home "bin/java"))) home))
-            (java-home-candidates environment))
-      (get environment "JAVA_HOME")))
+  (if-let [home (some (fn [home]
+                        (when (= 26 (java-major (fs/path home "bin/java"))) home))
+                      (java-home-candidates environment))]
+    (str (fs/canonicalize home))
+    (throw (ex-info "Seon requires JDK 26; install it before starting."
+                    {:seon.dev.config/required-java-major 26}))))
 
 (defn- child-environment [root]
   ;; The invoking environment wins over .env. The file is parsed as data and

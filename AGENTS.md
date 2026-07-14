@@ -547,8 +547,11 @@ Use `bin/test-cljs --test=seon.example-test` for one CLJS namespace or
 `--test=seon.example-test/example` for one var; use `--no-build` only when the
 existing test bundle contains the change. `bin/test-cljs` is the full CLJS
 checkpoint. Its default terminal output is compact; the complete negative-path
-and runtime transcript stays in the printed timestamped log. Add `--verbose`
-only when that full stream is needed live. Use `bin/test-writer` for the
+and runtime transcript stays in the printed timestamped log, and the adjacent
+namespaced EDN report is stable at `tmp/test-cljs-latest.report.edn`. Read that
+report and its `:seon.dev.test-runner/full-log` rather than rerunning for more
+output. Add `--verbose` only when the full stream is needed live. Use
+`bin/test-writer` for the
 retained JVM database-server gate, or pass one test namespace for a focused
 writer run. Never run overlapping cljs.test suites in the live pod.
 

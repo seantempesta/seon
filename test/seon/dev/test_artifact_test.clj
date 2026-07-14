@@ -66,3 +66,8 @@
                (:seon.dev.test.resource/requires
                  (second (:seon.dev.test.artifact/resources manifest))))))
       (finally (fs/delete-tree root {:force true})))))
+
+(deftest one-shot-build-can-decline-authoritative-publication
+  (let [state {:shadow.build/config
+               {:seon.dev.test-artifact/publish? false}}]
+    (is (identical? state (artifact/publish! state)))))

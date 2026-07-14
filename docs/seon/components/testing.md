@@ -37,9 +37,12 @@ complete the `cljs.test/async` continuation.
 
 The default terminal stream is deliberately compact: namespace progress, final
 counts, and the bounded failure index. Expected negative-path Datahike/LLM logs
-remain in the timestamped full transcript instead of burying assertions. Use
-`--verbose` only when live access to that complete stream is useful; every run
-prints the retained log path either way.
+remain in the timestamped full transcript instead of burying assertions. Every
+run also writes a namespaced EDN report beside the transcript and updates the
+stable `tmp/test-cljs-latest.report.edn` and `tmp/test-cljs-latest.log` links, so
+an agent can inspect either level without rerunning. Use `--verbose` only when
+live access to the complete stream is useful; every run prints both retained
+paths either way.
 
 `bin/test-writer` loads an explicit list of retained JVM namespaces through the
 `:writer:writer-test` basis. It does not discover or load the archived JVM

@@ -27,7 +27,7 @@ touched. Reusable script: `bench/db_scale.clj`.
   sources + notes (`:syn.note/source` ref). ~28% of entities carry an
   embedding (project descriptions + note bodies, the realistic text fields).
   String tempids resolve within each 2000-entity transaction.
-- **JVM:** OpenJDK 25, `-Xmx24g`, G1GC, `--add-modules jdk.incubator.vector`,
+- **JVM:** the then-current OpenJDK, `-Xmx24g`, G1GC, `--add-modules jdk.incubator.vector`,
   on a 32 GB / 10-core machine. Each size = its own fresh JVM (clean heap).
 - **Latency:** `cold` = first call of a NOVEL query (uncached work, page-ins,
   JIT); `warm` = median of 5 repeats. All times in ms.

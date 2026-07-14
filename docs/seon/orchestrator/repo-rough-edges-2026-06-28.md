@@ -91,12 +91,11 @@ CONTRIBUTING. None of the documented commands are outright broken.
   MEMORY but nowhere a solo external contributor would look. Lower likelihood for
   a single human, high impact when hit.
 
-### 7. Minor: JDK "22+" vs resolver targeting 25 — LOW
-- `README.md:82` says Java 22+ and "auto-selects a 22+ JDK";
-  `bin/_java-home-resolver:20` sets `SEON_JAVA_VERSION="25"` (22 is the asserted
-  hard floor). A user with *exactly* JDK 22 should still pass the floor assert,
-  but the resolver *prefers* 25 — worth a half-sentence so a 22-only user isn't
-  surprised. Not a contradiction, just under-specified.
+### 7. Minor: competing JVM floors — RESOLVED
+
+- The README and operator now name Java 26 as the one supported runtime. The
+  compiler, writer, tests, development operator, and packaged image use that
+  same version instead of carrying separate minimum and preferred policies.
 
 ## Anything actually BROKEN?
 - **No.** Every documented command checked works: `bin/seon status` returns the

@@ -204,35 +204,40 @@
 (defn ^{:shadow.build/stage :flush} publish!
   "Publish one immutable test bundle and atomically point at its manifest."
   [state]
-  (let [root (canonical-file (io/file ".") (:project-dir state))
-        output (canonical-file root
-                               (get-in state
-                                       [:shadow.build/config :output-to]))]
-    (when-not (and output (.isFile output))
-      (throw (ex-info "Shadow completed without its configured test output."
-                      {:seon.dev.test.artifact/output (some-> output str)})))
-    (let [runner-source (slurp output)
-          runner (portable-runner runner-source)
-          runtime (runner-runtime output runner-source)
-          directory (io/file root "out/test/artifacts")
-          {:seon.dev.test.artifact/keys [digest file]}
-          (publish-bundle! directory runner (runtime-entries runtime))
-          resources (->> (:sources state)
-                         (keep #(resource-row state root %))
-                         (sort-by :seon.dev.test.resource/path)
-                         vec)
-          manifest
-          {:seon.dev.test.artifact/digest digest
-           :seon.dev.test.artifact/path (relative-project-path root file)
-           :seon.dev.test.artifact/published-at (str (Instant/now))
-           :seon.dev.test.artifact/test-namespaces
-           (->> (:shadow.build.test-util/test-namespaces state)
-                (sort-by str)
-                vec)
-           :seon.dev.test.artifact/resources resources}]
-      (atomic-edn! (io/file directory "current.edn") manifest)
-      (prune-bundles! directory digest)
-      state)))
+  (if (false? (get-in state
+                      [:shadow.build/config
+                       :seon.dev.test-artifact/publish?]
+                      true))
+    state
+    (let [root (canonical-file (io/file ".") (:project-dir state))
+          output (canonical-file root
+                                 (get-in state
+                                         [:shadow.build/config :output-to]))]
+      (when-not (and output (.isFile output))
+        (throw (ex-info "Shadow completed without its configured test output."
+                        {:seon.dev.test-artifact/output (some-> output str)})))
+      (let [runner-source (slurp output)
+            runner (portable-runner runner-source)
+            runtime (runner-runtime output runner-source)
+            directory (io/file root "out/test/artifacts")
+            {:seon.dev.test.artifact/keys [digest file]}
+            (publish-bundle! directory runner (runtime-entries runtime))
+            resources (->> (:sources state)
+                           (keep #(resource-row state root %))
+                           (sort-by :seon.dev.test.resource/path)
+                           vec)
+            manifest
+            {:seon.dev.test.artifact/digest digest
+             :seon.dev.test.artifact/path (relative-project-path root file)
+             :seon.dev.test.artifact/published-at (str (Instant/now))
+             :seon.dev.test.artifact/test-namespaces
+             (->> (:shadow.build.test-util/test-namespaces state)
+                  (sort-by str)
+                  vec)
+             :seon.dev.test.artifact/resources resources}]
+        (atomic-edn! (io/file directory "current.edn") manifest)
+        (prune-bundles! directory digest)
+        state))))
 
 (defn read-current
   "Read the current published test manifest under `root`."

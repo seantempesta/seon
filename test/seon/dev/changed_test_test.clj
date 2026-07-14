@@ -56,3 +56,15 @@
     (is (= :shared-or-build-input
            (get-in result [:seon.dev.changed-test/widening 0
                            :seon.dev.changed-test/reason])))))
+
+(deftest failure-feedback-keeps-actionable-values-and-bounds-the-index
+  (let [failure (fn [n]
+                  (str "FAIL in (example-" n ") (example_test.cljs:10)\n"
+                       "expected: (= " n " 1)\n"
+                       "  actual: (not (= " n " 1))\n\n"))
+        excerpts (changed/failure-excerpts
+                   (str (failure 1) (failure 2) (failure 3)))]
+    (is (= 2 (count excerpts)))
+    (is (every? #(and (re-find #"expected:" %)
+                      (re-find #"actual:" %))
+                excerpts))))

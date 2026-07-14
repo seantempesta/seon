@@ -202,7 +202,13 @@ tests and 124 assertions. The reactive-call harness also replayed an unseeded
 isolated database, making an intentionally incomplete schema authoritative and
 leaking it forward. It now runs the real boot seed before replay and restores
 state per example; reactive call plus live router passes 6 tests and 34
-assertions. Another complete checkpoint remains the next batch gate.
+assertions. The subsequent complete checkpoint passes 1,301 tests and 6,159
+assertions with zero failures and zero errors. Test output is now
+pay-for-what-you-use: the terminal shows progress and a bounded verdict, while
+each invocation retains an unabridged timestamped log plus a stable namespaced
+EDN report pointing to it. The compiler and database processes share the Java
+26 resolver, and the resolver canonicalizes Homebrew paths instead of hiding
+overwrite warnings.
 
 The durable evidence, pinned sources, executable probes, and acceptance gates
 are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]],

@@ -83,7 +83,7 @@ These licenses (EPL and MIT) are permissive; where Seon ports their code, the up
 
 | Tool | Version | Why |
 |------|---------|-----|
-| **Java (JDK)** | **22+ (25 preferred)** | The database server runs on the JVM; its Proximum vector index ships class-file 66.0 and uses the Foreign Memory API, both Java 22+ only — 22 is the hard floor. `bin/_java-home-resolver` *prefers* JDK 25 and falls back to any pinned JDK or to `java` on PATH with a warning. Set `JAVA_HOME` to override. |
+| **Java (JDK)** | **26** | The writer, Shadow compiler, test runners, and packaged image use one supported JVM version. `bin/_java-home-resolver` selects an installed JDK 26 or exits with an installation hint; `JAVA_HOME` is honored when it already points to JDK 26. |
 | **Clojure CLI** | 1.12+ | Builds the CLJS pod and runs the database server. |
 | **Babashka** (`bb`) | 1.x | Dev hooks, MCP servers, and datahike's build tasks. |
 | **Node.js** + npm | 22+ (24 recommended) | The agent pod is a long-running Node process. |
@@ -93,8 +93,8 @@ These licenses (EPL and MIT) are permissive; where Seon ports their code, the up
 Optional: **Caddy** 2.x (HTTPS reverse proxy), and the JVM dev seat
 (`bin/run`, nREPL 7888 — for development/orchestration, not needed to run
 agents). Platform: **macOS, Linux, and Windows via WSL** — the stack is all
-cross-platform (JVM, Node, Clojure, Babashka) and `bin/seon` selects a JDK
-(prefers 25, floor 22) on each. The `reference-code/*` git submodules are vendored dependency
+cross-platform (JVM, Node, Clojure, Babashka) and `bin/seon` selects JDK 26 on
+each. The `reference-code/*` git submodules are vendored dependency
 source for reading when stuck — not needed to run, so a plain `git clone` is
 fine.
 

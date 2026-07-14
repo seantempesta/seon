@@ -22,11 +22,13 @@
 #
 # Output: out/test/test.js (intermediate)
 #         tmp/test-cljs-<timestamp>.log (full transcript, tmp/test-cljs-latest.log symlinked)
+#         tmp/test-cljs-<timestamp>.report.edn (structured verdict, latest symlinked)
 #
 # Wave 4.5 item C — Platform track. Gates Wave 4b verification.
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
+source bin/_java-home-resolver
 
 # A Ctrl-C during the final `node | tee` pipeline used to leave the Node test
 # child reparented to launchd, where it kept a CPU core busy indefinitely.
@@ -86,6 +88,7 @@ done
 
 mkdir -p tmp out/test
 TMPOUT="tmp/test-cljs-$(date +%Y%m%d-%H%M%S)-$$.log"
+REPORTOUT="${TMPOUT%.log}.report.edn"
 
 # One output bundle means one compile+run owner. Two agents compiling different
 # focused namespace sets into out/test/test.js can otherwise each run the other
@@ -198,27 +201,49 @@ prune_test_logs() {
   while IFS= read -r log; do
     n=$((n + 1))
     if [ "$n" -gt 20 ]; then
-      rm -f -- "$log"
+      rm -f -- "$log" "${log%.log}.report.edn"
     fi
   done < <(find tmp -maxdepth 1 -type f -name 'test-cljs-[0-9]*.log' -print | sort -r)
+}
+
+# Every invocation publishes a small EDN index beside the unabridged log. A
+# human gets the compact terminal verdict; an agent can read stable structured
+# counts and then open the exact full transcript without rerunning the suite.
+write_test_report() {
+  local status="$1"
+  local phase="$2"
+  local complete="$3"
+  local tests="$4"
+  local assertions="$5"
+  local failures="$6"
+  local errors="$7"
+  local compile_seconds="$8"
+  local node_seconds="$9"
+  local namespaces="${10}"
+  local node_exit="${11}"
+  local core_faults="${12}"
+  {
+    printf '{:seon.dev.test-runner/status :%s\n' "$status"
+    printf ' :seon.dev.test-runner/phase :%s\n' "$phase"
+    printf ' :seon.dev.test-runner/complete? %s\n' "$complete"
+    printf ' :seon.dev.test-runner/tests %s\n' "$tests"
+    printf ' :seon.dev.test-runner/assertions %s\n' "$assertions"
+    printf ' :seon.dev.test-runner/failures %s\n' "$failures"
+    printf ' :seon.dev.test-runner/errors %s\n' "$errors"
+    printf ' :seon.dev.test-runner/core-faults %s\n' "$core_faults"
+    printf ' :seon.dev.test-runner/namespaces %s\n' "$namespaces"
+    printf ' :seon.dev.test-runner/compile-seconds %s\n' "$compile_seconds"
+    printf ' :seon.dev.test-runner/node-seconds %s\n' "$node_seconds"
+    printf ' :seon.dev.test-runner/node-exit %s\n' "$node_exit"
+    printf ' :seon.dev.test-runner/full-log "%s"}\n' "$TMPOUT"
+  } > "$REPORTOUT"
+  ln -sf "$(basename "$TMPOUT")" tmp/test-cljs-latest.log
+  ln -sf "$(basename "$REPORTOUT")" tmp/test-cljs-latest.report.edn
 }
 
 START=$(date +%s)
 COMPILE_ELAPSED=0
 COMPILE_STATUS="skipped (--no-build)"
-
-# Keep Shadow/compiler diagnostics visible, but leave launcher deprecation
-# chatter in the full log. These exact warnings originate before Shadow sees
-# the program and repeat unchanged on every JVM start.
-compact_compile_output() {
-  awk '
-    /^WARNING: A terminally deprecated method in sun\.misc\.Unsafe/ { next }
-    /^WARNING: sun\.misc\.Unsafe::arrayBaseOffset/ { next }
-    /^WARNING: Please consider reporting this to the maintainers/ { next }
-    /^Warning: environ value .*:java-home.* overwritten/ { next }
-    { print; system("") }
-  '
-}
 
 if [ "$BUILD" = "1" ]; then
   rm -f -- "$FINGERPRINT_FILE" "$FINGERPRINT_FILE.tmp"
@@ -240,32 +265,31 @@ if [ "$BUILD" = "1" ]; then
     COMPILE_CMD+=(-Sdeps "{:deps {seon.extra/src {:local/root \"$SEON_EXTRA_SRC\"}}}")
   fi
   COMPILE_CMD+=(-M:cljs compile test)
-  CONFIG_MERGE="{}"
+  # The long-running full-graph watcher is the sole publisher of changed-test
+  # artifacts. One-shot focused compiles share the build definition but must
+  # never replace that authoritative manifest with their partial graph.
+  CONFIG_MERGE="{:seon.dev.test-artifact/publish? false}"
   if [ -n "$NAMESPACE_EDN" ] && [ -n "${SEON_EXTRA_SRC:-}" ] && [ -n "${SEON_EXTRA_PRELOAD:-}" ]; then
-    CONFIG_MERGE="{:namespaces [$NAMESPACE_EDN] :devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
+    CONFIG_MERGE="{:seon.dev.test-artifact/publish? false :namespaces [$NAMESPACE_EDN] :devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
   elif [ -n "$NAMESPACE_EDN" ]; then
-    CONFIG_MERGE="{:namespaces [$NAMESPACE_EDN]}"
+    CONFIG_MERGE="{:seon.dev.test-artifact/publish? false :namespaces [$NAMESPACE_EDN]}"
   elif [ -n "${SEON_EXTRA_SRC:-}" ] && [ -n "${SEON_EXTRA_PRELOAD:-}" ]; then
-    CONFIG_MERGE="{:devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
+    CONFIG_MERGE="{:seon.dev.test-artifact/publish? false :devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
   fi
-  if [ "$CONFIG_MERGE" != "{}" ]; then
-    COMPILE_CMD+=(--config-merge "$CONFIG_MERGE")
-  fi
+  COMPILE_CMD+=(--config-merge "$CONFIG_MERGE")
   echo "== Compiling :test build (shadow-cljs, dev) =="
-  if [ "$VERBOSE" -eq 1 ]; then
-    "${COMPILE_CMD[@]}" 2>&1 | tee "$TMPOUT"
-    COMPILE_EXIT=${PIPESTATUS[0]}
-  else
-    "${COMPILE_CMD[@]}" 2>&1 | tee "$TMPOUT" | compact_compile_output
-    COMPILE_EXIT=${PIPESTATUS[0]}
-  fi
+  "${COMPILE_CMD[@]}" 2>&1 | tee "$TMPOUT"
+  COMPILE_EXIT=${PIPESTATUS[0]}
   if [ "$COMPILE_EXIT" -ne 0 ]; then
     COMPILE_END=$(date +%s)
     COMPILE_ELAPSED=$((COMPILE_END - COMPILE_START))
+    write_test_report error compile false nil nil nil nil "$COMPILE_ELAPSED" nil nil nil nil
+    prune_test_logs
     echo ""
     echo "========================================"
     echo "COMPILE FAIL (${COMPILE_ELAPSED}s)"
     echo "Full output: $TMPOUT"
+    echo "Summary report: $REPORTOUT"
     echo "========================================"
     exit 2
   fi
@@ -422,6 +446,20 @@ VERDICT_FAIL=0
 [ "$REAL_FAILS" -ne 0 ] && VERDICT_FAIL=1
 [ "$CORE_GATE_TRIPPED" -ne 0 ] && VERDICT_FAIL=1
 
+TEST_COUNT=$(printf '%s\n' "$SUMMARY_LINE" | awk '{print $2}')
+ASSERTION_COUNT=$(printf '%s\n' "$SUMMARY_LINE" | awk '{print $5}')
+FAILURE_COUNT=$(printf '%s\n' "$COUNTS_LINE" | awk '{print $1}')
+ERROR_COUNT=$(printf '%s\n' "$COUNTS_LINE" | awk '{print $3}')
+: "${TEST_COUNT:=nil}" "${ASSERTION_COUNT:=nil}"
+: "${FAILURE_COUNT:=nil}" "${ERROR_COUNT:=nil}"
+REPORT_STATUS=pass
+[ "$VERDICT_FAIL" -ne 0 ] && REPORT_STATUS=fail
+REPORT_COMPLETE=true
+[ "$INCOMPLETE" -ne 0 ] && REPORT_COMPLETE=false
+write_test_report "$REPORT_STATUS" runtime "$REPORT_COMPLETE" \
+  "$TEST_COUNT" "$ASSERTION_COUNT" "$FAILURE_COUNT" "$ERROR_COUNT" \
+  "$COMPILE_ELAPSED" "$NODE_ELAPSED" "$RAN" "$NODE_EXIT" "$CORE_FAULTS"
+
 END=$(date +%s)
 ELAPSED=$((END - START))
 
@@ -467,8 +505,8 @@ else
 fi
 echo "========================================"
 
-ln -sf "$(basename "$TMPOUT")" tmp/test-cljs-latest.log
 prune_test_logs
 echo "Full output: $TMPOUT (or tmp/test-cljs-latest.log)"
+echo "Summary report: $REPORTOUT (or tmp/test-cljs-latest.report.edn)"
 
 if [ "$VERDICT_FAIL" -eq 0 ]; then exit 0; else exit 1; fi

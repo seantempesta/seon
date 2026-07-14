@@ -76,10 +76,9 @@ the current tree.
 - **wire-server (JVM)** — `clojure -M:simd:fork-deps:writer --backend file
   --db-name <cluster> --path <dir>/store --req-sock <uds> --pub-sock <uds>
   --repl-port <port>` (`bin/seon:276`). Main ns `seon.server.boot`
-  (`deps.edn:196-199`). JDK pinned to 25, hard floor 22 (Proximum class-file
-  66 + Foreign Memory API — `bin/_java-home-resolver` sets
-  `SEON_JAVA_VERSION="25"` and already scans Linux JVM roots
-  `/usr/lib/jvm/*`; `bin/seon:60-71` keeps the >=22 assert). Heap is sized
+  (`deps.edn:196-199`). The JDK is pinned by
+  `bin/_java-home-resolver`, which scans platform install roots and keeps the
+  compiler and writer on one supported runtime. Heap is sized
   by the `:simd` alias: `-Xmx2g` + G1GC + `jdk.incubator.vector`
   (`deps.edn:107-110`).
 - **pod (Node)** — `node out/client/main.js` (`bin/seon:243`), a shadow-cljs

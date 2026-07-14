@@ -234,6 +234,7 @@
   {:target    :node-test
    :output-to "out/test/test.js"
    :ns-regexp "-test$"
+   :seon.dev.test-artifact/publish? true
    :build-hooks [[seon.dev.test-artifact/publish!]]
    :devtools  {:preloads [seon.test.node-preload]}
    :compiler-options {:warnings-as-errors false

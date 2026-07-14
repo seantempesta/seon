@@ -11,7 +11,8 @@ tags: [research, prd, flow]
 The 2.6 GiB physical footprint of the long-running Shadow watcher is high, but
 the captured run does **not** show an application-style leak or duplicate test
 builds accumulating inside that process. The primary cause is simpler: the
-`:cljs` alias supplies no heap policy, so JDK 25 sizes this JVM from the host's
+At measurement time the `:cljs` alias supplied no heap policy, so the JVM
+sized itself from the host's
 128 GiB of RAM. It starts with a 2 GiB heap and permits nearly 30 GiB. G1 had
 2.14 GiB committed even when only about 812 MiB was used after a natural young
 collection. The old generation was about 360 MiB. RSS therefore stayed near

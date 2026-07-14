@@ -14,7 +14,7 @@
                  {:cmd [(str (fs/path repo-root "bin/seon-hook"))]
                   :dir repo-root
                   :env (assoc (into {} (System/getenv))
-                              "SEON_CONFIG" config-path)
+                              "SEON_HOOK_CONFIG" config-path)
                   :in (json/generate-string event)
                   :out :string
                   :err :string
@@ -101,7 +101,7 @@
                        [:seon.dev.hook-test/response :decision]))))
       (finally (fs/delete-tree directory)))))
 
-(deftest codex-post-edit-delivers-advisory-changed-test-feedback
+(deftest codex-post-edit-keeps-disabled-changed-tests-advisory-out-of-band
   (let [{:seon.dev.hook-test/keys [directory config]} (fixture)
         path "test/seon/dev/runtime_id_test.cljs"
         patch (str "*** Begin Patch\n"
@@ -113,14 +113,11 @@
                       :tool_name "apply_patch"
                       :tool_input {:command patch}}
                      config)
-            feedback (get-in result
-                             [:seon.dev.hook-test/response
-                              :hookSpecificOutput
-                              :additionalContext])]
+            response (:seon.dev.hook-test/response result)]
         (is (zero? (:seon.dev.hook-test/exit result)))
-        (is (str/includes? feedback "tests never gate refactoring"))
-        (is (str/includes? feedback "changed tests passed"))
-        (is (str/includes? feedback "seon.dev.runtime-id-test")))
+        (is (true? (:continue response)))
+        (is (nil? (:decision response))
+            "test feedback is advisory and never becomes an edit decision"))
       (finally (fs/delete-tree directory)))))
 
 (deftest codex-post-edit-loads-the-real-docstring-checker-from-any-path

@@ -48,6 +48,7 @@
     org.slf4j/slf4j-simple {:mvn/version "2.0.16"}}
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
+              "--sun-misc-unsafe-memory-access=allow"
               "-XX:+UseG1GC" "-Xmx2g"]}
 
   ;; Focused writer tests add source only; clojure.test already rides Clojure.
@@ -58,7 +59,7 @@
 
   ;; The database-writer test namespaces load against the exact :writer basis;
   ;; there is no second writer dependency graph or broad JVM test discovery.
-  ;; Usage (JDK 25+, pinned via bin/_java-home-resolver):
+  ;; Usage (JDK 26, pinned via bin/_java-home-resolver):
   ;;   bin/test-writer seon.db.transport-uds-test
 
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
@@ -101,7 +102,8 @@
          ;; a 128 GiB workstation otherwise commit a 2 GiB initial heap and
          ;; permit ~30 GiB per concurrent compiler. Keep one explicit bounded
          ;; policy here; do not duplicate heap flags in launch scripts.
-         :jvm-opts      ["-Xms256m" "-Xmx3g"]
+         :jvm-opts      ["--sun-misc-unsafe-memory-access=allow"
+                         "-Xms256m" "-Xmx3g"]
          :extra-paths   ["test" "script"]
          :extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}

@@ -27,7 +27,7 @@
 # ============================================================
 # Builder — all compilation happens HERE; none at container boot.
 # ============================================================
-FROM eclipse-temurin:25-jdk-noble AS build
+FROM eclipse-temurin:26-jdk-noble AS build
 
 # buildx auto-populates TARGETARCH per --platform (arm64 | amd64). Each
 # arch-specific download below selects its asset name + sha256 from it.
@@ -55,16 +55,16 @@ RUN case "$TARGETARCH" in \
  && rm /tmp/node.tar.xz
 
 # Temurin JRE: asset arch arm64→aarch64, amd64→x64.
-ARG JRE_VERSION_TAG=jdk-25.0.3%2B9
-ARG JRE_FILE_VER=25.0.3_9
-ARG JRE_SHA256_ARM64=d12d5b19ff7f6c4a99fd4f9eecede2c96e64df7d1f41cc84f2e9c9b38408600b
-ARG JRE_SHA256_AMD64=487ad434d8b121ae3902d5ad9cb830cd8e1f75fefad6e2ba80f89d60e3db95d7
+ARG JRE_VERSION_TAG=jdk-26.0.1%2B8
+ARG JRE_FILE_VER=26.0.1_8
+ARG JRE_SHA256_ARM64=bf5f733066599065de5e720edda550b39d85876f5bf23a94fee2cb6a8379cb36
+ARG JRE_SHA256_AMD64=2e90cf68d31b28553fb2c8202d5a4c3a5e99a60285e125dc28c94ba5fb2ac1ef
 RUN case "$TARGETARCH" in \
       arm64) JARCH=aarch64; JSHA="$JRE_SHA256_ARM64" ;; \
       amd64) JARCH=x64;     JSHA="$JRE_SHA256_AMD64" ;; \
       *) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
     esac \
- && curl -fL "https://github.com/adoptium/temurin25-binaries/releases/download/${JRE_VERSION_TAG}/OpenJDK25U-jre_${JARCH}_linux_hotspot_${JRE_FILE_VER}.tar.gz" -o /tmp/jre.tar.gz \
+ && curl -fL "https://github.com/adoptium/temurin26-binaries/releases/download/${JRE_VERSION_TAG}/OpenJDK26U-jre_${JARCH}_linux_hotspot_${JRE_FILE_VER}.tar.gz" -o /tmp/jre.tar.gz \
  && echo "${JSHA}  /tmp/jre.tar.gz" | sha256sum -c - \
  && mkdir -p /opt/seon/jre \
  && tar -xzf /tmp/jre.tar.gz --strip-components=1 -C /opt/seon/jre \
