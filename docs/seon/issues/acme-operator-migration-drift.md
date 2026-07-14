@@ -149,6 +149,25 @@ current operator's one target/artifact/process graph. Core operator semantics
 remain owned by `script/seon/dev/*`; ACME adapts to them without restoring named
 process commands or a parallel supervisor.
 
+## Duplicate development-cluster identity — 2026-07-14
+
+The agentic-tool-refinement lane started a current ACME target from a dedicated
+worktree on port 8094 while an older current-layout ACME target remained live
+from the main checkout. Both advertised cluster basename `acme`. An
+`eval_cljs` request for `acme/root` selected the main-checkout pod at PID 84892
+and cwd `/Users/sean/src/seon`, not the lane pod. Port, process, database, and
+Shadow isolation were therefore insufficient for deterministic development
+addressing when the wrapper forced `SEON_CLUSTER_DIR=data/clusters/acme`.
+
+`bin/acme` now retains that path as its default but honors an explicit
+`SEON_CLUSTER_DIR`. Starting the lane with
+`data/clusters/acme-agentic-tool-refinement` published the distinct cluster
+identity. The repository MCP server then resolved
+`acme-agentic-tool-refinement/root` to PID 74241 and cwd
+`/Users/sean/src/seon-acme-agentic-tool-refinement`. This closes the local
+single-lane addressing need; general concurrent sample allocation and token-
+fenced ownership remain with `inspect-live-cluster-caller-drift.md`.
+
 ## Acceptance
 
 - Coordinate and drain the stable and display-v3 ACME process groups through

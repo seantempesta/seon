@@ -28,13 +28,13 @@ if [ -f "$SEON_ROOT/.env.acme" ]; then set -a; . "$SEON_ROOT/.env.acme"; set +a;
 
 # --- isolation: distinct from the live default (7890, data/clusters/default,
 #     tmp/seon-cluster-default-*.sock, tmp/proc, logs/). Ports use ${...:-} so a
-#     shell override (SEON_PORT=… SEON_WRITER_REPL_PORT=… bin/acme …) can dodge a
-#     machine-level collision without editing this file. The web port is stable
-#     for humans; the writer development REPL must bind port zero and publish
-#     its actual cluster-qualified port file. ---
+#     shell override (SEON_PORT=… SEON_CLUSTER_DIR=… bin/acme …) can dodge a
+#     machine-level or cluster-identity collision without editing this file.
+#     The web port is stable for humans; the writer development REPL must bind
+#     port zero and publish its actual cluster-qualified port file. ---
 export SEON_PORT="${SEON_PORT:-7994}"
 export SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-0}"
-export SEON_CLUSTER_DIR=data/clusters/acme
+export SEON_CLUSTER_DIR="${SEON_CLUSTER_DIR:-data/clusters/acme}"
 export SEON_REQ_SOCK=tmp/acme-cluster-req.sock
 export SEON_PUB_SOCK=tmp/acme-cluster-pub.sock
 export SEON_PROC_DIR=tmp/proc-acme          # own supervisor pid/lock namespace
