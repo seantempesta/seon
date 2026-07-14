@@ -465,9 +465,10 @@
                   ::materialized-face]}
   [{dbv :seon.db/db agent-id :seon.agent/id
     selection ::selection requested-face ::face}]
-  (when-let [source (current-surface-source dbv agent-id selection)]
-    (some-> (render-surface-hiccup dbv agent-id source)
-            (face requested-face))))
+  (when (agent-present? dbv agent-id)
+    (when-let [source (current-surface-source dbv agent-id selection)]
+      (some-> (render-surface-hiccup dbv agent-id source)
+              (face requested-face)))))
 
 (defn- render-surface
   "Render one source once, then project its compact and expanded faces."
@@ -493,8 +494,10 @@
   {:malli/schema [:=> [:cat ::materialize-surfaces-request]
                   ::materialized-surfaces]}
   [{dbv :seon.db/db agent-id :seon.agent/id selections ::selections}]
-  (->> (surface-sources dbv agent-id)
-       (filter #(or (nil? selections)
-                    (contains? selections (::selection %))))
-       (keep #(render-surface dbv agent-id %))
-       vec))
+  (if-not (agent-present? dbv agent-id)
+    []
+    (->> (surface-sources dbv agent-id)
+         (filter #(or (nil? selections)
+                      (contains? selections (::selection %))))
+         (keep #(render-surface dbv agent-id %))
+         vec)))
