@@ -5,37 +5,36 @@ severity: friction
 tags: [issue, agent, database]
 ---
 
-# Address-message steps have no explicit queue priority
+# Address-message steps can displace authored plan work
 
 ## Problem
 
-An open step linked to a newly accepted human message can sort behind older
-ready plan leaves, so the plan anchor and `next` queue can direct the agent to
-prior work before the message it was just asked to address.
+An address step linked to the inbound human message can become the active plan
+anchor while agent-authored work remains open. The agent then follows and
+closes the message bookkeeping step instead of advancing the plan that carries
+the task's expected outcomes.
 
 ## Evidence
 
-`seon.agent.message/message!` atomically mints the linked open step with
-`:my.plan/message`, but `my.plan.internal/ready-leaves` sorts every ready step
-only by `:my.plan/created-at`, oldest first. Neither the query nor the sort
-considers the message connection.
-
-The plan-preload pilot also observed the converse timing failure in all three
-scenarios: when the address step was the only ready step before plan authoring,
-it captured the active position. Together these cases show that creation time
-is standing in for two different semantics: address the accepted message and
-advance existing planned work.
+The plan-preload pilot observed address-step capture in all three scenarios.
+The first `active!` selected the auto-minted message step; in the first scenario
+the resulting escalation was attributed to that bookkeeping step rather than
+the authored work, and in the third scenario the address step was prematurely
+closed while the requested work still lacked authored plan steps. The measured
+defect is the coexistence of an active address step with open authored work.
+The pilot does not support a requirement that address steps always sort first.
 
 ## Owner
 
-The one derived work-queue ordering in `my.plan.internal/ready-leaves` and its
+The one derived plan position/queue mechanism in `my.plan.internal` and its
 message-linked step facts from `seon.agent.message`.
 
 ## Acceptance
 
-- With no explicit active step, a newly accepted human message's linked open
-  step is selected ahead of older ready leaves until that message is addressed.
-- An explicitly active step remains the position anchor.
-- Behavioral tests cover older and newer authored leaves around the linked
-  message step; ordering derives from facts and does not add a stored priority
-  mirror or a second queue.
+- No derived plan state has a message-linked address step active while an
+  agent-authored step remains open.
+- The inbound message remains traceable and addressable without displacing the
+  authored plan's outcome-bearing position.
+- Behavioral tests cover a message arriving before and after authored plan
+  leaves, including the pilot's address-capture shape. The fix derives from
+  existing facts and adds neither a stored priority mirror nor a second queue.

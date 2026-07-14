@@ -228,6 +228,263 @@ def check_planning(reply: str,
 
 
 # ---------------------------------------------------------------------------
+# Three-arm plan-preload experiment (pilot hardening, 2026-07-14)
+# ---------------------------------------------------------------------------
+
+PLAN_ARMS = ("pretransacted", "model_authored", "no_plan")
+
+
+def check_database_outcome(outcome: dict[str, Any],
+                           oracle: dict[str, Any]) -> dict[str, Any]:
+    """Score the staged world's result, never the plausibility of the reply.
+
+    The live adapter is expected to derive ``outcome["answer"]`` from the
+    database after the run. Keeping this check over plain data makes the
+    wrong-but-plausible ferry total from the pilot an offline regression.
+    """
+    observed = str(outcome.get("answer", ""))
+    checked = check_answer(observed, oracle)
+    return {**checked, "observed": observed}
+
+
+def check_plan_integrity(closes: list[dict[str, Any]],
+                         *, required: bool) -> dict[str, Any]:
+    """Every plan close must have its step expectation verified at close.
+
+    The live adapter derives ``expect_verified`` from an outcome-oracle read at
+    the close basis. The no-plan control has no closes and reports this metric
+    as not applicable instead of receiving free plan credit.
+    """
+    verified = [c for c in closes if c.get("expect_verified") is True]
+    applicable = bool(closes) or required
+    ok = ((not closes) if not required else
+          (bool(closes) and len(verified) == len(closes)))
+    return {"ok": ok, "applicable": applicable,
+            "verified_closes": len(verified), "closes": len(closes)}
+
+
+def check_report_delivery(events: list[dict[str, Any]],
+                          oracle: dict[str, Any]) -> dict[str, Any]:
+    """The oracle answer reached ``message/user`` before the run closed."""
+    close_indices = [i for i, e in enumerate(events)
+                     if e.get("kind") == "run_closed"]
+    close_idx = close_indices[0] if close_indices else None
+    reports = [(i, e) for i, e in enumerate(events)
+               if e.get("kind") == "message_user"]
+    matching = [(i, e) for i, e in reports
+                if close_idx is not None and i < close_idx
+                and check_answer(str(e.get("content", "")), oracle)["ok"]]
+    return {"ok": bool(close_indices) and bool(matching),
+            "evidence_sufficient": bool(close_indices),
+            "run_closed_observed": bool(close_indices),
+            "reports": len(reports),
+            "matching_before_close": len(matching)}
+
+
+def check_address_step_discipline(
+        evidence: dict[str, Any],
+        *, plan_required: bool, plan_absent_observed: bool) -> dict[str, Any]:
+    """No address step is active while an authored plan step remains open."""
+    observations = evidence.get("observations")
+    observations = observations if isinstance(observations, list) else []
+    violations = [o for o in observations
+                  if o.get("address_active") and o.get("authored_open")]
+    coverage_complete = evidence.get("coverage_complete") is True
+    evidence_sufficient = ((coverage_complete and bool(observations))
+                           if plan_required
+                           else plan_absent_observed)
+    return {"ok": evidence_sufficient and not violations,
+            "applicable": plan_required,
+            "evidence_sufficient": evidence_sufficient,
+            "coverage_complete": coverage_complete,
+            "observations": len(observations),
+            "violations": len(violations)}
+
+
+def check_plan_arm_evidence(arm: str,
+                            evidence: dict[str, Any]) -> dict[str, Any]:
+    """Derive plan presence, provenance, and timing from database evidence.
+
+    Live adapters must supply this plain-data record from one bounded database
+    read after the run:
+
+    ``observed``
+        True only when the plan-root query completed.
+    ``observed_at_t`` / ``first_turn_t``
+        Database transaction coordinates for the observation and first turn.
+    ``plan_present``
+        Explicit result of the root-existence query; must agree with ``roots``.
+    ``agent_eid``
+        Driven agent entity id.
+    ``harness_plan_tx_ids``
+        Transaction ids returned by the harness's pre-turn plan transaction.
+    ``roots``
+        Every observed root as ``{id, creation_t, creation_tx_id,
+        creation_user_eid}``, where creation provenance comes from transaction
+        metadata rather than an arm label.
+    ``history_observed`` / ``run_historical_root_ids``
+        True only when a Datahike history read covered the inclusive interval
+        ``[first_turn_t, observed_at_t]``; ids are the union of roots present in
+        the as-of database at ``first_turn_t`` and roots asserted or retracted
+        through ``observed_at_t``.
+    ``run_root_creation_count`` / ``run_root_creation_tx_ids``
+        Count and transaction ids of root creations asserted inside that same
+        interval. Creation transaction provenance is the root row's
+        ``creation_user_eid`` plus transaction id; retraction cannot erase it.
+
+    Source is derived here: a root created by a recorded harness transaction is
+    ``harness``; otherwise a root whose creation transaction user is the driven
+    agent is ``model``. No caller-supplied ``plan_source`` is accepted.
+    """
+    roots = evidence.get("roots")
+    roots = roots if isinstance(roots, list) else []
+    observed = evidence.get("observed") is True
+    explicit_present = evidence.get("plan_present")
+    presence_consistent = (isinstance(explicit_present, bool)
+                           and explicit_present == bool(roots))
+    first_turn_t = evidence.get("first_turn_t")
+    observed_at_t = evidence.get("observed_at_t")
+    coordinates_valid = (isinstance(first_turn_t, int)
+                         and isinstance(observed_at_t, int)
+                         and observed_at_t >= first_turn_t)
+    harness_tx_rows = evidence.get("harness_plan_tx_ids")
+    harness_valid = (isinstance(harness_tx_rows, list)
+                     and all(isinstance(tx, int) for tx in harness_tx_rows))
+    harness_txs = set(harness_tx_rows) if harness_valid else set()
+    agent_eid = evidence.get("agent_eid")
+    agent_valid = isinstance(agent_eid, int)
+    history_observed = evidence.get("history_observed") is True
+    historical_root_ids = evidence.get("run_historical_root_ids")
+    historical_ids_valid = (isinstance(historical_root_ids, list)
+                            and all(isinstance(root_id, str)
+                                    for root_id in historical_root_ids)
+                            and len(set(historical_root_ids))
+                            == len(historical_root_ids))
+    run_creation_count = evidence.get("run_root_creation_count")
+    run_creation_tx_ids = evidence.get("run_root_creation_tx_ids")
+    run_creation_valid = (isinstance(run_creation_count, int)
+                          and run_creation_count >= 0
+                          and isinstance(run_creation_tx_ids, list)
+                          and all(isinstance(tx, int)
+                                  for tx in run_creation_tx_ids)
+                          and len(set(run_creation_tx_ids))
+                          == len(run_creation_tx_ids)
+                          and run_creation_count
+                          == len(run_creation_tx_ids))
+
+    def source(root: dict[str, Any]) -> str:
+        if root.get("creation_tx_id") in harness_txs:
+            return "harness"
+        if root.get("creation_user_eid") == agent_eid:
+            return "model"
+        return "unknown"
+
+    root_maps = all(isinstance(root, dict) for root in roots)
+    sources = [source(root) for root in roots] if root_maps else ["unknown"]
+    creation_ts = ([root.get("creation_t") for root in roots]
+                   if root_maps else [])
+    roots_valid = (root_maps
+                   and all(isinstance(root.get("id"), str)
+                           and isinstance(root.get("creation_t"), int)
+                           and isinstance(root.get("creation_tx_id"), int)
+                           and isinstance(root.get("creation_user_eid"), int)
+                           for root in roots))
+    roots_observed_by_basis = (coordinates_valid and roots_valid
+                               and all(t <= observed_at_t for t in creation_ts))
+    final_interval_creation_tx_ids = (
+        {root["creation_tx_id"] for root in roots
+         if first_turn_t <= root["creation_t"] <= observed_at_t}
+        if roots_valid and coordinates_valid else set())
+    interval_creations_consistent = (
+        run_creation_valid
+        and final_interval_creation_tx_ids.issubset(set(run_creation_tx_ids)))
+    evidence_sufficient = (observed and presence_consistent
+                           and coordinates_valid and roots_valid
+                           and harness_valid and agent_valid
+                           and history_observed and historical_ids_valid
+                           and run_creation_valid and roots_observed_by_basis
+                           and interval_creations_consistent)
+    root_ids = {root["id"] for root in roots} if roots_valid else set()
+    history_covers_final = (historical_ids_valid
+                            and root_ids.issubset(set(historical_root_ids)))
+
+    if not evidence_sufficient:
+        contract = False
+    elif arm == "pretransacted":
+        contract = (bool(roots) and all(s == "harness" for s in sources)
+                    and all(t < first_turn_t for t in creation_ts)
+                    and all(t <= observed_at_t for t in creation_ts)
+                    and history_covers_final)
+    elif arm == "model_authored":
+        contract = (bool(roots) and all(s == "model" for s in sources)
+                    and all(first_turn_t <= t <= observed_at_t
+                            for t in creation_ts)
+                    and history_covers_final
+                    and set(root["creation_tx_id"] for root in roots)
+                    .issubset(set(run_creation_tx_ids)))
+    else:
+        contract = (explicit_present is False and not roots
+                    and historical_root_ids == []
+                    and run_creation_count == 0
+                    and run_creation_tx_ids == [])
+    return {"ok": evidence_sufficient and contract,
+            "evidence_sufficient": evidence_sufficient,
+            "plan_present": explicit_present,
+            "presence_consistent": presence_consistent,
+            "sources": sources,
+            "creation_ts": creation_ts,
+            "first_turn_t": first_turn_t,
+            "observed_at_t": observed_at_t,
+            "history_observed": history_observed,
+            "run_historical_root_ids": historical_root_ids,
+            "run_root_creation_count": run_creation_count,
+            "run_root_creation_tx_ids": run_creation_tx_ids,
+            "roots_observed_by_basis": roots_observed_by_basis,
+            "interval_creations_consistent": interval_creations_consistent}
+
+
+def check_plan_experiment(
+    arm: str,
+    database_outcome: dict[str, Any],
+    oracle: dict[str, Any],
+    *,
+    plan_closes: list[dict[str, Any]],
+    report_events: list[dict[str, Any]],
+    address_evidence: dict[str, Any],
+    plan_evidence: dict[str, Any],
+) -> dict[str, Any]:
+    """Mechanical verdict for the measured preloaded/authored/control arms.
+
+    ``pretransacted`` requires a harness-authored plan already present before
+    turn one; ``model_authored`` requires the model to author it; ``no_plan``
+    requires the absence of a plan. Outcome and report delivery gate every arm.
+    Plan integrity and address-step discipline gate only the two plan arms.
+    """
+    if arm not in PLAN_ARMS:
+        raise ValueError(f"unknown planning arm {arm!r}; expected {PLAN_ARMS}")
+    required_plan = arm != "no_plan"
+    arm_contract = check_plan_arm_evidence(arm, plan_evidence)
+    plan_absent_observed = (arm_contract["evidence_sufficient"]
+                            and arm_contract["plan_present"] is False)
+    parts = {
+        "database_outcome": check_database_outcome(database_outcome, oracle),
+        "plan_integrity": check_plan_integrity(plan_closes,
+                                                required=required_plan),
+        "report_delivery": check_report_delivery(report_events, oracle),
+        "address_step_discipline": check_address_step_discipline(
+            address_evidence, plan_required=required_plan,
+            plan_absent_observed=plan_absent_observed),
+        "arm_contract": arm_contract,
+    }
+    gates = [parts["database_outcome"], parts["plan_integrity"],
+             parts["report_delivery"], parts["arm_contract"]]
+    if required_plan:
+        gates.append(parts["address_step_discipline"])
+    return {"ok": all(bool(part["ok"]) for part in gates),
+            "arm": arm, **parts}
+
+
+# ---------------------------------------------------------------------------
 # Run wiring — phase 1 → restart → phase 2 → snapshot (effects injected)
 # ---------------------------------------------------------------------------
 
@@ -455,6 +712,29 @@ def planning_scorer() -> Scorer:
 
     async def score(state: TaskState, target: Target) -> Score:
         meta = state.metadata or {}
+        if "plan_experiment" in meta:
+            experiment = meta["plan_experiment"]
+            res = check_plan_experiment(
+                experiment["arm"], experiment["database_outcome"],
+                meta["oracle"]["final"],
+                plan_closes=experiment["plan_closes"],
+                report_events=experiment["report_events"],
+                address_evidence=experiment["address_evidence"],
+                plan_evidence=experiment["plan_evidence"],
+            )
+            return Score(
+                value=CORRECT if res["ok"] else INCORRECT,
+                explanation=json.dumps({
+                    "arm": res["arm"],
+                    "database_outcome_ok": res["database_outcome"]["ok"],
+                    "plan_integrity": res["plan_integrity"],
+                    "report_delivery": res["report_delivery"],
+                    "address_step_discipline":
+                        res["address_step_discipline"],
+                    "arm_contract": res["arm_contract"],
+                }),
+                metadata=res,
+            )
         res = check_planning(
             state.output.completion,
             meta["plan_snapshot"],

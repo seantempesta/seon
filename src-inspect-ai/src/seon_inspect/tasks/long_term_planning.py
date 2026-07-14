@@ -18,6 +18,10 @@ Two solver modes (arm switch, like `milestone_lift`):
     ephemeral cluster, POSTs phase 1, restarts the pod, POSTs phase 2 to the
     SAME agent, snapshots the plan, and reads the eval rows back — every value
     the scorer needs lands in `state.metadata`.
+  - `endpoint="mock:experiment:<arm>"` — OFFLINE three-arm plan-preload
+    proof (`pretransacted`, `model_authored`, `no_plan`). It exercises the
+    same scorer's database-outcome, plan-integrity, report-delivery, and
+    address-step checks without a cluster or paid model call.
 
 Samples come from the deterministic generators (`generators.generate_rows`,
 the `long_term_planning` templates) — no hand-maintained rows; `(seed, n)` is
@@ -115,12 +119,104 @@ _BAD: dict[str, Any] = {
 
 _GOLDEN = {"good": _GOOD, "bad": _BAD}
 
+_EXPERIMENT_GOLDEN: dict[str, dict[str, Any]] = {
+    "pretransacted": {
+        "plan_evidence": {
+            "observed": True, "observed_at_t": 500,
+            "plan_present": True, "first_turn_t": 100,
+            "agent_eid": 42, "harness_plan_tx_ids": [90],
+            "history_observed": True,
+            "run_historical_root_ids": ["p-root"],
+            "run_root_creation_count": 0,
+            "run_root_creation_tx_ids": [],
+            "roots": [{"id": "p-root", "creation_t": 90,
+                       "creation_tx_id": 90, "creation_user_eid": 7}],
+        },
+        "database_outcome": {"answer": "25"},
+        "plan_closes": [
+            {"step_id": "p1", "expect_verified": True},
+            {"step_id": "p2", "expect_verified": True},
+            {"step_id": "p3", "expect_verified": True},
+        ],
+        "report_events": [
+            {"kind": "message_user", "content": "island-loop: 25"},
+            {"kind": "run_closed"},
+        ],
+        "address_evidence": {
+            "coverage_complete": True,
+            "observations": [
+                {"address_active": False, "authored_open": True},
+                {"address_active": False, "authored_open": False},
+            ],
+        },
+    },
+    "model_authored": {
+        "plan_evidence": {
+            "observed": True, "observed_at_t": 500,
+            "plan_present": True, "first_turn_t": 100,
+            "agent_eid": 42, "harness_plan_tx_ids": [],
+            "history_observed": True,
+            "run_historical_root_ids": ["a-root"],
+            "run_root_creation_count": 1,
+            "run_root_creation_tx_ids": [111],
+            "roots": [{"id": "a-root", "creation_t": 110,
+                       "creation_tx_id": 111, "creation_user_eid": 42}],
+        },
+        "database_outcome": {"answer": "25"},
+        "plan_closes": [
+            {"step_id": "a1", "expect_verified": True},
+            {"step_id": "a2", "expect_verified": True},
+        ],
+        "report_events": [
+            {"kind": "message_user", "content": "The result is 25."},
+            {"kind": "run_closed"},
+        ],
+        "address_evidence": {
+            "coverage_complete": True,
+            "observations": [
+                {"address_active": False, "authored_open": True},
+            ],
+        },
+    },
+    # Pilot regression: plausible prose reported 26, and the same wrong value
+    # reached durable memory because no plan expectation existed to falsify it.
+    "no_plan": {
+        "plan_evidence": {
+            "observed": True, "observed_at_t": 500,
+            "plan_present": False, "first_turn_t": 100,
+            "agent_eid": 42, "harness_plan_tx_ids": [],
+            "history_observed": True, "run_historical_root_ids": [],
+            "run_root_creation_count": 0, "run_root_creation_tx_ids": [],
+            "roots": [],
+        },
+        "database_outcome": {"answer": "26"},
+        "plan_closes": [],
+        "report_events": [
+            {"kind": "message_user", "content": "island-loop: 26"},
+            {"kind": "run_closed"},
+        ],
+        "address_evidence": {"coverage_complete": False,
+                             "observations": []},
+    },
+}
+
+_EXPERIMENT_ORACLE: dict[str, Any] = {
+    "final": {"kind": "integer", "answer": "25"},
+}
+
 
 @solver
 def planning_solver(endpoint: str):
     """Drive the live two-phase pod (endpoint="pod") or replay a golden (mock:*)."""
 
     async def solve(state: TaskState, generate: Generate) -> TaskState:
+        if endpoint.startswith("mock:experiment:"):
+            arm = endpoint.rsplit(":", 1)[1]
+            state.output.completion = "offline experiment fixture"
+            state.metadata["plan_experiment"] = {
+                "arm": arm, **_EXPERIMENT_GOLDEN[arm]}
+            state.metadata["oracle"] = _EXPERIMENT_ORACLE
+            return state
         if endpoint.startswith("mock:"):
             golden = _GOLDEN[endpoint.split(":", 1)[1]]  # "good" | "bad"
             state.output.completion = golden["reply"]
@@ -145,7 +241,8 @@ def planning_solver(endpoint: str):
                 "cluster": res.get("cluster"), "agent_id": res.get("agent_id")}
             return state
         raise ValueError(f"unknown endpoint {endpoint!r} "
-                         "(mock:good | mock:bad | pod)")
+                         "(mock:good | mock:bad | "
+                         "mock:experiment:<arm> | pod)")
 
     return solve
 
@@ -154,7 +251,13 @@ def planning_solver(endpoint: str):
 def long_term_planning(seed: str = "s1", n: int = 1,
                        endpoint: str = "pod", epochs: int = 1):
     """Long-horizon planning rows x pass^k epochs (plan → restart → resume)."""
-    if endpoint.startswith("mock:"):
+    if endpoint.startswith("mock:experiment:"):
+        arm = endpoint.rsplit(":", 1)[1]
+        if arm not in _EXPERIMENT_GOLDEN:
+            raise ValueError(f"unknown experiment arm {arm!r}")
+        samples = [Sample(id=f"mock-experiment-{arm}", input=arm,
+                          target="25", metadata={})]
+    elif endpoint.startswith("mock:"):
         # The mock arm scores its OWN self-contained golden, not a generated
         # row — one sample is the whole discrimination proof.
         samples = [Sample(id=f"mock-{endpoint.split(':', 1)[1]}",

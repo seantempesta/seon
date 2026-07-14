@@ -95,6 +95,7 @@ next to `datasets.lock`) — never under the package or docs/.
 | Frozen dev split of a standard bench | `freeze.run_split("arc_challenge", "dev", per_sample_cluster=True, cluster_parallelism=2, run_timeout_s=240, epochs=1)` | same |
 | BFCL tool-calling row (AST subset) | `freeze.run_split("bfcl_ast", "dev", per_sample_cluster=True, cluster_parallelism=2, run_timeout_s=180, epochs=1)` — the `bfcl_adapter` text→tool_call bridge is auto-selected by bench name | same |
 | Planning row (live, two-phase) | `planning.pod_planning_driver(phase1, phase2)` per sample -> `check_planning` | same + wire-server REPL (`tmp/seon-writer-repl-port-default`) |
+| Planning preload arms (offline) | `long_term_planning(endpoint="mock:experiment:<pretransacted|model_authored|no_plan>")` | no cluster, model, or paid call |
 | GPU worker | add `-T endpoint=runpod` + env `DIFFGEMMA_EP`/`RUNPOD_API_KEY`, `--max-samples 1` | deployed worker, `verify_fresh` FIRST (runbook step 0) |
 
 `--model mockllm/model` satisfies eval()'s model requirement and is never

@@ -10,6 +10,7 @@ from inspect_ai import eval as inspect_eval
 
 from seon_inspect.tasks.e1_spec_fn import e1_spec_fn
 from seon_inspect.tasks.ladder_lift import ladder_lift
+from seon_inspect.tasks.long_term_planning import long_term_planning
 from seon_inspect.tasks.skill_lift import skill_lift
 
 
@@ -48,3 +49,13 @@ def test_skill_lift_discriminates(condition, expected):
 def test_ladder_lift_discriminates(ladder, expected):
     got = _mean_accuracy(ladder_lift(ladder=ladder, endpoint="mock:ladder"))
     assert got == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("arm,expected", [
+    ("pretransacted", 1.0),
+    ("model_authored", 1.0),
+    ("no_plan", 0.0),
+])
+def test_planning_preload_experiment_arms_use_real_scorer(arm, expected):
+    task = long_term_planning(endpoint=f"mock:experiment:{arm}")
+    assert _mean_accuracy(task) == pytest.approx(expected)

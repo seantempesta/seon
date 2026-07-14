@@ -47,6 +47,12 @@ RUNS = [
                                                 endpoint="mock:bad")),
     ("planning good", lambda: long_term_planning(endpoint="mock:good")),
     ("planning bad", lambda: long_term_planning(endpoint="mock:bad")),
+    ("planning pretransacted", lambda: long_term_planning(
+        endpoint="mock:experiment:pretransacted")),
+    ("planning model-authored", lambda: long_term_planning(
+        endpoint="mock:experiment:model_authored")),
+    ("planning no-plan", lambda: long_term_planning(
+        endpoint="mock:experiment:no_plan")),
 ]
 
 

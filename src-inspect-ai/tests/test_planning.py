@@ -454,3 +454,208 @@ def test_decompose_first_prose_is_not_work():
              _ev('(my.plan/plan! {:my.plan/title "t"})'),
              _ev(_WORK)]
     assert check_decompose_first(evals)["ok"] is True
+
+
+# --- three-arm plan-preload experiment --------------------------------------
+
+
+def _plan_evidence(arm):
+    base = {"observed": True, "observed_at_t": 500,
+            "first_turn_t": 100, "agent_eid": 42,
+            "harness_plan_tx_ids": [], "roots": [],
+            "history_observed": True, "run_historical_root_ids": [],
+            "run_root_creation_count": 0, "run_root_creation_tx_ids": []}
+    if arm == "pretransacted":
+        return {**base, "plan_present": True, "harness_plan_tx_ids": [90],
+                "run_historical_root_ids": ["r"],
+                "roots": [{"id": "r", "creation_t": 90,
+                           "creation_tx_id": 90,
+                           "creation_user_eid": 7}]}
+    if arm == "model_authored":
+        return {**base, "plan_present": True,
+                "run_historical_root_ids": ["r"],
+                "run_root_creation_count": 1,
+                "run_root_creation_tx_ids": [111],
+                "roots": [{"id": "r", "creation_t": 110,
+                           "creation_tx_id": 111,
+                           "creation_user_eid": 42}]}
+    return {**base, "plan_present": False}
+
+
+def _experiment(arm="pretransacted", answer="25", verified=True,
+                report="island-loop: 25", address=False,
+                observations=None, address_coverage=True,
+                plan_evidence=None, report_events=None):
+    from seon_inspect.planning import check_plan_experiment
+    if observations is None:
+        observations = ([] if arm == "no_plan" else [
+            {"address_active": address, "authored_open": True}])
+    if report_events is None:
+        report_events = [{"kind": "message_user", "content": report},
+                         {"kind": "run_closed"}]
+    return check_plan_experiment(
+        arm, {"answer": answer}, {"kind": "integer", "answer": "25"},
+        plan_closes=[] if arm == "no_plan" else [
+            {"step_id": "s1", "expect_verified": verified}],
+        report_events=report_events,
+        address_evidence={"coverage_complete": address_coverage,
+                          "observations": observations},
+        plan_evidence=(_plan_evidence(arm)
+                       if plan_evidence is None else plan_evidence),
+    )
+
+
+def test_plan_experiment_pretransacted_arm_passes_all_mechanical_oracles():
+    res = _experiment()
+    assert res["ok"] is True, res
+    assert res["database_outcome"]["ok"] is True
+    assert res["plan_integrity"]["verified_closes"] == 1
+    assert res["report_delivery"]["matching_before_close"] == 1
+    assert res["address_step_discipline"]["violations"] == 0
+
+
+def test_plan_experiment_model_authored_arm_requires_model_plan_source():
+    assert _experiment("model_authored")["ok"] is True
+    evidence = _plan_evidence("model_authored")
+    evidence["source"] = "model"  # self-asserted and deliberately ignored
+    evidence["roots"][0]["creation_user_eid"] = 7
+    res = _experiment("model_authored", plan_evidence=evidence)
+    assert res["ok"] is False
+    assert res["arm_contract"]["ok"] is False
+
+
+def test_plan_experiment_database_oracle_catches_plausible_wrong_report():
+    res = _experiment("no_plan", answer="26", report="island-loop: 26")
+    assert res["ok"] is False
+    assert res["database_outcome"]["ok"] is False
+    assert res["plan_integrity"]["applicable"] is False
+
+
+def test_plan_experiment_no_plan_control_rejects_hidden_plan():
+    evidence = _plan_evidence("no_plan")
+    evidence["roots"] = [{"id": "hidden", "creation_t": 110,
+                          "creation_tx_id": 111,
+                          "creation_user_eid": 42}]
+    res = _experiment("no_plan", plan_evidence=evidence)
+    assert res["ok"] is False
+    assert res["arm_contract"]["presence_consistent"] is False
+    assert res["arm_contract"]["ok"] is False
+
+
+def test_plan_experiment_no_plan_rejects_close_after_deleted_plan():
+    from seon_inspect.planning import check_plan_experiment
+    res = check_plan_experiment(
+        "no_plan", {"answer": "25"}, {"kind": "integer", "answer": "25"},
+        plan_closes=[{"step_id": "deleted", "expect_verified": True}],
+        report_events=[{"kind": "message_user", "content": "25"},
+                       {"kind": "run_closed"}],
+        address_evidence={"coverage_complete": False, "observations": []},
+        plan_evidence=_plan_evidence("no_plan"))
+    assert res["ok"] is False
+    assert res["plan_integrity"]["ok"] is False
+
+
+def test_plan_experiment_no_plan_rejects_created_then_retracted_root():
+    evidence = _plan_evidence("no_plan")
+    evidence.update({"run_historical_root_ids": ["retracted"],
+                     "run_root_creation_count": 1,
+                     "run_root_creation_tx_ids": [120]})
+    res = _experiment("no_plan", plan_evidence=evidence)
+    assert res["ok"] is False
+    assert res["arm_contract"]["plan_present"] is False
+    assert res["arm_contract"]["run_historical_root_ids"] == ["retracted"]
+    assert res["arm_contract"]["ok"] is False
+
+
+def test_plan_experiment_no_plan_consistent_never_had_plan_passes():
+    res = _experiment("no_plan")
+    assert res["ok"] is True, res
+    assert res["plan_integrity"]["closes"] == 0
+    assert res["arm_contract"]["run_root_creation_count"] == 0
+
+
+def test_plan_experiment_pretransacted_plan_must_predate_first_turn():
+    evidence = _plan_evidence("pretransacted")
+    evidence["roots"][0]["creation_t"] = evidence["first_turn_t"] + 1
+    res = _experiment(plan_evidence=evidence)
+    assert res["ok"] is False
+    assert res["arm_contract"]["ok"] is False
+
+
+@pytest.mark.parametrize("creation_t", [100, 500])
+def test_plan_experiment_model_plan_accepts_inclusive_run_boundaries(creation_t):
+    evidence = _plan_evidence("model_authored")
+    evidence["roots"][0]["creation_t"] = creation_t
+    res = _experiment("model_authored", plan_evidence=evidence)
+    assert res["ok"] is True, res
+
+
+def test_plan_experiment_rejects_root_created_after_observation_basis():
+    evidence = _plan_evidence("model_authored")
+    evidence["roots"][0]["creation_t"] = evidence["observed_at_t"] + 1
+    res = _experiment("model_authored", plan_evidence=evidence)
+    assert res["ok"] is False
+    assert res["arm_contract"]["roots_observed_by_basis"] is False
+
+
+def test_plan_experiment_requires_final_interval_creation_in_history_ids():
+    evidence = _plan_evidence("model_authored")
+    evidence["run_root_creation_count"] = 0
+    evidence["run_root_creation_tx_ids"] = []
+    res = _experiment("model_authored", plan_evidence=evidence)
+    assert res["ok"] is False
+    assert res["arm_contract"]["interval_creations_consistent"] is False
+
+
+def test_plan_experiment_missing_plan_evidence_fails():
+    res = _experiment(plan_evidence={"observed": False})
+    assert res["ok"] is False
+    assert res["arm_contract"]["evidence_sufficient"] is False
+
+
+def test_plan_experiment_fails_unverified_close_and_address_capture():
+    res = _experiment(verified=False, address=True)
+    assert res["ok"] is False
+    assert res["plan_integrity"]["ok"] is False
+    assert res["address_step_discipline"]["violations"] == 1
+
+
+def test_plan_experiment_plan_arm_requires_address_observation_coverage():
+    res = _experiment(observations=[])
+    assert res["ok"] is False
+    assert res["address_step_discipline"]["evidence_sufficient"] is False
+    incomplete = _experiment(address_coverage=False)
+    assert incomplete["ok"] is False
+    assert incomplete["address_step_discipline"]["coverage_complete"] is False
+
+
+def test_plan_experiment_no_plan_address_metric_requires_derived_absence():
+    good = _experiment("no_plan")
+    assert good["address_step_discipline"]["applicable"] is False
+    assert good["address_step_discipline"]["evidence_sufficient"] is True
+    missing = _experiment("no_plan", plan_evidence={"observed": False})
+    assert missing["address_step_discipline"]["ok"] is False
+
+
+def test_plan_experiment_requires_human_report_before_close():
+    from seon_inspect.planning import check_plan_experiment
+    res = check_plan_experiment(
+        "pretransacted", {"answer": "25"},
+        {"kind": "integer", "answer": "25"},
+        plan_closes=[{"step_id": "s1", "expect_verified": True}],
+        report_events=[{"kind": "run_closed"},
+                       {"kind": "message_user", "content": "25"}],
+        address_evidence={"coverage_complete": True,
+                          "observations": [{"address_active": False,
+                                            "authored_open": True}]},
+        plan_evidence=_plan_evidence("pretransacted"))
+    assert res["ok"] is False
+    assert res["report_delivery"]["ok"] is False
+
+
+def test_plan_experiment_report_without_run_closed_is_insufficient():
+    res = _experiment(report_events=[
+        {"kind": "message_user", "content": "island-loop: 25"}])
+    assert res["ok"] is False
+    assert res["report_delivery"]["evidence_sufficient"] is False
+    assert res["report_delivery"]["run_closed_observed"] is False

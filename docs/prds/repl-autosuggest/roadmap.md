@@ -16,10 +16,10 @@ Model work is paused behind a "garbage in, garbage out" correctness
 push. **[[root-cause-fixes-2026-07-13]] is the restart anchor** — read
 it first. Summary: our instruments lied (eval false-ok taints mined
 data; 27% of generated pairs fail at eval; the runtime refactor
-stabilized and must be adopted). 5-tier plan: adopt refactored runtime +
+stabilized and must be adopted). 5-tier plan: adopt refactored runtime and
 rebuild acme → fix eval boundary → clean-data pipeline (stage→render→
-eval→keep-clean) → runtime hygiene → measurement instruments (display v3
-+ fair scorer). **Next-session focus = DATA QUALITY** (owner): smarter
+eval→keep-clean) → runtime hygiene → measurement instruments (display v3 and
+fair scorer). **Next-session focus = DATA QUALITY** (owner): smarter
 models generate proper trajectories; investigate LLM judges for
 goal-achievement, calibrated against the benchmark oracles. The dated
 sections below are the prior arc's evidence trail.
@@ -108,8 +108,8 @@ frontier; register .100 regresses; defn ~0 (exclusion re-confirmed).
 ## KT3-redux — HALTED mid-matrix (2026-07-12, owner stop order)
 
 The fair ceiling test, owner-corrected (full 168-fn index in every arm,
-in-document exemplars for base models, scoring v2 = set-union bundle F1
-+ full decomposition/confusion/id lenses)
+in-document exemplars for base models, scoring v2 = set-union bundle F1 with
+full decomposition/confusion/id lenses)
 ([[research/kt3-redux-full-index-2026-07-12.md]], status: draft).
 **HALTED: the v2 display is defective** (cards spec-less — `:malli/schema`
 stripped by KT1 compaction; stale deleted-fn cards; glyph tax) — re-run
@@ -271,8 +271,8 @@ contract lane owns it); `transact!`/`register!`/`put!` stay 0/3 needle
 8. **DG finetune (second consumer, owner 2026-07-12)** — the SAME
    canonical JSONL feeds a DiffusionGemma finetune ((context, forms) ≡
    (conditioning prefix, denoise region)); per-model formatter in the
-   trainer, no second dataset pipeline. LoRA-on-MLX first (8-bit base
-   + adapters), RunPod CUDA artifacts as fallback; training loop lives
+   trainer, no second dataset pipeline. LoRA-on-MLX first (8-bit base with
+   adapters), RunPod CUDA artifacts as fallback; training loop lives
    in the diffusion-gemma repo (model infra, not seon core); own
    reachability smoke before any long run. Independent of needle's
    KT5 outcome — gated only on the data build passing curation.
@@ -290,3 +290,33 @@ contract lane owns it); `transact!`/`register!`/`put!` stay 0/3 needle
   capture dial gates prompt/reply/suggestion blobs; prod off, dev/acme
   on; `rendered-as-of` always-on. Lands with B3 (small turn.cljs +
   config change).
+
+## Inspect takeover checkpoint — 2026-07-14
+
+The stable and retired-gym lanes were reviewed against the canonical branch.
+All stable implementation gains selected by `INTEGRATE-BACK.md` were already
+present. The gym's remaining dirty predicate translations were not imported:
+the gym is deleted and Inspect AI is the single harness.
+
+The existing `long_term_planning` task and `planning_scorer` now encode the
+measured three-arm plan experiment (pretransacted, model-authored, no-plan)
+with database outcome, expect-verified close integrity, report-before-close,
+and evidence-covered address-step discipline checks. Plan provenance and
+bounded creation timing are derived from explicit plan-root/transaction
+evidence; model-authored roots must fall inside the inclusive run interval and
+pretransacted roots must precede it, with no root allowed after the observation
+basis;
+report-only runs and empty plan-arm observation sets fail. Focused offline
+proof is 56 passed. The no-plan control also requires Datahike-history evidence
+of zero plan roots/creations across the run interval and zero closes, so deleting
+a plan cannot masquerade as the control. The
+pretransacted/model-authored fixtures score 1.000 and the pilot's plausible but
+database-wrong no-plan fixture scores 0.000. Standard-vs-pod execution guidance,
+the verified local-35B HumanEval command, excluded stable scratch, and remaining
+live gates are in [[research/inspect-harness-integration-2026-07-14]].
+
+Model training remains paused. The next Inspect work is a live, equal-budget
+three-arm drive after current run/turn/database adapters derive the pure scorer
+inputs. The dirty stable fair-scoring implementation is evidence, not imported
+code: it depends on the paused `src-needle` audit lane and must be rebuilt in the
+canonical data-quality pipeline.
