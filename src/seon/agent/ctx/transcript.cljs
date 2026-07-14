@@ -463,6 +463,24 @@
 ;; evals, flattened, each carrying its FIXED stored time, sorted by it.
 ;; ------------------------------------------------------------
 
+(defn- message->event
+  "Convert one pulled message row into a transcript event, or nil."
+  [my-eid own-id m]
+  (let [from      (:seon.agent.message/from m)
+        outbound? (= my-eid (:db/id from))]
+    (when (or outbound? (inbound-msg? m my-eid))
+      {::at         (:seon.agent.message/at m)
+       ::kind       :message
+       ::id         (:seon.agent.message/id m)
+       ::outbound?  outbound?
+       ::content    (:seon.agent.message/content m)
+       ::from-label (ctx/message-label from own-id)
+       ::to-labels  (->> (:seon.agent.message/to m)
+                         (map #(ctx/message-label % own-id))
+                         distinct vec)
+       :seon.render/ai
+       'seon.agent.ctx.transcript/message->renderable})))
+
 (defn- message-events
   "ALL of the agent's WAKING-inbound + outbound messages as transcript
    events, each `{::at ::kind :message :seon.render/ai 'message->renderable
@@ -489,21 +507,18 @@
               [?m :seon.agent.message/at _]]
             :seon.db/args [my-eid]})
          (map first)
-         (keep
-           (fn [m]
-             (let [from      (:seon.agent.message/from m)
-                   outbound? (= my-eid (:db/id from))]
-               (when (or outbound? (inbound-msg? m my-eid))
-                 {::at        (:seon.agent.message/at m)
-                  ::kind      :message
-                  ::id        (:seon.agent.message/id m)
-                  ::outbound? outbound?
-                  ::content   (:seon.agent.message/content m)
-                  ::from-label (ctx/message-label from own-id)
-                  ::to-labels (->> (:seon.agent.message/to m)
-                                   (map #(ctx/message-label % own-id))
-                                   distinct vec)
-                  :seon.render/ai 'seon.agent.ctx.transcript/message->renderable})))))))
+         (keep #(message->event my-eid own-id %)))))
+
+(defn- eval->event
+  "Convert one eval row into a transcript event at its optional turn index."
+  [turn-idx e]
+  (cond->
+    {::at           (:seon.eval/at e)
+     ::kind         :eval
+     ::entity       (into {} e)
+     ::result-live? (seval/result-live? (:seon.eval/id e))
+     :seon.render/ai 'seon.agent.ctx.transcript/eval->renderable}
+    (some? turn-idx) (assoc ::turn-idx turn-idx)))
 
 (defn- eval-events
   "ALL of the agent's evals as transcript events across ALL its turns,
@@ -520,12 +535,7 @@
     (vec
       (for [[ti t] (map-indexed vector turns)
             e      (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
-        {::at           (:seon.eval/at e)
-         ::kind         :eval
-         ::entity       (into {} e)
-         ::result-live? (seval/result-live? (:seon.eval/id e))
-         ::turn-idx     ti
-         :seon.render/ai 'seon.agent.ctx.transcript/eval->renderable}))))
+        (eval->event ti e)))))
 
 (defn- agent-rec
   "The agent entity (lazy) for `id` against `db`."
@@ -814,6 +824,46 @@
           (into [preceding] recent)
           recent)))))
 
+(defn- turn-index-at
+  "Index of the latest turn that began no later than `at`, or nil."
+  [turn-ats at]
+  (when (instance? js/Date at)
+    (let [at-ms (.getTime ^js at)]
+      (reduce-kv
+        (fn [found idx turn-at]
+          (if (<= (.getTime ^js turn-at) at-ms)
+            idx
+            (reduced found)))
+        nil
+        (vec turn-ats)))))
+
+(defn- recent-html-source-events
+  "Bound message/eval reads before constructing the human transcript DOM.
+
+   Each fact owner contributes at most 200 newest append-only entities. The
+   retained-turn projection then removes older rows. This cap is deliberately
+   HTML-only; the AI transcript's policy remains unchanged."
+  [db own-id my-eid turn-ats]
+  (let [messages (if my-eid
+                   (msg/recent
+                     {:seon.db/db db
+                      :seon.agent/id own-id
+                      :seon.agent.message/recent-limit 200})
+                   [])
+        evals (seval/recent
+                {:seon.db/db db
+                 :seon.agent/id own-id
+                 :seon.eval/recent-limit 200})
+        kind-rank {:message 0 :eval 1}]
+    (->> (concat
+           (keep #(message->event my-eid own-id %) messages)
+           (map #(eval->event (turn-index-at turn-ats (:seon.eval/at %)) %)
+                evals))
+         (filter #(instance? js/Date (::at %)))
+         (sort-by (juxt #(.getTime ^js (::at %))
+                        #(kind-rank (::kind %) 9)))
+         vec)))
+
 (defn- coalesced-card-html
   "One fixed-size activity row for a coalesced error run.
 
@@ -850,7 +900,7 @@
         ;; the full technical log. Bound first, then coalesce the visible
         ;; window so a historical error burst cannot re-enter through its
         ;; member cards.
-        events   (->> (ordered-events db own-id my-eid)
+        events   (->> (recent-html-source-events db own-id my-eid turn-ats)
                       (recent-html-events turn-ats retained)
                       coalesce-events)
         render-message

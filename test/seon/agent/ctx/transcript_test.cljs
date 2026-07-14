@@ -9,6 +9,7 @@
   (:require
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing]]
+    [seon.agent.message :as message]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.transcript :as t]
     [seon.eval :as seval]
@@ -160,6 +161,41 @@
                 (html-ev :three 300 :message)]]
     (is (= [:two :three]
            (mapv ::event-id (t/recent-html-events [] 2 events))))))
+
+(deftest html-source-events-use-bounded-fact-owner-windows
+  (let [requests (atom [])
+        turn-ats [(at 100) (at 250)]
+        message-row
+        {:seon.agent.message/id "message-1"
+         :seon.agent.message/at (at 200)
+         :seon.agent.message/from {:db/id 1 :seon.user/id "user"}
+         :seon.agent.message/to [{:db/id 10 :seon.agent/id "agent"}]
+         :seon.agent.message/content "hello"
+         :seon.agent.message/hops 0}
+        eval-row
+        {:seon.eval/id "eval-1"
+         :seon.eval/at (at 300)
+         :seon.eval/source "(+ 1 1)"
+         :seon.eval/ok? true}
+        events
+        (with-redefs [message/recent
+                      (fn [request]
+                        (swap! requests conj request)
+                        [message-row])
+                      seval/recent
+                      (fn [request]
+                        (swap! requests conj request)
+                        [eval-row])]
+          ((deref #'t/recent-html-source-events)
+           ::db "agent" 10 turn-ats))]
+    (is (= [200 200]
+           (mapv #(or (:seon.agent.message/recent-limit %)
+                      (:seon.eval/recent-limit %))
+                 @requests))
+        "both fact owners are capped before transcript event materialization")
+    (is (= [:message :eval] (mapv ::t/kind events)))
+    (is (= 1 (::t/turn-idx (second events)))
+        "bounded evals retain the same turn-window coordinate")))
 
 (defn- hiccup-tags [hiccup]
   (->> (tree-seq coll? seq hiccup)
