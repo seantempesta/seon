@@ -107,33 +107,6 @@
   [ns-sym]
   (not (re-find #"^(clojure|cljs|goog)(\.|$)" (name ns-sym))))
 
-;; ============================================================
-;; Per-invocation mutable holders.
-;;
-;; The pod is single-threaded and canvas renders are synchronous (html-render
-;; returns before the next render begins), so a process-wide deadline +
-;; input volatile read by each fresh ctx's interrupt-fn / host accessor is
-;; safe — there is no overlapping invocation to race.
-;; ============================================================
-
-(def ^:private !deadline (volatile! 0))
-(def ^:private !input    (volatile! nil))
-
-(defn- current-input
-  "Host accessor exposed to the SCI ctx as `seon.render.sci/current-input` —
-   lets the eval'd canvas fn receive the live (non-serializable) input map by
-   reference without inlining it into the eval string."
-  []
-  @!input)
-
-(defn- deadline-interrupt-fn
-  "Zero-arg `:interrupt-fn`: throws the un-catchable SCI interrupt once the
-   wall clock passes the per-render deadline. Polls `js/Date.now` (proven to
-   read correctly inside a blocked SCI loop on Node — the spike)."
-  []
-  (when (> (js/Date.now) @!deadline)
-    (interrupt/interrupt!)))
-
 (def ^:private base-classes {'js js/globalThis :allow :all})
 
 ;; One-time process-level warmup: JIT the SCI interpreter's loop/recur + fn
@@ -141,8 +114,12 @@
 ;; than the cold ~100ms-slower path (spike TEST G). V8 JIT is process-level
 ;; (not per-ctx), so this warms every later fresh ctx.
 (defonce ^:private _warmup
-  (let [c (sci/init {:interrupt-fn deadline-interrupt-fn :classes base-classes})]
-    (vreset! !deadline (+ (js/Date.now) 60000))
+  (let [deadline (+ (js/Date.now) 60000)
+        c (sci/init {:interrupt-fn
+                     (fn []
+                       (when (> (js/Date.now) deadline)
+                         (interrupt/interrupt!)))
+                     :classes base-classes})]
     (try (sci/eval-string* c "(loop [i 0] (if (< i 64) (recur (inc i)) i)) ((fn [x] (inc x)) 1)")
          (catch :default e
            ;; a literal warmup loop failing means SCI itself is broken —
@@ -481,23 +458,28 @@
                                      (merge m (or (expose-ns db tns #{}) {})))
                                    {} refer-all)
                agent-m  (merge own refer-v refer-all-v)
-               nsmap    (cond-> (assoc req-ns 'seon.render.sci {'current-input current-input})
+               deadline (+ (js/Date.now) budget-ms)
+               input-fn (fn [] input)
+               interrupt-fn
+               (fn []
+                 (when (> (js/Date.now) deadline)
+                   (interrupt/interrupt!)))
+               nsmap    (cond-> (assoc req-ns 'seon.render.sci
+                                       {'current-input input-fn})
                           (seq agent-m) (assoc (symbol agent-ns) agent-m))
-               c        (sci/init {:interrupt-fn deadline-interrupt-fn
+               c        (sci/init {:interrupt-fn interrupt-fn
                                    :classes      base-classes
                                    :namespaces   nsmap
                                    :ns-aliases   aliases})
                call     (str "(in-ns '" agent-ns ")\n"
                              source
                              "\n(" (name sym) " (seon.render.sci/current-input))")]
-           (vreset! !input input)
-           (vreset! !deadline (+ (js/Date.now) budget-ms))
            (try
              ;; Deep-force the result INSIDE the deadline window. An
              ;; interpreted fn returning LAZY seqs in its hiccup (`(map …)`
              ;; is the classic) would otherwise realize its SCI thunks
-             ;; LATER — during html serialization, outside this try, against
-             ;; a stale `!deadline` — and the un-catchable interrupt would
+             ;; LATER — during html serialization, outside this try, after
+             ;; the invocation deadline — and the un-catchable interrupt would
              ;; escape straight into the feed/router (every push fails).
              ;; `postwalk identity` realizes every nested seq eagerly here,
              ;; so an over-budget lazy body becomes the honest
