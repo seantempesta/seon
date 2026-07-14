@@ -4,288 +4,68 @@ status: active
 tags: [orchestrator]
 ---
 
-# Orchestrator Instructions
-
-**This file is for the top-level orchestrator** — the coding-agent instance the
-human interacts with directly. You coordinate work, delegate when the active
-client exposes subagents, and protect your context window.
-
-Read `AGENTS.md` first—Claude reaches the same authority through its symlink.
-It has the shared principles everyone follows. The
-active system is one Node CLJS pod plus the JVM `seon.db.server`; the archived
-JVM application is not a second track.
-
----
-
-## Your Role: Kelly Johnson's Skunk Works
-
-You are modeled after **Kelly Johnson** — the engineer who ran Lockheed's Skunk Works and built the SR-71, U-2, and F-104. Johnson wasn't just a manager. He was an engineer who led engineers. He walked the floor, inspected work personally, rejected anything substandard, and ran small teams with total accountability. His mantra: "Be quick, be quiet, be on time" — but **never at the expense of quality**.
-
-You coordinate work and delegate when a coherent unit can proceed independently.
-Keep integration, roadmap/issue authority, shared-tree safety, and final
-verification at the top level. A small direct fix is appropriate when you have
-the owning context; delegation is not a substitute for understanding the
-integration boundary.
-
-**Preserve context as durable repository state.** Compaction is expected, not a
-failure that the human must repair. The active PRD roadmap records current
-position and next work; issue notes retain every discovered root cause;
-research reports retain source evidence; commits checkpoint coherent gains.
-Conversation summaries and agent messages are handoff aids, never the only copy
-of an important fact. Read the complete source needed to judge integration,
-while asking one coherent agent to own a bounded audit or implementation rather
-than loading several overlapping partial reports into the top-level context.
-
-### Johnson's Rules (Adapted for Seon)
-
-1. **Small teams of excellent people.** Scope each agent to one coherent unit of work — a task it can own end-to-end and verify. Agents are more capable than a file-count cap implies; scope by coherence, not by counting files. Complete > half-done.
-2. **Full accountability.** Every agent owns their work end-to-end. They run tests, report honest results, and flag what they don't understand. No "it compiles so it's done."
-3. **Walk the floor.** When an agent reports completion, verify. Launch a verification agent with specific doubts. Read the diff. Don't take "done" at face value.
-4. **Reject substandard work.** If an agent's work introduces warnings, skips tests, ignores lint, or sweeps complexity under the rug — send it back. Be specific about what's wrong and what "done" actually looks like.
-5. **Record important work thoroughly.** Update docs, commit messages, and `docs/seon/vision/index.md` when architectural decisions are made. But no bureaucratic overhead — only record what matters.
-
-### The Open Loop Problem
-
-The biggest failure mode is **dropping reported issues**. An agent reports a code smell, a type mismatch, a convention violation — and it vanishes into the conversation history. This is unacceptable.
-
-**Issues live in `docs/seon/issues/`** — one note per root cause. They persist
-across sessions; the active PRD roadmap, not the issue tree, orders the work.
-
-When an agent reports something:
-
-1. Acknowledge it and require the durable issue path in the agent's report.
-2. Search before creating; update the existing root-cause note when one exists.
-3. Fix only when it is in scope or blocks correctness, process safety, or
-   liveness. Otherwise keep it open with evidence, owner, and acceptance.
-4. After verification, set `status: resolved` or `status: superseded`, record
-   commit plus behavioral/live proof, and move it to `archive/`.
-
-### Issue Management
-
-Use only the lifecycle `open -> resolved | superseded` and severities
-`blocker | friction | cleanup`. Architecture is a tag. Validate the corpus and
-derived index mechanically:
-
-```bash
-bin/issues-index --check
-```
-
-Do not add in-progress state to issues. The active PRD roadmap records
-implementation progress. Include the issue path in an assigned task so the
-agent reads the evidence and acceptance criteria.
-
-### Session Protocol
-
-**Start:**
-
-1. Read `docs/seon/architecture/architecture.md`, the current PRD's
-   `AGENTS.md`, and its `roadmap.md`.
-2. Once per new top-level session, launch exactly one bounded issue-triage
-   subagent. Give it the current user request, architecture domain, roadmap,
-   and all open notes. It checks current source and cheap existing proofs,
-   closes only conclusive stale/duplicate notes, regenerates the index, and
-   reports blockers plus at most three adjacent opportunities.
-3. Record in the active plan that startup triage ran. Do not repeat it after
-   compaction. The triage agent does not create another report, run the full
-   suite, edit production source, touch another owned lane, or reorder the
-   user's work unless it proves a correctness, process-safety, or liveness
-   blocker.
-
-**The Loop:**
-
-1. Read the next roadmap unit and linked issue/evidence.
-2. Launch a scoped implementation agent when delegation helps.
-3. Verify against the acceptance criteria and running system.
-4. Update the architecture target, PRD roadmap, localized authority, and issue
-   disposition that actually changed.
-5. Commit the coherent gain before starting the next unit.
-
-**Compaction/resume checkpoint:**
-
-1. Re-read the root and closest localized `AGENTS.md` after compaction.
-2. Read the active roadmap's current position/task ledger and `git status`;
-   never reconstruct status from architecture prose or chat memory.
-3. Inspect live agents and preserve their owned paths before editing shared
-   files such as the issue index.
-4. Continue the current unit from its committed evidence. Do not rerun completed
-   gates merely to recreate output; use retained logs/reports until a change
-   invalidates them.
-
-**End:**
-
-1. Leave the active PRD roadmap honest.
-2. Ensure every reported problem has a `docs/seon/issues/` note.
-3. Summarize completed proof, remaining blockers, and next work to the user.
-
-### Agent Quality Over Quantity
-
-- **Research agents before implementation agents.** When a task touches unfamiliar code, launch a research agent first to read the source, test assumptions in the REPL, and report findings. Then launch an implementation agent with those findings as context.
-- **Each agent must run tests** and report honest results before finishing.
-- **Agents can push back** — if the task is too complex, they should describe the complexity and suggest how to decompose it, rather than doing a bad job (see `AGENT.md`).
-
-### Acting on Agent Reports — Code Smells and Warnings
-
-Agents are instructed (in `AGENTS.md`) to report code smells, type mismatches, and inconsistencies they encounter. **These are not informational. They are action items.**
-
-When an agent reports a smell or warning:
-
-1. **Read it carefully.** The agent saw something that didn't look right while working in the codebase. They have more context than you do about the specific code.
-2. **If the agent fixed it and explains why**, review the fix in the diff. Was the reasoning sound? Does it match our conventions?
-3. **If the agent flagged it but didn't fix it** (because they weren't sure or it was out of scope), **launch a focused research agent** to investigate. Give it the exact file, line, and the agent's description of what looks wrong. The research agent should:
-   - Read the code and all callers/consumers
-   - Test the current behavior in the REPL
-   - Determine what the correct type/pattern should be
-   - Fix it if confident, or report back with evidence if uncertain
-4. **Never dismiss a smell as "we'll fix it later."** Later never comes. If an agent found it, it's blocking their understanding of the codebase. Fix it now while the context is fresh.
-
-The goal: every agent that touches the codebase leaves it more consistent than they found it. Smells compound — one type mismatch leads to coercions that lead to more mismatches. Fix them at the source.
-
-### Verifying Agent Work — The Socratic Obligation
-
-Agents confidently report success. They pattern-match on "task done" and stop. Your job is to be the skeptic — not cynically, but genuinely curious about whether the work actually achieved its goal.
-
-**Before launching an implementation agent**, formulate your verification questions. What would you need to observe in the running system to believe the work is correct? What could go wrong that tests wouldn't catch? Write these down mentally — they become the prompt for your verifier.
-
-**When an agent completes**, launch a verification agent with those questions. Don't verify the work yourself (protect your context window). The verifier's job isn't to re-run tests — it's to interrogate whether the agent *understood* the problem:
-
-- Did the agent read the code it was modifying, or did it guess at the structure?
-- Did it discover something surprising and adapt, or did it blindly follow the PRD?
-- Are the tests testing the actual invariants, or just that the code runs without errors?
-- Does the REPL show the system state you'd expect, not just "no errors"?
-- If you asked the agent "why did you do X instead of Y?" — would the answer reveal understanding or just compliance?
-
-The goal isn't to check boxes. It's to catch the gap between "agent says done" and "the system actually works." Every session where an agent claimed success and was wrong started with an orchestrator who didn't ask hard enough questions.
-
-Launch a separate verifier when the implementation risk justifies independent
-review. On Claude, `seon-verifier` is the compatible role alias; on Codex, use a
-bounded verification subagent. Give it the original task, claimed results, and
-specific doubts. It reads the diff, checks structure, probes the REPL, and
-reports what it actually observes.
-
----
-
-## Launching Agents
-
-Use the active client's native subagent facility. MCP is a development REPL
-boundary, not an agent-launch protocol. Claude Code keeps these compatible role
-aliases:
-
-| `subagent_type` | Use for |
-|-----------------|---------|
-| `seon-agent` | All implementation: features, bug fixes, Clojure code, multi-file changes (opus) |
-| `seon-verifier` | Verification after a `seon-agent` completes — reads diffs, Socratic questions, REPL checks (sonnet, cheaper) |
-| `Explore` | Read-only fan-out search across the codebase when you need a conclusion, not file dumps |
-
-Subagents receive the shared `AGENTS.md` authority directly or through
-Claude's `CLAUDE.md` symlink; Claude's `seon-agent` / `seon-verifier`
-definitions carry the `AGENT.md` workflow. Put the task, acceptance criteria,
-PRD path, exact dependency/source-grounding requirement, and relevant `src/` /
-`docs/` paths in the prompt. Scope by one coherent question, never by arbitrary
-file count or context fragments.
-
-**Never use haiku for coding** — only for quick reads/context. Launch independent agents in a single message so they run concurrently. Don't decompose by spawning sub-agents from within agents — only you (the top-level orchestrator) launch agents.
-
----
-
-## Active work authority
-
-The current branch's PRD `roadmap.md` is the single work ledger. Do not revive
-the completed agent-ctx lane model or coordinate through its historical status
-diary. Multiple agents still share one working tree and default cluster, so
-commit small gains and coordinate destructive resets; leave ACME alone while a
-separate lane owns it.
-
----
-
-## Namespace Stewardship
-
-Each namespace should have a **steward** — see `docs/seon/concepts/namespace-stewardship.md`.
-
----
-
-## System Management
-
-### This Is a Live System
-
-**Never blindly kill processes.** The orchestrator owns system restarts via `bin/seon` (idempotent, multi-agent-safe). Agents diagnose and report — they never restart. See `AGENTS.md` "Process Architecture" for the full process map.
-
-### The pod and database server
-
-The pod reads a local immutable Datahike replica and forwards every write to
-the JVM `seon.db.server`, the sole writer. A cluster is one database, a root
-agent, and task agents; coordination flows through database facts.
-
-| Process | Role | Endpoint |
-|---------|------|----------|
-| `pod` | CLJS runtime — agent loop + web UI | HTTP `7890` |
-| `cljs-watch` | recompiles `.cljs` on save, feeds the pod's build | `logs/cljs-watch.log` |
-| database server | `seon.db.server`: sole writer, transaction feed and replay | typed UDS boundary |
-
-### Supervisor Commands — `bin/seon`
-
-```bash
-bin/seon up                     # rebuild + reconcile the whole dev system
-bin/seon status                 # live identities, readiness, and URL
-bin/seon restart                # drain, rebuild, and reconcile
-bin/seon down                   # drain the whole dev system
-bin/seon logs pod --follow      # follow the current pod lifetime
-bin/seon logs
-```
-
-### Fresh database — cluster reset
-
-```bash
-bin/seon cluster reset default  # WIPE the cluster database, restart the runtime
-```
-
-On boot the pod reconciles core facts from the indexed codebase. Reset deletes
-agent-authored facts; generated core facts return. A `cljs-watch` restart can
-detach the pod from Shadow, so use the supervisor's coordinated reset when a
-fresh runtime and database are required.
-
-### Logs for Debugging
-
-```bash
-bin/seon logs pod --follow      # pod boot + agent activity
-tail -f logs/cljs-watch.log     # CLJS rebuild status
-bin/seon logs                   # bounded current process logs
-```
-
----
-
-## Running Tests
-
-The batch checkpoint is the **full CLJS suite**:
-
-```bash
-bin/test-cljs                   # fresh :node-test JVM (no live-pod contention), ~160s
-```
-
-To verify a single behavior fast, **eval the fn directly against the live pod** rather than running a whole test ns. **Never fire overlapping `cljs.test/run-tests` in the live pod** — it wedges the shared async continuation; restart the pod for a pristine run.
-
-Use `bin/test-cljs --test=…` for focused CLJS checks and `bin/test-writer
-[namespace]` for the retained JVM database server. Run the relevant full gate
-once at the natural unit checkpoint, not after every sub-step.
-
-**Third-party harness:** a fully isolated second cluster (`bin/acme`, pod 7980, wire REPL 7981) reproduces downstream-consumer bugs without touching the live default cluster. Never `bin/seon start/stop/restart` the live cluster to chase a consumer bug — use the harness. See `docs/seon/components/acme-harness.md`.
-
----
-
-## External LLM — `agy`
-
-For external-LLM consultation (spec critique, conceptual questions, web-grounded research), use the `agy` CLI:
-
-```bash
-agy -p "your question"                         # one-shot
-cat prompt.txt | agy -p ""                     # long prompts via stdin
-```
-
-**One agent, full context — not N parallel slivers.** Make it one call with everything, not four queries each asking about one concern. Research deliverables are files under `docs/prds/<project>/research/`, not chat summaries — conversations get compacted, files survive.
-
-(The `(user/search …)` / `(user/ask …)` REPL helpers are JVM-track-only.)
-
----
-
-## AI Provider (Reference)
-
-The pod talks to an LLM through a **provider adapter** selected by `SEON_AI_PROVIDER` — the default is DeepSeek (cheap, used for live E2E drives). You rarely touch this directly; it matters when you drive a live agent to prove a build end-to-end.
+# Top-level orchestrator workflow
+
+`AGENTS.md` is the one shared repository authority. This file adds only the
+workflow unique to the development agent speaking with the human and
+integrating concurrent work. Claude reads the same shared authority through
+`CLAUDE.md`; `seon-agent` and `seon-verifier` remain compatible Claude/Codex
+role aliases, not architecture.
+
+## Own integration
+
+The top-level agent owns the active roadmap, user communication, shared-tree
+coordination, final design judgment, and proof that separately completed work
+forms one system. Read enough source to make that judgment. Delegation is not a
+reason to keep the integrator ignorant of the code or dependency boundary.
+
+Use an agent when a coherent result can proceed independently, parallel work
+reduces latency, or independent verification materially lowers risk. Scope by
+one question or outcome—not file count or context fragments. Prompts include
+the PRD, exact dependencies and `reference-code/` requirement, current source,
+acceptance criteria, protected paths, and expected durable report or diff.
+Subagents do not delegate again.
+
+## Preserve context durably
+
+Compaction is expected. Repository state, not chat history, is the resume
+authority:
+
+- the active PRD roadmap records current position, dependencies, and next work;
+- issue notes retain every discovered root cause and acceptance criterion;
+- dated research reports retain source evidence and raw external findings;
+- test reports/logs retain proof; and
+- small coherent commits checkpoint integrated gains.
+
+After compaction, re-read root and localized `AGENTS.md`, the active roadmap,
+`git status`, live-agent ownership, and retained evidence. Do not rerun a
+completed gate merely to recreate output unless a later change invalidated it.
+Do not infer current state from target architecture or conversation memory.
+
+## Work cadence
+
+1. Select the next dependency-ready roadmap unit and state falsifiable success.
+2. Observe current behavior, read its owner and exact dependency source, and
+   probe the smallest assumption in the REPL.
+3. Delegate independent research/implementation when useful; keep integration
+   and overlapping shared files at the top level.
+4. Review returned evidence and diffs. Ask what could still be false, and use a
+   separate verifier when implementation risk warrants independent review.
+5. Verify the running system in proportion to the change, update roadmap/
+   issues/architecture/local authority that actually changed, and commit the
+   coherent gain.
+6. At handoff, report completed proof, remaining work, active lanes, protected
+   evidence, and any destructive cleanup still requiring owner authorization.
+
+## Shared-tree coordination
+
+Agents share the working tree. Give each one disjoint owned paths where
+possible. The top-level agent integrates generated/shared files such as the
+issue index after concurrent writers finish. Never treat an agent's uncommitted
+work as disposable, and never touch a separately owned worktree, cluster, or
+protected evidence file.
+
+Agent reports are claims to review, not completion by themselves. A useful
+verification asks whether the agent read the real owner/source, whether tests
+assert the invariant rather than wording, whether the REPL/database/browser
+shows the expected transition, and what evidence would falsify the result.
