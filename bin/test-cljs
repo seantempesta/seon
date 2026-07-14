@@ -207,6 +207,19 @@ START=$(date +%s)
 COMPILE_ELAPSED=0
 COMPILE_STATUS="skipped (--no-build)"
 
+# Keep Shadow/compiler diagnostics visible, but leave launcher deprecation
+# chatter in the full log. These exact warnings originate before Shadow sees
+# the program and repeat unchanged on every JVM start.
+compact_compile_output() {
+  awk '
+    /^WARNING: A terminally deprecated method in sun\.misc\.Unsafe/ { next }
+    /^WARNING: sun\.misc\.Unsafe::arrayBaseOffset/ { next }
+    /^WARNING: Please consider reporting this to the maintainers/ { next }
+    /^Warning: environ value .*:java-home.* overwritten/ { next }
+    { print; system("") }
+  '
+}
+
 if [ "$BUILD" = "1" ]; then
   rm -f -- "$FINGERPRINT_FILE" "$FINGERPRINT_FILE.tmp"
   COMPILE_START=$(date +%s)
@@ -239,7 +252,14 @@ if [ "$BUILD" = "1" ]; then
     COMPILE_CMD+=(--config-merge "$CONFIG_MERGE")
   fi
   echo "== Compiling :test build (shadow-cljs, dev) =="
-  if ! "${COMPILE_CMD[@]}" 2>&1 | tee "$TMPOUT"; then
+  if [ "$VERBOSE" -eq 1 ]; then
+    "${COMPILE_CMD[@]}" 2>&1 | tee "$TMPOUT"
+    COMPILE_EXIT=${PIPESTATUS[0]}
+  else
+    "${COMPILE_CMD[@]}" 2>&1 | tee "$TMPOUT" | compact_compile_output
+    COMPILE_EXIT=${PIPESTATUS[0]}
+  fi
+  if [ "$COMPILE_EXIT" -ne 0 ]; then
     COMPILE_END=$(date +%s)
     COMPILE_ELAPSED=$((COMPILE_END - COMPILE_START))
     echo ""

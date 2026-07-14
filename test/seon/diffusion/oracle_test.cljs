@@ -134,14 +134,16 @@
                                      {::oracle/clamps clamps
                                       ::oracle/renoise-spans renoise-spans
                                       ::oracle/injections injections
-                                      ::oracle/legs legs}})]
+                                      ::oracle/legs legs}})
+                  ^js first-renoise (aget (.-renoise_spans w) 0)
+                  ^js first-injection (aget (.-injections w) 0)]
               (is (= "refine" (.-op w)))
               (is (= ["parse" "retrieve"] (vec (.-legs w))))
               (is (= (count clamps) (alength (.-clamps w))))
               (is (= (count renoise-spans) (alength (.-renoise_spans w))))
               (is (= (count injections) (alength (.-injections w))))
-              (is (= "eof" (.-error_kind ^js (aget (.-renoise_spans w) 0))))
-              (is (= "db/transact!" (.-replacement ^js (aget (.-injections w) 0))))))))
+              (is (= "eof" (.-error_kind first-renoise)))
+              (is (= "db/transact!" (.-replacement first-injection)))))))
       done)))
 
 ;; ---------------------------------------------------------------------------
