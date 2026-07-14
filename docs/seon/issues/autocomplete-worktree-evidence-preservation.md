@@ -83,6 +83,18 @@ read-only staging proof, and the smaller generated/blob residues still need a
 hash-backed duplicate or supported reproducibility decision. Worktree removal
 therefore remains blocked.
 
+The follow-up read-only audit
+[[docs/prds/runtime-reliability/research/legacy-acme-archive-readback-runbook-2026-07-14]]
+captured live database checkpoints through the owning writers without opening a
+second connection. Stable is at basis `536870984` with 202 schema attributes;
+display-v3 is at basis `536877667` with 269 schema attributes and 29 installed
+autocomplete/typeahead attributes. The report records canonical schema hashes,
+latest transaction entities, blob-reference/file counts, exact historical
+Datahike/Konserve locks, and available staging capacity. It also corrects the
+quiescence order: stop a pod first, capture its writer's final identity second,
+then stop that writer and copy the closed cluster. The current values remain
+live checkpoints until that maintenance sequence is executed.
+
 ## Owner
 
 The repl-autosuggest evidence/archive owner inventories the experiments; the

@@ -179,6 +179,21 @@ Those metadata files are part of the evidence and must travel with the JSONL.
 
 ## Content-addressed archive and read-back protocol
 
+The live identities, exact historical dependency locks, capacity analysis, and
+executable maintenance sequence are now recorded in
+[[legacy-acme-archive-readback-runbook-2026-07-14]]. Read-only capture found:
+
+- stable basis `536870984`, 202 schema attributes, schema SHA-256
+  `0d98d8b1f1246b36703b3edd5b450a1470a153573a16352ee42882c7521b3199`,
+  six blob projections, and 302 blob files; and
+- display-v3 basis `536877667`, 269 schema attributes, schema SHA-256
+  `aceac1c468682aa1c1428e2eb28a8b5ed7f1d8547c47d18d8eeeeb06cec18ec6`,
+  533 blob projections, 1,966 blob files, and 29 installed
+  autocomplete/typeahead attributes.
+
+These are live checkpoints, not final archive identities. The final values must
+be recaptured after the owning pod exits and before its writer exits.
+
 The archive owner must choose a durable `ARCHIVE_ROOT` outside every worktree.
 The following is the required protocol, not a command authorization for this
 inventory unit:
@@ -186,12 +201,14 @@ inventory unit:
 1. Re-run `git worktree list --porcelain`, Git status including ignored and
    untracked paths, `lsof` working-directory ownership, and listening-port
    ownership. Diff the results against this manifest.
-2. Coordinate a maintenance window for stable and display-v3. Record a final
-   read-only database identity through each owning legacy writer: logical
-   database name, basis transaction, schema identity, latest transaction, and
-   referenced blob count. Then stop only those four explicitly accepted PIDs
-   through their owning lane. Confirm the ports are closed and no process has
-   a file open under either cluster path.
+2. Coordinate a maintenance window for stable and display-v3. Stop one owning
+   pod and confirm its HTTP port is closed. With that lane's writer still live
+   and no remaining producer, record the final read-only database identity:
+   logical database name, basis transaction, schema identity, latest
+   transaction, and referenced blob count. Then stop that writer. Repeat for
+   the other lane. Confirm every endpoint is closed and no process has a file
+   open under either cluster path. Capturing identity before stopping the pod
+   is only a pre-quiesce checkpoint because the pod can still race a write.
 3. Copy each complete cluster directory and each small evidence set to a
    staging directory on the archive filesystem. Preserve relative paths,
    permissions, mtimes, producing checkout HEAD, Git status, dependency SHAs,
@@ -240,9 +257,12 @@ inventory unit:
 
 ## Remaining blockers
 
-- No archive root, package digest, restore proof, or owner acceptance exists.
+- No owner-approved durable archive root, package digest, restore proof, or
+  owner acceptance exists. The internal APFS volume has ample staging capacity
+  (about 1.0 TiB available), but same-volume staging is not a durable backup.
 - Stable and display-v3 remain live and mutable.
-- Basis/schema/latest-transaction identities are not yet captured.
+- Live basis/schema/latest-transaction checkpoints are captured, but final
+  post-pod-quiescence identities are not.
 - Plan-pilot lacks the required current read-only staging proof.
 - Pin has not been superseded by equivalent current Inspect evidence.
 - Fn-surface, toolkit-gaps, and their same-sized blob residues lack a real
