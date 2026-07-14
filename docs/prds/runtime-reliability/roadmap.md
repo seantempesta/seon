@@ -28,24 +28,55 @@ compensate for unclear functions.
 
 ## Current position
 
-**Current phase: integrated completion across the remaining local slices.**
+**Current phase: branch graduation and architecture reconciliation.**
 The permanent JVM database server, canonical CLJS runtime, Babashka operator,
 database protocol, shared Datastar feed, database-authoritative program/schema
 projection, and focused test doors are already active. Work from the original
 phases 3–5 landed out of sequence while bugs were being removed, so the old
 “phase 3 of 6” label no longer described reality. The execution ledger below is
-now the authoritative remaining order. Remote replication, cloud topology,
-browser replicas, offline mutation, mobile packaging, and the full paid Inspect
-AI battery remain explicit follow-on work rather than completion gates.
+retained as implementation evidence, but the architecture audit's branch-sized
+PRDs now own the remaining order; this branch must not remain the container for
+every local ambition. Remote replication, cloud topology, browser replicas,
+offline mutation, mobile packaging, and the full paid Inspect AI battery remain
+explicit follow-on work rather than completion gates.
+
+### Resume checkpoint — 2026-07-14
+
+Completed and committed on this branch:
+
+- one maintained `AGENTS.md` authority per directory, with `CLAUDE.md` symlinks;
+- one client-neutral `docs/seon/issues/` authority, generated/validated index,
+  parent-agent handoff rule, and bounded startup triage;
+- one automatic CLJ/CLJS/CLJC changed-test decision over the existing operator,
+  database-server, and pod runners, with token-bounded summaries and complete
+  retained evidence;
+- the reviewed autosuggest/plan/Inspect behavior, without its duplicate context
+  path; and
+- a green complete CLJS checkpoint of 1,301 tests/6,159 assertions plus focused
+  live hook proofs on all three Clojure file types.
+
+The issue authority currently contains 14 open and 86 archived notes. Startup
+triage found one process-safety blocker before broad agent/browser drives:
+`eval-memory-safety.md` still permits an individual database query or pull to
+materialize an unbounded value even though retained result-slot count is
+bounded.
+
+Before implementation resumes, reconcile the target architecture from
+[[research/architecture-target-drift-audit-2026-07-14]] in its recommended
+order, then carve the remaining work into the audit's focused PRDs. The already
+completed developer-feedback/operator work does not need a second branch. The
+first implementation unit after documentation reconciliation is the smallest
+owner for eval/query materialization bounds; broad live-agent drives wait until
+that blocker is falsified.
 
 ## Active execution ledger
 
-Exactly one slice is `IN PROGRESS`. A slice closes only after its code, focused
-tests, live proof, architecture update, roadmap update, and bounded commits all
-land. After closing one slice, mark the next one `IN PROGRESS` in this ledger
-before doing implementation work. Do not stop merely because a useful commit
-landed; stop only at branch graduation, a genuine authority/input blocker, or a
-new user direction.
+Exactly one slice is `IN PROGRESS`: Slice 0 closes this branch by reconciling
+the architecture and carving the remaining scopes into focused PRDs. Slice 4
+landed early and is complete. The other former slices are retained below as
+evidence but are explicitly carved out; do not mark another one in progress on
+this branch. Each successor PRD closes only after code, focused tests, live
+proof, architecture update, roadmap update, and bounded commits land.
 
 ### Live browser baseline — 2026-07-14
 
@@ -217,14 +248,13 @@ are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]],
 cross-platform continuation is
 [[research/unified-clj-cljs-cljc-test-feedback-2026-07-14]].
 
-Repository instructions are being collapsed onto one maintained authority per
-directory: `AGENTS.md`, with same-directory `CLAUDE.md -> AGENTS.md` links for
-Claude compatibility. The verified inventory, semantic drift, client loading
+Repository instructions now use one maintained authority per directory:
+`AGENTS.md`, with same-directory `CLAUDE.md -> AGENTS.md` links for Claude
+compatibility. The verified inventory, semantic drift, client loading
 differences, Codex capacity defect, platform risks, and atomic conversion gate
 are [[research/agents-claude-instruction-unification-2026-07-14]]. The reviewed
-autosuggest commits are already integrated above, so the conversion may
-reconcile that PRD against this branch; it must preserve the concurrently owned
-untracked autosuggest research file.
+autosuggest commits are integrated above; the concurrently owned untracked
+autosuggest research file remains preserved.
 
 The architecture target has now been re-audited as a separate authority from
 this implementation ledger. Exact per-file drift, evidence, target-only edits,
@@ -239,7 +269,7 @@ triage, and mechanical index checks are
 now implemented as one client-neutral `docs/seon/issues/` tree. The obsolete
 orchestrator-doc directory and manual current-work indexes are gone; dated
 audits moved into this PRD's research, the private dual-path registry was split
-and archived, and 19 open plus 81 archived notes pass `bin/issues-index
+and archived, and 14 open plus 86 archived notes pass `bin/issues-index
 --check`. Root and role instructions now require durable parent handoff and one
 bounded startup triage rather than a chat-only finding or second backlog.
 
@@ -295,7 +325,7 @@ Exit: one clean, reproducible default-cluster baseline and a source-grounded
 file/test inventory for every later slice. The operator gate, database boundary,
 critical eval/context gates, and live instrumentation census pass.
 
-### Slice 1 — database lifecycle and reconstruction — PENDING
+### Slice 1 — database lifecycle and reconstruction — CARVED OUT
 
 - Finish candidate installation of missing native Datahike attributes and make
   accepted program/schema publication fail closed: if post-commit runtime
@@ -318,7 +348,7 @@ Exit: the full fresh/converged/config-free/reopen/restart/crash/as-of/fork/
 restore/undo/batch transition matrix passes without arbitrary eval replay,
 parallel registries, or compatibility paths.
 
-### Slice 2 — lazy reactive units and database browser — PENDING
+### Slice 2 — lazy reactive units and database browser — CARVED OUT
 
 - Complete `seon.db.browser` projections for entities, outbound/reverse refs,
   transactions, provenance, and history using bounded Datahike index cursors.
@@ -350,7 +380,7 @@ read updates an already-open unit; unknown reads are conservative; equivalent
 tabs share work; eviction changes latency but never output; no page owns a
 second transition algorithm.
 
-### Slice 3 — root, sessions, canvas, focus, and layout — PENDING
+### Slice 3 — root, sessions, canvas, focus, and layout — CARVED OUT
 
 - Reduce root's oversized namespace context by fixing selection and ownership,
   not by adding prose caps or a second root-context mechanism. Keep one concise
@@ -389,7 +419,7 @@ lifecycle, recovery, and canvas changes update only the affected root units;
 every canvas control produces a fast, observable reactive result through one
 route/feed/database path.
 
-### Slice 4 — tests, operator, callers, and dead material — PENDING
+### Slice 4 — tests, operator, callers, and dead material — COMPLETED
 
 - Audit test value by behavior and edge coverage. Remove disabled suites,
   obsolete artifacts, duplicated fixtures, context-wording assertions, and
@@ -431,7 +461,7 @@ checkpoint still proves the selector itself. The final commands, fallback
 rules, and cadence are recorded concisely in root `AGENTS.md` (Claude reads the
 same authority through its symlink) plus the testing skill.
 
-### Slice 5 — profiling and bug-driven simplification — PENDING
+### Slice 5 — profiling and bug-driven simplification — CARVED OUT
 
 - Profile cold/warm boot, five agent births, writer/receipt/replay latency,
   event-loop delay, queries, dirty-unit renders, SCI setup/body, serialization,
@@ -445,7 +475,7 @@ same authority through its symlink) plus the testing skill.
 Exit: unchanged/open feeds remain idle, work scales with opened/changed units,
 memory returns to a stable band, and the system pays only for features in use.
 
-### Slice 6 — acceptance and graduation — PENDING
+### Slice 6 — acceptance and graduation — CARVED OUT
 
 - Run the complete transition/failure matrix from a destructive default reset.
 - Browser-drive `/`, ordinary first-run routing, root, agent, debug, canvas
