@@ -15,8 +15,7 @@
      (fix {::content \"...\"})"
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [seon.schema :as schema]
-            [taoensso.timbre :as log]))
+            [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -968,16 +967,14 @@
       (let [content (slurp f)]
         (validate (cond-> {::content content ::file-path file-path}
                     vault-root (assoc ::vault-root vault-root))))
-      (do
-        (log/warn "Markdown file not found:" file-path)
-        {::valid? false
-         ::violations [{::rule :file-not-found
-                        ::severity :error
-                        ::message (str "File not found: " file-path)}]
-         ::document {::content ""
-                     ::headings []
-                     ::links []
-                     ::sections []}}))))
+      {::valid? false
+       ::violations [{::rule :file-not-found
+                      ::severity :error
+                      ::message (str "File not found: " file-path)}]
+       ::document {::content ""
+                   ::headings []
+                   ::links []
+                   ::sections []}})))
 
 (defn format-violations
   "Format violations for human-readable hook feedback.

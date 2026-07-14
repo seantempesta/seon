@@ -1,7 +1,7 @@
 (ns seon.ui.header
   "The persistent global status bar — `system-header = f(db)` — rendered as a
-   fixed top bar on EVERY view (every `/agent/{id}`, root `/`, the `/agents`
-   agent list, `/data`, `/debug`). One pure function of the db value: same db
+   fixed top bar on EVERY view (`/agent/{id}`, root `/`, `/data`, and `/debug`).
+   One pure function of the db value: same db
    always renders the same hiccup, nothing stored, self-healing.
 
    It is the fleet's pulse at a glance, left→right:
