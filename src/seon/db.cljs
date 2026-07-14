@@ -399,6 +399,23 @@
 (schema/register! ::entity-read-request
   [:map {:closed true}
    [::ref :any]])
+(schema/register! ::index [:enum :eavt :aevt :avet])
+(schema/register! ::components [:vector :any])
+(schema/register! ::index-limit [:int {:min 1 :max 1000}])
+(schema/register! ::seek? :boolean)
+(schema/register! ::index-read-request
+  [:map {:closed true}
+   [::index ::index]
+   [::components ::components]
+   [::index-limit ::index-limit]
+   [::seek? ::seek?]])
+(schema/register! ::index-datoms-request
+  [:map
+   [::db ::db-val]
+   [::index ::index]
+   [::components {:optional true} ::components]
+   [::index-limit ::index-limit]
+   [::seek? {:optional true} ::seek?]])
 (schema/register! ::empty-read-request [:map {:closed true}])
 (schema/register! ::read-result :any)
 (schema/register! ::read-replayable? :boolean)
@@ -867,6 +884,36 @@
           (let [db     @(internal/resolve-conn *conn*)
                 inputs (rest args)]
             (execute-query db q inputs)))))))
+
+(defn- raw-index-datoms
+  "Read and normalize one bounded Datahike index window without observing it."
+  [db index components limit seek?]
+  (let [read-fn (if seek? d/seek-datoms d/datoms)]
+    (->> (apply read-fn db index components)
+         (take limit)
+         (mapv internal/datom->map))))
+
+(defn index-datoms
+  "Read at most `:seon.db/index-limit` datoms from one database index.
+
+   `:seon.db/components` are the ordinary Datahike index components.
+   `:seon.db/seek? true` starts at or after them; false selects their exact
+   prefix. The returned values are fully namespaced plain datom maps. Reads
+   participate in the same exact observation/replay mechanism as query and
+   pull, so a reactive surface rerenders only when its bounded window changes."
+  {:malli/schema [:=> [:cat ::index-datoms-request] ::datoms]}
+  [{::keys [db index components index-limit seek?]
+    :or {components [] seek? false}}]
+  (let [result (raw-index-datoms db index components index-limit seek?)]
+    (when-let [captures (internal/current-read-captures)]
+      (internal/record-read!
+        captures :seon.db.read.operation/index-datoms db
+        {::index index
+         ::components components
+         ::index-limit index-limit
+         ::seek? seek?}
+        result true))
+    result))
 
 (defn- installed-schema*
   "Read installed schema without crossing the public observation boundary."
@@ -1395,6 +1442,7 @@
 
 (def ^:private replayable-read-operations
   #{:seon.db.read.operation/query
+    :seon.db.read.operation/index-datoms
     :seon.db.read.operation/installed-schema
     :seon.db.read.operation/pull
     :seon.db.read.operation/entity
@@ -1402,18 +1450,23 @@
 
 (def ^:private replayable-read-request-validators
   ;; Malli's `validate` rebuilds a validator per call. Replay is a broadcast
-  ;; hot path, so compile each stable registered request shape once here.
-  {:seon.db.read.operation/query (m/validator ::query-read-request)
-   :seon.db.read.operation/installed-schema (m/validator ::empty-read-request)
-   :seon.db.read.operation/pull (m/validator ::pull-read-request)
-   :seon.db.read.operation/entity (m/validator ::entity-read-request)
-   :seon.db.read.operation/basis-t (m/validator ::empty-read-request)})
+  ;; hot path, so compile each stable registered request shape once, lazily.
+  ;; A hot-reloaded namespace declares schemas into the replacement collector
+  ;; before the coordinator activates that complete projection. Eager
+  ;; top-level compilation would resolve a newly introduced reference against
+  ;; the still-active prior projection and transiently fail the module load.
+  {:seon.db.read.operation/query (delay (m/validator ::query-read-request))
+   :seon.db.read.operation/index-datoms (delay (m/validator ::index-read-request))
+   :seon.db.read.operation/installed-schema (delay (m/validator ::empty-read-request))
+   :seon.db.read.operation/pull (delay (m/validator ::pull-read-request))
+   :seon.db.read.operation/entity (delay (m/validator ::entity-read-request))
+   :seon.db.read.operation/basis-t (delay (m/validator ::empty-read-request))})
 
 (defn- valid-replay-request?
   "True when a known operation carries its exact normalized request shape."
   [operation request]
   (when-let [validator (get replayable-read-request-validators operation)]
-    (validator request)))
+    ((force validator) request)))
 
 (defn- replay-read-result
   "Replay one known semantic read without recording another observation."
@@ -1421,6 +1474,13 @@
   (case operation
     :seon.db.read.operation/query
     (raw-query db (::query request) (or (::args request) []))
+
+    :seon.db.read.operation/index-datoms
+    (raw-index-datoms db
+                      (::index request)
+                      (::components request)
+                      (::index-limit request)
+                      (::seek? request))
 
     :seon.db.read.operation/installed-schema
     (installed-schema* db)

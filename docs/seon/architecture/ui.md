@@ -119,6 +119,15 @@ and technical data remain available in the separate debug/data surfaces. This
 changes only the HTML projection—the agent's AI transcript remains
 byte-faithful.
 
+**The database browser pays for opened data.** `/data` uses the same gzip
+Datastar feed and observed-read invalidation as every other live page. Its
+default navigator derives from installed schema only. Selecting an attribute
+opens a bounded AEVT window through `seon.db/index-datoms`; the URL carries the
+last visible datom coordinate, and the server reads only enough rows to render
+the page and prove whether a next page exists. It never scans every entity or
+transaction to manufacture counts. Domain attributes lead by default;
+framework attributes remain reachable explicitly.
+
 **Large context twins are summaries first.** Plan roots render as compact
 title/progress disclosures; only the focused root starts open, and its tree has
 a bounded internal scroll region. Long titles and goals line-clamp, every

@@ -20,10 +20,12 @@
      (cljs.test/run-tests 'seon.db-test)"
   (:require
     [cljs.test :as t :refer [deftest is testing async use-fixtures]]
+    [clojure.set :as set]
     [datahike.api :as d]
     [seon.agent]
     [seon.agent.message]
     [seon.db :as db]
+    [seon.db.browser :as db-browser]
     [seon.db.internal :as internal]
     [seon.instrument :as si]
     [seon.schema :as schema]))
@@ -125,6 +127,86 @@
               (fn [_]
                 (is (= (count (d/datoms @conn :eavt))
                        (db/datom-count @conn)))))))
+      done)))
+
+(deftest database-browser-navigates-installed-attributes-without-entity-counts
+  (async done
+    (with-conn
+      (fn [conn]
+        (-> (d/transact! conn
+              [{:db/ident :my.browser.test/value
+                :db/cardinality :db.cardinality/one
+                :db/valueType :db.type/string}])
+            (.then
+              (fn [_]
+                (let [domain (db-browser/attribute-groups @conn false)
+                      all (db-browser/attribute-groups @conn true)]
+                  (is (= [:my.browser.test/value]
+                         (get domain :my.browser.test)))
+                  (is (nil? (get domain :seon.db-test)))
+                  (is (contains? all :seon.db-test)))))))
+      done)))
+
+(deftest database-browser-pages-aevt-with-a-stable-cursor
+  (async done
+    (with-conn
+      (fn [conn]
+        (-> (d/transact! conn
+              [{:db/ident :my.browser.test/value
+                :db/cardinality :db.cardinality/one
+                :db/valueType :db.type/string}])
+            (.then
+              (fn [_]
+                (d/transact! conn
+                  (mapv (fn [n] {:my.browser.test/value (str "value-" n)})
+                        (range 5)))))
+            (.then
+              (fn [_]
+                (let [request {:seon.db/db @conn
+                               ::db-browser/attribute :my.browser.test/value
+                               ::db-browser/limit 2}
+                      first-page (db-browser/attribute-page request)
+                      second-page
+                      (db-browser/attribute-page
+                        (assoc request ::db-browser/cursor
+                               (::db-browser/next-cursor first-page)))
+                      first-entities (mapv ::db-browser/entity
+                                           (::db-browser/rows first-page))
+                      second-entities (mapv ::db-browser/entity
+                                            (::db-browser/rows second-page))]
+                  (is (= 2 (count first-entities)))
+                  (is (= 2 (count second-entities)))
+                  (is (true? (::db-browser/more? first-page)))
+                  (is (empty? (set/intersection (set first-entities)
+                                                (set second-entities)))))))))
+      done)))
+
+(deftest database-browser-window-participates-in-reactive-read-replay
+  (async done
+    (with-conn
+      (fn [conn]
+        (-> (d/transact! conn
+              [{:db/ident :my.browser.test/value
+                :db/cardinality :db.cardinality/one
+                :db/valueType :db.type/string}
+               {:my.browser.test/value "first"}])
+            (.then
+              (fn [_]
+                (let [capture
+                      (db/capture-reads
+                        {:seon.db/db @conn
+                         :seon.db/thunk
+                         #(db-browser/attribute-page
+                            {:seon.db/db @conn
+                             ::db-browser/attribute :my.browser.test/value
+                             ::db-browser/limit 10})})]
+                  (-> (d/transact! conn [{:my.browser.test/value "second"}])
+                      (.then
+                        (fn [_]
+                          (is (some #(db/read-observation-changed?
+                                       {:seon.db/db @conn
+                                        :seon.db/read-observation %})
+                                    (:seon.db/read-observations capture)))))))))))
       done)))
 
 (deftest attached?-follows-the-datahike-connection-lifecycle

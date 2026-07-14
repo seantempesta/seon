@@ -7,13 +7,12 @@
                                   plus the per-block token + cache-line
                                   audit bar along the bottom.
      GET /agent/<id>/debug/feed — shared gzip Datastar feed for the debug view.
-     GET /data                  — the live datom browser: the kinds the
-                                  cluster stored with row counts, drill-down
-                                  to a kind's attrs + paginated rows.
+     GET /data                  — the live database browser: installed
+                                  attributes plus bounded AEVT pages.
      GET /data/feed             — shared gzip Datastar feed for the data view.
 
    These are the operator/developer introspection surfaces (raw prompt,
-   cache-line audit, stored datoms) — distinct from the agent-view renderers
+   cache-line audit, database facts) — distinct from the agent-view renderers
    (`seon.web.datastar`), which own `/`, `/agents`, `/agent/<id>`. The routes
    are wired into `seon.web.router`'s static supplement as plain reitit routes.
 
@@ -24,13 +23,15 @@
    Debug is dormant until its route is opened. It uses the same view-unit
    catalog, gzip feed registry, tx listener, backpressure, and morph framing as
    every normal page. Raw AI bodies and HTML twins are inactive stubs until the
-   operator expands them."
+  operator expands them."
   (:require
+    [cljs.reader :as reader]
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.usage :as ctx-usage]
     [seon.db :as db]
+    [seon.db.browser :as db-browser]
     [seon.derive :as derive]
     [seon.agent.debug :as agent-debug]
     [seon.log :as log]
@@ -52,8 +53,8 @@
 
 (defn- agent-exists?
   "True iff `agent-id` resolves to a live `:seon.agent/id` entity in the
-   cluster store. Guards the page + SSE routes: stale tabs/bookmarks
-   carry ids from prior stores (pre-flip pods, reset clusters) — without
+   cluster database. Guards the page + SSE routes: stale tabs/bookmarks
+   carry ids from prior databases (pre-flip pods, reset clusters) — without
    this check the page 500s on `snapshot`'s lookup-ref pull and the SSE
    registers a connection that throws on every subsequent tx."
   [agent-id]
@@ -659,13 +660,10 @@
                           "if(f){e.preventDefault();f.requestSubmit();}}});"))]]]))))
 
 ;; ============================================================
-;; /data — the live data browser. Level 1: the kinds the cluster stored,
-;; with row counts. Level 2 (?kind=…): that kind's attrs + a paginated
-;; rows table (pull [*], keys sorted, rows by :db/id). DEFAULT shows
-;; post-bootstrap data only — provenance via `seon.db/bootstrap-row-ids`.
-;; `?system=1` shows ALL rows. View state is the query string — a signal,
-;; never stored. Live: every commit re-morphs `#data-browser` (`::data`
-;; pseudo-agent key).
+;; /data — the live database browser. The default navigator reads only the
+;; installed schema. Opening an attribute reads one bounded AEVT page; the URL
+;; carries its cursor. No render scans the complete entity set or history.
+;; View state is the query string, never a database projection.
 ;; ============================================================
 
 (def ^:private data-page-size 50)
@@ -682,64 +680,45 @@
   "The /data browser's view params from the request URL."
   [^js req]
   (let [ns-kw (some-> (query-param req "ns") not-empty keyword)
-        page (let [p (js/parseInt (or (query-param req "page") "0") 10)]
-               (if (js/Number.isNaN p) 0 (max 0 p)))]
+        attr (some-> (query-param req "attr") not-empty keyword)
+        cursor
+        (try
+          (let [value (some-> (query-param req "cursor")
+                              not-empty
+                              reader/read-string)]
+            (when (and (vector? value)
+                       (= 3 (count value))
+                       (int? (nth value 0))
+                       (int? (nth value 2)))
+              value))
+          (catch :default _ nil))]
     {::data-ns      ns-kw
-     ::data-page    page
+     ::data-attr    attr
+     ::data-cursor  cursor
      ::data-system? (= "1" (query-param req "system"))}))
 
 (defn- data-qs
   "Query string (\"\" or \"?…\") for a /data view-params map."
-  [{::keys [data-ns data-page data-system?]}]
+  [{::keys [data-ns data-attr data-cursor data-system?]}]
   (let [qs (cond-> []
              data-ns          (conj (str "ns=" (js/encodeURIComponent
                                                  (subs (str data-ns) 1))))
-             (pos? data-page) (conj (str "page=" data-page))
+             data-attr        (conj (str "attr=" (js/encodeURIComponent
+                                                   (subs (str data-attr) 1))))
+             data-cursor      (conj (str "cursor=" (js/encodeURIComponent
+                                                     (pr-str data-cursor))))
              data-system?     (conj "system=1"))]
     (if (seq qs) (str "?" (str/join "&" qs)) "")))
 
 (defn- data-url [params] (str "/data" (data-qs params)))
 
-(defn- data-attr?
-  "Counted attrs: namespaced, not datahike's own (`db`/`db.*`)."
-  [a]
-  (let [n (namespace a)]
-    (boolean (and n (not= n "db") (not (str/starts-with? n "db."))))))
-
-(defn- data-scan
-  "One pass powering the whole /data page, grouping live attrs BY THEIR
-   NAMESPACE (entities have no kind):
-   `{::ns-groups {ns → #{eids}} ::attr-counts {ns → {attr → n}}}`.
-   Rows are post-bootstrap data rows by default (bootstrap rows and tx
-   provenance entities excluded — `seon.db/bootstrap-row-ids` is the
-   shared derivation); `system?` includes every row."
-  [db system?]
-  (let [bootstrap (if system? #{} (db/bootstrap-row-ids db))
-        tx-ids    (if system?
-                    #{}
-                    (into #{} (map first)
-                          (db/query {:seon.db/db db
-                                     :seon.db/query
-                                     '[:find ?tx :where [_ _ _ ?tx]]})))
-        pairs     (db/query {:seon.db/db db
-                             :seon.db/query '[:find ?e ?a :where [?e ?a _]]})]
-    (reduce (fn [acc [e a]]
-              (if (or (not (data-attr? a))
-                      (contains? bootstrap e)
-                      (contains? tx-ids e))
-                acc
-                (let [ns-kw (keyword (namespace a))]
-                  (-> acc
-                      (update-in [::ns-groups ns-kw] (fnil conj #{}) e)
-                      (update-in [::attr-counts ns-kw a] (fnil inc 0))))))
-            {::ns-groups {} ::attr-counts {}}
-            pairs)))
-
 (defn- data-toggle-link
   "The system-data toggle — same view, `system` query param flipped
-   (page reset: the row sets differ)."
+   (open attribute and cursor reset because the navigator differs)."
   [{::keys [data-system?] :as params}]
-  [:a {:href (data-url (assoc params ::data-page 0
+  [:a {:href (data-url (assoc params ::data-ns nil
+                              ::data-attr nil
+                              ::data-cursor nil
                               ::data-system? (not data-system?)))
        :class (str "text-xs font-mono "
                    (if data-system?
@@ -750,111 +729,116 @@
      "○ show system data")])
 
 (defn- data-ns-index
-  "Level 1 — every stored attribute NAMESPACE with its row count,
-   namespace-name order."
+  "Every installed attribute namespace and its attribute count."
   [ns-groups params]
   (if (empty? ns-groups)
     [:div {:class "text-text-500 italic text-xs font-mono p-2"}
-     "no data rows yet — agents store rows here as they work"]
+     "no domain attributes installed yet — show system data or let an agent define one"]
     (into [:div {:class "flex flex-col"}]
-          (map (fn [[ns-kw eids]]
+          (map (fn [[ns-kw attributes]]
                  [:a {:href (data-url (assoc params ::data-ns ns-kw
-                                             ::data-page 0))
+                                             ::data-attr nil
+                                             ::data-cursor nil))
                       :class (str "flex items-baseline gap-2 px-2 py-1 "
                                   "border-b border-base-800/60 "
                                   "hover:bg-base-900 text-xs font-mono")}
                   [:span {:class "text-amber-400"} (str "● " ns-kw)]
                   [:span {:class "ml-auto text-text-400 tabular-nums"}
-                   (str (count eids) (if (= 1 (count eids)) " row" " rows"))]]))
+                   (str (count attributes)
+                        (if (= 1 (count attributes)) " attribute" " attributes"))]]))
           (sort-by (comp str key) ns-groups))))
 
 (defn- data-row-table
-  "The page's rows as one table: columns = :db/id + the union of the
-   page rows' attrs, keys sorted; cells pr-str'd, display-clipped (the
-   stored values are complete)."
-  [db eids]
-  (let [rows (mapv #(db/pull db '[*] %) eids)
-        cols (into [:db/id]
-                   (->> rows
-                        (mapcat keys)
-                        (remove #(= :db/id %))
-                        distinct
-                        (sort-by str)))]
-    [:div {:class "overflow-x-auto"}
-     [:table {:class "text-xs font-mono w-full"}
-      [:thead
-       (into [:tr {:class "text-left text-text-400 border-b border-base-700"}]
-             (map (fn [c] [:th {:class "pr-3 py-0.5 whitespace-nowrap font-normal"}
-                           (pr-str c)]))
-             cols)]
-      (into [:tbody]
-            (map (fn [row]
-                   (into [:tr {:class "border-b border-base-800/60 align-top"}]
-                         (map (fn [c]
-                                [:td {:class "pr-3 py-0.5 text-text-100 break-all"}
-                                 (if (contains? row c)
-                                   (tokens/bounded-pr-str (get row c) 30)
-                                   "")]))
-                         cols)))
-            rows)]]))
+  "One bounded AEVT page. Values are clipped for display, never at read time."
+  [rows]
+  [:div {:class "overflow-x-auto"}
+   [:table {:class "text-xs font-mono w-full"}
+    [:thead
+     [:tr {:class "text-left text-text-400 border-b border-base-700"}
+      [:th {:class "pr-3 py-0.5 font-normal"} "entity"]
+      [:th {:class "pr-3 py-0.5 font-normal"} "value"]
+      [:th {:class "pr-3 py-0.5 font-normal"} "transaction"]]]
+    (into [:tbody]
+          (map (fn [{::db-browser/keys [entity value transaction]}]
+                 [:tr {:class "border-b border-base-800/60 align-top"}
+                  [:td {:class "pr-3 py-0.5 text-amber-400 tabular-nums"}
+                   (str entity)]
+                  [:td {:class "pr-3 py-0.5 text-text-100 break-all"}
+                   (tokens/bounded-pr-str value 30)]
+                  [:td {:class "pr-3 py-0.5 text-text-400 tabular-nums"}
+                   (str transaction)]]))
+          rows)]])
 
-(defn- data-ns-detail
-  "Level 2 — one attribute namespace: its attrs with counts + the
-   paginated rows table. Rows ordered by :db/id ascending (insertion
-   order, deterministic for a given db value); explicit prev/next."
-  [db ns-kw eids attr-counts params]
-  (let [sorted    (vec (sort eids))
-        total     (count sorted)
-        last-page (max 0 (quot (max 0 (dec total)) data-page-size))
-        page      (min (::data-page params) last-page)
-        start     (* page data-page-size)
-        page-eids (subvec sorted (min start total)
-                          (min (+ start data-page-size) total))]
+(defn- data-attribute-detail
+  [db attr params]
+  (let [{::db-browser/keys [rows more? next-cursor]}
+        (db-browser/attribute-page
+          (cond-> {:seon.db/db db
+                   ::db-browser/attribute attr
+                   ::db-browser/limit data-page-size}
+            (::data-cursor params)
+            (assoc ::db-browser/cursor (::data-cursor params))))]
     [:div {:class "flex flex-col gap-2"}
      [:div {:class "flex items-baseline gap-3 text-xs font-mono"}
-      [:a {:href (data-url (assoc params ::data-ns nil ::data-page 0))
+      [:span {:class "text-amber-400"} (str attr)]
+      [:span {:class "text-text-500"}
+       (tokens/bounded-pr-str (db-browser/attribute-schema db attr) 60)]]
+     (if (seq rows)
+       (data-row-table rows)
+       [:div {:class "text-text-500 italic text-xs font-mono"}
+        "this installed attribute currently has no datoms"])
+     [:div {:class "flex items-center gap-3 text-xs font-mono"}
+      (when (::data-cursor params)
+        [:a {:href (data-url (assoc params ::data-cursor nil))
+             :class "text-amber-500 hover:text-amber-300"}
+         "← first page"])
+      (when more?
+        [:a {:href (data-url (assoc params ::data-cursor next-cursor))
+             :class "text-amber-500 hover:text-amber-300"}
+         "next page →"])]]))
+
+(defn- data-ns-detail
+  "One namespace's installed attributes and an optional bounded attr page."
+  [db ns-kw attributes params]
+  (let [selected (::data-attr params)
+        selected (when (some #{selected} attributes) selected)]
+    [:div {:class "flex flex-col gap-2"}
+     [:div {:class "flex items-baseline gap-3 text-xs font-mono"}
+      [:a {:href (data-url (assoc params ::data-ns nil
+                                  ::data-attr nil
+                                  ::data-cursor nil))
            :class "text-amber-500 hover:text-amber-300"} "← all namespaces"]
       [:span {:class "text-amber-400"} (str "● " ns-kw)]
       [:span {:class "text-text-400"}
-       (str total (if (= 1 total) " row" " rows"))]]
-     (when (seq attr-counts)
-       (into [:div {:class "flex flex-wrap gap-x-4 gap-y-0.5 text-xs font-mono text-text-400"}]
-             (map (fn [[a n]]
-                    [:span (pr-str a) " "
-                     [:span {:class "text-text-200 tabular-nums"} (str n)]]))
-             (sort-by (comp str key) attr-counts)))
-     (if (zero? total)
-       [:div {:class "text-text-500 italic text-xs font-mono"}
-        (str "no rows under " ns-kw " in this view — retracted, or stored "
-             "by the bootstrap (toggle system data)")]
-       [:div {:class "flex flex-col gap-2"}
-        (data-row-table db page-eids)
-        [:div {:class "flex items-center gap-3 text-xs font-mono text-text-400"}
-         (if (pos? page)
-           [:a {:href (data-url (assoc params ::data-page (dec page)))
-                :class "text-amber-500 hover:text-amber-300"} "‹ prev"]
-           [:span {:class "text-text-600"} "‹ prev"])
-         [:span {:class "tabular-nums"}
-          (str "rows " (inc start) "–" (+ start (count page-eids))
-               " of " total)]
-         (if (< page last-page)
-           [:a {:href (data-url (assoc params ::data-page (inc page)))
-                :class "text-amber-500 hover:text-amber-300"} "next ›"]
-           [:span {:class "text-text-600"} "next ›"])]])]))
+       (str (count attributes)
+            (if (= 1 (count attributes)) " attribute" " attributes"))]]
+     (into [:div {:class "flex flex-wrap gap-1 text-xs font-mono"}]
+           (map (fn [attribute]
+                  [:a {:href (data-url (assoc params
+                                              ::data-attr attribute
+                                              ::data-cursor nil))
+                       :class (str "border rounded px-1.5 py-0.5 "
+                                   (if (= attribute selected)
+                                     "border-amber-700 text-amber-300"
+                                     "border-base-800 text-text-400 hover:text-text-200"))}
+                   (str attribute)]))
+           attributes)
+     (when selected
+       (data-attribute-detail db selected params))]))
 
 (defn- data-browser-fragment
   "The whole /data surface — ONE morph target (`#data-browser`),
    derived 100% from the DB at render time."
   [db {::keys [data-ns data-system?] :as params}]
-  (let [{::keys [ns-groups attr-counts]} (data-scan db data-system?)]
+  (let [ns-groups (db-browser/attribute-groups db data-system?)]
     [:div {:id "data-browser" :class "flex flex-col gap-3"}
      [:div {:class "flex items-baseline gap-4 flex-wrap"}
       [:h1 {:class "text-sm font-mono font-semibold text-text-100"}
        "data"]
       [:span {:class "text-xs font-mono text-text-500"}
        (if data-system?
-         "every row in the db — the whole system is data"
-         "what this cluster stored after bootstrap")]
+         "all installed attributes"
+         "domain attributes — bounded index reads")]
       [:div {:class "ml-auto flex items-baseline gap-4"}
        (data-toggle-link params)
        [:a {:href "/"
@@ -862,8 +846,7 @@
         "← all agents"]]]
      (if data-ns
        (data-ns-detail db data-ns
-                       (get ns-groups data-ns #{})
-                       (get attr-counts data-ns {})
+                       (get ns-groups data-ns [])
                        params)
        (data-ns-index ns-groups params))]))
 
@@ -909,8 +892,8 @@
 
 (defn- agent-not-found-page
   "Small full page for `/agent/<id>/debug` when `<id>` has no entity in
-   the cluster store — stale tabs/bookmarks land here after a pod restart
-   onto a different store or a `bin/seon cluster reset`."
+   the cluster database — stale tabs/bookmarks land here after a pod restart
+   onto a different database or a `bin/seon cluster reset`."
   [agent-id]
   (let [b (brand/info)]
     (str
@@ -925,9 +908,9 @@
          [:body {:class "h-screen bg-base-950 text-text-50 font-mono antialiased flex items-center justify-center"}
           [:div {:class "text-center"}
            [:div {:class "text-amber-400 text-sm mb-2"}
-            (str "agent " agent-id " is not in this cluster store")]
+            (str "agent " agent-id " is not in this cluster database")]
            [:div {:class "text-text-500 text-xs mb-4"}
-            "it belonged to a previous store — this tab is stale"]
+            "it belonged to a previous database — this tab is stale"]
            [:a {:href "/"
                 :class "text-amber-500 hover:text-amber-300 text-xs underline"}
             "← all live agents"]]]]))))
@@ -973,7 +956,8 @@
   [params view-id]
   {:seon.web.feed/key [:seon.web.feed/data
                        (some-> (::data-ns params) str)
-                       (::data-page params)
+                       (some-> (::data-attr params) str)
+                       (some-> (::data-cursor params) pr-str)
                        (::data-system? params)]
    :seon.web.feed/live? true
    ::datastar/view-id view-id

@@ -541,7 +541,7 @@ is evaluated behaviorally, not by asserting prose.
 | Dependencies | The writer and writer-test closures are honest and narrow. Heavy paused-app dependencies still live in the base graph used by old JVM/tools, and CLJS/tool ownership is not yet fully separated. |
 | Writer protocol | The semantic protocol, JVM writer/server, CLJS replica, and UDS transports are separated and the duplicate operations/helpers are deleted. A typed supervisor administration surface and cold process proof remain. |
 | Database vocabulary | The protocol/backend/replica path is canonical, the managed leaf is `/db`, and the generic `store-inventory` API/context/tooling family is deleted. Runtime and developer skills are converged; downstream ACME still needs the proven vocabulary cut. |
-| Database browser | The root inventory panel, header inventory scan, generic context block, `db/store-inventory`, and `my.kb/inventory` are deleted. `/data` uses the canonical shared gzip feed and cheap shell; index-backed bounded detail projections remain. |
+| Database browser | The obsolete inventory surfaces are deleted. `/data` uses the canonical shared gzip feed, cheap shell, schema navigator, and bounded AEVT cursor pages. Entity/ref/transaction/history units remain. |
 | Developer hooks | The direct Babashka hook is repository-contained before config/artifact access, runtime-independent, locally deterministic, and log-bounded under a cross-process lock. Automatic model review is deleted. The operator gate includes its Markdown/docstring checks. |
 | Operator | The Babashka graph and thin launcher are built and focused-tested; active caller migration plus default/ACME/Inspect live proof remain. |
 | Tests | Public pod/database/operator doors delegate to one runner each; focused pod builds use compile-time namespace selection, one bundle lock, and exact freshness fingerprints. Disabled/paused-application tests and remaining intentional expected-failure noise still need removal. |
@@ -790,9 +790,12 @@ agents idle and one exact notice visible to root.
    feed lifecycle. **Feed cut complete:** `/data/sse`, `!data-connections`, its
    listener flag, broadcast loop, and the generic `/sse` registry are deleted;
    the route returns a cheap shell and `/data/feed` owns one normalized view
-   descriptor. **Remaining:** replace the full `[?e ?a]` scan with the bounded
-   projections in step 5, then let `/view/unit` activate only visible/expanded
-   database details. URL params remain the shareable navigation state.
+   descriptor. **Bounded navigator complete:** the full `[?e ?a]` plus
+   transaction-history scans are deleted. The default reads installed schema;
+   selecting an attribute reads a cursor-bounded AEVT page through the shared
+   observed-read boundary. **Remaining:** let `/view/unit` activate entity,
+   transaction, reverse-ref, and history details only while opened. URL params
+   remain the shareable navigation state.
 5. Add fully specified, read-only `seon.db.browser` projections backed by
    Datahike indexes and bounded pages: installed attributes/schema, attribute
    values and carrier entities, entity facts/outbound and reverse refs,
@@ -800,7 +803,10 @@ agents idle and one exact notice visible to root.
    sections. List user/domain/KB data first and keep framework/system groups
    collapsed, while making every installed attribute reachable. Counts/samples
    that cannot be obtained cheaply are lazy units with explicit budgets, not
-   work performed on every transaction.
+   work performed on every transaction. **Partial:** installed attribute
+   grouping, schema detail, AEVT datom rows, opaque cursor continuation, and
+   exact reactive replay are complete. Entity/ref/transaction/history units
+   remain.
 6. Add the general Datahike `count-datoms` public primitive over its existing
    subtree count-slice implementation, then expose it only through the
    fully-specified Seon database API. Use cursor windows—not Datalog
