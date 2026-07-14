@@ -24,14 +24,23 @@
      index — with no error. The fix emits ONE loud, actionable `:seon.log` warn
      naming SEON_EXTRA_SRC + the exact reset! one-liner the entry ns must run."
   (:require
-    [cljs.test :refer [deftest is testing async]]
+    [cljs.test :refer [deftest is testing async use-fixtures]]
     [clojure.string :as str]
     [seon.client :as client]
+    [seon.agent.message]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.log :as log]
+    [seon.render]
     [seon.render.sci :as sci]
-    [seon.repl :as repl]))
+    [seon.repl :as repl]
+    [seon.schema :as schema]))
+
+(def ^:private baseline-schemas (schema/snapshot))
+
+(use-fixtures :each
+  {:before #(schema/activate! baseline-schemas)
+   :after  #(schema/activate! baseline-schemas)})
 
 ;; ---------------------------------------------------------------------------
 ;; BUG A — UNSPECCED aliased helper resolves under SCI bounding.
@@ -263,7 +272,10 @@
               (-> (db/transact!
                     {:seon.db/tx-data
                      [{:seon.ns/name   :probe.conn-tile
-                       :seon.ns/source conn-tile-ns-source}
+                       :seon.ns/source conn-tile-ns-source
+                       :seon.ns/require-edges
+                       [{:seon.ns.require/target :seon.db
+                         :seon.ns.require/alias  'db}]}
                       {:seon.fn/sym        "probe.conn-tile/conn-dash"
                        :seon.fn/ns         {:seon.ns/name :probe.conn-tile}
                        :seon.fn/source     conn-dash-source
@@ -393,7 +405,7 @@
           (aset env "SEON_EXTRA_SRC" before-src))))))
 
 ;; ---------------------------------------------------------------------------
-;; M4 — the SCI env is rebuilt from the STORED `:seon.ns/require-edges`
+;; M4 — the SCI env is rebuilt from persisted `:seon.ns/require-edges`
 ;; datoms, never from parsing `:seon.ns/source` text. The ns row here is a
 ;; STUB (no `:require` clause at all — the my.plan.internal incident shape:
 ;; a seeded ns whose aliases never made it into the stored source), so the
@@ -413,7 +425,7 @@
        "    {:seon.render/hiccup [:div (str (pos? (count (sdb/installed-schema d))))]\n"
        "     :seon.render/ai \"edge dash\"}))"))
 
-(deftest sci-env-from-stored-require-edges
+(deftest sci-env-from-persisted-require-edges
   (async done
     (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
         (.then
@@ -437,7 +449,7 @@
                         (testing "the stored edges round-trip through seon.eval"
                           (is (= #{{:seon.ns.require/target :seon.db
                                     :seon.ns.require/alias  'sdb}}
-                                 (seval/stored-require-edges @conn :probe.edge-tile))))
+                                 (seval/persisted-require-edges @conn :probe.edge-tile))))
                         (let [r (sci/invoke-bounded 'probe.edge-tile/edge-dash
                                                     {:seon.db/db @conn})]
                           (testing "the alias resolves from DATOMS (text parse could not — stub source)"

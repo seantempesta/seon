@@ -158,7 +158,7 @@
 ;; from the eval log + the program graph. Nothing new is stored: the
 ;; `:seon.eval` rows are the log the turn loop already writes, the
 ;; `:seon.fn` rows are the boot/tee-indexed program graph, and alias
-;; resolution reads the STORED `:seon.ns/require-edges` of each eval's
+;; resolution reads persisted `:seon.ns/require-edges` for each eval's
 ;; own ns (the one requires store, C36).
 ;; ============================================================
 
@@ -203,11 +203,11 @@
 
 (defn- require-info-for
   "The `::seval/require-info` lexical env of ns `ns-kw` in `db` — the
-   alias→ns + refers maps its STORED require-edges fold to. The empty
+   alias→ns + refers maps its persisted require edges fold to. The empty
    info for a nil/unstored ns (fully-qualified calls still resolve)."
   [db ns-kw]
   (seval/edges->require-info
-    (if ns-kw (seval/stored-require-edges db ns-kw) #{})))
+    (if ns-kw (seval/persisted-require-edges db ns-kw) #{})))
 
 (defn- resolve-call-sym
   "Resolve call symbol `sym` to a full `\"ns/name\"` string via the
@@ -341,7 +341,7 @@
     (if (and cur (contains? (db/installed-schema db) :seon.ns/name))
       (into #{}
             (filter ns-cards/included-ns?)
-            (seval/stored-require-targets db cur))
+            (seval/persisted-require-targets db cur))
       #{})))
 
 (defn- ns-public-specced-fns
@@ -465,7 +465,7 @@
 
    Each entry is a glyph plus the canonical inert callable contract (explicit
    map-in versus positional arguments, input types, return type, doc line 1).
-   Aliased calls resolve through each eval ns's STORED require-edges; nothing
+   Aliased calls resolve through each eval ns's persisted require edges; nothing
    new is stored.
    Selection is strictly optional (the header teaches it); REACTIVE:
    both groups empty → \"\" and the composer drops the section. The

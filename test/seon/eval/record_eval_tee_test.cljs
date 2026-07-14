@@ -1200,7 +1200,7 @@
           "both defns tee; the trailing expr does not — single-lane resume"))))
 
 ;; ---------------------------------------------------------------------------
-;; M4 + C28 structural store: the eval-batch! tee writes the reified
+;; M4 + C28 persisted facts: the eval-batch! tee writes the reified
 ;; require edges for the ending ns (:seon.ns/require-edges — alias/refer
 ;; facts from the ANALYZER, seon.analyzer-info/ns-require-edges) and the
 ;; declared read-set for every teed fn (:seon.fn/read-attrs — qualified
@@ -1235,7 +1235,7 @@
                       (testing "the ns form evals ok"
                         (is (= 1 (:seon.eval/n-ok b1)) (pr-str b1)))
                       (testing "the tee stored the reified require edges (aliases as DATOMS)"
-                        (let [edges (seval/stored-require-edges @conn (keyword uniq))]
+                        (let [edges (seval/persisted-require-edges @conn (keyword uniq))]
                           (is (contains? edges {:seon.ns.require/target :seon.db
                                                 :seon.ns.require/alias  'pdb})
                               (str "seon.db edge with alias — got " (pr-str edges)))

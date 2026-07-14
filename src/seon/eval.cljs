@@ -821,7 +821,7 @@
 
    [[guarded-load]]: a ns missing from the bootstrap bundle's index but
    live here is HOST-BUNDLED (compiled into out/client/main.js — `my.kb`,
-   `seon.db`, `my.kb.shared`): store-indexed and rendered into the
+   `seon.db`, `my.kb.shared`): database-indexed and rendered into the
    agent's prompt as code, but absent from shadow's `:bootstrap
    :entries`, so a bare `boot/load` throws `ns X not available`. Live ⇒
    no-op the load (empty `:js`) — the JS is already loaded. (This branch
@@ -845,10 +845,10 @@
                             :where [?e :seon.ns/name ?ns]]
                           db (keyword ns-sym)))))
 
-(declare stored-require-edges)
+(declare persisted-require-edges)
 
 (defn- synthesized-ns-head
-  "An `(ns …)` head string rebuilt from `ns-kw`'s STORED require-edges.
+  "An `(ns …)` head string rebuilt from `ns-kw`'s persisted require edges.
 
    For a member-bearing ns row with NO `:seon.ns/source` — the agent's
    HOME ns, whose aliases are wired at runtime by [[setup-agent-ns!]]
@@ -857,7 +857,7 @@
    `cljs.user`: its defns land in the WRONG ns and an auto-resolved
    `::alias/kw` in a member source cannot even READ (live-caught
    2026-07-03: the first `::db/tx-data` home-ns fn to survive the C37
-   gate failed the whole unit's replay). The M4 structural store carries
+   gate failed the whole unit's replay). The persisted edge facts carry
    exactly the needed facts — rebuild the `(:require …)` clause from
    `:seon.ns/require-edges` datoms."
   [db ns-kw]
@@ -872,7 +872,7 @@
                        (seq refers)    (conj :refer (vec (sort refers)))
                        refer-all?      (conj :refer :all)))
                    (sort-by :seon.ns.require/target
-                            (stored-require-edges db ns-kw)))
+                            (persisted-require-edges db ns-kw)))
         n     (symbol (name ns-kw))]
     (pr-str (if (seq specs)
               (list 'ns n (apply list :require specs))
@@ -2565,14 +2565,13 @@
     {::aliases {} ::nses #{} ::refers {} ::refer-all #{}}
     edges))
 
-(defn stored-require-edges
-  "The stored `:seon.ns/require-edges` maps for `ns-kw`, as a set.
+(defn persisted-require-edges
+  "The persisted `:seon.ns/require-edges` maps for `ns-kw`, as a set.
 
    Pulled off the `:seon.ns` row and normalized back to the
    `::analyzer-info/require-edge` shape (refers vector → set, `:db/id`
    dropped) so it compares `=` against a freshly-derived edge set.
-   `#{}` when the ns row or the attr is absent (pre-structural rows —
-   callers fall back to parsing `:seon.ns/source`). Never throws."
+   `#{}` when the ns row or the attr is absent. Never throws."
   {:malli/schema [:=> [:catn [::db :any] [::ns-kw :keyword]]
                   :seon.analyzer-info/require-edges]}
   [db ns-kw]
@@ -2581,35 +2580,39 @@
     ;; datahike LOG an :error before throwing (a fresh home-ns setup
     ;; reads before its ns row exists), so probe cheaply and pull only
     ;; a real row.
-    (if (nil? (ffirst (db/query '[:find ?e :in $ ?ns
-                                  :where [?e :seon.ns/name ?ns]]
-                                db ns-kw)))
+    (if (or (nil? (ffirst (db/query '[:find ?e :in $ ?ns
+                                      :where [?e :seon.ns/name ?ns]]
+                                    db ns-kw)))
+            (not (contains? (db/installed-schema db)
+                            :seon.ns/require-edges)))
       #{}
-      (into #{}
-            (map (fn [e]
-                   (let [refers (:seon.ns.require/refers e)]
-                     (cond-> (dissoc e :db/id :seon.ns.require/refers)
-                       (seq refers) (assoc :seon.ns.require/refers
-                                           (set refers))))))
-            (:seon.ns/require-edges
-              (db/pull db
-                       '[{:seon.ns/require-edges
-                          [:db/id :seon.ns.require/target :seon.ns.require/alias
-                           :seon.ns.require/refers :seon.ns.require/refer-all?
-                           :seon.ns.require/as-alias?]}]
-                       [:seon.ns/name ns-kw]))))
+      (let [installed (db/installed-schema db)
+            edge-attrs [:seon.ns.require/target :seon.ns.require/alias
+                        :seon.ns.require/refers :seon.ns.require/refer-all?
+                        :seon.ns.require/as-alias?]
+            fields (into [:db/id] (filter #(contains? installed %)) edge-attrs)]
+        (into #{}
+              (map (fn [e]
+                     (let [refers (:seon.ns.require/refers e)]
+                       (cond-> (dissoc e :db/id :seon.ns.require/refers)
+                         (seq refers) (assoc :seon.ns.require/refers
+                                             (set refers))))))
+              (:seon.ns/require-edges
+                (db/pull db
+                         [{:seon.ns/require-edges fields}]
+                         [:seon.ns/name ns-kw])))))
     (catch :default e
-      ;; the existence-probe above already returns #{} for the expected
-      ;; missing-row case, so a throw reading OUR stored require edges is a
+      ;; the existence probes above return #{} for expected missing rows or
+      ;; attrs, so a throw reading OUR persisted require edges is a
       ;; core defect (:core) — the caller still degrades to the empty set.
       (error/record! {:seon.error/raw e :seon.error/fault :core})
       #{})))
 
-(defn stored-require-targets
-  "The ns-name keywords `ns-kw`'s stored require-edges point at, as a set.
+(defn persisted-require-targets
+  "The ns-name keywords `ns-kw`'s persisted require-edges point at, as a set.
 
    The flat \"what does this ns require\" view, DERIVED from the ONE
-   stored representation (`:seon.ns/require-edges` — C36; the parallel
+   persisted representation (`:seon.ns/require-edges` — C36; the parallel
    flat `:seon.ns/requires` attr is deleted). `#{}` when the ns row or
    its edges are absent."
   {:malli/schema [:=> [:catn [::db :any] [::ns-kw :keyword]]
@@ -2617,7 +2620,7 @@
   [db ns-kw]
   (into #{}
         (map :seon.ns.require/target)
-        (stored-require-edges db ns-kw)))
+        (persisted-require-edges db ns-kw)))
 
 (defn ns-require-edges-tx
   "Tx ops making `:seon.ns/require-edges` for `ns-kw` EXACTLY `new-edges`.
@@ -2633,7 +2636,7 @@
          [::new-edges :seon.analyzer-info/require-edges]]
         [:vector :any]]}
   [db ns-kw new-edges]
-  (if (= (stored-require-edges db ns-kw) new-edges)
+  (if (= (persisted-require-edges db ns-kw) new-edges)
     []
     (let [old-eids (map first
                         (db/query '[:find ?e
@@ -3304,7 +3307,7 @@
   "Rewrite `(ns …)` source so its `:require` clause carries `new-specs`.
 
    Durable-by-default (owner ruling 2026-07-10): a REPL-issued bare
-   `(require …)` persists into the namespace's STORED declaration.
+   `(require …)` persists into the namespace's require-edge facts.
    Appends specs whose target ns is absent; merges opts into an
    existing spec for the same target ([[merge-spec-opts]]). Returns nil
    when `ns-source` isn't a single `(ns …)` form or when nothing
@@ -4124,9 +4127,9 @@
               ;; Capture the `:seon.ns/require-edges` for the ENDING ns
               ;; on EVERY successful eval — not only `(ns …)` forms —
               ;; so a re-eval'd ns form or a bare `(require '[x])`
-              ;; keeps the ONE dep-edge store current (the M4
-              ;; structural store; flat views derive from it via
-              ;; [[stored-require-targets]] — C36). Skip the transient
+              ;; keeps the ONE persisted dep-edge representation current;
+              ;; flat views derive from it via
+              ;; [[persisted-require-targets]] — C36). Skip the transient
               ;; eval-scaffolding nses (`cljs.user` / `seon.dynamic`)
               ;; so we never mint a `:seon.ns` row for them.
               ;; Diff'd against the live db value ([] when unchanged);
@@ -4150,7 +4153,7 @@
               ;; accumulation.
               ;; `::kw`/`::alias/kw` literals resolve against the ENDING
               ;; ns's analyzer require-edges (C37) — the same facts the
-              ;; M4 structural store tees, read once per entry.
+              ;; M4 require-edge facts, read once per entry.
               kw-resolve
               (when (symbol? ending-ns)
                 {:seon.repl/current-ns ending-ns
@@ -4172,7 +4175,7 @@
                       tee-entities))
               ;; Durable-by-default (owner ruling 2026-07-10): a bare
               ;; top-level `(require …)` — incl. the `alias` rewrite —
-              ;; persists its specs into the CURRENT ns's STORED
+              ;; persists its specs into the CURRENT ns's
               ;; declaration so a resume replay carries them. `[]` for
               ;; every non-require form (one read, cheap).
               req-decl-tx (when (and (::ok? result) ending-ns db/*conn*

@@ -209,7 +209,7 @@
             (.then
               (fn [_]
                 (let [db*   @db/*conn*
-                      edges (seval/stored-require-edges db* :probe.rv.heal)
+                      edges (seval/persisted-require-edges db* :probe.rv.heal)
                       srcs  (map :seon.ns.require/target edges)]
                   (testing "stored declaration is the NEW one"
                     (let [src (ns-source db* :probe.rv.heal)]
@@ -227,7 +227,7 @@
             (.finally done))))))
 
 ;; ===========================================================================
-;; B4 — bare (require …) persists into the STORED declaration (durable by
+;; B4 — bare (require …) persists into the namespace edge facts (durable by
 ;; default) and is idempotent; the reconstituted resume source carries it.
 ;; ===========================================================================
 
@@ -379,7 +379,7 @@
                   (testing "the edge round-trips flagged as-alias (no load on resume)"
                     (let [edge (first (filter #(= :probe.rv.notloaded
                                                   (:seon.ns.require/target %))
-                                              (seval/stored-require-edges
+                                              (seval/persisted-require-edges
                                                 db* :probe.rv.asa)))]
                       (is (true? (:seon.ns.require/as-alias? edge)))
                       (is (= 'nl (:seon.ns.require/alias edge))))))))
@@ -549,7 +549,7 @@
                   (testing "edges updated — target kept, alias gone"
                     (let [edge (first (filter #(= :clojure.string
                                                   (:seon.ns.require/target %))
-                                              (seval/stored-require-edges
+                                              (seval/persisted-require-edges
                                                 db* :probe.rv.ua)))]
                       (is (some? edge))
                       (is (nil? (:seon.ns.require/alias edge)))))

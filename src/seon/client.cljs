@@ -742,7 +742,7 @@
 ;; Only the agent DB layer loads, whole-namespace + dependency-ordered:
 ;;
 ;;   - `agent-ns-set` — every `:seon.ns/name` row minus `(core-ns-set)`.
-;;   - `topo-sort-nses` over the STORED `:seon.ns/require-edges`
+;;   - `topo-sort-nses` over persisted `:seon.ns/require-edges`
 ;;     (targets intersected with the agent-ns-set — intra-agent edges
 ;;     only; core deps load on-demand via the DB load-fn). A dep loads
 ;;     before its dependent.
@@ -783,9 +783,9 @@
 
 (defn ^:private agent-ns-requires
   "Map of `agent-ns-kw → #{intra-agent require ns-kws}` for topo-sort.
-   Derives each ns's required set from the STORED
+   Derives each ns's required set from persisted
    `:seon.ns/require-edges` (captured at tee from the analyzer, NOT
-   re-parsed here — `seon.eval/stored-require-targets`), INTERSECTED
+   re-parsed here — `seon.eval/persisted-require-targets`), INTERSECTED
    with `agent-nses` so only intra-agent edges order the load kick.
    Core/third-party deps are NOT edges here — they are satisfied
    on-demand by the compiled bundle via the DB load-fn
@@ -796,7 +796,7 @@
   (into {}
         (map (fn [ns-kw]
                [ns-kw (set/intersection
-                        (seval/stored-require-targets db ns-kw)
+                        (seval/persisted-require-targets db ns-kw)
                         agent-nses)]))
         agent-nses))
 
@@ -913,7 +913,7 @@
      1. `agent-ns-set` — every `:seon.ns/name` row minus `(core-ns-set)`.
         Core/third-party are COMPILED (in the bundle), indexed for
         DISPLAY only; only the agent DB layer is loaded.
-     2. `topo-sort-nses` over the STORED `:seon.ns/require-edges`
+     2. `topo-sort-nses` over persisted `:seon.ns/require-edges`
         targets intersected with the agent-ns-set (intra-agent edges
         only — core deps load on-demand via the load-fn). A dep loads
         before its dependent.
@@ -1118,7 +1118,7 @@
 
 (defn- reserved-extra-nses
   "The reserved-prefix violators among extra-var ns name strings:
-   `seon.*` (the core's) and `my.*` (the human's store-replayed
+   `seon.*` (the core's) and `my.*` (the human's database-replayed
    corpus — a COMPILED `my.*` ns would replay-skip what should be
    agent-authored rows). Sorted distinct vector; empty = all clear."
   [ns-strs]
@@ -1142,7 +1142,7 @@
                (str "extra-core registration provides RESERVED-prefix nses: "
                     (str/join ", " bad)
                     " — seon.* is the core's and my.* is the human's "
-                    "store-replayed corpus; SEON_EXTRA_SRC code must live "
+                    "database-replayed corpus; SEON_EXTRA_SRC code must live "
                     "under the downstream's own root prefix (e.g. acme.*)")
                {:seon.client/reserved-extra-nses bad})))))
 
@@ -1318,7 +1318,7 @@
                                " unreadable — falling back to the (ns x) stub"))
                         stub))
                 stub)
-        ;; Reified require edges (M4 structural store) for the SCI-
+        ;; Reified require edges (M4 persisted facts) for the SCI-
         ;; renderable surface: full-source nses are exactly where an
         ;; agent-authored-sym render fn can live (my.* + downstream), so
         ;; their alias/refer facts must be datoms, not text. Extracted
@@ -2032,9 +2032,9 @@
         ;; diff mechanism (seon.eval/ns-require-edges-tx — retractEntity
         ;; the old components, assert the new set, [] when unchanged).
         ;; Diffed over ALL fresh ns rows (not just the kept/drifted
-        ;; ones), so a pre-structural store BACKFILLS its compiled
-        ;; full-source nses on the next boot — ~a pull per full-source
-        ;; ns, [] each once converged.
+        ;; ones), so code changes reconcile the complete desired edge
+        ;; set on every boot — ~a pull per full-source ns, [] once
+        ;; converged.
         edge-tx   (into []
                         (mapcat (fn [row]
                                   (when-some [edges (and (map? row)

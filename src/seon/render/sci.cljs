@@ -35,9 +35,9 @@
    `:as` aliases (`db/query`, `render/...`) and any own-ns helpers — exactly
    the lexical environment the COMPILED fn had. We rebuild that environment:
 
-   - read the agent ns's STORED `:seon.ns/require-edges` datoms for its
-     `:require` `:as` aliases + `:refer`s (analyzer facts teed at eval/setup
-     time — M4; pre-structural rows fall back to parsing `:seon.ns/source`);
+   - read the agent ns's persisted `:seon.ns/require-edges` datoms for its
+     `:require` `:as` aliases + `:refer`s (committed at agent birth and
+     updated by the eval tee);
    - expose every required `seon.*`/agent namespace as SCI host vars by
      ENUMERATING its members from the `:seon.fn` index (code-as-data — the
      core IS indexed) and resolving each via `seon.eval/lookup-value`;
@@ -66,8 +66,6 @@
     [clojure.walk :as walk]
     [sci.core :as sci]
     [sci.interrupt :as interrupt]
-    [seon.agent.home :as home]
-    [seon.analyzer-info :as analyzer-info]
     [seon.config :as config]
     [seon.db :as db]
     [seon.error :as err]
@@ -268,50 +266,6 @@
 ;; into the render path.
 ;; ============================================================
 
-(defn- ns-source
-  "The stored `:seon.ns/source` (the agent's `(ns … (:require …))` form) for
-   `ns-kw`, or nil."
-  [db ns-kw]
-  (try
-    (ffirst (db/query
-              {:seon.db/db    db
-               :seon.db/query '[:find ?src :in $ ?nm :where
-                                [?ns :seon.ns/name ?nm]
-                                [?ns :seon.ns/source ?src]]
-               :seon.db/args  [ns-kw]}))
-    (catch :default e
-      ;; core machinery reading OUR stored ns source — a query throw is a
-      ;; defect, not "no source"; caller still degrades to nil.
-      (err/record! {:seon.error/raw e :seon.error/fault :core})
-      nil)))
-
-(defn- home-agent-id
-  "The agent id when `ns-str` names an agent HOME ns (`my.agent.<id>` — the
-   deterministic `seon.agent.home/home-ns` shape, structural, no list), else
-   nil."
-  [ns-str]
-  (let [prefix "my.agent."]
-    (when (and (str/starts-with? ns-str prefix)
-               (not (str/includes? (subs ns-str (count prefix)) ".")))
-      (subs ns-str (count prefix)))))
-
-(defn- derived-home-ns-source
-  "The canonical home-ns `(ns …)` source for a HOME ns with no stored
-   `:seon.ns/source`. A fresh home ns (`my.agent.<id>`) is WIRED by
-   `seon.eval/setup-agent-ns!` from the ONE canonical
-   `seon.agent.home/home-ns-form` but only gets a stored source datom when the
-   agent re-evals an `(ns …)` form itself — so derive the SAME form here
-   (per-agent `home-requires-for` honored) and the cage rebuilds the exact
-   aliases/refers the compiled fn had. nil for a non-home ns."
-  [ns-str]
-  (when-let [id (home-agent-id ns-str)]
-    (try (home/home-ns-form ns-str (home/home-requires-for id))
-         (catch :default e
-           ;; deriving the canonical home-ns form is OUR machinery — a
-           ;; throw is a core defect; caller still degrades to nil.
-           (err/record! {:seon.error/raw e :seon.error/fault :core})
-           nil))))
-
 (defn- fn-source
   "The stored `:seon.fn/source` for `sym` (a string), or nil. nil means we
    can't interpret it (no source) → caller falls back to the compiled path."
@@ -329,43 +283,12 @@
       (err/record! {:seon.error/raw e :seon.error/fault :core})
       nil)))
 
-;; The lexical require facts (aliases / refers / required nses) come from
-;; the STORED `:seon.ns/require-edges` component rows — the analyzer-
-;; derived facts the tee writes (M4 structural store; seon.eval/
-;; stored-require-edges → edges->require-info). Re-parsing the
-;; `:seon.ns/source` TEXT survives only as the documented fallback for
-;; PRE-STRUCTURAL rows (an ns whose edges were never teed — old stores;
-;; they self-backfill on the next replay/re-eval). The once-per-ns debug
-;; note below makes the taken path observable: its ABSENCE on a render
-;; proves the stored path ran.
-(def ^:private !source-fallback-noted (atom #{}))
-
-(defn- note-source-parse-fallback-once! [agent-ns]
-  (when-not (contains? @!source-fallback-noted agent-ns)
-    (swap! !source-fallback-noted conj agent-ns)
-    (log/debug! {:seon.log/source  ::require-info
-                 :seon.log/message
-                 (str "no stored :seon.ns/require-edges for " agent-ns
-                      " — rebuilding the SCI env by PARSING :seon.ns/source "
-                      "(pre-structural row fallback; re-evaling the ns form "
-                      "stores the edges)")})))
-
 (defn- require-info
-  "The `seon.eval/::require-info` map for `agent-ns` (a string): stored
-   `:seon.ns/require-edges` when present; else the documented
-   source-parse fallback over the stored (or derived home-ns)
-   `(ns …)` source. Fail-soft → the empty info."
+  "The `seon.eval/::require-info` map for `agent-ns` from persisted
+   `:seon.ns/require-edges`. Missing or empty edges yield empty info."
   [db agent-ns]
-  (let [stored (seval/stored-require-edges db (keyword agent-ns))]
-    (if (seq stored)
-      (seval/edges->require-info stored)
-      (do (note-source-parse-fallback-once! agent-ns)
-          (let [ns-src (or (ns-source db (keyword agent-ns))
-                           (derived-home-ns-source agent-ns))]
-            (seval/edges->require-info
-              (if ns-src
-                (analyzer-info/require-edges-from-source ns-src)
-                #{})))))))
+  (seval/edges->require-info
+    (seval/persisted-require-edges db (keyword agent-ns))))
 
 (defn- expose-ns
   "`{simple-sym <value>}` for namespace `ns-sym`, UNIONing three sources:
@@ -523,12 +446,11 @@
            sym (str "no stored :seon.fn/source for " sym
                     " — the fn cannot be interpreted (bounded)"))
          (let [agent-ns (namespace sym)
-               ;; Aliases/refers/required-nses from the STORED
-               ;; `:seon.ns/require-edges` datoms (analyzer facts teed at
-               ;; eval/setup time — M4); pre-structural rows fall back to
-               ;; parsing the stored (or derived home-ns) source, noted
-               ;; once per ns ([[require-info]]).
-               ;; `::nses` carries every stored edge target — the edge
+               ;; Aliases/refers/required-nses from persisted
+               ;; `:seon.ns/require-edges` datoms committed at agent birth
+               ;; and updated by the eval tee. There is no source-reparse
+               ;; compatibility path; database facts are authoritative.
+               ;; `::nses` carries every persisted edge target — the edge
                ;; tee fires on EVERY successful eval (a bare
                ;; `(require '[x])` included), so `:seon.ns/require-edges`
                ;; IS the fresh dep-edge truth (C36: the flat
