@@ -415,7 +415,7 @@
 
    Request opts (only :seon.ai/ctx required):
      :seon.ai/ctx           — the full ctx text (required)
-     :seon.ai/system-prompt — overrides the store-resident soul
+     :seon.ai/system-prompt — overrides the database-resident soul
      :seon.ai/model         — override config row / default-model
      :seon.ai/temperature   — override config row / default-temperature
      :seon.ai/max-tokens    — override config row / default-max-tokens

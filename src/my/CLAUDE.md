@@ -25,7 +25,7 @@ IS its worked example). That means:
 - Agents reach these functions by FULL qualification (`my.data/…`) or a real
   `:require` alias — never home-ns aliases.
 
-Current: `data` (aggregation), `ui` (static hiccup), `tile` (interactive
+Current: `data` (aggregation), `ui` (static hiccup), `canvas` (interactive
 controls wired to agent-defined handlers), `kb` (the DB-memory worked
 manual — `remember` store + `recall` ask), `ns` (program-graph fn listing
 via the ONE compact-card renderer), `skills` (the skill catalog blocks),

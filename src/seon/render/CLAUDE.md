@@ -1,4 +1,4 @@
-# src/seon/render — the ONE projection engine (with src/seon/ui as its tile library)
+# src/seon/render — the ONE projection engine (with src/seon/ui as its view library)
 
 **Read before editing:** `docs/seon/architecture/ui.md` (block/render/canvas/
 slot/layout + the render engine contract), `architecture.md` glossary.
@@ -8,7 +8,7 @@ Skills: `ui-canvas` (the agent-facing canvas how-to), `datastar-web-ui`.
 
 - **One guarded recursive walker, two views.** Every projection in the
   system — the agent's prompt text (`:seon.render/ai`) and the human's
-  hiccup (`:seon.render/hiccup` → a tile) — comes out of this engine. A new
+  hiccup (`:seon.render/hiccup` → a surface) — comes out of this engine. A new
   way to surface data is a new block/render FN, never a new mechanism.
 - **Renders are never stored.** A render is a function of the db at render
   time; if you're persisting one, you're building a cache the architecture
@@ -32,4 +32,4 @@ renderer dispatches to.
 
 `src/seon/ui/` is the canvas/layout library on top (agent view, header, markdown,
 clojure, components) — hiccup only, placed into slots by layouts; keep
-logic in render/derive fns, not tiles.
+logic in render/derive fns, not visual components.
