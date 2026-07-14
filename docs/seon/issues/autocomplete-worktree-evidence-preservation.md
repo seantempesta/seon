@@ -77,7 +77,7 @@ worktree.
 
 That inventory closes only the discovery half of this issue. Stable and
 display-v3 remain live under orphaned legacy processes; no archive root,
-closed-snapshot package digest, restore/read-back proof, database basis/schema
+closed-snapshot package digest, restore/read-back proof, final quiesced database
 identity, or owner acceptance exists yet. Plan-pilot still needs its current
 read-only staging proof, and the smaller generated/blob residues still need a
 hash-backed duplicate or supported reproducibility decision. Worktree removal
