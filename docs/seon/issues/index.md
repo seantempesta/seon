@@ -10,14 +10,15 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (2)
+## Blocker (3)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Arbitrary eval allocation lacks hard process memory containment](eval-process-isolation-memory-containment.md) | blocker | agent |
+| [Data browser feed key drift made every live view return 500](data-browser-feed-key-schema-drift.md) | blocker | UI |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 
-## Friction (17)
+## Friction (18)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -35,6 +36,7 @@ See `README.md` for the convention.
 | [Inspect live callers use retired cluster lifecycle contracts](inspect-live-cluster-caller-drift.md) | friction | agent |
 | [LoRA audit runner depends on a retired Shadow target and pinned checkout](lora-audit-runner-drift.md) | friction | general |
 | [Model can ghost-echo runtime scaffolding into the transcript spine](narration-ghost-echo-not-neutralized.md) | friction | agent |
+| [Operator ready URL queried a retired fleet feed](operator-ready-url-used-retired-feed.md) | friction | UI |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
 | [Self-host `cljs.test/is` throws inside a dynamically-evaled `:test` thunk](selfhost-cljs-test-is-thunk-resolution.md) | friction | agent |
 | [Shadow deps-mode declarations imply inactive build paths](shadow-deps-mode-declaration-drift.md) | friction | docs |

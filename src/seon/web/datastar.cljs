@@ -135,7 +135,8 @@
    [:tuple [:= :seon.web.feed/agent] :seon.agent/id]
    [:tuple [:= :seon.web.feed/agent] :seon.agent/id
     [:= :seon.web.feed/as-of] :int]
-   [:tuple [:= :seon.web.feed/data] [:maybe :string] :int :boolean]
+   [:tuple [:= :seon.web.feed/data]
+    [:maybe :string] [:maybe :string] [:maybe :string] :boolean]
    [:tuple [:= :seon.web.feed/debug] :seon.agent/id ::view-id]])
 (schema/register! ::render-full 'fn?)
 (schema/register! ::render-change 'fn?)

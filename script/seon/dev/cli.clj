@@ -68,12 +68,12 @@
   ;; fleet. Bound the stream and select the first non-root agent link.
   (let [result (shell/sh {:continue true :out :string :err :string
                           :cmd ["curl" "--compressed" "-sS" "-m" "1"
-                                (str base-url "/agents/feed")]})
-        ids (map second (re-seq #"href=\"/agent/([^\"]+)\"" (:out result)))
+                                (str base-url "/agent/root/feed")]})
+        ids (map second (re-seq #"href=\"/agent/([^/\"]+)\"" (:out result)))
         ordinary (first (remove #(= "root" %) ids))]
     (if ordinary
       (str base-url "/agent/" ordinary)
-      (str base-url "/agents"))))
+      (str base-url "/"))))
 
 (defn- open-url! [url]
   (let [argv (cond

@@ -1,10 +1,35 @@
 (ns seon.dev.cli-test
   (:require [babashka.fs :as fs]
+            [babashka.process :as shell]
             [clojure.test :refer [deftest is testing]]
             [seon.dev.artifact :as artifact]
             [seon.dev.cli :as cli]
             [seon.dev.process :as process]
             [seon.dev.state :as state]))
+
+(deftest ready-url-selects-an-ordinary-agent-from-the-root-feed
+  (let [requested (atom [])]
+    (with-redefs-fn
+      {#'shell/sh
+       (fn [{:keys [cmd]}]
+         (swap! requested conj cmd)
+         {:exit 0
+          :out (str "<a href=\"/agent/root\"></a>"
+                    "<a href=\"/agent/root/debug\"></a>"
+                    "<a href=\"/agent/quiet-rivers-turn\"></a>")
+          :err ""})}
+      (fn []
+        (is (= "http://127.0.0.1:7890/agent/quiet-rivers-turn"
+               (#'cli/ordinary-agent-url "http://127.0.0.1:7890")))))
+    (is (= "http://127.0.0.1:7890/agent/root/feed"
+           (last (first @requested))))))
+
+(deftest ready-url-falls-back-to-the-valid-root-page
+  (with-redefs-fn
+    {#'shell/sh (constantly {:exit 22 :out "" :err "unavailable"})}
+    (fn []
+      (is (= "http://127.0.0.1:7890/"
+             (#'cli/ordinary-agent-url "http://127.0.0.1:7890"))))))
 
 (defn- configuration [root]
   {:seon.dev.config/root root

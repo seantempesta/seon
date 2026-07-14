@@ -789,7 +789,7 @@
         events (atom [])
         feed (test-feed
                "attached-first-paint"
-               {:seon.web.feed/key [:seon.web.feed/data nil 0 false]
+               {:seon.web.feed/key [:seon.web.feed/data nil nil nil false]
                 :seon.web.feed/render-full
                 (fn [] [:div {:id "data-browser"}])})]
     (with-redefs [datastar/!feeds (atom @#'datastar/empty-feed-registry)
@@ -799,13 +799,28 @@
                                          (swap! events conj [conn event]))]
       (@#'datastar/open-feed! req res feed)
       (let [[conn event] (first @events)]
-        (is (= [[:seon.web.feed/data nil 0 false] "W10"]
+        (is (= [[:seon.web.feed/data nil nil nil false] "W10"]
                (::datastar/subscription-key conn))
             "first paint uses the registry-owned normalized descriptor")
         (is (str/includes? event "data-browser"))
         (is (not (contains? (::datastar/subscriptions @datastar/!feeds) nil))
             "first paint never creates a cross-view nil cache authority"))
       (.emit res "close"))))
+
+(deftest data-feed-key-is-the-exact-query-projection
+  (let [req #js {:url (str "/data?ns=seon.agent&attr=seon.agent%2Fid"
+                           "&cursor=%5B1%20%22root%22%203%5D&system=1")}
+        params (@#'debug/data-params req)
+        feed (@#'debug/data-feed-definition params "data-view")]
+    (is (= {:seon.web.debug/data-ns :seon.agent
+            :seon.web.debug/data-attr :seon.agent/id
+            :seon.web.debug/data-cursor [1 "root" 3]
+            :seon.web.debug/data-system? true}
+           params))
+    (is (= [:seon.web.feed/data
+            ":seon.agent" ":seon.agent/id" "[1 \"root\" 3]" true]
+           (:seon.web.feed/key feed)))
+    (is (= "data-view" (::datastar/view-id feed)))))
 
 (deftest obsolete-subscription-does-not-push-into-a-rebound-view
   (let [pushes (atom 0)
