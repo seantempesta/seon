@@ -17,14 +17,25 @@ a second authority.
 
 The JVM writer is the sole durable Datahike owner; the pod uses one immutable
 replica and typed protocol. Durable receipts, bounded replay/live overlap,
-config reconciliation, and crash fencing exist. Candidate/native-schema
-installation, fail-closed publication/reconstruction, quiesced clean restart,
-canonical database coordinates, and complete history/branch transitions remain
-to be grounded and implemented.
+config reconciliation, numeric as-of reads, and crash fencing exist. Complete
+Malli projection building also exists, but receipt-native schema is still
+installed through a hand-written pre-initializer path and post-commit
+instrumentation failure does not close admission or reconstruct the committed
+generation.
 
-The detailed source/dependency audit is in progress. No implementation is
-authorized by this scaffold; the audit must first replace broad claims with
-exact owners, executable probes, failure evidence, and acceptance tests.
+The maintained Datahike SHA already contains same-store branch/delete,
+commit/branch root reads, historical-secondary-index correction, awaited
+connection release, and guarded/read-back-verified force. Seon still exposes a
+physical-copy fork with a new database identity; its registry, protocol, feed,
+replica, runtime admission, and operator do not carry the full
+`{database-id, branch, commit-id, t}` coordinate or native branch lifecycle.
+Quiesced clean restart, restore/undo, branch-local blobs, and ordered multi-form
+process-failure proof remain unimplemented.
+
+The exact dependency/source audit, live probes, transition matrix, and ordered
+implementation slices are in
+[[research/database-lifecycle-source-audit-2026-07-14]]. Implementation remains
+dependent on current runtime-reliability graduation.
 
 ## Required transition matrix
 
