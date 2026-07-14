@@ -395,7 +395,7 @@
     (ex-info
      (str "Database transaction failed: " (::protocol/error response))
      (cond->
-      {::error-kind error-kind
+      {::protocol/error-kind error-kind
        :seon.error/kind
        (if (contains? #{protocol/generated-candidate-conflict-error
                         protocol/stale-basis-error}

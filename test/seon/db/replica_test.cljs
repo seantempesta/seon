@@ -771,6 +771,40 @@
                                    error))))
           (.finally done)))))
 
+(deftest stale-basis-rejection-retains-the-protocol-discriminator
+  (async done
+    (let [conn (fake-conn 23)]
+      (-> (with-wire-state
+           (stopped-state)
+           (fn []
+             (with-rpc-stub
+               (fn [_sock-path _request _opts]
+                 (js/Promise.resolve
+                  {::protocol/success? false
+                   ::protocol/error-kind protocol/stale-basis-error
+                   ::protocol/error "Transaction basis is stale."
+                   ::protocol/expected-basis-t 22
+                   ::protocol/current-basis-t 23}))
+               (fn []
+                 (-> (dispatch-transaction
+                      conn
+                      {:tx-data []
+                       :datahike/expected-basis-t 22})
+                     (.then
+                      (fn [error]
+                        (let [data (ex-data error)]
+                          (is (= protocol/stale-basis-error
+                                 (::protocol/error-kind data))
+                              "callers can recognize the protocol rejection")
+                          (is (= 22 (::protocol/expected-basis-t data)))
+                          (is (= 23 (::protocol/current-basis-t data)))
+                          (is (not (contains? data ::replica/error-kind))
+                              "the replica boundary does not rename protocol data")))))))))
+          (.catch
+           (fn [error]
+             (is false (str "stale-basis structure test threw: " error))))
+          (.finally done)))))
+
 (deftest definite-candidate-conflict-cleans-state-and-identifies-candidate
   (async done
     (let [candidate "mint-ember-otter"
