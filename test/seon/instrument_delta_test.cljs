@@ -4,6 +4,7 @@
     [cljs.test :refer [deftest is testing]]
     [goog.object :as gobj]
     [malli.core :as m]
+    [seon.client :as client]
     [seon.db :as db]
     [seon.instrument :as instrument]
     [seon.schema :as schema]))
@@ -31,6 +32,22 @@
   (let [ns-object (js/goog.getObjectByName
                     (cljs.core/munge (namespace sym)) js/goog.global)]
     (gobj/set ns-object (cljs.core/munge (name sym)) f)))
+
+(deftest node-reload-selection-retains-the-replaced-namespaces
+  (let [reloaded-namespaces (deref #'client/shadow-reloaded-namespaces)
+        message
+        {:info
+         {:compiled #{"compiled.cljs" "never.cljs"}
+          :sources [{:ns 'example.compiled :resource-id "compiled.cljs"}
+                    {:ns 'example.always :resource-id "unchanged.cljs"}
+                    {:ns 'example.never :resource-id "never.cljs"}
+                    {:ns 'example.untouched :resource-id "untouched.cljs"}]}
+         :reload-info
+         {:always-load #{'example.always}
+          :never-load #{'example.never}}}]
+    (is (= #{'example.compiled 'example.always}
+           (reloaded-namespaces message))
+        "instrument exactly the namespaces the Shadow Node client reloaded")))
 
 (deftest exact-data-and-delta-refresh-only-affected-wrappers
   (let [function-schemas-before (m/function-schemas :cljs)

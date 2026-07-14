@@ -223,7 +223,6 @@
     [seon.db.replica :as replica]
     ;; Use Shadow's own reload-source selection for build notifications;
     ;; this must stay identical to the files its Node client actually loaded.
-    [shadow.cljs.devtools.client.env :as shadow-env]
     ;; Pure MCP runtime-addressing values. The pod advertisement below queries
     ;; its database on demand; there is no second hosted-agent registry.
     [seon.dev.runtime-id :as runtime-id])
@@ -313,12 +312,25 @@
   (start-heartbeat!))
 
 (defn- shadow-reloaded-namespaces
-  "Namespace symbols Shadow loaded in one build-complete message."
+  "Namespace symbols Shadow's Node client loaded for one completed build.
+
+   Keep this selection byte-for-byte equivalent to
+   `shadow.cljs.devtools.client.node/handle-build-complete`: Node reloads a
+   source when its resource id is in `:compiled` or its namespace is in
+   `:always-load`, unless the namespace is in `:never-load`. The browser-only
+   `filter-reload-sources` helper additionally consults its loaded-source
+   registry and returns an empty set after Node has synchronously required the
+   files, which previously left every replaced function uninstrumented."
   [message]
-  (into #{}
-        (keep :ns)
-        (shadow-env/filter-reload-sources
-          (:info message) (:reload-info message))))
+  (let [{:keys [sources compiled]} (:info message)
+        {:keys [always-load never-load]} (:reload-info message)]
+    (into #{}
+          (comp
+            (remove #(contains? never-load (:ns %)))
+            (filter #(or (contains? compiled (:resource-id %))
+                         (contains? always-load (:ns %))))
+            (keep :ns))
+          sources)))
 
 (defn shadow-build-notify!
   "Apply exact instrumentation after Shadow loads changed namespaces."
