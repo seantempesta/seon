@@ -107,11 +107,16 @@ implementation:
   and compiler graph. Namespace dependency selection is sound today;
   automatic function-to-test selection is not, because complete call edges do
   not exist.
-- Automatic edit feedback has one existing delivery path: a trusted synchronous
-  `PostToolUse` hook returning `additionalContext` to the active agent. Extend
-  the current Babashka hook to normalize Codex `apply_patch` and Claude
-  `Edit`/`Write`, then have it call the same public changed-test operation a
-  human calls. Shadow remains compilation and dependency authority; do not add
+- Automatic edit feedback uses the trusted synchronous `PostToolUse` hook to
+  return `additionalContext` to the active agent. The Babashka hook now
+  normalizes Codex `apply_patch` and Claude `Edit`/`Write` and calls the same
+  `bin/seon test changed --path PATH` operation a human calls. The managed
+  Shadow process watches `client` and `test`, publishes a bounded immutable
+  complete-runtime artifact plus graph manifest, and a fresh Node process runs
+  the selected reverse-transitive namespace closure. A direct real-path proof
+  selected one namespace and passed 4 tests/16 assertions in 4.5 seconds
+  without a compile. Test failures are advisory and never gate edits. Shadow
+  remains compilation and dependency authority; do not add
   autorun, a test daemon, a second registry, database notification facts, or a
   polling requirement. The Codex hook definitions are currently discovered but
   untrusted, so live proof requires one user review after their implementation

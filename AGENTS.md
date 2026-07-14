@@ -523,9 +523,12 @@ If you repeatedly fail to edit a function, **the function is too complex**. Refa
 
 ## Dev Hook
 
-The lightweight edit hook provides immediate syntax and documentation feedback.
-It is not a hidden application runtime or test authority. Read its feedback,
-then run the focused test door for the code you changed.
+The lightweight edit hook provides immediate syntax, documentation, and
+affected-test feedback through `PostToolUse.additionalContext`. Test results
+are advisory and never block an edit: refactoring may correctly invalidate or
+delete a test. The hook delegates to `bin/seon test changed --path PATH`; it is
+not a second selector, runner, or application runtime. Codex must trust the
+project hooks once before automatic delivery runs.
 
 ---
 
@@ -546,6 +549,14 @@ existing test bundle contains the change. `bin/test-cljs` is the full CLJS
 checkpoint. Use `bin/test-writer` for the retained JVM database-server gate, or
 pass one test namespace for a focused writer run. Never run overlapping
 cljs.test suites in the live pod.
+
+For the normal inner loop, use
+`bin/seon test changed --path src/seon/example.cljs`. The managed Shadow JVM
+maintains the complete test graph and publishes a bounded content-addressed
+runtime snapshot; each request selects the conservative reverse-transitive
+test namespaces and launches a fresh Node process. Unknown, shared CLJC,
+macro, configuration, dependency, and deletion changes widen explicitly.
+Run the full gate once at the unit checkpoint, not after every edit.
 
 **Third-party harness (Acme):** the downstream overlay remains isolated, but its
 operator wrapper is deliberately held at the pre-database-server cutover while
@@ -634,8 +645,9 @@ bounded full args. Two populations, one shape:
 | Suite / CI | `config/test.edn` (via `bin/test-cljs`) | **`:gate`** | run FAILS on any un-expected marker, even with green assertions |
 | Prod / demo | downstream config | **`:log`** | datom + derived warnings surface only; never-crash intact |
 
-**Writing code (the loop you live in):** the dev hook reloads + tests every
-edit AND blocks if your change produced a NEW `:core` fault on the live pod.
+**Writing code (the loop you live in):** the dev hook reports affected tests
+after every supported edit without gating the edit. It blocks only when your
+change produced a NEW `:core` fault on the live pod.
 Error-path tests that DELIBERATELY provoke core faults wrap the provocation
 in `seon.error/expecting-core-fault!` (prints the `-EXPECTED-` marker; the
 gates ignore it; the datom still writes). A fault-provoking test WITHOUT the
