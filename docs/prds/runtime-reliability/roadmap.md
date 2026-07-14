@@ -28,7 +28,7 @@ compensate for unclear functions.
 
 ## Current position
 
-**Current phase: branch graduation and architecture reconciliation.**
+**Current phase: unit 0 graduated; database lifecycle/recovery is next.**
 The permanent JVM database server, canonical CLJS runtime, Babashka operator,
 database protocol, shared Datastar feed, database-authoritative program/schema
 projection, and focused test doors are already active. Work from the original
@@ -51,7 +51,7 @@ database, renderer, runtime, operator, or packaging mechanisms.
 
 | Order | Unit | State | Depends on | Measurable exit |
 |---|---|---|---|---|
-| 0 | Current branch graduation | **IN PROGRESS** | none | Reconciled docs and successor PRDs; clean full pod/writer/operator/Inspect-offline gates; destructive default reset; live CLJ+CLJS MCP, browser, gzip SSE, database read-back, restart, and retained-result/query-budget proof; legacy lane evidence classified before cleanup. |
+| 0 | Current branch graduation | **COMPLETE** | none | Reconciled docs and successor PRDs; clean full pod/writer/operator/Inspect-offline gates; destructive default reset; live CLJ+CLJS MCP, browser, gzip SSE, database read-back, restart, and retained-result/query-budget proof; legacy lane evidence classified before cleanup. |
 | 1 | `database-lifecycle-recovery` | **CARVED + GROUNDED** | 0 | Fresh, converged, config-free reopen, clean restart, crash recovery, canonical coordinates, as-of/fork/restore/undo, and multi-form transitions pass without replay or duplicate registries. |
 | 2 | `reactive-render-units` | **CARVED + GROUNDED** | 1 | One runtime-observed unit engine serves root, agent, canvas, debug, and data views; helper-indirected reads update; unrelated writes do no work; equivalent tabs share bounded plain-data/output reuse. |
 | 3 | `database-browser` | **CARVED + GROUNDED** | 1, unit contract from 2 | Entity, refs, transactions, provenance, and history are navigable through bounded Datahike index cursors; closed details construct no expensive body; no global scan or second feed exists. |
@@ -60,7 +60,7 @@ database, renderer, runtime, operator, or packaging mechanisms.
 | 6 | `agent-runtime-correctness` | **CARVED + GROUNDED** | 1 | Raw model replies are preserved; every complete form is attempted; async contracts, plan authority/evidence, retries, errors-as-values, and measured process containment cannot wedge or fabricate agent evidence. |
 | 7 | `inspect-autocomplete-evidence` | **CARVED + GROUNDED** | 0, 6 | Inspect source is content-pinned; preserved lane evidence is classified; the reviewed ACME tool-refinement results land through canonical `my.*` schemas/functions; large-planner/small-executor and simpler-model tool-use trials have reproducible task/scorer/provenance evidence. |
 | 8 | `independent-downstream-distribution` | **CARVED + AUDITED** | 0, stable runtime/package contracts from 1 and 6 | A clean ACME checkout builds, customizes, starts, MCP-evaluates, restarts, and reads back from released Seon SDK/runtime/writer artifacts while the Seon source checkout is unavailable. |
-| 9 | `local-performance-graduation` | **CARVED; FINAL** | 1–8 | Destructive acceptance matrix and real-browser journey pass; explicit cold/warm latency, idle CPU, event-loop, heap/RSS, feed/render, and grown-database budgets are green; superseded worktrees/processes are safely retired. |
+| 9 | `local-performance-graduation` | **CARVED + GROUNDED; FINAL** | 1–8 | Destructive acceptance matrix and real-browser journey pass; explicit cold/warm latency, idle CPU, event-loop, heap/RSS, feed/render, and grown-database budgets are green; superseded worktrees/processes are safely retired. |
 
 Parallel work is deliberately bounded:
 
@@ -78,14 +78,14 @@ Parallel work is deliberately bounded:
 
 Immediate unit-0 queue:
 
-1. **In progress:** the documentation hierarchy and practiced REPL-driven
+1. **Complete:** the documentation hierarchy and practiced REPL-driven
    workflow are corrected. The 51-report localization census in
    [[research/research-localization-classification-2026-07-14]] assigns 23
    reports to one successor, retains 18 as graduation evidence, and keeps ten
-   cross-owner reports as link-only shared input. Execute those moves in five
-   backlink-checked groups.
-2. **In progress:** reconcile this ledger with the generated open-issue index
-   and archive only findings that have committed behavioral and live proof.
+   cross-owner reports as link-only shared input. All 23 reports now live under
+   their one owner and every affected backlink is repaired.
+2. **Complete:** this ledger is reconciled with the generated open-issue index;
+   only findings with committed behavioral and live proof are archived.
 3. **Complete:** run one non-overlapping complete default checkpoint: operator,
    writer, pod, and offline Inspect.
 4. **Complete for the default cluster:** destructively reset/rebuild, then
@@ -102,7 +102,8 @@ Immediate unit-0 queue:
    database browser, root workspace sessions, canvas interaction, and agent
    runtime correctness, and Inspect/autocomplete evidence have current-source
    dependency audits; downstream distribution has a no-source consumer audit.
-   Ground local performance before implementation reaches the final unit.
+   Local performance has the final admission, measurement, evidence, budget,
+   destructive-matrix, and cleanup-gate audit.
 
 The 2026-07-14 unit-0 checkpoint passes operator 100 tests/592 assertions,
 writer 50/308, pod 1,307/6,182, and offline Inspect 311 passed/eight expected
