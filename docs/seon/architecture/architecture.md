@@ -206,6 +206,33 @@ the UI-host and agent-execution roles. Remote servers, thin clients,
 mobile packaging, and stronger execution isolation are separate target domains,
 not alternate local mechanisms.
 
+### Downstream distribution boundary
+
+Seon's source repository is the release producer; a downstream product does
+not require a Seon source checkout. One release operation publishes a
+coordinated standalone database-server uberjar and a relocatable Node runtime +
+consumer SDK. The runtime package contains the immutable pod closure, self-host
+bootstrap, bounded program-source corpus, static web assets, base config,
+production Node dependencies, semantic operator, and license/notices. The SDK
+contains the public CLJS source/macros and build entry needed to compile a
+consumer's namespaces into the same runtime.
+
+One compatibility manifest binds the Seon release/source revision, database
+protocol and config/SDK versions, Java/Node requirements, writer/runtime/
+bootstrap/source/assets digests, maintained Datahike/Konserve dependency
+identities, npm lock, and license/SBOM metadata. A downstream package embeds
+that manifest plus its own source/dependency/config/brand digest. Build and
+startup reject an incompatible or mixed set before database mutation; neither
+selects a mutable “latest” dependency or recompiles in production.
+
+The downstream repository owns its declared Clojure and npm dependencies,
+compiled namespaces/preload, config delta, routes and renders, brand CSS/assets,
+secrets, and deployment policy. It pins a released Seon SDK/runtime and invokes
+the shipped build/operator commands. Development projects add a compiler
+watcher to the same process graph; immutable packaged operation runs only the
+writer and pod. Product customization composes public data and function seams;
+it does not patch Seon source or introduce a second runtime mechanism.
+
 ## Cross-cutting principles
 
 ### DB-as-bus

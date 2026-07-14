@@ -166,6 +166,42 @@ that source dependency and recording it in run provenance is an open
 reproducibility issue; it does not block simultaneous default/ACME runtime
 experiments.
 
+The independent distribution audit in
+[[research/independent-acme-distribution-audit-2026-07-14]] establishes the
+next ACME boundary: ACME is the representative downstream product and must
+build, run, and customize a released Seon without a Seon source checkout. This
+is not implemented. The writer uberjar and source-checkout customization seams
+exist, but `bin/acme`, `acme/deps.edn`, the `acme-client` Shadow definition,
+base config include, operator, bootstrap/source/assets, and dependency bases
+still come from this checkout. The current client entry is a development loader
+into a checkout-local Shadow runtime, and the nominal packaged process graph
+still starts a compiler watcher.
+
+Carve the no-source downstream release into one focused successor PRD, ordered
+after this branch's local graduation evidence. The implementation order is:
+
+1. define a versioned compatibility manifest covering Seon/source, database
+   protocol, config/SDK ABI, Java/Node requirements, writer/runtime/bootstrap/
+   source/assets, maintained fork identities, npm lock, and license/SBOM data;
+2. publish the maintained dependencies and public CLJS source/macros as an
+   immutable downstream SDK coordinate;
+3. produce a relocatable, devtools-free Node runtime package with bootstrap,
+   bounded program-source corpus, static assets, and production npm closure;
+4. project development as watcher + writer + pod and packaged operation as
+   writer + pod from the one operator process graph;
+5. replace the hard-coded ACME flavor with a validated consumer descriptor for
+   source/preload, deps/npm, config, brand, package, and cluster defaults;
+6. add one source-repository release command that builds/tests and assembles
+   the versioned writer uberjar, runtime, SDK, manifest, hashes, SBOM/notices,
+   and license/source metadata; and
+7. prove one clean ACME checkout can build, start, customize, MCP-evaluate,
+   restart, and read back its database while the Seon checkout is inaccessible.
+
+The verified current defect is tracked by
+[[../../seon/issues/downstream-runtime-package-is-not-self-contained]]. The
+standalone writer jar remains only the database-process artifact; it cannot
+replace the CLJS pod/runtime SDK where agents, eval, rendering, and web UI live.
+
 Before implementation resumes, reconcile the target architecture from
 [[research/architecture-target-drift-audit-2026-07-14]] in its recommended
 order, then carve the remaining work into the audit's focused PRDs. The already
