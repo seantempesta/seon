@@ -40,8 +40,9 @@ The source/evidence audit sharpened the mismatch beyond Inspect itself:
   declared `src-inspect-ai` dependency despite current catalog/tests importing
   it;
 - the installed Python `openai` provider is `2.45.0`, while `pyproject.toml`
-  declares unbounded `openai`; the current lock happens to select bytes but the
-  accepted scorecard does not record that provider/lock identity; and
+  declares unbounded `openai`; the current lock has no `openai` package row and
+  does not list it under `seon-inspect`, so the installed provider is not
+  reproducible from that lock; and
 - historical scorecard rows identify a Seon Git SHA and dataset-lock hash but
   not Inspect, Inspect Evals, Python lock/provider, task source, or scorer
   implementation/config. Copying a native `.eval` log is currently best-effort

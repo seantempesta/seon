@@ -35,7 +35,8 @@ idempotent, but it is not an isolated eval-process boundary.
 The selected ClojureScript `1.12.145` source is not yet mirrored exactly. The
 current checkout is useful reference but cannot ground analyzer-boundary
 implementation. Exact Shadow `3.4.10` is already available at release commit
-`2911c908…` in the reference checkout's history.
+`d3c04691952aa9ea33f7287ffe9a2b3109c1e510` in the reference checkout's
+history; its parent `2911c908…` is still `3.4.9`.
 
 ## Research evidence
 

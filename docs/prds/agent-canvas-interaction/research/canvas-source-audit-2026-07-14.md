@@ -26,7 +26,7 @@ protected shared-schema file.
 | Datastar Clojure | `reference-code/datastar-clojure` `1cef624e…`, tagged `v1.0.0-RC7` | Confirms the separate gzip SSE and signal-reading idioms; Seon intentionally ships its own CLJS/Node adapter. |
 | Reitit | selected `0.10.1`; exact tag/checkout `106fc4c7…` | The database route resolves one `/agent/{id}/call` handler; controls do not need or own routes. |
 | Transit CLJS | selected `0.8.280`; exact tag is present and checkout is `3d8a2c49…` | Render-time button data remains data through the query-string codec; symbols, lists, and tagged values are refused before invoke. |
-| ClojureScript / Shadow | selected `1.12.145` / `3.4.10` | Exact Shadow release commit `2911c908…` is present. The exact selected ClojureScript source is still missing, so analyzer-sensitive changes remain blocked on that grounding gap; ordinary canvas data/control work does not need such a change. |
+| ClojureScript / Shadow | selected `1.12.145` / `3.4.10` | Exact Shadow release commit `d3c04691952aa9ea33f7287ffe9a2b3109c1e510` is present; its parent `2911c908…` is still `3.4.9`. The exact selected ClojureScript source is still missing, so analyzer-sensitive changes remain blocked on that grounding gap; ordinary canvas data/control work does not need such a change. |
 
 ## Current mechanism
 
