@@ -78,19 +78,46 @@ Parallel work is deliberately bounded:
 
 Immediate unit-0 queue:
 
-1. Correct the documentation hierarchy, add the practiced REPL-driven
-   workflow, and move detailed audits into their carved successor PRDs.
-2. Reconcile this ledger with the generated open-issue index and archive only
-   findings that have committed behavioral and live proof.
-3. Run one non-overlapping complete default checkpoint: operator, writer, pod,
-   and offline Inspect.
-4. Destructively reset/rebuild the default cluster, then prove routes, browser
-   interactions, gzip feeds, database read-back, restart, and both MCP runtimes.
-5. Classify every retained old-lane commit, ignored database/blob, worktree,
+1. **Complete:** correct the documentation hierarchy, add the practiced
+   REPL-driven workflow, and move detailed audits into their carved successor
+   PRDs.
+2. **In progress:** reconcile this ledger with the generated open-issue index
+   and archive only findings that have committed behavioral and live proof.
+3. **Complete:** run one non-overlapping complete default checkpoint: operator,
+   writer, pod, and offline Inspect.
+4. **Complete for the default cluster:** destructively reset/rebuild, then
+   prove routes, browser/static console state, server-side gzip feeds, database
+   read-back, restart, and both MCP runtimes.
+5. **Next:** classify every retained old-lane commit, ignored database/blob,
+   worktree,
    and process; preserve required evidence, then produce the explicit safe
    retirement list. Do not touch the active ACME agent worktree.
-6. Carve the successor PRD folders in dependency order with one grounded
-   dependency ledger and falsifiable acceptance matrix each.
+6. **In progress:** carve the successor PRD folders in dependency order with
+   one grounded dependency ledger and falsifiable acceptance matrix each.
+
+The 2026-07-14 unit-0 checkpoint passes operator 100 tests/592 assertions,
+writer 50/308, pod 1,307/6,182, and offline Inspect 311 passed/eight expected
+environment skips. The complete pod run first exposed two AI environment-
+fixture failures; REPL evidence showed ambient `SEON_AI_EXTRA_BODY` leakage,
+the fixture was corrected at its owner, and the repeated complete gate is the
+green count above.
+
+A destructive public reset rebuilt writer, client, bootstrap, and CSS, then
+returned watcher, writer, and pod ready. `/`, `/data`, the root gzip feed, and
+the data gzip feed served; both feeds emitted immediate
+`datastar-patch-elements` frames. A real in-app browser rendered the root shell
+and database page with no console warnings/errors. Its root long-lived feed
+remained on the loading shim, matching the documented browser-bridge SSE
+limitation rather than contradicting the server-side gzip proof.
+
+Unified raw MCP calls reached both current tool names. Before restart, the JVM
+and replica read basis `536870926`; the JVM additionally exposed branch `:db`
+and commit id, proving the replica's missing commit field recorded by the
+database-lifecycle audit. After public restart both runtimes re-resolved and
+read basis `536870929`. A bounded query failed as
+`:datahike/budget-exceeded` data at observed two/allowed one and the next normal
+query returned both agents. Retention admission rejected a 300,000-weight value
+against the 262,144 cap and immediately admitted `42`.
 
 ### Resume checkpoint — 2026-07-14
 
