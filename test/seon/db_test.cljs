@@ -209,6 +209,61 @@
                                     (:seon.db/read-observations capture)))))))))))
       done)))
 
+(deftest reverse-index-read-is-bounded-and-descending
+  (async done
+    (with-conn
+      (fn [conn]
+        (-> (d/transact! conn
+              [{::name "reverse-1" ::rank 1}
+               {::name "reverse-2" ::rank 2}
+               {::name "reverse-3" ::rank 3}
+               {::name "reverse-4" ::rank 4}])
+            (.then
+              (fn [_]
+                (let [rows (db/rseek-datoms
+                             {::db/db @conn
+                              ::db/index :aevt
+                              ::db/components [::rank]
+                              ::db/index-limit 3})
+                      entities (mapv ::db/e rows)]
+                  (is (= 3 (count rows)))
+                  (is (every? #(= ::rank (::db/a %)) rows))
+                  (is (apply > entities)))))))
+      done)))
+
+(deftest reverse-index-read-replays-only-its-bounded-result
+  (async done
+    (with-conn
+      (fn [conn]
+        (-> (d/transact! conn
+              [{::name "ranked-1" ::rank 1}
+               {::name "ranked-2" ::rank 2}])
+            (.then
+              (fn [_]
+                (let [capture
+                      (db/capture-reads
+                        {::db/db @conn
+                         ::db/thunk
+                         #(db/rseek-datoms
+                            {::db/db @conn
+                             ::db/index :aevt
+                             ::db/components [::rank]
+                             ::db/index-limit 2})})
+                      observation (first (::db/read-observations capture))]
+                  (-> (d/transact! conn [{::name "unrelated"}])
+                      (.then
+                        (fn [_]
+                          (is (false? (db/read-observation-changed?
+                                        {::db/db @conn
+                                         ::db/read-observation observation})))
+                          (d/transact! conn [{::name "ranked-3" ::rank 3}])))
+                      (.then
+                        (fn [_]
+                          (is (true? (db/read-observation-changed?
+                                       {::db/db @conn
+                                        ::db/read-observation observation})))))))))))
+      done)))
+
 (deftest attached?-follows-the-datahike-connection-lifecycle
   (async done
     (let [previous db/*conn*]

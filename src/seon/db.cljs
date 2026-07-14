@@ -411,6 +411,11 @@
    [::components ::components]
    [::index-limit ::index-limit]
    [::seek? ::seek?]])
+(schema/register! ::rseek-read-request
+  [:map {:closed true}
+   [::index ::index]
+   [::components ::components]
+   [::index-limit ::index-limit]])
 (schema/register! ::index-datoms-request
   [:map
    [::db ::db-val]
@@ -418,6 +423,12 @@
    [::components {:optional true} ::components]
    [::index-limit ::index-limit]
    [::seek? {:optional true} ::seek?]])
+(schema/register! ::rseek-datoms-request
+  [:map
+   [::db ::db-val]
+   [::index ::index]
+   [::components {:optional true} ::components]
+   [::index-limit ::index-limit]])
 (schema/register! ::empty-read-request [:map {:closed true}])
 (schema/register! ::read-result :any)
 (schema/register! ::read-replayable? :boolean)
@@ -914,6 +925,34 @@
          ::components components
          ::index-limit index-limit
          ::seek? seek?}
+        result true))
+    result))
+
+(defn- raw-rseek-datoms
+  "Read and normalize one bounded descending Datahike index window."
+  [db index components limit]
+  (->> (apply d/rseek-datoms db index components)
+       (take limit)
+       (mapv internal/datom->map)))
+
+(defn rseek-datoms
+  "Read at most `:seon.db/index-limit` datoms descending from an index key.
+
+   This is the bounded public face of Datahike's lazy `rseek-datoms`: results
+   begin at or before `:seon.db/components` and walk toward the beginning of
+   the selected index. Callers that need an exact prefix stop when the index
+   components change. The bounded result participates in exact reactive-read
+   replay, so unchanged windows do not rerender their consumers."
+  {:malli/schema [:=> [:cat ::rseek-datoms-request] ::datoms]}
+  [{::keys [db index components index-limit]
+    :or {components []}}]
+  (let [result (raw-rseek-datoms db index components index-limit)]
+    (when-let [captures (internal/current-read-captures)]
+      (internal/record-read!
+        captures :seon.db.read.operation/rseek-datoms db
+        {::index index
+         ::components components
+         ::index-limit index-limit}
         result true))
     result))
 
@@ -1445,6 +1484,7 @@
 (def ^:private replayable-read-operations
   #{:seon.db.read.operation/query
     :seon.db.read.operation/index-datoms
+    :seon.db.read.operation/rseek-datoms
     :seon.db.read.operation/installed-schema
     :seon.db.read.operation/pull
     :seon.db.read.operation/entity
@@ -1459,6 +1499,7 @@
   ;; the still-active prior projection and transiently fail the module load.
   {:seon.db.read.operation/query (delay (m/validator ::query-read-request))
    :seon.db.read.operation/index-datoms (delay (m/validator ::index-read-request))
+   :seon.db.read.operation/rseek-datoms (delay (m/validator ::rseek-read-request))
    :seon.db.read.operation/installed-schema (delay (m/validator ::empty-read-request))
    :seon.db.read.operation/pull (delay (m/validator ::pull-read-request))
    :seon.db.read.operation/entity (delay (m/validator ::entity-read-request))
@@ -1483,6 +1524,12 @@
                       (::components request)
                       (::index-limit request)
                       (::seek? request))
+
+    :seon.db.read.operation/rseek-datoms
+    (raw-rseek-datoms db
+                      (::index request)
+                      (::components request)
+                      (::index-limit request))
 
     :seon.db.read.operation/installed-schema
     (installed-schema* db)
