@@ -156,12 +156,34 @@
 ;; non-terminating agent-editable fn must never be able to wedge the
 ;; single-threaded pod, unconditionally. The error surface is derived and
 ;; self-healing — fix the fn (or its ns requires) and the next render is
-;; clean. One-time warn per sym so a persistently-failing fn stays visible
-;; in the log without spam.
-(def ^:private !bounding-warned (atom #{}))
+;; clean. A bounded FIFO window suppresses repeat log/error writes without
+;; retaining every broken symbol for the process lifetime.
+(def ^:private bounding-warning-cap 256)
+
+(def ^:private !bounding-warning-window
+  (atom {::warning-keys #{}
+         ::warning-order []}))
+
+(defn- first-warning-in-window?
+  [k]
+  (let [[before _]
+        (swap-vals!
+          !bounding-warning-window
+          (fn [{::keys [warning-keys warning-order] :as state}]
+            (if (contains? warning-keys k)
+              state
+              (let [order' (conj warning-order k)
+                    evicted (when (> (count order') bounding-warning-cap)
+                              (first order'))]
+                {::warning-keys (cond-> (conj warning-keys k)
+                                  evicted (disj evicted))
+                 ::warning-order (if evicted
+                                   (vec (rest order'))
+                                   order')}))))]
+    (not (contains? (::warning-keys before) k))))
 
 (defn- warn-bounding-failure-once!
-  "Warn + `record!` a bounding failure ONCE per [sym fault].
+  "Warn + `record!` the first bounding failure in the bounded key window.
 
    The render path re-invokes a persistently-broken canvas on every
    fetch/feed tick — per-occurrence recording would flood the DB the
@@ -171,8 +193,7 @@
    (the async wrapper arms) is skipped (`recorded?`)."
   [sym msg fault raw]
   (let [k (str sym " " fault)]
-    (when-not (contains? @!bounding-warned k)
-      (swap! !bounding-warned conj k)
+    (when (first-warning-in-window? k)
       (log/warn! {:seon.log/source  ::invoke-bounded
                   :seon.log/message
                   (str "render fn " sym " could not run under SCI bounding ("
