@@ -65,6 +65,61 @@ Uncommitted in the worktree and NOT for main: `acme/src/acme/pod.cljs`,
 `config/acme.edn`, `acme/CLAUDE.md`, `out-acme/client/main.js` (build output),
 and `src-needle/` scratch. These are the acme harness / experiment state.
 
+## RISKS, INCOMPLETE, and PROBLEMATIC parts (read before integrating)
+
+### Integration risks
+- **Naming migration `tile`→`surface`.** Main renamed the `plan!` docstring
+  example (`src/my/plan.cljs:33-34` on the pin: "summary fn + tile" / "tile
+  renders totals" → "surface") and is migrating the plan-block-HTML "tile"
+  naming (`internal.cljs` ~1337–1586). My cherry-picks do NOT touch those
+  regions (verified) — but after applying, grep the result for reintroduced
+  `tile`/`world`/`live-tile` in `my.plan` and keep main's `surface` wording.
+- **Order matters:** cherry-pick `2bf4eb14` (guard) THEN `39fd81ec` (markdown
+  cut) — 39fd81ec rewrites the same `plan!` docstring the guard commit's
+  context sits near.
+- **Verify, don't assume, the plan hunks.** Main's `plan.cljs`/`internal.cljs`
+  edits are in `needs!`/`move!` + `unresolved-step-refs` (internal ~81) +
+  render (~1451–1715); my hunks are `plan!` (~328), `reconcile!` (~521), the
+  `::markdown` schema (~191), the parser (759–874). Disjoint on inspection,
+  but a git 3-way merge can still throw context conflicts — resolve by keeping
+  BOTH main's preflights and my guard/markdown-cut, then run the tests below.
+- **Post-integration test gate:** `bin/test-cljs --test=my.plan-test` AND a
+  full `bin/test-cljs` (the plan changes touch shared render/eval paths).
+
+### Found-but-NOT-fixed (hand off to the refactor — these are its domain)
+- **Cross-tree writer-REPL port collision (infra bug).** `bin/seon:114`
+  hardcodes `SEON_WRITER_REPL_PORT` to a fixed `7891`; pods get a free port
+  (`SEON_PORT=0`) but the wire-server does not. So an ephemeral bench cluster
+  in one worktree collides with a co-located default wire-server (reproduced:
+  the stable worktree's bench cluster vs main's default on 7891 → `Address
+  already in use`, cluster-create dies). I worked around it with a one-off
+  `SEON_WRITER_REPL_PORT=<free>` env; NOT fixed at root. Proper fix: allocate a
+  free writer-REPL port per ephemeral cluster (mirror the pod's `SEON_PORT=0`).
+  This is runtime-reliability/cluster-lifecycle territory.
+- **Write-timeout is silent.** A DB write whose auto-await exceeds
+  `seon.eval/!timeout-ms` (10s) records a `:seon.eval/pending` placeholder — an
+  agent cannot distinguish slow-but-committed from failed. A write timeout
+  should surface a clear failure. Not triggered by the plan bug (writes were
+  ~400ms) but a real latent issue.
+
+### Incomplete / follow-ups (autosuggest lane, not blocking)
+- **plan-block teaching gap (owner-gated).** `empty-plan-teaching`
+  (`internal.cljs`) still omits "results arrive NEXT turn" + the `reconcile!`
+  pointer. I put that in `plan!`'s docstring (renders in its card), NOT the
+  teaching block — deferred per the no-context-hacks rule. If wanted in the
+  teaching too, it's a one-line follow-up requiring owner sign-off.
+- **`plan!` guard is title-scoped.** Two DELIBERATELY same-titled plans → the
+  second is refused (a distinct forest must use distinct titles). Accepted edge.
+- **`offline_proof` full suite is blocked at E1** (pre-existing, diffusion):
+  the `worker-oracle-eval` bundle is unbuilt, so the full suite aborts before
+  reaching my planning entries. Validated them in isolation instead
+  (good=1.000 / bad=0.000 via `inspect_eval` directly). Rebuild that bundle or
+  make E1 resilient to run the whole suite.
+- **Live behavioral proof pending.** The `plan!` guard + tightened docstrings
+  are unit-tested but NOT yet proven on a live 35B drive (bench-bundle rebuild
+  + one planning sample) — the "does the model stop duplicating and manage one
+  clean plan" proof is still to run.
+
 ## Already in the shared codebase (pre-pin, no action)
 
 - `3e0e0bff` — schema-reference closure, non-nilable schema gate, `my.plan`
