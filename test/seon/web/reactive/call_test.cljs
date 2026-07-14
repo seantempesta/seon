@@ -14,12 +14,29 @@
        the SCI tile tests use — no live pod."
   (:require
     [clojure.string :as str]
-    [cljs.test :refer [deftest is testing async]]
+    [cljs.test :refer [deftest is testing async use-fixtures]]
     [seon.agent.home :as home]
     [seon.client :as client]
     [seon.db :as db]
     [seon.repl :as repl]
+    [seon.schema :as schema]
     [seon.web.reactive.call :as call]))
+
+(def ^:private !schema-state (atom nil))
+
+(use-fixtures :each
+  {:before #(reset! !schema-state
+                    {::schema-forms (schema/snapshot)
+                     ::schema-projection (schema/current-projection)})
+   :after  #(let [{::keys [schema-forms schema-projection]} @!schema-state]
+              (if schema-projection
+                (do
+                  (schema/activate-projection! schema-projection)
+                  (schema/restore! schema-forms))
+                (do
+                  (schema/restore! schema-forms)
+                  (reset! @#'schema/!projection nil)
+                  (schema/relink-registry!))))})
 
 ;; A valid 14-char id (`:seon.db/id` is [:string {:min 14 :max 14}]).
 (def ^:private agent-id "tst-2606260000")
@@ -108,7 +125,11 @@
               (let [cs   (aget res 0)
                     conn (aget res 1)]
                 (set! db/*conn* conn)
-                (-> (seed!)
+                ;; Replay reads canonical schema/program facts from this
+                ;; isolated database, exactly like runtime boot. Seed those
+                ;; facts before asking replay to make them authoritative.
+                (-> (client/boot-seed! {:seon.db/conn conn})
+                    (.then (fn [_] (seed!)))
                     (.then
                       (fn [_]
                         (client/replay-program-graph!

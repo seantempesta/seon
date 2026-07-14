@@ -36,11 +36,21 @@
     [seon.repl :as repl]
     [seon.schema :as schema]))
 
-(def ^:private baseline-schemas (schema/snapshot))
+(def ^:private !schema-state (atom nil))
 
 (use-fixtures :each
-  {:before #(schema/activate! baseline-schemas)
-   :after  #(schema/activate! baseline-schemas)})
+  {:before #(reset! !schema-state
+                    {::forms (schema/snapshot)
+                     ::projection (schema/current-projection)})
+   :after  #(let [{::keys [forms projection]} @!schema-state]
+              (if projection
+                (do
+                  (schema/activate-projection! projection)
+                  (schema/restore! forms))
+                (do
+                  (schema/restore! forms)
+                  (reset! @#'schema/!projection nil)
+                  (schema/relink-registry!))))})
 
 ;; ---------------------------------------------------------------------------
 ;; BUG A — UNSPECCED aliased helper resolves under SCI bounding.

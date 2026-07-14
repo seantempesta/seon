@@ -48,7 +48,9 @@ declaration candidate without prematurely publishing it, and the original
 cross-namespace order is green. Replay test cleanup now also restores the
 candidate collector separately from the active projection, and warning
 derivation consumes the projection catalog rather than retired canonical
-properties. Re-run the complete checkpoint to find any
+properties. Test fixtures must capture registry state at execution time, never
+module load; isolated replay tests seed canonical database facts first. The SCI
+and reactive-call leaks now follow those rules. Re-run the complete checkpoint to find any
 independent remainder before optimizing selection;
 then reuse the existing managed Shadow process and compiler dependency graph.
 Do not infer function-level test impact from the incomplete runtime graph.
