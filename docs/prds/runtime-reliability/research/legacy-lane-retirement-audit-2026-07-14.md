@@ -11,7 +11,8 @@ tags: [research, archive, agent]
 This read-only audit classifies the registered autocomplete, Inspect, plan,
 function-surface, and retired-gym worktrees for eventual retirement. It
 rechecks [[worktree-evidence-preservation-manifest-2026-07-14]],
-[[inspect-autocomplete-lane-integration-audit-2026-07-14]], and
+[[../../inspect-autocomplete-evidence/research/inspect-autocomplete-lane-integration-audit-2026-07-14]],
+and
 [[legacy-acme-archive-readback-runbook-2026-07-14]] against current Git,
 filesystem-allocation, process, and listening-port metadata.
 
@@ -42,7 +43,7 @@ mutable on ports 7980–7983. This report authorizes no cleanup.
 | OS process/socket metadata | macOS `ps` and `lsof`; PID, parent, start time, cwd, command, and listening socket | Distinguish active runtime ownership from filesystem residue without signalling anything |
 | Preservation manifest | [[worktree-evidence-preservation-manifest-2026-07-14]] | Prior per-file hashes, database/blob inventory, and cleanup gates |
 | Historical read-back | [[legacy-acme-archive-readback-runbook-2026-07-14]] | Exact old Datahike/Konserve locks and the closed-copy verification protocol |
-| Lane integration audit | [[inspect-autocomplete-lane-integration-audit-2026-07-14]] | Commit-level import, supersession, and rejection decisions |
+| Lane integration audit | [[../../inspect-autocomplete-evidence/research/inspect-autocomplete-lane-integration-audit-2026-07-14]] | Commit-level import, supersession, and rejection decisions |
 | Current operator boundary | `bin/seon`; default writer PID 21496 and pod PID 21498 at this snapshot | Separates the maintained default cluster from orphaned legacy processes |
 
 This unit changes no Clojure behavior, so it introduces no new dependency API

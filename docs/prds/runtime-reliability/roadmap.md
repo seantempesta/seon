@@ -177,7 +177,8 @@ scalar-input find-pull shape returned `[[{:seon.agent/id "root"}]]`, proving
 the maintained fix through Seon's running CLJS database boundary.
 
 The cross-lane audit in
-[[research/inspect-autocomplete-lane-integration-audit-2026-07-14]] confirms
+[[../inspect-autocomplete-evidence/research/inspect-autocomplete-lane-integration-audit-2026-07-14]]
+confirms
 that the five stable behavior commits are integrated or patch-equivalent and
 that no old lane commit is a safe new cherry-pick. Four display-v3 ideas remain
 to be reimplemented through one structured database-derived export; ignored

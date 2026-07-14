@@ -38,7 +38,7 @@ removed merely to reclaim space before this preservation gate is complete.
   44 MB cluster, a dirty completed fair scorer/report, an untracked
   continuation-drive design and probe, and 404 KB of ignored prediction/example
   outputs. The design, probe, scorer, and report SHA-256 values are recorded in
-  [[docs/prds/runtime-reliability/research/inspect-autocomplete-lane-integration-audit-2026-07-14]].
+  [[docs/prds/inspect-autocomplete-evidence/research/inspect-autocomplete-lane-integration-audit-2026-07-14]].
   Removing the worktree from Git status alone would lose this evidence.
 - The root-cause runbook says to inspect display-v3 and plan/reconcile work
   before removing worktrees and to preserve the held-out export first. It does

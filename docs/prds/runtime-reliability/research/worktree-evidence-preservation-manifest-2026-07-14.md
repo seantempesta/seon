@@ -10,7 +10,9 @@ tags: [research, archive, database, agent]
 
 This is the non-destructive inventory required before retiring the old
 autocomplete, Inspect, planning, and gym worktrees. It refines the lane
-disposition in [[inspect-autocomplete-lane-integration-audit-2026-07-14]] and
+disposition in
+[[../../inspect-autocomplete-evidence/research/inspect-autocomplete-lane-integration-audit-2026-07-14]]
+and
 the live ownership findings in
 [[dependency-shadow-mcp-acme-audit-2026-07-14]]. The active roadmap remains
 the implementation-state and sequencing authority.
