@@ -113,6 +113,16 @@ implementation:
   misclassifies the resulting incomplete execution. Slice 4 therefore begins
   by restoring one green single-process baseline before optimizing selection.
 
+The first baseline repair now preserves the exact pre-test schema state across
+program-graph replay, including the meaningful distinction between the live
+declaration collector and an activated immutable projection. The replay,
+config, and database namespaces pass sequentially in one Node process (70
+tests, 436 assertions). Incomplete-run classification now calls a failure
+"cold bundle load" only when zero test namespaces started. A complete
+single-process rerun remains required after the autosuggest integration
+checkpoint; the prior diagnostic run reached its final summary and showed no
+independent duplicate completion.
+
 The durable evidence, pinned sources, executable probes, and acceptance gates
 are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]] and
 [[research/test-impact-selection-and-runner-audit-2026-07-14]].

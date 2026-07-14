@@ -321,10 +321,11 @@ INCOMPLETE=0
 [ -z "$SUMMARY_LINE" ] && INCOMPLETE=1
 
 # A missing summary can mean either a module-load failure or an async test that
-# never called its continuation. Diagnose known cold-load errors from the SAME
-# run without changing the verdict or launching a second process.
+# never called its continuation. A load failure occurs before cljs.test starts
+# any namespace; an invalid-schema later in an executing suite is a test/runtime
+# failure, not evidence that the bundle failed to load.
 LOAD_FAILED=0
-if [ "$INCOMPLETE" -ne 0 ] && \
+if [ "$INCOMPLETE" -ne 0 ] && [ "$RAN" -eq 0 ] && \
    grep -qaE 'SHADOW import error|malli\.core/invalid-schema|register that keyword first|is not a valid Malli schema' "$TMPOUT"; then
   LOAD_FAILED=1
 fi

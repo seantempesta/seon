@@ -18,7 +18,19 @@
             [seon.client :as client]
             [seon.db :as db]
             [seon.eval :as seval]
-            [seon.repl :as repl]))
+            [seon.repl :as repl]
+            [seon.schema :as schema]
+            [seon.test.async :refer [settle!]]))
+
+(defn- restore-schema-state!
+  "Restore the exact collector/projection state that preceded replay."
+  [forms projection]
+  (if projection
+    (schema/activate-projection! projection)
+    (do
+      (schema/restore! forms)
+      (reset! @#'schema/!projection nil)
+      (schema/relink-registry!))))
 
 ;; ---------------------------------------------------------------------------
 ;; The capability, end-to-end. "An agent owns and evolves its own functions"
@@ -58,7 +70,9 @@
 
 (deftest downstream-fn-is-indexed-and-its-override-flows-through-a-late-bound-caller
   (async done
-    (let [before @client/!extra-core-vars]
+    (let [before-extra      @client/!extra-core-vars
+          before-schemas    (schema/snapshot)
+          before-projection (schema/current-projection)]
       (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
           (.then
             (fn [res]
@@ -144,13 +158,11 @@
                           (testing "SET! flows through the UNCHANGED late-bound caller"
                             (is (:seon.eval/ok? r) (str "post-set! eval not ok — " (pr-str (:seon/error r))))
                             (is (= "set-bang!" (:seon.eval/value r)))))))))))
-          (.then (fn [_]
-                   (reset! client/!extra-core-vars before)
-                   (done)))
-          (.catch (fn [e]
-                    (reset! client/!extra-core-vars before)
-                    (is false (str "threw — " e))
-                    (done)))))))
+          (.finally
+            (fn []
+              (reset! client/!extra-core-vars before-extra)
+              (restore-schema-state! before-schemas before-projection)))
+          (settle! done)))))
 
 (defn guard-bait
   "A specced fn in a `seon.*` ns that is NOT in `core-vars` (test
