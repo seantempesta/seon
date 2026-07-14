@@ -172,6 +172,56 @@ commit, and the stable Konserve tree commit. A Git SHA alone is insufficient if
 the fork remote later disappears; the final archive should include Git bundles
 for the checkout and each Git dependency or a verified immutable remote URI.
 
+## Current-checkout orphaned legacy cluster
+
+The current checkout also contains an offline legacy-layout cluster at
+`/Users/sean/src/seon/data/clusters/acme/`. The current operator expects
+`data/clusters/acme/db`; `bin/acme status --edn` correctly returns
+`:seon.dev.target.failure/legacy-database-layout` instead of adopting the old
+`store/` directory. Its reported foreign writer and pod are the live stable and
+display-v3 port owners, not owners of this path. `lsof +D` found zero open files
+under the current cluster.
+
+| Field | Current-checkout legacy ACME |
+|---|---|
+| Closed interval from file mtimes | `2026-07-02T22:54:00-04:00` through `2026-07-13T09:24:24-04:00` |
+| Store | 101,348 KiB; 6,693 files |
+| Blobs | 112,112 KiB; 2,004 files |
+| Whole cluster | 213,460 KiB; 8,697 files |
+| Store manifest SHA-256 | `a4137685568cd01496e9c12f81d5f47290b7109bff3547510edba951d6970577` |
+| Blob manifest SHA-256 | `846d34a983c16bf338ba7aeccd955777f066f2c021547667b5adefacc566b44d` |
+| Cluster manifest SHA-256 | `108fb08a0bfa5620736f7c083c3ada0e2928f7dba58bc9c4be6f458a6f2436eb` |
+| Last recorded writer boot basis | `536870914` |
+| Last writer PID and boot | PID 31104 at `2026-07-13T09:24:23-04:00`; no longer live |
+| Historical checkout | `288d44612a2051dff32ec1d3e303821640792b22` |
+| Historical Datahike / Konserve | Git `67934f650fae30924ac115c899cd3412d90dcacb` / Git `df6818d43ea3363a808cd051c0d68917f1b987a9` |
+
+The manifest digests hash a relative-path-sorted stream of each file's SHA-256;
+they identify this closed payload without opening Datahike. The historical
+writer log records basis `536870914` when PID 31104 opened the database, then
+the pod resumed `root`, `twelve-words-lie`, and `upset-toys-brake` and installed
+three ACME context blocks. Because writes followed boot, `536870914` is only a
+lower bound. Final basis, schema identity, and latest transaction require a
+disposable-copy read-back; they must not be guessed from Konserve files.
+
+This cluster is unique. A path-and-byte comparison against display-v3 found
+1,966 identical files totaling 107,625,726 bytes, all in the content-addressed
+blob corpus. The current cluster has 38 blob files absent from display-v3. Of
+its 6,693 store files, 6,690 paths are absent from display-v3 and the three
+shared paths differ. Comparisons with stable and plan-pilot found no identical
+current files. Shared blob content proves lineage, not database duplication.
+
+Disposition: include the whole current `data/clusters/acme/` directory as its
+own content-addressed archive package. It is already quiesced, so it does not
+need the pod/writer stop steps. Recheck `lsof +D`, file count, sizes, newest
+mtime, and all three manifest hashes immediately before copying. Read back only
+a disposable restored copy with checkout `288d4461`, the exact Datahike and
+Konserve revisions above, and the same canonical identity expression. Require
+basis/schema/latest-transaction identity plus representative root, agent,
+eval, plan, ACME-context, and blob facts. Do not rename `store/` to `db/`, start
+the current operator against it, or combine it with display-v3 merely because
+their blob corpora overlap.
+
 ## Archive-root capacity and durability
 
 Only the internal APFS data volume is presently mounted as a writable archive
@@ -191,7 +241,7 @@ cleanup but not loss of the internal disk. Recommended choices are:
   to durable storage before cleanup authorization.
 
 Reserve at least four times the closed logical payload: staged copy, compressed
-package, extracted read-back copy, and headroom. For the current two clusters,
+package, extracted read-back copy, and headroom. For all three clusters,
 20 GiB free is a conservative minimum. The available internal volume exceeds
 that, but no root was created by this audit.
 
@@ -249,6 +299,10 @@ The following is a runbook, not authorization to execute it.
     before/after disposable-copy checksums, and owner acceptance in the
     preservation manifest and issue. Only then can cleanup review begin.
 
+For the current-checkout offline cluster, begin at step 6 after revalidating
+that it is still closed and byte-identical to the recorded manifest. Package it
+separately; the live-lane quiescence order does not apply to an unowned path.
+
 Because the writers are orphaned under PID 1, the old supervisor is not a
 trustworthy stop owner. The maintenance executor must signal the four
 revalidated process identities explicitly, one lane at a time; it must not use
@@ -265,6 +319,8 @@ checkouts.
 - No Git dependency bundle or verified immutable remote retention has been
   archived.
 - The extra blob files have not been classified against restored history.
+- The current-checkout legacy cluster has a closed payload identity but no
+  disposable-copy database identity or archive package.
 - Owner acceptance for process shutdown and worktree retirement is still
   absent.
 

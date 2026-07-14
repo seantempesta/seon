@@ -34,7 +34,7 @@ not content identities.
 
 | Worktree | Branch or state | HEAD | Tracked state | Untracked state | Initial disposition |
 |---|---|---|---|---|---|
-| `/Users/sean/src/seon` | `codex/runtime-reliability-refactor` | `9843e318` | Clean at snapshot | One protected research file | Keep; current integration checkout. |
+| `/Users/sean/src/seon` | `codex/runtime-reliability-refactor` | `9843e318` | Clean at snapshot | One protected research file | Keep; current integration checkout. Its offline legacy-layout ACME cluster requires a separate archive before current ACME may start. |
 | `/Users/sean/src/seon-display-v3` | `repl-autosuggest/display-v3` | `b7be18be` | 83 paths: generated bundle, `shadow-cljs.edn`, and 81 reference-link type changes | `node_modules`, `src-needle/.venv`, `src-needle/checkpoints` | Preserve database and tune exports; reject the four unique display commits as implementation imports. |
 | `/Users/sean/src/seon-fn-surface` | `repl-autosuggest/fn-surface-pin` | `17a82314` | Generated ACME bundle | `node_modules` | Reproducibly discard generated state after confirming committed lint evidence. |
 | `/Users/sean/src/seon-pin` | Detached | `93c8d8ad` | `shadow-cljs.edn` | `test/seon/needle_lora_audit_test.cljs` | Preserve audit fixture and historical default cluster until the current Inspect replacement proves equivalent evidence. |
@@ -84,6 +84,7 @@ starting a current writer against the same path.
 
 | Worktree and logical cluster | Database path and size | Blob path and size | Ownership and required disposition |
 |---|---|---|---|
+| current checkout `acme` | `data/clusters/acme/store`, 101,348 KiB | `data/clusters/acme/blobs`, 112,112 KiB | No live owner; current operator rejects the legacy layout. Unique store plus 38 blobs absent from display-v3. Archive and read back separately before migration or removal. |
 | display-v3 `acme` | `data/clusters/acme/store`, 4,324,736 KiB | `data/clusters/acme/blobs`, 110,572 KiB | Live writer PID 45003. Content-addressed archive plus restore/read-back is mandatory. |
 | fn-surface `acme` | `data/clusters/acme/store`, 15,576 KiB | None | No live owner observed. Compare against another cluster or classify as reproducible before discard. |
 | fn-surface `default` | No `store` directory | `data/clusters/default/blobs`, 2,188 KiB | Blob-only generated residue; discard only after proving no referenced unique blob. |
@@ -106,6 +107,14 @@ every byte of a live multi-gigabyte mutable database would not provide a
 consistent snapshot and would impose avoidable I/O. The archive step below
 must quiesce its owner, copy the complete cluster atomically, then hash the
 closed archive.
+
+The current-checkout legacy cluster is already closed and small enough for a
+read-only payload identity. Its 8,697-file relative-path/content manifest is
+`108fb08a0bfa5620736f7c083c3ada0e2928f7dba58bc9c4be6f458a6f2436eb`.
+It shares 1,966 byte-identical blobs with display-v3 but retains 38 additional
+blobs and an independent 6,693-file store, so it is not a duplicate. Exact
+evidence and historical dependency locks are in
+[[legacy-acme-archive-readback-runbook-2026-07-14]].
 
 ## Small unique evidence hashes
 
@@ -241,18 +250,20 @@ inventory unit:
    boundary; migrate Inspect and ACME callers before replacing any live lane.
 3. Archive and read back stable and display-v3, then obtain explicit owner
    acceptance for stopping their legacy processes.
-4. Archive and stage-read plan-pilot. Preserve pin until Inspect reproduces
+4. Archive and read back the current checkout's offline legacy ACME package;
+   only then migrate or remove that conflicting `store/` layout.
+5. Archive and stage-read plan-pilot. Preserve pin until Inspect reproduces
    its staged audit evidence.
-5. Preserve the stable scorer/probe/report/raw outputs, display-v3 tune files,
+6. Preserve the stable scorer/probe/report/raw outputs, display-v3 tune files,
    stable instruction drift, pin audit fixture, and gym binary patch.
-6. Prove fn-surface, plan-fix, and toolkit-gaps generated/database state is
+7. Prove fn-surface, plan-fix, and toolkit-gaps generated/database state is
    duplicate or reproducible. Equal directory size is insufficient.
-7. Re-run process, port, Git, ignored-file, and checksum checks immediately
+8. Re-run process, port, Git, ignored-file, and checksum checks immediately
    before removal. Remove accepted worktrees one at a time, never with a shared
    reset or discard command.
-8. Verify retained archive checksums after each removal. Remove worktrees
+9. Verify retained archive checksums after each removal. Remove worktrees
    before considering branch deletion.
-9. Delete only a branch whose commits are integrated, superseded, or explicitly
+10. Delete only a branch whose commits are integrated, superseded, or explicitly
    rejected and whose unique dirty/ignored evidence has a verified archive.
 
 ## Remaining blockers
@@ -263,6 +274,9 @@ inventory unit:
 - Stable and display-v3 remain live and mutable.
 - Live basis/schema/latest-transaction checkpoints are captured, but final
   post-pod-quiescence identities are not.
+- The current checkout's offline legacy ACME cluster is uniquely identified at
+  the byte level but lacks a content-addressed package and disposable-copy
+  basis/schema/read-back proof. Its legacy layout blocks current ACME startup.
 - Plan-pilot lacks the required current read-only staging proof.
 - Pin has not been superseded by equivalent current Inspect evidence.
 - Fn-surface, toolkit-gaps, and their same-sized blob residues lack a real

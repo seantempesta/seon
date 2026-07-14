@@ -95,6 +95,18 @@ quiescence order: stop a pod first, capture its writer's final identity second,
 then stop that writer and copy the closed cluster. The current values remain
 live checkpoints until that maintenance sequence is executed.
 
+The same audit found a third required package in the current checkout:
+`data/clusters/acme/store` plus `blobs` is an offline 213,460 KiB legacy-layout
+cluster with 8,697 files. The current operator rejects it rather than opening
+or migrating it in place. Its closed payload manifest is
+`108fb08a0bfa5620736f7c083c3ada0e2928f7dba58bc9c4be6f458a6f2436eb`.
+It shares 1,966 byte-identical blobs with display-v3, but has 38 additional
+blobs and an independent store: 6,690 store paths are absent from display-v3
+and the three shared paths differ. It is therefore unique, not disposable
+residue. Archive it separately and read back a disposable copy with historical
+checkout `288d4461`, Datahike `67934f65`, and Konserve `df6818d4` before the
+conflicting legacy path is migrated or removed.
+
 ## Owner
 
 The repl-autosuggest evidence/archive owner inventories the experiments; the
