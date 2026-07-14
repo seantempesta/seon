@@ -53,14 +53,16 @@ downstream repositories, never `src/`, `docs/`, or `pod-host/`.
 There are two documentation layers and no third:
 
 - `docs/seon/architecture/` is the single always-current description of the
-  intended system. It is target-written in present tense. Read
+  aspirational intended system. It is target-written in present tense, but
+  present tense never claims that source already implements the target. Read
   `architecture.md` first, then the relevant domain document. Update it when a
-  design decision changes; do not put implementation status or a migration
-  diary there.
+  design decision changes; never put current implementation state, gaps,
+  sequencing, evidence, graduation status, or a migration diary there.
 - `docs/prds/<chunk>/` contains one implementable roadmap chunk on its own
-  branch. Its `roadmap.md` records what is built, gaps, evidence, and the path
-  from current code to the architecture target. Its localized `AGENTS.md` is a
-  tight runbook/index. Finish and merge the chunk before carving the next
+  branch. Its `roadmap.md` is the sole authority for what is built now, the
+  remaining gaps, implementation order, evidence, graduation status, and the
+  path from current code to the architecture target. Its localized `AGENTS.md`
+  is a tight runbook/index. Finish and merge the chunk before carving the next
   architecture delta into a new PRD folder and branch.
 
 After a material change, update the affected architecture target, the active
