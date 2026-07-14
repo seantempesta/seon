@@ -165,7 +165,7 @@
        :seon.dev.config/http-port (parse-long (get environment "SEON_PORT" "7890"))
        :seon.dev.config/http-port-file port-file
        :seon.dev.config/writer-repl-port
-       (parse-long (get environment "SEON_WRITER_REPL_PORT" "7891"))
+       (parse-long (get environment "SEON_WRITER_REPL_PORT" "0"))
        :seon.dev.config/writer-repl-port-file writer-port-file
        :seon.dev.config/client-output
        (get environment "SEON_CLIENT_OUT" (str (fs/path root "out/client/main.js")))

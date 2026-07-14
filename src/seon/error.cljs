@@ -416,7 +416,7 @@
   "CALLER-scope bracket around one dev/MCP REPL-submitted form.
 
    Wrapped around the ONE dev-eval choke point (`js/SHADOW_NODE_EVAL`,
-   patched in `seon.client` — both nREPL :7889 entries funnel through
+   patched in `seon.client` — both Shadow nREPL entry paths funnel through
    it) so `seon.instrument/wrapper-fault` can read [[in-dev-eval?]]: an
    INPUT-contract violation a dev eval provokes on a core fn is the
    CALLER's mistake → `:agent` population (recorded, never escalates —

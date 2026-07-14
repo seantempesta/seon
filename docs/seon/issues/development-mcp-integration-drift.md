@@ -45,6 +45,40 @@ REPL values. The writer currently exposes the human-oriented `repl`, so a
 machine CLJ tool is absent; adding nREPL to the production writer would create
 an unnecessary second protocol and enlarge its isolated basis.
 
+The 2026-07-14 implementation verifier found six additional owning defects in
+the first integrated version:
+
+- a multi-form CLJ string consumed only the first per-form `:ret`, leaving
+  later returns queued and shifting subsequent stateful calls;
+- Shadow reports runtime and print failures as the values
+  `:repl/exception!` and `:repl/print-error!` with a terminal `done` status, so
+  status-only classification incorrectly returned tool success;
+- writer discovery ignored the operator-supported
+  `SEON_WRITER_REPL_PORT_FILE` override;
+- temporary and replaced Shadow nREPL sessions were not always closed;
+- CLJ deadlines were per-read inactivity timeouts and both CLJ and CLJS
+  transports accumulated output before the final display clip; and
+- `docker/seon-entrypoint` passed a default writer REPL port into the canonical
+  production container, violating the typed-production/development-eval
+  boundary.
+
+The current fix enforces one CLJ form before socket write (`(do ...)` is the
+explicit multi-expression form), classifies both Shadow sentinels as errors,
+honors the config-owned writer port-file override for the selected cluster,
+closes transient/replaced nREPL sessions, uses an overall CLJ deadline with
+bounded event retention and bounded nREPL response retention, and removes all
+writer REPL arguments from the production container.
+
+Focused proof passes `seon.dev.mcp-test` at 9 tests/36 assertions and
+`seon.db.server-test` at 1 test/4 assertions. A live newline-JSON-RPC proof
+against the ready default cluster observed CLJ state `9`, rejected `10 11` as
+`:multiple-forms`, then observed `10` from `(inc framing-proof)` with no queued
+return; a thrown CLJS `js/Error` returned `isError` with `:evaluation`; and a
+64-token bounded CLJ call returned valid JSON with `:bounded`. The earlier
+restart proof also observed explicit named-session loss plus successful default
+CLJ/CLJS recovery. This note remains open only until the owning commit exists;
+archive it with that commit and these behavioral proofs.
+
 ## Owner
 
 One repository-owned development MCP adapter under `script/seon/dev/` with a

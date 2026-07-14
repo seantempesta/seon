@@ -265,6 +265,25 @@ attempts fail, the function or document is too complex—refactor it.
 
 ## Dev feedback and testing
 
+Live diagnosis and narrow behavioral verification start through the repository
+MCP server loaded by `.codex/config.toml` and `.mcp.json`:
+
+- use `eval_cljs` for the running Node pod, keeping `agent_id` cluster-qualified
+  when more than one live pod can host the id;
+- use `eval_clj` for the selected JVM writer's stateful `io-prepl` session;
+- use the default session for disposable probes and a named `session_id` only
+  when later forms intentionally depend on `*1`/`*2`/`*3`;
+- treat a named-session restart error as lost process-local REPL state and
+  choose a fresh session id; never infer that the underlying database state was
+  lost; and
+- keep correctness tests in `bin/test-cljs`, `bin/test-writer`, and
+  `bin/seon test operator`. MCP eval is the first probe, not another test
+  runner.
+
+The server discovers the current checkout's dynamic Shadow and cluster writer
+ports. After changing MCP code or client registration, restart the Codex or
+Claude task: already-running clients do not reload stdio server definitions.
+
 The edit hook parses changed Clojure files and requests conservative affected
 tests through one public operation:
 

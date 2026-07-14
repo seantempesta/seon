@@ -55,7 +55,7 @@ Completed and committed on this branch:
 - a green complete CLJS checkpoint of 1,301 tests/6,159 assertions plus focused
   live hook proofs on all three Clojure file types.
 
-The issue authority currently contains 14 open and 86 archived notes. Startup
+The issue authority currently contains 24 open and 86 archived notes. Startup
 triage found one process-safety blocker before broad agent/browser drives:
 `eval-memory-safety.md` still permits an individual database query or pull to
 materialize an unbounded value even though retained result-slot count is
@@ -152,32 +152,38 @@ implementation:
   polling requirement. The Codex hook definitions are currently discovered but
   untrusted, so live proof requires one user review after their implementation
   is final.
-- The complete CLJS gate is not presently trustworthy. A focused
-  `seon.client.extra-core-test` reproduces a process-global Malli projection
-  leak, the full run reports duplicate async completion, and the runner
-  misclassifies the resulting incomplete execution. Slice 4 therefore begins
-  by restoring one green single-process baseline before optimizing selection.
-
-The first baseline repair now preserves the exact pre-test schema state across
-program-graph replay, including the meaningful distinction between the live
-declaration collector and an activated immutable projection. The replay,
-config, and database namespaces pass sequentially in one Node process (70
-tests, 436 assertions). Incomplete-run classification now calls a failure
-"cold bundle load" only when zero test namespaces started. A complete
-single-process rerun remains required after the autosuggest integration
-checkpoint; the prior diagnostic run reached its final summary and showed no
-independent duplicate completion.
-
-The post-integration rerun exposed the remaining projection fault more exactly:
-database writes validated newly registered attrs through Malli's last committed
-global registry, even though the eval deliberately withholds candidate
-publication until the declaration transaction succeeds. Candidate value
-validation now passes an explicit live declaration registry without mutating
-the global projection early. The focused schema/database gate passes 56 tests
-and 391 assertions, and the original contaminating order (`extra-core-test`
-then `db-test`) passes 52 tests and 361 assertions in one process. A complete
-single-process checkpoint is still required to distinguish any independent
-later failures from the old cascade.
+- Development evaluation now has one repository-owned Babashka MCP server with
+  explicit `eval_cljs` and `eval_clj` tools. The CLJS side retains Shadow's
+  bencode/nREPL sessions and cluster-qualified database-agent routing; the
+  writer exposes Clojure 1.12 `io-prepl` on loopback port zero. Both sides
+  discover actual checkout/cluster port files, bound tool output and deadlines,
+  and report process restarts explicitly. Claude's `seon_cljs` server name is a
+  compatibility registration of this same implementation; the removed JVM MCP
+  entry is gone. This is a development probe boundary, not a new test runner or
+  typed database administration protocol. ACME artifact flavors and Inspect
+  live-caller migration remain outside this unit and therefore remain open.
+  Closing a timed-out `io-prepl` socket bounds the MCP caller but does not
+  forcibly interrupt an arbitrary CLJ form already executing in the writer;
+  stronger interruption/isolation remains the separately measured decision
+  identified by the MCP audit.
+  The post-integration verifier also closed per-form `io-prepl` queue leakage,
+  Shadow's `:repl/exception!`/`:repl/print-error!` success misclassification,
+  the writer port-file override gap, temporary nREPL session leaks, and
+  pre-display response accumulation. The canonical container no longer passes
+  development REPL arguments, so production retains only the typed database
+  protocol. Focused MCP/writer gates pass 9 tests/39 assertions and 1 test/4
+  assertions; live JSON-RPC proved rejected multi-form input preserves CLJ
+  state and a thrown CLJS form is a tool error.
+- Dated diagnostic evidence from earlier on 2026-07-14 found a process-global
+  Malli projection leak, duplicate async completion, and incomplete-run
+  misclassification. The repair preserved the distinction between the live
+  declaration candidate and activated immutable projection, validated first
+  writes against that candidate, and classified a cold bundle load only when
+  zero test namespaces started. The focused schema/database gate passed 56
+  tests/391 assertions and the original contaminating order passed 52
+  tests/361 assertions. This is retained repair evidence, not a current gap:
+  the post-repair complete CLJS checkpoint is green at 1,301 tests/6,159
+  assertions.
 
 The completed autosuggest lane is now integrated as five bounded commits. The
 active Inspect SWE-bench arm derives restricted egress from the selected model
@@ -192,13 +198,13 @@ related-step preflights and surface vocabulary were preserved; the focused plan
 gate passes 40 tests and 241 assertions. A paid/live planning drive remains
 later acceptance work, not evidence implied by these offline checks.
 
-The 2026-07-14 post-integration complete CLJS gate compiled successfully, then
-ran 1,299 tests and 6,117 assertions in 234 seconds with 99 failures and 10
-errors. The first failures occur in database/schema state and cascade into
-later state, render, reactive-call, and router fixtures through missing or
-diverged registry facts. This is the current falsification baseline: do not
-interpret a focused green gate as a complete checkpoint, and do not optimize by
-hiding the cross-test state leak.
+The initial 2026-07-14 post-integration complete CLJS gate compiled
+successfully, then ran 1,299 tests and 6,117 assertions in 234 seconds with 99
+failures and 10 errors. The first failures occur in database/schema state and
+cascade into later state, render, reactive-call, and router fixtures through
+missing or diverged registry facts. This established the falsification baseline
+at that point: do not interpret a focused green gate as a complete checkpoint,
+and do not optimize by hiding the cross-test state leak.
 
 After candidate validation and exact collector/projection restoration, the
 next complete gate ran 1,300 tests and 6,123 assertions with 34 failures and 5
@@ -269,9 +275,11 @@ triage, and mechanical index checks are
 now implemented as one client-neutral `docs/seon/issues/` tree. The obsolete
 orchestrator-doc directory and manual current-work indexes are gone; dated
 audits moved into this PRD's research, the private dual-path registry was split
-and archived, and 14 open plus 86 archived notes pass `bin/issues-index
---check`. Root and role instructions now require durable parent handoff and one
-bounded startup triage rather than a chat-only finding or second backlog.
+and archived. At that initial implementation checkpoint, 14 open plus 86
+archived notes passed `bin/issues-index --check`; the current count is the
+24 open plus 86 archived notes recorded above. Root and role instructions now
+require durable parent handoff and one bounded startup triage rather than a
+chat-only finding or second backlog.
 
 The first automatic-feedback implementation is deliberately namespace-level
 and conservative. `seon.dev.changed-test` remains the one public decision:

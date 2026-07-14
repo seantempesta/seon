@@ -11,7 +11,7 @@
    `seon.client/start-agent!` so core experiments don't have to
    spin up the stub LLM, web server, or broadcast watcher.
 
-   ### Typical loop via mcp__seon_cljs__eval
+   ### Typical loop via the `eval_cljs` MCP tool
 
    The MCP server piggybacks shadow's nREPL into the :client runtime;
    forms eval'd through it see every namespace required from
@@ -48,7 +48,7 @@
     [seon.db.id :as id]
     [seon.eval :as seval]
     ;; Pulled in so the :client bundle can reach rewrite-clj via the
-    ;; host REPL (mcp__seon_cljs__eval) for ad-hoc core probes
+    ;; host REPL (`eval_cljs`) for ad-hoc core probes
     ;; — e.g. `(rewrite-clj.parser/parse-string-all "...")`. The
     ;; parse-forms parser itself lives in seon.repl.internal (.cljc).
     [rewrite-clj.parser]

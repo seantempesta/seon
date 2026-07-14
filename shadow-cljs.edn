@@ -1,11 +1,11 @@
 ;; CLJS build config — lives at seon root.
 ;; Builds pull from the :cljs alias in deps.edn for CLJS deps.
 ;;
-;; Shadow nREPL is pinned to :7889 so bin/mcp-server-cljs and editors have one
-;; stable CLJS development endpoint.
+;; Shadow binds an available loopback port and publishes the actual value under
+;; this checkout's cache root for the development MCP adapter and editors.
 {:deps  {:aliases [:cljs]}
 
- :nrepl {:port 7889}
+ :nrepl {:port 0}
 
  ;; npm package roots for the COMPILE-TIME resolver (shadow's npm
  ;; service probes each dir in order — build/npm.clj:1049-1089 +
@@ -76,8 +76,8 @@
   ;; :client EXCEPT :output-to → "out-acme/client/main.js" (its own
   ;; output dir, so the live :client watch's "out/client/main.js" is
   ;; never clobbered). bin/acme `build` runs a one-off COMPILE of this
-  ;; build (not a second watch) — that sidesteps the shadow nREPL :7889
-  ;; clash two watch servers would hit — injecting SEON_EXTRA_SRC (acme/)
+  ;; build (not a second watch) — that avoids two watchers contending for the
+  ;; same Shadow cache/server ownership — injecting SEON_EXTRA_SRC (acme/)
   ;; + SEON_EXTRA_PRELOAD (acme.pod) exactly as cljs-watch does for
   ;; :client. The acme.* surface compiles INTO this bundle; bin/acme's
   ;; pod runs it via SEON_CLIENT_OUT=out-acme/client/main.js.

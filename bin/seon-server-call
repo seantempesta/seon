@@ -2,9 +2,9 @@
 
 ;; bin/seon-server-call — structured RPC helper for the bin/seon supervisor.
 ;;
-;; Sends ONE Clojure expression to the database server's loopback socket REPL
+;; Sends ONE Clojure expression to the database server's loopback io-prepl
 ;; (the same supervisor channel `cluster fork`/`cluster destroy` have always
-;; used — clojure.core.server/repl on 127.0.0.1, port in the per-supervisor
+;; used — clojure.core.server/io-prepl on 127.0.0.1, port in the per-supervisor
 ;; $SEON_WRITER_REPL_PORT_FILE) and PARSES the printed reply as EDN instead of
 ;; pattern-matching it. Owner directive: the moment structure crosses a
 ;; boundary it is parsed as data — bash never greps printed EDN (the grep
@@ -131,20 +131,20 @@
       (str/replace #"(?m)^[\w.\-]+=> " "")))
 
 (defn read-result
-  "Read every EDN form in the prompt-stripped reply; the result is the LAST
-   form and must be a map (the server fns' response contract). Unknown
-   tagged literals read as tagged-literal values instead of throwing.
-   Returns the map, or nil when the reply doesn't honor the contract
-   (e.g. the REPL printed an exception)."
+  "Read io-prepl events and parse the final successful return value as a map."
   [cleaned]
   (try
     (let [rdr (PushbackReader. (StringReader. cleaned))
           eof (Object.)]
-      (loop [last-form nil saw-form? false]
+      (loop [return-event nil]
         (let [form (edn/read {:default tagged-literal :eof eof} rdr)]
           (if (identical? form eof)
-            (when (and saw-form? (map? last-form)) last-form)
-            (recur form true)))))
+            (when (and (= :ret (:tag return-event))
+                       (not (:exception return-event)))
+              (let [value (edn/read-string {:default tagged-literal}
+                                           (:val return-event))]
+                (when (map? value) value)))
+            (recur (if (= :ret (:tag form)) form return-event))))))
     (catch Exception _ nil)))
 
 ;; ---------------------------------------------------------------------------

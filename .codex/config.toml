@@ -1,4 +1,4 @@
 project_doc_max_bytes = 131072
 
 [mcp_servers.seon]
-command = "/Users/sean/src/seon/bin/mcp-server-cljs"
+command = "bin/mcp-server-cljs"

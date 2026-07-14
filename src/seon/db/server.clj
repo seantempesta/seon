@@ -109,7 +109,7 @@
            {:name "seon-database-repl"
             :address "127.0.0.1"
             :port port
-            :accept 'clojure.core.server/repl})]
+            :accept 'clojure.core.server/io-prepl})]
       (spit file (str (.getLocalPort ^java.net.ServerSocket server)))
       (.deleteOnExit file)
       server)))

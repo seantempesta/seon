@@ -31,7 +31,6 @@ NODE="$SEON_HOME/node/bin/node"
 
 REQ_SOCK="${SEON_REQ_SOCK:-$SEON_DATA/tmp/seon-req.sock}"
 PUB_SOCK="${SEON_PUB_SOCK:-$SEON_DATA/tmp/seon-pub.sock}"
-WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7891}"
 PORT_FILE="${SEON_PORT_FILE:-$SEON_DATA/tmp/seon-port}"
 
 mkdir -p "$CLUSTER_DIR" "$SEON_DATA/tmp" "$SEON_DATA/logs"
@@ -53,7 +52,6 @@ start_database() {
     --path "$CLUSTER_DIR/db" \
     --req-sock "$REQ_SOCK" \
     --pub-sock "$PUB_SOCK" \
-    --repl-port "$WRITER_REPL_PORT" \
     >> "$SEON_DATA/logs/database-server.log" 2>&1 &
   DATABASE_PID=$!
   echo "[seon-entrypoint] database server started (pid $DATABASE_PID)"

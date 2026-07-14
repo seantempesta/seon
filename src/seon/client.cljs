@@ -12,7 +12,7 @@
      ;; Terminal 2 — the Node host
      node out/client/main.js
 
-     ;; Editor / MCP — connect to nREPL on localhost:7889, then
+     ;; Editor / MCP — read `.shadow-cljs/nrepl.port`, then
      ;; pivot into the running CLJS runtime:
      (shadow.cljs.devtools.api/nrepl-select :client)
 
@@ -2407,8 +2407,8 @@
 
 (defonce ^:private !orig-shadow-node-eval
   ;; Dev-eval CALLER scope (C50): `js/SHADOW_NODE_EVAL` is the ONE conduit
-  ;; every dev/MCP REPL-submitted form enters the pod through — both nREPL
-  ;; :7889 routes (`do-invoke`'s node-eval and `IEvalJS -js-eval`) funnel
+  ;; every dev/MCP REPL-submitted form enters the pod through — both Shadow
+  ;; nREPL routes (`do-invoke`'s node-eval and `IEvalJS -js-eval`) funnel
   ;; into this one global (reference-code/shadow-cljs .../client/node.cljs
   ;; :11-13,:97-108); hot reload uses SHADOW_IMPORT, never this. Patched
   ;; ONCE per process (defonce) to run each eval inside
@@ -2518,5 +2518,5 @@
                                         "auto-boot FAILED — exiting (no local fallback)"
                                         err)
                     (.exit js/process 1))))))
-  (log/info-console! "seon.client" "nREPL :7889 — (shadow.cljs.devtools.api/nrepl-select :client)")
+  (log/info-console! "seon.client" "Shadow nREPL port: .shadow-cljs/nrepl.port; select :client")
   (start-heartbeat!))

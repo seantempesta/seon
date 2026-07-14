@@ -132,6 +132,14 @@ bin/seon test operator
 curl -fsS http://127.0.0.1:7890/agents >/dev/null
 ```
 
+For a narrow live probe, use the repository MCP server before reaching for a
+test run: `eval_cljs` targets the current pod through Shadow and `eval_clj`
+targets the selected writer through loopback `io-prepl`. Both discover current
+cluster-qualified dynamic port files. Tests still run only through the existing
+pod, database, and operator doors. Restart the client task after changing MCP
+registration or server source; an already-running stdio MCP process cannot
+reload itself.
+
 Use the authorized default cluster/database for destructive live proof. Do not
 touch ACME while its shared lane is dirty; update it only after the default
 cluster passes. Use the `browser-automation` skill for Seon's own UI and verify
