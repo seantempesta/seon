@@ -256,6 +256,16 @@ that source dependency and recording it in run provenance is an open
 reproducibility issue; it does not block simultaneous default/ACME runtime
 experiments.
 
+The agentic tool refinement work is carved into
+[[../agentic-tool-refinement/roadmap.md]]. It owns the isolated ACME small-model
+evaluation loop, dynamic namespace/tool-contract audit, frozen Inspect suites,
+planning-arm comparison, failure classification, and graduation evidence. It
+is downstream of the local ACME/operator integration already proven here and
+does not block runtime-reliability branch graduation. Its first fresh-agent
+baseline renders 21,839 estimated tokens in the namespaces block; reducing
+that cost without hiding complete relevant contracts is the first measured
+tool-surface question.
+
 The independent distribution audit in
 [[../independent-downstream-distribution/research/independent-acme-distribution-audit-2026-07-14]] establishes the
 next ACME boundary: ACME is the representative downstream product and must
