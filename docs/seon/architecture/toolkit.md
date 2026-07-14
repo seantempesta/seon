@@ -523,10 +523,15 @@ open items render every turn; an empty list is the done-signal.
 an entity; the wrapper holds the functions + the owner-scope default, the db engine
 does the durable write.
 
-Surface: `plan!`/`step!` → `{ok? id}` (optional `:my.plan/parent` /
-`:my.plan/needs` refs), `active!`/`done!`/`reopen!` (idempotent), `next`/
-`tree`/`status`/`list-open` (derived reads), `drop!`. Map-in/map-out;
-semantic failures are `::ok?` envelopes. Per-agent scope is DECLARED:
+Surface: `plan!` creates a whole plan once; an open root with the same title is
+a guiding failure that returns the existing root id instead of duplicating the
+tree. `reconcile!` is the one whole-plan update door: it accepts the edited EDN
+tree returned by `document` and diffs by `:my.plan/id`; there is no parallel
+markdown parser. `step!` adds one node (optional `:my.plan/parent` /
+`:my.plan/needs` refs), `active!`/`done!`/`reopen!` change status, `next`/
+`tree`/`document`/`status`/`list-open` are derived reads, and `drop!` retracts a
+subtree. Map-in/map-out; semantic failures are `::ok?` envelopes. Per-agent
+scope is DECLARED:
 each scoped function carries `:seon.agent/id {:optional true}` in its request
 schema — omitted, the eval boundary fills the calling agent (the
 required-key resolution in [[context]]); the row is stamped with the

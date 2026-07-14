@@ -312,7 +312,7 @@ def test_snapshot_form_is_one_line_with_sentinels():
     form = _SNAPSHOT_FORM % ("plan-t", '"a-9"')
     assert "\n" not in form
     assert form.count("WIRE-JSON") == 2
-    assert ":seon.server.registry/db-name :plan-t" in form
+    assert ":seon.db.registry/database-name :plan-t" in form
     assert '"a-9"' in form
 
 

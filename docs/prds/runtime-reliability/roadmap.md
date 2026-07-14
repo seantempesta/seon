@@ -123,6 +123,20 @@ single-process rerun remains required after the autosuggest integration
 checkpoint; the prior diagnostic run reached its final summary and showed no
 independent duplicate completion.
 
+The completed autosuggest lane is now integrated as five bounded commits. The
+active Inspect SWE-bench arm derives restricted egress from the selected model
+provider, standard openai-compatible Inspect mode declares its `openai`
+dependency, and long-term planning is a first-class Inspect task over the
+existing restart driver. Its offline good/bad arms score 1.000/0.000. The
+Inspect suite passes 293 tests with eight environment-gated skips after fixing
+one stale pre-refactor registry assertion. In `my.plan`, a repeated open
+same-title `plan!` is refused instead of duplicating a forest, while
+`reconcile!` now has one EDN-tree update format and no markdown parser. Main's
+related-step preflights and surface vocabulary were preserved; the focused plan
+gate passes 40 tests and 241 assertions. A paid/live planning drive and the
+complete CLJS gate remain later acceptance work, not evidence implied by these
+offline checks.
+
 The durable evidence, pinned sources, executable probes, and acceptance gates
 are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]] and
 [[research/test-impact-selection-and-runner-audit-2026-07-14]].

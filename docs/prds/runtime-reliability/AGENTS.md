@@ -46,6 +46,14 @@ projection leak and duplicate async completion. Repair that baseline first;
 then reuse the existing managed Shadow process and compiler dependency graph.
 Do not infer function-level test impact from the incomplete runtime graph.
 
+The stable autosuggest lane has been collapsed into this branch through its
+five reviewed implementation commits only. Keep the provider-derived Inspect
+egress, declared `openai` dependency, first-class long-term-planning task,
+same-title `plan!` guard, and EDN-only `reconcile!`. Do not import the lane's
+redundant compact-context commits, local ACME/src-needle state, or removed
+markdown plan path. The offline Inspect gate is 293 passed/eight gated skips;
+planning good/bad score 1.000/0.000; focused `my.plan-test` is 40/241.
+
 The previously shared ACME/plan/REPL work is checkpointed at `3e0e0bff` and the
 tree was clean immediately afterward. Focused `seon.schema-test`,
 `my.plan-test`, and `seon.ai.dispatch-test` runs pass. The annotated

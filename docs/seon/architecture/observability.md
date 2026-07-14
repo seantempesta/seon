@@ -286,6 +286,12 @@ ephemeral clusters by port through this same production boundary; there is no
 in-process evaluator lifecycle. The answer key never enters the pod — scoring
 stays host-side. Benchmark vocabulary is harness-side only.
 
+Long-term planning is a first-class Inspect task over that same door: its live
+arm creates one ephemeral cluster, drives phase one, restarts the pod, resumes
+the same agent for phase two, and scores the resulting plan/eval facts
+host-side. Frozen good/bad arms exercise the identical scorer offline so its
+discrimination can be proved without a pod or model.
+
 ## Build path
 
 Every turn uses the one complete database coordinate plus prompt/reply blob
