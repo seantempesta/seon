@@ -8,6 +8,7 @@
 #                                 # compile, then run one namespace or test var
 #   bin/test-cljs --no-build --test=seon.db-test/query-roundtrip
 #                                 # reuse the current bundle for one test var
+#   bin/test-cljs --verbose       # stream the full transcript to the terminal
 #
 # Config seam (per-test manifest): the node test process inherits this shell's
 # env, so a run names its own manifest via SEON_CONFIG / SEON_PROFILE — the SAME
@@ -67,11 +68,13 @@ export SEON_RENDER_STRICT="${SEON_RENDER_STRICT:-1}"
 export SEON_CONFIG="${SEON_CONFIG:-config/test.edn}"
 
 BUILD=1
+VERBOSE=0
 TEST_ARGS=()
 
 for arg in "$@"; do
   case "$arg" in
     --no-build) BUILD=0 ;;
+    --verbose) VERBOSE=1 ;;
     --test=*) TEST_ARGS+=("$arg") ;;
     --help|-h)
       sed -n '2,15p' "$0"
@@ -277,8 +280,46 @@ NODE_CMD=(node out/test/test.js)
 if [ "${#TEST_ARGS[@]}" -gt 0 ]; then
   NODE_CMD+=("${TEST_ARGS[@]}")
 fi
-"${NODE_CMD[@]}" 2>&1 | tee -a "$TMPOUT"
-NODE_EXIT=${PIPESTATUS[0]}
+
+# The timestamped log is the complete forensic transcript. The terminal is a
+# control surface: expected negative-path fixtures routinely emit multi-line
+# Datahike/LLM errors and ordinary runtime info, which used to bury the one
+# assertion a human needed. Default to compact progress + final cljs.test
+# counts; `--verbose` remains the explicit live-transcript escape hatch.
+compact_node_output() {
+  awk '
+    /^Testing / {
+      started += 1
+      if (started == 1) printf "progress: "
+      printf "."
+      if (started % 50 == 0) printf " %d namespaces\nprogress: ", started
+      system("")
+      next
+    }
+    /^Ran [0-9]+ tests containing/ || /^[0-9]+ failures, [0-9]+ errors\.$/ {
+      if (!closed) { printf " %d namespaces\n", started; closed = 1 }
+      print
+      system("")
+      next
+    }
+    /SHADOW import error/ {
+      if (!closed) { printf "\n"; closed = 1 }
+      print
+      system("")
+    }
+    END {
+      if (started > 0 && !closed) printf " %d namespaces\n", started
+    }
+  '
+}
+
+if [ "$VERBOSE" -eq 1 ]; then
+  "${NODE_CMD[@]}" 2>&1 | tee -a "$TMPOUT"
+  NODE_EXIT=${PIPESTATUS[0]}
+else
+  "${NODE_CMD[@]}" 2>&1 | tee -a "$TMPOUT" | compact_node_output
+  NODE_EXIT=${PIPESTATUS[0]}
+fi
 NODE_END=$(date +%s)
 NODE_ELAPSED=$((NODE_END - NODE_START))
 

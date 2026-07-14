@@ -546,9 +546,11 @@ fresh database is `bin/seon cluster reset default`.
 Use `bin/test-cljs --test=seon.example-test` for one CLJS namespace or
 `--test=seon.example-test/example` for one var; use `--no-build` only when the
 existing test bundle contains the change. `bin/test-cljs` is the full CLJS
-checkpoint. Use `bin/test-writer` for the retained JVM database-server gate, or
-pass one test namespace for a focused writer run. Never run overlapping
-cljs.test suites in the live pod.
+checkpoint. Its default terminal output is compact; the complete negative-path
+and runtime transcript stays in the printed timestamped log. Add `--verbose`
+only when that full stream is needed live. Use `bin/test-writer` for the
+retained JVM database-server gate, or pass one test namespace for a focused
+writer run. Never run overlapping cljs.test suites in the live pod.
 
 For the normal inner loop, use
 `bin/seon test changed --path src/seon/example.cljs`. The managed Shadow JVM

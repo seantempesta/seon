@@ -169,6 +169,15 @@ diverged registry facts. This is the current falsification baseline: do not
 interpret a focused green gate as a complete checkpoint, and do not optimize by
 hiding the cross-test state leak.
 
+After candidate validation and exact collector/projection restoration, the
+next complete gate ran 1,300 tests and 6,123 assertions with 34 failures and 5
+errors. `seon.db-test` is green inside the complete process; the remaining
+clusters begin at missing-agent rendering, state scratch-schema ownership, and
+warning fixtures that still lose schema/program projections. The default
+runner stream is now compact progress plus counts/failure index, while the
+complete expected-negative-path transcript remains in its bounded log;
+`--verbose` opts back into live raw output.
+
 The durable evidence, pinned sources, executable probes, and acceptance gates
 are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]],
 [[research/test-impact-selection-and-runner-audit-2026-07-14]], and

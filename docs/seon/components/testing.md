@@ -35,6 +35,12 @@ otherwise it fails loudly and requests a build. Each database test owns a fresh
 connection or explicit fixture. Async tests await the actual Promise and always
 complete the `cljs.test/async` continuation.
 
+The default terminal stream is deliberately compact: namespace progress, final
+counts, and the bounded failure index. Expected negative-path Datahike/LLM logs
+remain in the timestamped full transcript instead of burying assertions. Use
+`--verbose` only when live access to that complete stream is useful; every run
+prints the retained log path either way.
+
 `bin/test-writer` loads an explicit list of retained JVM namespaces through the
 `:writer:writer-test` basis. It does not discover or load the archived JVM
 application.
