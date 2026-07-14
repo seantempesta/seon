@@ -305,6 +305,18 @@
 ;;; transcript masthead read the DATOM (config-through-DB), never this key.
 (schema/register! :seon.config/repl-mode [:enum :batch :stream])
 
+;;; RUN RESOURCE POLICY — generous safety ceilings, not normal stop reasons.
+;;; The manifest section resolves into three scalar singleton datoms so the
+;;; frozen database value completely determines what a new run will seed.
+(schema/register! :seon.config.run/batch-turn-limit  [:int {:default 100 :min 1}])
+(schema/register! :seon.config.run/stream-form-limit [:int {:default 300 :min 1}])
+(schema/register! :seon.config.run/deadline-ms       [:int {:default 1800000 :min 1}])
+(schema/register! :seon.config/run
+  [:map
+   [:seon.config.run/batch-turn-limit  {:optional true} :seon.config.run/batch-turn-limit]
+   [:seon.config.run/stream-form-limit {:optional true} :seon.config.run/stream-form-limit]
+   [:seon.config.run/deadline-ms       {:optional true} :seon.config.run/deadline-ms]])
+
 ;;; ============================================================
 ;;; THE `:seon.config` SINGLETON — one cluster-config entity, ATTRIBUTE-PER-KEY
 ;;; (config-db-migration-spec 2026-07-10). The owner contract: config is read
@@ -369,6 +381,9 @@
    [:seon.config/id                          :seon.config/id]
    [:seon.config/skills             {:optional true} :seon.config/skills]
    [:seon.config/repl-mode          {:optional true} :seon.config/repl-mode]
+   [:seon.config.run/batch-turn-limit  {:optional true} :seon.config.run/batch-turn-limit]
+   [:seon.config.run/stream-form-limit {:optional true} :seon.config.run/stream-form-limit]
+   [:seon.config.run/deadline-ms       {:optional true} :seon.config.run/deadline-ms]
    [:seon.config/current-ns         {:optional true} :seon.config/current-ns]
    [:seon.config/on-core-error      {:optional true} :seon.config/on-core-error]
    [:seon.config/spawn-depth-cap    {:optional true} :seon.config/spawn-depth-cap]
@@ -436,6 +451,7 @@
   [:map
    [:seon.config/skills        {:optional true} :seon.config/skills-spec]
    [:seon.config/repl-mode     {:optional true} :seon.config/repl-mode]
+   [:seon.config/run           {:optional true} :seon.config/run]
    [:seon.config/namespaces    {:optional true} :seon.config/namespaces-spec]
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render        {:optional true} :seon.config/render]
@@ -608,6 +624,20 @@
 ;;; arities as before (the coordination contract; ~40 caller sites unchanged).
 ;;; ============================================================
 
+(def ^:private default-transformer
+  "The one recursive schema-default resolver for config sections. Optional
+   keys carrying Malli defaults are materialized before singleton flattening."
+  (mt/default-value-transformer {:malli.transform/add-optional-keys true}))
+
+(defn default-run-policy
+  "The run section with every schema default materialized.
+
+   This is the sole no-manifest fallback used before a config singleton exists;
+   normal runtime reads the resolved scalar datoms from the database."
+  {:malli/schema [:=> [:cat] :seon.config/run]}
+  []
+  (m/decode :seon.config/run {} default-transformer))
+
 (defn- coerce-enum
   "`v` when it is in `allowed`, else `fallback` — the belt for a stale/invalid
    value (the manifest validator already rejects a bad literal loudly at load)."
@@ -646,6 +676,7 @@
   {:malli/schema [:=> [:catn [::manifest :seon.config/manifest]] :seon.config/singleton]}
   [manifest]
   (let [r   (get manifest :seon.config/render {})
+        run (merge (default-run-policy) (get manifest :seon.config/run {}))
         rep (get manifest :seon.config/repair {})
         web (get manifest :seon.config/web {})
         nsp (resolve-namespaces manifest)]
@@ -653,6 +684,12 @@
              :seon.config/repl-mode
              (let [d (default-repl-mode)]
                (coerce-enum (get manifest :seon.config/repl-mode d) #{:batch :stream} d))
+             :seon.config.run/batch-turn-limit
+             (:seon.config.run/batch-turn-limit run)
+             :seon.config.run/stream-form-limit
+             (:seon.config.run/stream-form-limit run)
+             :seon.config.run/deadline-ms
+             (:seon.config.run/deadline-ms run)
              :seon.config/current-ns (:seon.config/current-ns nsp)
              :seon.config/always     (:seon.config/always nsp)
              :seon.config/on-core-error
@@ -1288,7 +1325,7 @@
    so without it the transformer skips absent keys instead of filling their
    `:default`). Fills agent-level keys AND recurses into any supplied partial
    block map to fill its per-block defaults."
-  (mt/default-value-transformer {:malli.transform/add-optional-keys true}))
+  default-transformer)
 
 (defn- context-config-for
   "Select the FULLY-DEFAULTED agent-context map for `id` from `manifest`

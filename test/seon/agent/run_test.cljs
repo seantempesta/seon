@@ -64,7 +64,7 @@
                     (is (re-matches #"^[a-z][a-z0-9]{11}$"
                                     (:seon.agent.run/id snap))
                         "the fencing token uses the compact generated-id policy")
-                    (is (= 20 (:seon.agent.run/turn-limit snap)) "default turn-limit")
+                    (is (= 100 (:seon.agent.run/turn-limit snap)) "default turn-limit")
                     (is (inst? (:seon.agent.run/deadline snap)) "wall-clock bound set")
                     (let [cur  (run/current-run {:seon.agent/id a-id})
                           snap2 (agent/derive-status {:seon.agent/id a-id})]
@@ -72,7 +72,7 @@
                           "the agent's pointer resolves to this open run")
                       (is (= :running (:seon.agent/state snap2)) "derived state")
                       (is (= 0 (:seon.agent.run/turn snap2)) "no turns stamped yet")
-                      (is (= 20 (:seon.agent.run/turns-remaining snap2)))
+                      (is (= 100 (:seon.agent.run/turns-remaining snap2)))
                       (is (contains? snap2 :seon.agent.run/ms-remaining))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -139,12 +139,12 @@
                     (let [rid    (:seon.agent.run/id snap)
                           dl-bef (.getTime (:seon.agent.run/deadline snap))]
                       (-> (run/renew! {:seon.agent/id a-id :seon.agent.run/id rid
-                                       :seon.agent.run/deadline-extension-ms 1200000})
+                                       :seon.agent.run/deadline-extension-ms 2400000})
                           (.then
                             (fn [res]
                               (is (:seon.db/ok? res))
                               (let [r (db/entity @conn [:seon.agent.run/id rid])]
-                                (is (= 21 (:seon.agent.run/turn-limit r)) "turn-limit +1")
+                                (is (= 101 (:seon.agent.run/turn-limit r)) "turn-limit +1")
                                 (is (> (.getTime (:seon.agent.run/deadline r)) dl-bef)
                                     "deadline pushed out"))
                               ;; supersede, then renew the OLD run → fenced

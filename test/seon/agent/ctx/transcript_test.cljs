@@ -106,6 +106,30 @@
     (is (= stream (t/clip-events-by-tiers [] 8 stream)))
     (is (= stream (t/clip-events-by-tiers [] 0 stream)))))
 
+(deftest turn-window-rotates-only-in-complete-25-turn-chunks
+  (testing "50/25 keeps an append-only window between rotation boundaries"
+    (is (= 0 (t/turn-window-cutoff 49 50 25)))
+    (is (= 25 (t/turn-window-cutoff 50 50 25)))
+    (is (= 25 (t/turn-window-cutoff 74 50 25)))
+    (is (= 50 (t/turn-window-cutoff 75 50 25))))
+  (let [events (mapv #(ev % :eval (str "e" %)) (range 75))]
+    (is (= (range 25 75)
+           (map ::t/turn-idx (t/clip-events-by-turn-window 74 50 25 events))))
+    (is (= (range 50 75)
+           (map ::t/turn-idx (t/clip-events-by-turn-window 75 50 25 events))))))
+
+(deftest settled-budget-charges-complete-rendered-event-newest-first
+  (let [oldest {::t/event {::t/turn-idx 25} ::t/text (apply str (repeat 40 "a"))}
+        newer  {::t/event {::t/turn-idx 49} ::t/text (apply str (repeat 40 "b"))}
+        active {::t/event {::t/turn-idx 50} ::t/text (apply str (repeat 400 "c"))}
+        cap    (tokens/estimate (::t/text newer))
+        out    (t/clip-rendered-events-by-settled-budget 50 cap
+                                                         [oldest newer active])]
+    (is (= [newer active] out)
+        "the newest settled row spends the shared cap; active rows are free")
+    (is (> (tokens/estimate (::t/text active)) cap)
+        "the active row survives even when it exceeds the settled budget")))
+
 (deftest tier-cap-for-turn-selects-the-covering-band
   (let [tiers [{::t/from-turn 2 ::t/to-turn 4 ::t/token-cap 100}
                {::t/from-turn 5 ::t/token-cap 20}]]

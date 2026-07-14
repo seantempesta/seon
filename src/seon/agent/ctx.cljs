@@ -354,7 +354,37 @@
   "Work-bound shown by the readline when the agent has NO open run (the
    run-model default a new run would seed). Mirrors
    `seon.agent.run/default-turn-limit`."
-  20)
+  (:seon.config.run/batch-turn-limit (config/default-run-policy)))
+
+(def default-form-limit
+  "Work-bound shown by the idle readline in stream mode. Mirrors
+   `seon.agent.run/default-form-limit` without introducing the run→ctx cycle."
+  (:seon.config.run/stream-form-limit (config/default-run-policy)))
+
+(schema/register! ::run-policy
+  [:map
+   [:seon.config.run/batch-turn-limit :seon.config.run/batch-turn-limit]
+   [:seon.config.run/stream-form-limit :seon.config.run/stream-form-limit]
+   [:seon.config.run/deadline-ms :seon.config.run/deadline-ms]])
+
+(defn run-policy
+  "Run safety policy from the frozen database config singleton.
+
+   The manifest resolver persists all three scalar attrs. A missing singleton
+   exists only in pre-config scratch stores and falls back through the same
+   schema defaults used by config resolution—never a second literal table."
+  {:malli/schema [:=> [:catn [:seon.db/db :any]] ::run-policy]}
+  [db]
+  (let [defaults (config/default-run-policy)
+        stored   (when (and db
+                            (every? (db/installed-schema db)
+                                    (keys defaults)))
+                   (select-keys
+                     (db/entity
+                       {:seon.db/db db
+                        :seon.db/ref [:seon.config/id config/cluster-config-id]})
+                     (keys defaults)))]
+    (merge defaults stored)))
 
 ;; `current-run` + `derived-state` are the [[seon.derive]] leaf — call
 ;; `seon.derive/current-run` / `seon.derive/derive-state` with the db value the
