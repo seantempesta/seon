@@ -107,6 +107,14 @@ residue. Archive it separately and read back a disposable copy with historical
 checkout `288d4461`, Datahike `67934f65`, and Konserve `df6818d4` before the
 conflicting legacy path is migrated or removed.
 
+That third package is now internally staged at content address `38409f97…` and
+all 11,791 packaged files verify after extraction. Historical network-denied
+read-back recovered basis `536871171`, 220 schema attributes, three agents, 44
+evals, 14 plans, 30 context blocks, and all 38 referenced blobs without changing
+the disposable copy. The source bytes remain under
+`data/preserved-clusters/current-acme-legacy-288d4461/`; internal APFS staging
+still needs durable promotion before those source bytes may be deleted.
+
 ## Owner
 
 The repl-autosuggest evidence/archive owner inventories the experiments; the

@@ -84,7 +84,7 @@ starting a current writer against the same path.
 
 | Worktree and logical cluster | Database path and size | Blob path and size | Ownership and required disposition |
 |---|---|---|---|
-| current checkout `acme` | `data/clusters/acme/store`, 101,348 KiB | `data/clusters/acme/blobs`, 112,112 KiB | No live owner; current operator rejects the legacy layout. Unique store plus 38 blobs absent from display-v3. Archive and read back separately before migration or removal. |
+| current checkout legacy `acme` | `data/preserved-clusters/current-acme-legacy-288d4461/store`, 101,348 KiB | `data/preserved-clusters/current-acme-legacy-288d4461/blobs`, 112,112 KiB | Verified internal package/read-back at `38409f97…`; source retained byte-identically pending durable promotion. The current operator's new `data/clusters/acme/db` is a distinct fresh cluster. |
 | display-v3 `acme` | `data/clusters/acme/store`, 4,324,736 KiB | `data/clusters/acme/blobs`, 110,572 KiB | Live writer PID 45003. Content-addressed archive plus restore/read-back is mandatory. |
 | fn-surface `acme` | `data/clusters/acme/store`, 15,576 KiB | None | No live owner observed. Compare against another cluster or classify as reproducible before discard. |
 | fn-surface `default` | No `store` directory | `data/clusters/default/blobs`, 2,188 KiB | Blob-only generated residue; discard only after proving no referenced unique blob. |
@@ -115,6 +115,13 @@ It shares 1,966 byte-identical blobs with display-v3 but retains 38 additional
 blobs and an independent 6,693-file store, so it is not a duplicate. Exact
 evidence and historical dependency locks are in
 [[legacy-acme-archive-readback-runbook-2026-07-14]].
+
+That package is now staged and extracted successfully under content address
+`38409f97f2982e88ad41fb9a32cab07e85aba7772d9c7309d0a9baf9f0f9069b`.
+Historical read-back recovered basis `536871171`, 220 schema attributes, three
+agents, 44 evals, 14 plans, and all 38 referenced blobs without changing the
+disposable copy's cluster hash. Internal staging is not durable promotion, so
+the preserved source directory remains.
 
 ## Small unique evidence hashes
 
@@ -274,7 +281,8 @@ inventory unit:
 - Stable and display-v3 remain live and mutable.
 - Live basis/schema/latest-transaction checkpoints are captured, but final
   post-pod-quiescence identities are not.
-- The current checkout's offline legacy ACME cluster is uniquely identified at
+- The current checkout's offline legacy ACME cluster is packaged and read back,
+  but its internal-only archive is not yet durable. It is uniquely identified at
   the byte level but lacks a content-addressed package and disposable-copy
   basis/schema/read-back proof. Its legacy layout blocks current ACME startup.
 - Plan-pilot lacks the required current read-only staging proof.

@@ -222,6 +222,34 @@ eval, plan, ACME-context, and blob facts. Do not rename `store/` to `db/`, start
 the current operator against it, or combine it with display-v3 merely because
 their blob corpora overlap.
 
+### Executed internal staging and read-back
+
+The owner subsequently authorized autonomous cleanup work. The closed payload
+was copied without changes to internal APFS staging, and the source and staged
+copies both reproduced all three manifest hashes above. A disposable copy was
+opened under network denial with GraalVM 25, checkout `288d4461`, Datahike
+`67934f65`, and Konserve `df6818d4`; connect/release left its 8,697-file cluster
+manifest unchanged.
+
+Read-back recovered final basis `536871171`, latest transaction time
+`2026-07-13T13:24:23.953Z`, 220 schema attributes with canonical schema digest
+`39816dd9815b61bbd15c787262c991eaf16e80d87a9ec15ada343c0cc4d03988`,
+three agents, 44 evals, 14 plans, 30 context blocks, and 38 prompt/reply blob
+refs; every referenced blob resolved. The absence of autocomplete attributes
+confirms this is not the display-v3 database.
+
+The deterministic package is
+`~/Library/Application Support/Seon/archives/sha256/38409f97f2982e88ad41fb9a32cab07e85aba7772d9c7309d0a9baf9f0f9069b/current-acme-legacy-2026-07-14.tar.zst`.
+Its SHA-256 is the directory component, its extracted `SHA256SUMS` verifies
+11,791 packaged files, and its extracted cluster reproduces `108fb08a…`. The
+package includes the historical source/dependency trees, classpath basis, this
+runbook, and structured read-back metadata. It is read-only internal staging,
+not off-machine durability.
+
+The unchanged source bytes moved reversibly to
+`data/preserved-clusters/current-acme-legacy-288d4461/` so the current operator
+could create its distinct `data/clusters/acme/db`. No legacy byte was deleted.
+
 ## Archive-root capacity and durability
 
 Only the internal APFS data volume is presently mounted as a writable archive
@@ -319,8 +347,9 @@ checkouts.
 - No Git dependency bundle or verified immutable remote retention has been
   archived.
 - The extra blob files have not been classified against restored history.
-- The current-checkout legacy cluster has a closed payload identity but no
-  disposable-copy database identity or archive package.
+- The current-checkout legacy cluster has a verified internal package and
+  disposable-copy identity, but that package still needs off-machine or
+  otherwise owner-approved durable promotion before source deletion.
 - Owner acceptance for process shutdown and worktree retirement is still
   absent.
 

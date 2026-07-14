@@ -129,6 +129,17 @@ ports 7980–7983. No worktree or database cleanup is authorized until closed
 archives and read-back proofs exist for the 44 MB stable and 4.2 GB display-v3
 databases.
 
+The current checkout's separate 208 MB legacy ACME database has crossed the
+read-back gate: content-addressed package `38409f97…` verifies 11,791 files,
+and historical network-denied read-back recovered basis `536871171`, 220 schema
+attributes, three agents, 44 evals, 14 plans, and all 38 referenced blobs with
+no copy mutation. Its source bytes remain preserved because internal staging
+is not durable promotion. A current ACME boot on alternate port 7994 then
+proved the isolated artifact/watcher/writer path, but the pod failed honestly
+when declarative seed reconciliation exhausted stale-basis retries. That fresh
+runtime defect and a concurrent Shadow nREPL discovery collision are now the
+next ACME blockers; the default cluster remains ready.
+
 Before implementation resumes, reconcile the target architecture from
 [[research/architecture-target-drift-audit-2026-07-14]] in its recommended
 order, then carve the remaining work into the audit's focused PRDs. The already
