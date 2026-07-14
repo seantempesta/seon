@@ -4,19 +4,15 @@
 # downstream consumer; NEVER put a real product name in this repo.
 #
 # This wrapper is pure env composition — ZERO seon-src edits. It gives Acme its
-# own ports, sockets, store, supervisor pid/lock namespace, and logs, plus the
+# own ports, sockets, database, supervisor pid/lock namespace, and logs, plus the
 # downstream overlay (SEON_EXTRA_*) and branding (SEON_BRAND_*) wiring.
 #
-#   bin/acme up                    # build + start wire-server + pod + status
+#   bin/acme up                    # build and reconcile the complete target
 #   bin/acme down                  # stop the whole cluster
-#   bin/acme build                 # one-off compile -> out-acme/client/main.js
-#   bin/acme start wire-server     # JVM writer on Acme's store + sockets (REPL 7981)
-#   bin/acme start pod             # Node pod on :7980, acme.* compiled in
-#   bin/acme status                # PIDs (from tmp/proc-acme)
-#   bin/acme tail pod              # logs/acme/pod.log
-#   bin/acme restart pod
-#   bin/acme stop                  # stop the whole cluster (or `stop pod`)
-#   bin/acme cluster reset default # wipes data/clusters/acme/store, bounces both
+#   bin/acme restart               # rebuild and reconcile the complete target
+#   bin/acme status --edn          # structured identity, endpoints, ownership
+#   bin/acme logs pod --follow
+#   bin/acme cluster reset acme    # scoped current-layout reset
 #
 # To reproduce BUG B (silent invisibility), comment out the (reset! …) in
 # acme/src/acme/pod.cljs and restart the pod: acme.* indexes ZERO rows.
@@ -63,7 +59,7 @@ esac
 #     deny-when-unset; this harness (a legit bench pod AND the downstream-usage
 #     proof) grants shell + web like any consumer's launcher would. Any value
 #     but "0" grants; deny via .env.acme or the shell (SEON_SHELL=0 bin/acme
-#     restart pod). Web REACHABILITY is a config policy (config/acme.edn's
+#     restart). Web REACHABILITY is a config policy (config/acme.edn's
 #     :seon.config/web, :open here) — not an env knob. SEON_FS_LOCK still
 #     passes through from .env.acme when set.
 #     Full gate table: docs/seon/components/capability-gates.md ---
@@ -85,7 +81,7 @@ export SEON_CLIENT_OUT=out-acme/client/main.js
 #     skills) — the same SEON_CONFIG seam bin/seon exposes, pointed at acme's
 #     file so acme curates independently of the default cluster with no src
 #     edit. A shell-set SEON_CONFIG still wins (e.g. SEON_CONFIG=config/test.edn
-#     bin/acme restart pod to prove retract-on-drop). ---
+#     bin/acme restart to prove retract-on-drop). ---
 export SEON_CONFIG="${SEON_CONFIG:-config/acme.edn}"
 
 # --- branding / CSS control (existing seon seams; no fork) ---
@@ -93,46 +89,12 @@ export SEON_BRAND_NAME="${SEON_BRAND_NAME:-Acme}"
 export SEON_BRAND_TAGLINE="${SEON_BRAND_TAGLINE:-Acme — the third-party harness}"
 export SEON_BRAND_CSS="$SEON_ROOT/acme/branding/acme.css"
 
-# --- build/compile: a ONE-OFF acme compile (NOT a second watch — two shadow
-#     watch servers would collide on nREPL :7889). Injects SEON_EXTRA_SRC +
-#     SEON_EXTRA_PRELOAD exactly as bin/seon's cljs-watch does for :client,
-#     but targets :acme-client → out-acme/client/main.js. Run this once before
-#     `bin/acme start pod`; re-run after editing acme/src. ---
+# The shared operator owns ACME's flavor-aware build, watcher, writer, and pod
+# graph. This wrapper contributes only target data plus consumer-only commands.
 case "${1:-}" in
-  build|compile)
-    cd "$SEON_ROOT"
-    echo "▶ compiling acme-client (SEON_EXTRA_SRC=$SEON_EXTRA_SRC, preload=$SEON_EXTRA_PRELOAD)"
-    clj -Sdeps "{:deps {seon.extra/src {:local/root \"$SEON_EXTRA_SRC\"}}}" \
-        -M:cljs compile acme-client \
-        --config-merge "{:devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
-    echo "● built $SEON_ROOT/$SEON_CLIENT_OUT (acme.* baked in)"
-    exit 0
-    ;;
-  up)
-    # build + boot the whole isolated cluster: wire-server FIRST (sole writer;
-    # pod boot is gated on its socket), then the pod. Recurse through "$0" so
-    # each step gets the full Acme env block above.
-    "$0" build
-    "$0" start wire-server
-    "$0" start pod
-    "$0" status
-    exit 0
-    ;;
-  down)
-    # stop the whole cluster (pod first, then the writer).
-    "$SEON_ROOT/bin/seon" stop pod || true
-    "$SEON_ROOT/bin/seon" stop wire-server || true
-    exit 0
-    ;;
-  stop)
-    # `bin/acme stop` with NO process name stops the whole cluster (bin/seon
-    # alone errors "stop requires a process name"). `bin/acme stop pod` still
-    # delegates to the named form below.
-    if [ -z "${2:-}" ]; then
-      "$SEON_ROOT/bin/seon" stop pod || true
-      "$SEON_ROOT/bin/seon" stop wire-server || true
-      exit 0
-    fi
+  build|compile|start|stop|tail)
+    echo "bin/acme no longer exposes '$1'; use up, down, restart, status, or logs" >&2
+    exit 2
     ;;
   gym-diffusion)
     # Score a CONSUMER-OWNED diffusion-gym scenario (acme/gym/scenarios/*.edn)
@@ -155,36 +117,6 @@ case "${1:-}" in
       esac
     done
     exec env SEON_ROOT="$SEON_ROOT" bb "$SEON_ROOT/acme/gym/diffusion_gym.bb" "${ARGS[@]}"
-    ;;
-  cluster)
-    # Owner rule (2026-07-02): REBUILD before every reset. The acme bundle is
-    # NOT watched — a reset on a stale bundle boots yesterday's core, or dies
-    # outright when the seed expects a namespace the bundle predates (the
-    # my.plan boot race). Build here, then FALL THROUGH to bin/seon's
-    # race-safe cluster_reset unchanged (do NOT replace it with `down && up`:
-    # after a store wipe the wire-server's cold mint outlasts the pod's ~10s
-    # ping window and the fresh pod dies).
-    if [ "${2:-}" = "reset" ]; then
-      "$0" build
-    fi
-    ;;
-  start|restart)
-    # Same staleness rule for start/restart pod: rebuild first when any core
-    # or overlay source is newer than the bundle (compile is ~20s and
-    # idempotent; running stale code costs far more).
-    if [ "${2:-}" = "pod" ]; then
-      BUNDLE="$SEON_ROOT/$SEON_CLIENT_OUT"
-      # Stale when any core/overlay source OR a dependency/build config
-      # (deps.edn, shadow-cljs.edn, acme/deps.edn — e.g. a datahike fork sha
-      # bump) is newer than the bundle: a dep change requires a re-compile
-      # just as much as a src change does.
-      if [ ! -f "$BUNDLE" ] \
-         || [ -n "$(find "$SEON_ROOT/src" "$SEON_EXTRA_SRC" \( -name '*.cljs' -o -name '*.cljc' \) -newer "$BUNDLE" -print -quit 2>/dev/null)" ] \
-         || [ -n "$(find "$SEON_ROOT/deps.edn" "$SEON_ROOT/shadow-cljs.edn" "$SEON_EXTRA_SRC/deps.edn" -newer "$BUNDLE" -print -quit 2>/dev/null)" ]; then
-        echo "▶ acme bundle is stale vs core/overlay source — rebuilding first"
-        "$0" build
-      fi
-    fi
     ;;
 esac
 

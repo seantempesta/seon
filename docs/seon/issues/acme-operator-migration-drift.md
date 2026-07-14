@@ -101,6 +101,43 @@ process commands, and the process graph still derives the default watcher.
 Isolated one-off build sequencing, foreign-owner detection, legacy database
 disposition, lifecycle migration, and live proof remain acceptance work below.
 
+## Operator migration slice — 2026-07-14
+
+The wrapper now contributes only ACME target data and delegates `up`, `down`,
+`restart`, `status`, `logs`, and scoped `cluster reset acme` to the shared
+semantic operator. Retired `build`, `compile`, `start`, `stop`, and `tail`
+commands fail with migration guidance instead of reconstructing named process
+operations. The shared process graph derives its watcher build and readiness
+from the artifact flavor: ACME watches `acme-client` plus `test` in
+`tmp/shadow/acme`, with its downstream source and preload, while the default
+watcher command remains unchanged.
+
+The operator now refuses both `up` and reset when a preserved legacy `store/`
+exists without the current `db/`; it cannot create an empty sibling database
+and call that migration. Structured status reports the configured cluster and
+database path, canonical artifact flavor/digests, owned process identities,
+and dynamically discovered web, CLJ, and CLJS endpoints. A listener without a
+matching live PID/start record is `:seon.dev.process.status/foreign`, making the
+target an ownership conflict rather than down. Read-only probes against both
+preserved port pairs (7980/7981 and 7982/7983) report the writer and pod as
+foreign while naming the legacy database conflict. The default target remains
+ready and publishes its actual dynamic ports.
+
+Focused proof passes 15 operator tests/51 assertions. The complete operator
+checkpoint passes 92 tests/574 assertions. No preserved process or database was
+mutated.
+
+ACME is still not safe to start. The stable and display-v3 process groups and
+databases need the preservation manifest's coordinated archive, drain, reopen,
+and read-back sequence. The active downstream source/config cleanup has removed
+the stale `steps-tile-html`, canvas `error-tile`, and `.seon-tile` references in
+favor of `steps-surface-html`, the error card, and `.seon-card`; the exact
+`acme-client` compile exposed the undeclared renderer before that repair.
+Browser/feed proof still remains. The operator intentionally does not claim an
+Inspect-style per-sample token lease: concurrent target-coordinate allocation,
+pinned frozen artifacts, and idempotent token-fenced release remain owned by
+the Inspect issue.
+
 ## Owner
 
 The ACME downstream boundary: `bin/acme`, `config/acme.edn`, `acme/`, and the

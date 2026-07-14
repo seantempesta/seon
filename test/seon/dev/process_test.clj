@@ -25,6 +25,33 @@
    :seon.dev.process/ready-timeout-ms 5000
    :seon.dev.process/artifact-digest "test-artifact"})
 
+(defn- target-config [configuration directory]
+  (merge configuration
+         {:seon.dev.config/client-build-id "client"
+          :seon.dev.config/artifact-flavor
+          :seon.dev.artifact.flavor/default
+          :seon.dev.config/shadow-cache-root
+          (str (fs/path directory "shadow"))
+          :seon.dev.config/client-output (str (fs/path directory "client.js"))
+          :seon.dev.config/writer-output (str (fs/path directory "writer.jar"))
+          :seon.dev.config/cluster-dir (str (fs/path directory "cluster"))
+          :seon.dev.config/cluster-name "test"
+          :seon.dev.config/request-socket (str (fs/path directory "req.sock"))
+          :seon.dev.config/publish-socket (str (fs/path directory "pub.sock"))
+          :seon.dev.config/writer-repl-port 0
+          :seon.dev.config/writer-repl-port-file
+          (str (fs/path directory "writer-port"))
+          :seon.dev.config/http-port 0
+          :seon.dev.config/http-port-file
+          (str (fs/path directory "pod-port"))}))
+
+(def target-manifest
+  {:seon.dev.artifact/flavor :seon.dev.artifact.flavor/default
+   :seon.dev.artifact/client-build-id "client"
+   :seon.dev.artifact/client-digest "client"
+   :seon.dev.artifact/writer-digest "writer"
+   :seon.dev.artifact/application-digest "application"})
+
 (defn- cleanup! [configuration ids]
   (doseq [id ids]
     (try (process/stop! configuration id) (catch Throwable _)))
@@ -165,6 +192,8 @@
 
 (deftest latest-watcher-result-is-readiness-truth
   (let [configuration (test-config)
+        configuration (assoc configuration :seon.dev.config/client-build-id
+                             "client")
         log (fs/path (:seon.dev.test/directory configuration) "watcher.log")
         pid (.pid (java.lang.ProcessHandle/current))
         record {:seon.dev.process/id process/watcher-id
@@ -197,19 +226,8 @@
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)
         port-file (str (fs/path directory "stale-pod-port"))
-        configuration
-        (merge configuration
-               {:seon.dev.config/client-output (str (fs/path directory "client.js"))
-                :seon.dev.config/writer-output (str (fs/path directory "writer.jar"))
-                :seon.dev.config/cluster-dir (str (fs/path directory "cluster"))
-                :seon.dev.config/cluster-name "test"
-                :seon.dev.config/request-socket (str (fs/path directory "req.sock"))
-                :seon.dev.config/publish-socket (str (fs/path directory "pub.sock"))
-                :seon.dev.config/writer-repl-port 0
-                :seon.dev.config/writer-repl-port-file
-                (str (fs/path directory "writer-port"))
-                :seon.dev.config/http-port 0
-                :seon.dev.config/http-port-file port-file})
+        configuration (assoc (target-config configuration directory)
+                             :seon.dev.config/http-port-file port-file)
         manifest {:seon.dev.artifact/client-digest "client"
                   :seon.dev.artifact/writer-digest "writer"
                   :seon.dev.artifact/application-digest "application"}]
@@ -218,6 +236,70 @@
       (is (nil? (:seon.dev.target/url
                   (process/status configuration manifest))))
       (finally (fs/delete-tree directory)))))
+
+(deftest artifact-flavor-owns-the-watcher-build-and-cache
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        base (target-config configuration directory)
+        default-argv (get-in (process/specs base target-manifest)
+                             [process/watcher-id :seon.dev.process/argv])
+        acme (-> base
+                 (assoc :seon.dev.config/client-build-id "acme-client"
+                        :seon.dev.config/artifact-flavor
+                        :seon.dev.artifact.flavor/acme
+                        :seon.dev.config/shadow-cache-root
+                        (str (fs/path directory "shadow-acme")))
+                 (assoc-in [:seon.dev.config/environment "SEON_EXTRA_SRC"]
+                           (str (fs/path directory "acme")) )
+                 (assoc-in [:seon.dev.config/environment "SEON_EXTRA_PRELOAD"]
+                           "acme.pod"))
+        acme-argv (get-in (process/specs
+                            acme
+                            (assoc target-manifest
+                                   :seon.dev.artifact/flavor
+                                   :seon.dev.artifact.flavor/acme
+                                   :seon.dev.artifact/client-build-id
+                                   "acme-client"))
+                          [process/watcher-id :seon.dev.process/argv])]
+    (try
+      (is (= ["clj" "-M:cljs" "watch" "client" "test"] default-argv))
+      (is (= "acme-client" (nth acme-argv 5)))
+      (is (some #(str/includes? % ":cache-root") acme-argv))
+      (is (some #(str/includes? % "acme.pod") acme-argv))
+      (finally (fs/delete-tree directory)))))
+
+(deftest structured-status-reports-a-foreign-pod-without-advertising-it
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        port (with-open [socket (ServerSocket. 0)] (.getLocalPort socket))
+        server (shell/process {:out :discard :err :discard
+                               :cmd ["python3" "-m" "http.server" (str port)
+                                     "--bind" "127.0.0.1"]})
+        configuration (assoc (target-config configuration directory)
+                              :seon.dev.config/http-port port)]
+    (try
+      (loop [remaining 50]
+        (let [probe (shell/sh {:continue true :out :string :err :string
+                               :cmd ["curl" "-fsS" "-m" "1"
+                                     (str "http://127.0.0.1:" port "/")]})]
+          (when (and (pos? remaining) (not (zero? (:exit probe))))
+            (Thread/sleep 20)
+            (recur (dec remaining)))))
+      (let [status (process/status configuration target-manifest)]
+        (is (= :seon.dev.target.status/ownership-conflict
+               (:seon.dev.target/status status)))
+        (is (= :seon.dev.process.status/foreign
+               (get-in status [:seon.dev.target/processes process/pod-id
+                               :seon.dev.process/status])))
+        (is (= "test" (:seon.dev.target/cluster-name status)))
+        (is (= (:seon.dev.artifact/application-digest target-manifest)
+               (get-in status [:seon.dev.target/artifact
+                               :seon.dev.artifact/application-digest])))
+        (is (nil? (:seon.dev.endpoint/web
+                    (:seon.dev.target/endpoints status)))))
+      (finally
+        (.destroyForcibly ^java.lang.Process (:proc server))
+        (fs/delete-tree directory)))))
 
 (deftest process-order-comes-from-dependency-data
   (let [specs {:seon.dev.process/pod

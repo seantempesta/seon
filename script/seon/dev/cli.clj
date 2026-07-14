@@ -20,11 +20,31 @@
     (process/stop! configuration id))
   nil)
 
+(defn- legacy-database-path [configuration]
+  (let [cluster (:seon.dev.config/cluster-dir configuration)
+        database (fs/path cluster "db")
+        legacy (fs/path cluster "store")]
+    (when (and (fs/directory? legacy) (not (fs/exists? database)))
+      (str legacy))))
+
+(defn- assert-current-database-layout! [configuration]
+  (when-let [legacy (legacy-database-path configuration)]
+    (throw
+      (ex-info
+        "A legacy database exists, but the current database path is absent. Refusing to create a fresh database beside preserved evidence."
+        {:seon.dev.target/failure
+         :seon.dev.target.failure/legacy-database-layout
+         :seon.dev.target/legacy-database-path legacy
+         :seon.dev.target/database-path
+         (str (fs/path (:seon.dev.config/cluster-dir configuration) "db"))})))
+  configuration)
+
 (defn- reconcile-development! [configuration]
   ;; A one-shot compiler must never share Shadow's mutable build cache with a
   ;; watcher, and the pod must never read a partially rebuilt output closure.
   ;; Quiesce both readers before building; the writer can safely keep running
   ;; from its already-loaded jar until its digest is known to have changed.
+  (assert-current-database-layout! configuration)
   (process/stop! configuration process/watcher-id)
   (process/stop! configuration process/pod-id)
   (let [manifest (artifact/build! configuration)
@@ -159,11 +179,33 @@
     (print-ready! target false)))
 
 (defn- status-value [configuration]
-  (if-let [manifest (artifact/read-manifest configuration)]
-    (process/status configuration manifest)
-    {:seon.dev.target/name :seon.dev.target/development
-     :seon.dev.target/status :seon.dev.target.status/down
-     :seon.dev.target/failure :seon.dev.target.failure/missing-artifact}))
+  (let [foreign (process/ownership-conflicts configuration)]
+    (if-let [legacy (legacy-database-path configuration)]
+      (cond->
+        {:seon.dev.target/name :seon.dev.target/development
+         :seon.dev.target/status :seon.dev.target.status/ownership-conflict
+         :seon.dev.target/failure
+         :seon.dev.target.failure/legacy-database-layout
+         :seon.dev.target/cluster-name
+         (:seon.dev.config/cluster-name configuration)
+         :seon.dev.target/database-path
+         (str (fs/path (:seon.dev.config/cluster-dir configuration) "db"))
+         :seon.dev.target/legacy-database-path legacy}
+        (seq foreign) (assoc :seon.dev.target/foreign-processes foreign))
+    (if-let [manifest (artifact/read-manifest configuration)]
+      (process/status configuration manifest)
+      (cond->
+        {:seon.dev.target/name :seon.dev.target/development
+         :seon.dev.target/status
+         (if (seq foreign)
+           :seon.dev.target.status/ownership-conflict
+           :seon.dev.target.status/down)
+         :seon.dev.target/cluster-name
+         (:seon.dev.config/cluster-name configuration)
+         :seon.dev.target/database-path
+         (str (fs/path (:seon.dev.config/cluster-dir configuration) "db"))
+         :seon.dev.target/failure :seon.dev.target.failure/missing-artifact}
+        (seq foreign) (assoc :seon.dev.target/foreign-processes foreign))))))
 
 (defn- status! [configuration arguments]
   (let [edn? (= ["--edn"] (vec arguments))]
@@ -298,7 +340,8 @@
                        (:seon.dev.config/cluster-name configuration)})))
     (state/with-lock
       configuration :stack 600000
-      #(let [manifest (or (artifact/read-manifest configuration)
+      #(let [_ (assert-current-database-layout! configuration)
+             manifest (or (artifact/read-manifest configuration)
                           (throw (ex-info "Run `bin/seon up` before reset."
                                           {:seon.dev.target/failure
                                            :seon.dev.target.failure/missing-artifact})))

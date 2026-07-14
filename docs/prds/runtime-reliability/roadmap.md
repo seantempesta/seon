@@ -105,9 +105,19 @@ The dependency/Shadow/ACME audit in
 `deps.edn` split and unified dynamic-port MCP boundary. The operator now has one
 explicit default/ACME artifact-flavor record that selects build id, isolated
 Shadow cache, output, and version-2 manifest; the complete operator checkpoint
-passes 89 tests/562 assertions. This closes the hybrid-artifact defect but does
-not yet make ACME safe to start: its lifecycle wrapper, watcher graph, ownership
-checks, and legacy-database disposition still need migration.
+passes 92 tests/574 assertions. The flavor also owns the managed watcher build,
+cache, and readiness. `bin/acme` now delegates only semantic target operations;
+structured status publishes cluster/database/artifact/process identity and
+dynamic web/CLJ/CLJS endpoints; foreign listeners are explicit ownership
+conflicts; and both `up` and reset refuse to create a fresh `db/` beside a
+preserved legacy `store/`. Read-only probes detect writer and pod conflicts on
+both preserved port pairs while the default target remains ready. This closes
+the wrapper/watcher/status safety slice but does not make ACME safe to start:
+archive/drain/reopen/read-back and browser proof remain. Active ACME source and
+config now resolve `steps-surface-html` and the error card, and use card CSS;
+the exact `acme-client` compile exposed and removed the stale renderer symbol.
+Inspect's per-sample owner/token, isolated coordinate allocation, frozen
+artifact selection, and token-fenced create/restart/release lease also remain.
 
 The preservation manifest in
 [[research/worktree-evidence-preservation-manifest-2026-07-14]] inventories all

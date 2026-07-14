@@ -65,17 +65,22 @@ could be changed independently of that missing seam:
   retaining static explicitly provisioned URL mode and the offline scorer/
   choreography tests.
 
-The exact remaining blocker is operator-owned rather than Python-owned.
-`bin/seon status --edn` currently reports target status, processes, and the web
-URL for only the configured target. It does not report cluster/database
-identity, canonical artifact flavor/digest, writer or CLJS endpoint, lease
-owner/token, or create/restart/release transitions. The canonical artifact
-manifest is likewise not projected through target status. Consequently the
-caller cannot safely distinguish default from ACME, pin a sample artifact,
-read a writer endpoint without private file knowledge, or prove that cleanup
-owns the process it would stop. The read-only legacy frozen-bundle identity
-helper remains solely for offline contamination fixtures; no live caller can
-build or select that artifact through a removed command.
+The first operator-owned half is now present. `bin/seon status --edn` projects
+the configured cluster/database identity, canonical artifact flavor and
+digests, exact owned process identities, and dynamically discovered web, CLJ,
+and CLJS endpoints. Missing process records with live listeners surface as a
+foreign ownership conflict, and the current semantic `up`, `restart`, and
+`down` transitions remain target-scoped. This is sufficient for ACME's fixed
+target to stop guessing ports and artifact identity.
+
+The exact remaining blocker is the per-sample lease rather than endpoint
+discovery. The operator still has no lease owner/token, isolated target
+coordinate allocator, frozen artifact selection, or token-fenced
+create/restart/release contract. Consequently Inspect cannot safely allocate
+concurrent sample process/cache/database namespaces or prove that cleanup owns
+the target it would stop. The read-only legacy frozen-bundle identity helper
+remains solely for offline contamination fixtures; no live caller can build or
+select that artifact through a removed command.
 
 This is distinct from `acme-operator-migration-drift.md`. That issue owns the
 ACME process/artifact/database migration itself; this issue owns Inspect's

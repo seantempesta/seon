@@ -67,3 +67,28 @@
                (get-in (#'cli/select-config base "config/custom.edn")
                        [:seon.dev.config/environment "SEON_CONFIG"]))))
       (finally (fs/delete-tree root {:force true})))))
+
+(deftest legacy-database-layout-is-never-silently-replaced
+  (let [root (fs/create-temp-dir {:prefix "seon-cli-legacy-db-"})
+        cluster (fs/path root "data/clusters/acme")
+        configuration {:seon.dev.config/cluster-dir (str cluster)
+                       :seon.dev.config/cluster-name "acme"}]
+    (try
+      (fs/create-dirs (fs/path cluster "store"))
+      (is (thrown-with-msg?
+            Exception #"Refusing to create a fresh database"
+            (#'cli/assert-current-database-layout! configuration)))
+      (is (= {:seon.dev.target/name :seon.dev.target/development
+              :seon.dev.target/status
+              :seon.dev.target.status/ownership-conflict
+              :seon.dev.target/failure
+              :seon.dev.target.failure/legacy-database-layout
+              :seon.dev.target/cluster-name "acme"
+              :seon.dev.target/database-path (str (fs/path cluster "db"))
+              :seon.dev.target/legacy-database-path
+              (str (fs/path cluster "store"))}
+             (#'cli/status-value configuration)))
+      (fs/create-dirs (fs/path cluster "db"))
+      (is (= configuration
+             (#'cli/assert-current-database-layout! configuration)))
+      (finally (fs/delete-tree root {:force true})))))

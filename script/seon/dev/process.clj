@@ -122,18 +122,26 @@
 
 (defn- extra-cljs-watch-args [config]
   (let [environment (:seon.dev.config/environment config)
+        build-id (:seon.dev.config/client-build-id config)
+        cache-root (:seon.dev.config/shadow-cache-root config)
+        default-flavor? (= :seon.dev.artifact.flavor/default
+                           (:seon.dev.config/artifact-flavor config))
         source (get environment "SEON_EXTRA_SRC")
-        preload (get environment "SEON_EXTRA_PRELOAD")]
+        preload (get environment "SEON_EXTRA_PRELOAD")
+        config-merge
+        (cond-> {}
+          (not default-flavor?) (assoc :cache-root cache-root)
+          (and (not (str/blank? source)) (not (str/blank? preload)))
+          (assoc :devtools {:preloads [(symbol preload)]}))]
     (cond-> []
       (not (str/blank? source))
       (into ["-Sdeps" (pr-str {:deps {'seon.extra/src {:local/root source}}})])
 
       true
-      (into ["-M:cljs" "watch" "client" "test"])
+      (into ["-M:cljs" "watch" build-id "test"])
 
-      (and (not (str/blank? source)) (not (str/blank? preload)))
-      (into ["--config-merge"
-             (pr-str {:devtools {:preloads [(symbol preload)]}})]))))
+      (seq config-merge)
+      (into ["--config-merge" (pr-str config-merge)]))))
 
 (defn specs
   "Derive the complete development process graph from one manifest."
@@ -232,6 +240,15 @@
            true
            (catch Throwable _ false)))))
 
+(defn- tcp-ready? [port]
+  (and (pos-int? port)
+       (try
+         (with-open [socket (java.net.Socket.)]
+           (.connect socket (java.net.InetSocketAddress.
+                              "127.0.0.1" (int port)) 500))
+         true
+         (catch Throwable _ false))))
+
 (defn- http-ready? [port]
   (try
     (let [connection ^HttpURLConnection
@@ -267,9 +284,10 @@
         compiling (last-index text (str prefix "Compiling ..."))]
     (and (not (neg? completed)) (> completed failed) (> completed compiling))))
 
-(defn- watcher-ready? [record]
+(defn- watcher-ready? [config record]
   (let [text (tail-text (:seon.dev.process/log record))]
-    (every? #(build-ready? text %) [:client :test])))
+    (every? #(build-ready? text %)
+            [(keyword (:seon.dev.config/client-build-id config)) :test])))
 
 (defn- pod-ready? [config record]
   (let [port-file (:seon.dev.config/http-port-file config)
@@ -285,7 +303,7 @@
   (and (= :seon.dev.process.status/alive (process-status record))
        (case (:seon.dev.process/readiness spec)
          :seon.dev.process.readiness/process true
-         :seon.dev.process.readiness/watcher (watcher-ready? record)
+         :seon.dev.process.readiness/watcher (watcher-ready? config record)
          :seon.dev.process.readiness/writer (writer-ready? config)
          :seon.dev.process.readiness/pod (pod-ready? config record)
          false)))
@@ -324,15 +342,44 @@
 
 (defn- accepting-unmanaged? [config id]
   (case id
+    :seon.dev.process/watcher
+    (let [cache-root (:seon.dev.config/shadow-cache-root config)
+          path (when cache-root (fs/path cache-root "nrepl.port"))
+          port (when (fs/regular-file? path)
+                 (some-> (slurp (str path)) str/trim parse-long))]
+      (tcp-ready? port))
     :seon.dev.process/writer
-    (try
-      (with-open [channel (SocketChannel/open StandardProtocolFamily/UNIX)]
-        (.connect channel (UnixDomainSocketAddress/of
-                            (:seon.dev.config/request-socket config))))
-      true
-      (catch Throwable _ false))
-    :seon.dev.process/pod (http-ready? (:seon.dev.config/http-port config))
+    (let [request-socket (:seon.dev.config/request-socket config)
+          file (:seon.dev.config/writer-repl-port-file config)]
+      (or
+      (and request-socket
+      (try
+        (with-open [channel (SocketChannel/open StandardProtocolFamily/UNIX)]
+          (.connect channel (UnixDomainSocketAddress/of
+                              request-socket)))
+        true
+        (catch Throwable _ false)))
+      (let [published (when (and file (fs/regular-file? file))
+                        (some-> (slurp file) str/trim parse-long))]
+        (tcp-ready? (or published
+                        (:seon.dev.config/writer-repl-port config))))))
+    :seon.dev.process/pod
+    (boolean (when-let [port (:seon.dev.config/http-port config)]
+               (http-ready? port)))
     false))
+
+(defn ownership-conflicts
+  "Process doors held without a matching live operator record."
+  [config]
+  (if-not (:seon.dev.config/process-dir config)
+    []
+    (->> target-processes
+         (filter (fn [id]
+                   (let [record (read-process config id)]
+                     (and (not= :seon.dev.process.status/alive
+                                (process-status record))
+                          (accepting-unmanaged? config id)))))
+         vec)))
 
 (defn- clear-readiness! [config id]
   (case id
@@ -467,7 +514,13 @@
               (map (fn [id]
                      (let [record (read-process config id)
                            spec (get spec-map id)
-                           process-state (process-status record)]
+                           recorded-state (process-status record)
+                           foreign? (and (not= :seon.dev.process.status/alive
+                                               recorded-state)
+                                         (accepting-unmanaged? config id))
+                           process-state (if foreign?
+                                           :seon.dev.process.status/foreign
+                                           recorded-state)]
                        [id {:seon.dev.process/status process-state
                             :seon.dev.process/pid (:seon.dev.process/pid record)
                             :seon.dev.process/ready?
@@ -476,6 +529,7 @@
                                           (ready? config spec record)))
                             :seon.dev.process/log (:seon.dev.process/log record)}])))
               ordered)
+        foreign? (seq (ownership-conflicts config))
         all-ready? (every? (fn [[_ value]]
                              (and (= :seon.dev.process.status/alive
                                      (:seon.dev.process/status value))
@@ -485,14 +539,46 @@
         port (when (and pod-ready
                         (fs/regular-file? (:seon.dev.config/http-port-file config)))
                (some-> (slurp (:seon.dev.config/http-port-file config))
-                       str/trim parse-long))]
-    {:seon.dev.target/status (if all-ready?
-                               :seon.dev.target.status/ready
-                               (if (some #(= :seon.dev.process.status/alive
-                                             (:seon.dev.process/status %))
-                                         (vals processes))
-                                 :seon.dev.target.status/degraded
-                                 :seon.dev.target.status/down))
+                       str/trim parse-long))
+        writer-ready (get-in processes [writer-id :seon.dev.process/ready?])
+        writer-port (when (and writer-ready
+                               (fs/regular-file?
+                                 (:seon.dev.config/writer-repl-port-file config)))
+                      (some-> (slurp
+                                (:seon.dev.config/writer-repl-port-file config))
+                              str/trim parse-long))
+        watcher-ready (get-in processes [watcher-id :seon.dev.process/ready?])
+        shadow-port-file (fs/path (:seon.dev.config/shadow-cache-root config)
+                                  "nrepl.port")
+        shadow-port (when (and watcher-ready (fs/regular-file? shadow-port-file))
+                      (some-> (slurp (str shadow-port-file)) str/trim parse-long))
+        artifact (select-keys manifest
+                              [:seon.dev.artifact/flavor
+                               :seon.dev.artifact/client-build-id
+                               :seon.dev.artifact/application-digest
+                               :seon.dev.artifact/writer-digest
+                               :seon.dev.artifact/client-digest])]
+    {:seon.dev.target/status (cond
+                               foreign? :seon.dev.target.status/ownership-conflict
+                               all-ready? :seon.dev.target.status/ready
+                               (some #(= :seon.dev.process.status/alive
+                                         (:seon.dev.process/status %))
+                                     (vals processes))
+                               :seon.dev.target.status/degraded
+                               :else :seon.dev.target.status/down)
      :seon.dev.target/name :seon.dev.target/development
+     :seon.dev.target/cluster-name (:seon.dev.config/cluster-name config)
+     :seon.dev.target/database-path
+     (str (fs/path (:seon.dev.config/cluster-dir config) "db"))
+     :seon.dev.target/artifact artifact
      :seon.dev.target/processes processes
+     :seon.dev.target/endpoints
+     (cond-> {:seon.dev.endpoint/cljs-build-id
+              (:seon.dev.config/client-build-id config)}
+       port (assoc :seon.dev.endpoint/web
+                   (str "http://127.0.0.1:" port))
+       writer-port (assoc :seon.dev.endpoint/clj
+                          (str "127.0.0.1:" writer-port))
+       shadow-port (assoc :seon.dev.endpoint/cljs
+                          (str "127.0.0.1:" shadow-port)))
      :seon.dev.target/url (when port (str "http://127.0.0.1:" port))}))
