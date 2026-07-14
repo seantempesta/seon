@@ -241,6 +241,12 @@
    {:deps {'seon/hook-source {:local/root repo-root}}})
   (require namespace))
 
+(defn- clip-feedback [config message]
+  (load-direct-check! 'seon.ai.tokens)
+  ((requiring-resolve 'seon.ai.tokens/clip-str)
+   message
+   (get-in config [:feedback :max-tokens] 300)))
+
 (defn- markdown-feedback [event config]
   (when (and (= (:hook_event_name event) "PostToolUse")
              (get-in config [:markdown-lint :enabled] true)
@@ -262,10 +268,12 @@
                     initial
                     (validate-file request))]
         (when-not (:seon.dev.markdown/valid? final)
-          (:seon.dev.markdown/formatted
-           (format-violations
-            {:seon.dev.markdown/violations (:seon.dev.markdown/violations final)
-             :seon.dev.markdown/max-length (get-in config [:feedback :max-length] 1000)}))))
+          (clip-feedback
+           config
+           (:seon.dev.markdown/formatted
+            (format-violations
+             {:seon.dev.markdown/violations (:seon.dev.markdown/violations final)
+              :seon.dev.markdown/max-length Long/MAX_VALUE})))))
       (catch Exception e
         (log! "MARKDOWN_LINT_ERROR" (.getMessage e))
         nil))))
@@ -282,23 +290,26 @@
                     {:seon.dev.docstring/file-path
                      (absolute-file-path (get-file-path event))})]
         (when-not (:seon.dev.docstring/clean? result)
-          (:seon.dev.docstring/formatted
-           (format-findings
-            {:seon.dev.docstring/findings (:seon.dev.docstring/findings result)
-             :seon.dev.docstring/max-length (get-in config [:feedback :max-length] 1000)}))))
+          (clip-feedback
+           config
+           (:seon.dev.docstring/formatted
+            (format-findings
+             {:seon.dev.docstring/findings (:seon.dev.docstring/findings result)
+              :seon.dev.docstring/max-length Long/MAX_VALUE})))))
       (catch Exception e
         (log! "DOCSTRING_LINT_ERROR" (.getMessage e))
         nil))))
 
-(defn- cljs-test-path? [file-path]
+(defn- clojure-test-path? [file-path]
   (when file-path
     (let [lower (str/lower-case file-path)]
-      (or (str/ends-with? lower ".cljs")
+      (or (str/ends-with? lower ".clj")
+          (str/ends-with? lower ".cljs")
           (str/ends-with? lower ".cljc")))))
 
 (defn- changed-test-feedback [event config]
   (let [paths (->> (event-file-paths event)
-                   (filter cljs-test-path?)
+                   (filter clojure-test-path?)
                    vec)
         invalid-source?
         (some (fn [path]
@@ -327,11 +338,8 @@
                    (if (str/blank? output)
                      (str "Changed-test operation exited " (:exit result)
                           " without output.")
-                     output))
-              max-length (get-in config [:feedback :max-length] 1000)]
-          (if (> (count message) max-length)
-            (str (subs message 0 (max 0 (- max-length 2))) " …")
-            message))
+                     output))]
+          (clip-feedback config message))
         (catch Exception error
           (str "ADVISORY — changed-test feedback could not run: "
                (.getMessage error)))))))

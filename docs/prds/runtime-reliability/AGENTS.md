@@ -57,8 +57,12 @@ Automatic agent feedback uses the existing synchronous `PostToolUse`
 `additionalContext` hook path. Codex `apply_patch` and Claude edits are now
 normalized in `bin/seon-hook`; the managed Shadow process publishes one
 immutable artifact/manifest; and `bin/seon test changed --path PATH` is the
-public operation called by the hook. Test feedback is advisory and never gates
-refactoring. Do not add
+public operation called by the hook. CLJ uses a bounded namespace-only
+clj-kondo graph, CLJC unions the host and Shadow decisions, and a missing exact
+Shadow manifest delegates to the existing full one-shot pod gate after three
+seconds rather than using stale code. Test feedback is advisory and never gates
+refactoring. Read `tmp/test-changed/latest.report.edn` and its full-log paths;
+do not rerun merely to recover truncated output. Do not add
 Shadow autorun, another daemon, registry, event bus, or database notification
 projection. Codex hook trust is a one-time user review, never a committed or
 bypassed setting.

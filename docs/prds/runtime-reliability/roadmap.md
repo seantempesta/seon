@@ -254,21 +254,21 @@ retains one EDN report plus full logs, and never gates an edit on test results.
 No daemon, database projection, hardcoded test enumeration, speculative
 function call graph, or fourth runner is part of this slice.
 
-Implementation order for this unit:
+This automatic-feedback unit is implemented. Writer and operator roots are
+discovered from their runners; clj-kondo derives the host namespace graph in
+about 0.4 seconds; CLJ macro namespaces seed Shadow's existing graph; and CLJC
+unions both platforms. Missing host facts widen, while a missing exact Shadow
+manifest waits three seconds then calls the existing full `bin/test-cljs`
+one-shot gate instead of running stale code or returning a 30-second dead end.
+All selected boundaries run sequentially and retain commands, complete logs,
+and one atomic EDN report; the hook summary uses the canonical token clipper.
 
-1. **PARTIAL:** writer/operator test roots are now discovered dynamically by
-   their existing runners, and the operator accepts exact namespace selectors.
-   The hook remains CLJS/CLJC-only until the host dependency selector lands, so
-   a `.clj` edit cannot be misreported as a Shadow build timeout.
-2. Return one boundary-selection/result shape and let the operator runner
-   accept exact namespace selectors.
-3. Add host namespace analysis, reverse dependency closure, CLJ macro joins
-   into Shadow, and explicit CLJC dual-platform decisions.
-4. Preserve full per-boundary logs and one token-bounded combined report;
-   widen on missing analyzer/build facts rather than silently selecting none.
-5. Prove pass, failure, malformed source, stale artifact, missing analyzer,
-   deletion/move, and multi-boundary behavior through both Claude and Codex
-   hook adapters.
+Live Codex edit proofs observed: a CLJ operator edit selected two namespaces
+and passed 13 tests/31 assertions; a CLJS edit selected one pod namespace and
+passed 4/16; and a CLJC edit selected `seon.db.id-test` on both writer (12/75)
+and pod (11/68). Hook-adapter tests cover Claude prospective parse blocking,
+Codex multi-file parse-all, repository containment, advisory continuation, and
+direct checker loading. Tests remain advisory; malformed source skips them.
 
 ### Slice 0 — reconcile and baseline — IN PROGRESS
 

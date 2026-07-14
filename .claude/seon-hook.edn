@@ -18,4 +18,4 @@
  {:enabled true}
 
  :feedback
- {:max-length 1000}}
+ {:max-tokens 300}}

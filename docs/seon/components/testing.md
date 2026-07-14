@@ -57,16 +57,22 @@ Run the smallest gate that can falsify the change while debugging, then the
 relevant batch checkpoint once at the unit boundary. Behavioral invariants and
 edge cases are the contract; tests that pin agent prose are not.
 
-The inner loop is one changed-test operation backed by the managed Shadow
-compiler. A successful test build publishes an immutable artifact and a
-manifest containing its source fingerprint and compiler dependency graph. The
-operation waits for an exact current manifest, selects the conservative
-reverse-transitive namespace closure, and runs a fresh bounded Node process.
-The existing edit hook calls that same operation and returns its concise result
-through trusted `PostToolUse.additionalContext`; it does not own a second
-selector or runner. Unknown, macro, shared CLJC, configuration, dependency, and
-deletion changes widen explicitly. Exact function-level automatic selection is
-deferred until the analyzer can prove complete call edges.
+The inner loop is one changed-test operation over the three existing runners.
+A successful Shadow test build publishes an immutable artifact plus compiler
+dependency graph for CLJS. A bounded host-only clj-kondo scan derives CLJ
+namespace edges and intersects them with the operator and database-server roots
+those runners already discover. CLJC unions both decisions. Every selected
+boundary runs sequentially even after an earlier failure, with one stable EDN
+report and full per-boundary logs.
+
+The operation waits at most three seconds for an exact current Shadow manifest;
+it never runs a stale bundle. If the watcher cannot publish one, it delegates to
+the existing full `bin/test-cljs` one-shot gate. Missing or ambiguous host facts
+widen only the relevant host boundary. The edit hook calls this same operation
+and returns token-bounded `PostToolUse.additionalContext`; it owns no second
+selector or runner. Unknown, macro, configuration, dependency, deletion, and
+move changes widen explicitly. Exact function-level automatic selection remains
+deferred until an analyzer can prove complete call edges.
 
 The artifact is the complete dev-mode runtime, not only Shadow's small
 `test.js` launcher. Runtime files live once in a content-addressed object store;

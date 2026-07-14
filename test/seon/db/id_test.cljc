@@ -1,4 +1,5 @@
 (ns seon.db.id-test
+  "Cross-platform identity syntax, generation, allocation, and recovery tests."
   (:require
    #?(:clj  [clojure.edn :as edn]
       :cljs [cljs.reader :as edn])

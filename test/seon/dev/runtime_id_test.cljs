@@ -4,7 +4,7 @@
    Advertisements normalize database-derived agent ids. Resolution is
    `parse-id` + `select-runtime`: zero matches, one match, or an explicit
    ambiguity. There is no process-global agent membership state to isolate in
-  tests."
+   tests."
   (:require
     [cljs.test :refer [deftest is testing]]
     [seon.dev.runtime-id :as runtime-id]))
