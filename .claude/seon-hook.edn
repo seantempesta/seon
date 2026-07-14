@@ -14,5 +14,8 @@
  :docstring-lint
  {:enabled true}
 
+ :changed-tests
+ {:enabled true}
+
  :feedback
  {:max-length 1000}}

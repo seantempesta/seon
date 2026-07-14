@@ -28,7 +28,9 @@
   (let [directory (fs/path repo-root "tmp" (str "hook-cli-" (random-uuid)))
         config (fs/path directory "system.edn")]
     (fs/create-dirs directory)
-    (spit (str config) "{:seon.config/on-core-error :log}\n")
+    (spit (str config)
+          (str "{:seon.config/on-core-error :log\n"
+               " :changed-tests {:enabled false}}\n"))
     {:seon.dev.hook-test/directory directory
      :seon.dev.hook-test/config (str config)}))
 
@@ -97,4 +99,26 @@
         (is (= "block"
                (get-in result
                        [:seon.dev.hook-test/response :decision]))))
+      (finally (fs/delete-tree directory)))))
+
+(deftest codex-post-edit-delivers-advisory-changed-test-feedback
+  (let [{:seon.dev.hook-test/keys [directory config]} (fixture)
+        path "test/seon/dev/runtime_id_test.cljs"
+        patch (str "*** Begin Patch\n"
+                   "*** Update File: " path "\n"
+                   "*** End Patch")]
+    (try
+      (let [result (run-hook
+                     {:hook_event_name "PostToolUse"
+                      :tool_name "apply_patch"
+                      :tool_input {:command patch}}
+                     config)
+            feedback (get-in result
+                             [:seon.dev.hook-test/response
+                              :hookSpecificOutput
+                              :additionalContext])]
+        (is (zero? (:seon.dev.hook-test/exit result)))
+        (is (str/includes? feedback "tests never gate refactoring"))
+        (is (str/includes? feedback "changed tests passed"))
+        (is (str/includes? feedback "seon.dev.runtime-id-test")))
       (finally (fs/delete-tree directory)))))
