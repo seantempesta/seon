@@ -96,11 +96,11 @@
 ;; :seon.fn/:seon.schema attr family stays in seon.agent until the P6
 ;; split finds them a real home.
 (schema/register! :seon.ns/source  :string)
-;; The ns dependency edges live in ONE store: the reified
+;; The ns dependency edges have ONE persisted representation: the reified
 ;; `:seon.ns/require-edges` component rows (registered in seon.eval,
 ;; written by the tee — target/alias/refers per required ns). The flat
 ;; "required ns-names" view is DERIVED from them at read time via
-;; `seon.eval/stored-require-targets` — the parallel flat
+;; `seon.eval/persisted-require-targets` — the parallel flat
 ;; `:seon.ns/requires` attr is deleted (C36).
 
 (schema/register! :seon.agent.ctx/name     :keyword)
@@ -1852,10 +1852,16 @@
   (or (some-> s read-schema-form schema-form-refs) #{}))
 
 (defn normalize-schema-form
-  "Read one canonical persisted Malli form."
+  "Read one persisted Malli form, unwrapping a canonical register call."
   {:malli/schema [:=> [:catn [:seon.schema/form :string]] :any]}
   [source]
-  (read-schema-form source))
+  (let [form (read-schema-form source)]
+    (if (and (seq? form)
+             (#{'register! 'seon.schema/register!} (first form))
+             (keyword? (second form))
+             (<= 3 (count form)))
+      (nth form 2)
+      form)))
 
 (defn- schema-definition-in-db
   "The normalized persisted definition for schema key `k`, or nil."

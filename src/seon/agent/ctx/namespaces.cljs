@@ -202,7 +202,7 @@
    each rendered as a COMPACT CARD. Pure fn of the DB: a real
    `(:require [x …])` on the current ns pulls `x` into context as a card; drop
    the require → it leaves the set (self-healing on the
-   `:seon.ns/require-edges` rows, via `seon.eval/stored-require-targets`).
+   `:seon.ns/require-edges` rows, via `seon.eval/persisted-require-targets`).
    `*.internal` / `*-test` are excluded ([[included-ns?]]). Empty when
    `cur-ns` is nil."
   [db cur-ns]
@@ -210,7 +210,7 @@
     #{}
     (into #{}
           (filter included-ns?)
-          (seval/stored-require-targets db cur-ns))))
+          (seval/persisted-require-targets db cur-ns))))
 
 (defn- full?
   "True when an included ns `nm` renders FULL (its whole real source); false
@@ -580,8 +580,8 @@
    CURRENT ns, not necessarily the namespace it describes. It is deliberately
    NOT a synthetic `register!` form: compact cards describe callable code but
    never present partial/reprojected data as executable source."
-  [{:seon.schema/keys [key source]}]
-  (str "schema " (pr-str key) " = " (schema-form-text source)))
+  [{:seon.schema/keys [key form]}]
+  (str "schema " (pr-str key) " = " (schema-form-text form)))
 
 (defn- parsed-arglists
   "Stored arglists as a nonempty seq of vectors, or nil when unreadable."
