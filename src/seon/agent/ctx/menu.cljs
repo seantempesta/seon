@@ -172,19 +172,17 @@
   "The agent's most recent successful eval rows in `db`, newest first.
 
    `{:seon.eval/at … :seon.eval/source … :seon.eval/ns …}` maps, capped
-   at [[eval-scan-window]]. [] when the agent/attrs are absent."
+   at [[eval-scan-window]]. The fact owner's bounded reverse window is read
+   first, so a long eval history is never scanned merely to build a menu. []
+   when the agent/attrs are absent."
   [db agent-id]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query '[:find [?e ...]
-                                   :in $ ?aid
-                                   :where
-                                   [?a :seon.agent/id ?aid]
-                                   [?e :seon.eval/agent ?a]
-                                   [?e :seon.eval/ok? true]]
-                  :seon.db/args [agent-id]})
-       (map #(db/pull db [:seon.eval/at :seon.eval/source :seon.eval/ns] %))
-       (filter :seon.eval/at)
-       (sort-by #(.getTime ^js (:seon.eval/at %)) >)
+  (->> (seval/recent
+         {:seon.db/db db
+          :seon.agent/id agent-id
+          :seon.eval/recent-limit 200})
+       reverse
+       (filter #(and (:seon.eval/ok? %)
+                     (:seon.eval/at %)))
        (take eval-scan-window)
        vec))
 
@@ -306,15 +304,15 @@
 (defn- all-eval-rows
   "The newest [[global-eval-scan-window]] successful eval rows in `db`
    across ALL agents, newest first — [[eval-rows]] without the agent
-   filter. [] when the attr is absent."
+   filter. Reads the fact owner's bounded reverse window rather than sorting
+   the complete cluster history. [] when the attr is absent."
   [db]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query '[:find [?e ...]
-                                   :where [?e :seon.eval/ok? true]]})
-       (map #(db/pull db [:seon.eval/at :seon.eval/source :seon.eval/ns] %))
-       (filter :seon.eval/at)
-       (sort-by #(.getTime ^js (:seon.eval/at %)) >)
-       (take global-eval-scan-window)
+  (->> (seval/recent-all
+         {:seon.db/db db
+          :seon.eval/recent-limit global-eval-scan-window})
+       reverse
+       (filter #(and (:seon.eval/ok? %)
+                     (:seon.eval/at %)))
        vec))
 
 (defn- call-freq
