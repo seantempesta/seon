@@ -67,7 +67,19 @@ and `src-needle/` scratch. These are the acme harness / experiment state.
 
 ## RISKS, INCOMPLETE, and PROBLEMATIC parts (read before integrating)
 
+Re-verified against main HEAD `7075e98d` (2026-07-14): DROP set still redundant
+(`abbrev-ns-kws` count 0), `src-inspect-ai` still untouched, plan commits still
+absent (markdown refs 11, guard 0).
+
 ### Integration risks
+- **Sibling plan worktrees may overlap.** `git worktree list` shows
+  `seon-plan-fix` and `seon-plan-pilot` — another agent may have in-flight
+  `my.plan` work not yet in main. Before applying `2bf4eb14`/`39fd81ec`, check
+  those branches (and any new `fix(plan)`/`feat(plan)` commits on main since
+  `7075e98d`) for a colliding guard/markdown/reconcile change; reconcile rather
+  than double-apply. (Main already has `4867f9fc fix(plan): validate related
+  steps` = the `needs!`/`move!` preflights, and `894758bd` = the tile→surface
+  rename — both disjoint from my hunks.)
 - **Naming migration `tile`→`surface`.** Main renamed the `plan!` docstring
   example (`src/my/plan.cljs:33-34` on the pin: "summary fn + tile" / "tile
   renders totals" → "surface") and is migrating the plan-block-HTML "tile"
