@@ -115,8 +115,11 @@
               (testing "the FIXED source is what recorded (and would tee)"
                 (is (str/includes? (str (:source row)) "even?"))
                 (is (not (str/includes? (str (:source row)) "(filter even "))))
-              (testing "the value is the fixed form's result"
-                (is (str/includes? (str (:result row)) "(2 4)")))
+              (testing "the fixed lazy result is not retained implicitly"
+                (is (str/includes? (str (:result row))
+                                   ":seon.eval/unbounded-collection"))
+                (is (not (str/includes? (str (:result row)) "(2 4)"))
+                    "admission does not realize the lazy filter merely to display it"))
               (testing "the ↻ fixed note is visible in the narration"
                 (is (str/includes? (str (:narration row)) "↻ fixed:"))
                 (is (str/includes? (str (:narration row)) "even"))

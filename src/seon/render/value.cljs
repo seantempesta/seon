@@ -151,15 +151,21 @@
   (and (not (coll? x)) (not (record? x))
        (number? (:e x)) (keyword? (:a x))))
 
-(defn- opaque-node?
-  "A node that is NOT plain data — must be projected to a marker before it
-   bloats / breaks the skeleton."
+(defn opaque?
+  "True when `x` is a runtime handle rather than ordinary immutable data.
+
+   Rendering projects these values to compact markers. The eval result store
+   also uses this predicate at admission time so an opaque database, entity,
+   compiler object, function, or host object cannot keep an arbitrary object
+   graph alive behind `result/<id>`."
+  {:malli/schema [:=> [:catn [::value :any]] :boolean]}
   [x]
-  (or (datahike-handle? x)
-      (record? x)
-      (datom-shape? x)
-      (object? x)
-      (fn? x)))
+  (boolean
+    (or (datahike-handle? x)
+        (record? x)
+        (datom-shape? x)
+        (object? x)
+        (fn? x))))
 
 (defn- opaque-marker
   "Reader-safe marker for one non-plain node. Never throws."
@@ -201,7 +207,7 @@
   [value]
   (cond
     ;; opaque handles FIRST — a datahike DB is also map?/coll?.
-    (opaque-node? value) (opaque-marker value)
+    (opaque? value) (opaque-marker value)
 
     ;; plain map — recurse over keys AND values.
     (map? value)
@@ -349,7 +355,7 @@
   [x {:keys [max-depth max-keys max-string] :as opts} depth]
   (cond
     ;; opaque handles FIRST — a datahike DB is also map?/coll?.
-    (opaque-node? x) (opaque-marker x)
+    (opaque? x) (opaque-marker x)
 
     (string? x) (clip-string x max-string)
 

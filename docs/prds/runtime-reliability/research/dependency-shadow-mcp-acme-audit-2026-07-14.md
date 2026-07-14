@@ -8,7 +8,7 @@ tags: [research, orchestrator, mcp, cljs, pod]
 
 ## Decision summary
 
-The repository's dependency split is mostly sound. `deps.edn` should continue
+The repository's dependency split is sound. `deps.edn` should continue
 to own JVM and ClojureScript dependency bases, classpaths, JVM options, and
 tool entry points. `shadow-cljs.edn` should own build graphs and compiler
 options. `bb.edn` plus `script/seon/dev/` should own the fast operator and MCP
@@ -16,27 +16,24 @@ adapter dependencies. `bin/seon` should remain a tiny launcher. Process
 lifecycle, artifact sequencing, target selection, dynamic ports, and cluster
 ownership do not belong in aliases.
 
-The current MCP and ACME integration is not ready to be a default workflow:
+The MCP half of the initial audit is now implemented and verified:
 
-- Claude's `seon` MCP command points to the removed `bin/mcp-server`, while its
-  separate `seon_cljs` command points to `bin/mcp-server-cljs`.
-- Codex config calls the CLJS-only executable under the ambiguous name `seon`.
-- The CLJS MCP executable is an 875-line Babashka program whose dependencies
-  and lifecycle are not declared by the repository.
-- Shadow nREPL and writer REPL ports are fixed even though both runtimes expose
-  actual-port discovery files.
-- the preserved ACME processes are live from `seon-stable` but invisible to
-  the current operator, and the current `bin/acme` calls commands the rewritten
-  operator no longer implements.
-- Inspect's offline integration is present, but its live cluster callers still
-  call removed operator verbs and hard-code writer ports.
+- `script/seon/dev/mcp.clj` is the one Babashka server and its dependencies are
+  declared in `bb.edn`;
+- `eval_clj` uses the writer's stateful `io-prepl` boundary and `eval_cljs`
+  uses Shadow nREPL;
+- `.mcp.json` and `.codex/config.toml` call the same checkout-relative
+  `bin/mcp-server-cljs` launcher while preserving Claude's `seon_cljs` name;
+- Shadow and writer REPLs bind port zero and publish their actual ports; and
+- focused framing, routing, session, deadline, restart, and live CLJ/CLJS
+  proofs are recorded in the roadmap and the archived MCP issue.
 
-The target is one repository-owned, development-only MCP server with two
-explicit tools, `eval_clj` and `eval_cljs`. Both Claude and Codex should launch
-the same server. CLJS evaluation should keep Shadow's nREPL transport. CLJ
-evaluation should use the writer's `clojure.core.server/io-prepl`, not add an
-nREPL dependency to the production writer. The server should discover dynamic
-ports from operator-owned files and select a cluster explicitly.
+ACME and Inspect remain unready for the current operator. Preserved ACME
+processes are live from `seon-stable` and `seon-display-v3`, `bin/acme` still
+calls removed named-process commands, and Inspect's live cluster callers still
+call removed operator verbs or hard-code ports. Those are the remaining
+consumer-migration boundary, not evidence that lifecycle belongs in
+`deps.edn`.
 
 ## Scope and evidence
 
@@ -64,21 +61,21 @@ audit.
 
 ## Observed live baseline
 
-At observation time, the default cluster was ready under the new operator:
+The initial observation found the default cluster ready under the new
+operator. A post-MCP re-audit on the same date additionally confirmed:
 
-- watcher PID 5700;
-- writer PID 7684;
-- pod PID 7688;
-- web UI port 7890;
-- Shadow nREPL port file value 7889;
-- writer REPL port file value 7891.
+- the current `.mcp.json` and `.codex/config.toml` use a portable relative
+  launcher and no longer name the deleted `bin/mcp-server`;
+- `shadow-cljs.edn` declares `:nrepl {:port 0}` and the writer configuration
+  defaults its development REPL to zero;
+- stable ACME remains live at HTTP 7980/writer 7981 from
+  `/Users/sean/src/seon-stable` (PIDs 31038/30873); and
+- display-v3 ACME remains live at HTTP 7982/writer 7983 from
+  `/Users/sean/src/seon-display-v3` (PIDs 52189/45003).
 
-The ACME status command reported the cluster down because its new-format
-artifact was absent. The operating system nevertheless showed an old writer
-on 7981 and pod on 7980. Both were orphaned under PID 1 with working directory
-`/Users/sean/src/seon-stable`. Their command lines use the retired server boot,
-old dependency aliases and Datahike revision, Java 25, and the old
-`data/clusters/acme/store` layout. Current source uses the writer uberjar,
+All four preserved processes are orphaned under PID 1. Their command lines use
+the retired server boot, old dependency aliases and Datahike revisions, Java
+25, and `data/clusters/acme/store`. Current source uses the writer uberjar,
 `seon.db.server`, Java 26, and a cluster database child named `db`.
 
 This is not merely stale documentation. Starting a new ACME cluster blindly
@@ -96,15 +93,31 @@ data decision before `seon-stable` can be retired.
 | `:build` | Correct tools.build boundary; the uberjar basis selects `:writer`. | Keep build entry here, but keep build sequencing in the operator. |
 | `:cljs` | Correctly owns compiler/runtime dependencies and its bounded JVM options. Effective classpath includes `src`, `resources`, `test`, and `script`. | Remove Shadow's inert duplicate `:source-paths` only after a clean build proves the deps-mode classpath. Do not remove direct `core.async` without an effective dependency-tree and compile proof. |
 | `:lint` | Appropriate tool alias. | No change identified. |
-| `bb.edn` | Correct owner for the Babashka operator, but it declares only Malli while the MCP executable uses additional namespaces. | Move the MCP implementation into a namespace and explicitly declare any non-bundled dependencies used by that namespace. |
+| `bb.edn` | Correct owner for the Babashka operator and unified MCP adapter. It now declares Cheshire, Malli, and nREPL bencode. | Keep these tooling dependencies out of the product bases. |
 | `acme/deps.edn` | A downstream local/root dependency with its own `src` is sound. The operator's `-Sdeps` injection correctly contributes ACME source to the classpath. | Keep downstream dependency declaration downstream. Model ACME as an operator artifact flavor, not a Seon alias. |
-| `package.json` | Runtime browser dependencies are appropriate. The Shadow npm package appears redundant because every active command enters Shadow through `clj -M:cljs`. | Remove the redundant package and stale lifecycle scripts only after lockfile and clean-build proof. |
+| `package.json` | Runtime dependencies are appropriate. The Shadow npm package and `client:*` scripts appear redundant because every supported active command enters Shadow through `clj -M:cljs` or `bin/seon`. | Remove the redundant package and stale scripts only after lockfile and clean-build proof. |
 | `src-inspect-ai/pyproject.toml` | Correct owner for the Python evaluation harness. | Keep Inspect dependencies out of `deps.edn`; migrate only its operator API usage. |
 
 `shadow-cljs.edn` currently contains `:source-paths`, but Shadow's deps mode
 uses the Clojure classpath. The effective classpath probe confirmed the actual
 source roots. Retaining a second, inert list invites false confidence that the
 two lists are synchronized.
+
+Exact post-change classpath probes showed:
+
+- base: `src` and `resources`, with no Shadow, CLJS, or Datahike;
+- `:writer`: `src`, `reference-code/datahike/src-secondary`, and the exact
+  maintained Datahike/Konserve revisions, with no test/script roots;
+- `:writer:writer-test`: the writer basis plus `test` and `script`;
+- `:cljs`: `src`, `resources`, `test`, and `script`, CLJS 1.12.145,
+  Shadow 3.4.10, and maintained Datahike/Konserve revisions; and
+- ACME `-Sdeps` injection: the same CLJS basis plus only
+  `/Users/sean/src/seon/acme/src` from the downstream project.
+
+This confirms that ACME's empty dependency map is valid today. Its own future
+Clojure dependencies belong in `acme/deps.edn`; its npm dependencies belong in
+a downstream `package.json`/`node_modules` reached through `SEON_EXTRA_NPM`,
+not in `deps.edn`.
 
 The `:writer` basis omits the repository `resources` directory. That is
 currently consistent with the writer's source and artifact build. It should
@@ -166,52 +179,33 @@ shared Shadow server safe for independently owned worktrees.
 
 ## MCP transport audit
 
-The handwritten CLJS adapter follows the essential nREPL rules: bencode
-messages, unique IDs, persistent sessions, collection until `done`, stderr-only
-diagnostics, stdout JSON-RPC, and explicit Shadow runtime selection. That
-mechanism is justified because Shadow nREPL is the supported way to address a
-running CLJS runtime.
+The initial finding has been resolved in place. The handwritten executable is
+now a thin launcher over `script/seon/dev/mcp.clj`; `bb.edn` declares its
+non-bundled dependencies; one JSON-RPC server exposes `eval_cljs` and
+`eval_clj`; all diagnostics stay on stderr; and the two client configurations
+launch the same checkout-relative command.
 
-The deployment around it is the problem:
+The CLJS side retains the justified Shadow nREPL mechanism: bencode messages,
+unique IDs, persistent sessions, collection through `done`, explicit runtime
+selection, and cluster-qualified agent addressing. The CLJ side uses the
+writer's development-only `clojure.core.server/io-prepl`, whose EDN event
+framing supports stateful `*1`/`*2`/`*3` sessions without adding nREPL to the
+product writer basis. Both transports read current port files on demand and
+report process-local session loss honestly after restart.
 
-- `.mcp.json` refers to a deleted CLJ executable and a separate CLJS server;
-- `.codex/config.toml` exposes only the CLJS server;
-- both configs use an absolute path to the main checkout, so an agent in a
-  worktree silently evaluates the main checkout runtime;
-- the large executable mixes protocol, transport, sessions, port discovery,
-  and process supervision in one file;
-- there is no repository-declared dependency/runtime boundary for the adapter.
-
-The replacement should strengthen the existing mechanism in place:
-
-1. Move the MCP implementation to a tested Babashka namespace.
-2. Keep one thin executable with repository-root discovery.
-3. Expose two named tools from one stdio MCP server: `eval_cljs` and `eval_clj`.
-4. Require or resolve an explicit cluster and read its actual port files.
-5. Keep all protocol logs on stderr and JSON-RPC alone on stdout.
-6. Update Claude and Codex configuration atomically to the same command.
-7. Preserve Claude compatibility through `.mcp.json`; do not preserve the dead
-   two-server topology.
-
-The writer currently starts `clojure.core.server/repl`, which is a human REPL
-with prompts and mixed output. Installed Clojure source confirms that
-`io-prepl` emits one EDN map per output or return event, exactly one `:ret` per
-form, maintains `*1`, `*2`, and `*3`, and accepts `:repl/quit`. It is the right
-machine-framed transport for the CLJ tool. Adding nREPL to the production
-writer solely for MCP would enlarge the writer basis and create a second
-operational protocol without a demonstrated need. If reliable interruption of
-arbitrary running CLJ forms later becomes a requirement, that decision should
-be measured independently.
+This solves the default workflow and any cluster/runtime that is actually
+owned and advertised by the current operator/Shadow server. It does not by
+itself adopt legacy ACME processes compiled from another worktree, and it does
+not replace Inspect's need for a structured cluster lease.
 
 Arbitrary eval remains loopback, development-only tooling. It must not become
 the writer's typed production administration surface.
 
 ## Dynamic ports and ownership
 
-The fixed Shadow port 7889 and writer REPL port 7891 are unnecessary. Shadow
-already supports port zero and writes its actual port. The writer schema
-already accepts zero, and `ServerSocket.getLocalPort` is already written to a
-cluster port file. Developer transports should therefore use dynamic ports.
+Shadow and the writer now bind their development REPLs to port zero and publish
+the actual values. The unified MCP adapter discovers both on each call. The web
+UI remains a configurable stable human endpoint.
 
 The stable web UI port 7890 is different: it is a human-facing endpoint and is
 reasonable as a configurable default. ACME's 7980 may remain an explicit
@@ -227,9 +221,9 @@ Port-file rules should be:
 - reject a live foreign owner rather than kill or overwrite it;
 - include checkout/artifact identity where multiple worktrees may operate.
 
-Absolute MCP commands in preserved worktrees currently violate the last rule:
-they start tooling from `/Users/sean/src/seon` even when the task is in another
-checkout.
+The current checkout's MCP registrations are relative. Preserved worktrees may
+still contain old absolute registrations; they are historical state to
+inventory before removal, not configuration to merge back.
 
 ## ACME integration findings
 
@@ -250,6 +244,16 @@ update:
 - the old `seon-stable` processes must be stopped through coordinated ownership
   after deciding whether their data is reset, archived, or migrated.
 
+The artifact mismatch is sharper than a stale command name. With
+`SEON_CLIENT_OUT=out-acme/client/main.js`, the current artifact builder still
+compiles build id `client` and fingerprints
+`.shadow-cljs/builds/client/dev/out/cljs-runtime`, while its required-output
+check points at the old `out-acme` file. If that legacy file exists, a naive
+wrapper that merely delegates to `bin/seon up` can publish a hybrid manifest:
+current default-client closure plus stale ACME entry bundle. ACME therefore
+needs a real artifact flavor/build-id in the one operator graph before any
+start attempt.
+
 `config/acme.edn` also reintroduces a manually mirrored tool/context set and a
 DiffusionGemma/typeahead block. The preserved stable manifest inherited the
 default system instead. Since the roadmap is the implementation-state
@@ -257,6 +261,26 @@ authority, the active ACME manifest should be reconciled against the actually
 graduated autocomplete work rather than treating either aspirational docs or
 the old mirror as truth. The current `steps-tile-html` spelling additionally
 uses retired vocabulary and is evidence that the mirror has drifted.
+
+The preserved worktree audit found additional state that must not be flattened
+into this branch blindly:
+
+- `seon-stable` has dirty ACME source/config, generated bundle, Inspect scoring
+  research/scripts, and an untracked regular `acme/CLAUDE.md`; its live ACME
+  database is about 44 MB;
+- `seon-display-v3` has a live ACME cluster and about 4.2 GB under
+  `data/clusters/acme`, plus dirty generated output/reference links;
+- `seon-plan-pilot` retains about 373 MB of ACME database evidence; and
+- several other worktrees retain generated ACME bundles, local `node_modules`,
+  or audit fixtures.
+
+The five selected stable-lane implementation commits for Inspect planning and
+plan behavior are already present on the current branch under new commit IDs
+(`6ca0aec4`, `71527299`, `1946850e`, `c8a8b23e`, `99c5046b`). Git's patch-id
+comparison marks the corresponding stable commits as integrated. Remaining
+stable-only commits are documentation/history or older autocomplete changes;
+they must be classified against the active roadmap and evidence-preservation
+issue rather than bulk-merged.
 
 ## Inspect integration findings
 
@@ -278,24 +302,21 @@ hard-coded values or Clojure string evaluation.
 
 ## Implementation order
 
-1. Record the invisible live ACME ownership/data hazard and stale Inspect
-   caller contracts as durable issues. Do not start, stop, or migrate ACME yet.
-2. Add tested operator target/flavor data and cluster-namespaced dynamic REPL
-   port discovery without changing the proven default cluster behavior.
-3. Change the writer's development REPL accept function to `io-prepl`, bind it
-   to port zero, and test framing and port publication.
-4. Refactor the existing MCP adapter into one repository-declared server with
-   separate CLJ and CLJS tools. Test JSON-RPC, bencode/EDN framing, sessions,
-   timeouts, malformed responses, unavailable runtimes, and stderr/stdout
-   separation with controlled fake transports.
-5. Update `.mcp.json` and `.codex/config.toml` atomically to the same portable
-   command. Restart both clients and prove CLJ and CLJS evaluation against the
-   intended checkout and cluster.
-6. Make artifact manifests flavor-aware, preserving the default build closure
+1. Completed: record the live ACME ownership/data hazard and stale Inspect
+   caller contracts as durable issues.
+2. Completed for development REPLs: cluster-namespaced dynamic writer port
+   discovery and Shadow port-file discovery preserve default behavior.
+3. Completed: writer `io-prepl` on port zero with framing and publication
+   tests.
+4. Completed: one repository-declared MCP server with CLJ/CLJS tools, bounded
+   framing, sessions, deadlines, failures, and restart behavior.
+5. Completed: portable matching Claude/Codex registrations and live CLJ/CLJS
+   proof against the default cluster.
+6. Next: make artifact manifests flavor-aware, preserving the default closure
    and warm test publication exactly.
 7. Implement the isolated one-off ACME build, then coordinate stopping the old
-   stable processes and deciding the old `store` data disposition before
-   starting current ACME.
+   stable/display processes and deciding each old `store` data disposition
+   before starting current ACME.
 8. Implement the roadmap's cluster lifecycle/lease boundary and migrate
    Inspect's live callers and documentation. Run offline tests plus a basic
    live CLJ/CLJS and typeahead smoke.
@@ -327,7 +348,7 @@ The completed change should demonstrate all of the following:
   smoke evidence;
 - no live process rooted in a worktree before that worktree is removed.
 
-## Durable issues required before implementation
+## Durable issue ownership
 
 This audit found two operational problems that require issue-note ownership:
 
@@ -340,20 +361,21 @@ This audit found two operational problems that require issue-note ownership:
    ports. Acceptance requires the structured cluster lifecycle/lease contract,
    migrated callers and docs, and live CLJ/CLJS/typeahead proof.
 
-The top-level implementation owner should search `docs/seon/issues/` for the
-root causes and create or update the corresponding notes before production
-edits. This research unit intentionally does not edit that issue namespace.
+The active notes are `acme-operator-migration-drift.md`,
+`inspect-live-cluster-caller-drift.md`,
+`autocomplete-worktree-evidence-preservation.md`, and
+`acme-no-sci-eval-seam.md`. The initial MCP issue is archived after the
+implemented proof.
 
 ## Source map
 
 The most decision-relevant evidence is concentrated at these locations:
 
-- `.mcp.json:3-13` and `.codex/config.toml:3-4` — split, absolute, and stale
-  MCP commands;
-- `bin/mcp-server-cljs` — current JSON-RPC, bencode, Shadow runtime, session,
-  and port-discovery implementation;
-- `shadow-cljs.edn:4-8,31-40,75-101` — fixed nREPL port, inert source list, and
-  mirrored ACME build;
+- `.mcp.json` and `.codex/config.toml` — matching portable MCP registrations;
+- `bin/mcp-server-cljs` and `script/seon/dev/mcp.clj` — thin launcher plus the
+  unified JSON-RPC, CLJ/CLJS transport, session, deadline, and discovery owner;
+- `shadow-cljs.edn:4-8,31-40,75-101` — dynamic nREPL port, inert source list,
+  and mirrored ACME build;
 - `reference-code/shadow-cljs/src/main/shadow/cljs/devtools/server/nrepl.clj:117-140`
   — default port-zero nREPL startup;
 - `reference-code/shadow-cljs/src/main/shadow/cljs/devtools/server.clj:139-151,349-359`
@@ -365,8 +387,8 @@ The most decision-relevant evidence is concentrated at these locations:
 - `reference-code/nrepl/src/clojure/nrepl/core.clj` and
   `reference-code/nrepl/src/clojure/nrepl/transport.clj` — request/session and
   bencode transport contracts;
-- `script/seon/dev/config.clj:145,167-169` — cluster port file plus fixed writer
-  REPL default;
+- `script/seon/dev/config.clj:145,167-169` — cluster port file plus dynamic
+  writer REPL default;
 - `script/seon/dev/artifact.clj:161,169-198` — default-client-only build and
   manifest closure;
 - `script/seon/dev/process.clj:123-178,270-298` — unconditional client/test
@@ -381,13 +403,13 @@ The most decision-relevant evidence is concentrated at these locations:
 
 ## Conclusion
 
-The central dependency architecture is not hacky; the edges are. The isolated
-writer and CLJS bases are good, the new operator launcher boundary is good, and
-the default Shadow test artifact has useful correctness guards. The brittle
-parts are duplicate/stale client configuration, fixed developer ports,
-worktree-insensitive absolute commands, an undeclared monolithic MCP script,
-and callers left behind by the operator rewrite.
+The central dependency architecture is not hacky. The isolated writer and CLJS
+bases, thin operator launcher, dynamic development ports, unified MCP adapter,
+and default Shadow test artifact now have clear ownership. The brittle parts
+are duplicate/stale client declarations, default-client-only artifact logic,
+preserved worktree process/data ownership, and ACME/Inspect callers left behind
+by the operator rewrite.
 
-One unified dev MCP adapter, data-driven artifact flavors, dynamic discovered
-ports, and a deliberate ACME/Inspect migration complete the existing design
-without moving lifecycle into aliases or creating another runtime path.
+Data-driven artifact flavors and a deliberate ACME/Inspect migration complete
+the existing design without moving lifecycle into aliases or creating another
+runtime path.

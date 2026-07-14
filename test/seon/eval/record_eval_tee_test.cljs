@@ -249,7 +249,7 @@
                     (is false (str "ambiguous allocation test threw: " error))))
           (.finally done)))))
 
-(deftest allocation-retries-format-one-prepared-value-without-re-realizing-it
+(deftest allocation-retries-reuse-one-lazy-value-rejection-without-realizing-it
   (async done
     (let [!realized (atom 0)
           value (map (fn [n]
@@ -292,12 +292,18 @@
                             first-result final-result]}
                     @!observation]
                 (is (= final-id (:seon.eval/id response)))
-                (is (pos? after-prepare)
-                    "preparation realizes only the bounded view it needs")
+                (is (zero? after-prepare)
+                    "retained-value admission never realizes a lazy result")
                 (is (= after-prepare after-first after-final)
                     "candidate formatting never touches the raw lazy value")
-                (is (str/includes? first-result first-id))
-                (is (str/includes? final-result final-id)))))
+                (is (= first-result final-result)
+                    "every allocation candidate renders the same descriptor")
+                (is (str/includes? first-result
+                                   ":seon.eval/unbounded-collection"))
+                (is (= :seon.eval/unbounded-collection
+                       (get-in response
+                               [:seon.eval/retained-value
+                                :seon.eval/retained-reason]))))))
           (.catch
             (fn [error]
               (is false (str "prepared render retry test threw: " error))))

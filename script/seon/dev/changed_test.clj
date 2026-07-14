@@ -310,10 +310,12 @@
                                    #(set (:seon.dev.test.resource/requires %))))
                         resources)
          affected (reverse-closure requires changed-namespaces)
-         selected (if (or (seq unknown) (seq broad))
+         full? (boolean (or (seq unknown) (seq broad)))
+         selected (if full?
                     test-namespaces
                     (set/intersection affected test-namespaces))]
      {:seon.dev.changed-test/paths (vec paths)
+      :seon.dev.changed-test/full? full?
       :seon.dev.changed-test/test-namespaces (vec (sort-by str selected))
       :seon.dev.changed-test/widening
       (cond-> []
@@ -354,18 +356,26 @@
           (recur (drop 4 lines) (conj excerpts block)))
         (recur (rest lines) excerpts)))))
 
-(defn- run-command! [root boundary argv]
+(defn test-process-environment
+  "Return the canonical Node test environment, preserving explicit overrides."
+  [configuration]
+  (let [environment (:seon.dev.config/environment configuration)]
+    {"SEON_CONFIG" (get environment "SEON_CONFIG" "config/test.edn")
+     "SEON_RENDER_STRICT" (get environment "SEON_RENDER_STRICT" "1")}))
+
+(defn- run-command! [root boundary argv environment]
   (let [log-dir (fs/path root "tmp/test-changed")
         log (fs/path log-dir
                      (str "changed-" (name boundary) "-"
                           (System/currentTimeMillis) "-"
                           (random-uuid) ".log"))
         _ (fs/create-dirs log-dir)
-        process (-> (ProcessBuilder. ^java.util.List argv)
-                    (.directory (.toFile (fs/path root)))
-                    (.redirectErrorStream true)
-                    (.redirectOutput (.toFile log))
-                    (.start))
+        builder (doto (ProcessBuilder. ^java.util.List argv)
+                  (.directory (.toFile (fs/path root)))
+                  (.redirectErrorStream true)
+                  (.redirectOutput (.toFile log)))
+        _ (.putAll (.environment builder) environment)
+        process (.start builder)
         completed? (.waitFor process test-timeout-ms TimeUnit/MILLISECONDS)
         _ (when-not completed? (terminate! process))
         exit (if completed? (.exitValue process) 124)
@@ -393,11 +403,19 @@
     (prune-logs! log-dir)
     result))
 
-(defn- run-node! [root manifest test-namespaces]
-  (let [artifact-path (fs/path root (:seon.dev.test.artifact/path manifest))
-        argv (into ["node" (str artifact-path)]
-                   (map #(str "--test=" %) test-namespaces))]
-    (assoc (run-command! root :pod argv)
+(defn node-argv
+  "Return an unfiltered full command or an explicitly focused Node command."
+  [root manifest test-namespaces]
+  (cond-> ["node" (str (fs/path root
+                                (:seon.dev.test.artifact/path manifest)))]
+    (not= :all test-namespaces)
+    (into (map #(str "--test=" %) test-namespaces))))
+
+(defn- run-node! [configuration manifest test-namespaces]
+  (let [root (:seon.dev.config/root configuration)]
+    (assoc (run-command! root :pod
+                         (node-argv root manifest test-namespaces)
+                         (test-process-environment configuration))
            :seon.dev.changed-test/test-namespaces test-namespaces)))
 
 (defn- run-operator! [root test-namespaces]
@@ -405,21 +423,23 @@
                       "--deps-root" root "-m" "seon.dev.test-runner"]
                (not= :all test-namespaces)
                (into (map str test-namespaces)))]
-    (assoc (run-command! root :operator argv)
+    (assoc (run-command! root :operator argv {})
            :seon.dev.changed-test/test-namespaces test-namespaces)))
 
 (defn- run-writer! [root test-namespaces]
   (let [argv (cond-> [(str (fs/path root "bin/test-writer"))]
                (not= :all test-namespaces)
                (into (map str test-namespaces)))]
-    (assoc (run-command! root :writer argv)
+    (assoc (run-command! root :writer argv {})
            :seon.dev.changed-test/test-namespaces test-namespaces)))
 
-(defn- run-pod-fallback! [root]
-  (assoc (run-command! root :pod [(str (fs/path root "bin/test-cljs"))])
+(defn- run-pod-fallback! [configuration]
+  (let [root (:seon.dev.config/root configuration)]
+    (assoc (run-command! root :pod [(str (fs/path root "bin/test-cljs"))]
+                         (test-process-environment configuration))
          :seon.dev.changed-test/test-namespaces :all
          :seon.dev.changed-test/reason
-         "The managed Shadow manifest was unavailable; ran the full one-shot pod gate."))
+         "The managed Shadow manifest was unavailable; ran the full one-shot pod gate.")))
 
 (defn- shadow-build-input? [path]
   (or (str/starts-with? path "config/")
@@ -505,6 +525,11 @@
                               (impact manifest paths
                                       (:seon.dev.changed-test/shadow-seeds
                                        shadow)))
+              pod-tests (when pod-selection
+                          (if (:seon.dev.changed-test/full? pod-selection)
+                            :all
+                            (:seon.dev.changed-test/test-namespaces
+                             pod-selection)))
               operator-tests
               (:seon.dev.changed-test/operator-tests host-selection)
               writer-tests
@@ -518,16 +543,13 @@
                 (conj (run-writer! root writer-tests))
 
                 (and manifest
-                     (seq (:seon.dev.changed-test/test-namespaces
-                           pod-selection)))
+                     (or (= :all pod-tests) (seq pod-tests)))
                 (conj (run-node!
-                       root manifest
-                       (:seon.dev.changed-test/test-namespaces
-                        pod-selection)))
+                       configuration manifest pod-tests))
 
                 (and (:seon.dev.changed-test/shadow? shadow)
                      (nil? manifest))
-                (conj (run-pod-fallback! root)))]
+                (conj (run-pod-fallback! configuration)))]
           {:seon.dev.changed-test/paths requested-paths
            :seon.dev.changed-test/status (aggregate-status boundary-results)
            :seon.dev.changed-test/boundaries boundary-results

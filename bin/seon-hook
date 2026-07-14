@@ -300,16 +300,21 @@
         (log! "DOCSTRING_LINT_ERROR" (.getMessage e))
         nil))))
 
-(defn- clojure-test-path? [file-path]
+(def ^:private changed-test-build-inputs
+  #{"deps.edn" "shadow-cljs.edn" "package.json" "package-lock.json" "bb.edn"})
+
+(defn- changed-test-path? [file-path]
   (when file-path
-    (let [lower (str/lower-case file-path)]
+    (let [lower (str/lower-case file-path)
+          name (.getName (io/file lower))]
       (or (str/ends-with? lower ".clj")
           (str/ends-with? lower ".cljs")
-          (str/ends-with? lower ".cljc")))))
+          (str/ends-with? lower ".cljc")
+          (contains? changed-test-build-inputs name)))))
 
 (defn- changed-test-feedback [event config]
   (let [paths (->> (event-file-paths event)
-                   (filter clojure-test-path?)
+                   (filter changed-test-path?)
                    vec)
         invalid-source?
         (some (fn [path]

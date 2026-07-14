@@ -669,11 +669,20 @@ mechanisms — extended, never duplicated — make every hang a value:
 - **One fence: the run-id CAS.** A late-settling await from a reaped or
   superseded run cannot corrupt state — its writes lead with the work-fence
   and abort at commit. Late results are values, absorbed or discarded.
-- **One leak-bound: the `result/<id>` cache.** A never-settling Promise occupies
-  the same capped runtime slot read by the analyzer-emitted `result/<id>` symbol
-  and the internal reader. Value and analyzer handle evict together
-  oldest-first and disappear on restart. A late settlement updates only a slot
-  that is still live; it cannot resurrect evicted work.
+- **One leak-bound: the `result/<id>` cache.** Small immutable values pass one
+  bounded, non-serializing structural admission and remain identical. An
+  overweight, lazy, or opaque value becomes a compact descriptor before the
+  transcript or live slot sees it. A never-settling Promise occupies the same
+  capped runtime slot temporarily; its settlement passes the same admission.
+  Value and analyzer handle evict together oldest-first and disappear on
+  restart. A late settlement updates only a slot that is still live; it cannot
+  resurrect evicted work.
+- **One database execution bound.** `seon.db` applies hard query and pull work,
+  result-node, and shallow-weight ceilings inside maintained Datahike execution.
+  Callers may lower but never raise them. Exhaustion is structured
+  `:datahike/budget-exceeded` data and never a silently complete prefix. Query
+  cache admission uses the same bounded weight walk and skips uncertifiable
+  values.
 
 The honest residual is a synchronous CPU loop: it blocks the pod event loop and
 cannot be preempted by an in-process timer. The local runtime records and

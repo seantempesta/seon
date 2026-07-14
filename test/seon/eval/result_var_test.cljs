@@ -227,6 +227,28 @@
                                            (str seval/result-ns-sym)))
               (done)))))))
 
+(deftest pending-settlement-passes-retained-value-admission
+  (let [eval-id "settled-oversize-9999999999"
+        cs (atom {:cljs.analyzer/namespaces {}})
+        prior-results (js/Reflect.get js/globalThis
+                                      (str seval/result-ns-sym))]
+    (js/Reflect.set js/globalThis (str seval/result-ns-sym)
+                    (js/Object.create nil))
+    (seval/bind-result-var! cs eval-id :pending)
+    (try
+      (is (true? ((deref #'seval/replace-live-result!)
+                  eval-id (apply str (repeat (* 1024 1024) "z")))))
+      (is (= :seon.eval/weight-cap-exceeded
+             (:seon.eval/retained-reason
+               (seval/lookup-result eval-id))))
+      (finally
+        ((deref #'seval/unbind-result-var!) cs eval-id)
+        (if prior-results
+          (js/Reflect.set js/globalThis (str seval/result-ns-sym)
+                          prior-results)
+          (js/Reflect.deleteProperty js/globalThis
+                                     (str seval/result-ns-sym)))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Failed eval binds NO result/<id> — its id is a graceful miss.
 ;; ---------------------------------------------------------------------------

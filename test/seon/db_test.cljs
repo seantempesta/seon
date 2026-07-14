@@ -700,6 +700,61 @@
                                      ::db/db    db-after})))))))
       done)))
 
+(deftest query-and-pull-resource-budgets-are-clamped-and-recover
+  (testing "callers may lower but never raise a hard ceiling"
+    (let [clamp (deref #'db/clamp-budget)
+          ceilings {::db/max-work 10
+                    ::db/max-results 5
+                    ::db/max-result-weight 100}]
+      (is (= {:max-work 10 :max-results 2 :max-result-weight 100}
+             (clamp ceilings
+                    {::db/max-work 999
+                     ::db/max-results 2
+                     :max-result-weight 999})))))
+  (async done
+    (with-conn
+      (fn [conn]
+        (.then (tx! conn [{::name "Alpha" ::rank 1}
+                          {::name "Beta" ::rank 2}
+                          {::name "Gamma" ::rank 3}])
+               (fn [_]
+                 (testing "query output exhaustion is structured"
+                   (let [error (try
+                                 (db/query
+                                   {::db/query '[:find ?n
+                                                 :where [_ :seon.db-test/name ?n]]
+                                    ::db/conn conn
+                                    ::db/max-results 1})
+                                 nil
+                                 (catch :default error error))]
+                     (is (true? (:datahike/budget-exceeded (ex-data error))))
+                     (is (= :query-results
+                            (:datahike.budget/name (ex-data error))))))
+                 (testing "pull result-node exhaustion is structured"
+                   (let [error (try
+                                 (db/pull {::db/pull-pattern [::name ::rank]
+                                           ::db/ref [::name "Alpha"]
+                                           ::db/conn conn
+                                           ::db/max-results 1})
+                                 nil
+                                 (catch :default error error))]
+                     (is (true? (:datahike/budget-exceeded (ex-data error))))
+                     (is (= :query-results
+                            (:datahike.budget/name (ex-data error))))))
+                 (testing "a normal read succeeds after both exhausted calls"
+                   (is (= 3
+                          (count
+                            (db/query
+                              {::db/query '[:find ?n
+                                            :where [_ :seon.db-test/name ?n]]
+                               ::db/conn conn}))))
+                   (is (= 1
+                          (::rank
+                            (db/pull {::db/pull-pattern [::name ::rank]
+                                      ::db/ref [::name "Alpha"]
+                                      ::db/conn conn}))))))))
+      done)))
+
 ;; ---------------------------------------------------------------------------
 ;; Positional read arities (T15) — every read op gains a datahike-shaped
 ;; positional form ALONGSIDE its map-in arity. The positional db/conn slot

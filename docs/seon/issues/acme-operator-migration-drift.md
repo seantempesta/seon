@@ -59,6 +59,21 @@ database-server artifact. Their running processes and legacy databases are
 evidence to preserve, not state that the default operator may adopt, reset, or
 overwrite.
 
+The 2026-07-14 post-MCP re-audit pinned the live owners precisely:
+
+- `/Users/sean/src/seon-stable`: writer PID 30873 on 7981 and pod PID 31038
+  on 7980, with about 44 MB under `data/clusters/acme`;
+- `/Users/sean/src/seon-display-v3`: writer PID 45003 on 7983 and pod PID
+  52189 on 7982, with about 4.2 GB under `data/clusters/acme`.
+
+There is also an artifact-integrity trap in a naive wrapper-only migration.
+The current artifact builder always compiles/fingerprints build id `client`,
+but `SEON_CLIENT_OUT=out-acme/client/main.js` changes the required entry-file
+path. Because a legacy `out-acme` file exists, simply delegating to current
+`bin/seon up` could publish a hybrid manifest containing the current default
+client closure and a stale ACME entry bundle. Artifact flavor/build id must be
+one piece of operator data; output substitution is not sufficient.
+
 This is distinct from `acme-no-sci-eval-seam.md`: that issue concerns direct
 SCI access after a cluster exists; this issue owns lifecycle, artifact,
 database, and active consumer-surface migration.

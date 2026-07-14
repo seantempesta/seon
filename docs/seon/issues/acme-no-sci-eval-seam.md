@@ -9,12 +9,12 @@ tags: [issue, agent]
 
 ## Problem
 
-There is no way to eval a CLJS form in the **acme** cluster's pod SCI runtime
-programmatically. The `seon_cljs` MCP attaches only to the DEFAULT pod's shadow
-`:repl` build; acme runs the unwatched `out-acme` bundle (no cljs-watch), and
-acme's wire-REPL on 7981 is the **JVM datahike writer** (`nc` only), NOT the
-CLJS SCI cage. So a measurement or probe that needs to eval Clojure inside
-acme's runtime can't reach it.
+There is no current-operator-owned way to eval a CLJS form in the **acme**
+cluster's pod SCI runtime programmatically. The unified MCP can address any
+cluster-qualified runtime advertised through its Shadow server, but preserved
+ACME runs an unwatched legacy `out-acme` bundle from another worktree and is
+not owned or advertised by the current operator. Its writer REPL is CLJ, not
+the CLJS SCI cage.
 
 ## Impact
 
@@ -30,11 +30,11 @@ is heavyweight and indirect.
 
 ## Acceptance criteria
 
-A direct eval seam into acme's pod SCI runtime — e.g. an HTTP `/eval` endpoint
-on the acme pod (7980), or wiring the `seon_cljs` MCP / a socket REPL to acme's
-CLJS runtime. Must stay isolated to acme's store (never touch the default
-cluster). Then the eval-tier measurement (and future acme-side probes) can run
-in the isolated cluster as originally intended.
+Make the migrated ACME runtime discoverable through the existing unified MCP
+runtime-selection mechanism with a cluster-qualified agent id. Do not add an
+HTTP `/eval`, second socket REPL, or ACME-only eval implementation. The seam
+must resolve to ACME's own database and fail on ambiguous/bare ids. Then the
+eval-tier measurement can run in the isolated cluster as intended.
 
 ## Workarounds (today)
 

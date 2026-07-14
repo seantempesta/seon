@@ -196,6 +196,9 @@
 ;; `::query` key and both of [[query]]'s arities reference it (the
 ;; shared-shape rule; it was inlined three times before).
 (schema/register! ::query-form [:or [:vector :any] :map :string])
+(schema/register! ::max-work [:int {:min 1}])
+(schema/register! ::max-results [:int {:min 1}])
+(schema/register! ::max-result-weight [:int {:min 1}])
 
 ;; An entity ADDRESS as an agent writes one: a raw eid (int) or a
 ;; lookup-ref `[identity-attr value]`. THE shape to pass in `::ref` /
@@ -209,6 +212,9 @@
   [:map
    [::query ::query-form]
    [::args  {:optional true} [:vector :any]]
+   [::max-work {:optional true} ::max-work]
+   [::max-results {:optional true} ::max-results]
+   [::max-result-weight {:optional true} ::max-result-weight]
    [::db    {:optional true} :any]
    [::conn  {:optional true} ::conn]])
 
@@ -220,6 +226,9 @@
    ;; DIRECTLY (no :any escape), and core render paths thread nested
    ;; Entity handles through it. Agents write [[::entity-ref]] shapes.
    [::ref          :any]
+   [::max-work {:optional true} ::max-work]
+   [::max-results {:optional true} ::max-results]
+   [::max-result-weight {:optional true} ::max-result-weight]
    [::db           {:optional true} :any]
    [::conn         {:optional true} ::conn]])
 
@@ -394,11 +403,17 @@
 (schema/register! ::query-read-request
   [:map {:closed true}
    [::query ::query-form]
-   [::args [:vector :any]]])
+   [::args [:vector :any]]
+   [::max-work ::max-work]
+   [::max-results ::max-results]
+   [::max-result-weight ::max-result-weight]])
 (schema/register! ::pull-read-request
   [:map {:closed true}
    [::pull-pattern [:vector :any]]
-   [::ref :any]])
+   [::ref :any]
+   [::max-work ::max-work]
+   [::max-results ::max-results]
+   [::max-result-weight ::max-result-weight]])
 (schema/register! ::entity-read-request
   [:map {:closed true}
    [::ref :any]])
@@ -771,20 +786,59 @@
 
 (declare assert-known-query-attrs!)
 
+(def ^:private query-budget-ceilings
+  "Hard synchronous resource ceilings for every application query.
+
+   Callers may lower these through the namespaced request keys or a raw query
+   map's Datahike option keys; no caller can raise them. Exhaustion is a
+   structured `:datahike/budget-exceeded` error, never a partial answer."
+  {::max-work 2000000
+   ::max-results 50000
+   ::max-result-weight (* 8 1024 1024)})
+
+(def ^:private pull-budget-ceilings
+  "Hard synchronous resource ceilings for every application pull."
+  {::max-work 250000
+   ::max-results 25000
+   ::max-result-weight (* 4 1024 1024)})
+
+(defn- clamp-budget
+  "Translate namespaced Seon or raw Datahike options into clamped options."
+  [ceilings request]
+  (reduce-kv
+    (fn [options seon-key ceiling]
+      (let [library-key (keyword (name seon-key))
+            requested (or (get request seon-key)
+                          (get request library-key)
+                          ceiling)]
+        (assoc options library-key (min ceiling requested))))
+    {}
+    ceilings))
+
+(defn- captured-budget
+  "Translate clamped Datahike options back to the namespaced read contract."
+  [options]
+  {::max-work (:max-work options)
+   ::max-results (:max-results options)
+   ::max-result-weight (:max-result-weight options)})
+
 (defn- raw-query
   "Run one guarded query without crossing the read-observation boundary."
-  [db q inputs]
+  [db q inputs budget-request]
   (assert-known-query-attrs! db q)
-  (apply d/q q db inputs))
+  (d/q (merge {:query q :args (into [db] inputs)}
+              (clamp-budget query-budget-ceilings budget-request))))
 
 (defn- execute-query
   "Run one normalized query and record it only when a capture scope is active."
-  [db q inputs]
-  (let [result (raw-query db q inputs)]
+  [db q inputs budget-request]
+  (let [budget (clamp-budget query-budget-ceilings budget-request)
+        result (raw-query db q inputs budget)]
     (when-let [captures (internal/current-read-captures)]
       (internal/record-read!
         captures :seon.db.read.operation/query db
-        {::query q ::args (vec inputs)} result true))
+        (merge {::query q ::args (vec inputs)} (captured-budget budget))
+        result true))
     result))
 
 (defn query
@@ -863,7 +917,7 @@
       (and (map? a0) (contains? a0 ::query))
       (let [{::keys [query args db conn] :or {conn *conn* args []}} a0
             db (or db @(internal/resolve-conn conn))]
-        (execute-query db query args))
+        (execute-query db query args a0))
 
       ;; Datahike's raw map query is a separate supported query form. Every
       ;; map-form query carries :find; do not confuse it with a malformed
@@ -872,10 +926,10 @@
       (let [q a0]
         (if (internal/db-value? (second args))
           (let [[_ db & inputs] args]
-            (execute-query db q inputs))
+            (execute-query db q inputs q))
           (let [db     @(internal/resolve-conn *conn*)
                 inputs (rest args)]
-            (execute-query db q inputs))))
+            (execute-query db q inputs q))))
 
       ;; A map that is neither supported shape is almost always a bare-key
       ;; typo such as {:query ...}. Passing it to Datahike used to return #{}
@@ -897,10 +951,10 @@
       (let [q a0]
         (if (internal/db-value? (second args))
           (let [[_ db & inputs] args]
-            (execute-query db q inputs))
+            (execute-query db q inputs q))
           (let [db     @(internal/resolve-conn *conn*)
                 inputs (rest args)]
-            (execute-query db q inputs)))))))
+            (execute-query db q inputs q)))))))
 
 (defn- raw-index-datoms
   "Read and normalize one bounded Datahike index window without observing it."
@@ -1218,7 +1272,7 @@
    the guard filters the whole pattern away (no attr could have
    matched ⇒ same result datahike returns for a pattern of
    installed-but-absent attrs)."
-  [db pattern ref]
+  [db pattern ref budget-request]
   (let [named       (pull-pattern-attrs pattern)
         installed   (installed-schema* db)
         uninstalled (->> named
@@ -1246,19 +1300,24 @@
                          ::pull-pattern   pattern}))))
     (when-let [eid (resolve-existing-eid db ref)]
       (if (empty? registered)
-        (d/pull db pattern eid)
+        (d/pull db (merge {:selector pattern :eid eid}
+                          (clamp-budget pull-budget-ceilings budget-request)))
         (let [pattern' (filter-pull-pattern pattern (set registered))]
           (when (seq pattern')
-            (d/pull db pattern' eid)))))))
+            (d/pull db (merge {:selector pattern' :eid eid}
+                              (clamp-budget pull-budget-ceilings
+                                            budget-request)))))))))
 
 (defn- execute-pull
   "Run one guarded pull and capture its normalized request/result when bound."
-  [db pattern ref]
-  (let [result (guarded-pull db pattern ref)]
+  [db pattern ref budget-request]
+  (let [budget (clamp-budget pull-budget-ceilings budget-request)
+        result (guarded-pull db pattern ref budget)]
     (when-let [captures (internal/current-read-captures)]
       (internal/record-read!
         captures :seon.db.read.operation/pull db
-        {::pull-pattern pattern ::ref ref} result true))
+        (merge {::pull-pattern pattern ::ref ref} (captured-budget budget))
+        result true))
     result))
 
 (defn pull
@@ -1306,11 +1365,11 @@
   ([req]
    (let [{::keys [pull-pattern ref db conn] :or {conn *conn*}} req
          db (or db @(internal/resolve-conn conn))]
-     (execute-pull db pull-pattern ref)))
+     (execute-pull db pull-pattern ref req)))
   ([selector eid]
-   (execute-pull @(internal/resolve-conn *conn*) selector eid))
+   (execute-pull @(internal/resolve-conn *conn*) selector eid {}))
   ([db selector eid]
-   (execute-pull db selector eid)))
+   (execute-pull db selector eid {})))
 
 (defn- raw-entity
   "Resolve a Datahike Entity without crossing the public observation boundary."
@@ -1551,7 +1610,7 @@
   [db operation request]
   (case operation
     :seon.db.read.operation/query
-    (raw-query db (::query request) (or (::args request) []))
+    (raw-query db (::query request) (or (::args request) []) request)
 
     :seon.db.read.operation/index-datoms
     (raw-index-datoms db
@@ -1571,7 +1630,7 @@
     (installed-schema* db)
 
     :seon.db.read.operation/pull
-    (guarded-pull db (::pull-pattern request) (::ref request))
+    (guarded-pull db (::pull-pattern request) (::ref request) request)
 
     :seon.db.read.operation/entity
     (touch->map (raw-entity db (::ref request)))

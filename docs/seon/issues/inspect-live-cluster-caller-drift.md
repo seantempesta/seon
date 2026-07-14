@@ -31,12 +31,24 @@ The dependency/Shadow/MCP audit found:
 - associated docstrings and runbooks describe the same retired supervisor,
   frozen-bundle, registry, and port behavior.
 
+The 2026-07-14 lane-integration audit re-ran the complete offline Inspect
+suite: 314 tests passed with eight expected environment-gated skips in 7.86
+seconds. This sharpens the boundary rather than closing it: pure task/scorer
+logic is healthy, while no operator-backed CLJ/CLJS/restart/cleanup journey was
+exercised. The active PRD's older 293/eight count is stale documentation.
+
 Current `bin/seon` exposes target-level `up`, `down`, `restart`, structured
 `status`, one artifact manifest, and scoped reset—not the per-pod/create/
 destroy/bench-bundle surface these callers assume. The remaining cluster
 lifecycle, lease, and artifact-flavor contract is roadmap work; callers cannot
 safely reconstruct it with subprocess strings, arbitrary writer eval, or
 guessed ports.
+
+The unified development MCP is now complete and proves dynamic CLJ and CLJS
+discovery for an already-owned cluster. That removes the old transport gap but
+does not create, lease, freeze, restart, or release Inspect sample clusters.
+Live Inspect must consume the operator lifecycle/lease boundary rather than
+shelling through MCP as a substitute supervisor.
 
 This is distinct from `acme-operator-migration-drift.md`. That issue owns the
 ACME process/artifact/database migration itself; this issue owns Inspect's

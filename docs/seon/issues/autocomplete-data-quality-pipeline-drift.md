@@ -49,6 +49,16 @@ issue's data gate is satisfied.
 - The LoRA audit found 149 of 557 retained pairs hard-failed the live REPL.
   Text-only and `:seon.eval/ok?`-only curation therefore cannot certify gold
   trajectories.
+- The stable worktree's untracked continuation probe found that a balanced
+  first-form stop improved clean single-form shape from `.19` to `.81`, but
+  head accuracy on the small slice remained approximately zero. It also found
+  42 of 213 bundles begin with mechanical `in-ns`. A serving stop primitive
+  therefore cannot substitute for a versioned target/projection contract, and
+  namespace bookkeeping must not silently define a continuation score.
+- The dirty stable fair scorer passed its predeclared creative-alternative and
+  real-error cases and moved the audited frontier from `.264` to `.436`, but it
+  consumes the retired pin and obsolete text-card grammar. Its behavior is a
+  specification to reproduce through Inspect, not a second scorer to import.
 
 ## Owner
 
@@ -64,6 +74,10 @@ parse source, invent cards, choose split membership, or own a second scorer.
   artifact/config identity, projection version, database identity and basis,
   renderer/profile version, row identities, content digests, split assignment,
   and rejection reasons; repeated export at the same basis is byte-identical.
+- Every target declares its projection semantics. Observed historical bundles,
+  counterfactual re-projections, and substantive next-form targets are distinct
+  modes; `in-ns` or other harness-owned bookkeeping is never silently added to
+  or removed from the scored target.
 - Exported cards are exactly the runtime's inert compact-card representation.
   Referenced schemas are closed through the program graph and emitted once by
   the same runtime mechanism; no Python/Clojure fake-`defn`, brace stripping,
@@ -81,5 +95,8 @@ parse source, invent cards, choose split membership, or own a second scorer.
   deterministic oracle/judge calibration. The prior fair-scoring acceptance
   cases pass there, and historical model results are labeled non-comparable
   unless regenerated from the canonical artifact.
+- A future continuation arm may use a bounded string/comment-aware first-form
+  stop, but it consumes the same artifact and Inspect scorer. It does not own a
+  second renderer, dataset, eval path, or metric.
 - A clean held-out export and scored baseline pass the data-quality gate before
   autocomplete training is deliberately resumed.

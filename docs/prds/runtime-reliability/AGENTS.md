@@ -72,8 +72,8 @@ five reviewed implementation commits only. Keep the provider-derived Inspect
 egress, declared `openai` dependency, first-class long-term-planning task,
 same-title `plan!` guard, and EDN-only `reconcile!`. Do not import the lane's
 redundant compact-context commits, local ACME/src-needle state, or removed
-markdown plan path. The offline Inspect gate is 293 passed/eight gated skips;
-planning good/bad score 1.000/0.000; focused `my.plan-test` is 40/241.
+markdown plan path. Current gate counts and remaining integration work belong
+only in [[roadmap.md]]; this runbook records the durable lane disposition.
 
 The previously shared ACME/plan/REPL work is checkpointed at `3e0e0bff` and the
 tree was clean immediately afterward. Focused `seon.schema-test`,

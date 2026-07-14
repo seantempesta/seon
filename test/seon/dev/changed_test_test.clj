@@ -39,11 +39,38 @@
 
 (deftest unknown-cljs-path-widens-explicitly
   (let [result (changed/impact manifest ["src/example/new.cljs"])]
+    (is (true? (:seon.dev.changed-test/full? result)))
     (is (= (set (:seon.dev.test.artifact/test-namespaces manifest))
            (set (:seon.dev.changed-test/test-namespaces result))))
     (is (= :unknown-cljs-resource
            (get-in result [:seon.dev.changed-test/widening 0
                            :seon.dev.changed-test/reason])))))
+
+(deftest broad-input-runs-the-unfiltered-shadow-artifact
+  (let [result (changed/impact manifest ["deps.edn"])]
+    (is (true? (:seon.dev.changed-test/full? result))
+        "a broad input must run Shadow's complete test data, including required probe namespaces")
+    (is (= (set (:seon.dev.test.artifact/test-namespaces manifest))
+           (set (:seon.dev.changed-test/test-namespaces result))))))
+
+(deftest node-test-environment-matches-the-canonical-runner
+  (is (= {"SEON_CONFIG" "config/test.edn"
+          "SEON_RENDER_STRICT" "1"}
+         (changed/test-process-environment {})))
+  (is (= {"SEON_CONFIG" "config/custom.edn"
+          "SEON_RENDER_STRICT" "0"}
+         (changed/test-process-environment
+           {:seon.dev.config/environment
+            {"SEON_CONFIG" "config/custom.edn"
+             "SEON_RENDER_STRICT" "0"}}))
+      "an explicit caller selection still wins, as it does in bin/test-cljs"))
+
+(deftest full-node-command-does-not-filter-shadow-test-data
+  (let [artifact {:seon.dev.test.artifact/path "out/test/artifact/test.js"}]
+    (is (= ["node" "root/out/test/artifact/test.js"]
+           (changed/node-argv "root" artifact :all)))
+    (is (= ["node" "root/out/test/artifact/test.js" "--test=example.alpha-test"]
+           (changed/node-argv "root" artifact ['example.alpha-test])))))
 
 (deftest shared-cljc-input-uses-the-shadow-graph-when-known
   (let [shared (assoc-in manifest

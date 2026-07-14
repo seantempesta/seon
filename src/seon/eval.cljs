@@ -1126,6 +1126,149 @@
    with SEON_EVAL_RESULT_VARS_CAP."
   (config/result-vars-cap))
 
+(def ^:private result-retained-node-cap
+  "Maximum distinct structural nodes inspected and retained by one
+   `result/<id>` value. This is a hard safety ceiling, not a display knob."
+  4096)
+
+(def ^:private result-retained-weight-cap
+  "Maximum shallow retention weight for one `result/<id>` value.
+
+   Strings and byte buffers charge their complete length in O(1); ordinary
+   nodes charge one unit. Two hundred maximally admitted slots therefore have
+   a finite upper envelope instead of a count-only bound."
+  (* 256 1024))
+
+(schema/register! ::retained? :boolean)
+(schema/register! ::retained-reason :keyword)
+(schema/register! ::retained-observed-nodes [:int {:min 0}])
+(schema/register! ::retained-observed-weight [:int {:min 0}])
+(schema/register! ::retained-node-cap [:int {:min 1}])
+(schema/register! ::retained-weight-cap [:int {:min 1}])
+(schema/register! ::retained-summary :string)
+(schema/register! ::retained-recovery :string)
+(schema/register! ::retained-value :any)
+
+(defn- retained-rejection
+  [reason nodes weight summary]
+  {::retained? false
+   ::retained-reason reason
+   ::retained-observed-nodes nodes
+   ::retained-observed-weight weight
+   ::retained-node-cap result-retained-node-cap
+   ::retained-weight-cap result-retained-weight-cap
+   ::retained-summary summary
+   ::retained-recovery
+   "Use a narrower seon.db/query, seon.db/pull, or seon.db/index-datoms request; persist intentional large text incrementally with my.blob/put!."})
+
+(defn- byte-length
+  "Return an ArrayBuffer/typed-array byte length without copying, else nil."
+  [x]
+  (cond
+    (instance? js/ArrayBuffer x) (.-byteLength x)
+    (and (exists? js/ArrayBuffer)
+         (.isView js/ArrayBuffer x)) (.-byteLength x)
+    :else nil))
+
+(defn admit-result-value
+  "Return `v` unchanged when it is safe to retain as `result/<id>`.
+
+   Admission is iterative, non-serializing, and stops at the first exceeded
+   node/weight bound. Strings and byte buffers are measured in O(1), bounded
+   immutable collections are inspected structurally, shared references are
+   visited once, and lazy/unbounded collections or opaque runtime handles are
+   rejected. A rejection returns a small data descriptor that never refers to
+   `v`; callers record and retain that descriptor instead of the raw value."
+  {:malli/schema [:=> [:catn [::value :any]] :any]}
+  [v]
+  (try
+    (let [seen (js/WeakSet.)]
+      (loop [work [v]
+             nodes 0
+             weight 0]
+        (if (empty? work)
+          v
+          (let [x (peek work)
+                work (pop work)
+                bytes (byte-length x)
+                reference? (or (coll? x) (object? x) (some? bytes))
+                seen? (and reference? (.has seen x))]
+            (if seen?
+              (recur work nodes weight)
+              (let [_ (when reference? (.add seen x))
+                    nodes' (inc nodes)
+                    weight' (+ weight
+                               (cond
+                                 (string? x) (count x)
+                                 (some? bytes) bytes
+                                 :else 1))]
+                (cond
+                  (> nodes' result-retained-node-cap)
+                  (retained-rejection
+                    ::node-cap-exceeded nodes' weight'
+                    "result was not retained because its structure exceeds the live-result node budget")
+
+                  (> weight' result-retained-weight-cap)
+                  (retained-rejection
+                    ::weight-cap-exceeded nodes' weight'
+                    "result was not retained because its shallow weight exceeds the live-result budget")
+
+                  (some? bytes)
+                  (recur work nodes' weight')
+
+                  (value/opaque? x)
+                  (retained-rejection
+                    ::opaque-value nodes' weight'
+                    "result was not retained because it contains an opaque runtime handle")
+
+                  (and (coll? x) (not (counted? x)))
+                  (retained-rejection
+                    ::unbounded-collection nodes' weight'
+                    "result was not retained because it contains a lazy or unbounded collection")
+
+                  (map? x)
+                  (let [metadata (meta x)
+                        child-count (+ (* 2 (count x))
+                                       (if (seq metadata) 1 0))]
+                    (if (> (+ nodes' (count work) child-count)
+                           result-retained-node-cap)
+                      (retained-rejection
+                        ::node-cap-exceeded
+                        (inc result-retained-node-cap)
+                        weight'
+                        "result was not retained because its structure exceeds the live-result node budget")
+                      (recur
+                        (cond->
+                          (reduce-kv (fn [stack k child]
+                                       (conj stack k child))
+                                     work x)
+                          (seq metadata) (conj metadata))
+                        nodes' weight')))
+
+                  (coll? x)
+                  (let [metadata (meta x)
+                        child-count (+ (count x) (if (seq metadata) 1 0))]
+                    (if (> (+ nodes' (count work) child-count)
+                           result-retained-node-cap)
+                      (retained-rejection
+                        ::node-cap-exceeded
+                        (inc result-retained-node-cap)
+                        weight'
+                        "result was not retained because its structure exceeds the live-result node budget")
+                      (recur (cond-> (reduce conj work x)
+                               (seq metadata) (conj metadata))
+                             nodes' weight')))
+
+                  :else
+                  (recur work nodes' weight'))))))))
+    (catch :default e
+      (retained-rejection
+        ::inspection-failed 0 0
+        (str "result was not retained because bounded structural inspection failed: "
+             (subs (or (some-> ^js e .-message) (str e))
+                   0 (min 160 (count (or (some-> ^js e .-message)
+                                         (str e))))))))))
+
 (defn result-live?
   "True when the bounded runtime owns `result/<id>`."
   {:malli/schema [:=> [:catn [::id :string]] :boolean]}
@@ -1390,8 +1533,10 @@
 ;; ============================================================
 ;; Results store. The one runtime value lives at
 ;; `globalThis.result.<munged-id>`, the same slot emitted for the
-;; agent-facing `result/<id>` analyzer handle. Any value type can live
-;; there, including opaque Datahike objects and Promises; no
+;; agent-facing `result/<id>` analyzer handle. Small immutable data lives
+;; there identically; overweight, lazy, and opaque values are replaced by a
+;; compact descriptor before installation. A pending Promise is the one
+;; temporary handle exception and its settlement passes admission. No
 ;; pr-str/read-string round trip is involved. The reserved object's own
 ;; enumerable property order is the oldest-first eviction order, so there is
 ;; no second atom mirroring which live results exist. Eval ids are valid
@@ -1479,7 +1624,7 @@
       (boolean
         (when (and robj
                    (js/Reflect.has robj munged))
-          (js/Reflect.set robj munged value))))
+          (js/Reflect.set robj munged (admit-result-value value)))))
     (catch :default e
       (error/record! {:seon.error/raw e :seon.error/fault :core})
       false)))
@@ -1519,8 +1664,8 @@
   [compile-state id]
   (unbind-result-runtime-key! compile-state (cljs.core/munge id)))
 
-(defn bind-result-var!
-  "Store a successful eval's live value as the var `result/<id>`.
+(defn- bind-admitted-result-var!
+  "Install one already-admitted value as the var `result/<id>`.
 
    Sets `globalThis.result.<munged-id>` and registers `<id>` in the
    `result` ns's analyzer defs in `compile-state`, so a later bare
@@ -1531,8 +1676,6 @@
 
    Failed evals never call this — there is no value to bind. Soft-fails
    (logs + ignores) so a bind hiccup never breaks the eval pipeline."
-  {:malli/schema [:=> [:catn [::compile-state :any] [::id :string] [::value :any]]
-                  :nil]}
   [compile-state id v]
   (try
     (let [munged (cljs.core/munge id)
@@ -1571,6 +1714,18 @@
       (unbind-result-runtime-key! compile-state (cljs.core/munge id))
       (error/record! {:seon.error/raw e :seon.error/fault :core})))
   nil)
+
+(defn bind-result-var!
+  "Admit and store a successful eval value as `result/<id>`.
+
+   Small immutable data round-trips identically. Oversized, lazy, or opaque
+   values become a bounded descriptor before this function touches the live
+   runtime slot. Eval recording uses the same admitted value through the
+   private installer so its transcript and live handle cannot disagree."
+  {:malli/schema [:=> [:catn [::compile-state :any] [::id :string] [::value :any]]
+                  :nil]}
+  [compile-state id v]
+  (bind-admitted-result-var! compile-state id (admit-result-value v)))
 
 ;; ============================================================
 ;; Config-driven agent-init CP-1 — home-ns wiring + toolkit (agent-level
@@ -2785,9 +2940,9 @@
    string so a whole-database scan stays bounded by `N * database-edn-cap`.
 
    16k is generous headroom for direct datom inspection/debugging while
-   staying ~600x below the 9.7M blob that caused the OOM. The FULL value
-   remains available in-session as the live var `result/<id>` in the bounded
-   process store — its VALUE is not clipped."
+   staying ~600x below the 9.7M blob that caused the OOM. A safely admitted
+   value remains available in-session as `result/<id>`; rejected values leave
+   a compact descriptor instead of retaining the dangerous object graph."
   (config/database-edn-cap))
 
 (defn cap-edn
@@ -2862,8 +3017,8 @@
 
    The clip applied to the projected/pr-str'd value string before it is
    persisted: any value (a giant scalar, a wide map, a long string)
-   clips to a well-formed string that names `result/<id>` for the full
-   live value. The cap's ONE owner is
+   clips to a well-formed string that names `result/<id>` for the safely
+   admitted live value. The cap's ONE owner is
    `seon.config/result-body-render-cap` (chars — the same knob
    `seon.agent.ctx/result-body-render-cap` reads for the read-time
    render; C32), converted to this clip's TOKEN budget at the boundary
@@ -2874,8 +3029,8 @@
    Delegates the cut to `seon.ai.tokens/clip-str` (the ONE bounded-print)
    with a loud, token-denominated marker: a one-line pointer to the full
    value's `result/<id>` live var. Under the cap → returned unchanged.
-   Names the id so the agent always knows where the untruncated value
-   lives. Pure; nil-safe."
+   Names the id so the agent knows where an admitted untruncated value lives;
+   an unsafe value is already a compact rejection descriptor. Pure; nil-safe."
   {:malli/schema [:=> [:catn [::eval-id :string] [::body :string]] :string]}
   [eval-id body]
   (tokens/clip-str
@@ -2883,7 +3038,7 @@
     (tokens/chars->tokens (config/result-body-render-cap))
     (fn [budget total]
       (str "\n; … +" (- total budget) " tokens clipped (of " total "); the "
-           "full value is the live var result/" eval-id " — drill it with "
+           "admitted value is the live var result/" eval-id " — drill it with "
            "get-in/filter/subs."))))
 
 ;; --- agent-safe projection ---------------------------------------------
@@ -3003,7 +3158,10 @@
   [{::keys [at narration source result duration-ms tee output pending?]
     turn-id :seon.agent.turn/id-of-turn
     ns      ::ending-ns}]
-  (let [conn db/*conn*
+  (let [result (if (and (::ok? result) (not pending?))
+                 (update result ::value admit-result-value)
+                 result)
+        conn db/*conn*
         aid  (db/current-agent-id)
         stable-eval-row
         (cond-> {:seon.eval/at          at
@@ -3067,9 +3225,12 @@
                :seon.db/conn conn})))
         primary (await (allocate-record! (vec (or tee []))))]
     (if (:seon.db/ok? primary)
-      {:seon.db/ok? true
-       :seon.eval/id (get-in primary [::db.id/ids ::eval-allocation])
-       ::tee-recorded? true}
+      (cond->
+        {:seon.db/ok? true
+         :seon.eval/id (get-in primary [::db.id/ids ::eval-allocation])
+         ::tee-recorded? true}
+        (and (::ok? result) (not pending?))
+        (assoc ::retained-value (::value result)))
       (do
         (js/console.error "[seon.eval/record-eval!] tx FAILED:"
                           (-> primary :seon.db/error :seon.error/message)
@@ -3100,9 +3261,12 @@
                     "[seon.eval/record-eval!] could not stamp"
                     ":seon.eval/record-error on eval" eval-id ":"
                     (-> stamped :seon.db/error :seon.error/message)))
-                {:seon.db/ok? true
-                 :seon.eval/id eval-id
-                 ::tee-recorded? false})
+                (cond->
+                  {:seon.db/ok? true
+                   :seon.eval/id eval-id
+                   ::tee-recorded? false}
+                  (and (::ok? result) (not pending?))
+                  (assoc ::retained-value (::value result))))
               (do
                 (js/console.error
                   "[seon.eval/record-eval!] DATA LOSS — eval row could not be"
@@ -4228,8 +4392,10 @@
           ;; Bind only the committed id. A failed recorder leaves no orphaned
           ;; result slot; a rejected allocation candidate is never observable.
           (when (and (:seon.db/ok? recorded) (::ok? result))
-            (let [live-value (if pending? pending-promise (::value result))]
-              (bind-result-var! compile-state eval-id live-value)
+            (let [live-value (if pending?
+                               pending-promise
+                               (::retained-value recorded))]
+              (bind-admitted-result-var! compile-state eval-id live-value)
               (when pending?
                 (-> pending-promise
                     (.then (fn [v]
@@ -4319,7 +4485,8 @@
                       ::result      result
                       ::tee         (vec (or tee []))}))]
     (when (and (:seon.db/ok? recorded) (::ok? result))
-      (bind-result-var! compile-state (:seon.eval/id recorded) value))
+      (bind-admitted-result-var! compile-state (:seon.eval/id recorded)
+                                 (::retained-value recorded)))
     (if (::ok? result) (vswap! n-ok inc) (vswap! n-fail inc))
     recorded))
 
@@ -4587,8 +4754,8 @@
                           ::ending-ns   @current-ns
                           ::result      result}))]
         (when (and (:seon.db/ok? recorded) (::ok? result))
-          (bind-result-var! compile-state (:seon.eval/id recorded)
-                            (::value result)))
+          (bind-admitted-result-var! compile-state (:seon.eval/id recorded)
+                                     (::retained-value recorded)))
         (if (::ok? result)
           (vswap! n-ok   inc)
           (vswap! n-fail inc))

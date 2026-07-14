@@ -52,14 +52,47 @@ Completed and committed on this branch:
   retained evidence;
 - the reviewed autosuggest/plan/Inspect behavior, without its duplicate context
   path; and
-- a green complete CLJS checkpoint of 1,301 tests/6,159 assertions plus focused
+- a green complete CLJS checkpoint of 1,305 tests/6,175 assertions plus focused
   live hook proofs on all three Clojure file types.
 
-The issue authority currently contains 23 open and 87 archived notes. Startup
-triage found one process-safety blocker before broad agent/browser drives:
-`eval-memory-safety.md` still permits an individual database query or pull to
-materialize an unbounded value even though retained result-slot count is
-bounded.
+The issue authority's generated index is the live count. Startup triage's
+process-safety blocker is now implemented pending final live proof: maintained
+Datahike commit `1e78cb9c` adds synchronous query/pull work, result-node, and
+shallow-weight budgets plus safe query-cache admission; `seon.db` clamps hard
+defaults; and `result/<id>` admits bounded immutable values before transcript
+recording or retention. Focused library proof is 117 JVM tests/309 assertions,
+104 CLJS tests/821 assertions, and the exact nested find-pull budget probe at
+three tests/21 assertions. Seon proof is query/pull clamp and recovery 1/7,
+database 50/346, read observation 8/76, eval memory 13/40, result slots 8/29,
+record/retry 28/130, writer 50/308, and operator 84/539.
+
+The fresh default cluster rebuilt and returned ready with watcher, writer, and
+pod alive. Live MCP evaluation reached both CLJ and CLJS runtimes. A query with
+`:seon.db/max-results 1` failed as structured `:datahike/budget-exceeded` data
+after observing two rows; 100 repeated exhausted queries returned control and a
+normal query still returned all three agent rows. A 300 KB string was replaced
+by the 256 KiB retained-result descriptor and the next eval returned `42`.
+The complete post-change CLJS checkpoint is 1,305 tests/6,175 assertions with
+zero failures and errors. The dependency-aware changed-test path now reaches
+the same complete immutable artifact without narrowing selectors or dropping
+the canonical test manifest: the mixed `deps.edn`/`src/seon/db.cljs` proof
+passes operator 84/539, writer 50/308, and pod 1,305/6,175.
+
+The cross-lane audit in
+[[research/inspect-autocomplete-lane-integration-audit-2026-07-14]] confirms
+that the five stable behavior commits are integrated or patch-equivalent and
+that no old lane commit is a safe new cherry-pick. Four display-v3 ideas remain
+to be reimplemented through one structured database-derived export; ignored
+database, scorer, and continuation evidence must be preserved before worktree
+removal. The current offline Inspect gate is 314 passed/eight expected skips.
+
+The dependency/Shadow/ACME audit in
+[[research/dependency-shadow-mcp-acme-audit-2026-07-14]] confirms the current
+`deps.edn` split and unified dynamic-port MCP boundary. ACME cannot yet delegate
+to the operator: artifact creation is hard-wired to `client`, so an `out-acme`
+override can combine a current default closure with a stale ACME entry bundle.
+Add an explicit ACME artifact flavor/build id before touching the preserved
+stable/display-v3 processes or their 44 MB/4.2 GB databases.
 
 Before implementation resumes, reconcile the target architecture from
 [[research/architecture-target-drift-audit-2026-07-14]] in its recommended
@@ -182,7 +215,7 @@ implementation:
   zero test namespaces started. The focused schema/database gate passed 56
   tests/391 assertions and the original contaminating order passed 52
   tests/361 assertions. This is retained repair evidence, not a current gap:
-  the post-repair complete CLJS checkpoint is green at 1,301 tests/6,159
+  the latest complete CLJS checkpoint is green at 1,305 tests/6,175
   assertions.
 
 The completed autosuggest lane is now integrated as five bounded commits. The
@@ -190,7 +223,7 @@ active Inspect SWE-bench arm derives restricted egress from the selected model
 provider, standard openai-compatible Inspect mode declares its `openai`
 dependency, and long-term planning is a first-class Inspect task over the
 existing restart driver. Its offline good/bad arms score 1.000/0.000. The
-Inspect suite passes 293 tests with eight environment-gated skips after fixing
+Inspect suite passes 314 tests with eight environment-gated skips after fixing
 one stale pre-refactor registry assertion. In `my.plan`, a repeated open
 same-title `plan!` is refused instead of duplicating a forest, while
 `reconcile!` now has one EDN-tree update format and no markdown parser. Main's
@@ -1595,8 +1628,10 @@ Grown-database idle feeds do not repeat SCI/HTML work or sawtooth RSS.
 5. Profile cold/warm boot, five agent births, writer latency, sync, dirty-unit renders,
    SCI invocations, gzip bytes, browser morph time, event-loop delay, CPU, heap,
    GC, and RSS on small and grown databases.
-6. Establish explicit budgets and fail loudly when agent-authored database
-   reads/renders exceed them; do not hide unbounded work by increasing timeouts.
+6. Explicit database-read and retained-result budgets are implemented at their
+   owners. Complete the remaining render budgets and fail loudly when
+   agent-authored work exceeds them; do not hide unbounded work by increasing
+   timeouts.
 7. Update active architecture, skills, runbooks, Docker/build docs, and
    operator help to describe only proven behavior. Mark historical material as
    history rather than rewriting it.

@@ -78,6 +78,13 @@ Malli-to-Datahike bridge. `seon.eval`, `seon.ns`, and the program graph own code
 lookup and evaluation. `my.kb`, `my.ns`, and `my.plan` compose those contracts;
 they do not bypass them.
 
+Every `seon.db/query` and `seon.db/pull` runs with hard synchronous work,
+result-node, and shallow-weight ceilings at the maintained Datahike executor.
+Namespaced request options can lower those bounds for a deliberately small
+operation but cannot raise the application ceiling. Budget exhaustion is a
+structured error value; a semantic query `:limit` remains ordinary result
+semantics and is not mistaken for a work or materialization bound.
+
 ### Host and network effects
 
 Filesystem, search, shell, fetch, and web search are protected capability

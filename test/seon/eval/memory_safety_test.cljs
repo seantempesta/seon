@@ -12,9 +12,8 @@
      longer flows through cap-edn — it persists WHOLE as a
      logs/prompts/<agent>/<turn>.txt blob with chars/file datom
      projections, 2026-06-09.)
-   - the FULL value still lives in the one capped `result/<id>` process
-     store, so the unclipped value stays available in-session even when
-     the persisted datom is bounded.
+   - the live `result/<id>` store admits only bounded immutable values;
+     overweight, lazy, and opaque values become compact descriptors.
    - normal small results are stored verbatim (no spurious truncation).
 
    Run interactively via MCP eval:
@@ -89,13 +88,12 @@
   (is (= "abc" (seval/cap-edn "abc" 3))))
 
 ;; ---------------------------------------------------------------------------
-;; The live-result store is SEPARATE from the persisted datom. Capping the
-;; datom must NOT clip the `result/<id>` runtime value. The agent-facing var
-;; and internal lookup must read the same bounded process slot; no hidden
-;; second property may retain the value.
+;; The live-result store is SEPARATE from the persisted datom, but it has its
+;; own structural admission budget. Small values round-trip identically;
+;; overweight values leave only a bounded descriptor in `result/<id>`.
 ;; ---------------------------------------------------------------------------
 
-(deftest one-live-result-slot-retains-the-full-value
+(deftest one-live-result-slot-rejects-an-overweight-value
   (let [eval-id       "mem-safe-0001"
         big-value     (apply str (repeat (* 5 1024 1024) "y"))
         compile-state (atom {:cljs.analyzer/namespaces {}})
@@ -113,9 +111,13 @@
       (testing "persisted datom is bounded"
         (is (<= (count persisted) (+ seval/database-edn-cap 64)))
         (is (< (count persisted) (count big-value))))
-      (testing "the public var and internal lookup share one unclipped slot"
-        (is (= big-value (seval/lookup-result eval-id)))
-        (is (= big-value (seval/lookup-result (keyword eval-id))))
+      (testing "the public var and internal lookup share one bounded descriptor"
+        (let [retained (seval/lookup-result eval-id)]
+          (is (false? (:seon.eval/retained? retained)))
+          (is (= :seon.eval/weight-cap-exceeded
+                 (:seon.eval/retained-reason retained)))
+          (is (< (count (pr-str retained)) 1000))
+          (is (= retained (seval/lookup-result (keyword eval-id)))))
         (is (contains?
               (get-in @compile-state
                       [:cljs.analyzer/namespaces seval/result-ns-sym :defs])
@@ -129,6 +131,21 @@
                           prior-results)
           (js/Reflect.deleteProperty js/globalThis
                                      (str seval/result-ns-sym)))))))
+
+(deftest small-live-result-round-trips-identically
+  (let [value {:seon.demo/total 42
+               :seon.demo/rows [1 2 3]}]
+    (is (identical? value (seval/admit-result-value value)))))
+
+(deftest structural-admission-stops-before-unbounded-work
+  (testing "an already-wide value is rejected by node count"
+    (is (= :seon.eval/node-cap-exceeded
+           (:seon.eval/retained-reason
+             (seval/admit-result-value (vec (range 5000)))))))
+  (testing "a lazy sequence is rejected without walking its tail"
+    (is (= :seon.eval/unbounded-collection
+           (:seon.eval/retained-reason
+             (seval/admit-result-value (iterate inc 0)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; render-result-edn — the agent-facing text. Delegates to
