@@ -2487,8 +2487,7 @@
 
 ;; The attrs a fn's source names as QUALIFIED keyword literals — its
 ;; declared read-set, extracted from the ALREADY-READ defn form at tee
-;; time (never from text). ABSENT = no keyword literals OR a
-;; pre-structural row (consumers fall back to the regex scan).
+;; time (never from text). No datoms means the declared set is empty.
 ;; `[:vector …]` (not `[:set …]`): the transact validator checks the
 ;; tx VALUE against the registered container, and diff-upserts
 ;; transact vectors.
@@ -2661,8 +2660,7 @@
    attr is read as ONE lookup ref rather than two cardinality-many values.
    Emitted after the owning fn entity at the tee site, so the lookup-ref is
    resolvable even on the first definition. A REDEF that drops a keyword
-   literal sheds the stale watch, and a legacy row self-backfills on its first
-   replay/re-eval."
+   literal sheds the stale watch."
   {:malli/schema
    [:=> [:catn [::db :any] [::sym-str :string]
          [::new-kws [:set :qualified-keyword]]]

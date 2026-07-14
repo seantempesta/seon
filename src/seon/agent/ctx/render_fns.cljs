@@ -149,13 +149,6 @@
 ;; so a retraction counts as a change too).
 ;; ============================================================
 
-(def ^:private attr-literal-re
-  "Qualified keyword LITERALS in a stored fn source — the LEGACY-fallback
-   regex behind [[declared-read-attrs]]. Requires a `/` (an unqualified
-   `:keys` never matches); an `::alias/k` form matches only its bare
-   `alias/k` tail, which the installed-attr intersection then discards."
-  #":([A-Za-z][A-Za-z0-9_.$-]*/[A-Za-z0-9_.*+!?<>='-]+)")
-
 (def ^:private dependency-exclusions
   "Transaction/delivery plumbing is not domain view data.
 
@@ -168,43 +161,21 @@
     :seon.db/process
     :seon.db.protocol/request-id})
 
-(defn- source-attrs
-  "LEGACY fallback: regex-scan `src` for qualified keyword literals.
-
-   Kept ONLY for PRE-STRUCTURAL `:seon.fn` rows (no stored
-   `:seon.fn/read-attrs` — old stores; they self-backfill on the next
-   replay/re-eval). New rows take the stored path in
-   [[declared-read-attrs]]; never widen this scan."
-  [installed src]
-  (->> (re-seq attr-literal-re src)
-       (map (comp keyword second))
-       (filter installed)
-       (remove twin-keys)
-       distinct
-       vec))
-
 (defn- declared-read-attrs
   "The fn's DECLARED read-set: the attrs its author's forms name as
    qualified keyword literals (agent `my.*` code must fully qualify
-   (#73), so the literals are the queries). Reads the STORED
-   `:seon.fn/read-attrs` (the tee extracts the set from the
-   already-read defn form — C28 structural store); a row without the
-   attr (pre-structural) falls back to the [[source-attrs]] regex over
-   `src`. Intersected with the INSTALLED schema at read time (an attr
-   registered after the tee still joins the watch set) and the render
-   twin keys (the fn's OUTPUT, never data) removed. Conservative by
-   construction: an attr reached only dynamically is not watched."
-  [installed stored-kws src]
-  (if (some? stored-kws)
-    (->> stored-kws
-         (filter installed)
-         (remove twin-keys)
-         (remove dependency-exclusions)
-         distinct
-         vec)
-    (->> (source-attrs installed src)
-         (remove dependency-exclusions)
-         vec)))
+   (#73), so the literals are the queries). Reads only persisted
+   `:seon.fn/read-attrs`, extracted from the already-read defn form by
+   the analyzer tee. Intersected with the installed schema at read time
+   and stripped of output/protocol attrs. Conservative by construction:
+   an attr reached only dynamically is not watched."
+  [installed persisted-kws]
+  (->> persisted-kws
+       (filter installed)
+       (remove twin-keys)
+       (remove dependency-exclusions)
+       distinct
+       vec))
 
 (schema/register! ::last-updated-request
   [:map
@@ -222,23 +193,23 @@
   [db sym]
   (let [installed (db/installed-schema db)]
     (when (every? installed [:seon.fn/sym :seon.fn/source])
-      (when-let [[src src-tx]
+      (when-let [[src-tx]
                  (first (db/query
                           {:seon.db/db db
                            :seon.db/query
-                           '[:find ?src ?tx
+                           '[:find ?tx
                              :in $ ?sym
                              :where
                              [?f :seon.fn/sym ?sym]
-                             [?f :seon.fn/source ?src ?tx]]
+                             [?f :seon.fn/source _ ?tx]]
                            :seon.db/args [(str sym)]}))]
-        (let [stored (when (installed :seon.fn/read-attrs)
-                       (not-empty
-                         (set (:seon.fn/read-attrs
-                                (db/pull db [:seon.fn/read-attrs]
-                                         [:seon.fn/sym (str sym)])))))]
+        (let [persisted (if (installed :seon.fn/read-attrs)
+                          (set (:seon.fn/read-attrs
+                                 (db/pull db [:seon.fn/read-attrs]
+                                          [:seon.fn/sym (str sym)])))
+                          #{})]
           {::src-tx src-tx
-           ::attrs (declared-read-attrs installed stored src)})))))
+           ::attrs (declared-read-attrs installed persisted)})))))
 
 (schema/register! ::renderer-read-attrs-request
   [:map
@@ -251,8 +222,8 @@
   "A symbolic renderer's declared database read-set.
 
    This is the dependency projection used by both recency and live UI
-   invalidation. It reads the stored analyzer-produced `:seon.fn/read-attrs`
-   and retains the existing legacy source fallback through [[fn-row]]."
+   invalidation. It reads the analyzer-produced `:seon.fn/read-attrs`
+   database facts through [[fn-row]]."
   {:malli/schema [:=> [:cat ::renderer-read-attrs-request]
                   ::renderer-read-attrs-response]}
   [{db :seon.db/db renderer :seon.render/html}]
@@ -328,8 +299,8 @@
    ([[output-twin-keys]] — the same structural detection as auto-run).
    Each candidate's TOUCH coordinate is the max agent/REPL tx over (a) its own
    source datom — redefining the surface touches it — and (b) every datom
-   of the attrs it declares ([[declared-read-attrs]] — the stored
-   `:seon.fn/read-attrs`, regex fallback for pre-structural rows), read
+   of the attrs it declares ([[declared-read-attrs]] — persisted
+   `:seon.fn/read-attrs` facts), read
    on the HISTORY view so retractions count. The candidate with the max touch
    is the last-updated surface; `{}` when the agent has authored none (the
    caller falls back to the welcome). Ties break on the fn name.
@@ -354,44 +325,43 @@
             ;; only when `:seon.fn/private?` is installed; the filter
             ;; itself runs in Clojure, mirroring [[render-fn-rows]].
             q    (if (installed :seon.fn/private?)
-                   '[:find ?sym ?src ?spec ?srctx ?priv
-                     :in $ ?aid ?repl
-                     :where
-                     [?f :seon.fn/source ?src ?srctx]
+                     '[:find ?sym ?spec ?srctx ?priv
+                      :in $ ?aid ?repl
+                      :where
+                      [?f :seon.fn/source _ ?srctx]
                      [?srctx :seon.db/user ?author]
                      [?author :seon.agent/id ?aid]
                      [?srctx :seon.db/process ?repl]
                      [?f :seon.fn/sym ?sym]
                      [?f :seon.fn/spec ?spec]
                      [(get-else $ ?f :seon.fn/private? false) ?priv]]
-                   '[:find ?sym ?src ?spec ?srctx
+                   '[:find ?sym ?spec ?srctx
                      :in $ ?aid ?repl
                      :where
-                     [?f :seon.fn/source ?src ?srctx]
+                     [?f :seon.fn/source _ ?srctx]
                      [?srctx :seon.db/user ?author]
                      [?author :seon.agent/id ?aid]
                      [?srctx :seon.db/process ?repl]
                      [?f :seon.fn/sym ?sym]
                      [?f :seon.fn/spec ?spec]])
-            ;; stored read-set (C28) — nil for a pre-structural row (or
-            ;; a store predating the attr), which falls back to the
-            ;; legacy regex in [[declared-read-attrs]].
-            stored-kws (fn [sym]
-                         (when (installed :seon.fn/read-attrs)
-                           (not-empty
-                             (set (:seon.fn/read-attrs
-                                    (db/pull db [:seon.fn/read-attrs]
-                                             [:seon.fn/sym (str sym)]))))))
+            persisted-kws
+            (fn [sym]
+              (if (installed :seon.fn/read-attrs)
+                (set (:seon.fn/read-attrs
+                       (db/pull db [:seon.fn/read-attrs]
+                                [:seon.fn/sym (str sym)])))
+                #{}))
             rows (->> (db/query {:seon.db/db db :seon.db/query q
                                  :seon.db/args [id repl-eid]})
-                      (keep (fn [[sym src spec srctx priv]]
+                      (keep (fn [[sym spec srctx priv]]
                               (when (and (not priv)
                                          (contains? (output-twin-keys spec)
                                                     :seon.render/hiccup))
                                 {::surface-sym (symbol sym)
                                  ::src-tx   srctx
                                  ::attrs    (declared-read-attrs
-                                              installed (stored-kws sym) src)}))))
+                                              installed
+                                              (persisted-kws sym))}))))
             ;; ONE aggregate over the union of watched attrs (history view —
             ;; a retraction is a change), then per-candidate max lookup.
             attrs   (into #{} (mapcat ::attrs) rows)

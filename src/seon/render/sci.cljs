@@ -202,7 +202,7 @@
                        msg ") — rendering a :seon/error block in place "
                        "(fail-loud; the unbounded compiled fallback is "
                        "banned). Ensure the fn's :seon.fn/source and its ns "
-                       ":require aliases are stored (:seon.ns/require-edges; "
+                       ":require aliases are persisted (:seon.ns/require-edges; "
                        "re-eval the ns form to tee them).")})
       (when-not (err/recorded? raw)
         (err/record! {:seon.error/raw raw :seon.error/fault fault})))))

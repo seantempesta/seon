@@ -288,9 +288,10 @@
   (async done
     (-> (with-seeded
           (fn [conn]
-            (-> (transact-as! conn agent-id
+                (-> (transact-as! conn agent-id
                   [(fn-row (str cur-ns-str "/purpose-tile") render-spec
-                           purpose-tile-source)])
+                           purpose-tile-source
+                           :read-attrs [:seon.agent/purpose])])
                 (.then (fn [_]
                   (transact-as! conn agent-id
                     [(fn-row (str cur-ns-str "/clock-tile") render-spec
@@ -332,12 +333,10 @@
                                                   :seon.agent/id agent-id})))))))))
         (.then done))))
 
-(deftest last-updated-surface-prefers-the-stored-read-set
-  ;; C28 structural store: a row WITH :seon.fn/read-attrs is watched by
-  ;; the STORED set, never the source regex. opaque-tile's SOURCE names
-  ;; no attr literal (a dynamic read), but its stored read-set declares
-  ;; :seon.agent/purpose — under the legacy regex path a purpose write
-  ;; could never surface it, so this pins that the stored path won.
+(deftest last-updated-surface-uses-the-persisted-read-set
+  ;; A row WITH :seon.fn/read-attrs is watched by those database facts.
+  ;; opaque-tile's source names no attr literal (a dynamic read), but its
+  ;; declared read-set includes :seon.agent/purpose.
   (async done
     (-> (with-seeded
           (fn [conn]
@@ -361,7 +360,7 @@
                     [{:seon.agent/id agent-id
                       :seon.agent/purpose "stored read-set proof"}])))
                 (.then (fn [_]
-                  (testing "a write to a STORED-declared attr surfaces the tile (regex would miss it)"
+                  (testing "a write to a declared attr surfaces the canvas"
                     (is (= {::rf/surface-sym
                             (symbol (str cur-ns-str "/opaque-tile"))}
                            (rf/last-updated-surface {:seon.db/db @conn
@@ -395,6 +394,27 @@
                                      (symbol (str cur-ns-str
                                                   "/dependency-tile"))}))))
                         "provenance transport attrs do not invalidate views"))))))
+        (.then done))))
+
+(deftest renderer-dependencies-come-only-from-database-facts
+  (async done
+    (-> (with-seeded
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   [(fn-row (str cur-ns-str "/source-only-tile") render-spec
+                            purpose-tile-source)]})
+                (.then
+                  (fn [_]
+                    (is (= []
+                           (::rf/attrs
+                             (rf/renderer-read-attrs
+                               {:seon.db/db @conn
+                                :seon.render/html
+                                (symbol (str cur-ns-str
+                                             "/source-only-tile"))})))
+                        "source text is not a parallel dependency authority"))))))
         (.then done))))
 
 (deftest last-updated-surface-gates-on-provenance-process-and-privacy
@@ -442,7 +462,8 @@
                                  :seon.render/html sym})
                               ::rf/touch)]
               (-> (transact-as! conn agent-id
-                    [(fn-row (str sym) render-spec purpose-tile-source)])
+                    [(fn-row (str sym) render-spec purpose-tile-source
+                             :read-attrs [:seon.agent/purpose])])
                   (.then
                     (fn [_]
                       (let [authored-touch (touch)]
