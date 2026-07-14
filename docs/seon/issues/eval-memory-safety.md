@@ -66,10 +66,17 @@ datom.
   wildcard and recursive pull materialization has no size bound.
 - `seon.eval/bind-result-var!` prunes the oldest runtime slots to
   `result-vars-cap`, but stores each successful value verbatim before pruning.
+- Maintained Datahike's process-global query-result cache stores the complete
+  query value and weighs it only by top-level tuple count. A scalar or one-row
+  result containing a huge string weighs one, so fixing result slots alone
+  would leave another unbounded-value retention surface.
 - `seon.eval.memory-safety-test/one-live-result-slot-retains-the-full-value`
   explicitly proves that a 5 MB value remains live in one slot. The existing
   collection render tests prove bounded presentation only, not bounded
   materialization or retained heap.
+
+The source-grounded implementation design and falsification matrix are
+[[docs/prds/runtime-reliability/research/eval-query-memory-safety-audit-2026-07-14]].
 
 ## Owner
 
@@ -131,28 +138,37 @@ Why a guard is NOT trivially cheap here:
 - You cannot measure a CLJS value's heap size without walking/serializing it,
   which itself materializes the cost you are trying to avoid. `pr-str` then
   checking length defeats the purpose (the 9.7M string is the expensive part).
-- The real fix is upstream: bound the QUERY, not the result. Datahike has no
-  built-in `:limit`, so the cheap lever is a wrapper around `seon.db/query` /
-  `seon.db/pull` that (a) refuses unbounded whole-DB find patterns, or (b)
-  truncates the result seq with a hard row cap via `take`/`bounded-count`
-  BEFORE realizing the whole thing. `(bounded-count N coll)` realizes at most N
-  elements — that is the one genuinely cheap heap guard available.
+- The maintained Datahike fork accepts query-map `:limit`, but the planned
+  relation and legacy paths collect and deduplicate before applying it. A safe
+  20-row predicate-counter probe returned two rows for `:limit 2` while still
+  invoking the predicate 20 times. The direct executor has a `max-results`
+  seam, but its caller currently passes `nil`. The existing limit is therefore
+  result semantics, not a realization or work bound.
+- Pull applies a per-attribute default limit of 1,000, but wildcard component
+  expansion and recursive/subpattern frames have no global entity/datom/result
+  budget. An attribute-level limit, including an explicit `nil`, cannot be the
+  safety boundary.
 
 Recommendation (defer to a focused follow-up task, sized ~M):
 
-1. **Guard the DB surface before realization.** Ground the design in the
-   maintained Datahike query/pull implementation. Reject provably dangerous
-   requests before execution or add a true realization-time budget at the one
-   database/heavy-compute owner. Applying `take`, `bounded-count`, `pr-str`, or
-   a size check after `d/q` or `d/pull` returns is too late.
-2. **Bound retained value weight.** The existing last-N eviction bounds slot
-   count only. Preserve useful addressability through a measured bounded
-   handle/projection policy that does not walk or serialize an already-dangerous
-   value. A collection projection after safe production does not make the
-   query itself safe and misses one huge scalar or nested pull map.
+1. **Guard Datahike during execution.** Add synchronous work/output/weight
+   budgets to the maintained query executor and a global budget to the existing
+   pull frame machine, then set hard defaults at `seon.db`. Applying `take`,
+   `bounded-count`, `pr-str`, or a size check after `d/q` or `d/pull` returns is
+   too late. Do not move unbounded work into the sole JVM writer; that only
+   moves the crash into the database authority.
+2. **Repair query-cache admission.** Reuse bounded shallow weight accounting or
+   skip an entry that cannot be certified without crossing the inspection
+   budget. Tuple count is not memory weight.
+3. **Bound retained value weight.** Before installing a result slot, perform a
+   bounded non-serializing structural inspection that stops after `N + 1`
+   nodes and charges O(1) string/byte lengths. Preserve small values exactly;
+   represent rejected values with a bounded descriptor or an existing blob
+   handle. Never serialize an arbitrary oversized compound value merely to
+   decide whether to keep it.
 
-None of these are in scope for this task (store-time caps were the must-have);
-they are flagged here so the OOM root cause is not mistaken for closed. The
+These repairs are the current runtime-reliability blocker; store-time caps were
+necessary but did not close the OOM root cause. The
 store-time caps guarantee the *DB* never holds a multi-MB blob (so a later
 whole-DB scan over `result-edn`/`prompt-text` datoms — the exact second OOM
 observed — is now bounded); the *transient eval-time* heap blow-up from one bad
