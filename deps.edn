@@ -102,7 +102,7 @@
          ;; permit ~30 GiB per concurrent compiler. Keep one explicit bounded
          ;; policy here; do not duplicate heap flags in launch scripts.
          :jvm-opts      ["-Xms256m" "-Xmx3g"]
-         :extra-paths   ["test"]
+         :extra-paths   ["test" "script"]
          :extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
                          thheller/shadow-cljs                 {:mvn/version "3.4.10"}

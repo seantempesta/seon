@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [seon.dev.artifact :as artifact]
             [seon.dev.config :as config]
+            [seon.dev.changed-test :as changed-test]
             [seon.dev.process :as process]
             [seon.dev.skills :as skills]
             [seon.dev.state :as state]))
@@ -352,11 +353,25 @@
                       {:seon.dev.cli/arguments (vec arguments)})))))
 
 (defn- test! [configuration arguments]
-  (doseq [argv (test-commands configuration arguments)]
-    (println (str "▶ " (str/join " " argv)))
-    (shell/shell {:dir (:seon.dev.config/root configuration)
-                  :env (:seon.dev.config/environment configuration)
-                  :cmd argv}))
+  (if (= "changed" (first arguments))
+    (let [paths (loop [remaining (rest arguments) paths []]
+                  (if-not (seq remaining)
+                    paths
+                    (if (and (= "--path" (first remaining))
+                             (second remaining))
+                      (recur (nnext remaining) (conj paths (second remaining)))
+                      (throw (ex-info "Use `test changed --path PATH` one or more times."
+                                      {:seon.dev.cli/arguments (vec arguments)})))))]
+      (when-not (seq paths)
+        (throw (ex-info "`test changed` requires at least one `--path PATH`."
+                        {:seon.dev.cli/arguments (vec arguments)})))
+      (println (changed-test/format-result
+                 (changed-test/run-changed! configuration paths))))
+    (doseq [argv (test-commands configuration arguments)]
+      (println (str "▶ " (str/join " " argv)))
+      (shell/shell {:dir (:seon.dev.config/root configuration)
+                    :env (:seon.dev.config/environment configuration)
+                    :cmd argv})))
   nil)
 
 (defn- skills! [configuration arguments]
@@ -385,6 +400,7 @@
          "  status [--edn]           report live health\n"
          "  logs [writer|watcher|pod] [--lines N] [--follow]\n"
          "  doctor [--edn]           check host prerequisites\n"
+         "  test changed --path PATH...  run affected tests from the warm graph\n"
          "  test pod|database|operator|all [selector]\n"
          "  skills sync|check        generate or verify tool-facing skill adapters\n"
          "  cluster reset <name>     drain and reset one named database\n")))

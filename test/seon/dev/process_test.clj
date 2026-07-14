@@ -174,13 +174,22 @@
         spec {:seon.dev.process/id process/watcher-id
               :seon.dev.process/readiness :seon.dev.process.readiness/watcher}]
     (try
-      (spit (str log) "[:client] Compiling ...\n[:client] Build completed.\n")
+      (spit (str log) (str "[:client] Compiling ...\n"
+                           "[:client] Build completed.\n"
+                           "[:test] Compiling ...\n"
+                           "[:test] Build completed.\n"))
       (is (process/ready? configuration spec record))
       (spit (str log) "[:client] Compiling ...\n" :append true)
       (is (not (process/ready? configuration spec record)))
       (spit (str log) "[:client] Build failure:\n" :append true)
       (is (not (process/ready? configuration spec record)))
       (spit (str log) "[:client] Build completed.\n" :append true)
+      (is (process/ready? configuration spec record))
+      (spit (str log) "[:test] Compiling ...\n" :append true)
+      (is (not (process/ready? configuration spec record)))
+      (spit (str log) "[:test] Build failure:\n" :append true)
+      (is (not (process/ready? configuration spec record)))
+      (spit (str log) "[:test] Build completed.\n" :append true)
       (is (process/ready? configuration spec record))
       (finally (fs/delete-tree (:seon.dev.test/directory configuration))))))
 

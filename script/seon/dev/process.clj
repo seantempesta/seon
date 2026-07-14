@@ -129,7 +129,7 @@
       (into ["-Sdeps" (pr-str {:deps {'seon.extra/src {:local/root source}}})])
 
       true
-      (into ["-M:cljs" "watch" "client"])
+      (into ["-M:cljs" "watch" "client" "test"])
 
       (and (not (str/blank? source)) (not (str/blank? preload)))
       (into ["--config-merge"
@@ -260,13 +260,16 @@
         (.readFully file buffer)
         (String. buffer StandardCharsets/UTF_8)))))
 
-(defn- watcher-ready? [record]
-  (let [log (:seon.dev.process/log record)
-        text (tail-text log)
-        completed (last-index text "[:client] Build completed.")
-        failed (last-index text "[:client] Build failure:")
-        compiling (last-index text "[:client] Compiling ...")]
+(defn- build-ready? [text build-id]
+  (let [prefix (str "[:" (name build-id) "] ")
+        completed (last-index text (str prefix "Build completed."))
+        failed (last-index text (str prefix "Build failure:"))
+        compiling (last-index text (str prefix "Compiling ..."))]
     (and (not (neg? completed)) (> completed failed) (> completed compiling))))
+
+(defn- watcher-ready? [record]
+  (let [text (tail-text (:seon.dev.process/log record))]
+    (every? #(build-ready? text %) [:client :test])))
 
 (defn- pod-ready? [config record]
   (let [port-file (:seon.dev.config/http-port-file config)
@@ -292,6 +295,7 @@
         text (tail-text log)]
     (or (some->> (str/split-lines text)
                  (filter #(or (str/includes? % "[:client] Build failure:")
+                              (str/includes? % "[:test] Build failure:")
                               (str/includes? % "auto-boot FAILED")
                               (str/includes? % "SEON-CORE-FAULT ")))
                  last)

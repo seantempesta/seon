@@ -2,19 +2,23 @@
   (:require [clojure.test :refer [run-tests]]
             [seon.dev.artifact-test]
             [seon.dev.cli-test]
+            [seon.dev.changed-test-test]
             [seon.dev.docstring-test]
             [seon.dev.hook-cli-test]
             [seon.dev.markdown-test]
             [seon.dev.process-test]
-            [seon.dev.skills-test]))
+            [seon.dev.skills-test]
+            [seon.dev.test-artifact-test]))
 
 (defn -main [& _]
   (let [{:keys [fail error]}
         (run-tests 'seon.dev.artifact-test
                    'seon.dev.cli-test
+                   'seon.dev.changed-test-test
                    'seon.dev.docstring-test
                    'seon.dev.hook-cli-test
                    'seon.dev.markdown-test
                    'seon.dev.process-test
-                   'seon.dev.skills-test)]
+                   'seon.dev.skills-test
+                   'seon.dev.test-artifact-test)]
     (when (pos? (+ fail error)) (System/exit 1))))
