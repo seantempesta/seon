@@ -232,6 +232,13 @@ and branch-sized follow-on chunks are
 [[research/architecture-target-drift-audit-2026-07-14]]. Architecture stays
 intended present tense; implementation status and migration order stay here.
 
+The durable issue authority and startup-triage design has also been audited.
+The exact move/archive/split map, one-note contract, bounded session-start
+triage, and mechanical index checks are
+[[research/issue-authority-and-startup-triage-audit-2026-07-14]]. The target is
+one client-neutral `docs/seon/issues/` tree; no private registry or chat-only
+finding remains authoritative.
+
 The first automatic-feedback implementation is deliberately namespace-level
 and conservative. `seon.dev.changed-test` remains the one public decision:
 Shadow supplies the CLJS graph, bounded host-only clj-kondo analysis supplies
