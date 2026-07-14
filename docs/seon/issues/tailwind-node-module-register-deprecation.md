@@ -20,7 +20,10 @@ The destructive reset and following restart both emitted the warning while
 running `tailwindcss -i resources/public/css/input.css -o
 resources/public/css/output.css`. The selected closure is Node `26.4.0`,
 `@tailwindcss/cli`/`@tailwindcss/node`/`tailwindcss` `4.1.18`, and `jiti`
-`2.6.1`. The warning asks callers to use `module.registerHooks()` instead.
+`2.6.1`. A focused `NODE_OPTIONS=--trace-deprecation npm run css:build`
+reproduced it at `node_modules/@tailwindcss/node/dist/index.mjs:18:86`, where
+that package calls `Module.register`; Jiti is not the emitting frame. The
+warning asks callers to use `module.registerHooks()` instead.
 
 ## Owner
 
@@ -29,7 +32,7 @@ script in `package.json`; not the Babashka operator or web runtime.
 
 ## Acceptance
 
-- Use `--trace-deprecation` once to identify the exact dependency call site.
+- Preserve the focused trace proving the exact `@tailwindcss/node` call site.
 - Select the smallest maintained dependency upgrade or upstream fix that
   supports Node 26; do not hide all Node deprecations globally.
 - Canonical CSS build output remains deterministic and the operator, pod, and
