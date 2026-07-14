@@ -226,6 +226,12 @@ autosuggest commits are already integrated above, so the conversion may
 reconcile that PRD against this branch; it must preserve the concurrently owned
 untracked autosuggest research file.
 
+The architecture target has now been re-audited as a separate authority from
+this implementation ledger. Exact per-file drift, evidence, target-only edits,
+and branch-sized follow-on chunks are
+[[research/architecture-target-drift-audit-2026-07-14]]. Architecture stays
+intended present tense; implementation status and migration order stay here.
+
 The first automatic-feedback implementation is deliberately namespace-level
 and conservative. `seon.dev.changed-test` remains the one public decision:
 Shadow supplies the CLJS graph, bounded host-only clj-kondo analysis supplies
