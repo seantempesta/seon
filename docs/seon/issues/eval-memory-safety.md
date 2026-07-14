@@ -5,7 +5,7 @@ tags: [issue, agent, flow, database, architecture]
 severity: blocker
 ---
 
-# An agent can OOM its own pod via unbounded eval results / whole-DB queries
+# An agent can OOM the pod via unbounded query and eval values
 
 ## Problem
 
@@ -27,14 +27,19 @@ the DB from holding multi-MB blobs nor stop a query/pull from materializing them
 
 ## Root cause
 
-Two unbounded surfaces:
+The persisted strings are now bounded, but two in-heap surfaces remain:
 
-1. **Store-time:** `record-eval!` (`src/seon/eval.cljs:~834`) `pr-str`s the eval
-   value into `:seon.eval/result-edn` with no size cap; `:seon.turn/prompt-text`
-   likewise stored uncapped. The DB accumulates multi-MB blobs.
-2. **Query-time:** an agent eval like `pull [*]` on a richly-connected entity, or
+1. **Query-time:** an agent eval like `pull [*]` on a richly-connected entity, or
    a whole-DB `[?e ?a ?v]` scan, materializes arbitrarily large results in heap
    with no guard.
+2. **Retained values:** `result/<id>` slots are capped by count, but each slot
+   retains its full value on `globalThis`. One huge value, or the bounded number
+   of individually large values, can still retain an unsafe amount of heap.
+
+The prior store-time surfaces are closed: `record-eval!` persists a bounded
+render of the result/error, and turn prompts are append-only blob content with
+bounded database projections rather than an uncapped `:seon.turn/prompt-text`
+datom.
 
 ## Acceptance criteria
 
@@ -42,15 +47,35 @@ Two unbounded surfaces:
   elision marker) so the DB never holds multi-MB result blobs. (`render` cap
   already exists; this is the store-time complement.) Also capped
   `:seon.eval/error`.
-- [DONE 2026-06-08] `:seon.turn/prompt-text` capped at store time similarly.
+- [DONE 2026-06-09] The retired `:seon.turn/prompt-text` datom was replaced by
+  whole prompt blobs plus bounded database projections.
 - [OPEN — see "In-heap guard" finding below] A guard against an agent eval
-  materializing an unbounded result (bound result size / heap guard in the eval
-  path, or a documented limit) — at minimum, the pod must not die from one bad
-  query. Investigated; the cheap lever is a DB-surface row-cap, not an
-  eval-path size check. Deferred to a focused follow-up.
+  materializing an unbounded result. The bound must apply before or during
+  Datahike query/pull realization; truncating or serializing the already
+  materialized value is not a memory guard. At minimum, one bad query must not
+  kill the pod.
 - [DONE 2026-06-08] A regression test: a huge value is stored/capped bounded and
-  the live stash still returns the full value
+  the bounded-count live result store still returns the full value
   (`test/seon/eval/memory_safety_test.cljs`).
+
+## Current source check — 2026-07-14
+
+- `seon.db/query` still delegates to `raw-query` and captures the already
+  materialized result; it has no row or byte bound.
+- `seon.db/pull` still delegates to Datahike `d/pull` after attribute/ref guards;
+  wildcard and recursive pull materialization has no size bound.
+- `seon.eval/bind-result-var!` prunes the oldest runtime slots to
+  `result-vars-cap`, but stores each successful value verbatim before pruning.
+- `seon.eval.memory-safety-test/one-live-result-slot-retains-the-full-value`
+  explicitly proves that a 5 MB value remains live in one slot. The existing
+  collection render tests prove bounded presentation only, not bounded
+  materialization or retained heap.
+
+## Owner
+
+The one `seon.db/query` / `seon.db/pull` boundary, including the JVM
+database/heavy-compute seam when required for a true realization-time bound,
+plus `seon.eval`'s existing `result/<id>` retention owner.
 
 ## Refs
 
@@ -89,19 +114,17 @@ The store-time complement to the render cap landed:
 ## In-heap guard — INVESTIGATE finding + recommendation (NOT implemented)
 
 The store-time caps do **not** close the OOM that started this issue. The OOM
-happens *before* `record-eval!` runs: in `eval-batch!`
-(`src/seon/eval.cljs` ~line 1023) the agent's form is evaluated and its result
-fully materialized in heap (`raw-result` → `:value`), then **stashed verbatim
-on globalThis** (`stash-result-raw!`, ~line 1045) where it stays live for the
-whole session. Two transient-heap surfaces remain unbounded:
+happens before `record-eval!`: the agent's form is evaluated and its result is
+fully materialized, then `bind-result-var!` stores that value verbatim in a
+bounded-count `globalThis.result` slot. Two transient-heap surfaces remain:
 
 1. A single eval whose RESULT is huge — `(seon.db/pull {... '[*] ... 111})` or
    `(seon.db/query '[:find ?e ?a ?v :where [?e ?a ?v]])` (whole-DB scan).
    `d/q`/`d/pull` build the entire result vector in heap inside the eval; if it
    is multi-hundred-MB the pod OOMs at `d/q` time, before any cap can run.
-2. The live-result stash itself accumulates every successful eval's full value
-   on globalThis for the session lifetime — unbounded retained heap across many
-   large evals (a slower leak than #1).
+2. The live-result store retains full values on `globalThis`. Slot count is
+   bounded, but retained bytes are not; the cap therefore limits cardinality,
+   not memory.
 
 Why a guard is NOT trivially cheap here:
 
@@ -117,20 +140,16 @@ Why a guard is NOT trivially cheap here:
 
 Recommendation (defer to a focused follow-up task, sized ~M):
 
-1. **Row-cap the stash + result at realization.** In `eval-batch!`, before
-   `stash-result-raw!`, if `(:value result)` is a seq/coll, realize at most a
-   const `result-row-cap` (e.g. 100k) elements via `bounded-count` and stash a
-   `take`'d, elided view when it exceeds. This bounds both #1's stash and #2's
-   retained heap. Caveat: a single huge SCALAR (one 9.7M string from `pull
-   [*]`) is not a long seq, so row-cap alone misses it.
-2. **Guard the DB surface, not the eval.** Add an opt-out soft limit to
-   `seon.db/query`/`pull`: reject a `:find` with no entity-binding constraint
-   (pure `[?e ?a ?v]` whole-DB scan) and apply a default `take` to query
-   results. This is the highest-leverage cheap guard and stops the exact two
-   evals that caused the live OOM.
-3. **Bound the stash lifetime.** The session-lifetime globalThis stash is a
-   slow leak; an LRU/ring of the last N eval-ids would cap retained heap. Lower
-   priority than 1+2.
+1. **Guard the DB surface before realization.** Ground the design in the
+   maintained Datahike query/pull implementation. Reject provably dangerous
+   requests before execution or add a true realization-time budget at the one
+   database/heavy-compute owner. Applying `take`, `bounded-count`, `pr-str`, or
+   a size check after `d/q` or `d/pull` returns is too late.
+2. **Bound retained value weight.** The existing last-N eviction bounds slot
+   count only. Preserve useful addressability through a measured bounded
+   handle/projection policy that does not walk or serialize an already-dangerous
+   value. A collection projection after safe production does not make the
+   query itself safe and misses one huge scalar or nested pull map.
 
 None of these are in scope for this task (store-time caps were the must-have);
 they are flagged here so the OOM root cause is not mistaken for closed. The

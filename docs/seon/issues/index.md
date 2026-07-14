@@ -14,7 +14,7 @@ See `README.md` for the convention.
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [An agent can OOM its own pod via unbounded eval results / whole-DB queries](eval-memory-safety.md) | blocker | agent |
+| [An agent can OOM the pod via unbounded query and eval values](eval-memory-safety.md) | blocker | agent |
 
 ## Friction (7)
 
