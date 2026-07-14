@@ -180,6 +180,13 @@ process verbs are not primary UX.
   menus, error-storms, root activity, and the normal HTML transcript consume
   them. HTML caps both sources before its retained-turn projection; the
   deliberate AI transcript history policy remains unchanged.
+- Hot reload now derives its affected namespaces from Shadow's Node reload
+  selection instead of the browser-only filter that returned an empty set.
+  Every reloaded definition is re-instrumented, so the root-only derived
+  instrumentation alarm self-omits at zero gaps after both reload and cold boot.
+- Persisted `:seon.ns/require-edges` are the sole alias/refer authority for SCI,
+  replay ordering, and context resolution. The render-time namespace-source
+  parser and its fallback-tracking atom are deleted.
 
 ## Settled — do not re-litigate
 

@@ -613,7 +613,11 @@ only the identities and core refs matter here.
 
 | entity | identity attr | valueType | other refs |
 |---|---|---|---|
-| `:seon.ns` | `:seon.ns/name` `[:keyword {:seon.db/identity true}]` | keyword | `:seon.ns/requires [:vector :keyword]` (cardinality-many), `:seon.ns/require-edges` (component rows `{:seon.ns.require/target :keyword, alias :symbol, refers [:set :symbol]}` — the reified `:as`/`:refer` facts the SCI cage env is built from AND boot replay's synthesized `(ns …)` head for a sourceless member-bearing row — the agent HOME ns, whose requires are wired at runtime; teed from the analyzer, boot-indexed for full-source nses), `:seon.ns/source :string` |
+| `:seon.ns` | `:seon.ns/name` `[:keyword {:seon.db/identity true}]` | keyword | `:seon.ns/require-edges` (component rows `{:seon.ns.require/target :keyword, alias :symbol, refers [:set :symbol]}` — the sole reified `:as`/`:refer` facts used to build the SCI environment and synthesize boot replay's `(ns …)` head; committed with the home namespace at agent birth, updated by the analyzer tee, and indexed from full source at boot), `:seon.ns/source :string` |
+
+Render-time consumers never reparse `:seon.ns/source` to recover aliases or
+refers. Namespace source and require-edge facts are committed together; the
+database edge rows are the one runtime authority.
 | `:seon.fn` | `:seon.fn/sym` `[:string {:seon.db/identity true}]` | string | `:seon.fn/ns :seon.db/ref`, plus source/spec/arglists/doc strings; renderer reads are runtime observations, not stored keyword literals |
 | `:seon.schema` | `:seon.schema/key` `[:keyword {:seon.db/identity true}]` | keyword | `:seon.schema/ns :seon.db/ref`, full canonical untruncated EDN form |
 | `:seon.test` | `:seon.test/sym` `[:string {:seon.db/identity true}]` | string | `:seon.test/ns :seon.db/ref`, last-passed-at/last-failed-at insts |

@@ -142,6 +142,18 @@ tokens with the same 43 tests/329 assertions passing. Canonical timestamped
 test logs are bounded to the newest 20, and normal client/ACME/bench bundles no
 longer preload the platform test graph.
 
+The giant root instrumentation warning was traced to a real hot-reload defect,
+not suppressed as context. The Node pod was calling Shadow's browser-only
+reload-source filter after Node had already loaded the files, so it selected no
+namespaces and left fresh definitions unwrapped. Reload selection now follows
+Shadow's Node client semantics and re-instruments the exact changed namespaces;
+a cold live census reports zero gaps. The warning remains a derived invariant
+alarm and renders nothing while healthy. SCI environment reconstruction now
+has one authority as well: persisted `:seon.ns/require-edges` committed at agent
+birth or eval. The render-time source parser and its unbounded fallback-note
+atom are deleted; focused require/replay/SCI tests pass 51 tests and 231
+assertions.
+
 The direct Babashka edit hook now proves repository containment before it loads
 configuration or writes diagnostics, serializes bounded diagnostic writes
 across concurrent hook processes, and cannot throw from its terminal log sink.

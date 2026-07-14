@@ -160,10 +160,10 @@ REPL moves work:
   requires (deliberately richer than the JVM's blank-slate `in-ns`) — never
   a blank slate, never an error.
 - **`(ns foo …)` declares/UPDATES** — re-eval REPLACES the require set;
-  the stored `:seon.ns/source` + `:seon.ns/require-edges` heal wholesale
+  persisted `:seon.ns/source` + `:seon.ns/require-edges` heal wholesale
   (component retract cascade, no orphans).
 - **A bare top-level `(require …)` is durable by default** — it loads now
-  AND persists into the ns's stored declaration (`require-decl-tx` merges
+  AND persists into the ns's database declaration (`require-decl-tx` merges
   the specs into `:seon.ns/source`), so resume replays it. `(alias 'a 'ns)`
   is the same mechanism (rewritten to a require; error-as-value when the
   target exists nowhere). `:as-alias` aliases keywords WITHOUT loading and
