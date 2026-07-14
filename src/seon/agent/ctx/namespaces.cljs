@@ -294,7 +294,7 @@
        " (most-recently-modified last).\n"
        "; Namespaces are PLACES — (in-ns 'the.ns) moves you there (your state\n"
        "; is preserved; a NEW name is created with your toolkit requires).\n"
-       "; (ns the.ns (:require …)) declares/UPDATES a namespace's requires.\n"
+       "; (ns the.ns (:require [dependency.ns :as dep])) declares/UPDATES requires.\n"
        "; A bare (require '[x :as y]) adds a dependency now AND records it in\n"
        "; the declaration. Redefining a fn/schema/test IS how you update it;\n"
        "; (ns-unmap 'name) removes one.\n"
