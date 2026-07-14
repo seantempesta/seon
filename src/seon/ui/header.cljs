@@ -24,7 +24,7 @@
    optional-purpose input outside its live morph target."
   (:require
     [seon.db :as db]
-    [seon.derive :as derive]
+    [seon.eval :as seval]
     [seon.render.system :as system]
     [seon.schema :as schema]
     [seon.web.brand :as brand]))
@@ -76,7 +76,7 @@
 
 (defn- storms-chunk
   "HEALTH SIGNAL — agents currently THRASHING on broken evals
-   (`seon.derive/error-storms`: an anomalous recent eval-failure rate).
+   (`seon.eval/error-storms`: an anomalous recent eval-failure rate).
    DERIVED, so it vanishes the instant an agent's evals recover; renders
    NOTHING (incl. its own leading divider) when the fleet is healthy. Each
    storming agent links to its `/agent/{id}` so the human can intervene."
@@ -87,12 +87,17 @@
      [:span {:class "text-warning"
              :title "agents with an anomalous recent eval-failure rate"}
       "⚠"]
-     (for [{:seon.agent/keys [id] :seon.derive/keys [failed window consec]} storms]
+     (for [{:seon.agent/keys [id]
+            :seon.eval/keys [error-storm-failed
+                             error-storm-window
+                             error-storm-consecutive]} storms]
        [:a {:key   id
             :href  (str "/agent/" id)
             :class "flex items-center gap-1 text-warning hover:text-amber-300"
-            :title (str failed "/" window " recent evals failed"
-                        (when (>= consec 2) (str " · " consec " in a row")))}
+            :title (str error-storm-failed "/" error-storm-window
+                        " recent evals failed"
+                        (when (>= error-storm-consecutive 2)
+                          (str " · " error-storm-consecutive " in a row")))}
         [:span {:class "font-semibold"} id]
         [:span {:class "text-text-500"} "erroring"]])]))
 
@@ -166,7 +171,7 @@
        (agents-chunk fleet)
        [:span {:class "text-text-700"} "│"]
        (database-chunk db fleet)
-       (storms-chunk (derive/error-storms db))
+       (storms-chunk (seval/error-storms db))
        [:span {:class "ml-auto"} (actions-chunk fleet)]])
     (catch :default e
       [:header {:id    "system-header"

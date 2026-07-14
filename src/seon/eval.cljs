@@ -108,6 +108,29 @@
    [:seon.db/db :seon.db/db-val]
    [::recent-limit ::recent-limit]])
 
+(def error-storm-window
+  "How many of one agent's most-recent real evals the failure-rate test examines."
+  8)
+
+(def error-storm-min-fail
+  "Absolute failure floor below which a short window is not a storm."
+  4)
+
+(def error-storm-consecutive
+  "Trailing consecutive real failures that identify a stuck agent."
+  4)
+
+(schema/register! ::error-storm-failed :int)
+(schema/register! ::error-storm-window :int)
+(schema/register! ::error-storm-consecutive :int)
+(schema/register! ::error-storm
+  [:map
+   [:seon.agent/id :string]
+   [::error-storm-failed ::error-storm-failed]
+   [::error-storm-window ::error-storm-window]
+   [::error-storm-consecutive ::error-storm-consecutive]])
+(schema/register! ::error-storms [:vector ::error-storm])
+
 (def ^:private recent-all-pull-pattern
   '[* {:seon.eval/agent [:seon.agent/id]}])
 
@@ -163,6 +186,58 @@
          (sort-by #(.getTime ^js (:seon.eval/at %)))
          vec)
     []))
+
+(defn- real-eval-results
+  "One agent's bounded real-eval success values, oldest first.
+
+   Content-free closing-delimiter rows are segmentation noise. Reading the
+   fact owner's largest supported reverse window gives the storm detector room
+   to skip that noise without scanning a complete history."
+  [dbv agent-id]
+  (->> (recent {:seon.db/db dbv
+                :seon.agent/id agent-id
+                ::recent-limit 200})
+       (remove
+         (fn [{source :seon.eval/source}]
+           (let [source (str/trim (str source))]
+             (or (str/blank? source)
+                 (boolean (re-matches #"[)\]}]+" source))))))
+       (mapv #(boolean (:seon.eval/ok? %)))))
+
+(defn error-storm
+  "Return one bounded failure-rate signal for `agent-id`, or nil.
+
+   A storm means at least [[error-storm-consecutive]] trailing failures, or
+   more than half of the last [[error-storm-window]] real evals failed with at
+   least [[error-storm-min-fail]] failures. Nothing is stored; successful evals
+   make the signal disappear."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/id :string]]
+                  [:maybe ::error-storm]]}
+  [dbv agent-id]
+  (let [results (real-eval-results dbv agent-id)
+        recent-results (vec (take-last error-storm-window results))
+        n (count recent-results)
+        failed (count (remove true? recent-results))
+        consecutive (count (take-while false? (reverse recent-results)))]
+    (when (or (>= consecutive error-storm-consecutive)
+              (and (>= failed error-storm-min-fail)
+                   (> failed (quot n 2))))
+      {:seon.agent/id agent-id
+       ::error-storm-failed failed
+       ::error-storm-window n
+       ::error-storm-consecutive consecutive})))
+
+(defn error-storms
+  "Return every agent whose bounded recent eval window is currently failing."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] ::error-storms]}
+  [dbv]
+  (->> (db/query {:seon.db/db dbv
+                  :seon.db/query
+                  '[:find [?id ...] :where [?a :seon.agent/id ?id]]})
+       (keep #(error-storm dbv %))
+       (sort-by :seon.agent/id)
+       vec))
 
 (deftype ^:private Budgeted [ms value])
 
