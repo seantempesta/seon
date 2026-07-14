@@ -74,9 +74,11 @@ export SEON_WEB="${SEON_WEB:-1}"       # seon.agent.web/fetch (master on/off gat
 export SEON_EXTRA_SRC="$SEON_ROOT/acme"
 export SEON_EXTRA_PRELOAD=acme.pod
 
-# --- acme's OWN pod bundle: the :acme-client shadow build writes
-#     out-acme/client/main.js; SEON_CLIENT_OUT makes bin/seon's pod run THAT
-#     bundle instead of the live cluster's out/client/main.js. ---
+# --- acme's OWN artifact identity: one operator flavor selects the isolated
+#     Shadow cache, :acme-client build, output closure, and artifact manifest
+#     together. SEON_CLIENT_OUT remains only as a checked compatibility value;
+#     it cannot substitute an output from a different flavor. ---
+export SEON_ARTIFACT_FLAVOR=acme
 export SEON_CLIENT_OUT=out-acme/client/main.js
 
 # --- config seam: acme reads its OWN manifest (per-cluster loadout/routes/

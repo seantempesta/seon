@@ -20,6 +20,11 @@
    [:seon.dev.config/http-port-file :string]
    [:seon.dev.config/writer-repl-port [:int {:min 0 :max 65535}]]
    [:seon.dev.config/writer-repl-port-file :string]
+   [:seon.dev.config/artifact-flavor
+    [:enum :seon.dev.artifact.flavor/default
+     :seon.dev.artifact.flavor/acme]]
+   [:seon.dev.config/client-build-id :string]
+   [:seon.dev.config/shadow-cache-root :string]
    [:seon.dev.config/client-output :string]
    [:seon.dev.config/writer-output :string]
    [:seon.dev.config/artifact-manifest :string]])
@@ -56,6 +61,61 @@
     (if (fs/regular-file? path)
       (into {} (keep dotenv-entry) (str/split-lines (slurp (str path))))
       {})))
+
+(def artifact-configuration-schema
+  [:map
+   [:seon.dev.config/artifact-flavor
+    [:enum :seon.dev.artifact.flavor/default
+     :seon.dev.artifact.flavor/acme]]
+   [:seon.dev.config/client-build-id :string]
+   [:seon.dev.config/shadow-cache-root :string]
+   [:seon.dev.config/client-output :string]
+   [:seon.dev.config/artifact-manifest-name :string]])
+
+(def ^:private artifact-flavors
+  {"default"
+   {:seon.dev.config/artifact-flavor :seon.dev.artifact.flavor/default
+    :seon.dev.config/client-build-id "client"
+    :seon.dev.config/shadow-cache-root ".shadow-cljs"
+    :seon.dev.config/client-output "out/client/main.js"
+    :seon.dev.config/artifact-manifest-name "artifact.edn"}
+   "acme"
+   {:seon.dev.config/artifact-flavor :seon.dev.artifact.flavor/acme
+    :seon.dev.config/client-build-id "acme-client"
+    :seon.dev.config/shadow-cache-root "tmp/shadow/acme"
+    :seon.dev.config/client-output "out-acme/client/main.js"
+    :seon.dev.config/artifact-manifest-name "artifact-acme.edn"}})
+
+(defn- root-path [root path]
+  (let [path (fs/path path)]
+    (str (fs/normalize (if (fs/absolute? path) path (fs/path root path))))))
+
+(defn artifact-configuration
+  "Artifact coordinates selected by an explicit flavor."
+  {:malli/schema
+   [:=> [:cat :string [:map-of :string :string]]
+    artifact-configuration-schema]}
+  [root environment]
+  (let [flavor-name (get environment "SEON_ARTIFACT_FLAVOR" "default")
+        target (or (get artifact-flavors flavor-name)
+                   (throw
+                     (ex-info "Unknown Seon artifact flavor."
+                              {:seon.dev.config/artifact-flavor flavor-name
+                               :seon.dev.config/known-artifact-flavors
+                               (vec (sort (keys artifact-flavors)))})))
+        expected-output (root-path root (:seon.dev.config/client-output target))
+        configured-output (some->> (get environment "SEON_CLIENT_OUT")
+                                   (root-path root))]
+    (when (and configured-output (not= expected-output configured-output))
+      (throw
+        (ex-info "The client output does not match the selected artifact flavor."
+                 {:seon.dev.config/artifact-flavor
+                  (:seon.dev.config/artifact-flavor target)
+                  :seon.dev.config/expected-client-output expected-output
+                  :seon.dev.config/configured-client-output configured-output})))
+    (-> target
+        (update :seon.dev.config/shadow-cache-root #(root-path root %))
+        (assoc :seon.dev.config/client-output expected-output))))
 
 (defn- command-result [argv]
   (try
@@ -127,6 +187,7 @@
   [root]
   (let [root (str (fs/normalize (fs/absolutize root)))
         environment (child-environment root)
+        artifact (artifact-configuration root environment)
         cluster-dir (get environment "SEON_CLUSTER_DIR"
                          (str (fs/path root "data/clusters/default")))
         cluster-name (str (fs/file-name cluster-dir))
@@ -152,24 +213,27 @@
                       "SEON_FS_ROOT" root
                       "SEON_FS_READ_ONLY" "1")]
     (validate-configuration!
-      {:seon.dev.config/root root
-       :seon.dev.config/source-checkout? (and (fs/regular-file? (fs/path root "deps.edn"))
-                                               (fs/regular-file? (fs/path root "shadow-cljs.edn")))
-       :seon.dev.config/environment environment
-       :seon.dev.config/process-dir proc-dir
-       :seon.dev.config/log-dir log-dir
-       :seon.dev.config/cluster-dir cluster-dir
-       :seon.dev.config/cluster-name cluster-name
-       :seon.dev.config/request-socket req-sock
-       :seon.dev.config/publish-socket pub-sock
-       :seon.dev.config/http-port (parse-long (get environment "SEON_PORT" "7890"))
-       :seon.dev.config/http-port-file port-file
-       :seon.dev.config/writer-repl-port
-       (parse-long (get environment "SEON_WRITER_REPL_PORT" "0"))
-       :seon.dev.config/writer-repl-port-file writer-port-file
-       :seon.dev.config/client-output
-       (get environment "SEON_CLIENT_OUT" (str (fs/path root "out/client/main.js")))
-       :seon.dev.config/writer-output
-       (str (fs/path root "target/seon-database-server-standalone.jar"))
-       :seon.dev.config/artifact-manifest
-       (str (fs/path proc-dir "artifact.edn"))})))
+      (merge
+        (dissoc artifact :seon.dev.config/artifact-manifest-name)
+        {:seon.dev.config/root root
+         :seon.dev.config/source-checkout?
+         (and (fs/regular-file? (fs/path root "deps.edn"))
+              (fs/regular-file? (fs/path root "shadow-cljs.edn")))
+         :seon.dev.config/environment environment
+         :seon.dev.config/process-dir proc-dir
+         :seon.dev.config/log-dir log-dir
+         :seon.dev.config/cluster-dir cluster-dir
+         :seon.dev.config/cluster-name cluster-name
+         :seon.dev.config/request-socket req-sock
+         :seon.dev.config/publish-socket pub-sock
+         :seon.dev.config/http-port
+         (parse-long (get environment "SEON_PORT" "7890"))
+         :seon.dev.config/http-port-file port-file
+         :seon.dev.config/writer-repl-port
+         (parse-long (get environment "SEON_WRITER_REPL_PORT" "0"))
+         :seon.dev.config/writer-repl-port-file writer-port-file
+         :seon.dev.config/writer-output
+         (str (fs/path root "target/seon-database-server-standalone.jar"))
+         :seon.dev.config/artifact-manifest
+         (str (fs/path proc-dir
+                       (:seon.dev.config/artifact-manifest-name artifact)))}))))

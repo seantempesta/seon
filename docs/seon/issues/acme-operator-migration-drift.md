@@ -78,6 +78,29 @@ This is distinct from `acme-no-sci-eval-seam.md`: that issue concerns direct
 SCI access after a cluster exists; this issue owns lifecycle, artifact,
 database, and active consumer-surface migration.
 
+## Partial implementation — 2026-07-14
+
+The shared operator now derives an explicit artifact flavor before it builds.
+The default flavor retains `client`, `.shadow-cljs`, `out/client/main.js`, and
+`artifact.edn`. The ACME flavor selects `acme-client`, `tmp/shadow/acme`,
+`out-acme/client/main.js`, and `artifact-acme.edn` as one data record. Artifact
+manifest version 2 publishes those coordinates and includes them in the
+application digest; a mismatched `SEON_CLIENT_OUT` is rejected instead of
+forming a hybrid manifest. Legacy version 1 manifests are accepted only as the
+default flavor. `bin/acme` now declares the ACME flavor explicitly.
+
+Focused operator tests prove distinct cache/build/output/manifest identities,
+the unchanged default Shadow command, the isolated ACME Shadow config merge,
+hybrid-output rejection, and default-only legacy-manifest upgrade. The complete
+operator checkpoint passes 89 tests and 562 assertions. Read-only
+`bin/seon status --edn` still reports the default cluster ready through the
+legacy-manifest read path.
+
+This does not make ACME safe to start. Its wrapper still composes retired named
+process commands, and the process graph still derives the default watcher.
+Isolated one-off build sequencing, foreign-owner detection, legacy database
+disposition, lifecycle migration, and live proof remain acceptance work below.
+
 ## Owner
 
 The ACME downstream boundary: `bin/acme`, `config/acme.edn`, `acme/`, and the

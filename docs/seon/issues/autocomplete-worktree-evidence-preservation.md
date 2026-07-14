@@ -65,6 +65,24 @@ reconciliation are already integrated on the current branch. That narrows the
 tracked-code merge question, but it does not classify the ignored databases or
 dirty experiment evidence above.
 
+The read-only preservation inventory is now durable in
+[[docs/prds/runtime-reliability/research/worktree-evidence-preservation-manifest-2026-07-14]].
+It covers all nine registered worktrees, exact HEAD/branch and dirty-state
+counts, cluster/blob paths and allocated sizes, four live legacy ACME PIDs and
+ports, stable continuation/scorer/probe hashes, all 14 continuation raw-output
+hashes, seven display-v3 tune/export hashes, tracked patch hashes, and an
+explicit archive/read-back/cleanup protocol. The inventory did not stop or
+alter a process, open or exhaustively hash a live database, or edit an old
+worktree.
+
+That inventory closes only the discovery half of this issue. Stable and
+display-v3 remain live under orphaned legacy processes; no archive root,
+closed-snapshot package digest, restore/read-back proof, database basis/schema
+identity, or owner acceptance exists yet. Plan-pilot still needs its current
+read-only staging proof, and the smaller generated/blob residues still need a
+hash-backed duplicate or supported reproducibility decision. Worktree removal
+therefore remains blocked.
+
 ## Owner
 
 The repl-autosuggest evidence/archive owner inventories the experiments; the

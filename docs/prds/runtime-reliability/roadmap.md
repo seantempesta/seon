@@ -57,12 +57,15 @@ Completed and committed on this branch:
 
 The issue authority's generated index is the live count. Startup triage's
 process-safety blocker is now implemented pending final live proof: maintained
-Datahike commit `1e78cb9c` adds synchronous query/pull work, result-node, and
+Datahike commits `1e78cb9c` and `6f90b339` add synchronous query/pull work,
+result-node, and
 shallow-weight budgets plus safe query-cache admission; `seon.db` clamps hard
 defaults; and `result/<id>` admits bounded immutable values before transcript
 recording or retention. Focused library proof is 117 JVM tests/309 assertions,
-104 CLJS tests/821 assertions, and the exact nested find-pull budget probe at
-three tests/21 assertions. Seon proof is query/pull clamp and recovery 1/7,
+105 CLJS tests/825 assertions, and the exact nested find-pull budget probe at
+three tests/21 assertions. The latter commit also fixes planned scalar and
+collection `:in` find-pull projections with a portable three-test/12-assertion
+JVM regression. Seon proof is query/pull clamp and recovery 1/7,
 database 50/346, read observation 8/76, eval memory 13/40, result slots 8/29,
 record/retry 28/130, writer 50/308, and operator 84/539.
 
@@ -78,21 +81,41 @@ the same complete immutable artifact without narrowing selectors or dropping
 the canonical test manifest: the mixed `deps.edn`/`src/seon/db.cljs` proof
 passes operator 84/539, writer 50/308, and pod 1,305/6,175.
 
+After pinning `6f90b339`, the complete local checkpoint remains green at
+operator 89/562, writer 50/308, and pod 1,305/6,175. A default-cluster restart
+built and published the version-2 default artifact, reconciled fresh watcher,
+writer, and pod processes, and returned ready. Live MCP evaluation of the exact
+scalar-input find-pull shape returned `[[{:seon.agent/id "root"}]]`, proving
+the maintained fix through Seon's running CLJS database boundary.
+
 The cross-lane audit in
 [[research/inspect-autocomplete-lane-integration-audit-2026-07-14]] confirms
 that the five stable behavior commits are integrated or patch-equivalent and
 that no old lane commit is a safe new cherry-pick. Four display-v3 ideas remain
 to be reimplemented through one structured database-derived export; ignored
 database, scorer, and continuation evidence must be preserved before worktree
-removal. The current offline Inspect gate is 314 passed/eight expected skips.
+removal. Active Inspect callers no longer invoke retired per-pod or ACME
+lifecycle commands or assume ports 7980/7981; lease-dependent modes now stop
+before subprocess/model work until the operator exposes ownership-fenced
+transitions. The current offline Inspect gate is 311 passed/eight expected
+skips.
 
 The dependency/Shadow/ACME audit in
 [[research/dependency-shadow-mcp-acme-audit-2026-07-14]] confirms the current
-`deps.edn` split and unified dynamic-port MCP boundary. ACME cannot yet delegate
-to the operator: artifact creation is hard-wired to `client`, so an `out-acme`
-override can combine a current default closure with a stale ACME entry bundle.
-Add an explicit ACME artifact flavor/build id before touching the preserved
-stable/display-v3 processes or their 44 MB/4.2 GB databases.
+`deps.edn` split and unified dynamic-port MCP boundary. The operator now has one
+explicit default/ACME artifact-flavor record that selects build id, isolated
+Shadow cache, output, and version-2 manifest; the complete operator checkpoint
+passes 89 tests/562 assertions. This closes the hybrid-artifact defect but does
+not yet make ACME safe to start: its lifecycle wrapper, watcher graph, ownership
+checks, and legacy-database disposition still need migration.
+
+The preservation manifest in
+[[research/worktree-evidence-preservation-manifest-2026-07-14]] inventories all
+nine worktrees, dirty patches, ignored databases/blobs, stable continuation
+evidence, display-v3 scorer/report artifacts, and four live orphan processes on
+ports 7980–7983. No worktree or database cleanup is authorized until closed
+archives and read-back proofs exist for the 44 MB stable and 4.2 GB display-v3
+databases.
 
 Before implementation resumes, reconcile the target architecture from
 [[research/architecture-target-drift-audit-2026-07-14]] in its recommended

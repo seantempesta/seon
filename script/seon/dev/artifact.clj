@@ -13,6 +13,22 @@
 
 (def artifact-manifest-schema
   [:map
+   [:seon.dev.artifact/version [:= 2]]
+   [:seon.dev.artifact/published-at :string]
+   [:seon.dev.artifact/flavor
+    [:enum :seon.dev.artifact.flavor/default
+     :seon.dev.artifact.flavor/acme]]
+   [:seon.dev.artifact/client-build-id :string]
+   [:seon.dev.artifact/shadow-cache-root :string]
+   [:seon.dev.artifact/client-output :string]
+   [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/bootstrap-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
+
+(def ^:private legacy-artifact-manifest-schema
+  [:map
    [:seon.dev.artifact/version [:= 1]]
    [:seon.dev.artifact/published-at :string]
    [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
@@ -98,7 +114,26 @@
   [config]
   (let [path (:seon.dev.config/artifact-manifest config)]
     (when (fs/regular-file? path)
-      (validate-manifest! (edn/read-string (slurp path))))))
+      (let [manifest (edn/read-string (slurp path))]
+        (if (m/validate legacy-artifact-manifest-schema manifest)
+          (if (= :seon.dev.artifact.flavor/default
+                 (:seon.dev.config/artifact-flavor config))
+            (validate-manifest!
+              (assoc manifest
+                     :seon.dev.artifact/version 2
+                     :seon.dev.artifact/flavor
+                     :seon.dev.artifact.flavor/default
+                     :seon.dev.artifact/client-build-id "client"
+                     :seon.dev.artifact/shadow-cache-root
+                     (:seon.dev.config/shadow-cache-root config)
+                     :seon.dev.artifact/client-output
+                     (:seon.dev.config/client-output config)))
+            (throw
+              (ex-info "A legacy artifact manifest cannot identify this flavor."
+                       {:seon.dev.artifact/path path
+                        :seon.dev.artifact/flavor
+                        (:seon.dev.config/artifact-flavor config)})))
+          (validate-manifest! manifest))))))
 
 (defn- atomic-spit! [path value]
   (let [path (fs/path path)
@@ -108,27 +143,35 @@
     (fs/move temp path {:replace-existing true :atomic-move true})
     value))
 
-(defn- extra-cljs-args [environment]
-  (let [source (get environment "SEON_EXTRA_SRC")
-        preload (get environment "SEON_EXTRA_PRELOAD")]
+(defn- extra-cljs-args [config]
+  (let [environment (:seon.dev.config/environment config)
+        flavor (:seon.dev.config/artifact-flavor config)
+        cache-root (:seon.dev.config/shadow-cache-root config)
+        isolated-cache? (and cache-root
+                             (not= flavor
+                                   :seon.dev.artifact.flavor/default))
+        source (get environment "SEON_EXTRA_SRC")
+        preload (get environment "SEON_EXTRA_PRELOAD")
+        config-merge
+        (cond-> {}
+          isolated-cache? (assoc :cache-root cache-root)
+          (and (not (str/blank? source)) (not (str/blank? preload)))
+          (assoc :devtools {:preloads [(symbol preload)]}))]
     (cond-> []
       (not (str/blank? source))
       (into ["-Sdeps" (pr-str {:deps {'seon.extra/src {:local/root source}}})])
 
-      (and (not (str/blank? source)) (not (str/blank? preload)))
-      (into ["--config-merge"
-             (pr-str {:devtools {:preloads [(symbol preload)]}})]))))
+      (seq config-merge)
+      (into ["--config-merge" (pr-str config-merge)]))))
 
 (defn cljs-command
   "Build a structured Shadow CLJS argv vector."
   [config action build-id]
-  (let [environment (:seon.dev.config/environment config)]
+  (let [extra-args (extra-cljs-args config)]
     (into ["clj"]
-          (concat (take-while #(not= "--config-merge" %)
-                              (extra-cljs-args environment))
+          (concat (take-while #(not= "--config-merge" %) extra-args)
                   ["-M:cljs" action build-id]
-                  (drop-while #(not= "--config-merge" %)
-                              (extra-cljs-args environment))))))
+                  (drop-while #(not= "--config-merge" %) extra-args)))))
 
 (defn- run-step! [config label argv]
   (println (str "▶ " label))
@@ -158,7 +201,9 @@
                 "--enable-native-access=ALL-UNNAMED"
                 "-XX:+UseG1GC" "-Xmx2g" "-jar"
                 (:seon.dev.config/writer-output config) "--preflight"]))
-  (run-step! config "build client" (cljs-command config "compile" "client"))
+  (run-step! config "build client"
+             (cljs-command config "compile"
+                           (:seon.dev.config/client-build-id config)))
   (run-step! config "build self-host bootstrap"
              (cljs-command config "compile" "bootstrap"))
   (run-step! config "repair bootstrap macro metadata"
@@ -169,7 +214,10 @@
 (defn- output-manifest [config]
   (let [root (:seon.dev.config/root config)
         writer (:seon.dev.config/writer-output config)
-        client-runtime (fs/path root ".shadow-cljs/builds/client/dev/out/cljs-runtime")
+        client-runtime
+        (fs/path (:seon.dev.config/shadow-cache-root config)
+                 "builds" (:seon.dev.config/client-build-id config)
+                 "dev/out/cljs-runtime")
         bootstrap (fs/path root "out/bootstrap")
         css (fs/path root "resources/public/css/output.css")
         required [writer (:seon.dev.config/client-output config) bootstrap css]
@@ -183,12 +231,27 @@
           bootstrap-digest (digest-paths root [bootstrap])
           css-digest (digest-paths root [css])
           application-digest
-          (digest-values ["client" client-digest
+          (digest-values ["flavor" (:seon.dev.config/artifact-flavor config)
+                          "client-build-id"
+                          (:seon.dev.config/client-build-id config)
+                          "client-output"
+                          (:seon.dev.config/client-output config)
+                          "shadow-cache-root"
+                          (:seon.dev.config/shadow-cache-root config)
+                          "client" client-digest
                           "bootstrap" bootstrap-digest
                           "css" css-digest])]
       (validate-manifest!
-        {:seon.dev.artifact/version 1
+        {:seon.dev.artifact/version 2
          :seon.dev.artifact/published-at (str (Instant/now))
+         :seon.dev.artifact/flavor
+         (:seon.dev.config/artifact-flavor config)
+         :seon.dev.artifact/client-build-id
+         (:seon.dev.config/client-build-id config)
+         :seon.dev.artifact/shadow-cache-root
+         (:seon.dev.config/shadow-cache-root config)
+         :seon.dev.artifact/client-output
+         (:seon.dev.config/client-output config)
          :seon.dev.artifact/writer-digest writer-digest
          :seon.dev.artifact/client-digest client-digest
          :seon.dev.artifact/bootstrap-digest bootstrap-digest

@@ -1,0 +1,53 @@
+(ns seon.dev.config-test
+  (:require [babashka.fs :as fs]
+            [clojure.test :refer [deftest is testing]]
+            [seon.dev.config :as config]))
+
+(deftest artifact-flavors-own-cache-build-output-and-manifest-identities
+  (let [root (str (fs/normalize (fs/absolutize ".")))
+        default (config/artifact-configuration root {})
+        acme (config/artifact-configuration
+               root {"SEON_ARTIFACT_FLAVOR" "acme"
+                     "SEON_CLIENT_OUT" "out-acme/client/main.js"})]
+    (is (= :seon.dev.artifact.flavor/default
+           (:seon.dev.config/artifact-flavor default)))
+    (is (= "client" (:seon.dev.config/client-build-id default)))
+    (is (= (str (fs/path root ".shadow-cljs"))
+           (:seon.dev.config/shadow-cache-root default)))
+    (is (= (str (fs/path root "out/client/main.js"))
+           (:seon.dev.config/client-output default)))
+    (is (= "artifact.edn"
+           (:seon.dev.config/artifact-manifest-name default)))
+    (is (= :seon.dev.artifact.flavor/acme
+           (:seon.dev.config/artifact-flavor acme)))
+    (is (= "acme-client" (:seon.dev.config/client-build-id acme)))
+    (is (= (str (fs/path root "tmp/shadow/acme"))
+           (:seon.dev.config/shadow-cache-root acme)))
+    (is (= (str (fs/path root "out-acme/client/main.js"))
+           (:seon.dev.config/client-output acme)))
+    (is (= "artifact-acme.edn"
+           (:seon.dev.config/artifact-manifest-name acme)))
+    (is (not= (select-keys default
+                           [:seon.dev.config/client-build-id
+                            :seon.dev.config/shadow-cache-root
+                            :seon.dev.config/client-output
+                            :seon.dev.config/artifact-manifest-name])
+              (select-keys acme
+                           [:seon.dev.config/client-build-id
+                            :seon.dev.config/shadow-cache-root
+                            :seon.dev.config/client-output
+                            :seon.dev.config/artifact-manifest-name])))))
+
+(deftest artifact-flavor-rejects-hybrid-or-unknown-coordinates
+  (let [root (str (fs/normalize (fs/absolutize ".")))]
+    (testing "an output override cannot silently select another build"
+      (is (thrown-with-msg?
+            Exception #"does not match"
+            (config/artifact-configuration
+              root {"SEON_ARTIFACT_FLAVOR" "default"
+                    "SEON_CLIENT_OUT" "out-acme/client/main.js"}))))
+    (testing "the flavor selector is closed data"
+      (is (thrown-with-msg?
+            Exception #"Unknown Seon artifact flavor"
+            (config/artifact-configuration
+              root {"SEON_ARTIFACT_FLAVOR" "invented"}))))))
