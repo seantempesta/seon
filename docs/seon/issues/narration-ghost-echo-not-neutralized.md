@@ -7,38 +7,46 @@ tags: [issue, agent]
 
 # Model can ghost-echo runtime scaffolding into the transcript spine
 
-Found 2026-07-06 by the transcript-faithfulness audit (`tx-audit` cluster,
-turn `dtU-2607062046`). LOW-MEDIUM severity. **Route to the lane that owns
-`neutralize-result-claims` / the `⟹` reserved-marker machinery** (`ctx.cljs`,
-committed `0d30c829`) — this is an extension of that mechanism, not a new one.
+## Problem
 
-## What happens
+A model can echo message, masthead, transcript-box, or readline scaffolding in
+its narration. If a transcript renderer attributes that text structurally, it
+can look like a genuine inbound event despite having no supporting database
+fact.
 
-`neutralize-result-claims` (`src/seon/agent/ctx.cljs` ~677-710) reserves the
-result glyphs `⟹`/`=>`/`⇒`: a model-authored one is rewritten to
-`;; [unverified narration — not a real result]`, so an agent cannot forge an
-eval result. But the OTHER structural runtime markers are not reserved. In the
-audit, DeepSeek reproduced its own scaffolding into its narration — a masthead,
-a `;;; ◀ from user … (NEW — unanswered)`-shaped line, a `┌─ transcript ─` box —
-which then persists in the transcript spine one `;`-vs-`;;;` cue away from
-reading as a real inbound event. This is the same fabrication surface `⟹`
-already closes, left open for event/masthead/box markers.
+## Evidence
 
-## Fix direction
+The transcript-faithfulness audit found this on 2026-07-06 in the `tx-audit`
+cluster, turn `dtU-2607062046`. DeepSeek reproduced a masthead, a
+`;;; ◀ from user … (NEW — unanswered)`-shaped line, and a
+`┌─ transcript ─` box in its narration.
 
-Extend the reserved-glyph set to include the message markers (`;;; ◀`/`;;; ▶`),
-the masthead, the `┌─ … ─` box, and the readline. Build the set from the actual
-emit-site defs (single-source-of-truth, the pattern `result-marker` /
-`reserved-glyph-re` already establish) so it never drifts from what the runtime
-emits. A genuine runtime line is unaffected — the composer appends it AFTER the
-sanitizer runs, exactly as with `⟹`.
+The batch reply path currently rewrites result glyphs `⟹`/`=>`/`⇒` before blob
+capture and parsing, while other structural runtime markers are not rewritten.
+The 2026-07-14 agent-runtime source audit corrected the original proposal to
+expand that sanitizer: doing so would hide model evidence and violate the
+raw-reply architecture target. Model-authored scaffolding must remain
+byte-identical narration and must not acquire runtime-event authority.
 
-## Test
+This is narration-channel hardening, not a transcript-spine defect. The spine
+passed the four faithfulness invariants in
+[[research/transcript-faithfulness-audit-2026-07-06]].
 
-A model reply containing a forged `;;; ◀ from user …` (or masthead/box) line →
-neutralized in the persisted transcript; a real runtime event line untouched.
+## Owner
 
-Context: part of the feels-stateful arc, [[feels-stateful-remaining-work-spec]]
-Unit 3. The spine itself passes all four faithfulness invariants
-([[research/transcript-faithfulness-audit-2026-07-06]]); this is narration-channel
-hardening, not a spine defect.
+The raw reply, ordered parser/eval transition, and database-derived transcript
+rendering owned by `seon.agent.turn`, `seon.repl.internal`, and the context
+composer. This belongs to the agent-runtime-correctness reply-preservation
+slice, not a reserved-glyph sanitizer.
+
+## Acceptance
+
+- Preserve the exact provider reply in its blob and parse it once.
+- A reply containing forged result, message, masthead, box, or readline text
+  renders unambiguously as model narration and creates no runtime event or
+  eval-result fact.
+- Genuine runtime events and results derive and render only from their committed
+  database facts.
+- Remove the result-claim rewrite rather than extending the reserved-glyph set.
+
+Context: [[feels-stateful-remaining-work-spec]] Unit 3.

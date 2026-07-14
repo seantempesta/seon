@@ -21,29 +21,48 @@ retry owner, bounded result admission, query/pull work budgets, restart recovery
 and one database-backed planning mechanism. Inspect has offline long-term-plan
 arms and the stable autocomplete/plan changes are integrated.
 
-Known gaps remain: batch handling still filters alleged result text before
-persistence; async structural functions can bypass output contracts; a
-successful plan step has no required verification evidence; cross-agent and
-address-message transitions can reopen or displace authored work; narration can
-echo runtime scaffolding; and arbitrary self-host evaluation has bounded result
-retention but no measured hard process-memory containment.
+Known gaps remain: batch handling deletes alleged result text before reply-blob
+capture and parsing, so the stored blob is not raw ground truth; a live census
+found 95 of 747 async contracts structurally excluded while the public coverage
+gap count reported zero; the outer provider timeout does not cancel the
+underlying request; a successful plan step has no required verification
+evidence; cross-agent and address-message transitions can reopen or displace
+authored work; narration can echo runtime scaffolding; and arbitrary self-host
+evaluation has bounded result retention but no measured hard process-memory
+containment. Pod-restart recovery is already transactionally fenced and
+idempotent, but it is not an isolated eval-process boundary.
+
+The selected ClojureScript `1.12.145` source is not yet mirrored exactly. The
+current checkout is useful reference but cannot ground analyzer-boundary
+implementation. Exact Shadow `3.4.10` is already available at release commit
+`2911c908…` in the reference checkout's history.
+
+## Research evidence
+
+- [[research/agent-runtime-source-audit-2026-07-14]] — dependency ledger,
+  live probes, current mechanisms, transition matrix, deletion map, ordered
+  slices, and containment decision criteria.
 
 ## Ordered work
 
-1. Preserve raw replies, parse once, and define the exact ordered batch state
+1. Mirror exact ClojureScript `1.12.145`, read Shadow at its existing exact
+   release commit, preserve raw replies, parse once, and define the ordered batch
+   state
    transition for complete, incomplete, read-error, eval-error, async, and
    process-death boundaries.
 2. Make async public-function instrumentation validate the awaited value without
    leaking Promises or throwing into the loop.
-3. Give plan completion schema'd verification evidence and settle authority for
+3. Thread cancellation through the existing provider attempt and adapters while
+   retaining one retry owner.
+4. Give plan completion schema'd verification evidence and settle authority for
    authored, addressed, cross-agent, retry, and resume transitions through the
    one `my.plan` mechanism.
-4. Remove narration/scaffolding ambiguity by fixing the owning context/runtime
+5. Remove narration/scaffolding ambiguity by fixing the owning context/runtime
    data rather than rewriting replies.
-5. Measure and implement the smallest hard process boundary for arbitrary eval,
+6. Measure and implement the smallest hard process boundary for arbitrary eval,
    with deadlines, cancellation, memory ceilings, crash attribution, receipt
    fencing, and reconstruction from committed facts.
-6. Integrate Inspect tasks/scorers that falsify each transition, then run paid
+7. Integrate Inspect tasks/scorers that falsify each transition, then run paid
    or small-model trials only after deterministic runtime gates pass.
 
 ## Graduation

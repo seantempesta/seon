@@ -25,6 +25,15 @@ preempt arbitrary synchronous code. The live default pod recovered from 100
 budget-exhausted queries, and a 300 KB retained result became a compact
 descriptor, but neither probe is a process-level adversarial allocation test.
 
+`seon.worker-eval` is already a separate diffusion-oracle JSON-line evaluator
+using `vm.runInThisContext`; it does not have the pod's analyzer state, prior
+agent definitions, instrumentation, or database context and is not an
+application-eval containment boundary. `reference-code/piscina` demonstrates
+abort, termination, cleanup, queue, and respawn patterns but is not a selected
+dependency. Node worker `resourceLimits` bound isolate heaps, not necessarily
+process RSS or external/native allocation, so worker thread versus child process
+must be selected from measured hostile-allocation evidence rather than assumed.
+
 ## Owner
 
 The agent runtime's process-isolation and restart boundary, coordinated with
@@ -35,6 +44,11 @@ writer, or describe SCI as a security boundary.
 
 - A bounded worker/process contract contains arbitrary synchronous eval memory
   and CPU failure without losing or wedging the writer, supervisor, or cluster.
+- The selected boundary is measured against JavaScript heap,
+  ArrayBuffer/external memory, native/dependency allocation, fatal worker
+  failure, cancellation latency, cleanup, and analyzer reconstruction. Use a
+  child process with Node/OS limits if worker threads fail any hard-containment
+  criterion.
 - The agent loop records a structured failure and can continue or restart from
   database state.
 - The default live cluster proves recovery from a killed or exhausted worker.
