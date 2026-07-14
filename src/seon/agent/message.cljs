@@ -84,6 +84,10 @@
    [:seon.agent/id :string]
    [::recent-limit ::recent-limit]])
 (schema/register! ::recent-response [:vector :map])
+(schema/register! ::recent-all-request
+  [:map
+   [:seon.db/db :seon.db/db-val]
+   [::recent-limit ::recent-limit]])
 
 (def ^:private recent-pull-pattern
   '[* {:seon.agent.message/from [:db/id :seon.user/id :seon.agent/id]
@@ -106,22 +110,46 @@
    Conversation membership remains derived (`from = agent OR to contains
    agent`). The two ref attributes are indexed by Datahike, so this reads at
    most `2 × :seon.agent.message/recent-limit` datoms plus that many entity
-   pulls; it never scans or sorts the complete message log."
+   pulls; it never scans or sorts the complete message log. Message entities
+   are append-only, so descending entity ids are their creation order."
   {:malli/schema [:=> [:cat ::recent-request] ::recent-response]}
   [{dbv :seon.db/db agent-id :seon.agent/id limit ::recent-limit}]
-  (if-some [agent-eid
-            (some-> (db/index-datoms
-                      {:seon.db/db dbv
-                       :seon.db/index :avet
-                       :seon.db/components [:seon.agent/id agent-id]
-                       :seon.db/index-limit 1})
-                    first
-                    :seon.db/e)]
-    (->> (concat (exact-ref-eids dbv :seon.agent.message/from agent-eid limit)
-                 (exact-ref-eids dbv :seon.agent.message/to agent-eid limit))
-         distinct
-         (sort >)
-         (take limit)
+  (let [installed (db/installed-schema dbv)]
+    (if (and (contains? installed :seon.agent.message/from)
+             (contains? installed :seon.agent.message/to))
+    (if-some [agent-eid
+              (some-> (db/index-datoms
+                        {:seon.db/db dbv
+                         :seon.db/index :avet
+                         :seon.db/components [:seon.agent/id agent-id]
+                         :seon.db/index-limit 1})
+                      first
+                      :seon.db/e)]
+      (->> (concat (exact-ref-eids dbv :seon.agent.message/from agent-eid limit)
+                   (exact-ref-eids dbv :seon.agent.message/to agent-eid limit))
+           distinct
+           (sort >)
+           (take limit)
+           (keep #(db/pull {:seon.db/db dbv
+                            :seon.db/pull-pattern recent-pull-pattern
+                            :seon.db/ref %}))
+           (sort-by #(.getTime ^js (:seon.agent.message/at %)))
+           vec)
+      [])
+      [])))
+
+(defn recent-all
+  "Return the newest-created messages across the database, bounded and oldest first."
+  {:malli/schema [:=> [:cat ::recent-all-request] ::recent-response]}
+  [{dbv :seon.db/db limit ::recent-limit}]
+  (if (contains? (db/installed-schema dbv) :seon.agent.message/at)
+    (->> (db/rseek-datoms
+           {:seon.db/db dbv
+            :seon.db/index :aevt
+            :seon.db/components [:seon.agent.message/at]
+            :seon.db/index-limit limit
+            :seon.db/index-prefix? true})
+         (map :seon.db/e)
          (keep #(db/pull {:seon.db/db dbv
                           :seon.db/pull-pattern recent-pull-pattern
                           :seon.db/ref %}))

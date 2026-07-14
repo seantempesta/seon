@@ -30,9 +30,11 @@
    rendering its surface on the next morph."
   (:require
     [clojure.string :as str]
+    [seon.agent.message :as message]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.derive :as derive]
+    [seon.eval :as seval]
     [seon.embed :as embed]
     [seon.render.surface :as surface]
     [seon.runtime.recovery :as recovery]
@@ -166,21 +168,18 @@
 (defn- eval-activity
   "Recent EVAL events across ALL agents (no per-agent filter) — the
    denormalized `:seon.eval/agent` ref gives the owning agent in one hop."
-  [db]
-  (->> (db/query
+  [db n]
+  (->> (seval/recent-all
          {:seon.db/db db
-          :seon.db/query
-          '[:find ?at ?aid ?src
-            :where
-            [?ev :seon.eval/agent ?a]
-            [?a  :seon.agent/id ?aid]
-            [?ev :seon.eval/at ?at]
-            [(get-else $ ?ev :seon.eval/source "") ?src]]})
-       (keep (fn [[at aid src]]
-               (let [text (truncate src 20)]
+          :seon.eval/recent-limit n})
+       (keep (fn [{at :seon.eval/at
+                   src :seon.eval/source
+                   agent :seon.eval/agent}]
+               (let [aid  (:seon.agent/id agent)
+                     text (truncate src 20)]
                  ;; Skip blank-source rows (a bare `}` / whitespace-only form
                  ;; split out of a multi-line eval) — noise in a glance feed.
-                 (when-not (str/blank? text)
+                 (when (and aid (not (str/blank? text)))
                    {::at    at
                     ::kind  :eval
                     ::label aid
@@ -191,15 +190,10 @@
   "Recent MESSAGE events across ALL agents (no per-agent filter). Attributed
    to the SENDER when it's an agent; a human-origin message is attributed to
    its first agent recipient (so the line still links into the fleet)."
-  [db]
-  (->> (db/query
+  [db n]
+  (->> (message/recent-all
          {:seon.db/db db
-          :seon.db/query
-          '[:find [(pull ?m [:seon.agent.message/at
-                             :seon.agent.message/content
-                             {:seon.agent.message/from [:seon.agent/id :seon.user/id]}
-                             {:seon.agent.message/to [:seon.agent/id]}]) ...]
-            :where [?m :seon.agent.message/at _]]})
+          :seon.agent.message/recent-limit n})
        (keep (fn [m]
                (let [at      (:seon.agent.message/at m)
                      from    (:seon.agent.message/from m)
@@ -229,7 +223,7 @@
                   [:=> [:catn [:seon.db/db :seon.db/db-val] [::n :int]] [:vector ::activity-event]]]}
   ([db] (recent-activity db 12))
   ([db n]
-   (->> (concat (eval-activity db) (message-activity db))
+   (->> (concat (eval-activity db n) (message-activity db n))
         (filter #(instance? js/Date (::at %)))
         (sort-by #(.getTime ^js (::at %)))
         reverse

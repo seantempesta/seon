@@ -96,6 +96,74 @@
 ;; form's frozen database config, not from process-global mutable state.
 (def ^:private default-timeout-ms 10000)
 
+(schema/register! ::recent-limit [:int {:min 1 :max 200}])
+(schema/register! ::recent-request
+  [:map
+   [:seon.db/db :seon.db/db-val]
+   [:seon.agent/id :string]
+   [::recent-limit ::recent-limit]])
+(schema/register! ::recent-response [:vector :map])
+(schema/register! ::recent-all-request
+  [:map
+   [:seon.db/db :seon.db/db-val]
+   [::recent-limit ::recent-limit]])
+
+(def ^:private recent-all-pull-pattern
+  '[* {:seon.eval/agent [:seon.agent/id]}])
+
+(defn recent
+  "Return one agent's newest eval rows, oldest first, from its ref index.
+
+   Every agent eval records `:seon.eval/agent`; Datahike indexes that ref, so
+   this reads and pulls at most `:seon.eval/recent-limit` entities instead of
+   walking every run and turn. The bounded reverse window participates in the
+   shared reactive-read observer. Eval entities are append-only, so descending
+   entity ids are their creation order."
+  {:malli/schema [:=> [:cat ::recent-request] ::recent-response]}
+  [{dbv :seon.db/db agent-id :seon.agent/id limit ::recent-limit}]
+  (if (contains? (db/installed-schema dbv) :seon.eval/agent)
+    (if-some [agent-eid
+              (some-> (db/index-datoms
+                        {:seon.db/db dbv
+                         :seon.db/index :avet
+                         :seon.db/components [:seon.agent/id agent-id]
+                         :seon.db/index-limit 1})
+                      first
+                      :seon.db/e)]
+      (->> (db/rseek-datoms
+             {:seon.db/db dbv
+              :seon.db/index :avet
+              :seon.db/components [:seon.eval/agent agent-eid]
+              :seon.db/index-limit limit
+              :seon.db/index-prefix? true})
+           (map :seon.db/e)
+           (keep #(db/pull {:seon.db/db dbv
+                            :seon.db/pull-pattern '[*]
+                            :seon.db/ref %}))
+           (sort-by #(.getTime ^js (:seon.eval/at %)))
+           vec)
+      [])
+    []))
+
+(defn recent-all
+  "Return the newest-created eval rows across the database, bounded and oldest first."
+  {:malli/schema [:=> [:cat ::recent-all-request] ::recent-response]}
+  [{dbv :seon.db/db limit ::recent-limit}]
+  (if (contains? (db/installed-schema dbv) :seon.eval/at)
+    (->> (db/rseek-datoms
+           {:seon.db/db dbv
+            :seon.db/index :aevt
+            :seon.db/components [:seon.eval/at]
+            :seon.db/index-limit limit
+            :seon.db/index-prefix? true})
+         (map :seon.db/e)
+         (keep #(db/pull {:seon.db/db dbv
+                          :seon.db/pull-pattern recent-all-pull-pattern
+                          :seon.db/ref %}))
+         (sort-by #(.getTime ^js (:seon.eval/at %)))
+         vec)
+    []))
+
 (deftype ^:private Budgeted [ms value])
 
 (defn budget

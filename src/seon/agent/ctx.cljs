@@ -1209,10 +1209,13 @@
   ([] (evals {}))
   ([{:seon.agent/keys [n id] db :seon.db/db :or {n 20}}]
    (let [id (resolve-id id)
-         es (for [t (agent-turns id db)
-                  e (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
-              e)]
-     (vec (take-last n es)))))
+         db (or db @db/*conn*)]
+     (if (pos? n)
+       (seval/recent
+         {:seon.db/db db
+          :seon.agent/id id
+          :seon.eval/recent-limit (min 200 n)})
+       []))))
 
 (defn current-ns
   "The agent's current namespace.
