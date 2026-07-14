@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database]
 ---
@@ -32,3 +32,18 @@ Scalar and collection `:in` entity bindings produce the same find-pull value
 as the equivalent constant-predicate query on planned and legacy paths. Add a
 cross-platform regression and prove ordinary find, scalar find-pull, and
 unbound find-pull agree without weakening resource-budget inheritance.
+
+## Resolution
+
+Maintained Datahike commit `6f90b339` prevents the planner's direct-relation
+fast path from handling a fully ground group. Its zero-width tuple emitter
+intentionally omits output, but a ground clause that exists must preserve one
+empty relation row so constant-bound projections such as `pull` can return the
+`:in` value. Those queries now fall back to the existing relation engine; no
+second execution path was added.
+
+The portable regression covers scalar and collection entity inputs with both
+planned and legacy execution. The focused JVM checkpoint passes three tests
+and 12 assertions, and the Node ClojureScript checkpoint passes 105 tests and
+825 assertions. The fork commit is pushed on `sync-upstream`, and both Seon
+dependency surfaces are pinned to its full SHA.
