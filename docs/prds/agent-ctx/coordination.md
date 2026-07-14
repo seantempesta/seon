@@ -276,7 +276,7 @@ frozen bundle (`0f34eca9`, fix verified compiled in the running runtime).
 - **Eval → Tooling:** two tool defects queued with evidence — (1) fresh-world
   `my.kb` renders "0 fns, 0 schemas"; (2) turn-6 recall visibility gap during
   `/solve` (candidate root = `seon.db/*conn*` single dynamic root, see
-  `docs/seon/orchestrator/issues/archive/tx-feed-pump-timeouts.md`). Absorbed into
+  `docs/seon/issues/archive/tx-feed-pump-timeouts.md`). Absorbed into
   [[CLAUDE]] §"Open tensions".
 - **Tooling → Eval:** `my.plan` was renamed from `seon.agent.todo` + redesigned
   (deps/pace/expect/active/blocked, position anchor, windowed render) — the
@@ -321,11 +321,11 @@ frozen bundle (`0f34eca9`, fix verified compiled in the running runtime).
   compiled path` (`logs/acme/pod.log:38`). Candidate root: the ns's
   `:seon.ns/source` require aliases not stored, so SCI can't resolve the
   `db/*conn*` alias. A hang in that fn would wedge the pod unbounded. Issue:
-  `docs/seon/orchestrator/issues/archive/sci-bounding-fallback-plan-block.md`.
+  `docs/seon/issues/archive/sci-bounding-fallback-plan-block.md`.
 - **Eval (self-owned):** `bin/seon` start/readiness echoes now print the real
   `$LOG_DIR` path via `log_file` (they hardcoded `logs/…` and lied under
   `bin/acme`); harness-doc `/agents` route drift filed
-  (`docs/seon/orchestrator/issues/acme-harness-agents-route-drift.md`).
+  (`docs/seon/issues/acme-harness-agents-route-drift.md`).
 
 ### 2026-07-02 — suite green + plan ratified with owner (tooling lane)
 
@@ -410,7 +410,7 @@ frozen bundle (`0f34eca9`, fix verified compiled in the running runtime).
   `schema/register!` rule — single-segment keyword namespaces rejected;
   (2) **real datahike-fork query-planner bug** — a valid 3-clause order
   silently returns `#{}`
-  (`docs/seon/orchestrator/issues/archive/datahike-query-clause-order-empty-results.md`);
+  (`docs/seon/issues/archive/datahike-query-clause-order-empty-results.md`);
   (3) agents DO have file-read verbs (`seon.agent.fs/read-file`,
   `seon.agent.search/grep`) — the skills were written file-free per owner
   policy; flag if a bench row assumes otherwise.
@@ -436,7 +436,7 @@ frozen bundle (`0f34eca9`, fix verified compiled in the running runtime).
   — your frozen agents' work; handle on your resume.
 - **Queued NEXT (owner-ordered, held until owner returns):** datahike-fork
   query-planner fix + verify all systems resolve OUR fork
-  (`docs/seon/orchestrator/issues/archive/datahike-query-clause-order-empty-results.md`
+  (`docs/seon/issues/archive/datahike-query-clause-order-empty-results.md`
   has the full dispatch scope). Nothing new launches until the owner is back.
 
 ### 2026-07-02 — skip-syms DELETED (resumed unit, complete)
@@ -582,7 +582,7 @@ collisions minimally, subject to owner override:
 
 ### 2026-07-02 — THE REGISTRY (owner-ordered; both lanes maintain it)
 
-- **`docs/seon/orchestrator/issues/dual-code-paths-registry.md` is now the ONE
+- **`docs/seon/issues/archive/dual-code-paths-registry.md` is now the ONE
   tracked list** of every dual-path / hand-list / silent-fallback / dual-home
   finding (owner: "don't lose track of dual code paths — track everything and
   fix it"). It absorbs your magic-systems audit (M-rows, statuses updated for

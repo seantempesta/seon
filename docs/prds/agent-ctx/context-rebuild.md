@@ -260,7 +260,7 @@ the graduated system-text on its next restart (coordination.md flagged).
 
 ## Hacks → production (the consolidated fix-it-all plan, owner-ordered 2026-07-11)
 
-Sources: the dual-code-paths registry (docs/seon/orchestrator/issues/
+Sources: the dual-code-paths registry (docs/seon/issues/
 dual-code-paths-registry.md — THE canonical list; open rows summarized
 here, the registry stays the tracker), the two 2026-07-11 audits
 (research/claude-md-audit + research/vocabulary-audit), and this arc's

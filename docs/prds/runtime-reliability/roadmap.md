@@ -236,8 +236,12 @@ The durable issue authority and startup-triage design has also been audited.
 The exact move/archive/split map, one-note contract, bounded session-start
 triage, and mechanical index checks are
 [[research/issue-authority-and-startup-triage-audit-2026-07-14]]. The target is
-one client-neutral `docs/seon/issues/` tree; no private registry or chat-only
-finding remains authoritative.
+now implemented as one client-neutral `docs/seon/issues/` tree. The obsolete
+orchestrator-doc directory and manual current-work indexes are gone; dated
+audits moved into this PRD's research, the private dual-path registry was split
+and archived, and 19 open plus 81 archived notes pass `bin/issues-index
+--check`. Root and role instructions now require durable parent handoff and one
+bounded startup triage rather than a chat-only finding or second backlog.
 
 The first automatic-feedback implementation is deliberately namespace-level
 and conservative. `seon.dev.changed-test` remains the one public decision:

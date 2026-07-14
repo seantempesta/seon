@@ -57,12 +57,12 @@ The crash was contained. No data was lost. No other process was affected.
 
 ## What Remains Honest
 
-- [[orchestrator/issues/atom-watches-bypass-flow]] -- ctx persistence and SSE push fire outside the flow topology. State changes are invisible to other flow processes.
-- [[orchestrator/issues/state-three-mechanisms]] -- ctx registry, runtime registry, and flow/ping each hold partial truths about namespace state. They do not sync.
-- [[orchestrator/issues/no-broadcast-signals]] -- no mechanism for namespaces to emit events that other namespaces can subscribe to. Cross-namespace coordination is blocked.
-- [[orchestrator/issues/no-custom-namespace-behavior]] -- all namespaces get the same behavioral mold. No extension points for custom request handling or derived state.
-- [[orchestrator/issues/coupling-circular-deps]] -- three pairs of namespaces use `requiring-resolve` to mask circular dependencies.
-- [[orchestrator/issues/raw-datalevin-conn]] -- agent_runner.clj bypasses `seon.db` for bootstrap connection (issue filename retained for stable link; now applies to the Datahike-backed bootstrap).
+- [[issues/archive/atom-watches-bypass-flow]] -- ctx persistence and SSE push fire outside the flow topology. State changes are invisible to other flow processes.
+- [[issues/archive/state-three-mechanisms]] -- ctx registry, runtime registry, and flow/ping each hold partial truths about namespace state. They do not sync.
+- [[issues/archive/no-broadcast-signals]] -- no mechanism for namespaces to emit events that other namespaces can subscribe to. Cross-namespace coordination is blocked.
+- [[issues/archive/no-custom-namespace-behavior]] -- all namespaces get the same behavioral mold. No extension points for custom request handling or derived state.
+- [[issues/archive/coupling-circular-deps]] -- three pairs of namespaces use `requiring-resolve` to mask circular dependencies.
+- [[issues/archive/raw-datalevin-conn]] -- agent_runner.clj bypasses `seon.db` for bootstrap connection (issue filename retained for stable link; now applies to the Datahike-backed bootstrap).
 
 The infrastructure works. Agents are isolated, the database survives crashes, the pool self-heals. The gap is that the flow topology is not yet the *sole* routing backbone -- atom watches and multiple state registries create invisible side channels.
 

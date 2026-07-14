@@ -648,12 +648,12 @@ Stability queue (interleaved, one per feature unit above; owner-agreed
    `warn-on-seed-origin-forge!` (the forgery becomes impossible, killing the
    ×3 boot warning).
 2. **Pub-socket feed migration** → **transact-timeout semantics**
-   (`docs/seon/orchestrator/issues/archive/tx-feed-pump-timeouts.md`).
+   (`docs/seon/issues/archive/tx-feed-pump-timeouts.md`).
 3. **SCI alias root-fix + fallback DELETION** — store the analyzer's requires
    on `:seon.ns/source` so SCI resolves aliases (code-as-data reuse); a fn
    that still can't run bounded renders a `:seon/error` tile
    (never-crash-always-surface) and the unbounded compiled fallback path is
-   REMOVED. Absorbs `docs/seon/orchestrator/issues/archive/sci-bounding-fallback-plan-block.md`
+   REMOVED. Absorbs `docs/seon/issues/archive/sci-bounding-fallback-plan-block.md`
    and part of the `*conn*` root.
 4. ~~**`*conn*` single-dynamic-root / fiber-local**~~ — DISSOLVED by the
    one-pod-per-cluster ruling (coordination.md MAJORs): one pod = one view =

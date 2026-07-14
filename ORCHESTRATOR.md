@@ -37,55 +37,63 @@ You coordinate work and delegate to agents. Handle only trivial edits (typos, re
 
 The biggest failure mode is **dropping reported issues**. An agent reports a code smell, a type mismatch, a convention violation — and it vanishes into the conversation history. This is unacceptable.
 
-**Issues live in `docs/seon/orchestrator/issues/`** — one note per problem. They persist across sessions. You read them at the start. You add new ones when agents report problems. You update status when problems are fixed. The issue count only shrinks when work is done.
+**Issues live in `docs/seon/issues/`** — one note per root cause. They persist
+across sessions; the active PRD roadmap, not the issue tree, orders the work.
 
 When an agent reports something:
 
-1. **Acknowledge it explicitly.** "Noted: type mismatch in `seon.agent.ctx:42` — `::args` uses `:any` but should be concrete."
-2. **Create an issue note** in `docs/seon/orchestrator/issues/` if one doesn't exist. Include: problem, file refs, acceptance criteria, component links, severity.
-3. **Decide: fix now or fix next.** If it's in scope and small, launch a fix agent now. If not, the issue note stays for the next session. Either way it's tracked.
-4. **Close the loop.** When a fix agent finishes, verify the fix. Update the issue's status to `verified`. Commit the status change with the fix.
+1. Acknowledge it and require the durable issue path in the agent's report.
+2. Search before creating; update the existing root-cause note when one exists.
+3. Fix only when it is in scope or blocks correctness, process safety, or
+   liveness. Otherwise keep it open with evidence, owner, and acceptance.
+4. After verification, set `status: resolved` or `status: superseded`, record
+   commit plus behavioral/live proof, and move it to `archive/`.
 
 ### Issue Management
 
-Issues live in `docs/seon/orchestrator/issues/` — one note per issue.
-
-**Creating issues:** Include problem, file refs, acceptance criteria, `[[component]]` links. Link to milestone if applicable. Severity: cleanup | friction | architectural | blocking.
-
-**Querying issues:** Use grep:
+Use only the lifecycle `open -> resolved | superseded` and severities
+`blocker | friction | cleanup`. Architecture is a tag. Validate the corpus and
+derived index mechanically:
 
 ```bash
-grep -rl "status: open" docs/seon/orchestrator/issues/      # Open issues
-grep -rl "severity: blocking" docs/seon/orchestrator/issues/ # Blockers
+bin/issues-index --check
 ```
 
-**Assigning to agents:** Pull issue into pipeline → set status to in-progress → include issue path in the agent prompt so the agent reads the full context and acceptance criteria.
+Do not add in-progress state to issues. The active PRD roadmap records
+implementation progress. Include the issue path in an assigned task so the
+agent reads the evidence and acceptance criteria.
 
 ### Session Protocol
 
 **Start:**
 
-1. Read `docs/seon/_dashboard.md` — system map
-2. Read `docs/seon/orchestrator/active.md` — pipeline and recovery
-3. Resuming? Pick up from last verified task. Fresh? Discuss with user, build pipeline.
+1. Read `docs/seon/architecture/architecture.md`, the current PRD's
+   `AGENTS.md`, and its `roadmap.md`.
+2. Once per new top-level session, launch exactly one bounded issue-triage
+   subagent. Give it the current user request, architecture domain, roadmap,
+   and all open notes. It checks current source and cheap existing proofs,
+   closes only conclusive stale/duplicate notes, regenerates the index, and
+   reports blockers plus at most three adjacent opportunities.
+3. Record in the active plan that startup triage ran. Do not repeat it after
+   compaction. The triage agent does not create another report, run the full
+   suite, edit production source, touch another owned lane, or reorder the
+   user's work unless it proves a correctness, process-safety, or liveness
+   blocker.
 
 **The Loop:**
 
-1. Read next task's linked issue/PRD for context + acceptance criteria
-2. Read relevant component notes for codebase context
-3. Launch a `seon-agent` — include: task, AC, PRD path, component refs
-4. Update active.md: status → in-progress
-5. Agent completes → launch `seon-verifier` with AC
-6. Record verification in active.md (what passed, what failed)
-7. Verified → update issue status, update component notes if changed
-8. Failed → update task, create new issues if needed
-9. Next task
+1. Read the next roadmap unit and linked issue/evidence.
+2. Launch a scoped implementation agent when delegation helps.
+3. Verify against the acceptance criteria and running system.
+4. Update the architecture target, PRD roadmap, localized authority, and issue
+   disposition that actually changed.
+5. Commit the coherent gain before starting the next unit.
 
 **End:**
 
-1. Update active.md with pipeline state
-2. New issues written to orchestrator/issues/
-3. Summary to user
+1. Leave the active PRD roadmap honest.
+2. Ensure every reported problem has a `docs/seon/issues/` note.
+3. Summarize completed proof, remaining blockers, and next work to the user.
 
 ### Agent Quality Over Quantity
 

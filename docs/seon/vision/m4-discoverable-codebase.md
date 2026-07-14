@@ -52,7 +52,7 @@ Same query mechanism. Different intent. The discovery API does not care whether 
 
 ## What This Requires
 
-**Graph indexes full function schemas.** The ingest pipeline already extracts `:malli/schema` metadata and stores input/output specs as Datahike refs (`:seon.fn/input-spec`, `:seon.fn/output-spec`) pointing to spec entities with `contains-keys` and `optional-keys`. Output-key discovery works via `gq/functions-with-output-key`. What is missing is the generalized discovery API (`gq/discover` or similar) that accepts arbitrary input/output key combinations. See [[orchestrator/issues/graph-missing-schema-index]].
+**Graph indexes full function schemas.** The ingest pipeline already extracts `:malli/schema` metadata and stores input/output specs as Datahike refs (`:seon.fn/input-spec`, `:seon.fn/output-spec`) pointing to spec entities with `contains-keys` and `optional-keys`. Output-key discovery works via `gq/functions-with-output-key`. What is missing is the generalized discovery API (`gq/discover` or similar) that accepts arbitrary input/output key combinations. See [[issues/archive/graph-missing-schema-index]].
 
 **One discovery API.** A single query function (`gq/discover` or similar) that accepts input keys, output keys, or both, and returns ranked matches. The ranking algorithm is the same one renderer discovery already uses: count of matched required keys for specificity, namespace proximity for tiebreaking. This generalizes [[concepts/renderer-discovery]] from "find render functions" to "find any function."
 
@@ -73,14 +73,14 @@ Same query mechanism. Different intent. The discovery API does not care whether 
 
 ## What Remains Honest
 
-- [[orchestrator/issues/graph-missing-schema-index]] -- the critical blocker. Without schema indexing in the graph, discovery is impossible. The schema data exists at runtime (`malli.core/function-schemas`) but the ingest pipeline does not capture it.
-- [[orchestrator/issues/overlap-three-rendering]] -- two rendering dispatch mechanisms coexist. Must converge.
-- [[orchestrator/issues/overlap-three-sse-push]] -- three SSE push paths. Must converge.
-- [[orchestrator/issues/overlap-three-ai-context]] -- three AI context builders. Must converge.
-- [[orchestrator/issues/overlap-three-status-badges]] -- three badge implementations. Symptom of the same problem.
-- [[orchestrator/issues/coupling-ns-routes-reactive]] -- namespace views bypass the standard push path.
-- [[orchestrator/issues/dead-web-namespace-viewer]] -- dead files from the pre-discovery era.
-- [[orchestrator/issues/lifecycle-coupling-bottleneck]] -- namespace lifecycle depends on 7 components. Discovery should decouple this.
+- [[issues/archive/graph-missing-schema-index]] -- the critical blocker. Without schema indexing in the graph, discovery is impossible. The schema data exists at runtime (`malli.core/function-schemas`) but the ingest pipeline does not capture it.
+- [[issues/archive/overlap-three-rendering]] -- two rendering dispatch mechanisms coexist. Must converge.
+- [[issues/archive/overlap-three-sse-push]] -- three SSE push paths. Must converge.
+- [[issues/archive/overlap-three-ai-context]] -- three AI context builders. Must converge.
+- [[issues/archive/overlap-three-status-badges]] -- three badge implementations. Symptom of the same problem.
+- [[issues/archive/coupling-ns-routes-reactive]] -- namespace views bypass the standard push path.
+- [[issues/archive/dead-web-namespace-viewer]] -- dead files from the pre-discovery era.
+- [[issues/archive/lifecycle-coupling-bottleneck]] -- namespace lifecycle depends on 7 components. Discovery should decouple this.
 
 Renderer discovery proves the pattern works. The gap is generalization: indexing all function schemas (not just render output), providing a unified query API, and converging the overlapping systems that predate discovery.
 

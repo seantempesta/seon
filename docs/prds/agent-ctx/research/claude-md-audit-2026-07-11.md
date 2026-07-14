@@ -154,7 +154,7 @@ phase**:
   what is actually being built.
 - "Build order" (lines 308-321) lists tooling-lane and eval-lane sequences that
   completed weeks ago.
-- Some pointers are stale-by-move: it references `docs/seon/orchestrator/issues/…`
+- Some pointers are stale-by-move: it references `docs/seon/issues/…`
   paths as the live registry.
 
 The file is well-STRUCTURED (contract, settled, runbook, pointer index) — the

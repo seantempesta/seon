@@ -44,7 +44,7 @@ Sweep of current-state docs to remove stale Datalevin references. The migration 
 | docs/seon/vision/m7-namespace-as-process.md | done | Word replacements |
 | docs/seon/vision/m3-convention-uniformity.md | done | Including removal of stale `ai/datalevin.clj` reference |
 | docs/seon/vision/full-framing-found-2026-05-23.md | **left as-is** | All remaining mentions are accurate descriptions of past commits or verbatim historical quotes |
-| docs/seon/orchestrator/prds.md | **left as-is** | All remaining mentions are PRD file paths (`prds/datalevin-migration/`, `prds/flow-datalevin-writer/`) — real on-disk PRDs |
+| former manual PRD index | **left as-is** | All remaining mentions were PRD file paths (`prds/datalevin-migration/`, `prds/flow-datalevin-writer/`) — real on-disk PRDs |
 | docs/seon/vision/prior-art-credits-2026-05-23.md | **left as-is** | The single mention already correctly notes "post-2026-04 migration from Datalevin" |
 | docs/seon/vision/m4-discoverable-codebase.md | done | "Datalevin refs" → "Datahike refs"; "Datalevin-backed specificity resolver" → "graph-backed specificity resolver" |
 | docs/seon/vision/capabilities/validated-writes.md | done | Body updated; PRD path ref retained |
@@ -74,7 +74,7 @@ Sweep of current-state docs to remove stale Datalevin references. The migration 
 Several places where the docs are wrong in ways beyond the Datalevin issue:
 
 - **`docs/seon/namespaces.md` is significantly out of date.** It listed the entire `seon.db.datalevin.*` namespace family that no longer exists. It also listed `seon.ai.datalevin` (also removed). The actual `seon.db.datahike.*` namespaces (`conn-process`, `system`, `flow`, `schema`, `tx-bus`) had no rows. Frontmatter `updated: 2026-03-11` predates the migration. Likely many other namespace inventories elsewhere are stale too.
-- **Issue and PRD links are unverified.** Many `[[orchestrator/issues/...]]` and `[[prds/...]]` links resolve to historical filenames (`raw-datalevin-conn`, `flow-datalevin-writer`). Whether those files still exist on disk wasn't verified in this sweep; the names were retained as stable links per user instruction.
+- **Issue and PRD links are unverified.** Many `[[issues/...]]` and `[[prds/...]]` links resolve to historical filenames (`raw-datalevin-conn`, `flow-datalevin-writer`). Whether those files still exist on disk wasn't verified in this sweep; the names were retained as stable links per user instruction.
 - **`/datalevin` skill name is misleading.** Three docs reference a skill literally named `datalevin` that covers the Datahike-backed `seon.db` API. Adding "skill name retained" notes is a workaround; the underlying inconsistency suggests renaming the skill itself in a separate pass.
 - **`namespaces.md`'s line for `seon.ai.gemini`** is fine, but `src/seon/ai/deepseek.cljs` exists in the source tree and isn't listed.
 

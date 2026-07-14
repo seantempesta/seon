@@ -68,15 +68,15 @@ The keyword `:buy` came back as a keyword, not a string. The double `0.85` came 
 
 ## What Remains Honest
 
-- [[orchestrator/issues/any-in-wire-protocol]] -- `::msg/args`, `::msg/payload`, `::msg/value` in `flow/msg.clj` use `:any` because they carry arbitrary function arguments. This is the hardest `:any` to remove -- it requires a design decision about how to type the wire protocol.
-- [[orchestrator/issues/any-in-render-html]] -- render response schemas use `:any` for the rendered value. Needs a union of known renderable types or a principled escape hatch.
-- [[orchestrator/issues/dup-db-name-schema]] -- `::db-name` registered 14 times. Single canonical registration needed.
-- [[orchestrator/issues/dup-namespace-schema]] -- `::namespace` registered 20+ times. Same problem.
-- [[orchestrator/issues/dup-connection-error]] -- `connection-error?` duplicated in db.clj and conn.clj.
-- [[orchestrator/issues/dup-get-conn-runtime]] -- `get-conn` for `:seon.runtime` in 3 places.
-- [[orchestrator/issues/coupling-render-db]] -- render.clj reaches into `db.datahike.*` connection internals directly, bypassing `seon.db`.
-- [[orchestrator/issues/map-in-map-out-compliance]] -- many public functions still use positional arguments.
-- [[orchestrator/issues/state-three-mechanisms]] -- three state registries hold partial truths.
+- [[issues/archive/any-in-wire-protocol]] -- `::msg/args`, `::msg/payload`, `::msg/value` in `flow/msg.clj` use `:any` because they carry arbitrary function arguments. This is the hardest `:any` to remove -- it requires a design decision about how to type the wire protocol.
+- [[issues/archive/any-in-render-html]] -- render response schemas use `:any` for the rendered value. Needs a union of known renderable types or a principled escape hatch.
+- [[issues/archive/dup-db-name-schema]] -- `::db-name` registered 14 times. Single canonical registration needed.
+- [[issues/archive/dup-namespace-schema]] -- `::namespace` registered 20+ times. Same problem.
+- [[issues/archive/dup-connection-error]] -- `connection-error?` duplicated in db.clj and conn.clj.
+- [[issues/archive/dup-get-conn-runtime]] -- `get-conn` for `:seon.runtime` in 3 places.
+- [[issues/archive/coupling-render-db]] -- render.clj reaches into `db.datahike.*` connection internals directly, bypassing `seon.db`.
+- [[issues/archive/map-in-map-out-compliance]] -- many public functions still use positional arguments.
+- [[issues/archive/state-three-mechanisms]] -- three state registries hold partial truths.
 
 The validation gate works. Nippy works. Generative roundtrip tests exist. The gaps are the `:any` holdouts in the wire protocol and render system, and the schema duplication that makes the "single source of truth" claim only partially true.
 

@@ -34,7 +34,7 @@ table wins — update the doc.
 | --- | --- |
 | scout | subagent (or agent) |
 | general | the top-level agent |
-| orchestrator (the runtime, user-facing one) | agent. **Note:** "orchestrator" still means the *dev-time* Claude instance elsewhere in the repo (`ORCHESTRATOR.md`, `docs/seon/orchestrator/`) — that usage is unchanged. |
+| orchestrator (the runtime, user-facing one) | agent. **Note:** "orchestrator" still means the top-level development-agent role in `ORCHESTRATOR.md`; it is not a documentation namespace. |
 | worker | agent (or "subagent" if you mean a launched one) |
 | read-set | patterns |
 | session (isolation boundary) | **fully retired.** The isolation boundary is "the database" (MVP) / "a cluster's database" (multi-cluster). Pre-loads user/auth semantics we haven't designed, and collides with nREPL sessions. |

@@ -9,8 +9,8 @@ tags: [research, issue, orchestrator, prd]
 ## TL;DR
 
 Move the issue authority to `docs/seon/issues/`. Do not rename the surrounding
-`docs/seon/orchestrator/` directory to `issues`; the nested issue tree is the
-thing worth keeping, while the five sibling orchestrator documents are either
+former orchestrator-doc directory to `issues`; the nested issue tree is the
+thing worth keeping, while the five sibling documents are either
 duplicate current-state indexes or dated research in the wrong layer.
 
 The migration must be a Git move, not a rewrite:
@@ -45,9 +45,9 @@ This audit read:
 
 - root `AGENTS.md` as supplied for the current instruction consolidation;
 - `ORCHESTRATOR.md` in full;
-- all five `docs/seon/orchestrator/*.md` files;
+- all five former orchestrator-doc files;
 - every top-level and archived file under
-  `docs/seon/orchestrator/issues/`;
+  `docs/seon/issues/`;
 - `docs/seon/_dashboard.md`;
 - the active runtime-reliability `AGENTS.md` and complete `roadmap.md`;
 - `bin/issues-index`, the Markdown validator, agent/verifier definitions, and
@@ -62,7 +62,7 @@ Observed inventory:
 | top-level issue notes | 30 | The index presents only 27 as open because three use invalid lifecycle values. |
 | archived issue notes | 61 | Four lack required severity. |
 | issue Markdown files including README/index | 93 | Valuable historical evidence; preserve through Git moves. |
-| sibling `docs/seon/orchestrator/*.md` files | 5 | Two duplicate current state; three are dated audits. |
+| sibling orchestrator-doc files | 5 | Two duplicate current state; three are dated audits. |
 | files outside the issue tree referring to the old path | 28 | Includes code, active instructions, verifier definitions, vision, PRDs, and historical evidence. |
 
 Concrete drift:
@@ -87,9 +87,9 @@ Concrete drift:
   row. It directly violates “one note per problem” and is a parallel tracker.
 - Ten top-level notes point only at source files deleted by the active JVM
   archive cut. Five more point at deleted hook/supervisor/test mechanisms.
-- `docs/seon/orchestrator/active.md` still advertises retired process verbs such
+- `docs/prds/runtime-reliability/roadmap.md` still advertises retired process verbs such
   as `start all` and `restart pod`; the current operator contract is in the
-  active PRD and root instructions. `docs/seon/orchestrator/prds.md` still calls
+  active PRD and root instructions. The former manual PRD index still calls
   the already-integrated autosuggest work a separate lane.
 - The hook emitted `changed tests build-unavailable` three times during this
   audit because the managed Shadow manifest did not match current source within
@@ -181,7 +181,7 @@ tracker.
 Use Git-aware moves:
 
 ```text
-docs/seon/orchestrator/issues/** -> docs/seon/issues/**
+docs/seon/issues/** -> docs/seon/issues/**
 ```
 
 No issue evidence is deleted during the path move. Closed and stale notes are
@@ -191,13 +191,13 @@ normalized and moved under the new `archive/` in the same migration.
 
 | Current file | Disposition | Reason |
 |---|---|---|
-| `docs/seon/orchestrator/active.md` | Delete after merging any unique entry link into `_dashboard.md`/active PRD. | Stale current-state projection with retired commands; the roadmap is the work ledger. |
-| `docs/seon/orchestrator/prds.md` | Delete after confirming `_dashboard.md` links the active PRD. | A manually maintained PRD registry is a third documentation system and is already stale. |
-| `docs/seon/orchestrator/config-coherence-audit-2026-06-28.md` | Git-move to `docs/prds/runtime-reliability/research/`. | Dated evidence, not present-tense global state. Normalize frontmatter to completed research. |
-| `docs/seon/orchestrator/issues-audit-2026-06-28.md` | Git-move to `docs/prds/runtime-reliability/research/`. | Historical triage evidence superseded by this audit, still valuable. |
-| `docs/seon/orchestrator/repo-rough-edges-2026-06-28.md` | Git-move to `docs/prds/runtime-reliability/research/`. | Dated onboarding evidence; current roadmap owns outstanding work. |
+| `docs/prds/runtime-reliability/roadmap.md` | Delete after merging any unique entry link into `_dashboard.md`/active PRD. | Stale current-state projection with retired commands; the roadmap is the work ledger. |
+| former `prds.md` | Delete after confirming `_dashboard.md` links the active PRD. | A manually maintained PRD registry is a third documentation system and is already stale. |
+| former `config-coherence-audit-2026-06-28.md` | Git-move to `docs/prds/runtime-reliability/research/`. | Dated evidence, not present-tense global state. Normalize frontmatter to completed research. |
+| `docs/seon/issues-audit-2026-06-28.md` | Git-move to `docs/prds/runtime-reliability/research/`. | Historical triage evidence superseded by this audit, still valuable. |
+| former `repo-rough-edges-audit-2026-06-28.md` | Git-move to `docs/prds/runtime-reliability/research/`. | Dated onboarding evidence; current roadmap owns outstanding work. |
 
-After these changes, `docs/seon/orchestrator/` should not exist. The role name
+After these changes, the former orchestrator-doc directory should not exist. The role name
 remains valid in `ORCHESTRATOR.md`; it is not a documentation namespace.
 
 ## Exact top-level issue triage
@@ -318,19 +318,19 @@ looks authoritative:
 - `bin/issues-index`: new directory plus validation/check mode;
 - `.codex/agents/seon-verifier.toml` and `.claude/agents/seon-verifier.md`: new
   path and legal checks;
-- `docs/seon/vision/**`: `[[orchestrator/issues/x]]` becomes
+- `docs/seon/vision/**`: `[[issues/x]]` becomes
   `[[issues/x]]` for open notes or `[[issues/archive/x]]` for closed notes;
 - active and historical PRD references: absolute old issue paths become the
   new open/archive paths;
-- `docs/seon/vision/index.md`: replace `[[orchestrator/active]]` with the
+- `docs/seon/vision/index.md`: replace `[[../prds/runtime-reliability/roadmap]]` with the
   active runtime-reliability roadmap;
 - historical archived issue self-links to `issues-audit-2026-06-28.md`: point
   at its new PRD research location; and
 - `bin/issues-index` header/comments: say `docs/seon/issues`, never
   `orchestrator`.
 
-Aim for zero occurrences of `docs/seon/orchestrator`,
-`docs/seon/orchestrator/issues`, and `[[orchestrator/issues` after the move.
+Aim for zero active references to the former path or old issue-wikilink prefix
+after the move.
 Historical prose may say “orchestrator” as a role; only the obsolete path is
 forbidden.
 
@@ -434,7 +434,7 @@ derived developer projection.
 6. Strengthen `bin/issues-index`, regenerate `index.md`, and update focused
    script tests through the existing operator runner.
 7. Move the three dated audits, remove `active.md`/`prds.md`, and delete the now
-   empty `docs/seon/orchestrator/` directory.
+   empty former orchestrator-doc directory.
 8. Update all code/docs/verifier references, choosing open versus archive link
    targets from actual disposition.
 9. Run mechanical checks, Markdown validation, and one read-only startup-triage
@@ -446,8 +446,6 @@ The implementation is complete only when all of these hold:
 
 ```bash
 test -d docs/seon/issues
-test ! -e docs/seon/orchestrator
-
 find docs/seon/issues -maxdepth 1 -type f -name '*.md'
 find docs/seon/issues/archive -type f -name '*.md'
 
@@ -455,7 +453,6 @@ bin/issues-index --check
 bin/issues-index
 git diff --exit-code -- docs/seon/issues/index.md
 
-rg -n 'docs/seon/orchestrator|\[\[orchestrator/issues' .
 rg -n 'status: (active|completed|verified|in-progress|closed|archived)' docs/seon/issues
 rg -L '^severity: (blocker|friction|cleanup)$' docs/seon/issues/*.md docs/seon/issues/archive/*.md
 

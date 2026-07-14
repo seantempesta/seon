@@ -15,7 +15,7 @@ JVM observatory code is in transitional state:
 
 - `docs/seon/vision/capabilities/agent-observatory.md` marks the capability `status: complete` (auto-derived from prior milestone work).
 - `src/seon/web/routes.clj` and `src/seon/web/server.clj` both contain "Agent observatory module pending restoration against the new schema" comments — the JVM-side wiring is currently dormant on this branch.
-- `docs/seon/orchestrator/issues/observatory-sse-streaming.md` flags a known gap: the JVM observatory polls at 1s intervals instead of true SSE-append streaming.
+- `docs/seon/issues/archive/observatory-sse-streaming.md` flags a known gap: the JVM observatory polls at 1s intervals instead of true SSE-append streaming.
 - `docs/archive/agent-observatory/streaming-research.md` (per the issue ref) holds a streaming-design write-up.
 - `data/namespaces/seon.observatory/` is a datahike store directory only; no source code there.
 

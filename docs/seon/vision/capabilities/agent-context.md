@@ -24,4 +24,4 @@ When an agent starts, it receives context about its namespace: functions, schema
 
 - Components: [[components/code-graph]], [[components/renderer]], [[components/agent-system]]
 - PRDs: `prds/spec-driven-rendering/prd`, `prds/graph-cleanup/prd`
-- Issues: [[orchestrator/issues/overlap-three-ai-context]]
+- Issues: [[issues/archive/overlap-three-ai-context]]

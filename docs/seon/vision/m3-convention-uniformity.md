@@ -67,33 +67,33 @@ The issue list for M3 is long because convention uniformity touches every file.
 
 **Schema gaps:**
 
-- [[orchestrator/issues/missing-malli-schema]] -- many public functions lack `:malli/schema`. This is the single biggest blocker.
-- [[orchestrator/issues/map-in-map-out-compliance]] -- many public functions use positional arguments.
-- [[orchestrator/issues/graph-missing-schema-index]] -- the graph does not index function schemas. Discovery cannot work without this.
-- [[orchestrator/issues/any-in-render-html]] -- render response schemas use `:any`.
-- [[orchestrator/issues/any-in-wire-protocol]] -- wire protocol uses `:any`.
+- [[issues/archive/missing-malli-schema]] -- many public functions lack `:malli/schema`. This is the single biggest blocker.
+- [[issues/archive/map-in-map-out-compliance]] -- many public functions use positional arguments.
+- [[issues/archive/graph-missing-schema-index]] -- the graph does not index function schemas. Discovery cannot work without this.
+- [[issues/archive/any-in-render-html]] -- render response schemas use `:any`.
+- [[issues/archive/any-in-wire-protocol]] -- wire protocol uses `:any`.
 
 **Duplication:**
 
-- [[orchestrator/issues/dup-db-name-schema]] -- 14 copies.
-- [[orchestrator/issues/dup-namespace-schema]] -- 20+ copies.
-- [[orchestrator/issues/dup-kondo-analysis]] -- clj-kondo wrapped in 3 namespaces.
-- [[orchestrator/issues/dup-connection-error]] -- duplicated predicate.
-- [[orchestrator/issues/dup-get-conn-runtime]] -- triplicated connection helper.
-- [[orchestrator/issues/dup-parse-form-body]] -- duplicated parser.
+- [[issues/archive/dup-db-name-schema]] -- 14 copies.
+- [[issues/archive/dup-namespace-schema]] -- 20+ copies.
+- [[issues/archive/dup-kondo-analysis]] -- clj-kondo wrapped in 3 namespaces.
+- [[issues/archive/dup-connection-error]] -- duplicated predicate.
+- [[issues/archive/dup-get-conn-runtime]] -- triplicated connection helper.
+- [[issues/archive/dup-parse-form-body]] -- duplicated parser.
 
 **Dead code:**
 
-- [[orchestrator/issues/dead-web-namespace-viewer]] -- replaced by `ns/routes`, still in src/.
+- [[issues/archive/dead-web-namespace-viewer]] -- replaced by `ns/routes`, still in src/.
 
 **Coupling and overlap:**
 
-- [[orchestrator/issues/overlap-three-ai-context]] -- three AI context builders.
-- [[orchestrator/issues/overlap-three-rendering]] -- two rendering dispatch mechanisms.
-- [[orchestrator/issues/overlap-three-sse-push]] -- three SSE push paths.
-- [[orchestrator/issues/overlap-three-status-badges]] -- three badge implementations.
-- [[orchestrator/issues/coupling-graph-render]] -- ingest depends on render.
-- [[orchestrator/issues/coupling-circular-deps]] -- three circular dependency pairs.
+- [[issues/archive/overlap-three-ai-context]] -- three AI context builders.
+- [[issues/archive/overlap-three-rendering]] -- two rendering dispatch mechanisms.
+- [[issues/archive/overlap-three-sse-push]] -- three SSE push paths.
+- [[issues/archive/overlap-three-status-badges]] -- three badge implementations.
+- [[issues/archive/coupling-graph-render]] -- ingest depends on render.
+- [[issues/archive/coupling-circular-deps]] -- three circular dependency pairs.
 
 This is a large surface area. The strategy is incremental: each agent session takes one namespace, adds schemas, removes dead code, deduplicates. The dev hook enforces conventions on every edit, so regressions are caught immediately. The work is mechanical but must be thorough.
 

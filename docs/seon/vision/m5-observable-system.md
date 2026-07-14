@@ -82,4 +82,4 @@ Throughout all of this, SSE pushes updates through a single flow-based mechanism
 
 **Enables M6 (Eval Pipeline)** -- the observable system is the foundation for the agent cockpit. Agents need to see their namespace state rendered in real time. The composable AI renderers in M6 are the same discovery mechanism applied to agent context instead of browser views.
 
-Blocking issues: [[orchestrator/issues/overlap-three-sse-push]], [[orchestrator/issues/overlap-three-rendering]], [[orchestrator/issues/overlap-three-status-badges]].
+Blocking issues: [[issues/archive/overlap-three-sse-push]], [[issues/archive/overlap-three-rendering]], [[issues/archive/overlap-three-status-badges]].

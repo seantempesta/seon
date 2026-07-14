@@ -308,7 +308,7 @@ shared loop mechanics — true for EVERY form regardless of verb):
   should NOT block the bench handoff: the drift is cosmetic-to-agents today
   (they cope with either glyph), and the concentration is a maintainability win,
   not a capability fix. Register it as one row in
-  `docs/seon/orchestrator/issues/dual-code-paths-registry.md`.
+  `docs/seon/issues/archive/dual-code-paths-registry.md`.
 
 ## Complexity artifacts found
 

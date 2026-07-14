@@ -80,7 +80,7 @@ The topology builder discovers the var via `{:seon.flow/step true}` metadata in 
 - The default step function (`namespace-step` in `harness.clj`) handles request forwarding, queue cap, overload replies, and observability. It is the foundation for expansion.
 - The 4-arity step function pattern is documented and production-tested across five step functions. See [[concepts/step-functions]].
 
-Key gaps: [[orchestrator/issues/no-custom-namespace-behavior]], [[orchestrator/issues/no-unified-namespace-model]], [[orchestrator/issues/no-live-subscriptions]], [[orchestrator/issues/no-broadcast-signals]], [[orchestrator/issues/atom-watches-bypass-flow]].
+Key gaps: [[issues/archive/no-custom-namespace-behavior]], [[issues/archive/no-unified-namespace-model]], [[issues/archive/no-live-subscriptions]], [[issues/archive/no-broadcast-signals]], [[issues/archive/atom-watches-bypass-flow]].
 
 ## How to Verify
 

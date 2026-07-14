@@ -105,7 +105,7 @@ say replayed functions were already wrapped inline are stale.
 `src/seon/client.cljs:286-317`. It does not reconcile the changed source/spec
 facts first. A changed core function is a fresh live JavaScript function, but
 the pass reads its old `:seon.fn/spec` from Datahike. This is the open C61 defect
-already recorded in `docs/seon/orchestrator/issues/dual-code-paths-registry.md`.
+already recorded in `docs/seon/issues/archive/dual-code-paths-registry.md`.
 
 The current pod log made the waste concrete. Between 14:37 and 14:46 on the
 audit date it recorded one boot pass and thirteen reload passes. Every line

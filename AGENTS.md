@@ -132,6 +132,15 @@ are bugs until proven otherwise. Fix an understood in-scope smell. Otherwise
 report the file/line, observed mismatch, expected owner, and uncertainty; never
 silently work around it.
 
+When you discover a bug, code smell, duplicate implementation, stale or broken
+test, unsafe edge, or documentation mismatch, report it to the agent that
+launched you and search `docs/seon/issues/` for the root cause. Create or update
+one issue note before returning. If you fix it in the same unit, close and
+archive the note with the commit plus behavioral or live proof; otherwise leave
+it open with current evidence, owner, and acceptance criteria. Never add a row
+to a private registry or leave the finding only in chat. This records the
+problem; it does not authorize unrelated production edits.
+
 ## Vocabulary
 
 Use discoverable code names, not umbrella nouns or synonyms:

@@ -164,7 +164,7 @@ convenience is the thing being protected.
   `halt superseded` → the host poll goes blind and burns the full 300s;
   `turns=0` reported despite 3 turns in the log. Per-pod /solve ceiling
   pinned at 1; parallel scoring requires N disposable pods.
-- `docs/seon/orchestrator/issues/eval-scratch-conn-no-commit.md`: a
+- `docs/seon/issues/eval-scratch-conn-no-commit.md`: a
   transact on a scratch conn via the eval path returns `{:seon.db/ok? true}`
   but never commits — the `*conn*` binding is lost across the `cljs.js`
   await boundary. Silent data loss.
@@ -255,7 +255,7 @@ the UNBOUNDED compiled path, with a once-per-symbol warning
   correctness guarantee for a safety guarantee, silently.
 
 **Cost already paid.**
-`docs/seon/orchestrator/issues/sci-bounding-fallback-plan-block.md`: every
+`docs/seon/issues/archive/sci-bounding-fallback-plan-block.md`: every
 fresh boot logs `my.plan.internal/plan-block could not run under SCI
 bounding (Unable to resolve symbol: db/*conn*)` and renders it unbounded —
 a hang there would freeze the whole pod. Also surfaced in the calibration
@@ -335,7 +335,7 @@ with a manual refresh instead of a reactive derivation. The one-shot
 in the pod's local replica by the time `start!` runs.
 
 **Cost already paid.** LIVE regression
-(`docs/seon/orchestrator/issues/acme-harness-agents-route-drift.md`
+(`docs/seon/issues/acme-harness-agents-route-drift.md`
 Part 2, observed 2026-07-02 ~18:45Z): the acme pod serves ONLY the static
 supplement — `GET /` is an INFINITE 302 loop, `/agent/root` 302s, every
 db-seeded core route falls to `not-found` — while the route rows verifiably

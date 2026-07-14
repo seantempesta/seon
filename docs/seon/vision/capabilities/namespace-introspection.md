@@ -24,4 +24,4 @@ Every loaded `seon.*` namespace has a web page showing its functions, vars, atom
 
 - Components: [[components/web-layer]], [[components/namespace-lifecycle]]
 - PRDs: [[prds/namespace-ui/prd]]
-- Issues: [[orchestrator/issues/dead-web-namespace-viewer]], [[orchestrator/issues/overlap-three-rendering]]
+- Issues: [[issues/archive/dead-web-namespace-viewer]], [[issues/archive/overlap-three-rendering]]
