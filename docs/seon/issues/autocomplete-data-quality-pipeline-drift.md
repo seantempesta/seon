@@ -60,6 +60,21 @@ issue's data gate is satisfied.
   consumes the retired pin and obsolete text-card grammar. Its behavior is a
   specification to reproduce through Inspect, not a second scorer to import.
 
+The source/evidence audit inspected the current `export!` row precisely. Its
+metadata contains turn id, agent id, bare basis `t`, a database-name string
+derived from the cluster directory, projection Git SHA, coverage, and optional
+rating. It does not carry the architecture's complete
+`{database-id, branch, commit-id, t}` coordinate, artifact/config/profile and
+renderer identities, tree-dirty/content identity, target projection mode,
+referenced-schema closure, frozen row/split identity, current-world replay
+verdict, or an addressable rejection record. Dated default output filenames
+also make the filesystem path wall-clock-derived rather than content-addressed.
+
+The historical typeahead corpus has useful prompt/reply blob hashes and
+verbatim sections, but it likewise names only cluster `acme` and reads blobs
+from a checkout-local path. It is calibration evidence, not the canonical
+export requested here.
+
 ## Owner
 
 The database-derived autocomplete exporter and the canonical
@@ -74,6 +89,10 @@ parse source, invent cards, choose split membership, or own a second scorer.
   artifact/config identity, projection version, database identity and basis,
   renderer/profile version, row identities, content digests, split assignment,
   and rejection reasons; repeated export at the same basis is byte-identical.
+- The complete coordinate includes database id, branch, commit id, and `t`;
+  content identity also binds the dirty-tree/source closure, runtime artifact,
+  config/profile/renderer, dependency locks, and export schema version. The
+  default artifact name is derived from content, not the wall clock.
 - Every target declares its projection semantics. Observed historical bundles,
   counterfactual re-projections, and substantive next-form targets are distinct
   modes; `in-ns` or other harness-owned bookkeeping is never silently added to
@@ -91,6 +110,9 @@ parse source, invent cards, choose split membership, or own a second scorer.
   the serving context path, executed through the current eval boundary, and
   retained only with database-derived outcome evidence. Rejected trajectories
   remain evidence rather than silently disappearing.
+- Every rejection is an addressable row with source coordinate, attempted
+  target, reason class, and replay evidence; aggregate skip counters are a
+  projection, never the only retained record.
 - Inspect owns layered parse/schema/eval/productivity/history results and the
   deterministic oracle/judge calibration. The prior fair-scoring acceptance
   cases pass there, and historical model results are labeled non-comparable

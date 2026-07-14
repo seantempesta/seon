@@ -32,6 +32,25 @@ install or the source a reviewer reads under `reference-code/`.
   `05322696a0f784ec399ef6abbafd3d2a250ea9cc` and describes itself as
   `0.3.246-dirty`. Its `_view/ts-mono` entry is also dirty.
 
+The source/evidence audit sharpened the mismatch beyond Inspect itself:
+
+- the installed `inspect_evals` distribution reports
+  `0.0.1.dev1+unknown.gce900d638`, while the clean inspected checkout is
+  `97c99f5f6507fc5d1449fe3247f267d591f64350` / `v0.14.3`; it is not a
+  declared `src-inspect-ai` dependency despite current catalog/tests importing
+  it;
+- the installed Python `openai` provider is `2.45.0`, while `pyproject.toml`
+  declares unbounded `openai`; the current lock happens to select bytes but the
+  accepted scorecard does not record that provider/lock identity; and
+- historical scorecard rows identify a Seon Git SHA and dataset-lock hash but
+  not Inspect, Inspect Evals, Python lock/provider, task source, or scorer
+  implementation/config. Copying a native `.eval` log is currently best-effort
+  and silently continues when the copy fails.
+
+These are distinct from the pod's Node provider SDKs, which are exactly matched
+by npm lock and reference source. A shared provider brand must not collapse
+Python harness provenance into Node runtime provenance.
+
 No environment was synchronized during this audit, so the observed version
 split remains intact evidence rather than an implicit framework upgrade.
 
@@ -50,4 +69,7 @@ run metadata.
 - The Inspect suite and one representative offline task pass from a newly
   synchronized environment.
 - Every scorecard/run artifact records the Inspect framework identity needed
-  to reproduce it, and a dirty framework source fails or is labeled explicitly.
+  to reproduce it, plus Inspect Evals/task/scorer, Python provider and lock,
+  native `.eval` log, and Seon runtime/artifact/config identities. A dirty or
+  mismatched source fails before task construction; it is not merely labeled
+  after a score exists.

@@ -82,6 +82,16 @@ the target it would stop. The read-only legacy frozen-bundle identity helper
 remains solely for offline contamination fixtures; no live caller can build or
 select that artifact through a removed command.
 
+The source/evidence audit found two additional migration edges behind the same
+owner. `typeahead_corpus.py` requires explicit endpoints now, but still sends
+raw `datahike.api` forms through the writer REPL and reads
+`data/clusters/<cluster>/blobs/<hash>` directly. That bypasses the typed
+database/debug/blob surfaces and assumes a checkout-local cluster layout.
+Also, selected run paths copy native Inspect `.eval` logs on a best-effort
+basis and suppress copy errors. Lease finalization must make the complete raw
+evidence bundle mandatory; a score without its log/coordinate bundle is not an
+accepted run.
+
 This is distinct from `acme-operator-migration-drift.md`. That issue owns the
 ACME process/artifact/database migration itself; this issue owns Inspect's
 live consumers after the current operator boundary exists.
@@ -113,3 +123,7 @@ supervisor.
 - The existing offline Python suite stays green, then one operator-backed live
   smoke proves CLJ read-back, CLJS/pod execution, typeahead corpus generation,
   restart continuity, dynamic endpoint discovery, and complete lease cleanup.
+- Typeahead/planning read-back consumes the lease's typed MCP/debug/blob and
+  database boundaries. No arbitrary writer form or direct cluster-directory
+  blob read remains in an accepted live path, and missing native Inspect logs
+  fail evidence finalization rather than being silently ignored.
