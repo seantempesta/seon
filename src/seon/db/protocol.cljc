@@ -12,6 +12,7 @@
    delivery through recovery."
   (:require [hasch.core :as hasch]
             [malli.core :as m]
+            [seon.db.coordinate :as coordinate]
             [seon.schema :as schema]))
 
 ;;; Protocol vocabulary
@@ -53,7 +54,6 @@
 (schema/register! ::success? :boolean)
 (schema/register! ::pong? :boolean)
 (schema/register! ::database-name [:string {:min 1}])
-(schema/register! ::database-id :uuid)
 (schema/register! ::database-path [:string {:min 1}])
 (schema/register! ::backend [:enum :memory :file])
 (schema/register! ::basis-t [:int {:min 0}])
@@ -173,10 +173,9 @@
  [:map
   [::success? [:= true]]
   [::database-name ::database-name]
-  [::database-id ::database-id]
+  [::coordinate/coordinate ::coordinate/coordinate]
   [::backend ::backend]
-  [::database-path {:optional true} ::database-path]
-  [::basis-t ::basis-t]])
+  [::database-path {:optional true} ::database-path]])
 (schema/register!
  ::transaction-response
  [:map

@@ -2,6 +2,7 @@
   "End-to-end canonical writer request and publication tests."
   (:require [clojure.test :refer [deftest is]]
             [datahike.api :as d]
+            [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.transport.uds :as uds]
@@ -57,7 +58,7 @@
                    (protocol/ensure-database-request
                     {::protocol/database-name database-name
                      ::protocol/backend :memory}))
-            initial-basis (::protocol/basis-t ensure-response)
+            initial-coordinate (::coordinate/coordinate ensure-response)
             invalid-response
             (call! request-channel
                    {::protocol/operation protocol/transact-operation
@@ -119,8 +120,11 @@
                     [ensure-response invalid-response ensure-after-invalid
                      unknown-response schema-response entity-response
                      recovered-response]))
-        (is (uuid? (::protocol/database-id ensure-response)))
-        (is (= initial-basis (::protocol/basis-t ensure-after-invalid))
+        (is (coordinate/same-attachment?
+             (coordinate/resolved (d/db connection))
+             (::coordinate/coordinate ensure-response)))
+        (is (= initial-coordinate
+               (::coordinate/coordinate ensure-after-invalid))
             "an invalid request and an idempotent ensure write nothing")
         (is (= protocol/protocol-error
                (::protocol/error-kind invalid-response)))

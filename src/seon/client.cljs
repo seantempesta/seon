@@ -65,6 +65,7 @@
     [seon.ai :as ai]
     [seon.ai.dispatch :as ai.dispatch]
     [seon.db :as db]
+    [seon.db.coordinate :as db.coordinate]
     [seon.db.id :as id]
     [seon.db.process :as db.process]
     [seon.error :as error]
@@ -717,10 +718,11 @@
   []
   (await (replica/ping!))
   (let [opened (await (replica/ensure-database!))
+        resolved-coordinate (::db.coordinate/coordinate opened)
         conn (await
               (d/connect
                (replica/database-config
-                {::replica/database-id (::db.protocol/database-id opened)})))]
+                (db.coordinate/attachment resolved-coordinate))))]
     (id/assert-allocation-writer! conn)
     (log/info-console! "seon.client/open-database-connection!"
                        (str "database " replica/database-name

@@ -15,9 +15,10 @@
      (cljs.test/run-tests 'seon.db.replica-test)"
   (:require
    [cljs.core.async :refer [take! poll!]]
-   [cljs.test :refer [deftest is async]]
+   [cljs.test :refer [deftest is async use-fixtures]]
    [datahike.api :as d]
    [datahike.writer :as writer]
+   [seon.db.coordinate :as coordinate]
    [seon.db.protocol :as protocol]
    [seon.db.transport.uds :as uds]
    [seon.db.replica :as replica]))
@@ -77,7 +78,32 @@
 (def ^:private fake-database-id
   #uuid "9dcfa740-5f7f-4ff5-ac08-a9c8b605a8aa")
 
+(def ^:private fake-commit-id
+  #uuid "cfd65c4c-c4f5-4f2b-afef-117b9fd6779a")
+
+(let [resolve-coordinate coordinate/resolved]
+  (use-fixtures
+   :once
+   {:before
+    (fn []
+      (set! coordinate/resolved
+            (fn [db]
+              (if (map? db)
+                {::coordinate/database-id (get-in db [:config :store :id])
+                 ::coordinate/branch (get-in db [:config :branch])
+                 ::coordinate/commit-id fake-commit-id
+                 ::coordinate/t (:max-tx db)}
+                (resolve-coordinate db)))))
+    :after (fn [] (set! coordinate/resolved resolve-coordinate))}))
+
 (def ^:private expected-transaction-attempts 3)
+
+(deftest database-config-uses-the-writer-owned-attachment
+  (let [attachment {::coordinate/database-id fake-database-id
+                    ::coordinate/branch :experiment}
+        config (replica/database-config attachment)]
+    (is (= fake-database-id (get-in config [:store :id])))
+    (is (= :experiment (:branch config)))))
 
 (defn- fake-db
   ([basis-t] (fake-db basis-t :db))
@@ -606,8 +632,8 @@
                                    (is (= :branch/a
                                           (get-in
                                            (replica/status)
-                                           [::replica/database-coordinate
-                                            ::replica/branch])))
+                                           [::coordinate/coordinate
+                                            ::coordinate/branch])))
                                    (start! conn-a)))
                                 (.then
                                  (fn [_]
@@ -640,19 +666,16 @@
                                      (is (= :branch/b
                                             (get-in
                                              status
-                                             [::replica/database-coordinate
-                                              ::replica/branch])))
+                                             [::coordinate/coordinate
+                                              ::coordinate/branch])))
                                      (is (= :branch/b
                                             (get-in
-                                             status
-                                             [::replica/last-applied-coordinate
-                                              ::replica/database-coordinate
-                                              ::replica/branch])))
+                                             (adapter-state)
+                                             [::replica/database-coordinate
+                                              ::coordinate/attachment
+                                              ::coordinate/branch])))
                                      (is (= 50
-                                            (get-in
-                                             status
-                                             [::replica/last-applied-coordinate
-                                              ::replica/basis-t]))
+                                            (adapter-basis-t))
                                          "branch B starts from its own t=50, not A's cursor")
                                      (reset! a-database
                                              (fake-db 51 :branch/a))

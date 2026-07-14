@@ -15,6 +15,7 @@
    [datahike.connector :as connector]
    [datahike.datom :as dd]
    [datahike.writer :as w]
+   [seon.db.coordinate :as coordinate]
    [seon.db.protocol :as protocol]
    [seon.db.transport.uds :as uds]
    [seon.platform :as platform]
@@ -29,16 +30,13 @@
 (schema/register! ::request-socket-path ::socket-path)
 (schema/register! ::publish-socket-path ::socket-path)
 (schema/register! ::database-name [:string {:min 1}])
-(schema/register! ::database-id :uuid)
-(schema/register! ::branch :keyword)
 (schema/register! ::writer-backend :keyword)
 (schema/register! ::basis-t [:int {:min 0}])
 (schema/register!
  ::database-coordinate
  [:map
   [::database-name ::database-name]
-  [::database-id ::database-id]
-  [::branch ::branch]
+  [::coordinate/attachment ::coordinate/attachment]
   [::writer-backend ::writer-backend]])
 (schema/register!
  ::progress-coordinate
@@ -53,7 +51,7 @@
 (schema/register! ::database-config-response :map)
 (schema/register!
  ::database-config-request
- [:map [::database-id ::database-id]])
+ ::coordinate/attachment)
 (schema/register!
  ::knn-search-request
  [:map
@@ -104,11 +102,12 @@
    local konserve."
   {:malli/schema [:=> [:cat ::database-config-request]
                   ::database-config-response]}
-  [{::keys [database-id]}]
+  [{::coordinate/keys [database-id branch]}]
   {:store               {:backend :file
                          :path    default-database-path
                          :id      database-id
                          :config  {:lock-blob? false}}
+   :branch              branch
    :keep-history?       true
    :schema-flexibility  :write
    :writer              {:backend :seon.db.writer/remote
@@ -603,24 +602,15 @@
   "Derive the branch-qualified identity of one Datahike connection."
   [db]
   (let [config         (:config db)
-        database-id    (get-in config [:store :id])
-        branch         (:branch config)
+        resolved       (coordinate/resolved db)
+        attachment     (coordinate/attachment resolved)
         writer-backend (get-in config [:writer :backend])]
-    (when-not (uuid? database-id)
-      (throw (ex-info "The attached database has no UUID identity."
-                      {::database-id database-id
-                       :seon.error/kind :core-bug})))
-    (when-not (keyword? branch)
-      (throw (ex-info "The attached database has no branch identity."
-                      {::branch branch
-                       :seon.error/kind :core-bug})))
     (when-not (keyword? writer-backend)
       (throw (ex-info "The attached database has no writer backend identity."
                       {::writer-backend writer-backend
                        :seon.error/kind :core-bug})))
     {::database-name database-name
-     ::database-id database-id
-     ::branch branch
+     ::coordinate/attachment attachment
      ::writer-backend writer-backend}))
 
 (defn- progress-coordinate
@@ -690,8 +680,7 @@
      [::phase [:enum ::stopped ::connecting ::live ::reconnecting]]
      [::generation :int]
      [::correlation-count [:int {:min 0}]]
-     [::database-coordinate {:optional true} ::database-coordinate]
-     [::last-applied-coordinate {:optional true} ::progress-coordinate]
+     [::coordinate/coordinate {:optional true} ::coordinate/coordinate]
      [::own-skips {:optional true} [:int {:min 0}]]]]}
   []
   (let [state @!attachment]
@@ -700,10 +689,8 @@
              ::phase (::phase state)
              ::generation (::generation state)
              ::correlation-count (count (::correlations state))}
-      (::database-coordinate state)
-      (assoc ::database-coordinate (::database-coordinate state))
-      (::last-applied-coordinate state)
-      (assoc ::last-applied-coordinate (::last-applied-coordinate state))
+      (::conn state)
+      (assoc ::coordinate/coordinate (coordinate/resolved @(::conn state)))
       (some? (::own-skips state))
       (assoc ::own-skips (::own-skips state)))))
 

@@ -11,7 +11,7 @@
             [datahike.api :as d]
             [datahike.constants :as datahike.constants]
             [datahike.db.interface :as dbi]
-            [seon.db.backend :as backend]
+            [seon.db.coordinate :as coordinate]
             [seon.db.id :as id]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
@@ -620,19 +620,12 @@
               ::database-name database-name}))))
         connection (::registry/conn entry)
         backend-kind (::registry/backend entry)
-        database-path (::registry/path entry)
-        facts
-        (backend/backend-facts
-         (cond->
-          {::backend/database-name (keyword database-name)
-           ::backend/backend backend-kind}
-           database-path (assoc ::backend/path database-path)))]
+        database-path (::registry/path entry)]
     (protocol/success
      (cond->
-      {::protocol/database-name database-name
-       ::protocol/database-id (::backend/database-id facts)
-       ::protocol/backend backend-kind
-       ::protocol/basis-t (basis-t-of (d/db connection))}
+       {::protocol/database-name database-name
+       ::coordinate/coordinate (coordinate/resolved (d/db connection))
+       ::protocol/backend backend-kind}
        database-path
        (assoc ::protocol/database-path database-path)))))
 

@@ -1,6 +1,7 @@
 (ns seon.db.transport-uds-test
   "Protocol validation and Unix-socket transport tests."
   (:require [clojure.test :refer [deftest is]]
+            [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds])
   (:import [java.io File]
@@ -65,6 +66,16 @@
     (is (instance? Date
                    (get-in decoded [::protocol/transaction-data 0
                                     :example/at])))))
+
+(deftest transit-roundtrip-preserves-the-complete-coordinate
+  (let [point
+        {::coordinate/database-id
+         #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
+         ::coordinate/branch :db
+         ::coordinate/commit-id
+         #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
+         ::coordinate/t 536870929}]
+    (is (= point (uds/decode (uds/encode point))))))
 
 (deftest request-server-delivers-maps-without-interpreting-them
   (let [path (socket-path "transport-request")

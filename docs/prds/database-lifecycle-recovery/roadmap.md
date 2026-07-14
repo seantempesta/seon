@@ -1,6 +1,6 @@
 ---
 type: prd
-status: planned
+status: active
 tags: [prd, database, flow]
 ---
 
@@ -34,8 +34,26 @@ process-failure proof remain unimplemented.
 
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in
-[[research/database-lifecycle-source-audit-2026-07-14]]. Implementation remains
-dependent on current runtime-reliability graduation.
+[[research/database-lifecycle-source-audit-2026-07-14]]. Implementation began
+after the completed runtime-reliability graduation checkpoint.
+
+The first coordinate kernel and head handshake are implemented.
+`seon.db.coordinate` owns one closed
+`{database-id, branch, commit-id, t}` shape plus its stable attachment
+projection. The writer's ensure response returns that point from the connected
+Datahike value; the pod config consumes the writer-owned database/branch
+attachment; replica diagnostics expose the canonical local head instead of a
+replica-specific public progress map. Focused proof passes ten JVM tests/51
+assertions and 20 CLJS tests/104 assertions. After a public rebuild/restart,
+CLJ and CLJS MCP both reported database `54b5b7e7-51fb-3220-b079-81a81914d86f`,
+branch `:db`, commit `6a56c20e-eb61-5cc2-b20f-90d25090eab5`, and `t`
+`536870932`.
+
+Slice 1 remains open: transaction responses/events, replay pages/cursors,
+own-write correlation, and downstream turn/error/cache/bookmark consumers
+still carry numeric basis values. Historical coordinates must resolve through
+the maintained commit graph because executable probes proved Datahike `as-of`
+wrappers expose neither the selected commit id nor a usable head map.
 
 ## Research evidence
 
