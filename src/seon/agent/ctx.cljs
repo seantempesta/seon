@@ -65,6 +65,7 @@
     [malli.core :as m]
     [malli.registry :as mr]
     [seon.agent.home :as home]
+    [seon.agent.message :as message]
     [seon.agent.ctx.render-fns :as render-fns]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
@@ -1151,28 +1152,13 @@
   ([] (messages {}))
   ([{:seon.agent/keys [n id] db :seon.db/db :or {n 50}}]
    (let [id     (resolve-id id)
-         db     (or db @db/*conn*)
-         my-eid (:db/id (db/entity-lazy {:seon.db/db db
-                                         :seon.db/ref [:seon.agent/id id]}))
-         rows   (when my-eid
-                  (db/query
-                    {:seon.db/db db
-                     :seon.db/query
-                     '[:find (pull ?m [* {:seon.agent.message/from
-                                          [:db/id :seon.user/id :seon.agent/id]
-                                          :seon.agent.message/to
-                                          [:db/id :seon.user/id :seon.agent/id]}])
-                       :in $ ?me
-                       :where
-                       (or-join [?m ?me]
-                         [?m :seon.agent.message/from ?me]
-                         [?m :seon.agent.message/to ?me])
-                       [?m :seon.agent.message/at _]]
-                     :seon.db/args [my-eid]}))
-         msgs   (->> rows
-                     (map first)
-                     (sort-by #(.getTime ^js (:seon.agent.message/at %))))]
-     (vec (take-last n msgs)))))
+         db     (or db @db/*conn*)]
+     (if (pos? n)
+       (message/recent
+         {:seon.db/db db
+          :seon.agent/id id
+          :seon.agent.message/recent-limit (min 200 n)})
+       []))))
 
 (defn current-turn
   "The most-recent `:seon.agent.turn` the agent owns.

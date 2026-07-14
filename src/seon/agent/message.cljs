@@ -77,6 +77,58 @@
    [:seon.agent.message/hops    :seon.agent.message/hops]
    [:seon.agent.message/origin  :seon.agent.message/origin]])
 
+(schema/register! ::recent-limit [:int {:min 1 :max 200}])
+(schema/register! ::recent-request
+  [:map
+   [:seon.db/db :seon.db/db-val]
+   [:seon.agent/id :string]
+   [::recent-limit ::recent-limit]])
+(schema/register! ::recent-response [:vector :map])
+
+(def ^:private recent-pull-pattern
+  '[* {:seon.agent.message/from [:db/id :seon.user/id :seon.agent/id]
+       :seon.agent.message/to   [:db/id :seon.user/id :seon.agent/id]}])
+
+(defn- exact-ref-eids
+  "Newest entity ids carrying ref `value` under indexed ref attr `attr`."
+  [dbv attr value limit]
+  (->> (db/rseek-datoms
+         {:seon.db/db dbv
+          :seon.db/index :avet
+          :seon.db/components [attr value]
+          :seon.db/index-limit limit
+          :seon.db/index-prefix? true})
+       (map :seon.db/e)))
+
+(defn recent
+  "Return one agent's newest messages, oldest first, from bounded ref indexes.
+
+   Conversation membership remains derived (`from = agent OR to contains
+   agent`). The two ref attributes are indexed by Datahike, so this reads at
+   most `2 × :seon.agent.message/recent-limit` datoms plus that many entity
+   pulls; it never scans or sorts the complete message log."
+  {:malli/schema [:=> [:cat ::recent-request] ::recent-response]}
+  [{dbv :seon.db/db agent-id :seon.agent/id limit ::recent-limit}]
+  (if-some [agent-eid
+            (some-> (db/index-datoms
+                      {:seon.db/db dbv
+                       :seon.db/index :avet
+                       :seon.db/components [:seon.agent/id agent-id]
+                       :seon.db/index-limit 1})
+                    first
+                    :seon.db/e)]
+    (->> (concat (exact-ref-eids dbv :seon.agent.message/from agent-eid limit)
+                 (exact-ref-eids dbv :seon.agent.message/to agent-eid limit))
+         distinct
+         (sort >)
+         (take limit)
+         (keep #(db/pull {:seon.db/db dbv
+                          :seon.db/pull-pattern recent-pull-pattern
+                          :seon.db/ref %}))
+         (sort-by #(.getTime ^js (:seon.agent.message/at %)))
+         vec)
+    []))
+
 ;; ============================================================
 ;; message! — the SINGLE write entry point for messages (the functions
 ;; `user`/`agent` below are thin wrappers over it). Presence of

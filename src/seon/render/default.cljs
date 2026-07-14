@@ -22,6 +22,7 @@
    seon.agent → seon.render → seon.render.default is the one-way
    arrow; we do not close it."
   (:require
+    [seon.agent.message :as message]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.log :as log]
@@ -104,85 +105,47 @@
                   [:=> [:cat :any :string :int] :any]]}
   ([db id] (recent-messages db id 20))
   ([db id n]
-   (let [;; All reads via QUERY, not d/entity — the web UI hands
-         ;; `view` a FilteredDB, and datahike-cljs FilteredDB doesn't
-         ;; implement -lookup (entity-by-lookup-ref throws); queries
-         ;; work fine.
-         q      (fn [query & args]
-                  (if db
-                    (db/query {:seon.db/db db
-                               :seon.db/query query
-                               :seon.db/args (vec args)})
-                    (db/query {:seon.db/query query
-                               :seon.db/args (vec args)})))
-         my-eid (ffirst (q '[:find ?e :in $ ?id
-                             :where [?e :seon.agent/id ?id]]
-                           id))
-         ;; The from-ref's KIND resolves in Clojure against these two
-         ;; eid→id maps, NOT via datalog `get-else` — on datahike-cljs
-         ;; get-else's default branch never fires (rows whose ?f lacks
-         ;; the attr are DROPPED, not defaulted), which would silently
-         ;; filter every agent-from message out of the conversation.
-         users  (into {} (q '[:find ?f ?uid :where [?f :seon.user/id ?uid]]))
-         agents (into {} (q '[:find ?f ?aid :where [?f :seon.agent/id ?aid]]))
-         rows   (when my-eid
-                  (q '[:find ?m ?at ?f ?content
-                       :in $ ?me
-                       :where
-                       (or-join [?m ?me]
-                         [?m :seon.agent.message/from ?me]
-                         [?m :seon.agent.message/to ?me])
-                       [?m :seon.agent.message/at ?at]
-                       [?m :seon.agent.message/from ?f]
-                       [?m :seon.agent.message/content ?content]]
-                     my-eid))
-         ;; to-refs per message eid — `to` is cardinality-many, so this
-         ;; query yields one row per (message, to-ref); fold into sets.
-         ;; Direction needs it: from=me alone can't tell a real reply
-         ;; (to ∋ user) from an agent → self row (to = [me]) from an
-         ;; outgoing peer send (to ∋ other agent).
-         tos    (when (seq rows)
-                  (reduce (fn [acc [m t]] (update acc m (fnil conj #{}) t))
-                          {}
-                          (q '[:find ?m ?t
-                               :in $ ?me
-                               :where
-                               (or-join [?m ?me]
-                                 [?m :seon.agent.message/from ?me]
-                                 [?m :seon.agent.message/to ?me])
-                               [?m :seon.agent.message/to ?t]]
-                             my-eid)))]
-     (->> rows
-          (keep (fn [[m at f content]]
-                  (let [to    (get tos m #{})
+   (let [db (or db @db/*conn*)]
+     (if (pos? n)
+       (->> (message/recent
+              {:seon.db/db db
+               :seon.agent/id id
+               :seon.agent.message/recent-limit (min 200 n)})
+            (keep (fn [{at :seon.agent.message/at
+                      f :seon.agent.message/from
+                      to :seon.agent.message/to
+                      content :seon.agent.message/content}]
+                  (let [from-user? (some? (:seon.user/id f))
+                        from-agent-id (:seon.agent/id f)
                         label (cond
-                                (contains? users f)
+                                from-user?
                                 "user"
 
-                                (= (get agents f) id)
+                                (= from-agent-id id)
                                 (cond
                                   ;; a real reply — to ∋ the user
-                                  (some #(contains? users %) to)
+                                  (some :seon.user/id to)
                                   "assistant"
                                   ;; outgoing peer send — to ∋ another agent
-                                  (some #(and (contains? agents %) (not= % f)) to)
+                                  (some #(and (:seon.agent/id %)
+                                              (not= id (:seon.agent/id %))) to)
                                   (str "→ agent-"
                                        (some (fn [t]
-                                               (when (and (contains? agents t)
-                                                          (not= t f))
-                                                 (get agents t)))
+                                               (when (and (:seon.agent/id t)
+                                                          (not= id (:seon.agent/id t)))
+                                                 (:seon.agent/id t)))
                                              to))
                                   ;; agent → self: transcript narration, not
                                   ;; conversation — exclude (nil → keep drops).
                                   :else nil)
 
-                                (contains? agents f)
-                                (str "agent-" (get agents f))
+                                from-agent-id
+                                (str "agent-" from-agent-id)
 
                                 :else "unknown")]
                     (when label [at label content]))))
-          (sort-by first)
-          (take-last n)))))
+            (take-last n))
+       []))))
 
 (defn ^:no-doc recent-errors
   "Return the most-recent `n` `:error` log entries for agent `id`.

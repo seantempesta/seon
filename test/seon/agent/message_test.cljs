@@ -19,6 +19,7 @@
     [datahike.api :as d]
     [malli.core :as m]
     [seon.agent :as agent]
+    [seon.agent.message :as message]
     [my.plan :as plan]
     [seon.client :as client]
     [seon.db :as db]
@@ -93,6 +94,48 @@
        (map first)
        (sort-by #(.getTime ^js (:seon.agent.message/at %)))
        vec))
+
+(deftest recent-messages-read-only-the-bounded-agent-ref-windows
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (let [user-send (fn [to content]
+                              (agent/message!
+                                {:seon.agent.message/from agent/user-ref
+                                 :seon.agent.message/to [:seon.agent/id to]
+                                 :seon.agent.message/content content}))]
+              (-> (user-send a-id "a-1")
+                  (.then (fn [_] (user-send a-id "a-2")))
+                  (.then (fn [_] (user-send b-id "b-only")))
+                  (.then (fn [_]
+                           (db/with-agent
+                             a-id
+                             #(agent/message!
+                                {:seon.agent.message/to agent/user-ref
+                                 :seon.agent.message/content "a-3"}))))
+                  (.then (fn [_] (user-send a-id "a-4")))
+                  (.then
+                    (fn [_]
+                      (let [request {:seon.db/db @conn
+                                     :seon.agent/id a-id
+                                     :seon.agent.message/recent-limit 3}
+                            capture (db/capture-reads
+                                      {:seon.db/db @conn
+                                       :seon.db/thunk #(message/recent request)})]
+                        (is (= ["a-2" "a-3" "a-4"]
+                               (mapv :seon.agent.message/content
+                                     (:seon.db/result capture))))
+                        (-> (user-send b-id "still-b-only")
+                            (.then
+                              (fn [_]
+                                (is (not-any?
+                                      #(db/read-observation-changed?
+                                         {:seon.db/db @conn
+                                          :seon.db/read-observation %})
+                                      (:seon.db/read-observations capture))
+                                    "another agent's message leaves A's bounded read unchanged")))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
 ;; message! — fully-formed storage + boundary defaults.

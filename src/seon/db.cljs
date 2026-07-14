@@ -405,6 +405,7 @@
 (schema/register! ::components [:vector :any])
 (schema/register! ::index-limit [:int {:min 1 :max 1000}])
 (schema/register! ::seek? :boolean)
+(schema/register! ::index-prefix? :boolean)
 (schema/register! ::index-read-request
   [:map {:closed true}
    [::index ::index]
@@ -415,7 +416,8 @@
   [:map {:closed true}
    [::index ::index]
    [::components ::components]
-   [::index-limit ::index-limit]])
+   [::index-limit ::index-limit]
+   [::index-prefix? ::index-prefix?]])
 (schema/register! ::index-datoms-request
   [:map
    [::db ::db-val]
@@ -428,7 +430,8 @@
    [::db ::db-val]
    [::index ::index]
    [::components {:optional true} ::components]
-   [::index-limit ::index-limit]])
+   [::index-limit ::index-limit]
+   [::index-prefix? {:optional true} ::index-prefix?]])
 (schema/register! ::empty-read-request [:map {:closed true}])
 (schema/register! ::read-result :any)
 (schema/register! ::read-replayable? :boolean)
@@ -928,31 +931,46 @@
         result true))
     result))
 
+(defn- datom-index-components
+  "Comparable component vector for one normalized Datahike index row."
+  [index datom]
+  (case index
+    :eavt [(::e datom) (::a datom) (::v datom) (::tx datom)]
+    :aevt [(::a datom) (::e datom) (::v datom) (::tx datom)]
+    :avet [(::a datom) (::v datom) (::e datom) (::tx datom)]))
+
 (defn- raw-rseek-datoms
   "Read and normalize one bounded descending Datahike index window."
-  [db index components limit]
-  (->> (apply d/rseek-datoms db index components)
-       (take limit)
-       (mapv internal/datom->map)))
+  [db index components limit prefix?]
+  (let [rows (map internal/datom->map
+                  (apply d/rseek-datoms db index components))
+        rows (if (and prefix? (seq components))
+               (take-while #(= components
+                               (subvec (datom-index-components index %)
+                                       0 (count components)))
+                           rows)
+               rows)]
+    (vec (take limit rows))))
 
 (defn rseek-datoms
   "Read at most `:seon.db/index-limit` datoms descending from an index key.
 
    This is the bounded public face of Datahike's lazy `rseek-datoms`: results
    begin at or before `:seon.db/components` and walk toward the beginning of
-   the selected index. Callers that need an exact prefix stop when the index
-   components change. The bounded result participates in exact reactive-read
-   replay, so unchanged windows do not rerender their consumers."
+   the selected index. `:seon.db/index-prefix? true` stops at the first row
+   outside those concrete components. The bounded result participates in exact
+   reactive-read replay, so unchanged windows do not rerender their consumers."
   {:malli/schema [:=> [:cat ::rseek-datoms-request] ::datoms]}
-  [{::keys [db index components index-limit]
-    :or {components []}}]
-  (let [result (raw-rseek-datoms db index components index-limit)]
+  [{::keys [db index components index-limit index-prefix?]
+    :or {components [] index-prefix? false}}]
+  (let [result (raw-rseek-datoms db index components index-limit index-prefix?)]
     (when-let [captures (internal/current-read-captures)]
       (internal/record-read!
         captures :seon.db.read.operation/rseek-datoms db
-        {::index index
-         ::components components
-         ::index-limit index-limit}
+         {::index index
+          ::components components
+         ::index-limit index-limit
+         ::index-prefix? index-prefix?}
         result true))
     result))
 
@@ -1529,7 +1547,8 @@
     (raw-rseek-datoms db
                       (::index request)
                       (::components request)
-                      (::index-limit request))
+                      (::index-limit request)
+                      (::index-prefix? request))
 
     :seon.db.read.operation/installed-schema
     (installed-schema* db)
