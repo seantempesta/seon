@@ -738,8 +738,13 @@ or discover archived behavior.
    The immutable candidate now also owns every parsed/validated function
    contract and its exact schema-reference index. Cold publication consumes
    that data directly, and schema/function deltas use the old/new indexes with
-   no contract-row scan or EDN reparse. Remaining: close admission/reconstruct
-   when post-commit publication cannot complete.
+   no contract-row scan or EDN reparse. Shadow's Node build-notify path now
+   selects exactly the resources its Node client actually required; the former
+   browser helper returned an empty set after reload and silently left hundreds
+   of replaced live vars unwrapped. A cold reset instruments the complete
+   projection, and a live reload repairs only the affected namespace rows.
+   Remaining: close admission/reconstruct when post-commit publication cannot
+   complete.
 7. Reconstruct declarations/program state only. Never replay arbitrary evals or
    process-local values.
 8. **Crash recovery complete:** the cold-start supervisor transition fence/closes every
@@ -846,14 +851,15 @@ agents idle and one exact notice visible to root.
    source/body facts so a later config-free restart does not depend on the
    original path. Keep default/test skill context blocks absent; explicit load
    remains an override through the normal block mechanism.
-10. Replace every full-history-then-`take-last` message/eval reader with one
-    bounded path per fact owner: `seon.agent.message` owns recent conversation,
-    `seon.eval` owns recent evals, and `seon.log/tail` remains the one error-log
-    tail. Expose Datahike's fixed lazy `rseek-datoms` only through a fully
-    specified `seon.db` wrapper, compose the two bounded streams where a timeline
-    is needed, and delete the duplicate readers in `seon.render.default`,
-    `seon.agent.ctx`, system activity, error-storm, transcript, and menu code.
-    Do not store a recent-list projection or rely on a growing Datalog sort.
+10. **Bounded fact-owner readers active:** `seon.agent.message` owns recent
+    conversation/global message windows, `seon.eval` owns recent per-agent/global
+    eval windows, and `seon.log/tail` remains the one error-log tail. Datahike's
+    fixed lazy `rseek-datoms` is exposed only through the fully specified
+    `seon.db` wrapper; agent context and root system activity now compose these
+    bounded append-order streams without a complete history scan. Remaining:
+    delete the duplicate readers in `seon.render.default`, error-storm,
+    transcript, and menu code. Do not store a recent-list projection or rely on
+    a growing Datalog sort.
 11. Restore a deliberately small root-only role block after behavioral review:
     root understands the fleet, starts/routes to ordinary agents, and handles
     recovery notices. Keep root's home requirements as one complete curated
