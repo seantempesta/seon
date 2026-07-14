@@ -279,6 +279,27 @@ One source, two renders: the **warnings block** (ai) for the agent and an **erro
 card** (html) for the human. The full map of failure-site → where it surfaces
 lives in [[data-model]] §7.
 
+### Dependency-aware tests, one runner per runtime boundary
+
+Fast feedback is a projection of the same program graph, not a third test
+harness. CLJS correctness uses the one CLJS runner; retained JVM database-server
+correctness uses the one writer runner; agent/model behavior uses Inspect. A
+source edit selects declared tests through proven namespace/function/schema
+dependency edges and reports why each test was selected. Selection is
+conservative: incomplete analyzer data, dynamic lookup, macro/build/config
+changes, deletions, or a cross-runtime contract widen to the owning namespace,
+dependency closure, runtime tier, or full checkpoint. A selector may do extra
+work but must never silently omit a possibly affected test.
+
+The compiler artifact or watch process remains warm only behind an exact source
+fingerprint, and test database/runtime fixtures remain isolated from the live
+pod. Individual vars and affected namespaces therefore reuse current compiled
+code instead of recompiling the whole suite, while the complete checkpoint
+periodically tests the selector and runner themselves. Disabled suites,
+generated historical results, bespoke drive scripts, and parallel harnesses are
+not an optimization cache; they are deleted once their current behavior is
+covered by the owning runner.
+
 ### Seed-copy, not merge
 
 ALL blocks are copied into the agent's own `:seon.agent/ctx` at creation; render

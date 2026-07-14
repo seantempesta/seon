@@ -263,6 +263,15 @@ lifecycle; lazy reactive/data units; root/session/canvas/UI; tests/operator/
 callers; profiling; acceptance/graduation. Keep one slice in progress, close it
 with focused tests + live proof + docs + commits, then mark the next slice in
 progress. Bugs and smells follow the ledger's interruption/recording policy.
+Human-visible work also follows the roadmap's browser journey discipline: use
+the public controls a normal user sees, verify database facts plus affected
+gzip-SSE element patches, exercise narrow/wide and two-tab behavior, and treat
+browser discoveries as implementation evidence rather than final visual QA.
+Test work follows the roadmap's test-selection design gate: improve the
+existing CLJS/writer doors in place, derive the smallest sound affected set from
+proven program-graph edges, widen on uncertainty, and document every selected
+test's reason. Do not implement a new runner while the source-grounded test
+impact audit is open.
 
 ## Entry points
 

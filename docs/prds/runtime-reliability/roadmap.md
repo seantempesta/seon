@@ -59,6 +59,10 @@ new user direction.
 - Preserve the concurrently owned untracked repl-autosuggest research file.
 - Baseline cold/warm boot, focused gates, routes/feeds, instrumentation coverage,
   CPU, heap, RSS, and representative agent/canvas/database-browser behavior.
+- Establish the browser-journey baseline below from the public UI. Record the
+  visible failure, request/response, database fact, feed patch, console/log
+  evidence, and affected render units rather than treating a successful HTTP
+  status or static screenshot as proof of a working interaction.
 
 Exit: one clean, reproducible default-cluster baseline and a source-grounded
 file/test inventory for every later slice. The operator gate, database boundary,
@@ -111,9 +115,20 @@ inspect all required database facts without a global scan.
 - Reduce root's oversized namespace context by fixing selection and ownership,
   not by adding prose caps or a second root-context mechanism. Keep one concise
   role block and move operational depth into discoverable namespaces.
-- Finish bounded lazy fleet-card detail and the database-backed per-tab session
-  model. Root redirects only the originating browser session through the normal
-  location fact/feed mechanism.
+- Give `/` a distinct root system layout over the existing block/render-unit/
+  route/feed machinery. It must not render the ordinary-agent heading, context
+  rail, canvas pin, or a recursive card for root. Its primary surface is a
+  responsive grid of ordinary-agent work-session cards plus calm system health
+  and recovery affordances.
+- Each root card previews the same database-derived focused surface used by the
+  corresponding agent page. Overlay a concise derived work description in this
+  order: active plan goal/title and current active-or-ready step; explicit agent
+  purpose; then a bounded recent-conversation fallback. Do not persist a second
+  summary projection solely for display.
+- Finish bounded lazy fleet-card detail and the database-backed per-tab browser
+  session model. Root redirects only the originating browser tab through the
+  normal location fact/feed mechanism; a browser session and an agent work
+  session remain distinct concepts in code and data.
 - Complete deliberate focus: agent canvas/domain updates select their surface;
   accepted human messages and agent replies select transcript; a manual
   selection yields to later recency unless explicitly pinned; a missing pinned
@@ -129,8 +144,10 @@ inspect all required database facts without a global scan.
   default skills context block absent.
 
 Exit: root and ordinary agents are understandable and responsive in narrow and
-wide real-browser proofs; two tabs do not fight; every canvas control produces a
-fast, observable reactive result through one route/feed/database path.
+wide real-browser proofs; two tabs do not fight; plan, purpose, focus, message,
+lifecycle, recovery, and canvas changes update only the affected root units;
+every canvas control produces a fast, observable reactive result through one
+route/feed/database path.
 
 ### Slice 4 — tests, operator, callers, and dead material — PENDING
 
@@ -138,6 +155,25 @@ fast, observable reactive result through one route/feed/database path.
   obsolete artifacts, duplicated fixtures, context-wording assertions, and
   expected-failure log floods. Keep focused pure/database/runtime/browser tiers
   with one bounded terminal each.
+- Keep one code-test runner per runtime boundary and make affected-test
+  selection part of those existing doors, never a new harness. The dependable
+  first stage maps changed source/test/config files to owning test namespaces
+  and transitive namespace dependents; every selection prints why each test was
+  included and which conservative fallback widened the run.
+- Investigate function-level selection against the existing analyzer/database
+  program graph. Adopt it only for edges the graph proves complete (declared
+  tests, owning namespaces, requires, schema refs, and any verified call edges);
+  an unknown dynamic edge, macro/build/config change, runner change, deletion,
+  or incomplete graph widens to the owning namespace/tier. Never trade a quiet
+  false negative for speed.
+- Reuse a warm compiler/test artifact or watch process when isolation and exact
+  source fingerprints prove it contains the change. Avoid repeated full
+  compilation for a single var, but do not run overlapping suites in the live
+  pod or let `--no-build` execute stale code.
+- Measure edit-to-result latency for one pure function, one async database
+  function, one namespace, changed-file impact, writer boundary, and full
+  checkpoint. Set budgets from the measured baseline and keep the selection
+  decision machine-readable for later profiling.
 - Finish the packaged artifact manifest and typed database administration
   surface without restoring nREPL administration or a second launch path.
 - Finish active Inspect caller migration and run only the bounded basic smoke.
@@ -148,7 +184,12 @@ fast, observable reactive result through one route/feed/database path.
   delete active remnants rather than document them as deprecated.
 
 Exit: one operator, one runner per tier, no disabled graveyard or duplicate
-harness, and default/Inspect/ACME callers use the same current contracts.
+harness, and default/Inspect/ACME callers use the same current contracts. A
+normal source edit reaches the smallest sound affected test set without a full
+compile/run, an individual test remains directly selectable, and the complete
+checkpoint still proves the selector itself. The final commands, fallback
+rules, and cadence are recorded concisely in both root `AGENTS.md` and
+`CLAUDE.md` plus the testing skill.
 
 ### Slice 5 — profiling and bug-driven simplification — PENDING
 
@@ -204,6 +245,75 @@ authority, and no known local duplicate or compatibility path.
   same slice.
 - Keep progress visible: concise commentary after each diagnosis, commit, live
   proof, newly discovered issue, and slice transition.
+
+## Browser journey discipline
+
+Browser proof is continuous implementation evidence, not a final polish pass.
+Every slice that changes a human-visible or user-triggered path runs the
+smallest relevant journeys below before its commit and repeats the complete
+matrix in slice 6. A journey uses the public UI controls a normal user sees;
+direct database transactions may prepare a fixture but cannot stand in for the
+interaction under test.
+
+- Open `/` from a cold cluster. Confirm the root system layout, fleet health,
+  ordinary-agent cards, useful empty state, and absence of the ordinary-agent
+  rail/header/pin and recursive root card.
+- Create an agent with the visible control and follow the redirect. Verify the
+  new database facts, agent page, root card, and feed patch without a reload.
+- Send a human message, observe the accepted-message state and agent reply,
+  confirm transcript bottom anchoring and focus selection, and see the root
+  card description/preview update.
+- Create and advance a durable plan through the agent-facing public operations.
+  Confirm the root card shows the high-level goal plus current step, survives a
+  restart, and changes reactively when the active step changes.
+- Build a canvas with a button, text input, select, toggle, and form. Exercise
+  successful writes, validation rejection, handler error, rapid repeated input,
+  pin/unpin, and clear. Verify visible feedback, database facts, affected-unit
+  morphs, and no stale or duplicated primary/rail surface.
+- Stop, resume, and recover an agent; open debug and `/data`; select context
+  surfaces; navigate back to root. Confirm every state transition is legible
+  and no closed debug/data detail performs body/SCI work.
+- Run two browser tabs with independent manual focus and navigation. A root
+  redirect moves only its originating tab; both tabs still receive shared
+  database changes.
+- Repeat the layout journeys at narrow and wide viewports. Confirm bounded
+  typography/code, full-height independently scrolling panels, reachable
+  controls, and no overlap with the chat bar.
+- Inspect browser console errors and request failures. Because the automation
+  bridge cannot prove long-lived gzip event streams, pair browser interaction
+  with a server-side gzip SSE client and pod feed/broadcast logs. Capture which
+  stable element ids were patched and assert unrelated units were absent.
+- For every discovered defect, add a behavioral regression at the narrowest
+  owning boundary and retain a real-browser reproduction. Do not add tests for
+  exact context wording, generated HTML blobs, or incidental CSS class order.
+
+## Test-selection design gate
+
+The program graph makes affected-test selection plausible, not automatically
+sound. Before implementation, the dated test-impact research must inventory the
+actual `:seon.ns`, `:seon.fn`, `:seon.schema`, and `:seon.test` facts and compare
+them with the compiler/analyzer dependency data and the vendored runners. The
+design must answer with evidence:
+
+- which edges are complete at edit time: namespace requires, function ownership,
+  test ownership, schema references, macro dependencies, dynamic symbol lookup,
+  routes/render symbols, configuration, generated sources, and JVM/CLJS wire
+  contracts;
+- whether individual `cljs.test` vars can run from an already-current artifact
+  without rebuilding or loading unrelated namespaces;
+- which process/compiler state can remain warm without sharing mutable database
+  fixtures or contaminating the live pod;
+- how deleted/renamed files, git staged/unstaged changes, a dirty worktree, and
+  another agent's edits affect selection;
+- the exact fallback ladder from changed function → owning namespace → affected
+  namespace closure → runtime tier → full checkpoint;
+- which existing scripts, disabled suites, artifacts, and harness remnants can
+  be deleted once the one runner owns selection.
+
+The research produces a plan and measurements, not a competing runner. The
+implementation replaces the current selection logic in place, proves false-
+negative defenses with behavioral fixtures, then updates the permanent root
+instructions only with commands and rules that actually work.
 
 The shared ACME/plan/REPL work is checkpointed at `3e0e0bff`; the directly
 affected schema, plan, and AI dispatch CLJS namespaces pass their focused tests,

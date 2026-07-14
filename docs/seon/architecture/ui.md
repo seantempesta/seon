@@ -163,7 +163,8 @@ every context band renders an html representation for inspectability.
 ## Pages — agent view, root view, debug view, app
 
 Every **page** is a layout placing block html renders into slots; each filled slot
-is a surface. All pages are agent views — one mechanism, a tree of routes:
+is a surface. Pages may have different layouts, but all use one rendering,
+render-unit, routing, and live-morph mechanism in one route tree:
 
 - **agent view** (`/agent/{id}`) — one agent: a large primary panel plus a right
   rail containing every current HTML context-block render ordered by database
@@ -206,19 +207,24 @@ is a surface. All pages are agent views — one mechanism, a tree of routes:
   maintenance rather than updates authored by the root agent. Requiring the
   REPL process keeps those facts available for provenance without letting them
   select or reorder the root canvas.
-- **the root agent’s view** (`/`) — the all-agents overview IS the **root
-  agent's** view (`:seon.agent/id "root"`). Its system-scoped blocks query across
-  all agents to render a card each. A cheap card shell always shows identity,
-  purpose, derived state, and the agent-derived focus label. Visible non-root
+- **the root system view** (`/`) — root remains the supervising
+  `:seon.agent/id "root"`, but `/` uses a dedicated system layout over the SAME
+  blocks, render units, route resolution, database projections, and gzip morph
+  feed as every other page. It is not wrapped in the ordinary-agent heading,
+  context rail, or canvas pin. Its primary surface is an attractive, calm grid
+  of ordinary-agent work sessions; root itself is not rendered as a recursive
+  card. System-scoped blocks query across all agents. A cheap card shell always
+  shows identity, derived state, and the agent-derived focus label. Visible
   cards materialize that surface's compact HTML face through
   the same `seon.render.surface` catalog/focus/materializer used by the agent's
   own page;
   its working data uses colocated `:seon.render.surface/*` keys. Expanded details
-  lazily show up to five recent messages and failed evals. Root remains in the
-  agent list, but its self-card is summary-only: its agent-derived focused surface is
-  this fleet `system-view`, so materializing that preview or canvas-AI twin would
-  recurse. These are independent view units, so one agent update does not rebuild
-  the fleet. Dive
+  lazily show up to five recent messages and failed evals. Each card overlays a
+  concise derived work description: an active plan's goal/title and current
+  active-or-ready step first, explicit purpose second, then a bounded recent
+  conversation fallback. This is a projection of existing facts, never a stored
+  display summary. These are independent view units, so one agent update does
+  not rebuild the fleet. Dive
   into one via reverse routing (step back to see all, dive into one). Its human
   input addresses root, whose
   deliberately small role context is to understand the fleet, start/select an
@@ -226,11 +232,11 @@ is a surface. All pages are agent views — one mechanism, a tree of routes:
   operational detail comes from its orchestration/navigation namespace cards
   and current-namespace source, not a long root instruction block. The IDENTICAL
   block/layout/route
-  machinery — NOT a separate overview page. It grounds the render + route tree: root
-  view (`/`) → per-agent views (`/agent/{id}`) → apps. (Root's
+  machinery — NOT a second reactive or routing system. It grounds the render +
+  route tree: root system view (`/`) → per-agent views (`/agent/{id}`) → apps. (Root's
   lifecycle/orchestrator facet lives in [[agent-runtime]]; here it is just the
-  agent whose view is `/`.) It is the same page as any `/agent/{id}` view,
-  with `seon.render.system/system-view` as its canvas (its canvas content). A
+  agent whose supervising view is `/`.) Its layout differs from an ordinary
+  agent page while its rendering and live-update mechanisms remain identical. A
   first-ever database also contains one ordinary agent; `bin/seon up --open`
   opens that ordinary agent while `/` remains available as mission control.
 
