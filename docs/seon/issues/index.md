@@ -16,10 +16,11 @@ See `README.md` for the convention.
 |-------|----------|------|
 | [An agent can OOM the pod via unbounded query and eval values](eval-memory-safety.md) | blocker | agent |
 
-## Friction (10)
+## Friction (11)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [ACME cannot migrate safely through the current operator](acme-operator-migration-drift.md) | friction | UI |
 | [AI and HTML render twins may run one derivation twice](render-twin-runs-function-twice.md) | friction | UI |
 | [Address-message steps have no explicit queue priority](plan-address-step-priority.md) | friction | agent |
 | [Async structural functions bypass contract validation](async-contract-instrumentation-gap.md) | friction | agent |
