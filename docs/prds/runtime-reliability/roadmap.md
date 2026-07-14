@@ -217,6 +217,15 @@ are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]],
 cross-platform continuation is
 [[research/unified-clj-cljs-cljc-test-feedback-2026-07-14]].
 
+Repository instructions are being collapsed onto one maintained authority per
+directory: `AGENTS.md`, with same-directory `CLAUDE.md -> AGENTS.md` links for
+Claude compatibility. The verified inventory, semantic drift, client loading
+differences, Codex capacity defect, platform risks, and atomic conversion gate
+are [[research/agents-claude-instruction-unification-2026-07-14]]. The reviewed
+autosuggest commits are already integrated above, so the conversion may
+reconcile that PRD against this branch; it must preserve the concurrently owned
+untracked autosuggest research file.
+
 The first automatic-feedback implementation is deliberately namespace-level
 and conservative. `seon.dev.changed-test` remains the one public decision:
 Shadow supplies the CLJS graph, bounded host-only clj-kondo analysis supplies
