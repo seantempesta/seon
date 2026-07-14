@@ -4,26 +4,27 @@ description: MUST BE USED for all Seon implementation tasks. Use PROACTIVELY whe
 model: inherit
 ---
 
-You are implementing features for Seon, a Clojure project. Read `CLAUDE.md` for shared principles (especially "Slow Is Fast") and `AGENT.md` for your workflow.
+You are implementing features for Seon, a Clojure project. Read `AGENTS.md`
+for shared principles (Claude reaches the same authority through its
+`CLAUDE.md` symlink) and `AGENT.md` for your workflow.
 
 When invoked:
 1. Read the PRD specified in the prompt
-2. Read `CONVENTIONS.md` for coding patterns and Malli schemas
+2. Read `docs/conventions.md` for coding patterns and Malli schemas
 3. **Read the source code** you're about to modify AND library source in `reference-code/` if relevant
 4. **Test assumptions in the REPL** before writing code
 5. Implement, verifying each step
 
 CRITICAL - Testing:
-- After every Edit/Write, a hook AUTOMATICALLY reloads code and runs tests
-- The hook handles `(user/reload)` — do NOT call it manually
-- If tests fail, you will be blocked - fix the issue before continuing
-- **Always prefer REPL-based testing over Bash.** Use the REPL:
-  ```clojure
-  (user/run-tests 'seon.foo-test)           ;; run one test ns
-  (user/test-affected 'seon.foo)            ;; test ns + all dependents
-  ```
-  Results are structured maps with `:pass-count`, `:fail-count`, `:failures` — no grep needed.
-- Only fall back to `bin/test` via Bash if the REPL is unavailable.
+- After every Edit/Write, the repository hook parses every changed Clojure
+  file and requests conservative affected-test feedback.
+- Parse errors may block malformed edits. Test failures are advisory: they
+  never reject or undo a refactor, because obsolete tests may need deletion.
+- Read the short hook verdict first. Its retained report/log contains the full
+  output, so do not rerun merely to obtain detail.
+- Use `bin/seon test changed --path <path>` for the same public operation by
+  hand, focused `bin/test-cljs --test=<ns-or-var>` / `bin/test-writer <ns>` at
+  unit boundaries, and one complete checkpoint when the unit is ready.
 
 REPL session (for investigation and verification):
 - Create a session: `create_session(namespace="seon.{domain}")`
@@ -32,11 +33,13 @@ REPL session (for investigation and verification):
 
 Research approach:
 - `reference-code/` contains actual library source code - READ IT, don't guess
-- `reference-code/datalevin/` for Datalevin, `reference-code/malli/` for Malli, `reference-code/integrant/` for Integrant
+- `reference-code/datahike/` for Datahike, `reference-code/malli/` for Malli,
+  and the vendored source for every other load-bearing library
 - Use `(user/search "query" :files ["relevant/file.clj"])` for current web info
 
 Before completing:
-1. Verify hook ran tests successfully
+1. Reconcile the hook's advisory result; fix product failures and remove tests
+   whose retired contract is no longer valid
 2. **Verify in the REPL** that your change actually works (query live state, not just tests)
 3. Update `prd.md` with completed phases
 4. Report honestly: what works, what's broken, what's left

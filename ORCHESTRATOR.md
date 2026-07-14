@@ -6,9 +6,12 @@ tags: [orchestrator]
 
 # Orchestrator Instructions
 
-**This file is for the main Claude Code instance** — the one the human interacts with directly. You coordinate work, delegate to agents via the Task/Agent tool, and protect your context window. Implementation happens in agents, not here.
+**This file is for the top-level orchestrator** — the coding-agent instance the
+human interacts with directly. You coordinate work, delegate when the active
+client exposes subagents, and protect your context window.
 
-Read `CLAUDE.md` first — it has the shared principles everyone follows. The
+Read `AGENTS.md` first—Claude reaches the same authority through its symlink.
+It has the shared principles everyone follows. The
 active system is one Node CLJS pod plus the JVM `seon.db.server`; the archived
 JVM application is not a second track.
 
@@ -92,7 +95,7 @@ grep -rl "severity: blocking" docs/seon/orchestrator/issues/ # Blockers
 
 ### Acting on Agent Reports — Code Smells and Warnings
 
-Agents are instructed (in `CLAUDE.md`) to report code smells, type mismatches, and inconsistencies they encounter. **These are not informational. They are action items.**
+Agents are instructed (in `AGENTS.md`) to report code smells, type mismatches, and inconsistencies they encounter. **These are not informational. They are action items.**
 
 When an agent reports a smell or warning:
 
@@ -137,15 +140,23 @@ You delegate **only** through the Task/Agent tool. There is no MCP agent-launch 
 | `seon-verifier` | Verification after a `seon-agent` completes — reads diffs, Socratic questions, REPL checks (sonnet, cheaper) |
 | `Explore` | Read-only fan-out search across the codebase when you need a conclusion, not file dumps |
 
-Subagents receive `CLAUDE.md` automatically and the `seon-agent` / `seon-verifier` definitions carry the `AGENT.md` workflow. Put the task, acceptance criteria, PRD path, and relevant `src/` / `docs/` file paths in the prompt — the agent reads them itself, keeping your context clean.
+Subagents receive the shared `AGENTS.md` authority directly or through
+Claude's `CLAUDE.md` symlink; the `seon-agent` / `seon-verifier` definitions
+carry the `AGENT.md` workflow. Put the task, acceptance criteria, PRD path, and
+relevant `src/` / `docs/` file paths in the prompt—the agent reads them itself,
+keeping your context clean.
 
 **Never use haiku for coding** — only for quick reads/context. Launch independent agents in a single message so they run concurrently. Don't decompose by spawning sub-agents from within agents — only you (the top-level orchestrator) launch agents.
 
 ---
 
-## Two-Lane Build — Keep Lanes Unblocked
+## Active work authority
 
-The active work is a **two-lane build: Tooling/engine and Eval/measurement**, coordinating through `docs/prds/agent-ctx/coordination.md` plus git on the shared `feature/agent-ctx` tree. Your job includes keeping both lanes unblocked and **not racing pod restarts** — the default pod (7890) is shared, so a `cluster reset default` is coordinated, never reflexive; acme (7980) is the eval lane's disposable harness. When a lane lands a keystone the other depends on, surface it (commit + coordination note) before dispatching dependent work.
+The current branch's PRD `roadmap.md` is the single work ledger. Do not revive
+the completed agent-ctx lane model or coordinate through its historical status
+diary. Multiple agents still share one working tree and default cluster, so
+commit small gains and coordinate destructive resets; leave ACME alone while a
+separate lane owns it.
 
 ---
 
@@ -159,7 +170,7 @@ Each namespace should have a **steward** — see `docs/seon/concepts/namespace-s
 
 ### This Is a Live System
 
-**Never blindly kill processes.** The orchestrator owns system restarts via `bin/seon` (idempotent, multi-agent-safe). Agents diagnose and report — they never restart. See `CLAUDE.md` "Process Architecture" for the full process map.
+**Never blindly kill processes.** The orchestrator owns system restarts via `bin/seon` (idempotent, multi-agent-safe). Agents diagnose and report — they never restart. See `AGENTS.md` "Process Architecture" for the full process map.
 
 ### The pod and database server
 

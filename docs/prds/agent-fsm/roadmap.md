@@ -1,6 +1,6 @@
 ---
 type: prd
-status: active
+status: completed
 tags: [prd, agent, web, architecture]
 ---
 
@@ -168,15 +168,15 @@ else composes with it.
    coordinate), prompt → blob, reply → datom-or-blob by size, volatile
    inputs (embedding-hit ids, referenced `result/<id>`s) recorded on the
    turn. The `SEON_DEBUG_CAPTURE` gate + the write-only `logs/turns`
-   tree are RETIRED (2026-07-02, C17): `seon.debug` deleted, gym driver
-   reads prompts by blob hash.
+   tree are RETIRED (2026-07-02, C17): `seon.debug` deleted; Inspect reads
+   prompts by blob hash.
 3. `inspect/turn` (one bundle: prompt, as-of re-render, reply, evals,
    usage, visible messages) + `inspect/turn-diff` (block-level render diff
-   + `db/since` datom delta) + `ctx-preview` over any t.
+   plus `db/since` datom delta) plus `ctx-preview` over any t.
 4. Widen search: `grep-graph` targets += messages/turns/blobs;
    `register-embeddable!` += message bodies + eval narrations (same ONE
    index).
-5. The forensic agent: a seed verb composing `/solve` scratch-conn
+5. The forensic agent: a seed function composing `/solve` scratch-conn
    isolation + as-of + reconstructed ctx + a debug-brief block + a
    thinking model via per-agent provider.
 

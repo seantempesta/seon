@@ -409,8 +409,8 @@ harness, and default/Inspect/ACME callers use the same current contracts. A
 normal source edit reaches the smallest sound affected test set without a full
 compile/run, an individual test remains directly selectable, and the complete
 checkpoint still proves the selector itself. The final commands, fallback
-rules, and cadence are recorded concisely in both root `AGENTS.md` and
-`CLAUDE.md` plus the testing skill.
+rules, and cadence are recorded concisely in root `AGENTS.md` (Claude reads the
+same authority through its symlink) plus the testing skill.
 
 ### Slice 5 — profiling and bug-driven simplification — PENDING
 

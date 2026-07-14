@@ -200,7 +200,7 @@ If you want to understand the project from the inside, in roughly this order:
 2. [`docs/seon/_dashboard.md`](docs/seon/_dashboard.md) — system map. Component notes, concept notes, the current state of every piece.
 3. [`docs/prds/agent-runtime/v1.md`](docs/prds/agent-runtime/v1.md) — what's being built next, in detail.
 4. [`docs/seon/architecture/overview.md`](docs/seon/architecture/overview.md) — how the moving parts fit today.
-5. [`CLAUDE.md`](CLAUDE.md) — orientation for anyone (human or AI) sitting down to write code in this repo. Includes conventions, the dev hook, the testing model, and the "slow is fast" rules I make every agent read first.
+5. [`AGENTS.md`](AGENTS.md) — the maintained orientation for anyone (human or AI) sitting down to write code in this repo. Claude reads the same authority through its `CLAUDE.md` symlink.
 
 For the long-form research that fed into the current README and vision documents: [`docs/seon/vision/full-scope-synthesis-2026-05-23.md`](docs/seon/vision/full-scope-synthesis-2026-05-23.md), [`docs/seon/vision/biggest-ideas-2026-05-23.md`](docs/seon/vision/biggest-ideas-2026-05-23.md), [`docs/seon/vision/full-framing-found-2026-05-23.md`](docs/seon/vision/full-framing-found-2026-05-23.md).
 

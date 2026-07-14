@@ -24,13 +24,13 @@ If AGPL-3.0 doesn't fit your use case (e.g., you'd like to use seon in a proprie
 
 ## Orientation
 
-Read [`CLAUDE.md`](CLAUDE.md) first — it is the real contributor orientation
+Read [`AGENTS.md`](AGENTS.md) first — it is the maintained contributor orientation
 (conventions, the dev hook, the testing model, and the architecture). The
-active runtime is the **CLJS pod** (a long-running Node process, `src/seon/*.cljs`,
-web UI on `http://localhost:7890`) backed by the JVM Datahike database server;
-the JVM main-app (`src/seon/*.clj`) is a **paused** track. `bin/seon`
-manages both — `bin/seon up`, `status`, `logs pod --follow`, `restart`.
-For the mental model, see [`docs/seon/architecture/overview.md`](docs/seon/architecture/overview.md).
+active runtime is the **CLJS pod** (a long-running Node process, web UI on
+`http://127.0.0.1:7890`) backed by the JVM Datahike database server.
+`bin/seon` manages the complete watcher, writer, and pod graph—use `up`,
+`status`, `logs pod --follow`, and `restart`. For the mental model, start at
+[`docs/seon/architecture/architecture.md`](docs/seon/architecture/architecture.md).
 
 ## Practical contribution guidelines
 
@@ -39,24 +39,27 @@ For the mental model, see [`docs/seon/architecture/overview.md`](docs/seon/archi
   Malli specs on every public fn). Schemas live with the namespace that owns the
   data; register via `seon.schema/register!`.
 - Keep commits focused and well-described.
-- **Run the tests before opening a PR.** The active CLJS-pod suite runs via
-  `bin/test-cljs` (a fresh `cljs.test` JVM, ~160 s). The paused JVM track's tests
-  run inside its REPL (`(user/run-tests)`), not via a separate process.
+- **Run the relevant tests before opening a PR.** Use `bin/test-cljs` for the
+  CLJS pod, `bin/test-writer` for the JVM database server, and
+  `bin/seon test operator` for Babashka operator code. Run focused checks while
+  iterating and one complete checkpoint at the unit boundary.
 
 ## Gotchas for contributors
 
-These are documented for agents in `CLAUDE.md` but easy to trip over as a human:
+These are documented for agents in `AGENTS.md` but easy to trip over as a human:
 
-- **Malli instrumentation is always on — a wrong/absent `:malli/schema` throws
-  at runtime, not at lint time.** Every public fn is validated (inputs, output,
-  arity) on every call; there is no "off" mode. If you see a
+- **Malli instrumentation is on in normal development — a wrong
+  `:malli/schema` fails at runtime, not at lint time.** Public functions are
+  validated across their supported boundary. If you see a
   `:malli.core/invalid-output`, fix the schema or the caller — it's a real
   mismatch. An `^:async` fn returning a `js/Promise` is a known sharp corner
-  (see the `clojurescript` skill). Details: `CLAUDE.md` → "Function Instrumentation".
+  (see the `clojurescript` skill). `SEON_INSTRUMENT` is an emergency
+  stability kill-switch, never a way to suppress a mismatch. Details:
+  `AGENTS.md` → "Function Instrumentation".
 - **Never `git add -A`.** The working tree is shared by multiple concurrent
   agents; sweeping everything tangles their uncommitted work. Stage explicit
   pathspecs (`git add path/to/file …`).
 - **The pod can wedge.** Overlapping `cljs.test` runs or a never-resolving
   Promise can jam the pod's shared async continuation — recover with
   `bin/seon restart` (a pristine run), or `bin/seon cluster reset default`
-  for a fresh world.
+  for a fresh database.

@@ -5,7 +5,7 @@ You are implementing features for Seon, a Clojure project. Read `AGENTS.md` for 
 
 When invoked:
 1. Read the PRD specified in the prompt
-2. Read `CONVENTIONS.md` for coding patterns and Malli schemas
+2. Read `docs/conventions.md` for coding patterns and Malli schemas
 3. **Read the source code** you're about to modify AND library source in `reference-code/` if relevant
 4. **Test assumptions in the REPL** before writing code
 5. Implement, verifying each step
@@ -28,7 +28,8 @@ REPL session (for investigation and verification):
 
 Research approach:
 - `reference-code/` contains actual library source code - READ IT, don't guess
-- `reference-code/datalevin/` for Datalevin, `reference-code/malli/` for Malli, `reference-code/integrant/` for Integrant
+- `reference-code/datahike/` for Datahike, `reference-code/malli/` for Malli,
+  and the vendored source for every other load-bearing library
 - Use `(user/search "query" :files ["relevant/file.clj"])` for current web info
 
 Before completing:

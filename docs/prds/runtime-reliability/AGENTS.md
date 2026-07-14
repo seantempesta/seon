@@ -8,13 +8,12 @@ tags: [orchestrator, prd, database, flow, agent, web]
 
 ## Current state
 
-The proven CLJS pod is responsive enough to preserve, but the repository still
-contains a paused JVM application, several duplicate runtime paths, broad build
-closures, stale UI/database vocabulary, and an
-expensive test surface. Source-grounded audits have now mapped the permanent
-JVM server, canonical CLJS runtime/UI, archive boundary, local and remote
-database synchronization, client distribution, test authority, and exact
-canvas/surface/card cutover.
+The old JVM application and its duplicate runtime paths are deleted. The active
+system is the CLJS pod plus the JVM database server, with one database protocol,
+one render path, and Inspect AI as the agent/model harness. Remaining work is
+the seven-slice reliability ledger: reconcile lingering drift, finish reactive
+render-unit correctness and root/system UI, unify automatic CLJ/CLJS/CLJC test
+feedback, profile the retained paths, and close acceptance evidence.
 
 This PRD is in **integrated completion**. Work from the original phases 3–5
 landed out of order, so the former “phase 3 of 6” label was retired. The
