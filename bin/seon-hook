@@ -3,7 +3,7 @@
 ;; Direct Babashka hook for Clojure and Markdown edits.
 ;;
 ;; This script:
-;; 1. Receives hook events from Claude Code (JSON on stdin)
+;; 1. Receives hook events from Codex or Claude Code (JSON on stdin)
 ;; 2. Loads configuration from .claude/seon-hook.edn
 ;; 3. Validates prospective Clojure syntax before an edit
 ;; 4. Runs the canonical Markdown/docstring linters after an edit
@@ -88,9 +88,36 @@
       (some #(clojure.string/ends-with? lower-path %)
             [".clj" ".cljs" ".cljc" ".bb" ".edn"]))))
 
-(defn- get-file-path [event]
+(defn- claude-file-path [event]
   (or (get-in event [:tool_input :file_path])
       (get-in event [:tool_input :filePath])))
+
+(defn- patch-file-paths
+  "Return every source and destination path named by a Codex patch."
+  [patch]
+  (when (string? patch)
+    (->> (concat
+           (map second
+                (re-seq
+                  #"(?m)^\*\*\* (?:Add|Update|Delete) File: (.+?)\r?$"
+                  patch))
+           (map second
+                (re-seq #"(?m)^\*\*\* Move to: (.+?)\r?$" patch)))
+         (map str/trim)
+         (remove str/blank?)
+         distinct
+         vec)))
+
+(defn- event-file-paths
+  "Normalize the complete path set from Codex and Claude edit payloads."
+  [event]
+  (if (= "apply_patch" (:tool_name event))
+    (patch-file-paths (get-in event [:tool_input :command]))
+    (some-> (claude-file-path event) vector)))
+
+(defn- get-file-path [event]
+  (or (:seon.hook/file-path event)
+      (first (event-file-paths event))))
 
 (defn- absolute-file-path [file-path]
   (try
@@ -168,6 +195,23 @@
                           "2. old_string matches file content exactly\n"
                           "3. new_string is complete, valid Clojure\n\n"
                           "TIP: If struggling, try Write to replace the entire function.")}))))))
+
+(defn- clojure-syntax-feedback
+  "Report invalid syntax in an edited file after the tool has written it."
+  [event]
+  (let [file-path (get-file-path event)
+        absolute-path (absolute-file-path file-path)]
+    (when (and (= (:hook_event_name event) "PostToolUse")
+               (clojure-file? file-path)
+               absolute-path
+               (.isFile (io/file absolute-path)))
+      (try
+        (let [validation (validate-clojure-syntax (slurp absolute-path))]
+          (when-not (:valid validation)
+            (str "Invalid Clojure syntax after editing " file-path ": "
+                 (:error validation))))
+        (catch Exception e
+          (str "Could not validate " file-path ": " (.getMessage e)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Markdown File Detection
@@ -330,36 +374,55 @@
   (let [event (try
                 (json/parse-string (slurp *in*) true)
                 (catch Exception _ nil))
-        file-path (get-file-path event)
+        file-paths (event-file-paths event)
         event-name (:hook_event_name event)
         tool-name (:tool_name event)
         edit-event? (and (#{"PreToolUse" "PostToolUse"} event-name)
-                         (#{"Edit" "Write"} tool-name))
-        local-edit? (and edit-event? (repository-file? file-path))]
-    (if-not local-edit?
+                         (#{"apply_patch" "Edit" "Write"} tool-name))
+        local-paths (filterv repository-file? file-paths)
+        mixed-scope? (and (seq local-paths)
+                          (not= (count local-paths) (count file-paths)))
+        local-edit? (and edit-event?
+                         (seq file-paths)
+                         (= (count local-paths) (count file-paths)))]
+    (if mixed-scope?
+      (output! {:decision "block"
+                :reason "BLOCKED: one edit cannot mix Seon files with paths outside this checkout."})
+      (if-not local-edit?
       (output! {:continue true})
       (try
         (let [config (load-config)]
           (log! event-name
                 (str "tool=" tool-name)
                 (str "session=" (or (:session_id event) "orchestrator"))
-                (str "file=" file-path))
+                (str "files=" (str/join "," file-paths)))
           (if (= event-name "PreToolUse")
             (if (get-in config [:lint :enabled] true)
-              (if-let [blocked (validate-clojure-edit event)]
-                (do
-                  (log! "CLOJURE_BLOCK" (:reason blocked))
-                  (output! blocked))
-                (output! {:continue true}))
+              (let [blocked (some validate-clojure-edit
+                                  (map #(assoc event :seon.hook/file-path %)
+                                       file-paths))]
+                (if blocked
+                  (do
+                    (log! "CLOJURE_BLOCK" (:reason blocked))
+                    (output! blocked))
+                  (output! {:continue true})))
               (output! {:continue true}))
-            (let [feedback [(markdown-feedback event config)
-                            (docstring-feedback event config)]
-                  gate (core-fault-gate! event)]
+            (let [path-events (map #(assoc event :seon.hook/file-path %)
+                                   file-paths)
+                  feedback (mapcat
+                             (fn [path-event]
+                               [(clojure-syntax-feedback path-event)
+                                (markdown-feedback path-event config)
+                                (docstring-feedback path-event config)])
+                             path-events)
+                  clojure-event (some #(when (clojure-file? (get-file-path %)) %)
+                                      path-events)
+                  gate (when clojure-event (core-fault-gate! clojure-event))]
               (output! (or gate (feedback-response feedback))))))
         (catch Exception e
           (log! "ERROR" (.getMessage e))
           (binding [*out* *err*]
             (println "HOOK ERROR:" (.getMessage e)))
-          (output! {:continue true}))))))
+          (output! {:continue true})))))))
 
 (-main)

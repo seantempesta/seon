@@ -3,6 +3,7 @@
             [seon.dev.artifact-test]
             [seon.dev.cli-test]
             [seon.dev.docstring-test]
+            [seon.dev.hook-cli-test]
             [seon.dev.markdown-test]
             [seon.dev.process-test]
             [seon.dev.skills-test]))
@@ -12,6 +13,7 @@
         (run-tests 'seon.dev.artifact-test
                    'seon.dev.cli-test
                    'seon.dev.docstring-test
+                   'seon.dev.hook-cli-test
                    'seon.dev.markdown-test
                    'seon.dev.process-test
                    'seon.dev.skills-test)]
