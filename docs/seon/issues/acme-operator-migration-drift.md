@@ -133,6 +133,10 @@ and read-back sequence. The active downstream source/config cleanup has removed
 the stale `steps-tile-html`, canvas `error-tile`, and `.seon-tile` references in
 favor of `steps-surface-html`, the error card, and `.seon-card`; the exact
 `acme-client` compile exposed the undeclared renderer before that repair.
+The repaired isolated compile completes with zero warnings. Its generated
+`out-acme/client/main.js` is no longer tracked: the flavor manifest and build
+graph are the artifact authority, while `.gitignore` already classifies the
+output tree as reproducible build state.
 Browser/feed proof still remains. The operator intentionally does not claim an
 Inspect-style per-sample token lease: concurrent target-coordinate allocation,
 pinned frozen artifacts, and idempotent token-fenced release remain owned by

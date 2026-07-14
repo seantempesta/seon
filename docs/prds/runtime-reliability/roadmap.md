@@ -115,7 +115,9 @@ both preserved port pairs while the default target remains ready. This closes
 the wrapper/watcher/status safety slice but does not make ACME safe to start:
 archive/drain/reopen/read-back and browser proof remain. Active ACME source and
 config now resolve `steps-surface-html` and the error card, and use card CSS;
-the exact `acme-client` compile exposed and removed the stale renderer symbol.
+the exact isolated `acme-client` compile exposed and removed the stale renderer
+symbol, then completed with zero warnings. The generated tracked entry bundle
+is removed because the flavor manifest/build graph, not Git, owns artifacts.
 Inspect's per-sample owner/token, isolated coordinate allocation, frozen
 artifact selection, and token-fenced create/restart/release lease also remain.
 
