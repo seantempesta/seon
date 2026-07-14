@@ -22,13 +22,20 @@ transition logic and a non-transitive declared-attribute gate can skip exact
 helper-indirected reads, leaving already-open root, plan, and transcript units
 stale while a fresh render is correct. Root, agent, debug, and data projections
 also retain different activation/detail paths, and open debug broadcasts can
-cost hundreds of milliseconds.
+cost hundreds of milliseconds. A 2026-07-14 read-only default-cluster probe
+found one open root-debug subscription retaining 657 observations, all marked
+non-replayable because its render thunk re-dereferences a different immutable
+database value. Lazy unit activation also invokes its producer outside read
+capture and rebinds with the inactive subscription's old dependencies, so a
+newly open detail can miss a change read only by that producer.
 
 Completed earlier audits establish two constraints: active-unit reuse needs no
 new library, and a Node `lru-cache` layer is justified only by measured reopen
-reuse. The new source audit must reconcile those reports with current owners,
-exact dependency source, complete tests, and the post-reset live baseline before
-implementation.
+reuse. [[research/reactive-render-source-audit-2026-07-14]] reconciles those reports with
+current owners, tests, dependency sources, and the live default baseline. It
+also records that the selected ClojureScript `1.12.145` source is not yet
+mirrored exactly: the current reference checkout identifies itself as
+`1.12.41`, so analyzer-sensitive implementation must close that grounding gap.
 
 ## Ordered work
 

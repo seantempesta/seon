@@ -25,9 +25,11 @@ entries because agent and platform code inspect analyzer state. The subsequent
 `bin/fix-bootstrap-macros` step reports no broken symbols, so macro repair does
 not explain or eliminate these analyzer warnings.
 
-The selected dependency is ClojureScript `1.12.145`; the shallow
-`reference-code/clojurescript` checkout documents that same stable release at
-`946d75f…`. Its `cljs.env/with-compiler-env` macro expands to CLJ-only
+The selected dependency is ClojureScript `1.12.145`, but the
+`reference-code/clojurescript` checkout at `946d75f…` identifies itself as
+`1.12.41` in `pom.xml`; the exact selected dependency source is not currently
+mirrored. That ClojureScript checkout's
+`cljs.env/with-compiler-env` macro expands to CLJ-only
 `clojure.lang.Atom`, `IllegalArgumentException`, and `class` forms. The
 unconditional `cljs.analyzer.api/resolve-extern` function invokes that macro,
 so compiling the API into the self-host CLJS bootstrap analyzes those host
@@ -43,8 +45,9 @@ shows the generated cache metadata is involved.
 
 ## Acceptance
 
-- Reproduce the warning with the smallest bootstrap entry/source combination
-  against the exact selected ClojureScript and Shadow sources.
+- Mirror and read the exact selected ClojureScript `1.12.145` source, then
+  reproduce the warning with the smallest bootstrap entry/source combination
+  against the exact selected ClojureScript and Shadow `3.4.10` sources.
 - Add the smallest executable `resolve-extern` self-host probe and establish
   whether every expanded host branch is reachable.
 - Make the maintained ClojureScript macro/function expansion portable or guard
