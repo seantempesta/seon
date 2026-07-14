@@ -37,6 +37,23 @@ implementation slices are in
 [[research/database-lifecycle-source-audit-2026-07-14]]. Implementation remains
 dependent on current runtime-reliability graduation.
 
+## Research evidence
+
+- [[research/database-lifecycle-source-audit-2026-07-14]] — current dependency
+  ledger, live probes, transition matrix, and ordered implementation slices.
+- [[research/config-schema-runtime-restoration-2026-07-12]],
+  [[research/malli-runtime-schema-authority-audit-2026-07-13]], and
+  [[research/db-protocol-cut-implementation-audit-2026-07-13]] — historical
+  schema, reconstruction, writer/protocol, and deletion evidence.
+- [[research/datahike-as-of-fork-and-restore-2026-07-12]],
+  [[research/time-travel-api-implementation-audit-2026-07-12]], and
+  [[research/database-runtime-responsiveness-audit-2026-07-13]] — historical
+  branch, restore, coordinate, and responsiveness evidence.
+- [[research/human-readable-word-ids-datahike-and-tokenization-2026-07-12]],
+  [[research/local-allocation-writer-config-audit-2026-07-12]], and
+  [[research/provenance-users-processes-and-ids-2026-07-12]] — identity,
+  allocation, and transaction-provenance evidence.
+
 ## Required transition matrix
 
 - fresh boot and converged explicit config;

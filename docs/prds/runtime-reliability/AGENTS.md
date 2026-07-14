@@ -360,7 +360,7 @@ impact audit is open.
   failure modes and Babashka target.
 - [[research/cljs-test-suite-speed-and-quality-audit-2026-07-12]] — active
   behavioral test authority and runtime tiers.
-- [[research/database-runtime-responsiveness-audit-2026-07-13]],
+- [[../database-lifecycle-recovery/research/database-runtime-responsiveness-audit-2026-07-13]],
   [[research/web-responsiveness-audit-2026-07-13]], and
   [[research/live-feed-fix-review-2026-07-13]] — performance baselines.
 - [[docs/seon/architecture/architecture]],

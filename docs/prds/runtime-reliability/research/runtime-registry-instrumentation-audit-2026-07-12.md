@@ -66,7 +66,8 @@ cutover.
 This document does not replace the two detailed source audits that already
 exist:
 
-- [[config-schema-runtime-restoration-2026-07-12]] owns canonical schema facts,
+- [[../../database-lifecycle-recovery/research/config-schema-runtime-restoration-2026-07-12]]
+  owns canonical schema facts,
   native Datahike schema, and cold restoration;
 - [[incremental-instrumentation-2026-07-12]] owns Malli ref walking, exact
   instrumentation data, and wrapper behavior; and

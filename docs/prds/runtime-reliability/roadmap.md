@@ -1032,7 +1032,7 @@ legacy boot-authored test rows while preserving agent-authored ones.
 
 The source-grounded system audits are complete and committed:
 
-- [[research/database-runtime-responsiveness-audit-2026-07-13]]
+- [[../database-lifecycle-recovery/research/database-runtime-responsiveness-audit-2026-07-13]]
 - [[research/web-responsiveness-audit-2026-07-13]]
 - [[research/live-feed-fix-review-2026-07-13]]
 - [[research/agent-lifecycle-responsiveness-audit-2026-07-13]]
@@ -1573,7 +1573,7 @@ or discover archived behavior.
    becomes the eval's user-input failure and commits no declaration facts.
    Remaining: stop admission/reconstruct from committed facts if the already
    validated post-commit wrapper publication itself fails. The full evidence and failure matrix are in
-   [[research/malli-runtime-schema-authority-audit-2026-07-13]].
+   [[../database-lifecycle-recovery/research/malli-runtime-schema-authority-audit-2026-07-13]].
 5. Use one analyzer/program snapshot and one exact add/change/remove
    transaction. Verify the ghost-pruning builder and every stale compatibility
    branch are absent.

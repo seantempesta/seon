@@ -501,7 +501,8 @@ head move is audited by the supervisor intent/completion facts; later database
 repairs carry ordinary root/boot or root/config transaction provenance.
 
 The source proof in
-[[research/datahike-as-of-fork-and-restore-2026-07-12]] records the API
+[[../database-lifecycle-recovery/research/datahike-as-of-fork-and-restore-2026-07-12]]
+records the API
 assessment, branch metadata, crash/undo behavior, and fully namespaced public
 shape. One lifecycle service owns all state-changing variants; callers never
 manipulate Konserve roots directly. Seon wraps upstream `as-of`, corrected
