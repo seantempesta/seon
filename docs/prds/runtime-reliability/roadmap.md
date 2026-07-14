@@ -107,6 +107,15 @@ implementation:
   and compiler graph. Namespace dependency selection is sound today;
   automatic function-to-test selection is not, because complete call edges do
   not exist.
+- Automatic edit feedback has one existing delivery path: a trusted synchronous
+  `PostToolUse` hook returning `additionalContext` to the active agent. Extend
+  the current Babashka hook to normalize Codex `apply_patch` and Claude
+  `Edit`/`Write`, then have it call the same public changed-test operation a
+  human calls. Shadow remains compilation and dependency authority; do not add
+  autorun, a test daemon, a second registry, database notification facts, or a
+  polling requirement. The Codex hook definitions are currently discovered but
+  untrusted, so live proof requires one user review after their implementation
+  is final.
 - The complete CLJS gate is not presently trustworthy. A focused
   `seon.client.extra-core-test` reproduces a process-global Malli projection
   leak, the full run reports duplicate async completion, and the runner
@@ -133,13 +142,21 @@ one stale pre-refactor registry assertion. In `my.plan`, a repeated open
 same-title `plan!` is refused instead of duplicating a forest, while
 `reconcile!` now has one EDN-tree update format and no markdown parser. Main's
 related-step preflights and surface vocabulary were preserved; the focused plan
-gate passes 40 tests and 241 assertions. A paid/live planning drive and the
-complete CLJS gate remain later acceptance work, not evidence implied by these
-offline checks.
+gate passes 40 tests and 241 assertions. A paid/live planning drive remains
+later acceptance work, not evidence implied by these offline checks.
+
+The 2026-07-14 post-integration complete CLJS gate compiled successfully, then
+ran 1,299 tests and 6,117 assertions in 234 seconds with 99 failures and 10
+errors. The first failures occur in database/schema state and cascade into
+later state, render, reactive-call, and router fixtures through missing or
+diverged registry facts. This is the current falsification baseline: do not
+interpret a focused green gate as a complete checkpoint, and do not optimize by
+hiding the cross-test state leak.
 
 The durable evidence, pinned sources, executable probes, and acceptance gates
-are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]] and
-[[research/test-impact-selection-and-runner-audit-2026-07-14]].
+are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]],
+[[research/test-impact-selection-and-runner-audit-2026-07-14]], and
+[[research/automatic-test-feedback-infrastructure-audit-2026-07-14]].
 
 ### Slice 0 — reconcile and baseline — IN PROGRESS
 

@@ -47,6 +47,17 @@ Run the smallest gate that can falsify the change while debugging, then the
 relevant batch checkpoint once at the unit boundary. Behavioral invariants and
 edge cases are the contract; tests that pin agent prose are not.
 
+The inner-loop target is one changed-test operation backed by the managed
+Shadow compiler. A successful test build publishes an immutable artifact and a
+manifest containing its source fingerprint and compiler dependency graph. The
+operation waits for an exact current manifest, selects the conservative
+reverse-transitive namespace closure, and runs a fresh bounded Node process.
+The existing edit hook calls that same operation and returns its concise result
+through trusted `PostToolUse.additionalContext`; it does not own a second
+selector or runner. Unknown, macro, shared CLJC, configuration, dependency, and
+deletion changes widen explicitly. Exact function-level automatic selection is
+deferred until the analyzer can prove complete call edges.
+
 For live proof after tests, inspect the database or page produced by the same
 runtime path. A passing unit test alone does not establish that a transaction
 replicated or a Datastar morph reached a browser.

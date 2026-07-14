@@ -45,6 +45,13 @@ Shadow JVM, while the current complete run is independently broken by a Malli
 projection leak and duplicate async completion. Repair that baseline first;
 then reuse the existing managed Shadow process and compiler dependency graph.
 Do not infer function-level test impact from the incomplete runtime graph.
+Automatic agent feedback uses the existing synchronous `PostToolUse`
+`additionalContext` hook path. Normalize Codex `apply_patch` and Claude edits in
+`bin/seon-hook`; publish one immutable Shadow test artifact/manifest; expose one
+public changed-test operation; and call that operation from the hook. Do not add
+Shadow autorun, another daemon, registry, event bus, or database notification
+projection. Codex hook trust is a one-time user review, never a committed or
+bypassed setting.
 
 The stable autosuggest lane has been collapsed into this branch through its
 five reviewed implementation commits only. Keep the provider-derived Inspect
