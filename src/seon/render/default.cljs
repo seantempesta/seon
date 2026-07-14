@@ -144,7 +144,7 @@
 
                                 :else "unknown")]
                     (when label [at label content]))))
-            (take-last n))
+            vec)
        []))))
 
 (defn ^:no-doc recent-errors
