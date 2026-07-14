@@ -21,14 +21,14 @@
              config ["pod" "--no-build" "seon.db-test/query-roundtrip"])))
     (is (= [[database "seon.db.registry-test"]]
            (#'cli/test-commands config ["database" "seon.db.registry-test"])))
+    (is (= [(conj operator "seon.dev.cli-test")]
+           (#'cli/test-commands config ["operator" "seon.dev.cli-test"])))
     (is (= [operator [database] [pod]]
            (#'cli/test-commands config ["all"])))))
 
 (deftest selector-free-targets-reject-accidental-arguments
   (let [config (configuration (str (fs/normalize (fs/absolutize "."))))]
-    (testing "operator and all are complete named gates"
-      (is (thrown? Exception
-                   (#'cli/test-commands config ["operator" "extra"])))
+    (testing "only the combined complete gate rejects selectors"
       (is (thrown? Exception
                    (#'cli/test-commands config ["all" "extra"]))))
     (is (thrown? Exception

@@ -335,12 +335,7 @@
     (case target
       "pod" [pod-command]
       "database" [database-command]
-      "operator"
-      (do
-        (when (seq target-arguments)
-          (throw (ex-info "`test operator` takes no selectors."
-                          {:seon.dev.cli/arguments target-arguments})))
-        [operator-command])
+      "operator" [(into operator-command target-arguments)]
       "all"
       (do
         (when (seq target-arguments)

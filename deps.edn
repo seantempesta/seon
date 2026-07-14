@@ -55,7 +55,7 @@
   ;; bin/test-writer selects exact retained namespaces without booting the
   ;; server or discovering unrelated CLJS tests.
   :writer-test
-  {:extra-paths ["test"]}
+  {:extra-paths ["test" "script"]}
 
   ;; The database-writer test namespaces load against the exact :writer basis;
   ;; there is no second writer dependency graph or broad JVM test discovery.

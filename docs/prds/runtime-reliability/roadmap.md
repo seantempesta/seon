@@ -245,8 +245,10 @@ function call graph, or fourth runner is part of this slice.
 
 Implementation order for this unit:
 
-1. Make the hook and current operation accept CLJ, CLJS, and CLJC; expose
-   dynamic writer/operator test roots from their owning runners.
+1. **PARTIAL:** writer/operator test roots are now discovered dynamically by
+   their existing runners, and the operator accepts exact namespace selectors.
+   The hook remains CLJS/CLJC-only until the host dependency selector lands, so
+   a `.clj` edit cannot be misreported as a Shadow build timeout.
 2. Return one boundary-selection/result shape and let the operator runner
    accept exact namespace selectors.
 3. Add host namespace analysis, reverse dependency closure, CLJ macro joins
