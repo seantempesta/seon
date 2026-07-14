@@ -31,18 +31,12 @@
 (schema/register! ::publish-socket-path ::socket-path)
 (schema/register! ::database-name [:string {:min 1}])
 (schema/register! ::writer-backend :keyword)
-(schema/register! ::basis-t [:int {:min 0}])
 (schema/register!
  ::database-coordinate
  [:map
   [::database-name ::database-name]
   [::coordinate/attachment ::coordinate/attachment]
   [::writer-backend ::writer-backend]])
-(schema/register!
- ::progress-coordinate
- [:map
-  [::database-coordinate ::database-coordinate]
-  [::basis-t ::basis-t]])
 ;; The pod's datahike conn handle the listen attachment subscribes for — an
 ;; opaque runtime value (third-party boundary), hence :any.
 (schema/register! ::conn :any)
@@ -316,7 +310,7 @@
 
 (defn- resolve-transaction!
   "Mark a successful response. Returns true when its feed was already skipped."
-  [conn request-id basis-t]
+  [conn request-id transaction-coordinate]
   (let [feed? (volatile! false)]
     (swap! !attachment
            (fn [state]
@@ -327,17 +321,24 @@
                    (vreset! feed? true)
                    (update state ::correlations dissoc request-id))
                  (assoc-in state [::correlations request-id]
-                           (assoc entry ::status ::resolved ::basis-t basis-t)))
+                           (assoc entry ::status ::resolved
+                                  ::coordinate/coordinate
+                                  transaction-coordinate)))
                state)))
     @feed?))
 
 (defn- prune-resolved-correlations
-  [correlations basis-t]
+  [correlations applied-coordinate]
   (into {}
         (remove (fn [[_ correlation]]
                   (and (= ::resolved (::status correlation))
-                       (some? (::basis-t correlation))
-                       (<= (::basis-t correlation) basis-t))))
+                       (some? (::coordinate/coordinate correlation))
+                       (coordinate/same-attachment?
+                        (::coordinate/coordinate correlation)
+                        applied-coordinate)
+                       (<= (get-in correlation
+                                   [::coordinate/coordinate ::coordinate/t])
+                           (::coordinate/t applied-coordinate)))))
         correlations))
 
 (defn- correlation-capacity-error
@@ -354,7 +355,7 @@
   (let [feed-coordinate (::feed-coordinate (correlation-for conn request-id))]
     (reject-transaction! conn request-id)
     (when feed-coordinate
-      (fire-own-tx-listeners! conn (::basis-t feed-coordinate)))
+      (fire-own-tx-listeners! conn (::coordinate/t feed-coordinate)))
     (ex-info
      (str "Database transaction lost every reply after " attempts
           " idempotent attempt(s); commit status remains unknown. "
@@ -362,7 +363,7 @@
      {::protocol/request-id request-id
       ::protocol/status protocol/unknown-status
       ::protocol/attempts attempts
-      ::protocol/basis-t (:max-tx @conn)
+      ::protocol/coordinate (coordinate/resolved @conn)
       ::protocol/transport-failure
       (::uds/failure (ex-data error))
       :seon.error/kind :core-bug}
@@ -419,12 +420,12 @@
   (let [feed-coordinate (::feed-coordinate (correlation-for conn request-id))]
     (reject-transaction! conn request-id)
     (when feed-coordinate
-      (fire-own-tx-listeners! conn (::basis-t feed-coordinate)))
+      (fire-own-tx-listeners! conn (::coordinate/t feed-coordinate)))
     (ex-info
      "A committed database transaction could not be materialized locally."
      {::protocol/request-id request-id
       ::protocol/status protocol/committed-status
-      ::protocol/basis-t (::protocol/basis-t response)
+      ::protocol/coordinate (::protocol/coordinate response)
       :seon.error/kind :core-bug}
      error)))
 
@@ -516,7 +517,9 @@
                      ;; the ack'd basis-t. The synthesized report carries
                      ;; the MATERIALIZED post-tx db value, so straight-line
                      ;; transact!-then-read code just works.
-                     (let [bt      (::protocol/basis-t resp)
+                     (let [transaction-coordinate
+                           (::protocol/coordinate resp)
+                           bt      (::coordinate/t transaction-coordinate)
                            db      (ryow-deref! conn bt)
                            tempids (::protocol/temporary-ids resp)
                            tx-meta (::protocol/transaction-meta resp)
@@ -542,12 +545,15 @@
                              (::protocol/recovered? resp)
                              (assoc ::protocol/recovered? true)
                              (some? tx-meta) (assoc :tx-meta tx-meta)
-                             (::protocol/basis-t-before resp)
+                             (::protocol/previous-coordinate resp)
                              (assoc :db-before
                                     (d/as-of db
-                                             (::protocol/basis-t-before
-                                              resp))))]
-                       (resolve-transaction! conn request-id bt)
+                                             (get-in
+                                              resp
+                                              [::protocol/previous-coordinate
+                                               ::coordinate/t]))))]
+                       (resolve-transaction! conn request-id
+                                             transaction-coordinate)
                        (finish-writer-operation! lifecycle p report)))
                    (catch :default e
                      (finish-writer-operation!
@@ -614,9 +620,14 @@
      ::writer-backend writer-backend}))
 
 (defn- progress-coordinate
-  [database-coordinate basis-t]
-  {::database-coordinate database-coordinate
-   ::basis-t basis-t})
+  [database-coordinate transaction-coordinate]
+  (when-not (= (::coordinate/attachment database-coordinate)
+               (coordinate/attachment transaction-coordinate))
+    (throw (ex-info "Replica progress belongs to another attachment."
+                    {::database-coordinate database-coordinate
+                     ::coordinate/coordinate transaction-coordinate
+                     :seon.error/kind :core-bug})))
+  transaction-coordinate)
 
 (defn- active-generation?
   ([state generation]
@@ -734,68 +745,86 @@
                        tx-t ":" (str e)))))
 
 (defn- advance-progress
-  [state basis-t]
+  [state transaction-coordinate]
   (-> state
       (assoc ::last-applied-coordinate
-             (progress-coordinate (::database-coordinate state) basis-t))
-      (update ::correlations prune-resolved-correlations basis-t)))
+             (progress-coordinate (::database-coordinate state)
+                                  transaction-coordinate))
+      (update ::correlations prune-resolved-correlations
+              transaction-coordinate)))
 
 (defn- apply-own-feed-event!
-  [generation conn request-id basis-t]
+  [generation conn request-id transaction-coordinate]
   ;; Materialize before advancing. A stale generation is checked again inside
   ;; the atomic update so an A→B reattach during the deref cannot mutate B.
-  (ryow-deref! conn basis-t)
+  (ryow-deref! conn (::coordinate/t transaction-coordinate))
   (swap! !attachment
          (fn [state]
            (if-not (active-generation? state generation conn)
              state
              (let [correlation (get-in state [::correlations request-id])
                    feed-coordinate
-                   (progress-coordinate (::database-coordinate state) basis-t)]
+                   (progress-coordinate (::database-coordinate state)
+                                        transaction-coordinate)]
                (-> (if (= ::resolved (::status correlation))
                      (update state ::correlations dissoc request-id)
                      (assoc-in state [::correlations request-id ::feed-coordinate]
                                feed-coordinate))
                    (update ::own-skips (fnil inc 0))
-                   (advance-progress basis-t)))))))
+                   (advance-progress transaction-coordinate)))))))
 
 (defn- apply-foreign-feed-event!
-  [generation conn basis-t basis-t-before ev]
-  (when-not (and (integer? basis-t-before) (< basis-t-before basis-t))
-    (throw (ex-info "A transaction feed event has no valid prior coordinate."
-                    {::basis-t basis-t
-                     ::basis-t-before basis-t-before
-                     :seon.error/kind :core-bug})))
-  (let [db      (ryow-deref! conn basis-t)
-        report  (cond-> {:db-after  db
-                         :db-before (d/as-of db basis-t-before)
-                         :tx-data   (transaction-datoms->datoms
-                                     (::protocol/transaction-data ev))}
-                  (some? (::protocol/transaction-meta ev))
-                  (assoc :tx-meta (::protocol/transaction-meta ev)))
-        applied? (volatile! false)]
-    (swap! !attachment
-           (fn [state]
-             (let [last-applied
-                   (get-in state [::last-applied-coordinate ::basis-t])]
-               (if (and (active-generation? state generation conn)
-                        (or (nil? last-applied) (< last-applied basis-t)))
-                 (do
-                   (vreset! applied? true)
-                   (advance-progress state basis-t))
-                 state))))
-    (when @applied?
-      (fire-native-listeners! conn report))))
+  [generation conn transaction-coordinate previous-coordinate ev]
+  (let [basis-t (::coordinate/t transaction-coordinate)
+        basis-t-before (::coordinate/t previous-coordinate)]
+    (when-not (and (schema/valid-candidate-value?
+                    ::coordinate/coordinate transaction-coordinate)
+                   (schema/valid-candidate-value?
+                    ::coordinate/coordinate previous-coordinate)
+                   (coordinate/same-attachment?
+                    transaction-coordinate previous-coordinate)
+                   (= (::coordinate/commit-id transaction-coordinate)
+                      (::coordinate/commit-id previous-coordinate))
+                   (< basis-t-before basis-t))
+      (throw (ex-info "A transaction feed event has no valid prior coordinate."
+                      {::protocol/coordinate transaction-coordinate
+                       ::protocol/previous-coordinate previous-coordinate
+                       :seon.error/kind :core-bug})))
+    (let [db      (ryow-deref! conn basis-t)
+          report  (cond-> {:db-after  db
+                           :db-before (d/as-of db basis-t-before)
+                           :tx-data   (transaction-datoms->datoms
+                                       (::protocol/transaction-data ev))}
+                    (some? (::protocol/transaction-meta ev))
+                    (assoc :tx-meta (::protocol/transaction-meta ev)))
+          applied? (volatile! false)]
+      (swap! !attachment
+             (fn [state]
+               (let [last-applied (::last-applied-coordinate state)]
+                 (if (and (active-generation? state generation conn)
+                          (or (nil? last-applied)
+                              (< (::coordinate/t last-applied) basis-t)))
+                   (do
+                     (vreset! applied? true)
+                     (advance-progress state transaction-coordinate))
+                   state))))
+      (when @applied?
+        (fire-native-listeners! conn report)))))
 
 (defn- handle-feed-event! [generation conn ev]
   (let [state        @!attachment
         request-id      (::protocol/request-id ev)
-        basis-t      (::protocol/basis-t ev)
-        basis-before (::protocol/basis-t-before ev)
-        last-applied (get-in state [::last-applied-coordinate ::basis-t])]
-    (when-not (integer? basis-t)
-      (throw (ex-info "A transaction feed event has no integer basis-t."
-                      {::basis-t basis-t
+        transaction-coordinate (::protocol/coordinate ev)
+        previous-coordinate (::protocol/previous-coordinate ev)
+        basis-t      (::coordinate/t transaction-coordinate)
+        last-applied (::last-applied-coordinate state)]
+    (when-not (and (schema/valid-candidate-value?
+                    ::coordinate/coordinate transaction-coordinate)
+                   (schema/valid-candidate-value?
+                    ::coordinate/coordinate previous-coordinate))
+      (throw (ex-info "A transaction feed event has no complete coordinate."
+                      {::protocol/coordinate transaction-coordinate
+                       ::protocol/previous-coordinate previous-coordinate
                        :seon.error/kind :core-bug})))
     (cond
       ;; A callback from an attachment that has been stopped or replaced is a
@@ -806,17 +835,19 @@
       ;; Replay/live overlap is idempotent inside this branch-qualified
       ;; attachment. A numeric t is never carried from one attachment to the
       ;; next; start seeds a new full coordinate from the new connection.
-      (and (some? last-applied) (<= basis-t last-applied))
+      (and (some? last-applied)
+           (coordinate/same-attachment? last-applied transaction-coordinate)
+           (<= basis-t (::coordinate/t last-applied)))
       nil
 
       ;; The response-side Datahike writer fires own listeners. The feed only
       ;; advances its full cursor and resolves correlation ordering.
       (and request-id (get-in state [::correlations request-id]))
-      (apply-own-feed-event! generation conn request-id basis-t)
+      (apply-own-feed-event! generation conn request-id transaction-coordinate)
 
       :else
       (apply-foreign-feed-event!
-       generation conn basis-t basis-before ev))))
+       generation conn transaction-coordinate previous-coordinate ev))))
 
 (defn- feed-event-dispatch!
   "Apply one transaction event for the attached database."
@@ -830,36 +861,50 @@
   (throw (ex-info (str "Invalid database replay page: " message)
                   (assoc data :seon.error/kind :core-bug))))
 
+(defn- same-container?
+  [left right]
+  (and (schema/valid-candidate-value? ::coordinate/coordinate left)
+       (schema/valid-candidate-value? ::coordinate/coordinate right)
+       (coordinate/same-attachment? left right)
+       (= (::coordinate/commit-id left) (::coordinate/commit-id right))))
+
 (defn- validated-replay-page
   "Validate one replay page before its cursor is allowed to advance.
 
    A malformed, stale, repeated-without-progress, or prematurely empty page is
    a reconnectable feed failure, never permission to skip a range. The first
-   page establishes db-name and through-t; later pages must retain both."
+   page establishes db-name and its frozen commit; later pages retain both."
   [cursor expected-through expected-db-name response]
   (when-not (::protocol/success? response)
     (replay-page-error "writer returned not-ok"
                        {::response response ::cursor cursor}))
-  (let [response-since (::protocol/since-t response)
-        through       (::protocol/through-t response)
-        continuation  (::protocol/continuation-t response)
+  (let [response-since (::protocol/since-coordinate response)
+        through       (::protocol/through-coordinate response)
+        continuation  (::protocol/continuation-coordinate response)
         done?         (::protocol/complete? response)
         response-database-name (::protocol/database-name response)
         events        (::protocol/events response)
         replayed      (::protocol/replayed-count response)
-        basis-ts      (mapv ::protocol/basis-t events)
-        before-ts     (mapv ::protocol/basis-t-before events)
-        expected-before-ts (if (seq basis-ts)
-                             (vec (cons cursor (butlast basis-ts)))
-                             [])]
-    (when-not (= cursor response-since)
-      (replay-page-error "response since-t does not match the requested cursor"
+        event-coordinates (mapv ::protocol/coordinate events)
+        previous-coordinates (mapv ::protocol/previous-coordinate events)
+        cursor-t (::coordinate/t cursor)
+        through-t (::coordinate/t through)
+        continuation-t (::coordinate/t continuation)
+        event-ts (mapv ::coordinate/t event-coordinates)
+        expected-previous (if (seq event-coordinates)
+                            (vec (cons response-since
+                                       (butlast event-coordinates)))
+                            [])]
+    (when-not (and (coordinate/same-attachment? cursor response-since)
+                   (= cursor-t (::coordinate/t response-since)))
+      (replay-page-error "response cursor does not identify the requested cut"
                          {::cursor cursor ::response response}))
-    (when-not (and (integer? through) (<= cursor through))
-      (replay-page-error "through-t is not an integer at or above the cursor"
+    (when-not (and (same-container? response-since through)
+                   (<= cursor-t through-t))
+      (replay-page-error "watermark does not contain the requested cursor"
                          {::cursor cursor ::response response}))
     (when (and (some? expected-through) (not= expected-through through))
-      (replay-page-error "through-t changed between pages"
+      (replay-page-error "frozen watermark changed between pages"
                          {::expected-through expected-through
                           ::response response}))
     (when-not (and (string? response-database-name)
@@ -880,22 +925,22 @@
     (when-not (boolean? done?)
       (replay-page-error "done? is not boolean"
                          {::response response}))
-    (when-not (and (integer? continuation)
-                   (<= cursor continuation through))
-      (replay-page-error "continuation-t is outside the page bounds"
+    (when-not (and (same-container? through continuation)
+                   (<= cursor-t continuation-t through-t))
+      (replay-page-error "continuation is outside the frozen page bounds"
                          {::cursor cursor ::response response}))
-    (when-not (every? (fn [basis-t]
-                        (and (integer? basis-t)
-                             (< cursor basis-t)
-                             (<= basis-t through)))
-                      basis-ts)
-      (replay-page-error "an event basis-t is stale or outside the watermark"
+    (when-not (every? (fn [event-coordinate]
+                        (and (same-container? through event-coordinate)
+                             (< cursor-t (::coordinate/t event-coordinate))
+                             (<= (::coordinate/t event-coordinate) through-t)))
+                      event-coordinates)
+      (replay-page-error "an event is stale or outside the frozen watermark"
                          {::cursor cursor ::response response}))
-    (when-not (apply < cursor basis-ts)
-      (replay-page-error "event basis-ts are not strictly ascending"
+    (when-not (apply < cursor-t event-ts)
+      (replay-page-error "event coordinates are not strictly ascending"
                          {::cursor cursor ::response response}))
-    (when-not (= expected-before-ts before-ts)
-      (replay-page-error "basis-t-before does not form one cursor chain"
+    (when-not (= expected-previous previous-coordinates)
+      (replay-page-error "previous coordinates do not form one cursor chain"
                          {::cursor cursor ::response response}))
     (when-not (every? (fn [event]
                         (and (= protocol/transaction-event
@@ -908,20 +953,21 @@
     (if done?
       (do
         (when-not (= through continuation)
-          (replay-page-error "a final page does not continue at through-t"
+          (replay-page-error "a final page does not continue at its watermark"
                              {::response response}))
-        (when (and (< cursor through)
-                   (or (empty? basis-ts) (not= through (peek basis-ts))))
+        (when (and (< cursor-t through-t)
+                   (or (empty? event-coordinates)
+                       (not= through (peek event-coordinates))))
           (replay-page-error "a final page omitted the upper watermark"
                              {::cursor cursor ::response response})))
-      (when (or (empty? basis-ts)
-                (not= continuation (peek basis-ts))
-                (<= continuation cursor))
+      (when (or (empty? event-coordinates)
+                (not= continuation (peek event-coordinates))
+                (<= continuation-t cursor-t))
         (replay-page-error "a continuation page made no progress"
                            {::cursor cursor ::response response})))
     {::database-name response-database-name
-     ::through-t through
-     ::continuation-t continuation
+     ::through-coordinate through
+     ::continuation-coordinate continuation
      ::done? done?
      ::events events
      ::replayed replayed}))
@@ -1023,9 +1069,8 @@
                                 {::generation generation
                                  :seon.error/kind :core-bug})))
             initial-cursor
-            (or (get-in attachment-state
-                        [::last-applied-coordinate ::basis-t])
-                0)
+            (or (::last-applied-coordinate attachment-state)
+                (coordinate/resolved @conn))
             expected-database-name (::database-name database-coordinate)
             replay-result
             (loop [cursor initial-cursor
@@ -1036,9 +1081,9 @@
                     (protocol/replay-transactions-request
                      (cond->
                       {::protocol/database-name expected-database-name
-                       ::protocol/since-t cursor}
+                       ::protocol/since-coordinate cursor}
                        (some? through)
-                       (assoc ::protocol/through-t through)))
+                       (assoc ::protocol/through-coordinate through)))
                     response
                     (await
                      (js/Promise.race
@@ -1056,8 +1101,8 @@
                   (feed-event-dispatch! generation conn next-db event))
                 (if (::done? page)
                   {::database-name next-db ::replayed total}
-                  (recur (::continuation-t page)
-                         (::through-t page)
+                  (recur (::continuation-coordinate page)
+                         (::through-coordinate page)
                          total))))]
         (throw-if-feed-dropped! !connection)
         (when-not (active-generation? @!attachment generation conn)
@@ -1204,12 +1249,8 @@
     :or {request-socket-path default-request-socket-path publish-socket-path default-publish-socket-path}}]
   (let [db                  @conn
         database-coordinate (connection-coordinate db)
-        basis-t             (:max-tx db)
+        head-coordinate     (coordinate/resolved db)
         current             @!attachment]
-    (when-not (integer? basis-t)
-      (throw (ex-info "The attached database has no integer basis-t."
-                      {::basis-t basis-t
-                       :seon.error/kind :core-bug})))
     (if (same-attachment?
          current conn database-coordinate request-socket-path publish-socket-path)
       (await (or (::ready current)
@@ -1220,7 +1261,7 @@
                    ::conn conn
                    ::database-coordinate database-coordinate
                    ::last-applied-coordinate
-                   (progress-coordinate database-coordinate basis-t)
+                   (progress-coordinate database-coordinate head-coordinate)
                    ::request-socket-path request-socket-path
                    ::publish-socket-path publish-socket-path
                    ::own-skips 0

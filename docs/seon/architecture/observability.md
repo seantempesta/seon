@@ -181,8 +181,8 @@ ids through the fork point are identical, but coordinates are always
 `{database-id, branch, commit-id}`
 qualified because later transaction ids can diverge/reuse after a reset.
 
-No branch-and-`t` convenience selector exists; the complete coordinate names the
-retained commit. The debug pod starts
+No branch-and-`t` convenience selector exists; the complete coordinate names a
+temporal cut inside one retained immutable containing commit. The debug pod starts
 non-autonomously: opening history installs no ticker, wake trigger, or agent
 host and never resumes agents, schedules, providers, or external-effect workers.
 

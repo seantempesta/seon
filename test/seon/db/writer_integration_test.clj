@@ -135,9 +135,10 @@
         (is (true? (::protocol/success? entity-response)))
         (is (pos-int?
              (get (::protocol/temporary-ids entity-response) "person-temp")))
-        (is (= [(::protocol/basis-t schema-response)
-                (::protocol/basis-t entity-response)]
-               (mapv ::protocol/basis-t [schema-event entity-event])))
+        (is (= [(::protocol/coordinate schema-response)
+                (::protocol/coordinate entity-response)]
+               (mapv ::protocol/coordinate
+                     [schema-event entity-event])))
         (is (= ["writer/schema" "writer/entity"]
                (mapv ::protocol/request-id [schema-event entity-event])))
         (is (every? #(= protocol/transaction-event (::protocol/event %))
@@ -203,7 +204,7 @@
                       {:db/ident :writer.fence/value
                        :db/valueType :db.type/string
                        :db/cardinality :db.cardinality/one}]}))
-            frozen (::protocol/basis-t schema)
+            frozen (get-in schema [::protocol/coordinate ::coordinate/t])
             accepted
             (call! request-channel
                    (protocol/transaction-request
@@ -213,7 +214,8 @@
                      ::protocol/transaction-data
                      [{:writer.fence/id "one"
                        :writer.fence/value "accepted"}]}))
-            committed (::protocol/basis-t accepted)
+            committed (get-in accepted
+                              [::protocol/coordinate ::coordinate/t])
             rejected
             (call! request-channel
                    (protocol/transaction-request

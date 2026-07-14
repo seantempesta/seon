@@ -81,8 +81,8 @@
       (is (true? (::protocol/success? first-response)))
       (is (true? (::protocol/success? recovered-response)))
       (is (true? (::protocol/recovered? recovered-response)))
-      (is (= (::protocol/basis-t first-response)
-             (::protocol/basis-t recovered-response)))
+      (is (= (::protocol/coordinate first-response)
+             (::protocol/coordinate recovered-response)))
       (is (= (::protocol/temporary-ids first-response)
              (::protocol/temporary-ids recovered-response)))
       (is (empty?
@@ -160,8 +160,8 @@
         second-response (ensure-database! runtime database-name)]
     (is (true? (::protocol/success? first-response)))
     (is (true? (::protocol/success? second-response)))
-    (is (= (::protocol/basis-t first-response)
-           (::protocol/basis-t second-response)))
+    (is (= (::protocol/coordinate first-response)
+           (::protocol/coordinate second-response)))
     (is (= (set (map :db/ident protocol/receipt-schema))
            (set (filter #(contains? (:schema (d/db (connection database-name))) %)
                         (map :db/ident protocol/receipt-schema)))))))

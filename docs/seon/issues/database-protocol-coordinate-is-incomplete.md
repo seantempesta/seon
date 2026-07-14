@@ -27,8 +27,12 @@ which lineage produced a value or frame.
   responses expose `basis-t` and `basis-t-before` without a lineage point.
 - `seon.db.replica/connection-coordinate` carries database id and branch;
   `progress-coordinate` adds only a numeric basis.
-- Datahike `as-of` values do not expose the stored commit id. Replay resolution
-  must use the maintained commit graph rather than infer identity from `t`.
+- Datahike `as-of` values do not expose the stored commit id. Replay must pin a
+  real containing commit rather than infer identity from `t`.
+- Transaction replies, recovered receipts, feed events, replay pages, replica
+  progress, and own-write correlations now use the canonical coordinate.
+  Replay freezes one containing commit and proves the initial cursor commit is
+  an ancestor; the full JVM and CLJS gates pass.
 
 The source and dependency evidence is in
 [[../../prds/database-lifecycle-recovery/research/database-lifecycle-source-audit-2026-07-14]].
@@ -55,3 +59,9 @@ progress, replay, bookmark, error, or cache identity.
   default head.
 - Superseded database-name-plus-basis identity maps are deleted rather than
   retained as a compatibility path.
+
+## Remaining
+
+Expected-write fences and stale-fence errors, turn/error capture, frozen
+caches, bookmarks, and native branch lifecycle still need the same coordinate.
+The issue remains open until those downstream identity copies are removed.

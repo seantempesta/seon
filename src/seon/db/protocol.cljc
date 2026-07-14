@@ -56,13 +56,13 @@
 (schema/register! ::database-name [:string {:min 1}])
 (schema/register! ::database-path [:string {:min 1}])
 (schema/register! ::backend [:enum :memory :file])
-(schema/register! ::basis-t [:int {:min 0}])
-(schema/register! ::basis-t-before [:int {:min 0}])
+(schema/register! ::coordinate ::coordinate/coordinate)
+(schema/register! ::previous-coordinate ::coordinate/coordinate)
+(schema/register! ::since-coordinate ::coordinate/coordinate)
+(schema/register! ::through-coordinate ::coordinate/coordinate)
+(schema/register! ::continuation-coordinate ::coordinate/coordinate)
 (schema/register! ::expected-basis-t [:int {:min 0}])
 (schema/register! ::current-basis-t [:int {:min 0}])
-(schema/register! ::since-t [:int {:min 0}])
-(schema/register! ::through-t [:int {:min 0}])
-(schema/register! ::continuation-t [:int {:min 0}])
 (schema/register! ::complete? :boolean)
 (schema/register! ::replayed-count [:int {:min 0}])
 (schema/register! ::datoms-added [:int {:min 0}])
@@ -99,8 +99,8 @@
  [:map
   [::event [:= transaction-event]]
   [::database-name ::database-name]
-  [::basis-t ::basis-t]
-  [::basis-t-before ::basis-t-before]
+  [::coordinate ::coordinate]
+  [::previous-coordinate ::previous-coordinate]
   [::transaction-data ::transaction-data]
   [::transaction-meta {:optional true} ::transaction-meta]
   [::request-id {:optional true} ::request-id]
@@ -136,8 +136,8 @@
   [:map
   [::operation [:= replay-transactions-operation]]
   [::database-name ::database-name]
-  [::since-t ::since-t]
-  [::through-t {:optional true} ::through-t]])
+  [::since-coordinate ::since-coordinate]
+  [::through-coordinate {:optional true} ::through-coordinate]])
 (schema/register!
   ::knn-search-request
   [:map
@@ -181,8 +181,8 @@
  [:map
   [::success? [:= true]]
   [::request-id ::request-id]
-  [::basis-t ::basis-t]
-  [::basis-t-before ::basis-t-before]
+  [::coordinate ::coordinate]
+  [::previous-coordinate ::previous-coordinate]
   [::temporary-ids ::temporary-ids]
   [::transaction-data ::transaction-data]
   [::transaction-meta {:optional true} ::transaction-meta]
@@ -195,9 +195,9 @@
  [:map
   [::success? [:= true]]
   [::database-name ::database-name]
-  [::since-t ::since-t]
-  [::through-t ::through-t]
-  [::continuation-t ::continuation-t]
+  [::since-coordinate ::since-coordinate]
+  [::through-coordinate ::through-coordinate]
+  [::continuation-coordinate ::continuation-coordinate]
   [::complete? ::complete?]
   [::events ::events]
   [::replayed-count ::replayed-count]])
@@ -242,8 +242,8 @@
   ::replay-request-input
   [:map
   [::database-name ::database-name]
-  [::since-t ::since-t]
-  [::through-t {:optional true} ::through-t]])
+  [::since-coordinate ::since-coordinate]
+  [::through-coordinate {:optional true} ::through-coordinate]])
 (schema/register!
   ::knn-request-input
   [:map
@@ -290,11 +290,12 @@
   "Construct one bounded transaction-history page request."
   {:malli/schema [:=> [:cat ::replay-request-input]
                   ::replay-transactions-request]}
-  [{::keys [database-name since-t through-t]}]
+  [{::keys [database-name since-coordinate through-coordinate]}]
   (cond-> {::operation replay-transactions-operation
            ::database-name database-name
-           ::since-t since-t}
-    (some? through-t) (assoc ::through-t through-t)))
+           ::since-coordinate since-coordinate}
+    (some? through-coordinate)
+    (assoc ::through-coordinate through-coordinate)))
 
 (defn knn-search-request
   "Construct one bounded embedding-neighbor request."

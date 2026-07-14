@@ -51,10 +51,15 @@
                  (::protocol/operation message))
             (replay-stub
              socket-path
-             (cond-> {:since-t (::protocol/since-t message)
+             (cond-> {:since-t (get-in message
+                                       [::protocol/since-coordinate
+                                        ::coordinate/t])
                       :db-name (::protocol/database-name message)}
-               (some? (::protocol/through-t message))
-               (assoc :through-t (::protocol/through-t message))))
+               (some? (::protocol/through-coordinate message))
+               (assoc :through-t
+                      (get-in message
+                              [::protocol/through-coordinate
+                               ::coordinate/t]))))
             (original-rpc request)))
         restore! (fn []
                    (set! uds/connect-publisher! original-connect)
@@ -80,6 +85,14 @@
 
 (def ^:private fake-commit-id
   #uuid "cfd65c4c-c4f5-4f2b-afef-117b9fd6779a")
+
+(defn- point
+  ([t] (point t :db))
+  ([t branch]
+   {::coordinate/database-id fake-database-id
+    ::coordinate/branch branch
+    ::coordinate/commit-id fake-commit-id
+    ::coordinate/t t}))
 
 (let [resolve-coordinate coordinate/resolved]
   (use-fixtures
@@ -154,7 +167,7 @@
 (defn- success-response
   [basis-t]
   {::protocol/success? true
-   ::protocol/basis-t basis-t
+   ::protocol/coordinate (point basis-t)
    ::protocol/temporary-ids {}
    ::protocol/transaction-data []
    ::protocol/datoms-added 0
@@ -191,7 +204,7 @@
       ::replica/conn conn
       ::replica/database-coordinate coordinate
       ::replica/last-applied-coordinate
-      (#'replica/progress-coordinate coordinate basis-t)
+      (#'replica/progress-coordinate coordinate (point basis-t))
       ::replica/request-socket-path "req.sock"
       ::replica/publish-socket-path "pub.sock"
       ::replica/own-skips 0
@@ -208,7 +221,7 @@
 (defn- adapter-basis-t
   []
   (get-in (adapter-state)
-          [::replica/last-applied-coordinate ::replica/basis-t]))
+          [::replica/last-applied-coordinate ::coordinate/t]))
 
 (defn- correlations
   []
@@ -244,24 +257,28 @@
      (js/setTimeout deliver 25))))
 
 (defn- replay-event
-  [db-name basis-t basis-t-before]
-  {::protocol/event protocol/transaction-event
-   ::protocol/database-name db-name
-   ::protocol/basis-t basis-t
-   ::protocol/basis-t-before basis-t-before
-   ::protocol/transaction-data
-   [[basis-t :seon.db.replica-test/value basis-t basis-t true]]})
+  ([db-name basis-t basis-t-before]
+   (replay-event db-name basis-t basis-t-before :db))
+  ([db-name basis-t basis-t-before branch]
+   {::protocol/event protocol/transaction-event
+    ::protocol/database-name db-name
+    ::protocol/coordinate (point basis-t branch)
+    ::protocol/previous-coordinate (point basis-t-before branch)
+    ::protocol/transaction-data
+    [[basis-t :seon.db.replica-test/value basis-t basis-t true]]}))
 
 (defn- replay-page
-  [db-name since-t through-t continuation-t done? events]
-  {::protocol/success? true
-   ::protocol/database-name db-name
-   ::protocol/since-t since-t
-   ::protocol/through-t through-t
-   ::protocol/continuation-t continuation-t
-   ::protocol/complete? done?
-   ::protocol/events events
-   ::protocol/replayed-count (count events)})
+  ([db-name since-t through-t continuation-t done? events]
+   (replay-page db-name since-t through-t continuation-t done? events :db))
+  ([db-name since-t through-t continuation-t done? events branch]
+   {::protocol/success? true
+    ::protocol/database-name db-name
+    ::protocol/since-coordinate (point since-t branch)
+    ::protocol/through-coordinate (point through-t branch)
+    ::protocol/continuation-coordinate (point continuation-t branch)
+    ::protocol/complete? done?
+    ::protocol/events events
+    ::protocol/replayed-count (count events)}))
 
 (deftest wire-writer-shutdown-closes-admission-and-drains-accepted-rpcs
   (async done
@@ -388,8 +405,8 @@
           listeners  (atom {:k (fn [report] (swap! fired conj (count (:tx-data report))))})
           conn       (fake-conn 100 listeners)
           ev         (fn [bt] {::protocol/event protocol/transaction-event
-                               ::protocol/basis-t bt
-                               ::protocol/basis-t-before (dec bt)
+                               ::protocol/coordinate (point bt)
+                               ::protocol/previous-coordinate (point (dec bt))
                                ::protocol/transaction-data [[1 :a "v" bt true]]})]
       (-> (with-wire-state
            (attached-state conn 99)
@@ -615,9 +632,12 @@
                                (socket-for connection-number))))
           replay-stub     (fn [_ {:keys [since-t db-name] :as request}]
                             (swap! !replays conj request)
-                            (js/Promise.resolve
-                             (replay-page db-name since-t since-t since-t
-                                          true [])))
+                            (let [branch (if (= 1 (count @!connections))
+                                           :branch/a
+                                           :branch/b)]
+                              (js/Promise.resolve
+                               (replay-page db-name since-t since-t since-t
+                                            true [] branch))))
           start!          (fn [conn]
                             (replica/attach!
                              {::replica/conn conn
@@ -682,11 +702,11 @@
                                      (reset! b-database
                                              (fake-db 51 :branch/b))
                                      ((:on-event a-callbacks)
-                                      (replay-event db-name 51 50))
+                                      (replay-event db-name 51 50 :branch/a))
                                      ((:on-event b-callbacks)
-                                      (replay-event db-name 51 50))
+                                      (replay-event db-name 51 50 :branch/b))
                                      ((:on-event b-callbacks)
-                                      (replay-event db-name 51 50))
+                                      (replay-event db-name 51 50 :branch/b))
                                      (-> (after-macrotask)
                                          (.then
                                           (fn []
@@ -939,8 +959,8 @@
                        request-id (::protocol/request-id @!request)
                        event   {::protocol/event protocol/transaction-event
                                 ::protocol/request-id request-id
-                                ::protocol/basis-t 37
-                                ::protocol/basis-t-before 36
+                                ::protocol/coordinate (point 37)
+                                ::protocol/previous-coordinate (point 36)
                                 ::protocol/transaction-data
                                 [[1 :seon.db.replica-test/value
                                   "feed-first" 37 true]]}]
@@ -991,8 +1011,8 @@
                         (let [request-id (::protocol/request-id @!request)
                               event   {::protocol/event protocol/transaction-event
                                        ::protocol/request-id request-id
-                                       ::protocol/basis-t 41
-                                       ::protocol/basis-t-before 40
+                                       ::protocol/coordinate (point 41)
+                                       ::protocol/previous-coordinate (point 40)
                                        ::protocol/transaction-data
                                        [[1 :seon.db.replica-test/value
                                          "response-first" 41 true]]}]

@@ -14,6 +14,7 @@
    [datahike.writer :as writer]
    [datahike.writing :as writing]
    [malli.core :as m]
+   [seon.db.coordinate :as coordinate]
    [seon.db.protocol :as protocol]
    [seon.schema :as schema]
    #?@(:cljs [[seon.db.internal :as db.internal]])
@@ -1407,8 +1408,9 @@
                {:seon.db/ok? true
                 :seon.db/tx
                 (get-in envelope
-                        [:seon.db/error :seon.error/data
-                         ::protocol/basis-t])
+                         [:seon.db/error :seon.error/data
+                          ::protocol/coordinate
+                         ::coordinate/t])
                 ::ids ids
                 ::eids eids
                 ::recovered-commit? true}

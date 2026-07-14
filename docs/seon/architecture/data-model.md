@@ -269,12 +269,12 @@ map schema:
 ```
 
 `{database-id, branch}` is the stable attachment; `commit-id` and `t` are an
-all-or-none resolved point. Commit id is canonical and t is a display/range
-aid. A logical database name travels beside this map as routing data and is never
-treated as storage identity. A convenience `{branch, t}` selector must resolve
-to exactly one commit in that branch's retained ancestry; zero/multiple matches
-are typed errors. Cache keys and durable bookmarks contain the resolved commit,
-never bare t.
+all-or-none resolved point. The commit id pins one immutable containing database
+value and `t` selects the exact temporal cut inside it. Multiple cuts may share
+one containing commit, so neither field is inferred from the other. A logical
+database name travels beside this map as routing data and is never treated as
+storage identity. No `{branch, t}` convenience selector exists. Cache keys and
+durable bookmarks contain the complete coordinate, never bare `t`.
 
 ## 3. Identifying an entity shape — presence, not a stored field
 

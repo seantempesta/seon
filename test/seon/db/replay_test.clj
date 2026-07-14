@@ -2,6 +2,7 @@
   "Bounded transaction replay ordering, watermark, and error tests."
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [datahike.api :as d]
+            [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.transport.uds :as uds]
@@ -57,13 +58,14 @@
      ::connection connection}))
 
 (defn- replay-page
-  [connection database-name since-t through-t]
+  [connection database-name since-coordinate through-coordinate]
   (writer/replay-transactions-page
    (cond-> {::writer/connection connection
             ::writer/database-name database-name
-            ::protocol/since-t since-t
+            ::protocol/since-coordinate since-coordinate
             ::writer/page-size 1}
-     (some? through-t) (assoc ::protocol/through-t through-t))))
+     through-coordinate
+     (assoc ::protocol/through-coordinate through-coordinate))))
 
 (defn- remaining-pages
   [connection database-name first-page]
@@ -73,8 +75,8 @@
       pages
       (let [next-page
             (replay-page connection database-name
-                         (::protocol/continuation-t page)
-                         (::protocol/through-t first-page))]
+                         (::protocol/continuation-coordinate page)
+                         (::protocol/through-coordinate first-page))]
         (recur (conj pages next-page) next-page)))))
 
 (deftest replay-is-ordered-bounded-and-preserves-retractions
@@ -89,7 +91,7 @@
           {:db/ident :replay/value
            :db/valueType :db.type/string
            :db/cardinality :db.cardinality/one}])
-        start-t (::protocol/basis-t schema-response)
+        start-coordinate (::protocol/coordinate schema-response)
         first-response
         (transact! runtime database-name "replay/first"
                    [{:replay/id "item" :replay/value "old"}])
@@ -100,14 +102,15 @@
         (transact! runtime database-name "replay/second"
                    [[:db/retract entity-id :replay/value "old"]
                     [:db/add entity-id :replay/value "new"]])
-        first-page (replay-page connection database-name start-t nil)
-        watermark (::protocol/through-t first-page)
+        first-page (replay-page connection database-name start-coordinate nil)
+        watermark (::protocol/through-coordinate first-page)
         after-watermark
         (transact! runtime database-name "replay/after-watermark"
                    [{:replay/id "later" :replay/value "excluded"}])
         pages (remaining-pages connection database-name first-page)
         events (vec (mapcat ::protocol/events pages))
-        transaction-ids (mapv ::protocol/basis-t events)
+        transaction-ids (mapv #(get-in % [::protocol/coordinate
+                                           ::coordinate/t]) events)
         retraction-event
         (first (filter #(= "replay/second" (::protocol/request-id %)) events))
         retraction
@@ -118,13 +121,29 @@
                  (= "old" value)
                  (false? added?)))
           (::protocol/transaction-data retraction-event)))]
-    (is (= [(::protocol/basis-t first-response)
-            (::protocol/basis-t second-response)]
+    (is (= [(get-in first-response
+                     [::protocol/coordinate ::coordinate/t])
+            (get-in second-response
+                    [::protocol/coordinate ::coordinate/t])]
            transaction-ids))
-    (is (= watermark (::protocol/basis-t second-response)))
-    (is (< watermark (::protocol/basis-t after-watermark))
+    (is (= (::coordinate/t watermark)
+           (get-in second-response [::protocol/coordinate ::coordinate/t])))
+    (is (= watermark (::protocol/coordinate second-response))
+        "the frozen replay watermark is the exact containing commit")
+    (is (every?
+         (fn [event]
+           (and (= (::coordinate/commit-id watermark)
+                   (get-in event [::protocol/coordinate
+                                  ::coordinate/commit-id]))
+                (= (::coordinate/commit-id watermark)
+                   (get-in event [::protocol/previous-coordinate
+                                  ::coordinate/commit-id]))))
+         events)
+        "every page cut remains inside one immutable container")
+    (is (< (::coordinate/t watermark)
+           (get-in after-watermark [::protocol/coordinate ::coordinate/t]))
         "later commits do not move a replay's captured upper watermark")
-    (is (every? #(= watermark (::protocol/through-t %)) pages))
+    (is (every? #(= watermark (::protocol/through-coordinate %)) pages))
     (is (= ["replay/first" "replay/second"]
            (mapv ::protocol/request-id events)))
     (is (= "replay/second" (::protocol/request-id retraction-event)))
@@ -139,7 +158,7 @@
 
 (deftest replay-errors-are-canonical-and-do-not-advance-a-cursor
   (let [{::keys [runtime database-name connection]} (open-database!)
-        current-t (:max-tx (d/db connection))
+        current-coordinate (coordinate/resolved (d/db connection))
         missing-cursor
         (writer/handle-request
          runtime
@@ -150,14 +169,15 @@
          runtime
          (protocol/replay-transactions-request
           {::protocol/database-name "missing-database"
-           ::protocol/since-t current-t}))
+           ::protocol/since-coordinate current-coordinate}))
         impossible-watermark
         (writer/handle-request
          runtime
          (protocol/replay-transactions-request
           {::protocol/database-name database-name
-           ::protocol/since-t current-t
-           ::protocol/through-t (inc current-t)}))]
+           ::protocol/since-coordinate current-coordinate
+           ::protocol/through-coordinate
+           (update current-coordinate ::coordinate/t inc)}))]
     (is (false? (::protocol/success? missing-cursor)))
     (is (= protocol/protocol-error
            (::protocol/error-kind missing-cursor)))

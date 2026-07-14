@@ -49,11 +49,26 @@ CLJ and CLJS MCP both reported database `54b5b7e7-51fb-3220-b079-81a81914d86f`,
 branch `:db`, commit `6a56c20e-eb61-5cc2-b20f-90d25090eab5`, and `t`
 `536870932`.
 
-Slice 1 remains open: transaction responses/events, replay pages/cursors,
-own-write correlation, and downstream turn/error/cache/bookmark consumers
-still carry numeric basis values. Historical coordinates must resolve through
-the maintained commit graph because executable probes proved Datahike `as-of`
-wrappers expose neither the selected commit id nor a usable head map.
+Slice 1 now carries complete coordinates through transaction responses/events,
+durable-receipt recovery, frozen replay pages/cursors, replica progress, and
+own-write correlation. One immutable replay commit contains every page cut;
+later writes cannot move its watermark, and the writer proves an initial cursor
+commit is an ancestor before replay. Focused proof passes the complete JVM gate
+(55 tests/327 assertions), the replica gate (17/93), and the complete CLJS gate
+(1,311/6,195). After a public rebuild/restart, the writer and replica both
+reported database `54b5b7e7-51fb-3220-b079-81a81914d86f`, branch `:db`, commit
+`6a56c8da-68c9-5c20-b4f4-99b6fc150056`, and `t` `536870935`; feed attachment
+replayed zero transactions and became live.
+
+The implementation audit corrected an earlier selector assumption: a Datahike
+commit can contain multiple temporal cuts. `commit-id` therefore pins the
+immutable containing value while `t` selects a cut inside it. `as-of` is only a
+read filter; no code searches ancestry for an exact-`t` commit.
+
+Slice 1 remains open at the downstream boundary: expected-write fences and
+their errors, turn/error capture, frozen caches, and bookmarks still carry bare
+numeric basis values. Registry and native branch lifecycle also remain later
+ordered slices.
 
 ## Research evidence
 

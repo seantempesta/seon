@@ -3,6 +3,7 @@
   (:require
    #?(:clj  [clojure.test :refer [deftest is testing use-fixtures]]
       :cljs [cljs.test :refer [deftest is testing use-fixtures]])
+   #?(:clj [datahike.api :as d])
    [malli.core :as m]
    [seon.db.coordinate :as coordinate]
    [seon.schema :as schema]))
@@ -72,3 +73,44 @@
       (is (= (::coordinate/t main-point) (::coordinate/t branch-point)))
       (is (not= main-point branch-point))
       (is (not (coordinate/same-attachment? main-point branch-point))))))
+
+#?(:clj
+   (deftest temporal-cuts-retain-their-containing-commit
+     (let [config {:store {:backend :memory :id (random-uuid)}
+                   :schema-flexibility :write
+                   :keep-history? true}
+           _ (d/create-database config)
+           connection (d/connect config)
+           before (d/db connection)
+           before-coordinate (coordinate/resolved before)
+           _ (d/transact connection
+                         [{:db/ident :coordinate-test/value
+                           :db/valueType :db.type/string
+                           :db/cardinality :db.cardinality/one}])
+           after (d/db connection)
+           contained-before
+           (coordinate/at
+            {::coordinate/db-value after
+             ::coordinate/target-t (::coordinate/t before-coordinate)})]
+       (try
+         (is (= (::coordinate/t before-coordinate)
+                (::coordinate/t contained-before)))
+         (is (= (::coordinate/commit-id (coordinate/resolved after))
+                (::coordinate/commit-id contained-before)))
+         (is (not= (::coordinate/commit-id before-coordinate)
+                   (::coordinate/commit-id contained-before)))
+         (is (= (coordinate/resolved after)
+                (coordinate/at
+                 {::coordinate/db-value after
+                  ::coordinate/target-t
+                  (::coordinate/t (coordinate/resolved after))})))
+         (is (thrown-with-msg?
+              clojure.lang.ExceptionInfo
+              #"outside its containing commit"
+              (coordinate/at
+               {::coordinate/db-value after
+                ::coordinate/target-t
+                (inc (::coordinate/t (coordinate/resolved after)))})))
+         (finally
+           (d/release connection)
+           (d/delete-database config))))))

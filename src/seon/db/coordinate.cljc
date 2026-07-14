@@ -7,6 +7,7 @@
    not database identity."
   (:require
    [datahike.api :as d]
+   [datahike.constants :as constants]
    [datahike.db.interface :as dbi]
    [seon.schema :as schema]))
 
@@ -32,12 +33,20 @@
 ;; A Datahike immutable database value is an opaque third-party record.
 (schema/register! ::db-value :any)
 
+(schema/register! ::target-t ::t)
+(schema/register!
+ ::at-request
+ [:map {:closed true}
+  [::db-value ::db-value]
+  [::attachment {:optional true} ::attachment]
+  [::target-t ::target-t]])
+
 (defn resolved
   "Resolve one complete point from a committed Datahike database value.
 
    Temporal wrapper values intentionally fail: Datahike `as-of` does not carry
-   the selected commit id. Historical selectors must resolve through the
-   maintained commit graph before calling this projection."
+   an independently selected commit id. Pin the containing committed database
+   value first, then use `at` for a temporal cut within it."
   {:malli/schema [:=> [:catn [::db-value ::db-value]] ::coordinate]}
   [db]
   (let [point
@@ -68,3 +77,26 @@
     :boolean]}
   [left right]
   (= (attachment left) (attachment right)))
+
+(defn at
+  "Identify temporal cut `t` within one immutable containing commit."
+  {:malli/schema [:=> [:cat ::at-request] ::coordinate]}
+  [{::keys [db-value target-t] attachment* ::attachment}]
+  (let [resolved-container (resolved db-value)
+        _ (when (and attachment*
+                     (not= (::database-id attachment*)
+                           (::database-id resolved-container)))
+            (throw
+             (ex-info "The attachment names a different physical database."
+                      {::attachment attachment*
+                       ::coordinate resolved-container
+                       :seon.error/kind :invalid-database-coordinate})))
+        container (merge resolved-container attachment*)
+        max-t (::t container)]
+    (when-not (<= constants/tx0 target-t max-t)
+      (throw
+       (ex-info "The temporal cut is outside its containing commit."
+                {::target-t target-t
+                 ::coordinate container
+                 :seon.error/kind :invalid-database-coordinate})))
+    (assoc container ::t target-t)))

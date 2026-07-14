@@ -218,8 +218,11 @@
      (transaction-data->protocol transaction-data)
      ::protocol/datoms-added (count (filter :added transaction-data))
      ::protocol/datoms-retracted (count (remove :added transaction-data))
-     ::protocol/basis-t (basis-t-of db-after)
-     ::protocol/basis-t-before (basis-t-of db-before)
+     ::protocol/coordinate (coordinate/resolved db-after)
+     ::protocol/previous-coordinate
+     (coordinate/at
+      {::coordinate/db-value db-after
+       ::coordinate/target-t (basis-t-of db-before)})
      ::protocol/temporary-ids
      (into {}
            (remove
@@ -235,9 +238,9 @@
   (let [event
         {::protocol/event protocol/transaction-event
          ::protocol/database-name database-name
-         ::protocol/basis-t (::protocol/basis-t transaction-data)
-         ::protocol/basis-t-before
-         (::protocol/basis-t-before transaction-data)
+         ::protocol/coordinate (::protocol/coordinate transaction-data)
+         ::protocol/previous-coordinate
+         (::protocol/previous-coordinate transaction-data)
          ::protocol/transaction-data
          (::protocol/transaction-data transaction-data)
          ::protocol/datoms-added (::protocol/datoms-added transaction-data)
@@ -293,8 +296,8 @@
   [data]
   (cond->
    {::protocol/request-id (::protocol/request-id data)
-    ::protocol/basis-t (::protocol/basis-t data)
-    ::protocol/basis-t-before (::protocol/basis-t-before data)
+    ::protocol/coordinate (::protocol/coordinate data)
+    ::protocol/previous-coordinate (::protocol/previous-coordinate data)
     ::protocol/temporary-ids (::protocol/temporary-ids data)
     ::protocol/transaction-data (::protocol/transaction-data data)
     ::protocol/datoms-added (::protocol/datoms-added data)
@@ -368,8 +371,14 @@
         response
         (response-from-report-data
          {::protocol/request-id request-id
-          ::protocol/basis-t transaction
-          ::protocol/basis-t-before (dec transaction)
+          ::protocol/coordinate
+          (coordinate/at
+           {::coordinate/db-value db
+            ::coordinate/target-t transaction})
+          ::protocol/previous-coordinate
+          (coordinate/at
+           {::coordinate/db-value db
+            ::coordinate/target-t (dec transaction)})
           ::protocol/temporary-ids
           (recovered-temporary-ids db transaction)
           ::protocol/transaction-data (transaction-data->protocol datoms)
@@ -468,15 +477,18 @@
  [:map
   [::connection ::connection]
   [::database-name ::database-name]
-  [::protocol/since-t :seon.db.protocol/since-t]
-  [::protocol/through-t {:optional true} :seon.db.protocol/through-t]
+  [::protocol/since-coordinate :seon.db.protocol/since-coordinate]
+  [::protocol/through-coordinate
+   {:optional true}
+   :seon.db.protocol/through-coordinate]
   [::page-size ::page-size]])
 (schema/register!
  ::replay-page-response
  [:map
-  [::protocol/since-t :seon.db.protocol/since-t]
-  [::protocol/through-t :seon.db.protocol/through-t]
-  [::protocol/continuation-t :seon.db.protocol/continuation-t]
+  [::protocol/since-coordinate :seon.db.protocol/since-coordinate]
+  [::protocol/through-coordinate :seon.db.protocol/through-coordinate]
+  [::protocol/continuation-coordinate
+   :seon.db.protocol/continuation-coordinate]
   [::protocol/complete? :seon.db.protocol/complete?]
   [::protocol/events :seon.db.protocol/events]
   [::protocol/replayed-count :seon.db.protocol/replayed-count]])
@@ -485,6 +497,37 @@
   [message data]
   (throw
    (ex-info message (assoc data ::failure-kind protocol/protocol-error))))
+
+(defn- replay-coordinate
+  [request]
+  (try
+    (coordinate/at request)
+    (catch clojure.lang.ExceptionInfo exception
+      (replay-error (.getMessage exception) (ex-data exception)))))
+
+(defn- ancestor-commit?
+  "True when `ancestor-id` is reachable from the frozen container commit."
+  [container-db ancestor-id]
+  (let [container-id (d/commit-id container-db)]
+    (or
+     (= container-id ancestor-id)
+     (loop [pending (seq (d/parent-commit-ids container-db))
+            visited #{}]
+       (if-let [commit-id (first pending)]
+         (cond
+           (= commit-id ancestor-id) true
+           (contains? visited commit-id)
+           (recur (next pending) visited)
+           :else
+           (let [parent-db
+                 (or (d/commit-as-db container-db commit-id)
+                     (replay-error
+                      "Replay ancestry contains an unavailable commit."
+                      {::coordinate/commit-id commit-id}))]
+             (recur (concat (next pending)
+                            (d/parent-commit-ids parent-db))
+                    (conj visited commit-id))))
+         false)))))
 
 (defn- transaction-id
   [^datahike.datom.Datom datom]
@@ -510,18 +553,18 @@
      (-> db d/history (d/since since-t) (d/datoms :eavt)))))
 
 (defn- replay-events
-  [db database-name since-t selected-transaction-ids]
+  [db attachment database-name since-t selected-transaction-ids]
   (let [by-transaction
         (history-by-transaction db since-t selected-transaction-ids)]
     (::events
      (reduce
-      (fn [{events ::events previous-basis-t ::previous-basis-t}
+      (fn [{events ::events previous-t ::previous-t}
            transaction]
         (let [datoms (get by-transaction transaction)]
           (when (empty? datoms)
             (replay-error
              "Replay could not reconstruct a selected transaction."
-             {::protocol/basis-t transaction}))
+             {::coordinate/t transaction}))
           (let [stored-transaction-meta
                 (into {}
                       (map
@@ -541,15 +584,23 @@
                  ::protocol/datoms-added (count (filter :added datoms))
                  ::protocol/datoms-retracted
                  (count (remove :added datoms))
-                 ::protocol/basis-t transaction
-                 ::protocol/basis-t-before previous-basis-t
+                 ::protocol/coordinate
+                 (replay-coordinate
+                  {::coordinate/db-value db
+                   ::coordinate/attachment attachment
+                   ::coordinate/target-t transaction})
+                 ::protocol/previous-coordinate
+                 (replay-coordinate
+                  {::coordinate/db-value db
+                   ::coordinate/attachment attachment
+                   ::coordinate/target-t previous-t})
                  ::protocol/transaction-meta transaction-meta
                  ::protocol/request-id request-id}]
             {::events
              (conj events
                    (transaction-event-from-data database-name data))
-             ::previous-basis-t transaction})))
-      {::events [] ::previous-basis-t since-t}
+             ::previous-t transaction})))
+      {::events [] ::previous-t since-t}
       selected-transaction-ids))))
 
 (defn replay-transactions-page
@@ -557,23 +608,78 @@
   {:malli/schema [:=> [:cat ::replay-page-request]
                   ::replay-page-response]}
   [{::keys [connection database-name page-size]
-    ::protocol/keys [since-t through-t]}]
-  (let [db (d/db connection)
-        current-t (basis-t-of db)
-        since-t (long since-t)
-        through-t (if (some? through-t) (long through-t) current-t)]
-    (when (> through-t current-t)
-      (replay-error "Replay watermark is ahead of the writer."
-                    {::protocol/through-t through-t
-                     ::current-basis-t current-t}))
+    ::protocol/keys [since-coordinate through-coordinate]}]
+  (let [current-db (d/db connection)
+        current-coordinate (coordinate/resolved current-db)
+        attachment (coordinate/attachment current-coordinate)
+        _ (when-not (coordinate/same-attachment?
+                     current-coordinate since-coordinate)
+            (replay-error "Replay cursor belongs to another attachment."
+                          {::protocol/since-coordinate since-coordinate
+                           ::protocol/coordinate current-coordinate}))
+        frozen-db
+        (if through-coordinate
+          (do
+            (when-not (coordinate/same-attachment?
+                       current-coordinate through-coordinate)
+              (replay-error "Replay watermark belongs to another attachment."
+                            {::protocol/through-coordinate through-coordinate
+                             ::protocol/coordinate current-coordinate}))
+            (or (d/commit-as-db current-db
+                                (::coordinate/commit-id through-coordinate))
+                (replay-error "Replay watermark commit is unavailable."
+                              {::protocol/through-coordinate
+                               through-coordinate})))
+          current-db)
+        through-t (long (or (::coordinate/t through-coordinate)
+                            (::coordinate/t current-coordinate)))
+        through-coordinate*
+        (replay-coordinate
+         {::coordinate/db-value frozen-db
+          ::coordinate/attachment attachment
+          ::coordinate/target-t through-t})
+        _ (when (and through-coordinate
+                     (not= through-coordinate through-coordinate*))
+            (replay-error "Replay watermark does not match its stored commit."
+                          {::protocol/through-coordinate through-coordinate
+                           ::protocol/coordinate through-coordinate*}))
+        since-t (long (::coordinate/t since-coordinate))
+        since-db
+        (if (= (::coordinate/commit-id since-coordinate)
+               (::coordinate/commit-id through-coordinate*))
+          frozen-db
+          (or (d/commit-as-db current-db
+                              (::coordinate/commit-id since-coordinate))
+              (replay-error "Replay cursor commit is unavailable."
+                            {::protocol/since-coordinate since-coordinate})))
+        verified-since
+        (replay-coordinate
+         {::coordinate/db-value since-db
+          ::coordinate/attachment attachment
+          ::coordinate/target-t since-t})
+        _ (when-not (= since-coordinate verified-since)
+            (replay-error "Replay cursor does not match its stored commit."
+                          {::protocol/since-coordinate since-coordinate
+                           ::protocol/coordinate verified-since}))
+        _ (when-not (ancestor-commit?
+                     frozen-db (::coordinate/commit-id since-coordinate))
+            (replay-error "Replay cursor is not an ancestor of its watermark."
+                          {::protocol/since-coordinate since-coordinate
+                           ::protocol/through-coordinate
+                           through-coordinate*}))
+        since-coordinate*
+        (replay-coordinate
+         {::coordinate/db-value frozen-db
+          ::coordinate/attachment attachment
+          ::coordinate/target-t since-t})]
     (when (> since-t through-t)
       (replay-error "Replay cursor is ahead of its watermark."
-                    {::protocol/since-t since-t
-                     ::protocol/through-t through-t}))
+                    {::protocol/since-coordinate since-coordinate
+                     ::protocol/through-coordinate through-coordinate*}))
     (if (= since-t through-t)
-      {::protocol/since-t since-t
-       ::protocol/through-t through-t
-       ::protocol/continuation-t through-t
+      {::protocol/since-coordinate since-coordinate*
+       ::protocol/through-coordinate through-coordinate*
+       ::protocol/continuation-coordinate through-coordinate*
        ::protocol/complete? true
        ::protocol/events []
        ::protocol/replayed-count 0}
@@ -583,13 +689,19 @@
             more? (> (count candidate-ids) page-size)]
         (when (empty? selected-ids)
           (replay-error "Replay found no transaction before its watermark."
-                        {::protocol/since-t since-t
-                         ::protocol/through-t through-t}))
-        (let [events (replay-events db database-name since-t selected-ids)
-              continuation (if more? (peek selected-ids) through-t)]
-          {::protocol/since-t since-t
-           ::protocol/through-t through-t
-           ::protocol/continuation-t continuation
+                        {::protocol/since-coordinate since-coordinate*
+                         ::protocol/through-coordinate through-coordinate*}))
+        (let [events (replay-events frozen-db attachment database-name
+                                    since-t selected-ids)
+              continuation-t (if more? (peek selected-ids) through-t)
+              continuation-coordinate
+              (replay-coordinate
+               {::coordinate/db-value frozen-db
+                ::coordinate/attachment attachment
+                ::coordinate/target-t continuation-t})]
+          {::protocol/since-coordinate since-coordinate*
+           ::protocol/through-coordinate through-coordinate*
+           ::protocol/continuation-coordinate continuation-coordinate
            ::protocol/complete? (not more?)
            ::protocol/events events
            ::protocol/replayed-count (count events)})))))
@@ -710,10 +822,11 @@
      (cond->
       {::connection connection
        ::database-name database-name
-       ::protocol/since-t (::protocol/since-t request)
+       ::protocol/since-coordinate (::protocol/since-coordinate request)
        ::page-size replay-page-size}
-       (contains? request ::protocol/through-t)
-       (assoc ::protocol/through-t (::protocol/through-t request))))
+       (contains? request ::protocol/through-coordinate)
+       (assoc ::protocol/through-coordinate
+              (::protocol/through-coordinate request))))
     ::protocol/database-name database-name)))
 
 (defn- handle-knn-search

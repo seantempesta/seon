@@ -245,8 +245,9 @@ there is no intent from which a new supervisor can derive the next safe action.
 
 - Add one `seon.db.coordinate` `.cljc` owner for the schema and pure
   projections. Use `database-id`, not the older `store-id` vocabulary.
-- Project commit id through maintained `datahike.api/commit-id`; resolve a
-  `{branch,t}` selector against retained ancestry on the JVM.
+- Project commit id through maintained `datahike.api/commit-id`. The commit
+  pins an immutable containing database value and `t` selects a cut within it;
+  never graph-search for a commit whose maximum transaction equals `t`.
 - Replace database-name plus bare basis fields in transaction responses, replay
   pages, and events with logical routing data beside the canonical coordinate.
 - Change replica attachment/progress, own-write correlations, replay validation,
@@ -256,6 +257,18 @@ there is no intent from which a new supervisor can derive the next safe action.
 Tests first: pure schema/selector tests, writer protocol validation, same-t
 cross-branch collision, malformed partial coordinate, and replica stale-lineage
 rejection. Live proof: JVM and CLJS report the exact same default head.
+
+Implementation probing refined the coordinate law after this audit. Raw
+Datahike commits may contain multiple temporal cuts, and concurrent raw writes
+can share a commit root. Immediate transaction before/after coordinates must
+therefore use the committed `db-after` as one container with distinct `t`
+values. Recovery uses one frozen current commit after proving the receipt and
+transaction datoms. Replay freezes one `through` commit, reloads that commit by
+UUID on later pages, and expresses the cursor, events, and watermark as cuts
+inside it. Parent traversal is valid only to prove that an initial cursor
+commit is an ancestor of that frozen container, never to invent identity from
+`t`. Datahike `as-of` remains a read filter and does not supply another commit
+identity.
 
 ### Slice 2 — one schema/program candidate and fail-closed publication
 
