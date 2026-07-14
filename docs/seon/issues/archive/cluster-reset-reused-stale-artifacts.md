@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, component, flow]
 ---
@@ -44,3 +44,15 @@ operator regression suite in `test/seon/dev/cli_test.clj`.
 - Focused and complete operator suites pass.
 - Fresh public resets rebuild and return both default and ACME ready, followed
   by live HTTP, SSE, MCP CLJ/CLJS, and database-readback proof.
+
+## Resolution
+
+Resolved by `d3da5083`. The operator regression proves reset never reads the
+previous manifest and delegates to the canonical build/reconciliation owner;
+the later complete operator checkpoint passed 100 tests and 592 assertions.
+Before ACME ownership transferred to the parallel agent, public
+`bin/seon cluster reset default` and `bin/acme cluster reset acme` each rebuilt
+writer, client, bootstrap, and CSS, then returned watcher, writer, and pod
+ready. Both roots and data shells returned 200, and cluster-qualified MCP CLJ
+and CLJS evaluations returned 42 while a bare `root` was rejected as
+ambiguous.

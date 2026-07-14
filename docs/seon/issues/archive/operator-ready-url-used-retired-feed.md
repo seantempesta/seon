@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, component, web]
 ---
@@ -33,3 +33,11 @@ fleet feed defined by the database route set.
   page `/`, never the POST-only `/agents` route.
 - Operator tests cover both cases.
 - A default public restart prints the current ordinary agent URL.
+
+## Resolution
+
+Resolved by `78c544ac`. The complete operator checkpoint passed 100 tests and
+592 assertions. A live Babashka invocation against the running default root
+feed selected `http://127.0.0.1:7890/agent/empty-lamps-shop`; the regression
+also proves that `/agent/root/debug` cannot be misread as an agent id and that
+an unavailable feed falls back to `/`.

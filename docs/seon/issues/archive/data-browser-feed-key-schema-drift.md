@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, web, schema, flow]
 ---
@@ -49,3 +49,13 @@ The normalized feed coordinate and instrumentation contract in
 - Focused and complete CLJS gates pass.
 - Default and ACME `/data/feed` return gzip SSE with an immediate
   `datastar-patch-elements` frame after hot reload and after restart.
+
+## Resolution
+
+Resolved by `78c544ac`. The URL-derived regression joined the affected CLJS
+checkpoint at 681 tests and 3,477 assertions with zero failures. A public
+default restart rebuilt the client, writer, and bootstrap; the live
+`/data/feed` then returned 200 with `Content-Encoding: gzip` and an immediate
+`datastar-patch-elements` frame. The parallel ACME lane owns subsequent ACME
+evidence; its pre-handoff hot reload had already returned the same successful
+frame.
