@@ -485,6 +485,11 @@ in `seon.web.datastar`.
   browser POST → the owning agent's sandbox → result datoms → tx-listener →
   morph). The DB is the bus both ways.
 
+Each SCI render owns its input accessor and deadline closure inside its fresh
+interpreter context. No process-global input/deadline cell can be overwritten by
+a nested or future concurrent render. The one-time interpreter warmup uses its
+own local deadline as well.
+
 The same gzip subscription mechanism serves root, agent, debug, and data
 views. There is no provenance-routed debug stream or unused generic `/sse`
 registry. Transaction user/process is relevant to agent-derived focus semantics,

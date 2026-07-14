@@ -161,6 +161,12 @@ removes a second parser and prevents strings, comments, and unresolved aliases
 from inventing dependencies. The focused behavioral gate passes 16 tests and
 49 assertions, including source-only omission and persisted dynamic reads.
 
+SCI invocation routing is now local as well. Each fresh context closes over its
+own input accessor and deadline; the process-global input/deadline volatiles are
+deleted, including from warmup. Existing bounded-render behavior passes 7 tests
+and 31 assertions, while nested or future concurrent renders can no longer
+cross-contaminate one another.
+
 The direct Babashka edit hook now proves repository containment before it loads
 configuration or writes diagnostics, serializes bounded diagnostic writes
 across concurrent hook processes, and cannot throw from its terminal log sink.

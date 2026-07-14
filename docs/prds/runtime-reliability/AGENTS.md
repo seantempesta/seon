@@ -190,6 +190,9 @@ process verbs are not primary UX.
 - Persisted `:seon.fn/read-attrs` are the sole declared renderer dependency
   facts. The render path no longer regex-scans source for old rows; fresh code
   is indexed or teed once and runtime observed reads remain the exact check.
+- SCI render input and deadline are invocation-local closures. The former
+  process-global volatiles are deleted, so nested/future concurrent renders
+  cannot cross-contaminate input or extend another invocation's budget.
 
 ## Settled — do not re-litigate
 
