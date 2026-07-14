@@ -54,11 +54,11 @@ database, renderer, runtime, operator, or packaging mechanisms.
 | 0 | Current branch graduation | **IN PROGRESS** | none | Reconciled docs and successor PRDs; clean full pod/writer/operator/Inspect-offline gates; destructive default reset; live CLJ+CLJS MCP, browser, gzip SSE, database read-back, restart, and retained-result/query-budget proof; legacy lane evidence classified before cleanup. |
 | 1 | `database-lifecycle-recovery` | **CARVED + GROUNDED** | 0 | Fresh, converged, config-free reopen, clean restart, crash recovery, canonical coordinates, as-of/fork/restore/undo, and multi-form transitions pass without replay or duplicate registries. |
 | 2 | `reactive-render-units` | **CARVED + GROUNDED** | 1 | One runtime-observed unit engine serves root, agent, canvas, debug, and data views; helper-indirected reads update; unrelated writes do no work; equivalent tabs share bounded plain-data/output reuse. |
-| 3 | `database-browser` | **CARVED** | 1, unit contract from 2 | Entity, refs, transactions, provenance, and history are navigable through bounded Datahike index cursors; closed details construct no expensive body; no global scan or second feed exists. |
-| 4 | `root-workspace-sessions` | **CARVED** | 2 | Root has its distinct system layout and concise context; ordinary-agent cards use the same derived focus; database-backed per-tab locations prove two tabs do not fight. |
-| 5 | `agent-canvas-interaction` | **CARVED** | 2, 4 | The one `my.canvas` path proves every control, validation/error result, focus/pin/clear transition, reactive update, and narrow/wide layout in a real browser. |
+| 3 | `database-browser` | **CARVED + GROUNDED** | 1, unit contract from 2 | Entity, refs, transactions, provenance, and history are navigable through bounded Datahike index cursors; closed details construct no expensive body; no global scan or second feed exists. |
+| 4 | `root-workspace-sessions` | **CARVED + GROUNDED** | 2 | Root has its distinct system layout and concise context; ordinary-agent cards use the same derived focus; database-backed per-tab locations prove two tabs do not fight. |
+| 5 | `agent-canvas-interaction` | **CARVED + GROUNDED** | 2, 4 | The one `my.canvas` path proves every control, validation/error result, focus/pin/clear transition, reactive update, and narrow/wide layout in a real browser. |
 | 6 | `agent-runtime-correctness` | **CARVED + GROUNDED** | 1 | Raw model replies are preserved; every complete form is attempted; async contracts, plan authority/evidence, retries, errors-as-values, and measured process containment cannot wedge or fabricate agent evidence. |
-| 7 | `inspect-autocomplete-evidence` | **CARVED** | 0, 6 | Inspect source is content-pinned; preserved lane evidence is classified; the reviewed ACME tool-refinement results land through canonical `my.*` schemas/functions; large-planner/small-executor and simpler-model tool-use trials have reproducible task/scorer/provenance evidence. |
+| 7 | `inspect-autocomplete-evidence` | **CARVED + GROUNDED** | 0, 6 | Inspect source is content-pinned; preserved lane evidence is classified; the reviewed ACME tool-refinement results land through canonical `my.*` schemas/functions; large-planner/small-executor and simpler-model tool-use trials have reproducible task/scorer/provenance evidence. |
 | 8 | `independent-downstream-distribution` | **CARVED + AUDITED** | 0, stable runtime/package contracts from 1 and 6 | A clean ACME checkout builds, customizes, starts, MCP-evaluates, restarts, and reads back from released Seon SDK/runtime/writer artifacts while the Seon source checkout is unavailable. |
 | 9 | `local-performance-graduation` | **CARVED; FINAL** | 1–8 | Destructive acceptance matrix and real-browser journey pass; explicit cold/warm latency, idle CPU, event-loop, heap/RSS, feed/render, and grown-database budgets are green; superseded worktrees/processes are safely retired. |
 
@@ -96,10 +96,10 @@ Immediate unit-0 queue:
    touch the active ACME agent worktree.
 6. **Complete:** all nine successor PRDs are carved with dependency edges and
    falsifiable acceptance matrices. Database lifecycle, reactive render units,
-   and agent runtime correctness have current-source dependency audits;
-   downstream distribution has a no-source consumer audit. Ground database
-   browser, root workspace sessions, canvas interaction, Inspect/autocomplete
-   evidence, and local performance before implementation reaches each unit.
+   database browser, root workspace sessions, canvas interaction, and agent
+   runtime correctness, and Inspect/autocomplete evidence have current-source
+   dependency audits; downstream distribution has a no-source consumer audit.
+   Ground local performance before implementation reaches the final unit.
 
 The 2026-07-14 unit-0 checkpoint passes operator 100 tests/592 assertions,
 writer 50/308, pod 1,307/6,182, and offline Inspect 311 passed/eight expected
