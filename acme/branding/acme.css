@@ -1,6 +1,6 @@
 /* Acme brand stylesheet.
  *
- * Loaded via SEON_BRAND_CSS (set by bin/acme) and inlined by the inspector
+ * Loaded via SEON_BRAND_CSS (set by bin/acme) and inlined by the web UI
  * AFTER seon's output.css, so these token overrides win. This is how a
  * third party controls their own CSS without forking seon — proof that the
  * branding seam works end to end.
@@ -16,8 +16,8 @@
   --color-signal:    #38bdf8;
 }
 
-/* A targeted rule on seon's tile markup, to prove selector-level control
+/* A targeted rule on Seon's card markup, to prove selector-level control
  * (not just token overrides) reaches the rendered UI. */
-.seon-tile-compact {
+.seon-card-compact {
   border-left: 2px solid #38bdf8;
 }

@@ -2,18 +2,20 @@
   "Acme helper namespace.
 
    `format-count` is UNSPECCED ON PURPOSE: it is the downstream helper a
-   tile calls through an alias (`h/format-count`), and the exact member
+   renderer calls through an alias (`h/format-count`), and the exact member
    SCI's `expose-ns` cannot enumerate today — it only reads the
-   `:seon.fn` index, which holds SPECCED fns only. That gap is why a tile
+   `:seon.fn` index, which holds SPECCED fns only. That gap is why a renderer
    requiring this ns falls off the SCI-bounded path onto the unbounded
    compiled path (BUG A — the downstream's live `Unable to resolve symbol`
-   when a tile calls an unspecced helper in a required ns). `greet` is
+   when a renderer calls an unspecced helper in a required ns). `greet` is
    specced, so this ns still owns a full-source `:seon.ns` row and shows
    in context.")
 
 (defn format-count
-  "Unspecced helper — render a count with its noun, pluralized. The tile
-   calls this; SCI must be able to resolve it for bounding to engage."
+  "Render a count with its noun pluralized.
+
+   This helper is deliberately unspecced; SCI must still resolve it when the
+   dashboard calls through the namespace alias."
   [n noun]
   (str n " " noun (when (not= 1 n) "s")))
 

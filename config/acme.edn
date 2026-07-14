@@ -13,7 +13,7 @@
 ;; can't see the functions); (2) the DECLARED :seon.agent/ctx tree — the
 ;; diffusion-testbed loadout (owner ruling 2026-07-11), which wholesale-
 ;; replaces system.edn's tree and therefore mirrors its rows BY HAND (see the
-;; note at the declaration). Isolation (ports/store/sockets/logs/bundle) lives
+;; note at the declaration). Isolation (ports/database/sockets/logs/artifact) lives
 ;; in bin/acme env, not here.
 ;;
 ;; NOTE `#merge` is manifest-aware for `:seon.config/agent-context` (fac50bef):
@@ -40,7 +40,7 @@
    ;; ACCEPTED COST: system.edn's tree rows below are a BY-HAND MIRROR — any
    ;; system.edn tree change must be copied here manually or acme drifts.
    ;; The testbed additions over the mirrored base: :function-menu 46 (the
-   ;; glyph function menu) + :typeahead-steps 95 (the step-loop tile, on by
+   ;; glyph function menu) + :typeahead-steps 95 (the step-loop surface, on by
    ;; default on the TESTBED only; the default cluster stays minimal).
    ;; NO :plan-ledger — retired 2026-07-11 (:plan is THE plan surface).
    :seon.agent/ctx
@@ -55,7 +55,7 @@
      :seon.render/ai seon.agent.ctx.menu/function-menu-block}
     {:seon.agent.ctx/name :typeahead-steps :seon.agent.ctx/priority 95
      :seon.render/ai seon.agent.ctx.typeahead-steps/steps-ai
-     :seon.render/html seon.agent.ctx.typeahead-steps/steps-tile-html}
+     :seon.render/html seon.agent.ctx.typeahead-steps/steps-surface-html}
     {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
      :seon.render/ai seon.agent.ctx.transcript/transcript-block
      :seon.render/html seon.agent.ctx.transcript/transcript-block-html

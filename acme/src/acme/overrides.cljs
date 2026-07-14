@@ -11,13 +11,13 @@
      catch): returns the FULL `:seon.render/html-response` map, so we
      preserve the agent-facing `:seon.render/ai` + `:seon.render/error` and
      swap only the human-facing hiccup.
-   - `error-tile` — the slot / entity / block error-tile surfaces
+   - `error-card` — the slot/entity/block error-card surfaces
      (`render`, `slot`, `render-entity-html` catches): a `(fn [:seon/error]
      → BARE hiccup)`. No agent-facing envelope to preserve, so we replace
      outright.
 
    Both render the same calm 'preparing this view' card — while an agent is
-   mid-building a tile the human sees a calm placeholder instead of a raw
+   mid-building a surface the human sees a calm placeholder instead of a raw
    error, the agent-facing signal stays intact on the hero."
   (:require [seon.render.canvas :as canvas]))
 
@@ -27,17 +27,17 @@
       (fn acme-error-response [req]
         (assoc (orig-error-response req)
                :seon.render/hiccup
-               [:div {:class "seon-tile"}
-                [:div {:class "seon-tile-compact p-3 text-xs text-text-300 italic"}
+               [:div {:class "seon-card"}
+                [:div {:class "seon-card-compact p-3 text-xs text-text-300 italic"}
                  "Acme is preparing this view…"]])))
 
-;; The slot / entity / block error-tile seam — `(fn [:seon/error] → BARE
+;; The slot/entity/block error-card seam — `(fn [:seon/error] → BARE
 ;; hiccup)`. Returns hiccup only (no `:seon.render/ai`/`:seon.render/error`
 ;; envelope like the hero), so there is nothing from the default to preserve:
 ;; we replace it outright with acme's calm branded card (mirroring the hero
-;; above). One `set!`, every slot/entity/block error tile on the page is acme.
-(set! canvas/error-tile
-      (fn acme-error-tile [_err]
-        [:div {:class "seon-tile"}
-         [:div {:class "seon-tile-compact p-3 text-xs text-text-300 italic"}
+;; above). One `set!`, every slot/entity/block error card on the page is Acme.
+(set! canvas/error-card
+      (fn acme-error-card [_err]
+        [:div {:class "seon-card"}
+         [:div {:class "seon-card-compact p-3 text-xs text-text-300 italic"}
           "Acme is preparing this view…"]]))

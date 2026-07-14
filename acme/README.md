@@ -16,8 +16,8 @@ the place we iterate on the "consume Seon without forking it" story.
   `SEON_EXTRA_PRELOAD` entry ns) registers them via `(reset!
   seon.client/!extra-core-vars …)`. Omit that one call and the entire
   surface is silently invisible — that's the bug.
-- **Live tile via SCI (BUG A)** — `acme.widget/dash` is a correctly
-  `:require`-d tile that calls `acme.helpers/format-count`, an UNSPECCED
+- **Live canvas via SCI (BUG A)** — `acme.widget/dash` is a correctly
+  `:require`-d renderer that calls `acme.helpers/format-count`, an UNSPECCED
   helper. It renders, but falls off the SCI-bounded path onto the unbounded
   compiled path because `expose-ns` only enumerates SPECCED `:seon.fn`
   rows. Wire it with:
@@ -30,30 +30,29 @@ the place we iterate on the "consume Seon without forking it" story.
 
 - **Function override** — `acme.overrides` `set!`s
   `seon.render.canvas/error-response` (late-binding through the global
-  var slot) for a calm broken-tile card. No seon-src edit.
+  var slot) for a calm broken-surface card. No seon-src edit.
 - **CSS / branding** — `acme/branding/acme.css` (via `SEON_BRAND_CSS`) plus
   `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE`, all set by `bin/acme`.
 
-## Boot
+## Operator status
+
+The downstream wrapper now contributes only ACME target data. The shared
+operator owns its artifact, watcher, writer, pod, readiness, and shutdown graph.
+The preserved legacy `store` databases are deliberately rejected; they must be
+archived and read back before the current `db` layout can be created.
 
 ```bash
-# (optional) export GEMINI_API_KEY=...   for embeddings KNN
-bin/acme build                 # one-off compile → out-acme/client/main.js (acme.* baked in)
-bin/acme start wire-server     # JVM writer first (sole writer; pod boot is gated on it)
-bin/acme start pod             # Node pod on http://127.0.0.1:7980
-bin/acme status
-bin/acme tail pod
+bin/acme status --edn          # identity, endpoints, artifact, ownership state
+bin/acme up                    # complete target; refuses preserved legacy layout
+bin/acme restart               # rebuild and reconcile the complete target
+bin/acme logs pod --follow
+bin/acme down
 ```
 
-`bin/acme build` runs a one-off shadow COMPILE of the `:acme-client` build
-(its own output dir, `out-acme/`) — not a second watch, which would collide
-with the live cluster's shadow nREPL on `:7889`. Re-run it after editing
-`acme/src`.
-
-Fresh store (clean store — needed to reproduce BUG B from zero):
+After the preservation gate is closed, a scoped current-layout reset is:
 
 ```bash
-bin/acme cluster reset default   # wipes data/clusters/acme/store, bounces both
+bin/acme cluster reset acme
 ```
 
 ## Isolation (zero overlap with the live cluster)
@@ -61,11 +60,11 @@ bin/acme cluster reset default   # wipes data/clusters/acme/store, bounces both
 | | live default | acme |
 |---|---|---|
 | pod HTTP | 7890 | 7980 |
-| wire-server REPL | 7891 | 7981 |
-| store | `data/clusters/default` | `data/clusters/acme` |
+| database-server REPL | dynamic | dynamic |
+| database | `data/clusters/default/db` | `data/clusters/acme/db` |
 | req/pub sockets | `tmp/seon-cluster-default-*.sock` | `tmp/acme-cluster-*.sock` |
 | supervisor state | `tmp/proc` | `tmp/proc-acme` |
 | logs | `logs/` | `logs/acme/` |
 
-`bin/acme` is pure env composition over `bin/seon`; the only seon change is
-making `PROC_DIR`/`LOG_DIR` env-overridable (byte-identical when unset).
+`bin/acme` is pure target-data composition over `bin/seon`; it does not expose
+the retired `build`, `start`, `stop`, `tail`, or named-process commands.
