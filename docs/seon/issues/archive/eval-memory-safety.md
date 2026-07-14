@@ -52,7 +52,7 @@ separate process-boundary concern tracked by
   eval returned `42`. The writer and pod remained ready.
 
 The source-grounded design and falsification matrix are retained in
-[[docs/prds/runtime-reliability/research/eval-query-memory-safety-audit-2026-07-14]].
+[[docs/prds/agent-runtime-correctness/research/eval-query-memory-safety-audit-2026-07-14]].
 
 ## Owner
 

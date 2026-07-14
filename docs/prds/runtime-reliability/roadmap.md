@@ -1035,7 +1035,7 @@ The source-grounded system audits are complete and committed:
 - [[../database-lifecycle-recovery/research/database-runtime-responsiveness-audit-2026-07-13]]
 - [[research/web-responsiveness-audit-2026-07-13]]
 - [[research/live-feed-fix-review-2026-07-13]]
-- [[research/agent-lifecycle-responsiveness-audit-2026-07-13]]
+- [[../agent-runtime-correctness/research/agent-lifecycle-responsiveness-audit-2026-07-13]]
 - [[research/seon-cli-lifecycle-audit-2026-07-13]]
 - [[research/jvm-archive-boundary-2026-07-13]]
 - [[research/jvm-server-cljs-client-storage-sync-2026-07-13]]
