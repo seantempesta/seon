@@ -25,6 +25,16 @@ entries because agent and platform code inspect analyzer state. The subsequent
 `bin/fix-bootstrap-macros` step reports no broken symbols, so macro repair does
 not explain or eliminate these analyzer warnings.
 
+The selected dependency is ClojureScript `1.12.145`; the shallow
+`reference-code/clojurescript` checkout documents that same stable release at
+`946d75f…`. Its `cljs.env/with-compiler-env` macro expands to CLJ-only
+`clojure.lang.Atom`, `IllegalArgumentException`, and `class` forms. The
+unconditional `cljs.analyzer.api/resolve-extern` function invokes that macro,
+so compiling the API into the self-host CLJS bootstrap analyzes those host
+forms as unresolved CLJS symbols. Active Seon source does not call
+`resolve-extern`, explaining why readiness and tests remain green, but the
+compiled public function cannot be assumed valid merely because it is unused.
+
 ## Owner
 
 The selected ClojureScript analyzer source and the one `:bootstrap` build in
@@ -35,9 +45,10 @@ shows the generated cache metadata is involved.
 
 - Reproduce the warning with the smallest bootstrap entry/source combination
   against the exact selected ClojureScript and Shadow sources.
-- Establish whether the symbols are valid CLJ branches leaking into self-host
-  analysis or genuinely unresolved runtime references.
-- Fix or precisely suppress the owning upstream/build condition; do not blanket
-  disable `:undeclared-var` warnings.
+- Add the smallest executable `resolve-extern` self-host probe and establish
+  whether every expanded host branch is reachable.
+- Make the maintained ClojureScript macro/function expansion portable or guard
+  the API at its real platform boundary; do not blanket-disable
+  `:undeclared-var` warnings or patch generated bootstrap output.
 - A clean bootstrap compile and complete pod gate pass with zero unexpected
   warnings and unchanged analyzer API behavior.
