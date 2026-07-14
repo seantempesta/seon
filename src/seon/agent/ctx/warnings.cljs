@@ -105,8 +105,7 @@
    The derived coverage invariant (C46) as a reactive section: the census
    (`seon.instrument/coverage-gaps`) is recomputed from the db + the live
    JS vars at every render — nothing stored, so the section VANISHES the
-   moment coverage is re-asserted (`instrument-from-db!` runs at boot, on
-   `start-agent!`, and after every hot reload). Non-empty means specced
+   moment the normal boot/reload/eval publication restores it. Non-empty means specced
    fns are running WITHOUT contract validation — a hole in the `:crash`
    dial's safety story. Root-only by config wiring (the block rides in
    `:seon.config/root-context`, like `:core-faults` — a coverage gap is
@@ -122,9 +121,8 @@
            " specced fns without a live wrapper (root-only)\n"
            "; These fns carry a :malli/schema but their LIVE var is not malli-wrapped\n"
            "; (structural async opt-outs excluded) — they run with NO contract\n"
-           "; validation. Usual cause: a ns re-eval replaced wrapped vars without a\n"
-           "; re-instrument pass. Re-assert coverage:\n"
-           ";   (seon.instrument/instrument-from-db! @seon.db/*conn*)\n"
+           "; validation. This is a core publication fault; restart the pod and\n"
+           "; inspect the recorded error if the gap returns.\n"
            (str/join
              "\n"
              (map (fn [{:seon.instrument/keys [sym reason]}]

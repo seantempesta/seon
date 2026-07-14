@@ -1660,26 +1660,6 @@
 ;; against re-defs — the digest + upsert path does the right thing.
 ;; ============================================================
 
-(defn- instrument-tee-fns!
-  "Refresh exactly the changed function targets after their tee commits.
-
-   The analyzer tuples are converted to the namespaced target data owned by
-   `seon.instrument`. Malli receives an explicit delta map; no process-global
-   function list or whole-program filter is involved."
-  [targets registry]
-  (when (seq targets)
-    (let [instrument-targets
-          (mapv (fn [[ns-sym fn-sym schema-form _async?]]
-                  (cond->
-                    {::instrument/sym (symbol (str ns-sym) (str fn-sym))
-                     ::instrument/schema-form schema-form}
-                    registry (assoc ::instrument/registry registry)))
-                targets)]
-      (instrument/instrument-delta!
-        {::instrument/changed-syms
-         (into #{} (map ::instrument/sym) instrument-targets)
-         ::instrument/targets instrument-targets}))))
-
 (defn- deftest-def?
   "True when an analyzer var-map came from a `(deftest …)` form.
 
@@ -1718,31 +1698,6 @@
                           :when (deftest-def? var-map)]
                       (symbol (str (:name var-map))))]
     (set new-tests)))
-
-(defn- collect-instrument-targets
-  "From the snapshot diff used by `build-tee-entities`, return the seq of
-   `[ns-sym fn-sym schema-form async?]` tuples for newly-defined fns whose
-   `:malli/schema` metadata parsed cleanly (Phase 3). `async?` (from the
-   var-map's `:async` meta) routes the fn to the await-then-validate
-   wrapper in [[instrument-tee-fns!]] instead of malli's stock synchronous
-   wrapper, which would false-fail on the Promise return. Uses
-   [[changed-defs]] so a BODY-ONLY redefinition (digest unchanged) still
-   re-instruments — the redef replaced the wrapped var with a fresh
-   unwrapped fn, so skipping it would silently drop validation+injection."
-  [compile-state defs-before source eval-ns]
-  (for [{:seon.analyzer-info/keys [ns sym var-map]} (changed-defs compile-state defs-before source eval-ns)
-        :let [schema-form (:malli/schema (:meta var-map))
-              async?      (boolean (:async (:meta var-map)))]
-        ;; Structural async opt-out is applied while the exact target data is
-        ;; prepared in seon.instrument.
-        :when (and schema-form
-                   ;; probe: an unparseable agent `:malli/schema` is
-                   ;; expected — it simply isn't an instrument target (the
-                   ;; parse failure is captured as `:seon.fn/schema-error`
-                   ;; on the tee row, the agent's own signal).
-                   (try (m/schema schema-form) true
-                        (catch :default _ false)))]
-    [ns sym schema-form async?]))
 
 (defn- ns-form-name
   "If `source` parses as an `(ns NAME …)` form, return NAME as a
@@ -2341,6 +2296,29 @@
                      [:db.fn/retractAttribute [:seon.fn/sym sym] attr])))
            (sort-by pr-str)
            vec))))
+
+(defn- function-contract-transition
+  "Apply accepted function tee rows to a projection's contract population.
+
+   Presence of `:seon.fn/spec` replaces the canonical form; omission removes
+   it. Returns both the complete next map and the directly changed qualified
+   symbols, derived from the same rows entering the database transaction."
+  [projection tee-entities]
+  (reduce
+    (fn [{::keys [function-contracts changed-syms]} row]
+      (if-let [sym-str (and (map? row) (:seon.fn/sym row))]
+        (let [sym (symbol sym-str)]
+          {::function-contracts
+           (if-let [spec (:seon.fn/spec row)]
+             (assoc function-contracts sym (reader/read-string spec))
+             (dissoc function-contracts sym))
+           ::changed-syms (conj changed-syms sym)})
+        {::function-contracts function-contracts
+         ::changed-syms changed-syms}))
+    {::function-contracts
+     (:seon.schema.projection/function-contracts projection)
+     ::changed-syms #{}}
+    tee-entities))
 
 ;; ----------------------------------------------------------------------------
 ;; Reified require edges + declared fn read-sets (M4 + C28 structural
@@ -4043,32 +4021,38 @@
               eval-id (:seon.eval/id recorded)
               changed-schemas (schema/changed-keys schemas-before)
               old-projection (schema/current-projection)
+              contract-transition
+              (function-contract-transition old-projection tee-entities)
+              changed-function-syms (::changed-syms contract-transition)
               new-projection
-              (when (and (seq changed-schemas)
+              (when (and (or (seq changed-schemas)
+                             (seq changed-function-syms))
                          (:seon.db/ok? recorded)
                          (::tee-recorded? recorded))
-                (schema/activate! (schema/snapshot)))]
+                (schema/build-projection
+                  (schema/snapshot)
+                  (::function-contracts contract-transition)))]
           ;; A declaration becomes runtime-authoritative only when its schema
           ;; fact landed in the same accepted transaction. record-eval! may
           ;; preserve the transcript by retrying without a broken tee; in that
           ;; recovery case the database did NOT accept the declaration, so the
           ;; collector must roll back instead of leaving a process-only schema.
-          (when (seq changed-schemas)
-            (if (and (:seon.db/ok? recorded) (::tee-recorded? recorded))
-              (when (and old-projection new-projection db/*conn*)
-                (let [stats
-                      (instrument/instrument-schema-dependents-from-db!
-                        {::instrument/db @db/*conn*
-                         ::instrument/old-projection old-projection
-                         ::instrument/new-projection new-projection
-                         ::instrument/changed-schema-keys changed-schemas})]
-                  (when (false? (::instrument/ok? stats))
-                    (error/record!
-                      {:seon.error/raw
-                       (ex-info
-                         "Accepted schema generation could not refresh all dependent function contracts"
-                         {:seon.instrument/stats stats})
-                       :seon.error/fault :core}))))
+          (if new-projection
+            (let [stats
+                  (instrument/instrument-projection-delta!
+                    {::instrument/old-projection old-projection
+                     ::instrument/new-projection new-projection
+                     ::instrument/changed-schema-keys changed-schemas
+                     ::instrument/changed-syms changed-function-syms})]
+              (if (false? (::instrument/ok? stats))
+                (error/record!
+                  {:seon.error/raw
+                   (ex-info
+                     "Accepted program generation could not publish all function contracts"
+                     {:seon.instrument/stats stats})
+                   :seon.error/fault :core})
+                (schema/activate-projection! new-projection)))
+            (when (seq changed-schemas)
               (schema/restore! schemas-before)))
           ;; Bind only the committed id. A failed recorder leaves no orphaned
           ;; result slot; a rejected allocation candidate is never observable.
@@ -4100,27 +4084,11 @@
                 (js/console.error
                   "[seon.eval/preflight-repair] fix datoms failed for eval"
                   eval-id ":" (-> r :seon.db/error :seon.error/message)))))
-          ;; Phase 3 (mvp-completion-plan 2026-05-27) —
-          ;; auto-instrument any newly-defined fn whose
-          ;; `:malli/schema` parsed cleanly. Runs AFTER the tee
-          ;; tx so the `:seon.fn` row is durable before we
-          ;; mutate the live var. Best-effort: a thrown
-          ;; instrument! aborts only this fn, not the batch.
+          ;; Tests run only after the declaration transaction and exact
+          ;; program projection publication both complete.
           (when (and (:seon.db/ok? recorded)
                      (::tee-recorded? recorded)
                      (::ok? result))
-            (try
-              (instrument-tee-fns!
-                (collect-instrument-targets compile-state defs-before
-                                            source @current-ns)
-                (:seon.schema.projection/registry
-                  (schema/current-projection)))
-              (catch :default e
-                ;; OUR instrumentation machinery (an exact Malli delta over a
-                ;; newly-tee'd fn whose schema already parsed) throwing is a
-                ;; core defect (:core) — record it; best-effort stays: only
-                ;; this fn's instrument aborts, the batch continues.
-                (error/record! {:seon.error/raw e :seon.error/fault :core})))
             ;; Phase 4 (mvp-completion-plan 2026-05-27) —
             ;; auto-test-run. After the tee tx, newly-defined tests run once.
             ;; Existing tests are never selected by source-substring guessing.

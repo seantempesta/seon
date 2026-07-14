@@ -41,9 +41,8 @@
     ;; `:seon.fn/spec` string in index-core! (the runtime-introspection
     ;; core indexer — coherent-bootstrap-indexing Step 2).
     [malli.core :as m]
-    ;; Instrumentation. `instrument-from-db!` (called in start-runtime! after
-    ;; the core is indexed) reads the program graph to wrap every fn; the
-    ;; eval path instruments newly-defined fns inline.
+    ;; Instrumentation publishes the validated database-derived projection
+    ;; once at boot; accepted eval/hot-reload transitions publish exact deltas.
     [seon.instrument :as instrument]
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-runtime! runs.
@@ -823,6 +822,18 @@
                     [?s :seon.schema/form ?form]]
                   db)))
 
+(defn ^:private function-contracts-in-db
+  "Canonical `{qualified-symbol function-form}` from one database value."
+  [db]
+  (into {}
+        (map (fn [[sym form]]
+               [(symbol sym) (reader/read-string form)]))
+        (db/query '[:find ?sym ?form
+                    :where
+                    [?function :seon.fn/sym ?sym]
+                    [?function :seon.fn/spec ?form]]
+                  db)))
+
 (defn- error-chain-message
   "Human-readable message for a `seon.error/->map` map, composed from
    the WHOLE `:seon.error/cause` chain (deduped, joined with ` <- `).
@@ -931,7 +942,10 @@
             ;; Schema facts are data, not replayable code. Validate and
             ;; activate the complete immutable projection before loading any
             ;; stored namespace/function source.
-            _        (schema/activate! (schema-forms-in-db db))
+            _        (schema/activate-projection!
+                       (schema/build-projection
+                         (schema-forms-in-db db)
+                         (function-contracts-in-db db)))
             agents   (agent-ns-set db)
             ;; Reconstitute each agent ns ONCE (frozen db value). A BLANK
             ;; source = nothing to replay: a member-less sourceless
@@ -2322,7 +2336,8 @@
               _ (log/info-console! "seon.client/start-runtime!"
                                    (str "replay: " (pr-str replay-stats)))
               instrument-stats
-              (instrument/instrument-from-db! (await (d/db conn)))
+              (instrument/instrument-projection!
+                (schema/current-projection))
               _ (log/info-console! "seon.client/start-runtime!"
                                    (str "instrumentation: "
                                         ;; The complete result carries Malli's
@@ -2442,11 +2457,10 @@
   (log/quiet-library-logs!)
   (install-process-safety-net!)
   (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
-  ;; Malli instrumentation is installed from the PROGRAM GRAPH inside
-  ;; `start-runtime!` (`instrument/instrument-from-db!`), AFTER the core is
-  ;; indexed — the DB is the complete, ordering-independent source of every
-  ;; fn + spec (issue instrumentation-collect-clean-build-empty). The
-  ;; eval-tee path instruments newly-defined fns inline between boots.
+  ;; Malli instrumentation is installed from the validated PROGRAM projection
+  ;; inside `start-runtime!`, after the core is indexed. The DB is the complete,
+  ;; ordering-independent source of every fn + spec; later transitions publish
+  ;; only their exact dependency delta.
   ;; A-5: auto-boot the V0 agent + HTTP server unless SEON_NO_AUTO_BOOT.
   ;; Cheap default for dev iteration — browser hits the loopback port,
   ;; no REPL needed. Disable for a compiler-only/dev-eval process.

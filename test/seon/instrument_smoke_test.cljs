@@ -7,7 +7,7 @@
    whose 1-arity body once delegated `(sample x nil)` into a 2-arity `opts`
    slot schema'd `:map` passed every test green — `merge` tolerates the nil.
    But the LIVE pod instruments every schema'd fn from the program graph
-   (`seon.instrument/instrument-from-db!`) at boot, and the SAME self-call
+   (`seon.instrument/instrument-projection!`) at boot, and the SAME exact-data call
    then throws `:malli.core/invalid-input`, breaking the fn for real (commit
    7b9e771 was the catastrophe: every eval result rendered as
    \"could not be rendered as data\").

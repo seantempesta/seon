@@ -264,15 +264,21 @@
   (some-> (get @*schemas k) pr-str))
 
 (defn build-projection
-  "Build and validate one immutable runtime projection from `{key form}`.
+  "Build and validate one immutable runtime projection.
 
-   Every key compiles against the complete candidate registry, so validation
-   is independent of declaration order. The entity catalog is derived from
-   authored forms; it is never transacted as a second schema model. Pure: no
-   atom, default-registry, database, or var mutation."
-  {:malli/schema [:=> [:catn [::forms :map]] :map]}
-  [forms]
-  (let [registry (mr/composite-registry
+   `forms` is the canonical `{schema-key form}` population and optional
+   `function-contracts` is `{qualified-symbol function-form}`. Every schema and
+   contract compiles against the complete candidate registry, so validation is
+   independent of declaration order. Schema/function dependency indexes and
+   the entity catalog are derived here; none are stored as a second model.
+   Pure: no atom, default-registry, database, or var mutation."
+  {:malli/schema
+   [:function
+    [:=> [:catn [::forms :map]] :map]
+    [:=> [:catn [::forms :map] [::function-contracts :map]] :map]]}
+  ([forms] (build-projection forms {}))
+  ([forms function-contracts]
+   (let [registry (mr/composite-registry
                    (m/default-schemas)
                    (mr/fast-registry forms))
         options  {:registry registry}
@@ -294,6 +300,13 @@
                     dependencies))
           {}
           schema-dependencies)
+        function-dependencies
+        (into (sorted-map)
+              (map (fn [[sym form]]
+                     [sym (direct-references*
+                            (m/function-schema form options)
+                            (set (keys forms)))]))
+              function-contracts)
         catalog  (->> forms
                       (keep
                         (fn [[k raw]]
@@ -316,27 +329,46 @@
                                        (:seon.render/html props)))))))
                       (sort-by :seon.schema.catalog/key)
                       vec)
-        fingerprint (hash (pr-str (sort-by key forms)))]
+        fingerprint
+        (hash (pr-str {:seon.schema.projection/forms
+                       (sort-by key forms)
+                       :seon.schema.projection/function-contracts
+                       (sort-by key function-contracts)}))]
     {:seon.schema.projection/forms forms
      :seon.schema.projection/registry registry
      :seon.schema.projection/schema-dependencies schema-dependencies
      :seon.schema.projection/reverse-schema-dependencies
      reverse-schema-dependencies
+     :seon.schema.projection/function-contracts function-contracts
+     :seon.schema.projection/function-dependencies function-dependencies
      :seon.schema.projection/catalog catalog
-     :seon.schema.projection/fingerprint fingerprint}))
+     :seon.schema.projection/fingerprint fingerprint})))
+
+(defn activate-projection!
+  "Atomically publish an already validated projection.
+
+   Transition coordinators build the complete candidate before committing,
+   then publish that exact object after the database accepts the matching
+   facts. No validation or database read occurs here."
+  {:malli/schema [:=> [:catn [::projection :map]] :map]}
+  [projection]
+  (reset! *schemas (:seon.schema.projection/forms projection))
+  (reset! !projection projection)
+  (mr/set-default-registry! (:seon.schema.projection/registry projection))
+  projection)
 
 (defn activate!
   "Validate and atomically activate a complete `{schema-key form}` set.
 
    The candidate is fully built before either the collector or Malli default
-   registry changes. Returns the activated projection."
+   registry changes. Existing canonical function contracts are revalidated
+   against the replacement schema population. Returns the activated projection."
   {:malli/schema [:=> [:catn [::forms :map]] :map]}
   [forms]
-  (let [candidate (build-projection forms)]
-    (reset! *schemas forms)
-    (reset! !projection candidate)
-    (mr/set-default-registry! (:seon.schema.projection/registry candidate))
-    candidate))
+  (activate-projection!
+    (build-projection
+      forms
+      (or (:seon.schema.projection/function-contracts @!projection) {}))))
 
 (defn current-projection
   "The active disposable projection, or nil during initial module loading."

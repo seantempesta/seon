@@ -1,94 +1,23 @@
 (ns seon.instrument-resilience-test
-  "Boot-resilience guard: a SINGLE persisted `:seon.fn` row whose
-   `:malli/schema` references a schema name that no longer resolves (a
-   renamed/pruned schema ghost) must NEVER crash the whole pod boot.
+  "A stale function contract fails candidate construction before publication.
 
-   The live incident (acme diffusion verification, agent ad64b807): the
-   store held a stale `my.data/rows` fn whose persisted spec referenced the
-   OLD `:my.data/items-envelope`; the schema had been renamed to
-   `:seon.items/envelope` and the old name no longer registered. At boot
-   `seon.instrument/instrument-from-db!` read that spec, handed it to
-   `mi/instrument!`, and malli threw `:malli.core/invalid-schema` →
-   `auto-boot FAILED — exiting`. One stale row took down the pod.
-
-   The fix (errors-as-values applied to boot): `instrument-from-db!` BUILDS
-   each schema against the live registry before registering it; a spec that
-   can't resolve is counted `:seon.instrument/unresolvable-schema` and left
-   UNINSTRUMENTED,
-   so boot proceeds. This ns proves the degrade: a conn carrying only an
-   unresolvable fn row returns a stats map (never throws) and registers
-   nothing.
-
-   The Malli `:cljs` function-schema registry is process-global. The exact-data
-   boot path must leave it byte-for-byte unchanged.
-
-   Deterministic — a fresh :memory datahike conn, never the live pod."
+   The database-derived runtime projection validates every function form
+   against the same immutable registry as schema forms. A dangling reference
+   cannot become a partially instrumented boot generation or mutate Malli's
+   process-global function-schema registry."
   (:require
-    [cljs.reader :as reader]
-    [cljs.test :refer [deftest is async]]
-    [datahike.api :as d]
+    [cljs.test :refer [deftest is]]
     [malli.core :as m]
-    [seon.instrument :as instrument]
-    ;; loaded so `seon.render.value/sample` is a LIVE var the row resolves
-    ;; to (clearing the `:seon.instrument/no-var` branch) — the ghost path
-    ;; needs a real fn.
-    [seon.render.value]))
+    [seon.schema :as schema]))
 
-(def ^:private bad-sym
-  "A REAL live var (resolves via the munged global path) so the row clears
-   the `:seon.instrument/no-var` branch and reaches the schema-resolve
-   check — the exact path the live ghost took."
-  "seon.render.value/sample")
+(def ^:private bad-sym 'seon.render.value/sample)
 
 (def ^:private bad-spec
-  "Reads fine as EDN, but references a schema name that is NOT in the
-   registry — the renamed/pruned-ghost shape."
-  "[:=> [:cat :int] :totally/nonexistent-schema-xyz]")
+  [:=> [:cat :int] :totally/nonexistent-schema-xyz])
 
-(defn ^:async build-conn
-  "Promise of a fresh :memory conn carrying ONE fn row with an unresolvable
-   spec — the minimal reproduction of the boot-crash store."
-  []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      false}]
-    (await (d/create-database cfg))
-    (let [conn (await (d/connect cfg {:sync? false}))]
-      ;; The two program-graph attrs instrument-from-db! reads, schema'd
-      ;; exactly as seon.agent registers them (`:seon.fn/sym` is a string
-      ;; identity; `:seon.fn/spec` a plain string).
-      (await (d/transact! conn {:tx-data [{:db/ident       :seon.fn/sym
-                                           :db/valueType   :db.type/string
-                                           :db/cardinality :db.cardinality/one
-                                           :db/unique      :db.unique/identity}
-                                          {:db/ident       :seon.fn/spec
-                                           :db/valueType   :db.type/string
-                                           :db/cardinality :db.cardinality/one}]}))
-      (await (d/transact! conn {:tx-data [{:seon.fn/sym  bad-sym
-                                           :seon.fn/spec bad-spec}]}))
-      conn)))
-
-(deftest unresolvable-schema-degrades-not-crashes
-  (async done
-    (-> (build-conn)
-        (.then
-          (fn [conn]
-            ;; The seed spec must be GENUINELY unresolvable — a guard with
-            ;; teeth (otherwise a green run would mean nothing).
-            (is (thrown? :default (m/schema (reader/read-string bad-spec)))
-                "seed spec must be genuinely unresolvable")
-            (let [snapshot (m/function-schemas :cljs)]
-              ;; The boot call returns rather than throwing.
-              (let [stats (instrument/instrument-from-db! @conn)]
-                (is (map? stats)
-                    "instrument-from-db! returns a stats map, never throws")
-                (when (:seon.instrument/enabled? stats)
-                  (is (= 1 (:seon.instrument/unresolvable-schema stats))
-                      "the one ghost row is counted as unresolved")
-                  (is (= 0 (:seon.instrument/registered stats))
-                      "the ghost row is never instrumented")
-                  (is (= snapshot (m/function-schemas :cljs))
-                      "boot instrumentation never mutates Malli's function-schema registry"))))))
-        (.catch (fn [e]
-                  (is false (str "deftest threw: " (ex-message e)))))
-        (.finally done))))
+(deftest unresolvable-contract-rejects-the-complete-candidate
+  (let [global-functions-before (m/function-schemas :cljs)]
+    (is (thrown? :default
+                 (schema/build-projection {} {bad-sym bad-spec})))
+    (is (= global-functions-before (m/function-schemas :cljs))
+        "pure candidate validation leaves Malli global function data unchanged")))

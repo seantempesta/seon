@@ -111,22 +111,23 @@
          ::instrument/targets []}))))
 
 (deftest schema-change-refreshes-only-transitive-function-dependents
-  (let [old-projection
+  (let [a-form [:=> [:cat :instrumenttest.contract/root]
+                :instrumenttest.contract/root]
+        b-form [:=> [:cat :int] :int]
+        function-contracts {a-sym a-form b-sym b-form}
+        old-projection
         (schema/build-projection
           {:instrumenttest.contract/leaf :int
            :instrumenttest.contract/root
-           [:vector :instrumenttest.contract/leaf]})
+           [:vector :instrumenttest.contract/leaf]}
+          function-contracts)
         new-projection
         (schema/build-projection
           {:instrumenttest.contract/leaf :string
            :instrumenttest.contract/root
-           [:vector :instrumenttest.contract/leaf]})
-        registry (:seon.schema.projection/registry old-projection)
-        a-form [:=> [:cat :instrumenttest.contract/root]
-                :instrumenttest.contract/root]
-        b-form [:=> [:cat :int] :int]
-        rows [[(str a-sym) (pr-str a-form)]
-              [(str b-sym) (pr-str b-form)]]]
+           [:vector :instrumenttest.contract/leaf]}
+          function-contracts)
+        registry (:seon.schema.projection/registry old-projection)]
     (try
       (instrument/instrument-targets!
         [{::instrument/sym a-sym ::instrument/schema-form a-form
@@ -137,15 +138,13 @@
         (let [a-before (live-fn a-sym)
               b-before (live-fn b-sym)
               result
-              (with-redefs [db/query (fn [& _] rows)]
-                (instrument/instrument-schema-dependents-from-db!
-                  {::instrument/db ::fake-db
-                   ::instrument/old-projection old-projection
-                   ::instrument/new-projection new-projection
-                   ::instrument/changed-schema-keys
-                   #{:instrumenttest.contract/leaf}}))]
+              (instrument/instrument-projection-delta!
+                {::instrument/old-projection old-projection
+                 ::instrument/new-projection new-projection
+                 ::instrument/changed-schema-keys
+                 #{:instrumenttest.contract/leaf}
+                 ::instrument/changed-syms #{}})]
           (is (true? (::instrument/ok? result)))
-          (is (= 2 (::instrument/n-inspected result)))
           (is (= 1 (::instrument/n-dependent result)))
           (is (= 1 (::instrument/n-instrumented result)))
           (is (not (identical? a-before (live-fn a-sym))))

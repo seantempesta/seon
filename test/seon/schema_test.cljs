@@ -43,7 +43,10 @@
                 :schematest.dependency/local]
                :schematest.dependency/unrelated
                [:enum :schematest.dependency/leaf]}
-        projection (schema/build-projection forms)]
+        function-form [:=> [:cat :schematest.dependency/root] :boolean]
+        function-sym 'schematest.dependency/use-root
+        projection (schema/build-projection forms
+                                            {function-sym function-form})]
     (testing "Malli's schema walk follows local refs and records canonical refs"
       (is (= #{:schematest.dependency/branch}
              (get-in projection
@@ -67,8 +70,11 @@
     (testing "function forms use the same exact reference mechanism"
       (is (= #{:schematest.dependency/root}
              (schema/direct-references
-               projection
-               [:=> [:cat :schematest.dependency/root] :boolean]))))))
+               projection function-form)))
+      (is (= #{:schematest.dependency/root}
+             (get-in projection
+                     [:seon.schema.projection/function-dependencies
+                      function-sym]))))))
 
 (deftest single-segment-keyword-namespace-is-refused-with-guidance
   (testing "the S-21 defect shape — :workout/date"

@@ -27,7 +27,7 @@ tags: [decision, architecture, schema]
 > (always-on, default-validated), but the absolute wording
 > below ("all fns", "no off switch") predates the CLJS pod and overclaims.
 > The then-current semantics on the active track were: instrumentation rides the
-> **program graph** (`seon.instrument/instrument-from-db!` at boot /
+> **validated program projection** (`seon.instrument/instrument-projection!` at boot /
 > `start-agent!`, re-asserted after every hot reload via
 > `seon.client/after-reload`; the eval-tee wraps agent fns inline).
 > **Structural opt-out** (`async-unwrappable?`, computed — never a name

@@ -1,8 +1,8 @@
 (ns seon.instrument
   "Exact-data Malli instrumentation for the canonical program graph.
 
-   Cold reconstruction supplies the complete DB-backed function snapshot
-   once to [[instrument-from-db!]]. Later accepted program transitions
+   Cold reconstruction supplies the complete validated DB-backed projection
+   once to [[instrument-projection!]]. Later accepted program transitions
    supply only their changed symbols and new contracts to
    [[instrument-delta!]]. Both paths pass explicit `:data` to Malli; Seon
    never populates Malli's process-global function-schema registry and never
@@ -388,7 +388,7 @@
 #?(:cljs
    (defn async-fn?
      "True when `f` is (or wraps) a JS async function — the runtime shape
-      `^:async` compiles to. Lets [[instrument-from-db!]] route async
+      `^:async` compiles to. Lets [[instrument-projection!]] route async
       wrappers without the analyzer's `:async` flag. Sees THROUGH a malli
       instrumentation wrapper ([[-original-fn]]): the ctor-name check is
       only ever applied to the real fn, so an already-instrumented
@@ -574,44 +574,26 @@
                     ::n-instrumented (count accepted-syms))))))))
 
 #?(:cljs
-   (defn instrument-from-db!
-     "Instrument the complete canonical DB function snapshot once at boot.
+   (defn instrument-projection!
+     "Instrument one complete validated runtime projection at cold boot.
 
-      Persisted specs are parsed into exact targets and handed to
-      [[instrument-targets!]]. Unreadable, unresolved, dead, and structural
-      opt-out rows degrade as namespaced counts without entering Malli's
-      instrumentation data. Runtime mint/resume and hot reload must use
-      [[instrument-delta!]], never this complete query."
-     {:malli/schema [:=> [:cat :any] :map]}
-     [db]
+      The candidate already owns canonical function forms and the exact Malli
+      registry that validated them. No database rescan, EDN reparse, or global
+      function-schema registry participates in this publication step."
+     {:malli/schema [:=> [:catn [::projection :map]] :map]}
+     [projection]
      (if-not (enabled?)
        {::enabled? false ::n-instrumented 0}
-       (let [projection (schema/current-projection)
-             registry (:seon.schema.projection/registry projection)
-             rows (db/query '[:find ?sym ?spec
-                              :where [?e :seon.fn/sym ?sym]
-                                     [?e :seon.fn/spec ?spec]]
-                            db)
-             parsed
-             (reduce
-               (fn [{::keys [targets] :as acc} [sym-str spec-str]]
-                 (try
-                   (let [sym (symbol sym-str)
-                         form (reader/read-string spec-str)]
-                     (if (qualified-target-parts sym)
-                       (update acc ::targets conj
-                               (cond-> {::sym sym ::schema-form form}
-                                 registry (assoc ::registry registry)))
-                       (update acc ::bad-spec inc)))
-                   (catch :default _
-                     (update acc ::bad-spec inc))))
-               {::targets [] ::bad-spec 0}
-               rows)
-             result (instrument-targets! (::targets parsed))
+       (let [registry (:seon.schema.projection/registry projection)
+             targets
+             (mapv (fn [[sym form]]
+                     {::sym sym ::schema-form form ::registry registry})
+                   (:seon.schema.projection/function-contracts projection))
+             result (instrument-targets! targets)
              rejected-counts (frequencies (map ::reason (::rejected result)))]
          (assoc result
                 ::registered (::n-instrumented result)
-                ::bad-spec (::bad-spec parsed)
+                ::bad-spec 0
                 ::skipped (get rejected-counts ::skipped 0)
                 ::no-var (get rejected-counts ::no-var 0)
                 ::unresolvable-schema
@@ -628,71 +610,62 @@
                         db))))
 
 #?(:cljs
-   (defn instrument-schema-dependents-from-db!
-     "Refresh functions affected by one accepted schema-generation change.
+   (defn instrument-projection-delta!
+     "Publish exactly one validated program/schema projection delta.
 
-      The database supplies canonical function contracts. Malli's dependency
-      graph supplies the affected closure in both the old and new projections,
-      so removing an old edge still refreshes its former dependents. Only
-      selected functions become delta targets; unrelated live wrappers retain
-      object identity. Replacement contracts compile against the exact new
-      immutable registry before any live wrapper is touched."
+      Directly changed definitions are unioned with function contracts whose
+      old/new schema dependencies intersect the changed schema closure. The
+      candidate already contains parsed, validated forms and indexes, so this
+      performs no database query and no whole-program schema walk."
      {:malli/schema
       [:=>
        [:cat
         [:map
-         [::db :any]
          [::old-projection :map]
          [::new-projection :map]
-         [::changed-schema-keys [:set :keyword]]]]
+         [::changed-schema-keys [:set :keyword]]
+         [::changed-syms [:set :qualified-symbol]]]]
        :map]}
-     [{::keys [db old-projection new-projection changed-schema-keys]}]
-     (if (or (not (enabled?)) (empty? changed-schema-keys))
-       {::enabled? (enabled?) ::ok? true ::n-inspected 0 ::n-dependent 0
-        ::n-unstrumented 0 ::n-instrumented 0 ::accepted-syms #{}
-        ::rejected []}
+     [{::keys [old-projection new-projection changed-schema-keys changed-syms]}]
+     (if-not (enabled?)
+       {::enabled? false ::ok? true ::n-dependent 0
+        ::n-unstrumented 0 ::n-instrumented 0 ::accepted-syms #{} ::rejected []}
        (let [affected
              (into
                (schema/dependent-schema-keys old-projection
                                              changed-schema-keys)
                (schema/dependent-schema-keys new-projection
                                              changed-schema-keys))
+             old-function-dependencies
+             (:seon.schema.projection/function-dependencies old-projection)
+             new-function-dependencies
+             (:seon.schema.projection/function-dependencies new-projection)
+             dependent-syms
+             (into #{}
+                   (keep
+                     (fn [sym]
+                       (let [references
+                             (into (get old-function-dependencies sym #{})
+                                   (get new-function-dependencies sym #{}))]
+                         (when (seq (set/intersection affected references))
+                           sym))))
+                   (into (set (keys old-function-dependencies))
+                         (keys new-function-dependencies)))
+             selected-syms (into (set changed-syms) dependent-syms)
              registry (:seon.schema.projection/registry new-projection)
-             rows (program-schema-rows db)
-             selected
-             (reduce
-               (fn [acc [sym-str spec-str]]
-                 (try
-                   (let [sym (symbol sym-str)
-                         form (reader/read-string spec-str)
-                         old-refs (try
-                                    (schema/direct-references
-                                      old-projection form)
-                                    (catch :default _ #{}))
-                         new-refs (try
-                                    (schema/direct-references
-                                      new-projection form)
-                                    (catch :default _ #{}))]
-                     (if (and (qualified-target-parts sym)
-                              (seq (set/intersection
-                                     affected (into old-refs new-refs))))
-                       (conj acc {::sym sym
-                                  ::schema-form form
-                                  ::registry registry})
-                       acc))
-                   (catch :default _ acc)))
-               []
-               rows)
-             changed-syms (into #{} (map ::sym) selected)
-             result
-             (if (seq selected)
-               (instrument-delta!
-                 {::changed-syms changed-syms ::targets selected})
-               {::enabled? true ::ok? true ::n-unstrumented 0
-                ::n-instrumented 0 ::accepted-syms #{} ::rejected []})]
+             contracts
+             (:seon.schema.projection/function-contracts new-projection)
+             targets
+             (into []
+                   (keep (fn [sym]
+                           (when-let [form (get contracts sym)]
+                             {::sym sym ::schema-form form
+                              ::registry registry})))
+                   selected-syms)
+             result (instrument-delta!
+                      {::changed-syms selected-syms ::targets targets})]
          (assoc result
-                ::n-inspected (count rows)
-                ::n-dependent (count selected))))))
+                ::n-dependent (count dependent-syms))))))
 
 #?(:cljs
    (defn- coverage-gap
