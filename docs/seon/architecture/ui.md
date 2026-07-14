@@ -442,19 +442,43 @@ in `seon.web.datastar`.
   `drain`; stale UI states never form an unbounded write queue.
 - **Observed reads + exact result change.** Each unit renders under a synchronous
   runtime-only observer at the `seon.db` boundary. Actual query/pull/entity
-  requests compile into an in-memory attribute→read→unit index; no dependency
-  datoms are stored. A coalesced batch retains earliest `db-before`, latest
-  `db-after`, and changed datoms/attributes. Attributes select candidate reads;
-  each normalized read is evaluated once on both immutable values, and only an
-  unequal result invokes its unit renderer. Identical serialized output is
-  suppressed. Broad/unknown reads are compared conservatively rather than
-  blindly rendering. Coalescing has a bounded maximum wait, so continuous
-  structural writes cannot starve a view.
+  requests compile into one runtime dependency descriptor: concrete attributes,
+  entity refs, index prefixes/windows, and a broad flag for anything that cannot
+  be narrowed safely. One in-memory reverse index maps those descriptors to
+  active normalized render units; no dependency datoms are stored. A coalesced
+  batch retains earliest `db-before`, latest `db-after`, and changed
+  datoms/attributes. Attribute/entity/index intersections select candidate
+  units; broad units remain candidates for every transaction. Each unique
+  normalized read is replayed once on the new immutable value and compared with
+  its captured result. Only an unequal result invokes its unit renderer.
+  Identical serialized output is suppressed. Coalescing has a bounded maximum
+  wait, so continuous structural writes cannot starve a view.
 - **Declared renderer reads are database facts.** The analyzer tee persists
-  qualified keyword reads as `:seon.fn/read-attrs`; recency and the pre-render
-  candidate filter consume only those facts. They never regex-scan function
-  source as a compatibility path. Runtime observation remains the exact
-  correctness check for reads that actually execute.
+  qualified keyword reads as `:seon.fn/read-attrs`; focus/recency and an optional
+  cold-start hint consume those facts. They never regex-scan function source as
+  a compatibility path. The declared set is non-transitive through helper
+  calls, so it can never exclude a runtime-observed dependency or veto exact
+  replay. Runtime observations are the sole live-correctness authority.
+- **Caching is automatic at the unit boundary.** Core and agent-authored
+  renderers do not call `memoize`. Every active unit automatically retains its
+  stable non-database inputs, renderer/source digest, normalized read
+  requests/results, and last serialized element. Equal read results reuse that
+  element without invoking the renderer; equal serialized output emits no
+  patch. Equivalent open views share this authority through their normalized
+  subscription. A bounded LRU may retain recently reusable unit outputs across
+  subscriptions, keyed only by unit coordinate + renderer digest + small plain
+  input/read-result data and bounded by entry count plus estimated output
+  tokens. It never keys by or retains a Datahike database/entity value. A source
+  change changes the renderer digest; an activation change changes the unit
+  plan; eviction affects performance only.
+- **One generic transition engine.** Root, ordinary-agent, canvas, context,
+  debug, and `/data` layouts compile to the same unit descriptors and call the
+  same observe/candidate/replay/render/serialize transition. Page namespaces
+  define unit composition and presentation, not custom invalidation algorithms.
+  Closed lazy details have no active descriptor, observations, or cache entry.
+  Agent-authored surfaces inherit the complete mechanism merely by rendering
+  through their ordinary surface unit; no special API or caching instruction is
+  exposed to the agent.
 - **Separate GET feed path.** The shim page (`/view`, `/agent/{id}`) and its live
   stream (`/view/feed`, `/agent/{id}/feed`) are two GET URLs; the shim's
   `data-init="@get('…/feed')"` opens the stream. Two distinct URLs sidestep the

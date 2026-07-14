@@ -23,6 +23,20 @@ the top of [[roadmap]]; slice 0 (reconcile and baseline) is in progress. The
 active plan replaces mechanisms in place and deletes superseded paths; it does
 not create compatibility namespaces or parallel architectures.
 
+The 2026-07-14 live-browser baseline in [[roadmap]] is the current falsification
+set: existing feeds partially stale plan/transcript/root units because a
+non-transitive declared-attribute gate skips exact observed reads; root uses the
+ordinary agent shell; open debug broadcasts cost hundreds of milliseconds; and
+simple plan/reply probes consumed 10–13 turns without a visible page interrupt.
+Do not tune caps or patch individual renderers around these owning defects.
+
+The settled reactive target is one automatic render-unit engine. Runtime-
+observed read requests derive the candidate index and remain correctness
+authority; every unit receives bounded read/result/serialized-output reuse;
+root, agent, canvas, debug, and `/data` define layouts but no custom transition
+logic. Agents never write memoized renderers, and no cache retains a database
+value. See [[roadmap]] slice 2 and [[docs/seon/architecture/ui]].
+
 The previously shared ACME/plan/REPL work is checkpointed at `3e0e0bff` and the
 tree was clean immediately afterward. Focused `seon.schema-test`,
 `my.plan-test`, and `seon.ai.dispatch-test` runs pass. The annotated

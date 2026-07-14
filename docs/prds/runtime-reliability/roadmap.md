@@ -47,6 +47,47 @@ before doing implementation work. Do not stop merely because a useful commit
 landed; stop only at branch graduation, a genuine authority/input blocker, or a
 new user direction.
 
+### Live browser baseline — 2026-07-14
+
+The first public-control journey ran against the unchanged default cluster
+before source implementation. It established these concrete failures:
+
+- `/` is the ordinary agent layout around `system-view`: it shows “agent root,”
+  “← all agents,” a canvas pin, the plan/transcript rail, and a recursive root
+  card. Ordinary-agent card bodies can be blank even when the same agent page
+  has a valid welcome canvas and purpose.
+- Creating an agent updated the root card grid, and sending a message updated
+  the shared/agent headers, proving the browser feed and Datastar morph path are
+  connected. The root system canvas remained internally stale: the header
+  showed three agents with one running while the canvas showed three idle, zero
+  turns/evals, and no activity.
+- On the ordinary agent page, submitting a planning request updated the headers
+  to running while the already-open plan and transcript surfaces remained “no
+  plan yet” and “no events yet.” A fresh gzip feed over the same database
+  rendered the submitted message and plan facts correctly. The defect is
+  incremental invalidation, not database state, renderer output, or idiomorph.
+- Source trace confirms the cause: `seon.ui.agent-view/transition` consults exact
+  captured reads only after a changed-attribute gate derived from the renderer
+  function's own analyzer keyword literals. That set is intentionally
+  non-transitive, so helper-indirected reads in `system-view`, plan, and
+  transcript never reach replay. Runtime observations must be correctness
+  authority; declared attrs cannot veto them.
+- One open root debug view rerendered on routine message/run/blob/turn commits at
+  roughly 409–1,135 ms per broadcast. The ordinary/root agent feed transitions
+  observed in the same journey were roughly 63–189 ms. Closed debug units and
+  unchanged blocks still need query/SCI/serialization attribution before a fix.
+- The root turn opened with roughly 19,000–21,000 prompt tokens; the ordinary
+  agent's later planning turns approached 25,000. A request for one brief root
+  reply consumed ten turns. A request to create a three-step plan, make the
+  first step active, and stop before doing the work reached thirteen turns and
+  continued executing. Both probes required the existing stop endpoint.
+- The normal agent page exposes no visible stop/resume control, so a human
+  cannot easily interrupt this behavior through the UI.
+
+These observations are baseline evidence, not accepted target behavior. Each
+must gain an owning behavioral regression plus a repeated real-browser and
+server-side gzip-feed proof before its slice closes.
+
 ### Slice 0 — reconcile and baseline — IN PROGRESS
 
 - Reconcile every remaining claim below with active source, tests, routes,
@@ -100,15 +141,28 @@ parallel registries, or compatibility paths.
 - Give data details, debug panes, and root/card details stable fully namespaced
   render-unit coordinates. Closed details construct no body, source, token
   breakdown, Hiccup, or SCI work.
-- Carry observed-read invalidation and shared normalized subscription behavior
-  through every unit. Add a bounded compositional output cache only where
-  profiling proves it useful; never key by or retain a database object.
+- Replace page-specific transition logic with one general render-unit engine
+  used by root, agent, canvas/context surfaces, debug, and `/data`. Initial
+  render captures nested `seon.db` reads automatically; their runtime requests
+  derive attribute/entity/index/broad dependency descriptors and one reverse
+  candidate index. Declared source keywords remain focus/recency hints only and
+  can never gate correctness.
+- Give every active unit automatic single-entry read/result/output reuse and
+  normalized cross-tab sharing. Add one bounded LRU for recently reusable unit
+  outputs only where profiling proves cross-subscription value; key it by unit
+  coordinate, renderer/source digest, and small normalized plain data, with
+  entry-count and estimated-output-token bounds. Never key by or retain a
+  database/entity value, and never require core or agent-authored functions to
+  call a cache API.
 - Suppress identical serialized output and delete any whole-page or secondary
   feed path made redundant by the unit contract.
 
 Exit: opening one detail pays for and updates only that detail; unrelated
 transactions invoke zero corresponding queries/renderers/SCI work; `/data` can
-inspect all required database facts without a global scan.
+inspect all required database facts without a global scan. A helper-indirected
+read updates an already-open unit; unknown reads are conservative; equivalent
+tabs share work; eviction changes latency but never output; no page owns a
+second transition algorithm.
 
 ### Slice 3 — root, sessions, canvas, focus, and layout — PENDING
 
@@ -265,14 +319,17 @@ interaction under test.
   card description/preview update.
 - Create and advance a durable plan through the agent-facing public operations.
   Confirm the root card shows the high-level goal plus current step, survives a
-  restart, and changes reactively when the active step changes.
+  restart, and changes reactively when the active step changes. A request to
+  plan and stop must not execute the planned work or consume the whole turn
+  allowance; the resulting plan must contain the requested dependency shape.
 - Build a canvas with a button, text input, select, toggle, and form. Exercise
   successful writes, validation rejection, handler error, rapid repeated input,
   pin/unpin, and clear. Verify visible feedback, database facts, affected-unit
   morphs, and no stale or duplicated primary/rail surface.
 - Stop, resume, and recover an agent; open debug and `/data`; select context
-  surfaces; navigate back to root. Confirm every state transition is legible
-  and no closed debug/data detail performs body/SCI work.
+  surfaces; navigate back to root. Stop/resume must be visible and reachable on
+  the agent page. Confirm every state transition is legible and no closed
+  debug/data detail performs body/SCI work.
 - Run two browser tabs with independent manual focus and navigation. A root
   redirect moves only its originating tab; both tabs still receive shared
   database changes.
