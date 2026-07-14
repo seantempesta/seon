@@ -213,7 +213,34 @@ overwrite warnings.
 The durable evidence, pinned sources, executable probes, and acceptance gates
 are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]],
 [[research/test-impact-selection-and-runner-audit-2026-07-14]], and
-[[research/automatic-test-feedback-infrastructure-audit-2026-07-14]].
+[[research/automatic-test-feedback-infrastructure-audit-2026-07-14]]. The
+cross-platform continuation is
+[[research/unified-clj-cljs-cljc-test-feedback-2026-07-14]].
+
+The first automatic-feedback implementation is deliberately namespace-level
+and conservative. `seon.dev.changed-test` remains the one public decision:
+Shadow supplies the CLJS graph, bounded host-only clj-kondo analysis supplies
+CLJ namespace facts when available, and CLJC unions both decisions. The
+operation delegates only to the existing pod, writer, and operator runners;
+missing or ambiguous facts widen to the full relevant gate. It recomputes the
+small host graph per request, attempts every selected boundary sequentially,
+retains one EDN report plus full logs, and never gates an edit on test results.
+No daemon, database projection, hardcoded test enumeration, speculative
+function call graph, or fourth runner is part of this slice.
+
+Implementation order for this unit:
+
+1. Make the hook and current operation accept CLJ, CLJS, and CLJC; expose
+   dynamic writer/operator test roots from their owning runners.
+2. Return one boundary-selection/result shape and let the operator runner
+   accept exact namespace selectors.
+3. Add host namespace analysis, reverse dependency closure, CLJ macro joins
+   into Shadow, and explicit CLJC dual-platform decisions.
+4. Preserve full per-boundary logs and one token-bounded combined report;
+   widen on missing analyzer/build facts rather than silently selecting none.
+5. Prove pass, failure, malformed source, stale artifact, missing analyzer,
+   deletion/move, and multi-boundary behavior through both Claude and Codex
+   hook adapters.
 
 ### Slice 0 — reconcile and baseline — IN PROGRESS
 
