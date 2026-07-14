@@ -860,11 +860,12 @@ agents idle and one exact notice visible to root.
     bounded append-order streams without a complete history scan. Function-menu
     ranking and header error-storm detection now consume those same fact-owner
     windows; their duplicate full-history queries and the parallel
-    `:seon.derive/error-storm` vocabulary are deleted. Remaining: bound the
-    transcript's retained HTML work before materialization while preserving the
-    deliberate full AI-history policy, and remove any now-redundant tail step in
-    `seon.render.default`. Do not store a recent-list projection or rely on a
-    growing Datalog sort.
+    `:seon.derive/error-storm` vocabulary are deleted. The normal HTML
+    transcript caps each fact-owner source before materialization and then
+    applies the same retained-turn policy; the deliberate AI transcript history
+    policy is unchanged. The redundant tail step in `seon.render.default` is
+    also gone. No recent-list projection is stored and no caller relies on a
+    growing Datalog sort. This item is complete.
 11. Restore a deliberately small root-only role block after behavioral review:
     root understands the fleet, starts/routes to ordinary agents, and handles
     recovery notices. Keep root's home requirements as one complete curated
