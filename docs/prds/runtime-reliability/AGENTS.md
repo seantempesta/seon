@@ -16,14 +16,12 @@ JVM server, canonical CLJS runtime/UI, archive boundary, local and remote
 database synchronization, client distribution, test authority, and exact
 canvas/surface/card cutover.
 
-This PRD is in **phase 3 of 6: finish the operator cutover and test trim**. The
-Babashka operator and default-cluster cold/restart proof are complete. ACME and
-Inspect callers and the remaining active test-door consolidation are the
-phase-3 work still open. The broken JVM gold-patch replay scripts and the
-dangling `bin/test-clj` symlink are deleted; their dated result artifacts remain
-as evidence. The active plan replaces mechanisms in
-place and deletes their superseded paths; it does not create compatibility
-namespaces or parallel architectures.
+This PRD is in **integrated completion**. Work from the original phases 3–5
+landed out of order, so the former “phase 3 of 6” label was retired. The
+authoritative remaining order is the seven-slice **Active execution ledger** at
+the top of [[roadmap]]; slice 0 (reconcile and baseline) is in progress. The
+active plan replaces mechanisms in place and deletes superseded paths; it does
+not create compatibility namespaces or parallel architectures.
 
 The previously shared ACME/plan/REPL work is checkpointed at `3e0e0bff` and the
 tree was clean immediately afterward. Focused `seon.schema-test`,
@@ -260,23 +258,11 @@ a hosted JVM + Node cluster.
 
 ## Ordered next steps
 
-1. Review/freeze the Git archive ref, database/UI vocabulary, deletion matrix,
-   and coordinated clean-base evidence.
-2. Isolate and prove the permanent JVM database/heavy-compute server, including
-   the atomic store→database namespace/schema/path cutover.
-3. Replace the operator with Babashka, archive/delete the paused JVM app and
-   rejected prototypes, and split fast CLJS/writer/runtime/browser test doors.
-4. Finish exact config/schema/program/database lifecycle reconstruction,
-   first-run root+ordinary-agent creation, non-fail-fast batches, coordinates,
-   as-of, branches, restore, undo, and idle-and-notify crash recovery.
-5. Converge canvas/surface/card UI vocabulary, delete weak context/inventory
-   paths, port `/data` to bounded lazy database units, restore concise root
-   context, persist per-tab location/navigation, refine skill import without a
-   default block, finish responsive layout/controls/focus, and cut over ACME
-   after default proof.
-6. Run local transition/failure/browser/basic-Inspect/profiling acceptance,
-   update the one architecture, and graduate only when active searches find no
-   duplicate local mechanism.
+Follow the roadmap's active execution ledger exactly: baseline; database
+lifecycle; lazy reactive/data units; root/session/canvas/UI; tests/operator/
+callers; profiling; acceptance/graduation. Keep one slice in progress, close it
+with focused tests + live proof + docs + commits, then mark the next slice in
+progress. Bugs and smells follow the ledger's interruption/recording policy.
 
 ## Entry points
 

@@ -28,17 +28,182 @@ compensate for unclear functions.
 
 ## Current position
 
-**Current phase: finish the operator cutover and test trim (phase 3 of 6).**
-The permanent JVM database server is isolated, duplicate runtime authority is
-removed, the paused application is archived, and the Babashka operator has
-cold-started and restarted the default cluster through its one public door.
-Remaining phase-3 gates are ACME/Inspect caller migration and consolidation of
-the active test doors. The broken JVM gold-patch replay scripts and dangling
-`bin/test-clj` symlink are deleted while their dated evidence remains. Remote
-replication, cloud topology, browser
-replicas, offline mutation, mobile packaging, and the full paid Inspect AI
-battery are explicit follow-on work rather than completion gates for this
-branch.
+**Current phase: integrated completion across the remaining local slices.**
+The permanent JVM database server, canonical CLJS runtime, Babashka operator,
+database protocol, shared Datastar feed, database-authoritative program/schema
+projection, and focused test doors are already active. Work from the original
+phases 3–5 landed out of sequence while bugs were being removed, so the old
+“phase 3 of 6” label no longer described reality. The execution ledger below is
+now the authoritative remaining order. Remote replication, cloud topology,
+browser replicas, offline mutation, mobile packaging, and the full paid Inspect
+AI battery remain explicit follow-on work rather than completion gates.
+
+## Active execution ledger
+
+Exactly one slice is `IN PROGRESS`. A slice closes only after its code, focused
+tests, live proof, architecture update, roadmap update, and bounded commits all
+land. After closing one slice, mark the next one `IN PROGRESS` in this ledger
+before doing implementation work. Do not stop merely because a useful commit
+landed; stop only at branch graduation, a genuine authority/input blocker, or a
+new user direction.
+
+### Slice 0 — reconcile and baseline — IN PROGRESS
+
+- Reconcile every remaining claim below with active source, tests, routes,
+  process/classpath inspection, and the running default cluster. Delete or
+  correct stale roadmap claims rather than treating prose as evidence.
+- Record the exact open files/functions/tests for slices 1–6. Search for stale
+  vocabulary, forwarding aliases, compatibility branches, duplicate mutable
+  authority, whole-history scans, retained database values, and unbounded
+  collections.
+- Preserve the concurrently owned untracked repl-autosuggest research file.
+- Baseline cold/warm boot, focused gates, routes/feeds, instrumentation coverage,
+  CPU, heap, RSS, and representative agent/canvas/database-browser behavior.
+
+Exit: one clean, reproducible default-cluster baseline and a source-grounded
+file/test inventory for every later slice. The operator gate, database boundary,
+critical eval/context gates, and live instrumentation census pass.
+
+### Slice 1 — database lifecycle and reconstruction — PENDING
+
+- Finish candidate installation of missing native Datahike attributes and make
+  accepted program/schema publication fail closed: if post-commit runtime
+  publication cannot complete, stop admission and reconstruct from committed
+  facts through the existing projection path.
+- Freeze supervisor intent so config remains operation-scoped and optional.
+  Prove native backend reopen without hidden manifest/runtime state.
+- Make clean restart quiesce at turn boundaries; retain the existing
+  idle-and-notify recovery transition only for unexpected interruption.
+- Finish one canonical `{database-id, branch, commit-id, t}` coordinate through
+  reads, receipts, feeds, turns, errors, caches, and bookmarks.
+- Complete read-only as-of, writable same-database branches, quiesced
+  restore/undo, branch-local blob behavior, and non-autonomous forensic reads
+  through the maintained Datahike lifecycle. Do not create a Seon-specific
+  physical-copy implementation where Datahike already owns the primitive.
+- Prove that multi-form batches attempt every complete form and persist every
+  real result in order.
+
+Exit: the full fresh/converged/config-free/reopen/restart/crash/as-of/fork/
+restore/undo/batch transition matrix passes without arbitrary eval replay,
+parallel registries, or compatibility paths.
+
+### Slice 2 — lazy reactive units and database browser — PENDING
+
+- Complete `seon.db.browser` projections for entities, outbound/reverse refs,
+  transactions, provenance, and history using bounded Datahike index cursors.
+- Add the general maintained-Datahike `count-datoms` primitive and expose it
+  only through the specified `seon.db` boundary.
+- Give data details, debug panes, and root/card details stable fully namespaced
+  render-unit coordinates. Closed details construct no body, source, token
+  breakdown, Hiccup, or SCI work.
+- Carry observed-read invalidation and shared normalized subscription behavior
+  through every unit. Add a bounded compositional output cache only where
+  profiling proves it useful; never key by or retain a database object.
+- Suppress identical serialized output and delete any whole-page or secondary
+  feed path made redundant by the unit contract.
+
+Exit: opening one detail pays for and updates only that detail; unrelated
+transactions invoke zero corresponding queries/renderers/SCI work; `/data` can
+inspect all required database facts without a global scan.
+
+### Slice 3 — root, sessions, canvas, focus, and layout — PENDING
+
+- Reduce root's oversized namespace context by fixing selection and ownership,
+  not by adding prose caps or a second root-context mechanism. Keep one concise
+  role block and move operational depth into discoverable namespaces.
+- Finish bounded lazy fleet-card detail and the database-backed per-tab session
+  model. Root redirects only the originating browser session through the normal
+  location fact/feed mechanism.
+- Complete deliberate focus: agent canvas/domain updates select their surface;
+  accepted human messages and agent replies select transcript; a manual
+  selection yields to later recency unless explicitly pinned; a missing pinned
+  surface heals normally.
+- Prove the single `my.canvas` API for buttons, inputs, selects, toggles, forms,
+  state, save, show, pin, and clear under success, validation failure, handler
+  rejection, rapid input, and throws. Feedback must be structured and visible
+  to the agent without repairing the agent's demo for it.
+- Finish the full-height responsive canvas/right rail, bounded fonts/code,
+  compact plan disclosures, transcript bottom anchoring, independent scrolling,
+  and focused-surface de-duplication. Keep the unused live bar hidden.
+- Persist imported skill bodies through the one importer while keeping the
+  default skills context block absent.
+
+Exit: root and ordinary agents are understandable and responsive in narrow and
+wide real-browser proofs; two tabs do not fight; every canvas control produces a
+fast, observable reactive result through one route/feed/database path.
+
+### Slice 4 — tests, operator, callers, and dead material — PENDING
+
+- Audit test value by behavior and edge coverage. Remove disabled suites,
+  obsolete artifacts, duplicated fixtures, context-wording assertions, and
+  expected-failure log floods. Keep focused pure/database/runtime/browser tiers
+  with one bounded terminal each.
+- Finish the packaged artifact manifest and typed database administration
+  surface without restoring nREPL administration or a second launch path.
+- Finish active Inspect caller migration and run only the bounded basic smoke.
+  Coordinate ACME after the default cluster proves the no-alias cut; do not edit
+  its concurrently owned lane prematurely.
+- Re-run active searches for old JVM, gym, inventory, store, inspector, world,
+  tile/live-tile, duplicate planner, duplicate feed, and forwarding API paths;
+  delete active remnants rather than document them as deprecated.
+
+Exit: one operator, one runner per tier, no disabled graveyard or duplicate
+harness, and default/Inspect/ACME callers use the same current contracts.
+
+### Slice 5 — profiling and bug-driven simplification — PENDING
+
+- Profile cold/warm boot, five agent births, writer/receipt/replay latency,
+  event-loop delay, queries, dirty-unit renders, SCI setup/body, serialization,
+  gzip/drain, heap, GC, RSS, and idle CPU on small and grown databases.
+- Reproduce the historical large-transcript HTML cost and 1.4–2.5 GB RSS
+  sawtooth. Fix unnecessary work at its owning unit/query/cache boundary; do not
+  raise budgets or hide the symptom.
+- Establish explicit local budgets and mechanized failure signals. Repeat the
+  profile after every material optimization and retain comparable evidence.
+
+Exit: unchanged/open feeds remain idle, work scales with opened/changed units,
+memory returns to a stable band, and the system pays only for features in use.
+
+### Slice 6 — acceptance and graduation — PENDING
+
+- Run the complete transition/failure matrix from a destructive default reset.
+- Browser-drive `/`, ordinary first-run routing, root, agent, debug, canvas
+  controls, focus/pin/scroll, `/data`, two-tab navigation, reconnect, as-of, and
+  responsive layouts. Verify gzip feeds server-side.
+- Run complete active CLJS/writer/operator gates once, then the bounded Inspect
+  smoke. Prove default first and coordinate ACME second.
+- Update the one architecture, skills, runbooks, and operator help to describe
+  only observed behavior. Active source/classpath/process/vocabulary searches
+  must find no superseded local mechanism.
+
+Exit: fast, stable, responsive agents; one writer, one CLJS runtime/UI, one
+protocol, one operator, one reactive unit/feed mechanism, one database/program
+authority, and no known local duplicate or compatibility path.
+
+## Bug and code-smell handling during every slice
+
+- Observe and reproduce before editing. A test or live proof must describe how
+  the defect fails; source shape alone is not completion evidence.
+- Fix a defect in the namespace/mechanism that owns it. Never create `v2`,
+  forwarding aliases, temporary compatibility namespaces, duplicated context,
+  or a second reactive/database path to avoid repairing the original.
+- If a discovered bug threatens data correctness, process safety, agent-loop
+  liveness, or invalidates the current slice's evidence, it interrupts the slice
+  and is fixed immediately. Otherwise add its reproduction, owner, and exit
+  proof to the most relevant pending slice before continuing.
+- Treat unbounded collections, whole-history scans, database-retaining caches,
+  source reparsing of persisted facts, mutable duplicate authority, bare keys,
+  unexplained coercions, stale vocabulary, and test-only production seams as
+  bugs until disproven.
+- Prefer deletion and reuse. Read the current implementation and vendored
+  library source before adding an abstraction; upstream maintained-library
+  fixes where the behavior belongs.
+- Commit each coherent gain with its focused tests. Do not accumulate unrelated
+  edits. After runtime/config changes, rebuild/reset the authorized default
+  cluster and prove the live path. Update architecture plus this ledger in the
+  same slice.
+- Keep progress visible: concise commentary after each diagnosis, commit, live
+  proof, newly discovered issue, and slice transition.
 
 The shared ACME/plan/REPL work is checkpointed at `3e0e0bff`; the directly
 affected schema, plan, and AI dispatch CLJS namespaces pass their focused tests,
