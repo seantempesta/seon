@@ -161,6 +161,10 @@
   (swap! *schemas assoc :seon.schema/registry-key :keyword))
 (defonce ^:private _definition-type
   (swap! *schemas assoc :seon.schema/definition :any))
+(defonce ^:private _value-type
+  (swap! *schemas assoc :seon.schema/value :any))
+(defonce ^:private _explanation-type
+  (swap! *schemas assoc :seon.schema/explanation [:maybe :map]))
 (defonce ^:private _namespace-name-type
   (swap! *schemas assoc :seon.schema/namespace-name :string))
 (defonce ^:private _kvs-type
@@ -463,6 +467,30 @@
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
   [k]
   (get @*schemas k))
+
+(defn valid-candidate-value?
+  "True when `value` satisfies `schema-key` in the current candidate.
+
+   Candidate declarations intentionally do not mutate Malli's process-global
+   default registry before their database transaction commits. Boundaries
+   validating a declaration and its first facts together use this function so
+   they see the complete candidate without publishing it early."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]
+                             [::value ::value]]
+                  :boolean]}
+  [schema-key value]
+  (m/validate schema-key value {:registry seon-registry}))
+
+(defn explain-candidate-value
+  "Explain a value rejected by the current declaration candidate.
+
+   Uses the same explicit candidate registry as `valid-candidate-value?`; nil
+   means the value is valid."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]
+                             [::value ::value]]
+                  ::explanation]}
+  [schema-key value]
+  (m/explain schema-key value {:registry seon-registry}))
 
 (defn schemas-in-namespace
   "The `{keyword definition}` map of schemas registered under `ns-name`.

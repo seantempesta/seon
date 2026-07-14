@@ -137,6 +137,17 @@ single-process rerun remains required after the autosuggest integration
 checkpoint; the prior diagnostic run reached its final summary and showed no
 independent duplicate completion.
 
+The post-integration rerun exposed the remaining projection fault more exactly:
+database writes validated newly registered attrs through Malli's last committed
+global registry, even though the eval deliberately withholds candidate
+publication until the declaration transaction succeeds. Candidate value
+validation now passes an explicit live declaration registry without mutating
+the global projection early. The focused schema/database gate passes 56 tests
+and 391 assertions, and the original contaminating order (`extra-core-test`
+then `db-test`) passes 52 tests and 361 assertions in one process. A complete
+single-process checkpoint is still required to distinguish any independent
+later failures from the old cascade.
+
 The completed autosuggest lane is now integrated as five bounded commits. The
 active Inspect SWE-bench arm derives restricted egress from the selected model
 provider, standard openai-compatible Inspect mode declares its `openai`

@@ -337,6 +337,30 @@
 (deftest validate-values!-accepts-good-entity
   (is (nil? (validate-values! [{::name "Alpha" ::rank 1}]))))
 
+(deftest candidate-value-validation-does-not-require-early-publication
+  (let [before-forms      (schema/snapshot)
+        before-projection (schema/current-projection)
+        attr              :seon.db-test.candidate/value]
+    (try
+      ;; Model the live runtime: a committed immutable projection is active,
+      ;; then an eval declares an attr whose first facts must validate before
+      ;; the candidate is published.
+      (schema/activate! before-forms)
+      (schema/register! attr :string)
+      (is (nil? (validate-values! [{attr "accepted before publication"}])))
+      (let [error (try
+                    (validate-values! [{attr 42}])
+                    nil
+                    (catch :default e e))]
+        (is (= :seon.db/invalid-value (:seon.db/error (ex-data error)))))
+      (finally
+        (if before-projection
+          (schema/activate-projection! before-projection)
+          (do
+            (schema/restore! before-forms)
+            (reset! @#'schema/!projection nil)
+            (schema/relink-registry!)))))))
+
 (deftest validate-values!-throws-on-bad-value
   (let [ex (try
              (validate-values! [{::name "Alpha" ::rank "not-an-int"}])

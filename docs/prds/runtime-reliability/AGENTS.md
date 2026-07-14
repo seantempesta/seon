@@ -42,7 +42,11 @@ no JVM cache and expose no cache API to renderers. A Node `lru-cache` recent
 layer is allowed only after active-unit profiling proves meaningful reopen
 reuse. The completed test audit proves the common latency tax is a fresh
 Shadow JVM, while the current complete run is independently broken by a Malli
-projection leak and duplicate async completion. Repair that baseline first;
+projection leak and duplicate async completion. The candidate-validation half
+of the projection leak is repaired: first facts now validate against the live
+declaration candidate without prematurely publishing it, and the original
+cross-namespace order is green. Re-run the complete checkpoint to find any
+independent remainder before optimizing selection;
 then reuse the existing managed Shadow process and compiler dependency graph.
 Do not infer function-level test impact from the incomplete runtime graph.
 Automatic agent feedback uses the existing synchronous `PostToolUse`

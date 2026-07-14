@@ -18,7 +18,6 @@
     [datahike.api :as d]
     [datahike.db.interface :as dbi]
     [datahike.impl.entity :as dentity]
-    [malli.core :as m]
     [seon.ai.tokens :as tokens]
     [seon.db :as-alias db]
     [seon.error :as error]
@@ -607,7 +606,7 @@
               (if-not (contains? ent ::db/ref)
                 ent
                 (let [r (get ent ::db/ref)]
-                  (when-not (m/validate :seon.db/ref r)
+                  (when-not (schema/valid-candidate-value? :seon.db/ref r)
                     (throw (ex-info
                              (str "seon.db/transact!: `:seon.db/ref` names "
                                   "the entity a map transacts ONTO — its "
@@ -617,7 +616,7 @@
                              {::db/error             :seon.db/invalid-value
                               ::db/attr              ::db/ref
                               ::db/actual-value      r
-                              ::db/malli-explanation (m/explain :seon.db/ref r)
+                              ::db/malli-explanation (schema/explain-candidate-value :seon.db/ref r)
                               :seon.error/kind       :user-input})))
                   (when (and (contains? ent :db/id)
                              (not= (:db/id ent) r))
@@ -805,7 +804,7 @@
     (map? child)
     (validate-entity-values! child)
 
-    (m/validate :seon.db/ref child)
+    (schema/valid-candidate-value? :seon.db/ref child)
     nil
 
     :else
@@ -815,7 +814,7 @@
                     {::db/error              :seon.db/invalid-ref-child
                      ::db/attr               parent-attr
                      ::db/actual-value       child
-                     ::db/malli-explanation  (m/explain :seon.db/ref child)
+                     ::db/malli-explanation  (schema/explain-candidate-value :seon.db/ref child)
                      :seon.error/kind        :user-input}))))
 
 (defn validate-entity-values!
@@ -849,7 +848,7 @@
             (validate-entity-values! val)
             ;; Anything else (eid, lookup tuple, ident) → validate as ref.
             :else
-            (when-not (m/validate :seon.db/ref val)
+            (when-not (schema/valid-candidate-value? :seon.db/ref val)
               (throw (ex-info (str "Malli validation failed for " attr
                                    ": expected :seon.db/ref (eid, lookup "
                                    "tuple, or nested entity map), got "
@@ -858,7 +857,7 @@
                                ::db/attr              attr
                                ::db/expected-schema   schema-form
                                ::db/actual-value      val
-                               ::db/malli-explanation (m/explain :seon.db/ref val)
+                               ::db/malli-explanation (schema/explain-candidate-value :seon.db/ref val)
                                :seon.error/kind       :user-input}))))
 
           ;; Many-card ref slot — iterate children, each may be a
@@ -870,7 +869,7 @@
 
           ;; Normal scalar / non-ref path — validate against the schema.
           :else
-          (when-not (m/validate attr val)
+          (when-not (schema/valid-candidate-value? attr val)
             (throw (ex-info (str "Malli validation failed for " attr
                                  ": expected " (pr-str schema-form)
                                  ", got " (truncate-value val))
@@ -878,7 +877,7 @@
                              ::db/attr               attr
                              ::db/expected-schema    schema-form
                              ::db/actual-value       val
-                             ::db/malli-explanation  (m/explain attr val)
+                             ::db/malli-explanation  (schema/explain-candidate-value attr val)
                              :seon.error/kind        :user-input}))))))))
 
 (defn validate-values!

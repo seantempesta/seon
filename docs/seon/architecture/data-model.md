@@ -339,9 +339,14 @@ Facet column reads `valueType / cardinality / unique|component`. Mixed-`:or`
 attrs note the EDN-string storage. Every attribute below is named, typed, and
 registered via `schema/register!`; the bridge derives the datahike facet.
 
-**`register!` ≠ bridge-to-datahike.** `schema/register!` is in-memory (the malli
-registry) only; the datahike bridge runs lazily at transact time, on the attrs
-that actually appear in a tx (`ensure-datahike-attrs!`, `internal.cljs:1359/1370`).
+**`register!` ≠ bridge-to-datahike.** `schema/register!` adds to the in-memory
+declaration candidate only; it does not publish a new process-global Malli
+projection before the matching database transaction commits. The transact
+boundary validates first facts against that explicit complete candidate, while
+ordinary Malli resolution continues to see the last committed immutable
+projection. After acceptance, the exact candidate becomes active atomically.
+The datahike bridge runs lazily at transact time, on the attrs that actually
+appear in a tx (`ensure-datahike-attrs!`, `internal.cljs:1359/1370`).
 So an IN-MEMORY-ONLY value shape — the `:seon/error` family (§6), the derived
 `:seon.warn/check-response` (§7), `:seon.derive/status` — registers fine even
 though it is a `:map` the bridge cannot store: it is never transacted as an entity
