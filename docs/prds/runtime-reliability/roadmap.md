@@ -178,6 +178,13 @@ runner stream is now compact progress plus counts/failure index, while the
 complete expected-negative-path transcript remains in its bounded log;
 `--verbose` opts back into live raw output.
 
+The missing-agent failure was a public database-contract mismatch: Datahike's
+pull path resolves lookup refs strictly and throws when the target is absent,
+while `seon.db/pull` and `entity` promise nil. The single database boundary now
+resolves an existing eid first, preserving malformed/non-unique-ref errors but
+returning nil for valid absence. The combined database/render gate passes 75
+tests and 411 assertions; canvas rendering again omits a missing agent.
+
 The durable evidence, pinned sources, executable probes, and acceptance gates
 are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]],
 [[research/test-impact-selection-and-runner-audit-2026-07-14]], and

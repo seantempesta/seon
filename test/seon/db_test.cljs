@@ -837,6 +837,19 @@
                    (is (= (:db/id map-in) (:db/id pos)) "same entity both shapes")))))
       done)))
 
+(deftest missing-lookup-ref-reads-return-nil
+  (async done
+    (with-conn
+      (fn [conn]
+        (.then (tx! conn [{::name "Alpha" ::rank 1}])
+               (fn [_]
+                 (let [missing [::name "Missing"]]
+                   (is (nil? (db/pull @conn [::name ::rank] missing))
+                       "an absent pull is data absence, not an exception")
+                   (is (nil? (db/entity @conn missing))
+                       "entity follows the same missing-ref contract")))))
+      done)))
+
 (deftest entity-positional-bad-db-slot-named-error
   ;; Wrong slot-0 (db not a db value) → invalid-input at ::db.
   (async done

@@ -62,6 +62,7 @@
     [datahike.constants :as dconst]
     [datahike.db :refer [AsOfDB]]
     [datahike.db.interface :as dbi]
+    [datahike.db.utils :as dbu]
     [datahike.index.interface :as di]
     [datahike.impl.entity :as dentity]
     [malli.core :as m]
@@ -1060,6 +1061,20 @@
   (let [a-ns (namespace attr)]
     (and a-ns (or (= a-ns "db") (str/starts-with? a-ns "db.")))))
 
+(defn- resolve-existing-eid
+  "Resolve a read ref without Datahike's strict missing-entity throw.
+
+   Datahike's public pull/entity paths call `entid-strict`, but Seon's public
+   contract treats an absent lookup ref as an ordinary absent value. Lookup
+   refs and idents already prove existence while resolving. A numeric eid is
+   syntax-valid without proving a row exists, so give it one bounded EAVT
+   existence probe. Malformed refs and non-unique lookup attrs still throw."
+  [db ref]
+  (when-let [eid (dbu/entid db ref)]
+    (when (or (not (number? ref))
+              (first (dbi/datoms db :eavt [eid])))
+      eid)))
+
 ;; --- query attr guard --------------------------------------------------
 ;; The sibling of the pull guard below, adapted to what
 ;; datalog actually does: d/q NEVER throws on
@@ -1229,11 +1244,12 @@
                         {:seon.error/kind :user-input
                          ::missing-attrs  (vec (sort unregistered))
                          ::pull-pattern   pattern}))))
-    (if (empty? registered)
-      (d/pull db pattern ref)
-      (let [pattern' (filter-pull-pattern pattern (set registered))]
-        (when (seq pattern')
-          (d/pull db pattern' ref))))))
+    (when-let [eid (resolve-existing-eid db ref)]
+      (if (empty? registered)
+        (d/pull db pattern eid)
+        (let [pattern' (filter-pull-pattern pattern (set registered))]
+          (when (seq pattern')
+            (d/pull db pattern' eid)))))))
 
 (defn- execute-pull
   "Run one guarded pull and capture its normalized request/result when bound."
@@ -1299,7 +1315,8 @@
 (defn- raw-entity
   "Resolve a Datahike Entity without crossing the public observation boundary."
   [db ref]
-  (d/entity db ref))
+  (when-let [eid (resolve-existing-eid db ref)]
+    (d/entity db eid)))
 
 (defn- execute-entity-lazy
   "Resolve a lazy Entity and record a deliberately non-replayable read."

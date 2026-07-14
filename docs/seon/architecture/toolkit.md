@@ -161,6 +161,12 @@ straight to `db/entity`, to `my.plan/add!`'s owner, or to `message/agent`.
 (db/entity {:seon.db/ref [:seon.agent/id "iCg-2606101519"]})   ; threads in
 ```
 
+Reads treat a well-formed ref with no current target as ordinary absence:
+`db/entity` and `db/pull` return nil. Malformed refs and lookup attributes that
+are not unique remain errors. The Seon boundary resolves existence before
+calling Datahike's strict pull/entity implementation, so an omitted agent or
+surface never turns into a rendering exception.
+
 ### 3. ITEMS — `:seon.items/*` (self-describing collections)
 
 A collection result is `{<ns>/ok? + a vector of SELF-DESCRIBING MAPS + count +
