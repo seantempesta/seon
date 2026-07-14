@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent]
 ---
@@ -28,3 +28,11 @@ faults from agent/development eval failures.
 A repeatable driver proves the classification from structured execution
 provenance rather than the top stack frame, while genuine core faults still
 fail hard in development.
+
+## Resolution
+
+Resolved by the structured `seon.error/dev-eval!` scope and
+`seon.instrument/wrapper-fault` classification matrix. Classification no
+longer relies on the top stack frame. `seon.error-record-test` passed in the
+focused four-namespace checkpoint on 2026-07-14 (29 tests/169 assertions
+total).

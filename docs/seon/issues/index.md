@@ -10,34 +10,29 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (2)
+## Blocker (1)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [An agent can OOM its own pod via unbounded eval results / whole-DB queries](eval-memory-safety.md) | blocker | agent |
-| [Hot reload may instrument stale database schema facts](hot-reload-spec-projection-stale.md) | blocker | agent |
 
-## Friction (10)
+## Friction (7)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [AI and HTML render twins may run one derivation twice](render-twin-runs-function-twice.md) | friction | UI |
 | [Async structural functions bypass contract validation](async-contract-instrumentation-gap.md) | friction | agent |
-| [Changed-test manifest can fail to converge](changed-test-manifest-does-not-converge.md) | friction | agent |
 | [Database query tuple results are hard for agents to read](database-query-tuple-shape-legibility.md) | friction | agent |
-| [Development eval failures may be misclassified as core faults](dev-eval-top-frame-misclassified-core.md) | friction | agent |
 | [Embedding boot noise — 232 `:entity-id/missing` errors on fresh seed](embedding-first-write-lookup-noise.md) | friction | agent |
 | [Model can ghost-echo runtime scaffolding into the transcript spine](narration-ghost-echo-not-neutralized.md) | friction | agent |
 | [Self-host `cljs.test/is` throws inside a dynamically-evaled `:test` thunk](selfhost-cljs-test-is-thunk-resolution.md) | friction | agent |
-| [acme `/agents` doc drift (FIXED) — uncovered: acme pod serves NO db-seeded routes (OPEN regression)](acme-harness-agents-route-drift.md) | friction | UI |
 | [acme cluster has no programmatic SCI eval seam](acme-no-sci-eval-seam.md) | friction | agent |
 
-## Cleanup (7)
+## Cleanup (6)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Agent tools may silently accept unknown request keys](agent-tool-unknown-key-acceptance.md) | cleanup | agent |
-| [Candidate ranking mechanics may be duplicated](duplicate-candidate-ranking.md) | cleanup | agent |
 | [Partially-Stale Reference Docs Need Updates](stale-reference-docs.md) | cleanup | docs |
 | [Surface recency may be recomputed globally](surface-recency-recomputed.md) | cleanup | UI |
 | [Unify the two AsyncLocalStorage stores; rename with-tx-context → with-tx-meta](als-unify-tx-meta.md) | cleanup | Core |

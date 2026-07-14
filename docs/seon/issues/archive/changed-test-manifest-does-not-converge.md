@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent]
 ---
@@ -28,3 +28,11 @@ Normal `.clj`, `.cljs`, and `.cljc` edits reach one bounded selection; a stale
 or missing manifest widens honestly or reports the actual watcher/build fault
 without a 30-second delay per edit; full logs and the EDN report retain the
 cause; and passing or failing tests remain advisory.
+
+## Resolution
+
+Resolved by `a148a4e3`. Exact-manifest waiting is bounded at three seconds and
+then delegates to the existing full `bin/test-cljs` one-shot gate; stale
+artifacts are never run. Real Codex edits proved CLJ (operator 13/31), CLJS
+(pod 4/16), and CLJC union (writer 12/75 plus pod 11/68). Every result stayed
+advisory and retained full logs plus `tmp/test-changed/latest.report.edn`.

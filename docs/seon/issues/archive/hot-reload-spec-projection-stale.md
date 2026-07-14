@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, agent]
 ---
@@ -28,3 +28,10 @@ instrumentation path.
 Changing a function's schema in a running pod publishes the new program fact
 before that definition is instrumented, and a live probe observes the new
 contract without restart, global reinstallation, or a second registry.
+
+## Resolution
+
+Resolved by `90bbd667`, `10497600`, and `503a3867`. The analyzer tee commits
+program facts before projection-delta instrumentation, and repair touches only
+affected live wrappers. `seon.instrument-delta-test` passed in the focused
+four-namespace checkpoint on 2026-07-14 (29 tests/169 assertions total).

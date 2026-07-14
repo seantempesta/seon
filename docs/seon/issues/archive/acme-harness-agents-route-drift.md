@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, web]
 ---
@@ -111,3 +111,12 @@ fork bump `41c1b9b2` → `da257d38`, minimal-overrides `config/acme.edn`):
   routes" from "not-found 302" (the current `-f` probe passes on both).
 - Note: `src/seon/web/serve.cljs` has UNCOMMITTED edits by another agent
   right now — coordinate before touching it.
+
+## Resolution
+
+Resolved in the generic mechanism without touching ACME. `seon.web.router`
+attaches one stable database listener and reconciles from post-commit route
+facts, eliminating the seed/rebuild race described above. The behavioral
+`route-facts-update-the-live-router-without-explicit-rebuild` proof passed in
+the focused four-namespace checkpoint on 2026-07-14 (29 tests/169 assertions
+total).
