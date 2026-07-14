@@ -21,20 +21,41 @@ graduation: successor behavior, grown-database budgets, full interaction
 journeys, paid/simple-model evidence, downstream packaging, and authorized lane
 retirement remain.
 
+The grounded audit
+[[research/local-performance-source-audit-2026-07-14]] reconciles current
+source with the older profiles. The CLJS JVM cap, canonical build ownership,
+bounded transcript, Datahike work/result/cache budgets, retained-result
+admission, effective transaction datoms, normalized subscriptions, and
+one-event feed backpressure are landed and must be regression-tested rather
+than reopened as current findings. Unit 9 still lacks a retained operator
+measurement envelope for V8/JVM heap, event-loop delay, CPU/RSS, feed pressure,
+phase/payload/browser timings, and complete source/artifact/database identity.
+
+The audit defines cold/warm sample classes, provisional guardrails and their
+post-unit-8 freeze rule, a content-addressed raw evidence schema, the ordered
+fresh/grown/restart/crash/history/browser/agent/Inspect/downstream/soak matrix,
+and candidate-specific cleanup preservation/authorization gates. Its read-only
+warm smoke baseline is comparison evidence only, not graduation.
+
 ## Ordered work
 
-1. Reconcile units 1–8 and refuse the final run until every predecessor
-   acceptance matrix and open blocker has an explicit disposition.
-2. Define cold/warm distributions and budgets for startup/readiness, REPL/MCP,
-   agent turns, database operations, feed/render work, browser interaction,
-   event-loop delay, heap/RSS, disk, and idle CPU.
-3. Run the destructive fresh/grown/restart/crash/history/downstream/agent/model/
-   browser matrix using production doors and retain machine-readable evidence.
-4. Investigate every regression at its owner; rerun only affected slices, then
-   one non-overlapping final matrix.
-5. With explicit owner authorization, stop, preserve, verify, read back, and
-   remove eligible legacy processes/worktrees/data; prove current clusters are
-   unaffected.
+1. Implement one fail-closed admission projection over units 1–8 manifests and
+   open-blocker dispositions; do not start destructive/model work before it is
+   green.
+2. Add bounded on-demand measurements to the existing operator/feed for
+   startup phases, CLJ/CLJS MCP, local turn overhead, database operations,
+   render/serialize/gzip/browser work, event-loop delay, CPU, JVM/V8 heap, RSS,
+   disk, and feed pressure. Do not add a benchmark runtime or telemetry store.
+3. Register the content-addressed fixture/run/sample evidence shapes, then run
+   the post-unit-8 reference-host characterization and freeze the budgets.
+4. Run the ordered destructive fresh/grown/restart/crash/history/browser/
+   agent/Inspect/no-source-downstream/soak matrix through production doors.
+5. Investigate every regression at its predecessor owner; rerun only affected
+   slices, then one non-overlapping exact-artifact checkpoint and independently
+   verify/read back the raw evidence package.
+6. With candidate-specific owner authorization, preserve, verify, read back,
+   and remove one eligible legacy process/worktree/data lane at a time; prove
+   current clusters and retained archives remain unaffected after each action.
 
 ## Graduation
 
