@@ -27,9 +27,9 @@
    BYTE-STABILITY: every past event renders byte-identical turn-to-turn —
    each time comes from the event's FIXED stored `:at` (never `now`), and
    the event list is `sort-by`'d before joining. The ONLY moving byte is
-   the single current-time line in the readline at the very bottom (below
-   the cache breakpoint — busting there is free). No render fn here calls
-   `now` to produce displayed text except that one readline line.
+   the free dynamic readline at the very bottom (below the cache breakpoint —
+   busting there is free). It carries live time and, for root, bounded host
+   telemetry. No historical row reads either input.
 
    The eval-row converter delegates to `seon.agent.ctx/format-eval-row` (which
    carries the fabrication-guard + the component caps); the message
@@ -45,6 +45,8 @@
     [seon.handlers.eval :as eval-handler]
     [seon.render :as render]
     [seon.schema :as schema]))
+
+(def ^:private node-os (js/require "os"))
 
 ;; ============================================================
 ;; Config-driven agent-init CP-1 — transcript block config attrs. Tiers
@@ -560,13 +562,40 @@
       [[] ::none]
       events)))
 
+(defn- format-bytes
+  "Compact binary size for the free dynamic tail."
+  [n]
+  (let [mib (/ (or n 0) 1048576)]
+    (if (>= mib 1024)
+      (str (.toFixed (/ mib 1024) 1) " GiB")
+      (str (.toFixed mib 0) " MiB"))))
+
+(defn host-telemetry
+  "The bounded Unix host line for root's free dynamic tail.
+
+   Load averages use the conventional 1/5/15-minute order; they are runnable
+   queue averages, not CPU percentages. RSS and used heap come from this pod's
+   Node process. Always comment-shaped and clipped below 50 estimated tokens."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (let [[one five fifteen] (js->clj (.loadavg node-os))
+        memory              (.memoryUsage js/process)
+        line                (str "; host · load 1m/5m/15m "
+                                 (.toFixed one 2) "/"
+                                 (.toFixed five 2) "/"
+                                 (.toFixed fifteen 2)
+                                 " · rss " (format-bytes (.-rss memory))
+                                 " · heap " (format-bytes (.-heapUsed memory)))]
+    (tokens/clip-str line 50)))
+
 (defn readline
   "The folded live readline — DERIVED every render, never stored. The
    very-bottom of the transcript: the cursor (`ns=>` current ns) plus this
    turn's status/steering as a `;` line (turn · time · loop K/cap ·
    state · any cap-pressure steering) — ONE steering surface. Always
-   present. This is the ONLY line in the whole transcript that reads the
-   live `now` (below the cache breakpoint — busting here is free).
+   present. Root additionally sees one bounded Unix host line. This is the
+   free dynamic tail: the only transcript material that reads live process
+   state, below the cache breakpoint where busting is free.
 
    Pressure steering escalates toward the per-loop cap — positive-framing:
    it tells the agent what to DO (finish, or message the result), never
@@ -616,6 +645,7 @@
     (str steer
          "; " ns-str " · turn " n-turns " · loop " loop-k "/" cap
          " · " (name (or state :idle)) " · " now " · agent " id "\n"
+         (when (= "root" id) (str (host-telemetry) "\n"))
          ns-str "=> ")))
 
 (defn- ordered-events

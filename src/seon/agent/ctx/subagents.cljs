@@ -8,8 +8,8 @@
        each with derived state + progress-or-result-or-death. A parent's
        monitoring surface: completion is a FACT in the DB (`:seon.agent.run/
        result`), so a parent that was mid-turn or restarted still sees every
-       child result. Wired into `config manifest` (childless
-       agents render empty → it costs them zero; root gets it too).
+       child result. The renderer is deliberately dormant in the minimal
+       manifest until solo-agent drives graduate.
 
      - `orphaned-agents-block` — the ROOT-ONLY section: live agents whose
        parent is TERMINATED. Root (or the human) decides per case with the

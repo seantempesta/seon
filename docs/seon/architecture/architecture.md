@@ -76,7 +76,10 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    forever: purpose + the `my.plan` anchor (WHAT I'm doing) + current-ns
    (WHERE I am) + the sliding transcript window (what I'm doing RIGHT NOW). A
    1000-turn agent behaves like a turn-3 agent because context is derived,
-   windowed, and cache-stable — never accumulated. (The claim under test: the
+   windowed, and cache-stable — never accumulated and never replaced by a
+   lossy conversation summary. Raw recent events occupy a bounded window;
+   intent and knowledge that must survive it are ordinary plan/database facts
+   that remain directly queryable. (The claim under test: the
    plan-survives-restart bench is its measurement.) Anchors: [[context]] §order.
 5. **Measured, not asserted.** The context/tool surface is a fitness landscape:
    every dial is config data, so contexts are A/B'd and selected against frozen
@@ -91,11 +94,18 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    than mutable application state; the writer arbitrates total order and late
    writes fail the CAS work fence. Anchors: [[agent-runtime]] and
    [[observability]].
-7. **One human, one bond.** The runtime serves ONE human; the canvas is the
-   shared value the pair looks at together. Infrastructure choices answer to
-   that relationship — on-device privacy, honest termination, the agent's own
-   code as the compounding asset serving its human. Anchors: the root agent,
-   `docs/seon/vision/` (the Seon premise).
+7. **One human, one bond; local compute first.** The runtime serves ONE human;
+   the canvas is the shared value the pair looks at together. Ordinary
+   personal-data work executes on local models when the measured capability
+   permits it. A stronger hosted model is an explicit consultant for planning,
+   ambiguity, or recovery, not an inference tax on every tool call. Model
+   routing preserves the same context, functions, schemas, database facts, and
+   Inspect evidence across both roles, so escalation changes compute rather
+   than inventing a second agent system. Infrastructure choices answer to that
+   relationship — modest-hardware operation, on-device privacy, honest
+   termination, and the agent's own code as the compounding asset serving its
+   human. Anchors: the root agent, [[agent-runtime]], `docs/seon/vision/` (the
+   Seon premise).
 8. **The horizon: think in Clojure, translate out.** Index ANY codebase into
    the same graph (LSP); plan/solve in Clojure and translate into the client's
    language — the Clojure artifact is the executable spec; seon-writes-seon

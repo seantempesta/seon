@@ -24,8 +24,11 @@ An agent is normally **`:idle`** — asleep, and the only triggerable state. A
 **trigger** (an inbound **message**, or a due **schedule** fired by the ticker)
 opens a **run**: the bounded unit of work. While the run is open the agent is
 **`:running`** and the loop executes **turns** until a bound fires. A run carries
-**two independent bounds** — a **work-quantity** bound (turn count) and a
-**wall-clock** bound (deadline) — and whichever is hit first closes it. New
+**two independent safety bounds** — a generous **work-quantity** ceiling and a
+**wall-clock** deadline — and whichever is hit first closes it. Neither is the
+normal success condition: the agent works until it records the outcome,
+explicitly waits, or a no-progress/error guard proves that more calls are not
+useful. New
 inbound messages **renew the lease** (slide both bounds). The clock bound is
 enforced **externally** by one periodic **ticker**, because a stalled LLM burns
 the clock and cannot self-detect. The **run-id is a fencing token**: a write from
@@ -74,28 +77,26 @@ per-tab `:seon.web.session/*` facts are navigation provenance, not execution
 lifecycle. Runs link back to the agent via `:seon.agent.run/agent`; turns to their
 run via `:seon.agent.turn/run`.
 
-### The two bounds, the lease, the heartbeat
+### Outcome first; bounds, lease, and heartbeat second
 
 The two bounds are deliberately separate (the k8s split: a `backoffLimit` count
 vs an `activeDeadlineSeconds` clock):
 
-- **Work-quantity bound (derived) — denominated by the REPL mode.** The unit is
-  **turns under `:batch`, forms under `:stream`** (the `:seon.config/repl-mode`
-  datom — [[context]] §"The REPL mode is a datom"; the manifest-absent default is
-  per-model, DeepSeek → `:stream`). Under `:batch` the effective budget is base
-  `:seon.agent/default-turn-limit` (20) and the current turn is a derived count of
-  `:seon.agent.turn/run` datoms — `seon.derive/run-turn-count`. Under `:stream` a
-  turn evals at most one form, so the budget is **form-denominated**
-  (`seon.agent.run/default-form-limit` 60) and the count is
-  `seon.derive/run-form-count` — so prose/orientation turns burn nothing. Either
-  way, **plus the count of inbound messages received during the run** — nothing
-  per-message is stored. Every inbound that lands mid-run earns +1, so a message
-  arriving during an LLM call always earns a unit to be **seen and answered**. A
-  stored override appears only when a process *explicitly* bumps or stops the budget.
+- **Work-quantity safety ceiling (derived) — denominated by the REPL mode.**
+  The unit is **inference turns under `:batch` and attempted forms under
+  `:stream`** (`:seon.config/repl-mode` — [[context]] §"The REPL mode is a
+  datom"). It is deliberately high and model/resource-profile configurable;
+  hitting it is an abnormal bounded outcome with a continue affordance, not
+  ordinary task flow. Counts derive from turn/eval facts. Formless streaks,
+  repeated equivalent errors, deadlines, explicit `wait`, and successful
+  `complete` provide earlier meaningful stops. New inbound messages renew the
+  safety lease so a message arriving during an LLM call is seen and answered.
+  Local model profiles may admit substantially more work than paid profiles,
+  but both retain a finite operator-owned ceiling.
 - **Wall-clock bound (`deadline`).** A run opens with `deadline = started-at +`
   the agent's `:seon.agent/default-deadline-ms` (or a generous global default).
   It is an **absolute instant**, so it survives restart and is a pure DB read;
-  the turn-limit is the usual stopper, the deadline the backstop.
+  it is the backstop for slow or wedged work, not a target duration.
 - **Lease renewal = the sliding window.** An inbound message during an open run
   slides both bounds (the work budget grows by the derived inbound count; the
   deadline pushes out). "The human keeps talking" extends the run. Any process
@@ -255,6 +256,13 @@ or the human) and parks — *unless* the agent already messaged that recipient t
 run: the earlier message IS the answer (derived from the run's message log, no
 stored flag), so `complete` closes without sending a second, answer-clobbering
 message.
+
+The runtime does not declare failure merely because a small arbitrary number
+of turns elapsed. A run normally ends because its outcome was recorded or
+because a falsifiable stagnation/resource condition fired. Inspect compares
+the same task under `:batch` and `:stream` using success, model calls, attempted
+forms, generated tokens, cache reuse, elapsed time, fabrication, and recovery;
+mode selection is measured rather than encoded as model folklore.
 
 **Complete-gate.** `complete` asserts success, so current parsed test facts that
 unambiguously show a failing owning gate refuse that assertion with an error
