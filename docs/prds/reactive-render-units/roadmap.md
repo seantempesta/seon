@@ -31,11 +31,27 @@ newly open detail can miss a change read only by that producer.
 
 Completed earlier audits establish two constraints: active-unit reuse needs no
 new library, and a Node `lru-cache` layer is justified only by measured reopen
-reuse. [[research/reactive-render-source-audit-2026-07-14]] reconciles those reports with
-current owners, tests, dependency sources, and the live default baseline. It
-also records that the selected ClojureScript `1.12.145` source is not yet
-mirrored exactly: the current reference checkout identifies itself as
+reuse. [[research/reactive-render-source-audit-2026-07-14]] reconciles those
+reports with current owners, tests, dependency sources, and the live default
+baseline. It also records that the selected ClojureScript `1.12.145` source is
+not yet mirrored exactly: the current reference checkout identifies itself as
 `1.12.41`, so analyzer-sensitive implementation must close that grounding gap.
+
+## Research evidence
+
+- [[research/reactive-render-source-audit-2026-07-14]] — current dependency
+  ledger, live observations, ownership graph, deletion map, and regression
+  matrix.
+- [[research/reactive-ui-dependency-routing-2026-07-12]] — observed-read
+  invalidation design and stale-unit evidence.
+- [[research/sci-render-cache-source-audit-2026-07-12]] — SCI execution and
+  render-cache boundary.
+- [[research/datastar-sse-render-allocation-profile-2026-07-12]] — feed/render
+  allocation and latency baseline.
+- [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]] — active-unit
+  reuse and optional bounded recent-cache decision.
+- [[research/root-reactive-system-view-audit-2026-07-14]] — root layout,
+  reactive correctness, and browser acceptance evidence.
 
 ## Ordered work
 

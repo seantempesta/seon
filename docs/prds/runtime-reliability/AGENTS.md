@@ -353,7 +353,7 @@ impact audit is open.
   UI rename/delete graph and four dormant context adapters.
 - [[research/root-view-presence-crash-batch-audit-2026-07-13]] — exact root
   canvas/focus/session/crash/batch/telemetry ownership and minimal slice.
-- [[research/root-reactive-system-view-audit-2026-07-14]] — live stale-unit
+- [[../reactive-render-units/research/root-reactive-system-view-audit-2026-07-14]] — live stale-unit
   reproduction, owning invalidation defect, dedicated root layout, plan overlay,
   unit-engine migration/deletion map, and browser acceptance matrix.
 - [[research/seon-cli-lifecycle-audit-2026-07-13]] — current shell/process

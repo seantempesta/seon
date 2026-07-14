@@ -83,7 +83,8 @@ the time of measurement.
 
 This document does not change context wording, add block-specific tests, or
 implement the refactor. It complements
-[[reactive-ui-dependency-routing-2026-07-12]]: that audit answers *when an active
+[[../../reactive-render-units/research/reactive-ui-dependency-routing-2026-07-12]]:
+that audit answers *when an active
 render is invalidated*; this one answers *which renders should be active at
 all*.
 
@@ -253,7 +254,8 @@ the header.
 One render request should carry a shared database snapshot and request-local
 projection cache so identical visible facts are computed once. Cross-feed
 sharing belongs to the compiled subscription/unit producer described in
-[[reactive-ui-dependency-routing-2026-07-12]], not to persisted cache entities.
+[[../../reactive-render-units/research/reactive-ui-dependency-routing-2026-07-12]],
+not to persisted cache entities.
 
 ## Datastar-grounded mechanism
 
@@ -520,7 +522,8 @@ the generic eval path proves it.
 ### 9. Integrate exact invalidation
 
 Complete the observed-read subscription design in
-[[reactive-ui-dependency-routing-2026-07-12]]. Unit activation records reads;
+[[../../reactive-render-units/research/reactive-ui-dependency-routing-2026-07-12]].
+Unit activation records reads;
 unit deactivation removes them from candidates. Exact read-result comparison
 must replace provenance routing and broad attribute-only fan-out. Retain
 database user/process metadata only where the question is deliberate focus or
@@ -613,7 +616,8 @@ The refactor is successful when live default-cluster evidence shows:
 - reconnect, as-of, button, form, transcript-scroll, and focus behavior remain
   correct;
 - repeated live updates no longer reproduce the avoidable allocation/RSS
-  sawtooth documented in [[datastar-sse-render-allocation-profile-2026-07-12]].
+  sawtooth documented in
+  [[../../reactive-render-units/research/datastar-sse-render-allocation-profile-2026-07-12]].
 
 The target is pay-for-use, not an arbitrary render cap. Legitimately visible
 content may still be large, but invisible content must cost only its cheap

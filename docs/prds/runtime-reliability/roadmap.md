@@ -475,7 +475,7 @@ EDN report pointing to it. The compiler and database processes share the Java
 overwrite warnings.
 
 The durable evidence, pinned sources, executable probes, and acceptance gates
-are [[research/clj-cljs-bounded-cache-library-audit-2026-07-14]],
+are [[../reactive-render-units/research/clj-cljs-bounded-cache-library-audit-2026-07-14]],
 [[research/test-impact-selection-and-runner-audit-2026-07-14]], and
 [[research/automatic-test-feedback-infrastructure-audit-2026-07-14]]. The
 cross-platform continuation is
