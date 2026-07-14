@@ -276,13 +276,15 @@
    [::tx     :int]
    [::added? :boolean]])
 
+(schema/register! ::datoms [:vector ::datom])
+
 (schema/register!
   ::handler-input
   [:map
    [::tx-report  :any]
    [::db         :any]
    [::db-before  :any]
-   [::datoms     [:vector ::datom]]
+   [::datoms     ::datoms]
    [::attr-index [:map-of :keyword [:vector ::datom]]]
    [::trigger    {:optional true} :any]])
 
