@@ -63,17 +63,21 @@
 (def ^:private seon-ai-env-vars
   ["SEON_AI_PROVIDER" "SEON_AI_MODEL" "SEON_AI_TEMPERATURE"
    "SEON_AI_MAX_TOKENS" "SEON_AI_THINKING" "SEON_AI_TIMEOUT_MS"
-   "SEON_AI_BASE_URL" "SEON_AI_API_KEY_ENV"])
+   "SEON_AI_BASE_URL" "SEON_AI_API_KEY_ENV" "SEON_DG_BACKEND"
+   "SEON_AI_EXTRA_BODY"])
 
 (defn- with-env-restored
-  "Snapshot every SEON_AI_* var on js process.env, run `body` (which
-   may aset/js-delete them freely), then restore each var to EXACTLY
-   its prior state — prior value re-asserted, originally-absent vars
-   deleted. The operator's provider steering survives the suite."
+  "Snapshot every recognized AI var on js process.env, clear the test's input
+   surface, run `body` (which may aset/js-delete values freely), then restore
+   each var to EXACTLY its prior state — prior value re-asserted,
+   originally-absent vars deleted. The operator's provider steering survives
+   the suite without influencing an example."
   [body]
   (let [env   (.. js/process -env)
         saved (into {} (map (fn [k] [k (aget env k)])) seon-ai-env-vars)]
     (try
+      (doseq [k seon-ai-env-vars]
+        (js-delete env k))
       (body env)
       (finally
         (doseq [k seon-ai-env-vars]
@@ -113,7 +117,6 @@
 (deftest env-row-skips-unparseable-values-loudly
   (with-env-restored
     (fn [env]
-      (doseq [v seon-ai-env-vars] (js-delete env v))
       (aset env "SEON_AI_PROVIDER" "openai")          ; not a known provider
       (aset env "SEON_AI_TEMPERATURE" "warm")          ; not a number
       (aset env "SEON_AI_MAX_TOKENS" "lots")           ; not a number

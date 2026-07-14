@@ -10,11 +10,12 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (2)
+## Blocker (3)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Arbitrary eval allocation lacks hard process memory containment](eval-process-isolation-memory-containment.md) | blocker | agent |
+| [Database receipts bypass the canonical schema candidate](database-receipt-schema-bypasses-candidate.md) | blocker | Core |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 
 ## Friction (16)
