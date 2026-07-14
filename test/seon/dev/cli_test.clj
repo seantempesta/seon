@@ -1,7 +1,10 @@
 (ns seon.dev.cli-test
   (:require [babashka.fs :as fs]
             [clojure.test :refer [deftest is testing]]
-            [seon.dev.cli :as cli]))
+            [seon.dev.artifact :as artifact]
+            [seon.dev.cli :as cli]
+            [seon.dev.process :as process]
+            [seon.dev.state :as state]))
 
 (defn- configuration [root]
   {:seon.dev.config/root root
@@ -91,4 +94,36 @@
       (fs/create-dirs (fs/path cluster "db"))
       (is (= configuration
              (#'cli/assert-current-database-layout! configuration)))
+      (finally (fs/delete-tree root {:force true})))))
+
+(deftest cluster-reset-rebuilds-before-reconciling
+  (let [root (fs/create-temp-dir {:prefix "seon-cli-reset-"})
+        cluster (fs/path root "data/clusters/default")
+        database (fs/path cluster "db")
+        configuration {:seon.dev.config/root (str root)
+                       :seon.dev.config/cluster-dir (str cluster)
+                       :seon.dev.config/cluster-name "default"
+                       :seon.dev.config/environment {}}
+        stopped (atom [])
+        reconciled (atom [])]
+    (try
+      (fs/create-dirs database)
+      (spit (str (fs/path database "old.ksv")) "old database")
+      (with-redefs-fn
+        {#'state/with-lock (fn [_configuration _owner _timeout thunk]
+                            (thunk))
+         #'process/stop! (fn [_configuration process-id]
+                           (swap! stopped conj process-id))
+         #'artifact/read-manifest
+         (fn [_]
+           (throw (ex-info "reset must not reuse a manifest" {})))
+         #'cli/select-config (fn [selected _path] selected)
+         #'cli/reconcile-development!
+         (fn [selected]
+           (is (not (fs/exists? database)))
+           (swap! reconciled conj selected)
+           {:seon.dev.target/status :seon.dev.target.status/ready})}
+        (fn [] (#'cli/reset-cluster! configuration ["default"])))
+      (is (= [process/pod-id process/writer-id] @stopped))
+      (is (= [configuration] @reconciled))
       (finally (fs/delete-tree root {:force true})))))

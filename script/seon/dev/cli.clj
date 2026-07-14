@@ -339,21 +339,13 @@
                        :seon.dev.cluster/configured
                        (:seon.dev.config/cluster-name configuration)})))
     (state/with-lock
-      configuration :stack 600000
+      configuration :stack 1800000
       #(let [_ (assert-current-database-layout! configuration)
-             manifest (or (artifact/read-manifest configuration)
-                          (throw (ex-info "Run `bin/seon up` before reset."
-                                          {:seon.dev.target/failure
-                                           :seon.dev.target.failure/missing-artifact})))
              database (fs/path (:seon.dev.config/cluster-dir configuration) "db")]
          (process/stop! configuration process/pod-id)
          (process/stop! configuration process/writer-id)
          (when (fs/exists? database) (fs/delete-tree database))
-         (let [configuration (select-config configuration nil)
-               specs (process/specs configuration manifest)]
-           (doseq [id (process/start-order specs)]
-             (process/ensure! configuration (get specs id)))
-           (process/status configuration manifest))))
+         (reconcile-development! (select-config configuration nil))))
     (println (str "● cluster " cluster-name " reset and ready"))))
 
 (defn- cluster! [configuration arguments]

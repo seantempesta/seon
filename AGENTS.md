@@ -103,15 +103,41 @@ question gets one coherent audit. External research uses `agy`; long prompts
 go through stdin. Every research agent writes its durable report under the
 active PRD's `research/` directory.
 
-Before writing code:
+Every research or implementation unit begins with a dependency ledger. Name
+the exact libraries and existing Seon mechanisms the unit depends on, their
+selected versions/SHAs, the relevant `reference-code/` paths, and the
+first-party call sites/tests that already demonstrate the desired idiom. This
+ledger is part of the plan and durable research evidence, not an optional step
+after a design has already been invented.
 
-1. Observe the live system and define what failure looks like.
-2. Read the existing implementation and its closest localized `AGENTS.md`.
-3. Read the actual dependency source in `reference-code/`; never guess library
-   behavior or unzip installed packages.
-4. Probe the assumption directly in the REPL or with the smallest executable
-   experiment.
-5. Implement by strengthening the one existing mechanism in place.
+Before planning a change or writing code:
+
+1. Read the closest localized `AGENTS.md` and the active roadmap's current
+   state, gap, evidence, and success measure.
+2. Identify the exact dependencies/mechanisms, then read their actual source
+   in `reference-code/` and the best idiomatic Clojure usages in this checkout.
+   Never plan from remembered library behavior or unzip installed packages. If
+   the exact pinned or maintained source is absent, locate or mirror it before
+   continuing; a plan that names only an API is not grounded.
+3. Observe the live system and define a falsifiable failure plus acceptance
+   evidence.
+4. Read the existing implementation and tests that own that behavior.
+5. Probe the critical dependency assumption directly in the REPL or with the
+   smallest executable experiment.
+6. Implement by strengthening the one existing mechanism in place.
+
+For Clojure work, use `data-oriented-clojure` before the plan, not only before
+the edit. Treat immutable data, pure transformations, attributes/connections,
+ambient database values, and errors-as-values as design inputs. If a plan is
+organized around mutable steps, object-like kinds, imperative accumulators, or
+stored derived state, stop and re-ground it in good Clojure source before
+implementation.
+
+Parallel agents divide independent dependency/source domains or independent
+implementation units. They do not split one semantic question into partial
+answers. Research agents return grounded constraints and success measures;
+implementation agents receive that complete evidence and retain authority to
+work out local details within the named owner and acceptance boundary.
 
 After writing code, verify the running system—not only the tests. Falsify the
 change with an observed datom, page/feed, log line, or REPL result. Report what
