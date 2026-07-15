@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -131,6 +132,33 @@ def test_selected_lock_admits_runtime_build_inputs():
         "shadow-cljs.edn", "package.json", "package-lock.json",
         "bin/seon", "bin/acme", "bin/fix-bootstrap-macros",
     } <= admitted
+
+
+def test_generated_python_bytecode_does_not_dirty_admitted_source(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"],
+                   cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Seon Test"],
+                   cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text(
+        (source_admission.REPO_ROOT / ".gitignore").read_text())
+    helper = tmp_path / "script" / "seon" / "dev" / "detach.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("print('source')\n")
+    subprocess.run(["git", "add", ".gitignore", str(helper.relative_to(tmp_path))],
+                   cwd=tmp_path, check=True)
+    subprocess.run(["git", "-c", "core.hooksPath=/dev/null",
+                    "commit", "-qm", "fixture"],
+                   cwd=tmp_path, check=True)
+
+    bytecode = helper.parent / "__pycache__" / "detach.cpython-314.pyc"
+    bytecode.parent.mkdir()
+    bytecode.write_bytes(b"generated")
+    assert source_admission._dirty_paths(tmp_path, ["script"], []) == []
+
+    helper.write_text("print('changed')\n")
+    assert source_admission._dirty_paths(tmp_path, ["script"], []) == [
+        "script/seon/dev/detach.py"]
 
 
 def test_verify_sources_rejects_revision_mismatch(monkeypatch, tmp_path):
