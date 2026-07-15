@@ -305,6 +305,43 @@
       (is (not (process/ready? configuration spec record)))
       (finally (fs/delete-tree (:seon.dev.test/directory configuration))))))
 
+(deftest completed-watcher-is-not-ready-after-client-byte-drift
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        output (fs/path directory "out-acme/client/main.js")
+        runtime (fs/path directory
+                         "shadow-acme/builds/acme-client/dev/out/cljs-runtime/a.js")
+        configuration
+        (assoc configuration
+               :seon.dev.config/client-build-id "acme-client"
+               :seon.dev.config/artifact-flavor
+               :seon.dev.artifact.flavor/acme
+               :seon.dev.config/client-output (str output)
+               :seon.dev.config/shadow-cache-root
+               (str (fs/path directory "shadow-acme")))
+        log (fs/path directory "watcher.log")
+        pid (.pid (java.lang.ProcessHandle/current))
+        record {:seon.dev.process/id process/watcher-id
+                :seon.dev.process/pid pid
+                :seon.dev.process/start-instant (state/process-start-instant pid)
+                :seon.dev.process/log (str log)}]
+    (try
+      (fs/create-dirs (fs/parent output))
+      (fs/create-dirs (fs/parent runtime))
+      (spit (str output) "main-a")
+      (spit (str runtime) "runtime-a")
+      (spit (str log) "[:acme-client] Build completed.\n")
+      (let [digest (artifact/current-client-digest configuration)
+            spec {:seon.dev.process/id process/watcher-id
+                  :seon.dev.process/readiness
+                  :seon.dev.process.readiness/watcher
+                  :seon.dev.process/artifact-digest digest}]
+        (is (process/ready? configuration spec record))
+        (spit (str runtime) "runtime-b")
+        (is (not (process/ready? configuration spec record))
+            "successful hot reload bytes cannot retain the old identity"))
+      (finally (fs/delete-tree directory)))))
+
 (deftest stale-port-file-does-not-advertise-a-url
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)
@@ -318,6 +355,43 @@
       (spit port-file "7890")
       (is (nil? (:seon.dev.target/url
                   (process/status configuration manifest))))
+      (finally (fs/delete-tree directory)))))
+
+(deftest structured-status-exposes-non-secret-process-identity
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        configuration (target-config configuration directory)
+        spec (get (process/specs configuration target-manifest)
+                  process/watcher-id)
+        pid (.pid (java.lang.ProcessHandle/current))
+        start-instant (state/process-start-instant pid)
+        environment-digest (#'process/environment-digest
+                            (:seon.dev.process/environment spec))
+        log (str (fs/path directory "watcher.log"))
+        record {:seon.dev.process/id process/watcher-id
+                :seon.dev.process/pid pid
+                :seon.dev.process/start-instant start-instant
+                :seon.dev.process/process-group pid
+                :seon.dev.process/argv (:seon.dev.process/argv spec)
+                :seon.dev.process/environment-digest environment-digest
+                :seon.dev.process/artifact-digest
+                (:seon.dev.process/artifact-digest spec)
+                :seon.dev.process/target :seon.dev.target/development
+                :seon.dev.process/started-at "test"
+                :seon.dev.process/log log}]
+    (try
+      (spit log "[:client] Build completed.\n")
+      (#'process/write-process! configuration process/watcher-id record)
+      (let [status (get-in (process/status configuration target-manifest)
+                           [:seon.dev.target/processes process/watcher-id])]
+        (is (= pid (:seon.dev.process/pid status)))
+        (is (= start-instant (:seon.dev.process/start-instant status)))
+        (is (= environment-digest
+               (:seon.dev.process/environment-digest status)))
+        (is (= (:seon.dev.process/artifact-digest spec)
+               (:seon.dev.process/artifact-digest status)))
+        (is (not (contains? status :seon.dev.process/environment))
+            "status exposes only the digest, never environment values"))
       (finally (fs/delete-tree directory)))))
 
 (deftest artifact-flavor-owns-the-watcher-build-and-cache

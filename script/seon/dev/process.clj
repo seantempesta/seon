@@ -309,6 +309,13 @@
   (let [text (tail-text (:seon.dev.process/log record))]
     (every? #(build-ready? text %) (watcher-build-ids config))))
 
+(defn- current-client-ready? [config spec]
+  (if-let [expected (:seon.dev.process/artifact-digest spec)]
+    (try
+      (= expected (artifact/current-client-digest config))
+      (catch Throwable _ false))
+    true))
+
 (defn- runtime-bootstrap-ready? [spec]
   (if-let [expected (:seon.dev.process/bootstrap-digest spec)]
     (let [runtime-root (get-in spec [:seon.dev.process/environment
@@ -332,7 +339,9 @@
   (and (= :seon.dev.process.status/alive (process-status record))
        (case (:seon.dev.process/readiness spec)
          :seon.dev.process.readiness/process true
-         :seon.dev.process.readiness/watcher (watcher-ready? config record)
+         :seon.dev.process.readiness/watcher
+         (and (watcher-ready? config record)
+              (current-client-ready? config spec))
          :seon.dev.process.readiness/writer (writer-ready? config)
          :seon.dev.process.readiness/pod (pod-ready? config spec record)
          false)))
@@ -555,13 +564,24 @@
                            process-state (if foreign?
                                            :seon.dev.process.status/foreign
                                            recorded-state)]
-                       [id {:seon.dev.process/status process-state
-                            :seon.dev.process/pid (:seon.dev.process/pid record)
-                            :seon.dev.process/ready?
-                            (boolean (and record
-                                          (same-process-spec? spec record)
-                                          (ready? config spec record)))
-                            :seon.dev.process/log (:seon.dev.process/log record)}])))
+                       [id (cond->
+                             {:seon.dev.process/status process-state
+                              :seon.dev.process/ready?
+                              (boolean (and record
+                                            (same-process-spec? spec record)
+                                            (ready? config spec record)))}
+                             record
+                             (assoc
+                               :seon.dev.process/pid
+                               (:seon.dev.process/pid record)
+                               :seon.dev.process/start-instant
+                               (:seon.dev.process/start-instant record)
+                               :seon.dev.process/environment-digest
+                               (:seon.dev.process/environment-digest record)
+                               :seon.dev.process/artifact-digest
+                               (:seon.dev.process/artifact-digest record)
+                               :seon.dev.process/log
+                               (:seon.dev.process/log record)))])))
               ordered)
         foreign? (seq (ownership-conflicts config))
         all-ready? (every? (fn [[_ value]]

@@ -29,6 +29,27 @@
         (is (not= digest (artifact/digest-paths directory [directory]))))
       (finally (fs/delete-tree directory)))))
 
+(deftest current-client-digest-owns-output-and-runtime-closure
+  (let [directory (fs/create-temp-dir {:prefix "seon-client-digest-test-"})
+        output (fs/path directory "out-acme/client/main.js")
+        runtime (fs/path directory
+                         "shadow/builds/acme-client/dev/out/cljs-runtime/a.js")
+        config {:seon.dev.config/root (str directory)
+                :seon.dev.config/client-output (str output)
+                :seon.dev.config/shadow-cache-root
+                (str (fs/path directory "shadow"))
+                :seon.dev.config/client-build-id "acme-client"}]
+    (try
+      (fs/create-dirs (fs/parent output))
+      (fs/create-dirs (fs/parent runtime))
+      (spit (str output) "main-a")
+      (spit (str runtime) "runtime-a")
+      (let [digest (artifact/current-client-digest config)]
+        (is (= digest (artifact/current-client-digest config)))
+        (spit (str runtime) "runtime-b")
+        (is (not= digest (artifact/current-client-digest config))))
+      (finally (fs/delete-tree directory)))))
+
 (deftest cljs-build-command-is-structured
   (let [plain {:seon.dev.config/environment {}}
         extended {:seon.dev.config/environment

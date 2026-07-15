@@ -364,6 +364,12 @@ sample is trustworthy.
   mandatory. It also records the operator's exact ready target EDN and requires
   byte-identical artifact/process/endpoint identity after the sample. The
   83-test focused gate includes a real native-log read-back.
+- Operator readiness now hashes the current flavor-owned client output and
+  Shadow runtime closure against the process's admitted artifact identity. A
+  live ACME probe changed from false-ready to degraded after concurrent hot
+  reloads; structured status retained the non-secret artifact/environment
+  digests and PID start identity needed to explain the transition. The focused
+  operator gate passes 25 tests and 95 assertions.
 - Infrastructure timeouts and core errors invalidate a sample instead of
   becoming a model score. A no-forms close remains model/runtime evidence.
 - A fresh ordinary ACME agent renders 22,171 total estimated tokens, including
@@ -381,14 +387,15 @@ sample is trustworthy.
 
 ### Current blockers
 
-- Shared source is currently dirty in context/transcript files owned by another
-  lane. Restarting ACME now would build an uncommitted mixed artifact; staging
-  those files here would cross ownership. Wait for that coherent commit, then
+- Shared source currently contains uncommitted runtime edits owned by other
+  lanes. Restarting ACME now would build an uncommitted mixed artifact; staging
+  those files here would cross ownership. Wait for those coherent commits, then
   restart ACME and require ready status.
 - The native milestone task can now enter through common source admission,
   mandatory finalization, and exact before/after operator status. The remaining
   P1a gate is a clean ACME rebuild after concurrent source owners commit; the
-  current ready target predates their hot-reloaded development bytes.
+  operator now correctly reports the current target degraded because its live
+  client closure predates canonical publication.
 - A planning restart on the static development target must be owned by the
   semantic ACME operator and preserve the same database/agent identity. The
   full parallel solution remains the P1b lease.
@@ -398,10 +405,10 @@ sample is trustworthy.
 
 ### Exact next order
 
-1. Commit this checkpoint and the 0.5B native diagnostic artifact without
-   staging any concurrent lane's files.
-2. When the shared context/transcript edits converge, restart only ACME and
-   prove a ready, ownership-coherent artifact plus clean admitted source.
+1. Commit the operator readiness checkpoint without staging any concurrent
+   lane's files.
+2. When the shared runtime edits converge, restart only ACME and prove a ready,
+   ownership-coherent artifact plus clean admitted source.
 3. Run `database_workflow-seed1-000` through common source admission, exact
    operator snapshot, and mandatory finalization. Inspect its prompt, reply,
    eval evidence, database coordinate, model identity, and classification.

@@ -444,6 +444,14 @@ live process. Thus a reboot cannot turn an old port file into a false-positive
 boot, and an unmanaged listener is reported for adoption or explicit operator
 action rather than silently replaced.
 
+Watcher readiness includes the exact flavor-owned client closure: its published
+output and Shadow runtime directory must hash to the artifact identity admitted
+at launch. A successful hot reload that changes either member therefore makes
+the target degraded until the operator canonically republishes and reconciles
+the artifact. Structured status exposes the non-secret environment and artifact
+digests plus `(pid, operating-system start stamp)` needed to reproduce that
+decision; it never exposes environment values.
+
 Process ownership is `(pid, operating-system start stamp)`, never a bare PID.
 That identity survives the supervised shell's `exec` into Node/JVM while a
 later reuse of the same PID fails closed and is never signalled. A managed

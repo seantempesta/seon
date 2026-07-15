@@ -123,6 +123,17 @@
         (update-stream! digest stream)))
     (bytes->hex (.digest digest))))
 
+(defn current-client-digest
+  "Hash the complete client closure at its flavor-owned coordinates."
+  [config]
+  (let [root (:seon.dev.config/root config)
+        client-runtime
+        (fs/path (:seon.dev.config/shadow-cache-root config)
+                 "builds" (:seon.dev.config/client-build-id config)
+                 "dev/out/cljs-runtime")]
+    (digest-paths root [(:seon.dev.config/client-output config)
+                        client-runtime])))
+
 (defn- digest-jar [path]
   ;; Zip entry timestamps are packaging metadata. Hash the entry names and
   ;; bytes so rebuilding identical writer code retains one artifact identity.
@@ -352,10 +363,6 @@
 (defn- output-manifest [config]
   (let [root (:seon.dev.config/root config)
         writer (:seon.dev.config/writer-output config)
-        client-runtime
-        (fs/path (:seon.dev.config/shadow-cache-root config)
-                 "builds" (:seon.dev.config/client-build-id config)
-                 "dev/out/cljs-runtime")
         bootstrap (fs/path root "out/bootstrap")
         css (fs/path root "resources/public/css/output.css")
         required [writer (:seon.dev.config/client-output config) bootstrap css]
@@ -364,8 +371,7 @@
       (throw (ex-info "Canonical build did not publish every required output."
                       {:seon.dev.artifact/missing (mapv str missing)})))
     (let [writer-digest (digest-jar writer)
-          client-digest (digest-paths root [(:seon.dev.config/client-output config)
-                                            client-runtime])
+          client-digest (current-client-digest config)
           bootstrap-digest (digest-paths root [bootstrap])
           css-digest (digest-paths root [css])
           runtime-root (publish-runtime-root! config bootstrap-digest)

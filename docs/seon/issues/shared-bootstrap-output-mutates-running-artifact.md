@@ -31,6 +31,15 @@ The source-artifact lock in `bf8cf3b5` correctly prevents concurrent fixed-path
 corruption and canonicalizes the writer jar. It does not establish
 post-publication immutability for bootstrap or other shared runtime members.
 
+A later live probe found the corresponding client-closure failure: ACME's
+watcher had successfully hot reloaded newer flavor-owned output while status
+still accepted the older published client digest. The operator now derives the
+current client digest from both the flavor's client output and its Shadow
+runtime directory. Watcher readiness fails closed when those bytes drift, and
+status exposes only non-secret process identity digests plus the PID start
+stamp. The running ACME target consequently changed from false-ready to
+degraded without a restart.
+
 ## Bounded implementation
 
 Artifact manifest version 3 now records a content-addressed runtime root. A
@@ -72,12 +81,16 @@ PRD owning the immutable package form.
 
 ## Verification
 
-- Focused operator tests pass 21 tests and 83 assertions.
+- Focused operator tests pass 25 tests and 95 assertions.
 - A deterministic sequential-flavor test publishes default bytes, changes the
   mutable build output, publishes ACME bytes, and proves both content-addressed
   roots retain their own digest and content.
 - A process test proves only the pod receives the manifest runtime root and
   that readiness changes from true to false after its bootstrap member is
   mutated.
+- Client-closure tests prove the digest owns both output and Shadow runtime
+  bytes, and that a completed watcher becomes unready after either admitted
+  closure changes. A live `bin/acme status --edn` probe reports the same target
+  degraded while leaving its writer and pod alive.
 - No pod was restarted or reset in this bounded unit. The final simultaneous
   default/ACME rebuild and resolved-path evidence remain open acceptance work.
