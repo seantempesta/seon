@@ -114,17 +114,19 @@ contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | Review each returned slice, preserve the full ledger, run focused cross-boundary proof, and advance unit 1's native lifecycle contract | Integration and design judgment cannot be delegated; it is the critical path | Next unit-1 transition: typed create/release/delete, then restart/crash and restore/undo proof |
-| Database lifecycle | Implement registry-native create/release/delete through the one typed protocol, prove exact adoption and honest cleanup failures, then delete physical-copy fork | Observational non-main open is complete at `3649c6b1`; this is the earliest unresolved unit-1 transition and does not depend on UI/runtime slices | Branch launch/runtime ownership, then restart/crash and restore/undo proof |
-| Reactive render units | **First consumer integrated:** audit the next agent/root consumer after `739a646c`; `330abf0d` closes duplicate same-subscription fan-in | The pure kernel and one live debug consumer now prove shared transition, cross-subscription delivery, and final release without claiming the full cutover | Implement the earliest consumer that deletes page-specific dependency authority, then settle the unit-3 cursor contract |
-| Agent runtime correctness | **Raw boundary integrated:** ground the next complete-form/async/containment slice in exact ClojureScript 1.12.145 and Shadow 3.4.10 source after `80475818` | Exact provider evidence is settled independently of database branch creation and web rendering; the remaining transition contract still needs dependency proof | Implement complete-form/async/containment correctness, then integrate unit-7 Inspect evidence |
+| Top-level integration | Review returned slices, preserve the full ledger, and integrate branch launch/runtime ownership without outrunning its lifecycle proofs | Integration and design judgment cannot be delegated; typed native create/release/delete is settled at `f34b7bda` + `989b6ed3` | Review non-autonomous launch, then branch-qualified replica/operator ownership and restart/crash proof |
+| Database lifecycle | **Writer-local lifecycle integrated:** split non-autonomous runtime attachment from autonomous activation and add graceful stop | Native create/adopt/release/delete, honest cleanup, bounded equality, and physical-fork deletion are green at 76 tests/456 assertions | Branch-qualified replica/operator launch, then restart/crash and restore/undo proof |
+| Reactive render units | **Header cut in progress:** move the ordinary agent header through the demanded-unit first-paint seam after `739a646c`, `330abf0d`, and audit `8c19490a` | The kernel, live debug consumer, and same-subscription framing are settled; this cut can delete one page-specific dependency authority | System-header or surface consumer only after the demanded-unit seam is reviewed, then settle unit 3's cursor contract |
+| Agent runtime correctness | **Async implementation in progress:** generalize the one instrumentation constructor from exact-source audit `2d99c79f` | Exact provider evidence and compiler/Malli callable shapes are settled independently of database and web work | Complete-form/process-death containment after async coverage is exact, then integrate unit-7 Inspect evidence |
 
 The ordered top-level sequence is therefore:
 
 1. **Complete:** integrate and falsify validation-only non-main open;
-2. **In progress:** implement the one typed native create/release/delete lifecycle and prove
-   exact fork coordinates without physical directory copying;
-3. finish unit 1 restart/crash, restore/undo, and multi-form transition proof;
+2. **Complete:** implement the one typed native create/release/delete lifecycle,
+   prove exact fork coordinates, and remove physical directory copying;
+3. **In progress:** implement non-autonomous runtime stop/start and
+   branch-qualified replica/operator ownership, then finish unit 1
+   restart/crash, restore/undo, and multi-form transition proof;
 4. graduate units 2 and 6 from bounded consumers into their complete acceptance
    matrices while starting unit 3/4 only from their settled contracts;
 5. complete canvas, Inspect/autocomplete, and independent artifact consumption
@@ -724,7 +726,8 @@ critical eval/context gates, and live instrumentation census pass.
   replica, turn/autocomplete, error/reproduction, and historical web-feed
   verticals are complete. Reconcile results now return the same point and the
   hot config projection cache keys plain decoded data by that point without
-  retaining a database value. Native branch lifecycle is next.
+  retaining a database value. Writer-local native branch lifecycle is complete;
+  branch-qualified runtime/operator ownership is next.
 - Complete read-only as-of, writable same-database branches, quiesced
   restore/undo, branch-local blob behavior, and non-autonomous forensic reads
   through the maintained Datahike lifecycle. Do not create a Seon-specific
