@@ -840,6 +840,85 @@
            (application-error
             (capture (str (pr-str (terminal-value generation)) " {}")))))))
 
+(defn- requested-stop-result [id]
+  {:seon.dev.process/id id
+   :seon.dev.process/terminal
+   {:seon.dev.process.containment/generation (random-uuid)
+    :seon.dev.process.containment/status
+    :seon.dev.process.containment.status/drained
+    :seon.dev.process.containment/trigger
+    :seon.dev.process.containment.trigger/requested
+    :seon.dev.process.containment/anchor-exit -9}})
+
+(deftest clean-or-force-orders-and-classifies-complete-evidence
+  (let [configuration {:seon.dev.config/environment
+                       {"SEON_TURN_TIMEOUT_MS" "10"}}
+        calls (atom [])
+        writer-result
+        (assoc (requested-stop-result process/writer-id)
+               :seon.dev.process/application-result
+               {:seon.db.terminal/generation (str (random-uuid))
+                :seon.db.terminal/process :seon.dev.process/writer
+                :seon.db.terminal/completed? true
+                :seon.db.terminal/stop-response
+                {:seon.db.server/stopped? true
+                 :seon.db.server/release-results
+                 [{:seon.db.registry/released? true}]}})]
+    (with-redefs [process/read-process (fn [_ _] {:record true})
+                  process/stop!
+                  (fn [_ id]
+                    (swap! calls conj id)
+                    (if (= process/writer-id id)
+                      writer-result
+                      (requested-stop-result id)))
+                  process/pod-application-evidence
+                  (fn [_ _ _]
+                    {:seon.dev.process/application-result
+                     {:seon.client/quiesced? true}})]
+      (let [result
+            (process/clean-or-force!
+             {:seon.dev.process/configuration configuration
+              :seon.dev.process/operation
+              :seon.dev.process.operation/restart
+              :seon.dev.process/targets
+              #{process/watcher-id process/pod-id process/writer-id}})]
+        (is (= [process/pod-id process/writer-id process/watcher-id]
+               @calls))
+        (is (= :seon.dev.process.classification/clean
+               (:seon.dev.process/classification result)))
+        (is (every? #(= :seon.dev.process.classification/clean
+                        (:seon.dev.process/classification %))
+                    (:seon.dev.process/results result)))))))
+
+(deftest clean-or-force-retains-the-completed-prefix-on-uncertainty
+  (let [configuration {:seon.dev.config/environment {}}
+        calls (atom [])]
+    (with-redefs [process/read-process (fn [_ _] {:record true})
+                  process/stop!
+                  (fn [_ id]
+                    (swap! calls conj id)
+                    (if (= process/writer-id id)
+                      (throw (ex-info "uncertain" {:original true}))
+                      (requested-stop-result id)))
+                  process/pod-application-evidence
+                  (fn [_ _ _]
+                    {:seon.dev.process/application-result
+                     {:seon.client/quiesced? true}})]
+      (try
+        (process/clean-or-force!
+         {:seon.dev.process/configuration configuration
+          :seon.dev.process/operation :seon.dev.process.operation/down
+          :seon.dev.process/targets
+          #{process/watcher-id process/pod-id process/writer-id}})
+        (is false "containment uncertainty must throw")
+        (catch clojure.lang.ExceptionInfo error
+          (is (= :seon.dev.process.classification/containment-uncertain
+                 (:seon.dev.process/classification (ex-data error))))
+          (is (= [process/pod-id process/writer-id] @calls))
+          (is (= [process/pod-id]
+                 (mapv :seon.dev.process/id
+                       (:seon.dev.process/results (ex-data error))))))))))
+
 (deftest dead-workload-drains-a-term-ignoring-descendant-before-replacement
   (let [configuration (test-config)
         id :seon.dev.process/dead-workload
