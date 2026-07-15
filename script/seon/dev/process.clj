@@ -572,6 +572,15 @@
        (= (environment-digest (:seon.dev.process/environment spec))
           (:seon.dev.process/environment-digest record))))
 
+(defn converged?
+  "True when one managed process already has the exact spec and is ready."
+  [config spec]
+  (let [record (read-process config (:seon.dev.process/id spec))]
+    (boolean
+     (and (= :seon.dev.process.status/alive (process-status record))
+          (same-process-spec? spec record)
+          (ready? config spec record)))))
+
 (defn- external-dependency-ready?
   [config dependency]
   (let [owner-config
@@ -663,9 +672,7 @@
                        :seon.dev.process/unavailable-external-processes
                        unavailable})))
         record (read-process config id)]
-    (if (and (= :seon.dev.process.status/alive (process-status record))
-             (same-process-spec? spec record)
-             (ready? config spec record))
+    (if (converged? config spec)
       record
       (do
         (when record (stop! config id))
