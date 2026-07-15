@@ -14,6 +14,7 @@
   (:require
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.eval.internal :as eval.internal]
     [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
@@ -47,6 +48,7 @@
 (schema/register! ::agent-ids [:vector :string])
 (schema/register! ::run-ids [:vector ::db.id/compact-value])
 (schema/register! ::turn-ids [:vector ::db.id/compact-value])
+(schema/register! ::eval-ids [:vector ::db.id/compact-value])
 (schema/register! ::recover-request
   [:map
    [:seon.runtime.recovery/detail
@@ -58,6 +60,7 @@
     [::agent-ids ::agent-ids]
     [::run-ids ::run-ids]
     [::turn-ids ::turn-ids]
+    [::eval-ids ::eval-ids]
     [:seon.runtime.recovery/id
      {:optional true} :seon.runtime.recovery/id]]
    :seon.db/transact-response])
@@ -95,6 +98,27 @@
          (sort-by (juxt first second))
          vec)))
 
+(defn- running-evals
+  "Running eval ids grouped with their pointed-at run and turn ids."
+  [database target-run-ids]
+  (if (contains? (db/installed-schema database) :seon.eval/status)
+    (let [target-run-ids (set target-run-ids)]
+      (->> (db/query
+             {:seon.db/db database
+              :seon.db/query
+              '[:find ?run-id ?turn-id ?eval-id
+                :where
+                [?run :seon.agent.run/id ?run-id]
+                [?turn :seon.agent.turn/run ?run]
+                [?turn :seon.agent.turn/id ?turn-id]
+                [?turn :seon.agent.turn/evals ?eval]
+                [?eval :seon.eval/id ?eval-id]
+                [?eval :seon.eval/status :running]]})
+           (filter (fn [[run-id _ _]] (contains? target-run-ids run-id)))
+           (sort-by (juxt first second #(nth % 2)))
+           vec))
+    []))
+
 (defn ^:async recover!
   "Fence interrupted ownership and restore every affected agent to idle.
 
@@ -106,12 +130,17 @@
 
    The caller supplies root/boot transaction provenance. Database failures are
    returned as the ordinary error envelope; no partial repair can commit."
-  {:malli/schema [:=> [:cat ::recover-request] ::recover-response]}
+  {:malli/schema [:=> [:catn [::request ::recover-request]]
+                  ::recover-response]}
   [{:seon.runtime.recovery/keys [detail]}]
   (let [database @db/*conn*
         targets (repair-targets database)]
     (if (empty? targets)
-      {::repaired? false ::agent-ids [] ::run-ids [] ::turn-ids []}
+      {::repaired? false
+       ::agent-ids []
+       ::run-ids []
+       ::turn-ids []
+       ::eval-ids []}
       (let [agent-ids (mapv first targets)
             run-ids (mapv second targets)
             open-run-ids (->> targets
@@ -121,6 +150,8 @@
                               vec)
             turn-rows (running-turns database run-ids)
             turn-ids (->> turn-rows (map second) sort vec)
+            eval-rows (running-evals database run-ids)
+            eval-ids (->> eval-rows (map #(nth % 2)) sort vec)
             closed-at (js/Date.)
             envelope
             (await
@@ -162,6 +193,14 @@
                              {:seon.agent.turn/id turn-id
                               :seon.agent.turn/status :interrupted})
                            turn-ids)
+                         eval-closes
+                         (into []
+                               (mapcat
+                                 (fn [eval-id]
+                                   (eval.internal/terminal-tx-data
+                                     {:seon.eval/id eval-id
+                                      :seon.eval/status :interrupted})))
+                               eval-ids)
                          anchor
                          (cond->
                            {:seon.runtime.recovery/id recovery-id
@@ -173,6 +212,7 @@
                           (into pointer-retractions)
                           (into run-closes)
                           (into turn-closes)
+                          (into eval-closes)
                           (conj anchor))}))
                  :seon.db/conn db/*conn*}))
             recovery-id
@@ -183,6 +223,7 @@
            ::agent-ids agent-ids
            ::run-ids run-ids
            ::turn-ids turn-ids
+           ::eval-ids eval-ids
            :seon.runtime.recovery/id recovery-id})))))
 
 ;; ---------------------------------------------------------------------------

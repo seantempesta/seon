@@ -66,6 +66,7 @@
             [seon.diffusion.grammar :as grammar]
             [seon.error :as error]
             [seon.eval.bootstrap-cache :as bootstrap-cache]
+            [seon.eval.internal :as eval.internal]
             [seon.error.instrument :as einstrument]
             [seon.instrument :as instrument]
             [seon.platform :as platform]
@@ -77,6 +78,37 @@
             [seon.schema :as schema]
             [seon.schema.internal :as schema.internal]
             [seon.test.runner :as test-runner]))
+
+(schema/register!
+  :seon.eval/id
+  [:and {:seon.db/identity true
+         :seon.db.id/generator :seon.db.id.generator/compact}
+   ::db.id/compact-value])
+(schema/register! :seon.eval/at :inst)
+;; Wall-clock duration of the eval in milliseconds. Populated by
+;; seon.eval/eval-batch! per form. Source of truth for slow-eval warnings
+;; without walking evals or computing :at deltas.
+(schema/register! :seon.eval/duration-ms :int)
+(schema/register! :seon.eval/narration :string)
+(schema/register! :seon.eval/source :string)
+(schema/register! :seon.eval/status
+                  [:enum :running :done :error :interrupted])
+(schema/register! :seon.eval/ok? :boolean)
+(schema/register! :seon.eval/result-edn :string)
+;; println/prn output captured during the eval span (*print-fn* otherwise
+;; routes to the pod's stdout, invisible to the agent; a REPL shows print
+;; output next to the result). Written by record-eval! only when something
+;; printed; absent = no output.
+(schema/register! :seon.eval/output :string)
+(schema/register! :seon.eval/error :string)
+;; Structured instrumentation envelope alongside the rendered error string.
+;; Stored as :string (pr-str at write, read-string at read) because the
+;; seon.db Malli→Datahike bridge has no :db.type/map entry.
+(schema/register! :seon.eval/error-data :string)
+;; The namespace the eval ended in. Always populated; never nil.
+(schema/register! :seon.eval/ns :keyword)
+;; Optional direct ref to the agent whose scope produced the eval.
+(schema/register! :seon.eval/agent :seon.db/ref)
 
 
 ;; ============================================================
@@ -203,7 +235,12 @@
            (let [source (str/trim (str source))]
              (or (str/blank? source)
                  (boolean (re-matches #"[)\]}]+" source))))))
-       (mapv #(boolean (:seon.eval/ok? %)))))
+       (keep (fn [eval-row]
+               (case (eval.internal/receipt-state eval-row)
+                 :done true
+                 (:error :interrupted) false
+                 nil)))
+       vec))
 
 (defn error-storm
   "Return one bounded failure-rate signal for `agent-id`, or nil.

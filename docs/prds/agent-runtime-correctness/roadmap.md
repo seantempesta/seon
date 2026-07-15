@@ -47,7 +47,13 @@ address-message transitions can reopen or displace
 authored work; narration can echo runtime scaffolding; and arbitrary self-host
 evaluation has bounded result retention but no measured hard process-memory
 containment. Pod-restart recovery is already transactionally fenced and
-idempotent, but it is not an isolated eval-process boundary.
+idempotent. The existing eval entity now also has parent-oriented
+`:running`/terminal receipt data, pure start and terminal transaction builders,
+historical `:seon.eval/ok?` compatibility reads, and recovery that interrupts
+running receipts in the same CAS-fenced transaction as their run and turn.
+This is durable receipt groundwork only: no eval has moved to a child, and the
+immutable parent capability plus child launch/kill/reap owner remain dependent
+on the unit-1 process boundary.
 
 The exact ClojureScript `1.12.145` source is now available as official tag
 `r1.12.145`, commit `bd23d9a2475d822ea8dfd65deaa6732428b9ed25`, fetched into
@@ -143,13 +149,18 @@ failures or errors).
    and the parent-stamped actor capability before provider and eval cutovers.
    Plan lifecycle authority may land its pure decisions earlier, but cannot
    claim an unforgeable actor while eval can replace `seon.db/with-agent`
-   context. In parallel with that experiment, one root-owned slice may add the
-   existing eval entity's running/terminal status, pure start/terminal tx-data
-   builders, historical compatibility reads, and recovery CAS proof. Do not
-   cut over eval or expose a temporary actor authority. After launch ownership
-   settles, `seon.eval` retains one immutable capability in the parent child-
-   handle closure, starts each form durably, stamps every accepted effect from
-   that capability, and acknowledges only committed terminal receipts. A
+   context. **Receipt Slice A is implemented:** `seon.eval` owns the existing
+   eval attributes including bounded status; `seon.eval.internal` owns only
+   closed pure request contracts and start/terminal transaction builders; one
+   running CAS permits exactly one terminal transition; historical rows derive
+   terminal state from `:seon.eval/ok?`; and pod recovery interrupts every
+   running receipt under the affected runs in its existing atomic repair.
+   Focused proof is `tmp/test-cljs-20260715-035819-82784.log` (two namespaces,
+   seven tests, 67 assertions, zero failures or errors). No production eval
+   cutover or temporary actor authority landed. After unit-1 launch ownership
+   settles, `seon.eval` must retain one immutable capability in the parent
+   child-handle closure, start each form durably, stamp every accepted effect
+   from that capability, and acknowledge only committed terminal receipts. A
    killed form becomes interrupted and later forms remain absent.
 7. Integrate Inspect tasks/scorers that falsify each transition, then run paid
    or small-model trials only after deterministic runtime gates pass.

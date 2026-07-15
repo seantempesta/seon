@@ -2,6 +2,7 @@
   "Behavioral coverage for one-transaction unexpected-exit recovery."
   (:require
     [cljs.test :refer [async deftest is testing]]
+    [datahike.api :as d]
     [malli.core :as m]
     [seon.agent :as agent]
     [seon.agent.run :as run]
@@ -14,16 +15,39 @@
 (def ^:private agent-b "recovrb-260713")
 (def ^:private agent-c "recovrc-260713")
 (def ^:private agent-d "recovrd-260713")
+(def ^:private eval-a "EVLrecoverA001")
+(def ^:private eval-b "EVLrecoverB001")
+(def ^:private eval-c "EVLrecoverC001")
+(def ^:private eval-d "EVLrecoverD001")
 
 (defn- with-conn
   [body]
   (-> (client/open-agent-conn!)
       (.then
         (fn [conn]
-          (let [previous db/*conn*]
-            (set! db/*conn* conn)
-            (-> (js/Promise.resolve (body conn))
-                (.finally (fn [] (set! db/*conn* previous)))))))))
+          (-> (d/transact!
+                conn
+                {:tx-data
+                 (db/malli->datahike-schema [:seon.eval/status])})
+              (.then
+                (fn [_]
+                  (let [previous db/*conn*]
+                    (set! db/*conn* conn)
+                    (-> (js/Promise.resolve (body conn))
+                        (.finally
+                          (fn [] (set! db/*conn* previous))))))))))))
+
+(defn- eval-row
+  [eval-id status]
+  (cond->
+    {:seon.eval/id eval-id
+     :seon.eval/at (js/Date.)
+     :seon.eval/source "(+ 1 2)"
+     :seon.eval/narration "recovery fixture"
+     :seon.eval/ns :my.agent.recovery
+     :seon.eval/status status}
+    (not= :running status)
+    (assoc :seon.eval/ok? (= :done status))))
 
 (defn- open-run!
   [agent-id]
@@ -87,6 +111,18 @@
        [?turn :seon.agent.turn/status :interrupted ?transaction true]]
      :seon.db/args [turn-id]}))
 
+(defn- eval-interruption-transaction
+  [database eval-id]
+  (db/query
+    {:seon.db/db (db/history database)
+     :seon.db/query
+     '[:find ?transaction .
+       :in $ ?eval-id
+       :where
+       [?eval :seon.eval/id ?eval-id _ true]
+       [?eval :seon.eval/status :interrupted ?transaction true]]
+     :seon.db/args [eval-id]}))
+
 (deftest recovery-schemas-compile-and-bound-the-optional-detail
   (is (m/validate :seon.runtime.recovery/detail "pod exited unexpectedly"))
   (is (not (m/validate :seon.runtime.recovery/detail
@@ -125,28 +161,35 @@
                       (db/transact!
                         {:seon.db/tx-data
                          [{:seon.agent.turn/id turn-a
-                     :seon.agent.turn/at (js/Date.)
-                     :seon.agent.turn/run [:seon.agent.run/id run-a]
-                     :seon.agent.turn/status :running}
-                    {:seon.agent.turn/id turn-b
-                     :seon.agent.turn/at (js/Date.)
-                     :seon.agent.turn/run [:seon.agent.run/id run-b]
-                     :seon.agent.turn/status :done}
-                    {:seon.agent.turn/id turn-c
-                     :seon.agent.turn/at (js/Date.)
-                     :seon.agent.turn/run [:seon.agent.run/id run-c]
-                     :seon.agent.turn/status :running}
-                    {:seon.agent.turn/id turn-d
-                     :seon.agent.turn/at (js/Date.)
-                     :seon.agent.turn/run [:seon.agent.run/id run-d]
-                     :seon.agent.turn/status :running}
-                    ;; A closed run with a stale current pointer is repaired,
-                    ;; but not re-closed as a crash.
-                    {:seon.agent.run/id run-d
-                     :seon.agent.run/status :closed
-                     :seon.agent.run/closed-reason :completed
-                     :seon.agent.run/closed-at (js/Date.)}
-                    ;; Terminated ownership is deliberately untouched.
+                           :seon.agent.turn/at (js/Date.)
+                           :seon.agent.turn/run [:seon.agent.run/id run-a]
+                           :seon.agent.turn/status :running
+                           :seon.agent.turn/evals
+                           [(eval-row eval-a :running)]}
+                          {:seon.agent.turn/id turn-b
+                           :seon.agent.turn/at (js/Date.)
+                           :seon.agent.turn/run [:seon.agent.run/id run-b]
+                           :seon.agent.turn/status :done
+                           :seon.agent.turn/evals [(eval-row eval-b :done)]}
+                          {:seon.agent.turn/id turn-c
+                           :seon.agent.turn/at (js/Date.)
+                           :seon.agent.turn/run [:seon.agent.run/id run-c]
+                           :seon.agent.turn/status :running
+                           :seon.agent.turn/evals
+                           [(eval-row eval-c :running)]}
+                          {:seon.agent.turn/id turn-d
+                           :seon.agent.turn/at (js/Date.)
+                           :seon.agent.turn/run [:seon.agent.run/id run-d]
+                           :seon.agent.turn/status :running
+                           :seon.agent.turn/evals
+                           [(eval-row eval-d :running)]}
+                          ;; A closed run with a stale current pointer is
+                          ;; repaired, but not re-closed as a crash.
+                          {:seon.agent.run/id run-d
+                           :seon.agent.run/status :closed
+                           :seon.agent.run/closed-reason :completed
+                           :seon.agent.run/closed-at (js/Date.)}
+                          ;; Terminated ownership is deliberately untouched.
                           {:seon.agent/id agent-c
                            :seon.agent/terminated-at (js/Date.)}]}))]
                 (is (true? (:seon.db/ok? setup-result))
@@ -174,6 +217,7 @@
                          (::recovery/agent-ids result)))
                   (is (= #{run-a run-b run-d} (set (::recovery/run-ids result))))
                   (is (= [turn-a turn-d] (::recovery/turn-ids result)))
+                  (is (= [eval-a eval-d] (::recovery/eval-ids result)))
                   (is (int? transaction))
                   (is (every?
                         #{transaction}
@@ -183,7 +227,9 @@
                          (run-close-transaction database run-a)
                          (run-close-transaction database run-b)
                          (turn-interruption-transaction database turn-a)
-                         (turn-interruption-transaction database turn-d)]))
+                         (turn-interruption-transaction database turn-d)
+                         (eval-interruption-transaction database eval-a)
+                         (eval-interruption-transaction database eval-d)]))
                   (let [tx-entity (db/entity
                                     {:seon.db/db database
                                      :seon.db/ref transaction})]
@@ -207,9 +253,36 @@
                          (:seon.agent.turn/status
                              (db/entity
                              {:seon.db/ref [:seon.agent.turn/id turn-c]}))))
+                  (is (= :running
+                         (:seon.eval/status
+                           (db/entity
+                             {:seon.db/ref [:seon.eval/id eval-c]}))))
+                  (is (= :done
+                         (:seon.eval/status
+                           (db/entity
+                             {:seon.db/ref [:seon.eval/id eval-b]}))))
+                  (doseq [eval-id [eval-a eval-d]]
+                    (let [eval-entity
+                          (db/entity
+                            {:seon.db/ref [:seon.eval/id eval-id]})]
+                      (is (= :interrupted (:seon.eval/status eval-entity)))
+                      (is (false? (:seon.eval/ok? eval-entity)))))
+                  (is (empty?
+                        (db/query
+                          {:seon.db/db database
+                           :seon.db/query
+                           '[:find ?eval-id
+                             :where
+                             [?run :seon.agent.run/status :closed]
+                             [?turn :seon.agent.turn/run ?run]
+                             [?turn :seon.agent.turn/status :interrupted]
+                             [?turn :seon.agent.turn/evals ?eval]
+                             [?eval :seon.eval/id ?eval-id]
+                             [?eval :seon.eval/status :running]]})))
                   (is (= messages-before (message-count database))))
                 (testing "an immediate second pass writes no duplicate anchor"
-                  (let [second-result (await (recovery/recover! {}))
+                  (let [before-second (db/basis-t @conn)
+                        second-result (await (recovery/recover! {}))
                         anchors (db/query
                                   {:seon.db/db @conn
                                    :seon.db/query
@@ -217,6 +290,8 @@
                                      :where
                                      [_ :seon.runtime.recovery/id ?id]]})]
                     (is (false? (::recovery/repaired? second-result)))
+                    (is (= [] (::recovery/eval-ids second-result)))
+                    (is (= before-second (db/basis-t @conn)))
                     (is (= [recovery-id] anchors))))
                 (testing "the root notice is derived and shrinks after later runs"
                   (let [notices (recovery/pending-notices {:seon.db/db database})]

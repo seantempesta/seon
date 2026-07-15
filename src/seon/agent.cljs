@@ -10,8 +10,9 @@
    This namespace owns:
      - the `:seon.agent/*` schemas (id/purpose/run/terminated-at/parent/
        default-turn-limit/default-deadline-ms/schedules/ctx + the entity
-       map), plus the `:seon.eval/*`, `:seon.ns/*`, `:seon.fn/*`,
-       `:seon.schema/*` corpus schemas (`:seon.agent.message/*` lives in
+       map), plus the rendered `:seon.eval` entity and the `:seon.ns/*`,
+       `:seon.fn/*`, `:seon.schema/*` corpus schemas (`:seon.eval/*` attrs
+       live behind [[seon.eval]], `:seon.agent.message/*` lives in
        [[seon.agent.message]], `:seon.agent.turn/*` in [[seon.agent.turn]],
        `:seon.agent.run/*` in [[seon.agent.run]], `:seon.agent.ctx/*` in [[seon.agent.ctx]])
      - `armable-agent-ids` — the wakeable agent ids (a `:seon.db/db` map-in
@@ -131,51 +132,6 @@
 (def transcript-block ctx-transcript/transcript-block)
 (def context-root ctx/context-root)
 
-(schema/register!
-  :seon.eval/id
-  [:and {:seon.db/identity true
-         :seon.db.id/generator :seon.db.id.generator/compact}
-   ::db.id/compact-value])
-(schema/register! :seon.eval/at          :inst)
-;; Wall-clock duration of the eval in milliseconds. Populated by
-;; seon.eval/eval-batch! per form. Source of truth for slow-eval warnings
-;; without walking evals or computing :at deltas.
-(schema/register! :seon.eval/duration-ms :int)
-(schema/register! :seon.eval/narration   :string)
-(schema/register! :seon.eval/source      :string)
-(schema/register! :seon.eval/ok?         :boolean)
-(schema/register! :seon.eval/result-edn  :string)
-;; println/prn output captured during the eval span (*print-fn* otherwise
-;; routes to the pod's stdout, invisible to the agent; a REPL shows print
-;; output next to the result). Written by record-eval! only when something
-;; printed; absent = no output.
-(schema/register! :seon.eval/output      :string)
-(schema/register! :seon.eval/error       :string)
-;; Structured instrumentation envelope alongside the rendered error string.
-;; Populated by record-eval! when the failure carries an instrumentation
-;; envelope (i.e. (:seon.error/data error) satisfies
-;; seon.error.instrument/instrument-error?). Programmatic readers branch on
-;; this; absent for non-instrumentation failures (timeouts, generic throws).
-;; Stored as :string (pr-str at write, read-string at read) because the
-;; seon.db Malli→datahike bridge has no :db.type/map entry.
-(schema/register! :seon.eval/error-data  :string)
-;; The namespace the eval ended in. Written by eval-batch!'s per-form reduce
-;; from the (:ns raw-result) of cljs.js/eval-str. For failed forms (read or
-;; eval), carries the unchanged current-ns accumulator — the last-known-good
-;; ns the form WOULD have run in. Always populated; never nil. Cross-batch
-;; derivation of "the agent's current ns" reads this attribute on the latest
-;; successful eval.
-(schema/register! :seon.eval/ns          :keyword)
-;; The agent whose scope produced the eval — a DENORMALIZED direct ref to the
-;; owning agent (the same agent reachable via turn → run → agent, surfaced here
-;; so an eval row can be found in ONE hop). Written by record-eval! from
-;; `(seon.db/current-agent-id)` when the eval runs inside a `with-agent` scope
-;; (every agent turn does); ABSENT for evals with no agent scope (boot index,
-;; web UI REPL) — optional, never nil. A ref so `[:seon.agent/id id]` value
-;; lookup-refs resolve and `/clear`'s `[?e :seon.eval/agent [:seon.agent/id …]]`
-;; query matches by eid.
-(schema/register! :seon.eval/agent       :seon.db/ref)
-
 ;; The agent's COMPLETE context block set — a component vector of
 ;; :seon.agent.ctx/block maps (see seon.agent.ctx). SEED-COPIED from the
 ;; default set at creation; render reads this one collection priority-sorted
@@ -266,6 +222,7 @@
    [:seon.eval/source      :seon.eval/source]
    [:seon.eval/ok?         :seon.eval/ok?]
    [:seon.eval/at          :seon.eval/at]
+   [:seon.eval/status      {:optional true} :seon.eval/status]
    [:seon.eval/agent       {:optional true} :seon.eval/agent]
    [:seon.eval/duration-ms {:optional true} :seon.eval/duration-ms]
    [:seon.eval/narration   {:optional true} :seon.eval/narration]
