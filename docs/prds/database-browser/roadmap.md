@@ -19,7 +19,15 @@ installed-schema navigation, bounded AEVT attribute pages, URL-owned view
 state, and exact read-result replay. It has no entity/ref/transaction/
 provenance/history navigation yet, and its whole browser remains one render
 unit. The exposed `[entity value tx]` cursor is neither opaque nor tied to a
-database coordinate, while the replica does not yet expose commit id.
+database coordinate.
+
+The complete `{database-id, branch, commit-id, t}` coordinate, retained-commit
+resolver, and pure shared render-unit lifecycle have now landed. Cursor
+hardening can proceed without the reverse candidate index or count API. A
+continuation freezes the exact point selected by its first page; stale or
+mismatched cursors fail as data before an index read. The later reactive unit
+migration still waits on the shared reverse-candidate boundary, currently
+blocked on a public Datahike query dependency projection.
 
 A read-only 2026-07-14 default-cluster probe observed basis `536870929` and
 15,851 datoms. The initial compressed feed emitted immediately, but the
@@ -36,11 +44,16 @@ coordinate and settled render-unit contract.
 - [[research/database-browser-source-audit-2026-07-14]] — selected dependency
   ledger, live baseline, exact current gaps, coordinate/cursor constraints,
   deletion map, ordered slices, and acceptance matrix.
+- [[research/coordinate-bound-cursor-contract-2026-07-15]] — settled coordinate
+  reconciliation, Transit cursor envelope, Datahike current/history seek edge,
+  narrow two-slice ownership, deletion boundary, and falsifiable tests.
 
 ## Ordered work
 
-1. Consume the lifecycle coordinate and reactive-unit contracts; mirror exact
-   persistent-sorted-set `0.4.137` source before count implementation.
+1. **Coordinate and pure lifecycle prerequisites complete:** consume their
+   settled contracts. The later reverse candidate index is separately blocked
+   on a public Datahike query-dependency projection. Mirror exact
+   persistent-sorted-set `0.4.137` source only before count implementation.
 2. Harden the current navigator: thread one db value, classify dependency
    system attrs correctly, and replace the raw tuple with a bounded versioned
    cursor tied to coordinate/index/prefix/direction.
