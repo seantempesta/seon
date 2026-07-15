@@ -67,6 +67,17 @@ fork creation, and final public SHAs remain prerequisites to changing Seon's
 production pins. ACME and the current root dependencies remain untouched until
 those immutable coordinates exist.
 
+The complete maintained-fork freshness ledger is
+[[research/custom-dependency-freshness-audit-2026-07-15]]. It adds one required
+edge to that publication order: merge upstream Konserve `0.9.359` into the
+legacy-header compatibility fork before merging current Datahike upstream into
+the guarded-force line. Datahike's upstream delete fix requires Konserve
+`>= 0.9.357`, and its concurrent-GC safe-point fix is also absent from the
+current pin. Shadow CLJS, superv.async, and partial-cps are already at the
+intended public maintained revisions. The final root coordinate update remains
+atomic across `:writer` and `:cljs`; ACME inherits that compatibility set and
+must not copy it downstream.
+
 ## Ordered work
 
 1. Freeze a versioned compatibility manifest for source, database protocol,
