@@ -332,6 +332,20 @@ def test_correct_final_prose_cannot_replace_execution(row):
 
 
 @pytest.mark.parametrize("row", ROWS)
+def test_terminal_reports_must_follow_the_observation_prompt(row):
+    turns, eval_rows, reply = FIXTURES[row]()
+    changed = copy.deepcopy(eval_rows)
+    report_rows = [
+        evidence for evidence in changed
+        if "message/user" in evidence["source"] or "(complete" in evidence["source"]
+    ]
+    for evidence in report_rows:
+        evidence["turn_id"] = turns[0]["turn_id"]
+    result = check_reachability(row, turns, changed, reply, FINAL)
+    assert not result["checks"]["report"]
+
+
+@pytest.mark.parametrize("row", ROWS)
 def test_failed_or_replaced_selected_call_does_not_count(row):
     turns, eval_rows, reply = FIXTURES[row]()
     changed = copy.deepcopy(eval_rows)

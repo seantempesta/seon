@@ -121,18 +121,26 @@ def _operation(
 
 
 def _reports(
-    rows: list[dict[str, Any]], values: tuple[str, ...], after: int
+    rows: list[dict[str, Any]], values: tuple[str, ...], after: int,
+    turns: list[dict[str, Any]], min_turn_index: int,
 ) -> bool:
+    turn_positions = _turn_index(turns)
+
+    def observed_after_prompt(index: int) -> bool:
+        return turn_positions.get(rows[index].get("turn_id"), -1) >= min_turn_index
+
     messages = [
         index
         for index in _successful(rows, "message/user", "seon.agent.message/user")
         if index > after
+        and observed_after_prompt(index)
         and all(value in (rows[index].get("source") or "") for value in values)
     ]
     completions = [
         index
         for index in _successful(rows, "complete", "seon.agent.lifecycle/complete")
         if index > after
+        and observed_after_prompt(index)
         and all(value in (rows[index].get("source") or "") for value in values)
     ]
     return bool(messages and completions and messages[0] < completions[-1])
@@ -219,10 +227,20 @@ def _root(
         later
         and any(":seon.agent/id" in _prompt(turns, index) for index in later)
     )
+    query_prompts = (
+        [
+            index for index in _later_prompt_indices(turns, rows[queries[-1]])
+            if child_id and child_id in _prompt(turns, index)
+        ]
+        if queries else []
+    )
     report_after = queries[-1] if queries else len(rows)
     report = bool(
         child_id
-        and _reports(rows, (child_id,), report_after)
+        and query_prompts
+        and _reports(
+            rows, (child_id,), report_after, turns, query_prompts[0]
+        )
         and child_id in (reply or "")
     )
     return {
@@ -299,7 +317,8 @@ def _discovery(
     values = WEB_FUNCTIONS
     report_after = returns[-1] if returns else len(rows)
     report = (
-        _reports(rows, values, report_after)
+        bool(dynamic_prompts)
+        and _reports(rows, values, report_after, turns, dynamic_prompts[0])
         and all(value in (reply or "") for value in values)
     )
     return {
@@ -360,7 +379,7 @@ def _skills(
     report_after = unloads[-1] if unloads else len(rows)
     report = bool(
         unload_prompts
-        and _reports(rows, (), report_after)
+        and _reports(rows, (), report_after, turns, unload_prompts[0])
         and isinstance(reply, str)
         and bool(reply.strip())
     )
@@ -407,7 +426,11 @@ def _acme(
     dynamic = bool(result_prompts)
     verification = dynamic
     report = bool(
-        _reports(rows, (ACME_TAGLINE, ACME_LOCATION), last_call)
+        result_prompts
+        and _reports(
+            rows, (ACME_TAGLINE, ACME_LOCATION), last_call,
+            turns, result_prompts[0],
+        )
         and ACME_TAGLINE in (reply or "")
         and ACME_LOCATION in (reply or "")
     )
