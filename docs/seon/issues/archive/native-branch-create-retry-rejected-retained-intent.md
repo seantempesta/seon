@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, flow]
 ---
@@ -45,3 +45,17 @@ it does not infer another route or add a recovery mutation.
   current before mutation.
 - Attachment, physical database, durable roster, and fork-coordinate
   mismatches fail closed.
+
+## Resolution
+
+Resolved by `e7bd160c`. `create-branch!` now reconciles a published exact route
+from its attachment, physical database coordinates, and durable branch roster,
+returning that route's freshly resolved current head. An unpublished durable
+branch is adopted only when its immutable fork coordinate matches the retained
+request; the expected-source-head fence remains mandatory immediately before
+a new branch mutation.
+
+The focused writer proof covers immediate retry, retry after target writes,
+adoption after an unrelated source write, mismatched durable-branch rejection,
+and stale-new-create rejection. The final changed-writer gate passed 37 tests
+and 259 assertions with zero failures or errors.

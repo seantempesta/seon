@@ -182,6 +182,15 @@ Datahike creates the branch but before response publication, retry sends the
 same request and the writer adopts only an exact matching durable branch.
 Publish the validated returned descriptor atomically before pod publication.
 
+The registry prerequisite is now settled by `e7bd160c`. An exact published
+route is identified by its logical name, branch attachment, physical database
+coordinates, and durable roster membership; retry returns its freshly resolved
+head because legitimate target writes can advance it beyond the immutable fork
+cut. An unpublished durable branch still must equal the retained fork
+coordinate. The source-head fence runs only before a genuinely new branch
+mutation, so a crash after mutation can adopt retained intent even if the
+source later advances. Focused writer proof passes 37 tests/259 assertions.
+
 The exact open transition is:
 
 1. Read the existing source artifact manifest and prove its current client

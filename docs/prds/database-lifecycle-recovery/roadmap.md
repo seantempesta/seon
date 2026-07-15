@@ -84,6 +84,14 @@ transport namespace at 9 tests/28 assertions, including an exact typed
 create-branch call with UUID coordinates over a bounded local Unix socket. The
 retained JVM transport/writer-integration gate passes 16 tests/93 assertions.
 
+The retained-create retry prerequisite is also complete at `e7bd160c`.
+`create-branch!` adopts an exact published route at its freshly resolved head,
+including after legitimate target writes, and adopts an unpublished exact
+durable branch at the immutable retained fork cut even if the source later
+advances. Attachment, physical database, durable roster, and fork-coordinate
+fences remain closed; the expected-source-head fence runs immediately before
+new mutation only. Focused writer proof passes 37 tests/259 assertions.
+
 The next dependency-ordered slice is therefore the retained typed operator
 lifecycle described in
 [[research/operator-descriptor-publication-pod-only-plan-2026-07-15]].

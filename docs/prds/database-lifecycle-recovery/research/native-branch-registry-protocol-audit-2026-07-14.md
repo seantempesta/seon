@@ -352,9 +352,11 @@ legacy request branch, or a migration flag.
 | containing commit missing or commit graph disabled | missing-commit / unsupported-history | none |
 | coordinate `t` is below containing commit maximum | cut-not-branchable | none |
 | new branch is `:db` or malformed | protocol error | none |
-| target route already exists | duplicate-route | none |
+| target route exists with a different attachment or physical database | attachment/route mismatch | none |
+| exact target route exists and durable roster still contains its branch | adopt route and return its fresh current head | none |
 | target attachment already has another route | duplicate-attachment | none |
-| Datahike branch roster already contains target | branch-exists | none |
+| Datahike roster contains exact target at retained fork cut | adopt exact branch and publish route | route publication only |
+| Datahike roster contains target at another fork cut | branch-exists | none |
 | secondary preflight fails | dependency error; no branch roster/head publication | immutable orphan nodes may remain collectable |
 | branch creation succeeds but target connect/init fails | release target, delete unpublished branch, return failure | no registry entry |
 | target receives source-branch event | replica rejects frame and reconnects | no cursor advance |
@@ -362,7 +364,8 @@ legacy request branch, or a migration flag.
 | target pod/connection remains active | active-branch | none |
 | delete removes roster but old head key remains | Seon open rejects absent roster | no source mutation |
 | process dies after branch head creation but before registry publication | next create derives roster/head, verifies requested identity, and either adopts exact result or reports branch-exists | no physical copy |
-| source advances after planning | recheck rejects stale expected head | none |
+| source advances before a new branch mutation | recheck rejects stale expected head | none |
+| source advances after exact durable mutation but before retry | adopt retained branch without repeating obsolete source-head fence | route publication only |
 
 ## Focused tests
 
