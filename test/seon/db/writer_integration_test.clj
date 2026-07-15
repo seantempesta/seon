@@ -346,7 +346,7 @@
             (is (= [] (::protocol/restore-completions observation)))
             (is (= #{} (::protocol/completed-restore-ids observation)))
             (is (= {}
-                   (::protocol/restore-completion-transaction-ts observation)))
+                   (::protocol/restore-completion-coordinates observation)))
             (is (= #{:db branch unopened-branch}
                    (::protocol/branch-roster observation)))
             (is (= (::protocol/branch-roster observation)

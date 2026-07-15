@@ -33,6 +33,7 @@
   (:require [clojure.set :as set]
             [datahike.api :as d]
             [datahike.index.audit :as index-audit]
+            [konserve.core :as k]
             [seon.db.coordinate :as coordinate]
             [seon.db.id :as id]
             [seon.db.restore :as db.restore]
@@ -78,8 +79,9 @@
 (schema/register! ::branch-coordinates [:map-of :keyword ::coordinate])
 (schema/register! ::restore-completions [:vector ::db.restore/completion])
 (schema/register! ::completed-restore-ids [:set ::db.restore/id])
-(schema/register! ::restore-completion-transaction-ts
-                  [:map-of ::db.restore/id ::coordinate/t])
+(schema/register! ::restore-completion-coordinates
+                  [:map-of ::db.restore/id ::coordinate])
+(schema/register! ::transaction-id ::coordinate/t)
 (schema/register! ::pre-restore-main-coordinate ::coordinate)
 (schema/register! ::selected-target-coordinate ::coordinate)
 (schema/register! ::prepared-target-coordinate ::coordinate)
@@ -148,8 +150,15 @@
   [::branch-roster ::branch-roster]
   [::restore-completions ::restore-completions]
   [::completed-restore-ids ::completed-restore-ids]
-  [::restore-completion-transaction-ts
-   ::restore-completion-transaction-ts]])
+  [::restore-completion-coordinates
+   ::restore-completion-coordinates]])
+
+(schema/register!
+ ::resolve-transaction-coordinate!-request
+ [:map {:closed true}
+  [::conn ::conn]
+  [::main-coordinate ::main-coordinate]
+  [::transaction-id ::transaction-id]])
 
 (schema/register!
  ::create-branch!-request
@@ -638,8 +647,135 @@
                [branch resolved])))
          (sort roster))))
 
+(defn- coordinate-resolution-error!
+  [kind message data]
+  (lifecycle-fail! kind message data))
+
+(defn- retained-stored-commit!
+  [store commit-id]
+  (or (k/get store commit-id nil {:sync? true})
+      (coordinate-resolution-error!
+       :seon.db.protocol.error/unsupported-history
+       "Transaction-coordinate ancestry is incomplete."
+       {::coordinate/commit-id commit-id})))
+
+(defn- stored-coordinate
+  [stored]
+  {::coordinate/database-id (get-in stored [:config :store :id])
+   ::coordinate/branch (get-in stored [:config :branch])
+   ::coordinate/commit-id (get-in stored [:meta :datahike/commit-id])
+   ::coordinate/t (:max-tx stored)})
+
+(defn- transaction-origin?
+  [store branch transaction stored]
+  (when (and (= branch (get-in stored [:config :branch]))
+             (= transaction (:max-tx stored)))
+    (let [parents (mapv #(retained-stored-commit! store %)
+                        (get-in stored [:meta :datahike/parents]))]
+      ;; Datahike advances max-tx only for an ordinary transaction. Branch and
+      ;; force metadata commits can repeat t, but then a direct parent already
+      ;; carries that same t.
+      (not-any? #(= transaction (:max-tx %)) parents))))
+
+(defn- transaction-origin-candidates
+  [store head branch transaction]
+  (loop [pending [head]
+         visited #{}
+         candidates []]
+    (if-let [stored (first pending)]
+      (let [commit-id (get-in stored [:meta :datahike/commit-id])]
+        (if (contains? visited commit-id)
+          (recur (next pending) visited candidates)
+          (let [basis-t (:max-tx stored)
+                candidates (cond-> candidates
+                             (transaction-origin?
+                              store branch transaction stored)
+                             (conj (stored-coordinate stored)))
+                parents
+                (if (>= basis-t transaction)
+                  (mapv #(retained-stored-commit! store %)
+                        (get-in stored [:meta :datahike/parents]))
+                  [])]
+            (recur (into (vec (next pending)) parents)
+                   (conj visited commit-id)
+                   candidates))))
+      candidates)))
+
+(defn resolve-transaction-coordinate!
+  "Resolve one transaction's exact origin on the retained main lineage."
+  {:malli/schema
+   [:=> [:cat ::resolve-transaction-coordinate!-request] ::coordinate]}
+  [{::keys [conn main-coordinate transaction-id]}]
+  (let [current-db (d/db conn)
+        current-coordinate (coordinate/resolved current-db)
+        store (:store current-db)]
+    (when (false? (get-in current-db [:config :commit-graph?] true))
+      (coordinate-resolution-error!
+       :seon.db.protocol.error/unsupported-history
+       "Transaction-coordinate resolution requires retained commit history."
+       {::main-coordinate main-coordinate
+        ::transaction-id transaction-id}))
+    (when-not (and (= :db (::coordinate/branch current-coordinate))
+                   (= :db (::coordinate/branch main-coordinate)))
+      (coordinate-resolution-error!
+       :seon.db.protocol.error/attachment-mismatch
+       "Restore completion coordinates resolve only on the live :db lineage."
+       {::main-coordinate main-coordinate
+        ::coordinate current-coordinate}))
+    (when-not (= (coordinate/attachment current-coordinate)
+                 (coordinate/attachment main-coordinate))
+      (coordinate-resolution-error!
+       :seon.db.protocol.error/attachment-mismatch
+       "The frozen head names a different database attachment."
+       {::main-coordinate main-coordinate
+        ::coordinate current-coordinate}))
+    (let [head (retained-stored-commit!
+                store (::coordinate/commit-id main-coordinate))
+          resolved-head (stored-coordinate head)]
+      (when-not (= main-coordinate resolved-head)
+        (coordinate-resolution-error!
+         :seon.db.protocol.error/attachment-mismatch
+         "The retained commit does not resolve the frozen head coordinate."
+         {::main-coordinate main-coordinate
+          ::coordinate resolved-head}))
+      (when-not
+       (loop [pending [(::coordinate/commit-id current-coordinate)]
+              visited #{}]
+         (if-let [commit-id (first pending)]
+           (cond
+             (= commit-id (::coordinate/commit-id main-coordinate)) true
+             (contains? visited commit-id)
+             (recur (next pending) visited)
+             :else
+             (let [stored (retained-stored-commit! store commit-id)]
+               (recur (concat (next pending)
+                              (get-in stored [:meta :datahike/parents]))
+                      (conj visited commit-id))))
+           false))
+        (coordinate-resolution-error!
+         :seon.db.protocol.error/non-ancestor
+         "The frozen head is not an ancestor of the current branch head."
+         {::main-coordinate main-coordinate
+          ::coordinate current-coordinate}))
+      (let [candidates
+            (transaction-origin-candidates
+             store head (::coordinate/branch main-coordinate) transaction-id)]
+        (case (count candidates)
+          1 (first candidates)
+          0 (coordinate-resolution-error!
+             :seon.db.protocol.error/not-found
+             "No original commit for the transaction is reachable from the frozen head."
+             {::main-coordinate main-coordinate
+              ::transaction-id transaction-id})
+          (coordinate-resolution-error!
+           :seon.db.protocol.error/ambiguous-history
+           "Several original commits match the transaction on this branch."
+           {::main-coordinate main-coordinate
+            ::transaction-id transaction-id
+            :seon.db.registry/candidate-coordinates candidates}))))))
+
 (defn- durable-restore-completions!
-  [database-name main-db main-coordinate]
+  [database-name connection main-db main-coordinate]
   (let [ids (->> (d/q '[:find [?id ...]
                          :where
                          [?completion :seon.db.restore/id ?id]]
@@ -692,7 +828,17 @@
                        :seon.db.restore/id completion-id
                        :seon.db.restore/transaction-ids transactions}))
                    [completion-id (first transactions)])))
-              ids)]
+              ids)
+        completion-coordinates
+        (into {}
+              (map
+               (fn [[completion-id transaction]]
+                 [completion-id
+                  (resolve-transaction-coordinate!
+                   {::conn connection
+                    ::main-coordinate main-coordinate
+                    ::transaction-id transaction})]))
+              transaction-ts)]
     (when-not (= (set ids) (set (keys transactions-by-id)))
       (lifecycle-fail!
        :seon.db.protocol.error/restore-divergence
@@ -705,7 +851,7 @@
     {::main-parent-commit-ids (set (or (d/parent-commit-ids main-db) []))
      ::restore-completions completions
      ::completed-restore-ids (set ids)
-     ::restore-completion-transaction-ts transaction-ts}))
+     ::restore-completion-coordinates completion-coordinates}))
 
 (defn- observe-main-lifecycle-facts!
   [database-name connection attachment expected-coordinate]
@@ -724,7 +870,7 @@
        "Observed main branch" expected-coordinate main-coordinate
        {::database-name database-name})
       (durable-restore-completions!
-       database-name main-db main-coordinate))))
+       database-name connection main-db main-coordinate))))
 
 (defn observe-database-lifecycle
   "Observe every exact native branch head from the registered main route."
@@ -796,8 +942,8 @@
            ::branch-roster roster-before
            ::restore-completions (::restore-completions main-facts)
            ::completed-restore-ids (::completed-restore-ids main-facts)
-           ::restore-completion-transaction-ts
-           (::restore-completion-transaction-ts main-facts)})))))
+           ::restore-completion-coordinates
+           (::restore-completion-coordinates main-facts)})))))
 
 (defn- datahike-lifecycle-kind
   [throwable]

@@ -64,6 +64,16 @@ later transaction now returns the original completion coordinate without a
 write or a shadow commit attribute. Exact grounding is in
 [[../../prds/database-lifecycle-recovery/research/restore-completion-transaction-coordinate-2026-07-15]].
 
+The retained lifecycle observation now consumes that same resolver directly.
+Its closed response exposes
+`:seon.db.protocol/restore-completion-coordinates` as a map from every durable
+completion id to its exact original
+`{database-id, branch, commit-id, t}` coordinate. The earlier transaction-only
+map was removed: a force metadata commit can repeat the completion transaction
+number at a different commit id, so `t` alone cannot admit terminal cleanup.
+The resolver moved intact into the registry lifecycle owner, and the standalone
+writer RPC delegates to it; there is still one commit-graph walker.
+
 The issue remains open because the restore-aware cold caller has not yet
 composed the closed forced-main result, exact completion transaction and
 read-back, reconstruction, and final admission. That caller must consume the
@@ -94,6 +104,12 @@ passes six tests/33 assertions. The request and response production Transit
 gate passes ten tests/32 assertions, and the focused CLJS restore gate passes
 six tests/34 assertions for the pod wrapper, original-coordinate result,
 structured error kind, and zero-write retry.
+
+The lifecycle extension is additionally proven by the registry, standalone
+resolver, and writer-integration selector at 28 tests/190 assertions. Its real
+Datahike falsifier publishes a completion, force-commits the same `t` at a
+different commit id, reopens the database, and requires lifecycle observation
+to return the original completion commit coordinate rather than the force head.
 
 ## Fresh schema integration fixed
 

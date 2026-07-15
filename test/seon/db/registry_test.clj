@@ -416,6 +416,7 @@
            (datahike.schema/malli-map->datahike-schema completion-schema)))
     (d/transact connection [completion])
     (let [main-db (d/db connection)
+          completion-coordinate (coordinate/resolved main-db)
           completion-t
           (d/q '[:find ?transaction .
                  :in $ ?id
@@ -423,16 +424,29 @@
                  [?completion :seon.db.restore/id ?id ?transaction true]]
                (d/history main-db)
                completion-id)
+          _ (d/force-branch!
+             main-db :db #{(::coordinate/commit-id completion-coordinate)}
+             {:expected-current-commit
+              (::coordinate/commit-id completion-coordinate)})
+          _ (registry/release-database!
+             {::registry/database-name database-name})
+          reopened (ensure-database!
+                    {::registry/database-name database-name
+                     ::registry/backend :memory})
+          reopened-db (d/db (::registry/conn reopened))
           observation
           (registry/observe-database-lifecycle
            {::registry/database-name database-name})]
-      (is (= (set (or (d/parent-commit-ids main-db) []))
+      (is (= (set (or (d/parent-commit-ids reopened-db) []))
              (::registry/main-parent-commit-ids observation)))
       (is (= [completion] (::registry/restore-completions observation)))
       (is (= #{completion-id}
              (::registry/completed-restore-ids observation)))
-      (is (= {completion-id completion-t}
-             (::registry/restore-completion-transaction-ts observation)))
+      (is (= completion-t (::coordinate/t completion-coordinate)))
+      (is (not= completion-coordinate (coordinate/resolved reopened-db))
+          "the force commit repeats t at a different commit coordinate")
+      (is (= {completion-id completion-coordinate}
+             (::registry/restore-completion-coordinates observation)))
       (let [original-pull d/pull
             foreign
             (with-redefs [d/pull

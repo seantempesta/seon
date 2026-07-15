@@ -678,131 +678,14 @@
       "Replay ancestry contains an unavailable commit."
       {::coordinate/commit-id commit-id}))))
 
-;;; Original transaction coordinates
-
-(defn- coordinate-resolution-error
-  [kind message data]
-  (throw (ex-info message (assoc data ::failure-kind kind))))
-
-(defn- resolution-stored-commit
-  [store commit-id]
-  (retained-stored-commit
-   store commit-id
-   (fn [missing-id]
-     (coordinate-resolution-error
-      protocol/unsupported-history-error
-      "Transaction-coordinate ancestry is incomplete."
-      {::coordinate/commit-id missing-id}))))
-
-(defn- stored-coordinate
-  [stored]
-  {::coordinate/database-id (get-in stored [:config :store :id])
-   ::coordinate/branch (get-in stored [:config :branch])
-   ::coordinate/commit-id (get-in stored [:meta :datahike/commit-id])
-   ::coordinate/t (:max-tx stored)})
-
-(defn- transaction-origin?
-  [store branch transaction stored]
-  (when (and (= branch (get-in stored [:config :branch]))
-             (= transaction (:max-tx stored)))
-    (let [parents (mapv #(resolution-stored-commit store %)
-                        (get-in stored [:meta :datahike/parents]))]
-      ;; Datahike commits each ordinary transaction once and advances max-tx.
-      ;; Branch and force metadata commits can repeat a transaction number,
-      ;; but at least one direct parent already carries that same max-tx.
-      (not-any? #(= transaction (:max-tx %)) parents))))
-
-(defn- transaction-origin-candidates
-  [store head branch transaction]
-  (loop [pending [head]
-         visited #{}
-         candidates []]
-    (if-let [stored (first pending)]
-      (let [commit-id (get-in stored [:meta :datahike/commit-id])]
-        (if (contains? visited commit-id)
-          (recur (next pending) visited candidates)
-          (let [basis-t (:max-tx stored)
-                candidates (cond-> candidates
-                             (transaction-origin?
-                              store branch transaction stored)
-                             (conj (stored-coordinate stored)))
-                parents
-                (if (>= basis-t transaction)
-                  (mapv #(resolution-stored-commit store %)
-                        (get-in stored [:meta :datahike/parents]))
-                  [])]
-            (recur (into (vec (next pending)) parents)
-                   (conj visited commit-id)
-                   candidates))))
-      candidates)))
-
 (defn- handle-resolve-transaction-coordinate
   [connection request]
-  (let [current-db (d/db connection)
-        current-coordinate (coordinate/resolved current-db)
-        head-coordinate (::protocol/head-coordinate request)
-        transaction (::protocol/transaction-id request)
-        store (:store current-db)]
-    (when (false? (get-in current-db [:config :commit-graph?] true))
-      (coordinate-resolution-error
-       protocol/unsupported-history-error
-       "Transaction-coordinate resolution requires retained commit history."
-       {::protocol/head-coordinate head-coordinate
-        ::protocol/transaction-id transaction}))
-    (when-not (and (= :db (::coordinate/branch current-coordinate))
-                   (= :db (::coordinate/branch head-coordinate)))
-      (coordinate-resolution-error
-       protocol/attachment-mismatch-error
-       "Restore completion coordinates resolve only on the live :db lineage."
-       {::protocol/head-coordinate head-coordinate
-        ::protocol/current-coordinate current-coordinate}))
-    (when-not (= (coordinate/attachment current-coordinate)
-                 (coordinate/attachment head-coordinate))
-      (coordinate-resolution-error
-       protocol/attachment-mismatch-error
-       "The frozen head names a different database attachment."
-       {::protocol/head-coordinate head-coordinate
-        ::protocol/current-coordinate current-coordinate}))
-    (let [head
-          (resolution-stored-commit
-           store (::coordinate/commit-id head-coordinate))
-          resolved-head (stored-coordinate head)]
-      (when-not (= head-coordinate resolved-head)
-        (coordinate-resolution-error
-         protocol/attachment-mismatch-error
-         "The retained commit does not resolve the frozen head coordinate."
-         {::protocol/head-coordinate head-coordinate
-          ::protocol/current-coordinate resolved-head}))
-      (when-not (stored-ancestor?
-                 store
-                 (::coordinate/commit-id current-coordinate)
-                 (::coordinate/commit-id head-coordinate)
-                 (fn [commit-id]
-                   (coordinate-resolution-error
-                    protocol/unsupported-history-error
-                    "Transaction-coordinate ancestry is incomplete."
-                    {::coordinate/commit-id commit-id})))
-        (coordinate-resolution-error
-         protocol/non-ancestor-error
-         "The frozen head is not an ancestor of the current branch head."
-         {::protocol/head-coordinate head-coordinate
-          ::protocol/current-coordinate current-coordinate}))
-      (let [candidates
-            (transaction-origin-candidates
-             store head (::coordinate/branch head-coordinate) transaction)]
-        (case (count candidates)
-          1 (protocol/success {::protocol/coordinate (first candidates)})
-          0 (coordinate-resolution-error
-             protocol/not-found-error
-             "No original commit for the transaction is reachable from the frozen head."
-             {::protocol/head-coordinate head-coordinate
-              ::protocol/transaction-id transaction})
-          (coordinate-resolution-error
-           protocol/ambiguous-history-error
-           "Several original commits match the transaction on this branch."
-           {::protocol/head-coordinate head-coordinate
-            ::protocol/transaction-id transaction
-            ::candidate-coordinates candidates}))))))
+  (protocol/success
+   {::protocol/coordinate
+    (registry/resolve-transaction-coordinate!
+     {::registry/conn connection
+      ::registry/main-coordinate (::protocol/head-coordinate request)
+      ::registry/transaction-id (::protocol/transaction-id request)})}))
 
 (defn- transaction-id
   [^datahike.datom.Datom datom]
@@ -1063,8 +946,8 @@
       (::registry/restore-completions observation)
       ::protocol/completed-restore-ids
       (::registry/completed-restore-ids observation)
-      ::protocol/restore-completion-transaction-ts
-      (::registry/restore-completion-transaction-ts observation)})))
+      ::protocol/restore-completion-coordinates
+      (::registry/restore-completion-coordinates observation)})))
 
 (defn- handle-release-database
   [request]

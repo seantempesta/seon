@@ -130,8 +130,8 @@
 (schema/register! ::branch-coordinates
                   [:map-of :keyword ::coordinate/coordinate])
 (schema/register! ::branch-roster [:set :keyword])
-(schema/register! ::restore-completion-transaction-ts
-                  [:map-of :seon.db.restore/id ::coordinate/t])
+(schema/register! ::restore-completion-coordinates
+                  [:map-of :seon.db.restore/id ::coordinate/coordinate])
 (schema/register! ::source-database-name ::database-name)
 (schema/register! ::target-database-name ::database-name)
 (schema/register! ::created? :boolean)
@@ -365,8 +365,8 @@
   [::branch-roster ::branch-roster]
   [::restore-completions [:vector :seon.db.restore/completion]]
   [::completed-restore-ids [:set :seon.db.restore/id]]
-  [::restore-completion-transaction-ts
-   ::restore-completion-transaction-ts]])
+  [::restore-completion-coordinates
+   ::restore-completion-coordinates]])
 (schema/register!
  ::create-branch-response
  [:map {:closed true}
