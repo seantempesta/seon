@@ -147,6 +147,17 @@ untouched until this default proof and the later restart/crash gates settle;
 simultaneous default/ACME proof remains a final coordinated admission gate, not
 part of this public-boundary slice.
 
+The pod-crash containment prerequisite is now source-grounded at
+[[research/dead-leader-process-subtree-containment-2026-07-15]]. A dead
+workload leader does not leave a safe numeric PGID handle: identifier reuse
+makes later operator signaling ambiguous. Keep the current refusal until the
+existing detach boundary becomes one persistent containment owner outside the
+execution group plus one live anchor that self-signals its pinned group and
+publishes a generation-matched drained result. Missing owner, anchor, or result
+evidence remains `containment-uncertain`; replacement and destructive branch
+inverse stay closed. This implementation follows the public branch checkpoint
+and precedes the default crash-replacement proof and unit-6 child cutover.
+
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in
 [[research/database-lifecycle-source-audit-2026-07-14]]. Implementation began

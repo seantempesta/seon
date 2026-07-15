@@ -126,7 +126,7 @@ contract work and independent consumers:
 | Top-level integration | **Keep unit 1 as the ordered spine while integrating the public branch operator and descriptor-driven MCP lanes** | Retained-branch interruption is integrated through `c95f8e03`; diagnostic schema parity through `56bf7818` and `1e1f0f8e`; and the exact CLI/status/MCP/live-gate audit through `ca9ec25a`. The top level owns cross-lane review, source-frozen gates, live default proof, and full-ledger reconciliation | Review both implementation returns against the audit, run the combined operator and CLJS gates from one artifact, then execute the default create/write/pod-restart/read/close proof. Refill from default restart/crash only after that checkpoint settles |
 | Database lifecycle | **Public retained branch ownership is split across two non-overlapping implementations:** branch/process/CLI and client/MCP discovery | Typed UDS (`ce342572`), crash-safe adoption (`e7bd160c`), retained pod lifecycle (`74bfa7e2`), ordinary interruption (`fbb8c399`), and retained interruption (`c95f8e03`) settle the mutation and inverse owners. `ca9ec25a` fixes the required identity projection and acceptance matrix | Integrate the two public-boundary returns without adding a registry or lifecycle owner, then run live create/write/restart/close. Continue unit 1 through default restart/crash, restore/undo, and multi-form failure proof in that order |
 | Reactive/database views | **Implementation and replay-all soundness oracle are complete; live browser/feed proof waits for the next source-frozen checkpoint** | `365052f0` lands candidate-only routing; `afc70d3f` proves six retained read shapes against every nonempty combination of seven actual transactions. The exact gate passes 1 test/10 assertions | Refill only after the unit-1 source checkpoint: prove gzip/SSE sharing, related/unrelated updates, and release in a real browser, then continue unit-2 consumer migration |
-| Agent runtime correctness | **The child-containment contract is integrated and its dead-leader subtree prerequisite is under source-grounded audit; production implementation still waits on unit 1** | Diagnostic schema parity is complete. Receipt/recovery Slice A remains complete at `defb8014`; `f2c1f1c8` defines one parent-owned child handle/capability. The active audit is restricted to proving safe old-subtree absence without trusting a recycled leader PID/PGID | Integrate the audit as evidence or an explicit prerequisite. Production child work waits for unit-1 backend descriptor plus a settled subtree proof; the named planner/small-executor trial remains a later unit-7 gate |
+| Agent runtime correctness | **The child-containment contract and dead-leader subtree audit are complete; production containment waits on unit 1** | Diagnostic schema parity is complete. Receipt/recovery Slice A remains complete at `defb8014`; `f2c1f1c8` defines one parent-owned child handle/capability. `f18d0282` proves a dead leader's numeric PGID is not signaling authority and specifies one persistent owner/live-anchor drain with a generation-matched terminal result | After the public branch checkpoint, implement the shared operator containment prerequisite before pod-crash replacement or unit-6 child cutover. The named planner/small-executor trial remains a later unit-7 gate |
 
 Current scheduling card:
 
@@ -139,9 +139,10 @@ Current scheduling card:
 3. **Parallel lane B:** implement only descriptor-owned runtime/writer
    advertisement and advertisement-driven CLJS/CLJ MCP selection; do not infer
    a branch-local writer or introduce a membership registry.
-4. **Parallel lane C:** finish the dead-leader subtree audit needed by the
-   already-integrated parent capability/child launch/deadline/kill/reap
-   contract. Production containment waits for unit 1 and this proof.
+4. **Parallel lane C:** the dead-leader subtree audit is complete at
+   `f18d0282`. Refill only after the public branch source checkpoint with the
+   one shared persistent-owner/live-anchor containment implementation; it is a
+   prerequisite for pod-crash replacement and the later unit-6 child cutover.
 5. **Final admission:** unit 9 remains blocked on integrated units 1–8 and is
    the only place for destructive simultaneous-cluster, performance, and
    authorized legacy-worktree cleanup proof.
