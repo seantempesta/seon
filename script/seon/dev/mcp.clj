@@ -664,14 +664,68 @@
 (defn- valid-cluster? [cluster]
   (boolean (re-matches #"[A-Za-z0-9._-]+" cluster)))
 
-(defn- writer-port-file
-  "Return the selected cluster's writer io-prepl port file."
+(defn- runtime-writer-owner!
+  "Resolve one runtime cluster to its immutable advertised writer owner."
   [cluster]
   (when-not (valid-cluster? cluster)
     (throw (ex-info "Invalid cluster name." {:seon.dev.mcp/cluster cluster})))
-  (let [configured (when (= cluster own-cluster) writer-port-file-override)
-        file (io/file (or configured
-                          (str "tmp/seon-writer-repl-port-" cluster)))]
+  (let [advertisements (all-advertisements!)
+        candidate-view
+        (fn [candidate]
+          (select-keys candidate
+                       [:seon.dev.runtime-id/cluster
+                        :seon.launch/writer-cluster
+                        :seon.launch/writer-repl-port-file
+                        :seon.dev.mcp/artifact-flavor
+                        :seon.dev.mcp/port
+                        :build
+                        :client-id]))
+        matches (filterv #(= cluster (:seon.dev.runtime-id/cluster %))
+                         advertisements)]
+    (case (count matches)
+      0
+      (if (= cluster own-cluster)
+        {:seon.launch/writer-cluster own-cluster
+         :seon.launch/writer-repl-port-file
+         (or writer-port-file-override
+             (str "tmp/seon-writer-repl-port-" own-cluster))}
+        (throw
+         (ex-info "No live runtime advertises the requested CLJ cluster."
+                  {:seon.dev.mcp/cluster cluster
+                   :seon.dev.mcp/advertisements
+                   (mapv candidate-view advertisements)})))
+
+      1
+      (let [candidate (first matches)
+            writer-cluster (:seon.launch/writer-cluster candidate)
+            port-file (:seon.launch/writer-repl-port-file candidate)]
+        (when-not (and (string? writer-cluster)
+                       (valid-cluster? writer-cluster)
+                       (string? port-file)
+                       (not (str/blank? port-file)))
+          (throw
+           (ex-info "Runtime advertisement has no valid writer owner."
+                    {:seon.dev.mcp/cluster cluster
+                     :seon.dev.mcp/advertisement
+                     (candidate-view candidate)})))
+        {:seon.launch/writer-cluster writer-cluster
+         :seon.launch/writer-repl-port-file port-file})
+
+      (throw
+       (ex-info "Several live runtimes advertise the requested CLJ cluster."
+                {:seon.dev.mcp/cluster cluster
+                 :seon.dev.mcp/advertisements
+                 (mapv candidate-view matches)})))))
+
+(defn- writer-port-file
+  "Return a runtime cluster's advertised writer io-prepl port file.
+
+   Only this MCP server's own cluster may use its operator environment or
+   conventional file while the pod is booting or down. A named non-own runtime
+   must be live and uniquely advertised; it never manufactures a writer path."
+  [cluster]
+  (let [owner (runtime-writer-owner! cluster)
+        file (io/file (:seon.launch/writer-repl-port-file owner))]
     (if (.isAbsolute file) file (io/file project-root (.getPath file)))))
 
 (defn- read-writer-port
@@ -1104,6 +1158,10 @@
                                  "  " build "#" client-id
                                  "  cluster="
                                  (or (:seon.dev.runtime-id/cluster candidate) "?")
+                                 "  writer="
+                                 (or (:seon.launch/writer-cluster candidate) "?")
+                                 "  writer-port-file="
+                                 (or (:seon.launch/writer-repl-port-file candidate) "?")
                                  "  ids="
                                  (pr-str (:seon.dev.runtime-id/ids candidate))))
                           adverts)]
@@ -1136,10 +1194,10 @@
                   :required ["code"]}}
 
    {:name "eval_clj"
-    :description "Evaluate one Clojure form in the selected writer's stateful loopback io-prepl session. The default session reconnects after writer restart; named sessions report that their state was lost."
+    :description "Evaluate one Clojure form through the writer advertised by the selected runtime cluster. Branch runtimes deliberately use their source writer. The default session reconnects after writer restart; named sessions report that their state was lost."
     :inputSchema {:type "object"
                   :properties {:code {:type "string"}
-                               :cluster {:type "string" :description "Operator cluster name. Defaults to this MCP server's cluster."}
+                               :cluster {:type "string" :description "Runtime cluster name. A live branch runtime selects its advertised source writer; defaults to this MCP server's own cluster."}
                                :session_id {:type "string" :description "Stateful io-prepl session id. Defaults to 'default'."}
                                :timeout_ms {:type "integer" :minimum 1 :maximum 120000}
                                :max_output_tokens {:type "integer" :minimum 64 :maximum 16000}}

@@ -29,7 +29,9 @@
     [seon.agent.run :as run]
     [seon.agent.testrun :as testrun]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.replica :as replica]
+    [seon.launch :as launch]))
 
 (defn- with-conn
   "Open a fresh schema-loaded conn, `set!` it as the ROOT `db/*conn*`
@@ -73,6 +75,25 @@
 
 (defn- derived [id]
   (:seon.agent/state (agent/derive-status {:seon.agent/id id})))
+
+(deftest runtime-advertisement-uses-immutable-launch-writer-owner
+  (let [descriptor
+        (-> replica/default-launch-descriptor
+            (assoc-in [::launch/runtime ::launch/runtime-cluster]
+                      "default-proof")
+            (assoc-in [::launch/writer-owner ::launch/writer-cluster]
+                      "default")
+            (assoc-in [::launch/writer-owner ::launch/writer-repl-port-file]
+                      "tmp/source-writer.port"))]
+    (with-redefs [replica/process-launch-descriptor descriptor
+                  db/attached? (constantly false)]
+      (is (= #:seon.dev.runtime-id
+             {:cluster "default-proof"
+              :ids []
+              :seon.launch/writer-cluster "default"
+              :seon.launch/writer-repl-port-file
+              "tmp/source-writer.port"}
+             (client/runtime-advertisement))))))
 
 ;; ============================================================
 ;; Lifecycle functions — wait / complete / pause / resume / terminate MUTATE the

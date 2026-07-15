@@ -320,22 +320,32 @@
 (defn runtime-advertisement
   "Project this pod's MCP addressable agents directly from its database.
 
-   The cluster coordinate is immutable launch configuration. Agent membership
-   is the same nonterminated, born-agent query used by cold resume. Before the
-   database attaches, the pod still advertises its cluster with no agent ids so
-   an ordinary cluster-pinned REPL can connect during boot."
+   Runtime and writer coordinates are immutable launch configuration. Agent
+   membership is the same nonterminated, born-agent query used by cold resume.
+   Before the database attaches, the pod still advertises its runtime and
+   writer owner with no agent ids so an ordinary cluster-pinned REPL can
+   connect during boot."
   {:malli/schema
    [:=> [:cat]
     [:map
      [:seon.dev.runtime-id/cluster :string]
-     [:seon.dev.runtime-id/ids [:vector :string]]]]}
+     [:seon.dev.runtime-id/ids [:vector :string]]
+     [::launch/writer-cluster ::launch/writer-cluster]
+     [::launch/writer-repl-port-file ::launch/writer-repl-port-file]]]}
   []
-  (runtime-id/advertisement
-   #:seon.dev.runtime-id
-    {:cluster replica/database-name
-     :ids (if (db/attached?)
-            (agent/resumable-agent-ids {:seon.db/db @db/*conn*})
-            [])}))
+  (let [descriptor replica/process-launch-descriptor
+        runtime (::launch/runtime descriptor)
+        writer-owner (::launch/writer-owner descriptor)]
+    (merge
+     (runtime-id/advertisement
+      #:seon.dev.runtime-id
+       {:cluster (::launch/runtime-cluster runtime)
+        :ids (if (db/attached?)
+               (agent/resumable-agent-ids {:seon.db/db @db/*conn*})
+               [])})
+     (select-keys writer-owner
+                  [::launch/writer-cluster
+                   ::launch/writer-repl-port-file]))))
 
 (defn start-heartbeat!
   "Holds the Node event loop open with a minute-cadence heartbeat. The

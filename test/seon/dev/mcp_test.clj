@@ -95,7 +95,10 @@
     (try
       (.mkdirs (.getParentFile port-file))
       (spit port-file (:port first-server))
-      (with-redefs [mcp/project-root (.getPath directory)]
+      (with-redefs [mcp/project-root (.getPath directory)
+                    mcp/own-cluster "test"
+                    mcp/writer-port-file-override nil
+                    mcp/all-advertisements! (constantly [])]
         (testing "a named session preserves io-prepl values"
           (is (= "41" (get-in (response-data
                                 (#'mcp/execute-clj-eval
@@ -216,9 +219,44 @@
 (deftest own-cluster-honors-operator-writer-port-file-override
   (let [override "tmp/not-opened-by-this-test"
         expected (io/file mcp/project-root override)]
-    (with-redefs [mcp/writer-port-file-override override]
+    (with-redefs [mcp/writer-port-file-override override
+                  mcp/all-advertisements! (constantly [])]
       (is (= (.getPath expected)
              (.getPath (#'mcp/writer-port-file mcp/own-cluster)))))))
+
+(deftest branch-writer-selection-consumes-the-runtime-advertisement
+  (let [port-file "tmp/source-writer.port"
+        advertisement
+        {:seon.dev.runtime-id/cluster "default-proof"
+         :seon.dev.runtime-id/ids ["root"]
+         :seon.launch/writer-cluster "default"
+         :seon.launch/writer-repl-port-file port-file
+         :build ":client"
+         :client-id 17}]
+    (with-redefs [mcp/all-advertisements! (constantly [advertisement])]
+      (is (= (.getPath (io/file mcp/project-root port-file))
+             (.getPath (#'mcp/writer-port-file "default-proof")))))))
+
+(deftest non-own-writer-selection-rejects-missing-and-ambiguous-runtimes
+  (testing "a missing branch runtime cannot manufacture a writer filename"
+    (with-redefs [mcp/all-advertisements! (constantly [])]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"No live runtime"
+           (#'mcp/writer-port-file "default-proof")))))
+  (testing "two pods claiming one runtime cluster are explicit ambiguity"
+    (let [advertisement
+          {:seon.dev.runtime-id/cluster "default-proof"
+           :seon.dev.runtime-id/ids ["root"]
+           :seon.launch/writer-cluster "default"
+           :seon.launch/writer-repl-port-file "tmp/source-writer.port"}]
+      (with-redefs [mcp/all-advertisements!
+                    (constantly [(assoc advertisement :client-id 17)
+                                 (assoc advertisement :client-id 18)])]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"Several live runtimes"
+             (#'mcp/writer-port-file "default-proof")))))))
 
 (deftest production-container-omits-development-io-prepl
   (let [source (slurp "docker/seon-entrypoint")]
