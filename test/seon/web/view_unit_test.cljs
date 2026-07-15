@@ -135,6 +135,17 @@
                    "active state retains neither database nor producer"))
              (is (re-find #"debug value 1"
                           (::unit/serialized-element shared-attach)))
+             (is (= {::unit/candidate? true
+                     ::unit/read-replays 0
+                     ::unit/producer-invocations 1
+                     ::unit/serializations 1
+                     ::unit/suppression
+                     :seon.web.view-unit.suppression/emitted
+                     ::unit/retained-output-bytes
+                     (js/Buffer.byteLength
+                      (::unit/serialized-element first-attach) "utf8")}
+                    (::unit/unit-metrics first-attach))
+                 "first activation records one complete producer boundary")
              (-> (db/transact!
                   {:seon.db/conn conn
                    :seon.db/tx-data [{::id "unrelated" ::value 9}]})
@@ -155,7 +166,42 @@
                           "equal replayed helper result skips the producer")
                       (is (false? (::unit/emitted? unchanged)))
                       (is (= 1 @renders))
-                      unchanged)))
+                      (is (= 2
+                             (get-in unchanged
+                                     [::unit/unit-metrics
+                                      ::unit/read-replays])))
+                      (is (= 0
+                             (get-in unchanged
+                                     [::unit/unit-metrics
+                                      ::unit/producer-invocations])))
+                      (is (= :seon.web.view-unit.suppression/equal-reads
+                             (get-in unchanged
+                                     [::unit/unit-metrics
+                                      ::unit/suppression])))
+                      (let [equal-output
+                            (unit/transition-unit
+                             {::unit/state (::unit/state unchanged)
+                              ::unit/token token
+                              :seon.db/db @conn
+                              ::unit/database-coordinate
+                              (db.coordinate/resolved @conn)
+                              ::unit/renderer-token "debug-v2"
+                              ::unit/producer producer})]
+                        (is (true? (::unit/rendered? equal-output)))
+                        (is (false? (::unit/emitted? equal-output)))
+                        (is (= 1
+                               (get-in equal-output
+                                       [::unit/unit-metrics
+                                        ::unit/producer-invocations])))
+                        (is (= 1
+                               (get-in equal-output
+                                       [::unit/unit-metrics
+                                        ::unit/serializations])))
+                        (is (= :seon.web.view-unit.suppression/equal-output
+                               (get-in equal-output
+                                       [::unit/unit-metrics
+                                        ::unit/suppression])))
+                        equal-output))))
                  (.then
                   (fn [unchanged]
                     (-> (db/transact!
@@ -181,7 +227,7 @@
                              ::unit/token token
                              :seon.db/db @conn
                              ::unit/database-coordinate (db.coordinate/resolved @conn)
-                             ::unit/renderer-token "debug-v1"
+                            ::unit/renderer-token "debug-v2"
                              ::unit/producer producer}))
                           first-close
                           (unit/detach-consumer
@@ -195,11 +241,19 @@
                             ::unit/consumer-id "tab-b"})]
                       (is (true? (::unit/rendered? changed)))
                       (is (true? (::unit/emitted? changed)))
+                      (is (= 1
+                             (get-in changed
+                                     [::unit/unit-metrics
+                                      ::unit/producer-invocations])))
+                      (is (= 1
+                             (get-in changed
+                                     [::unit/unit-metrics
+                                      ::unit/serializations])))
                       (is (= 2 @replays)
                           "a changed first result does not short-circuit later reads")
                       (is (re-find #"debug value 2"
                                    (::unit/serialized-element changed)))
-                      (is (= 2 @renders))
+                      (is (= 3 @renders))
                       (is (false? (::unit/released? first-close)))
                       (is (true? (::unit/released? final-close)))
                       (is (= unit/empty-state (::unit/state final-close))

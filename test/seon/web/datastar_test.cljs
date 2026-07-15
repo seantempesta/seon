@@ -454,7 +454,27 @@
                           (is (= 1 @renders)
                               "an unrelated attribute performs no producer work")
                           (is (zero? @serializations)
-                              "an unrelated attribute performs no serialization"))
+                              "an unrelated attribute performs no serialization")
+                          (let [diagnostics
+                                (view-unit/diagnostics
+                                 (::view-unit/state @datastar/!feeds))
+                                transition
+                                (::view-unit/last-transition diagnostics)
+                                metrics
+                                (get-in transition
+                                        [::view-unit/metrics-by-token token])]
+                            (is (= 1 (::view-unit/active-unit-count diagnostics)))
+                            (is (= 0
+                                   (::view-unit/candidate-unit-count transition)))
+                            (is (= false (::view-unit/candidate? metrics)))
+                            (is (= 0 (::view-unit/read-replays metrics)))
+                            (is (= 0
+                                   (::view-unit/producer-invocations metrics)))
+                            (is (= 0 (::view-unit/serializations metrics)))
+                            (is (= :seon.web.view-unit.suppression/not-candidate
+                                   (::view-unit/suppression metrics)))
+                            (is (pos?
+                                 (::view-unit/retained-output-bytes diagnostics)))))
                         (let [[registry emitted]
                               (@#'datastar/transition-active-units
                                @datastar/!feeds
@@ -471,7 +491,19 @@
                           (is (str/includes? (first left) "after"))
                           (is (= 1 @replays)
                               "a related complete change replays one shared unit")
-                          (is (= 2 @renders)))
+                          (is (= 2 @renders))
+                          (let [metrics
+                                (get-in registry
+                                        [::view-unit/state
+                                         ::view-unit/last-transition
+                                         ::view-unit/metrics-by-token token])]
+                            (is (= true (::view-unit/candidate? metrics)))
+                            (is (= 1 (::view-unit/read-replays metrics)))
+                            (is (= 1
+                                   (::view-unit/producer-invocations metrics)))
+                            (is (= 1 (::view-unit/serializations metrics)))
+                            (is (= :seon.web.view-unit.suppression/emitted
+                                   (::view-unit/suppression metrics)))))
                         (is (= ["same-element"]
                                (@#'datastar/emitted-elements-for-subscription
                                 {view-id ["same-element"]

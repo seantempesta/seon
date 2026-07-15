@@ -22,6 +22,39 @@
 (schema/register! ::database-coordinate ::db.coordinate/coordinate)
 (schema/register! ::serialized-element :string)
 (schema/register! ::producer 'fn?)
+(schema/register! ::count [:int {:min 0}])
+(schema/register! ::byte-weight [:int {:min 0}])
+(schema/register! ::candidate? :boolean)
+(schema/register! ::read-replays ::count)
+(schema/register! ::producer-invocations ::count)
+(schema/register! ::serializations ::count)
+(schema/register!
+ ::suppression
+ [:enum
+  :seon.web.view-unit.suppression/not-candidate
+  :seon.web.view-unit.suppression/equal-reads
+  :seon.web.view-unit.suppression/equal-output
+  :seon.web.view-unit.suppression/emitted])
+(schema/register! ::retained-output-bytes ::byte-weight)
+(schema/register!
+ ::unit-metrics
+ [:map {:closed true}
+  [::candidate? ::candidate?]
+  [::read-replays ::read-replays]
+  [::producer-invocations ::producer-invocations]
+  [::serializations ::serializations]
+  [::suppression ::suppression]
+  [::retained-output-bytes ::retained-output-bytes]])
+(schema/register! ::metrics-by-token [:map-of ::token ::unit-metrics])
+(schema/register! ::active-unit-count ::count)
+(schema/register! ::candidate-unit-count ::count)
+(schema/register!
+ ::last-transition
+ [:map {:closed true}
+  [::database-coordinate ::database-coordinate]
+  [::active-unit-count ::active-unit-count]
+  [::candidate-unit-count ::candidate-unit-count]
+  [::metrics-by-token ::metrics-by-token]])
 (schema/register!
  ::unit
  [:map {:closed true}
@@ -40,7 +73,8 @@
  [:map {:closed true}
   [::units ::units]
   [::broad-tokens ::broad-tokens]
-  [::tokens-by-attribute ::tokens-by-attribute]])
+  [::tokens-by-attribute ::tokens-by-attribute]
+  [::last-transition {:optional true} ::last-transition]])
 (schema/register!
  ::candidate-tokens-request
  [:map {:closed true}
@@ -83,6 +117,12 @@
 (schema/register! ::emitted? :boolean)
 (schema/register! ::released? :boolean)
 (schema/register!
+ ::diagnostics
+ [:map {:closed true}
+  [::active-unit-count ::active-unit-count]
+  [::retained-output-bytes ::retained-output-bytes]
+  [::last-transition {:optional true} ::last-transition]])
+(schema/register!
  ::transition-response
  [:map {:closed true}
   [::state ::state]
@@ -90,6 +130,7 @@
   [::rendered? ::rendered?]
   [::emitted? ::emitted?]
   [::released? ::released?]
+  [::unit-metrics ::unit-metrics]
   [::serialized-element {:optional true} ::serialized-element]])
 
 (def empty-state
@@ -139,6 +180,25 @@
   "Return one active unit's retained plain data, or nil."
   [state token]
   (get-in state [::units token]))
+
+(defn- output-byte-weight
+  "Return one serialized element's exact retained UTF-8 byte weight."
+  [serialized-element]
+  (js/Buffer.byteLength serialized-element "utf8"))
+
+(defn diagnostics
+  "Project bounded active-unit weight and the latest transition counters."
+  {:malli/schema [:=> [:cat ::state] ::diagnostics]}
+  [state]
+  (cond->
+    {::active-unit-count (count (::units state))
+     ::retained-output-bytes
+     (transduce (map (comp output-byte-weight ::serialized-element val))
+                +
+                0
+                (::units state))}
+    (::last-transition state)
+    (assoc ::last-transition (::last-transition state))))
 
 (defn- unit-candidate
   "Derive one unit's routing projection from its retained observations."
@@ -256,14 +316,17 @@
      (vec (distinct (:seon.db/read-observations capture)))
      ::serialized-element (html/->string (:seon.db/result capture))}))
 
-(defn- observations-changed?
-  "Replay every distinct observation before deciding whether the unit is dirty."
+(defn- replay-observations
+  "Replay every distinct observation and return its count plus dirty result."
   [dbv observations]
-  (let [changed (mapv #(db/read-observation-changed?
-                       {:seon.db/db dbv
-                        :seon.db/read-observation %})
-                      (distinct observations))]
-    (or (empty? observations) (boolean (some true? changed)))))
+  (let [observations (vec (distinct observations))
+        changed (mapv #(db/read-observation-changed?
+                        {:seon.db/db dbv
+                         :seon.db/read-observation %})
+                      observations)]
+    {::read-replays (count observations)
+     ::rendered? (or (empty? observations)
+                     (boolean (some true? changed)))}))
 
 (defn transition-unit
   "Advance one active unit to an explicitly supplied immutable database value.
@@ -282,10 +345,11 @@
     (let [renderer-changed? (not= renderer-token (::renderer-token unit))
           coordinate-changed? (not= database-coordinate
                                     (::database-coordinate unit))
+          replay (if (and coordinate-changed? (not renderer-changed?))
+                   (replay-observations dbv (::read-observations unit))
+                   {::read-replays 0 ::rendered? false})
           dirty? (or renderer-changed?
-                     (and coordinate-changed?
-                          (observations-changed?
-                           dbv (::read-observations unit))))]
+                     (and coordinate-changed? (::rendered? replay)))]
       (if dirty?
         (let [derived (derive-unit
                        {:seon.db/db dbv
@@ -294,12 +358,23 @@
                         ::producer producer})
               serialized (::serialized-element derived)
               emitted? (not= serialized (::serialized-element unit))
-              next-unit (merge unit derived)]
+              next-unit (merge unit derived)
+              metrics
+              {::candidate? true
+               ::read-replays (::read-replays replay)
+               ::producer-invocations 1
+               ::serializations 1
+               ::suppression
+               (if emitted?
+                 :seon.web.view-unit.suppression/emitted
+                 :seon.web.view-unit.suppression/equal-output)
+               ::retained-output-bytes (output-byte-weight serialized)}]
           (cond-> {::state (replace-unit state token next-unit)
                    ::token token
                    ::rendered? true
                    ::emitted? emitted?
-                   ::released? false}
+                   ::released? false
+                   ::unit-metrics metrics}
             emitted? (assoc ::serialized-element serialized)))
         {::state (if coordinate-changed?
                    (assoc-in state [::units token ::database-coordinate]
@@ -308,12 +383,27 @@
          ::token token
          ::rendered? false
          ::emitted? false
-         ::released? false}))
+         ::released? false
+         ::unit-metrics
+         {::candidate? true
+          ::read-replays (::read-replays replay)
+          ::producer-invocations 0
+          ::serializations 0
+          ::suppression :seon.web.view-unit.suppression/equal-reads
+          ::retained-output-bytes
+          (output-byte-weight (::serialized-element unit))}}))
     {::state state
      ::token token
      ::rendered? false
      ::emitted? false
-     ::released? false}))
+     ::released? false
+     ::unit-metrics
+     {::candidate? true
+      ::read-replays 0
+      ::producer-invocations 0
+      ::serializations 0
+      ::suppression :seon.web.view-unit.suppression/equal-reads
+      ::retained-output-bytes 0}}))
 
 (defn attach-consumer
   "Attach one consumer and return the unit's current complete serialized element.
@@ -357,6 +447,14 @@
          ::rendered? true
          ::emitted? true
          ::released? false
+         ::unit-metrics
+         {::candidate? true
+          ::read-replays 0
+          ::producer-invocations 1
+          ::serializations 1
+          ::suppression :seon.web.view-unit.suppression/emitted
+          ::retained-output-bytes
+          (output-byte-weight (::serialized-element unit))}
          ::serialized-element (::serialized-element unit)}))))
 
 (defn detach-consumer
@@ -367,16 +465,35 @@
     (let [remaining (disj (::consumers unit) consumer-id)
           released? (empty? remaining)]
       {::state (if released?
-                 (-> state
-                     (unindex-unit token unit)
-                     (update ::units dissoc token))
+                 (let [released-state
+                       (-> state
+                           (unindex-unit token unit)
+                           (update ::units dissoc token))]
+                   (if (empty? (::units released-state))
+                     empty-state
+                     released-state))
                  (assoc-in state [::units token ::consumers] remaining))
        ::token token
        ::rendered? false
        ::emitted? false
-       ::released? released?})
+       ::released? released?
+       ::unit-metrics
+       {::candidate? true
+        ::read-replays 0
+        ::producer-invocations 0
+        ::serializations 0
+        ::suppression :seon.web.view-unit.suppression/equal-reads
+        ::retained-output-bytes
+        (if released? 0 (output-byte-weight (::serialized-element unit)))}})
     {::state state
      ::token token
      ::rendered? false
      ::emitted? false
-     ::released? false}))
+     ::released? false
+     ::unit-metrics
+     {::candidate? true
+      ::read-replays 0
+      ::producer-invocations 0
+      ::serializations 0
+      ::suppression :seon.web.view-unit.suppression/equal-reads
+      ::retained-output-bytes 0}}))

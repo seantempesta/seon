@@ -158,6 +158,21 @@ The exact selector requested, matched, and executed 1 test with 10 assertions,
 zero failures, and zero errors. Retained evidence is
 `tmp/test-cljs-20260715-052511-49015.log` and its sibling report.
 
+The first bounded unit-cost diagnostic is now implemented in the existing
+`seon.web.view-unit` state and Datastar broadcast owner. One latest-transition
+plain-data snapshot records every active token as selected or not selected,
+the exact distinct-read replay count, producer-boundary and serialization
+invocation counts, the `not-candidate`/`equal-reads`/`equal-output`/`emitted`
+outcome, and exact retained UTF-8 output bytes. `diagnostics` derives current
+active-unit count and total retained bytes on demand. The snapshot contains no
+database value, producer, handle, timer, or history; the final release restores
+`empty-state`. Broadcast logs expose only bounded aggregates. A zero producer
+count also proves zero nested SCI work because SCI can only be crossed inside
+that producer; detailed inner SCI timing remains owned by the later render-cost
+slice rather than a second hook here. The focused view-unit plus Datastar gate
+passes 46 tests and 332 assertions with zero failures or errors. Retained
+evidence is `tmp/test-cljs-20260715-075047-60284.log` and its sibling report.
+
 ## Research evidence
 
 - [[research/reactive-render-source-audit-2026-07-14]] — current dependency
@@ -220,8 +235,12 @@ zero failures, and zero errors. Retained evidence is
 5. Harden the database navigator and coordinate-bound cursor as consumers, then
    move root, agent, canvas/context, debug, and data detail bodies onto the one
    lifecycle and delete every superseded transition/feed/cache path.
-6. Attribute query, SCI, Hiccup, serialization, gzip, and drain cost; mechanize
-   omission and latency evidence for closed, unchanged, and changed units.
+6. **First bounded work counters complete; detailed attribution pending:** use
+   the retained latest-transition projection to capture the coordinated live
+   checkpoint, then attribute query/replay time, inner SCI setup/body, Hiccup,
+   event framing, gzip, and drain cost without adding history or another
+   registry. Mechanize omission and latency evidence for closed, unchanged,
+   and changed units.
 
 ## Graduation
 

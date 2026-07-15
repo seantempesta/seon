@@ -658,7 +658,12 @@
                           (::consumer-view-ids current-subscription)))]
               (doseq [conn connections] (push-event! conn event))
               (when changed-event?
-                (log/info-console! "seon.web.datastar" "broadcast"
+                (let [diagnostics
+                      (view-unit/diagnostics (::view-unit/state @!feeds))
+                      transition-metrics (::view-unit/last-transition diagnostics)
+                      unit-metrics
+                      (vals (::view-unit/metrics-by-token transition-metrics))]
+                  (log/info-console! "seon.web.datastar" "broadcast"
                                    {:seon.web.broadcast/view (first subscription-key)
                                     :seon.web.broadcast/connections (count connections)
                                     :seon.web.broadcast/targets
@@ -666,8 +671,28 @@
                                        (count serialized-elements))
                                     :seon.web.broadcast/changed-attrs
                                     (sort (:seon.db/changed-attrs change))
+                                    :seon.web.broadcast/active-units
+                                    (::view-unit/active-unit-count diagnostics)
+                                    :seon.web.broadcast/candidate-units
+                                    (::view-unit/candidate-unit-count
+                                     transition-metrics)
+                                    :seon.web.broadcast/read-replays
+                                    (transduce (map ::view-unit/read-replays)
+                                               + 0 unit-metrics)
+                                    :seon.web.broadcast/producer-invocations
+                                    (transduce
+                                     (map ::view-unit/producer-invocations)
+                                     + 0 unit-metrics)
+                                    :seon.web.broadcast/serializations
+                                    (transduce (map ::view-unit/serializations)
+                                               + 0 unit-metrics)
+                                    :seon.web.broadcast/suppressions
+                                    (frequencies
+                                     (map ::view-unit/suppression unit-metrics))
+                                    :seon.web.broadcast/retained-output-bytes
+                                    (::view-unit/retained-output-bytes diagnostics)
                                     :seon.web.broadcast/render-ms
-                                    (.round js/Math render-ms)})))))
+                                    (.round js/Math render-ms)}))))))
       (catch :default e
         (log/error-console! "seon.web.datastar"
                             (str "broadcast failed for " subscription-key) e))))))
@@ -1377,9 +1402,24 @@
          {::view-unit/state initial
           ::view-unit/tokens noncandidate-tokens
           ::view-unit/database-coordinate database-coordinate})
-        [state emitted]
+        noncandidate-metrics
+        (into {}
+              (map (fn [token]
+                     (let [unit (get-in advanced [::view-unit/units token])]
+                       [token
+                        {::view-unit/candidate? false
+                         ::view-unit/read-replays 0
+                         ::view-unit/producer-invocations 0
+                         ::view-unit/serializations 0
+                         ::view-unit/suppression
+                         :seon.web.view-unit.suppression/not-candidate
+                         ::view-unit/retained-output-bytes
+                         (js/Buffer.byteLength
+                          (::view-unit/serialized-element unit) "utf8")}])))
+              noncandidate-tokens)
+        [state emitted candidate-metrics]
         (reduce
-         (fn [[state emitted] token]
+         (fn [[state emitted metrics] token]
            (let [unit (get-in state [::view-unit/units token])
                  consumers (::view-unit/consumers unit)
                  descriptor (get descriptors token)
@@ -1398,10 +1438,21 @@
               (if (::view-unit/emitted? transition)
                 (reduce #(update %1 %2 (fnil conj []) serialized)
                         emitted consumers)
-                emitted)]))
-         [advanced {}]
-         candidate-tokens)]
-    [(assoc registry ::view-unit/state state) emitted]))
+                emitted)
+              (assoc metrics token (::view-unit/unit-metrics transition))]))
+         [advanced {} {}]
+         candidate-tokens)
+        metrics-by-token (merge noncandidate-metrics candidate-metrics)
+        next-state
+        (if (empty? (::view-unit/units state))
+          view-unit/empty-state
+          (assoc state ::view-unit/last-transition
+                 {::view-unit/database-coordinate database-coordinate
+                  ::view-unit/active-unit-count
+                  (count (::view-unit/units state))
+                  ::view-unit/candidate-unit-count (count candidate-tokens)
+                  ::view-unit/metrics-by-token metrics-by-token}))]
+    [(assoc registry ::view-unit/state next-state) emitted]))
 
 (defn- commit-registry!
   "Commit one synchronous pure registry transition without retrying effects."
