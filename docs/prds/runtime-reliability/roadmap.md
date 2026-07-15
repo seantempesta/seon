@@ -109,20 +109,20 @@ than expanding the current implementation into unrelated files.
 
 ### Current working portfolio and refill queue
 
-The 2026-07-14 integrated portfolio is deliberately split between ordered
+The 2026-07-15 integrated portfolio is deliberately split between ordered
 contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
 | Top-level integration | Review each returned slice, preserve the full ledger, run focused cross-boundary proof, and advance unit 1's native lifecycle contract | Integration and design judgment cannot be delegated; it is the critical path | Next unit-1 transition: typed create/release/delete, then restart/crash and restore/undo proof |
-| Database lifecycle | Make non-main branch open validation-only before adding typed native lifecycle operations | It owns the earliest unresolved prerequisite and does not depend on UI/runtime slices | Remaining unit-1 lifecycle transition or recovery proof |
+| Database lifecycle | Implement registry-native create/release/delete through the one typed protocol, prove exact adoption and honest cleanup failures, then delete physical-copy fork | Observational non-main open is complete at `3649c6b1`; this is the earliest unresolved unit-1 transition and does not depend on UI/runtime slices | Branch launch/runtime ownership, then restart/crash and restore/undo proof |
 | Reactive render units | Move one real lazy debug consumer onto the already-proven unit kernel | The pure kernel and publication admission contract are settled; one bounded consumer can falsify the abstraction without claiming the full cutover | Next distinct consumer, then unit 3 cursor contract only after the unit API settles |
 | Agent runtime correctness | Preserve exact provider reply bytes and remove result-claim rewriting | It owns the agent-loop/observability boundary and is independent of database branch creation and web rendering | Complete-form/async/containment correctness, then unit 7 Inspect evidence integration |
 
 The ordered top-level sequence is therefore:
 
-1. integrate and falsify validation-only non-main open;
-2. implement the one typed native create/release/delete lifecycle and prove
+1. **Complete:** integrate and falsify validation-only non-main open;
+2. **In progress:** implement the one typed native create/release/delete lifecycle and prove
    exact fork coordinates without physical directory copying;
 3. finish unit 1 restart/crash, restore/undo, and multi-form transition proof;
 4. graduate units 2 and 6 from bounded consumers into their complete acceptance
