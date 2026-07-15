@@ -130,7 +130,13 @@ uncommitted source, so this slice did not restart or bypass the operator.
    remaining page-specific dependency map rather than adding an interim
    routing path.
 3. Derive the conservative reverse candidate index from runtime-observed
-   database read requests. Exact result equality remains the final authority.
+   database read requests. This is dependency-blocked on promoting the selected
+   Datahike fork's private conservative query/find-pull projection into one
+   public pure API, then exposing one `seon.db` observation-candidate boundary;
+   do not duplicate its parser or ship broad-query as an interim mechanism.
+   [[research/reverse-candidate-index-dependency-boundary-2026-07-15]] records
+   the coordinated cross-repo cut, deletion boundary, and falsifiable proof.
+   Exact result equality remains the final authority.
 4. Normalize equivalent subscribers across tabs and prove single execution.
    Add recent-output LRU reuse only if profiling crosses its acceptance gate.
 5. Harden the database navigator and coordinate-bound cursor as consumers, then
