@@ -72,6 +72,17 @@ much the large schema-heavy prompt lowers the model's ability to escape the
 attractor. The open finding is tracked in
 [[../../../seon/issues/narration-ghost-echo-not-neutralized]].
 
+A separate contract audit found a mechanical global projection defect. All
+required callable identities and home aliases were present, and identity-string
+schemas elsewhere showed `[:string {:seon.db/identity true}]`. However, compact
+cards rendered the preferred request-map shapes for `seon.db/query` and
+`seon.db/transact!` as pure-variadic positional calls because the one source
+arglist was paired with multiple logical Malli arities by index. The query form
+itself also remained opaque until navigating into full `seon.db` source. The
+mechanical renderer defect is tracked in
+[[../../../seon/issues/compact-pure-variadic-contract-mislabels-logical-arities]];
+capture the admitted baseline before fixing it.
+
 ## Exact next experiment
 
 1. Let the concurrent context/transcript owner finish or commit; do not stage
