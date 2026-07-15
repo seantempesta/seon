@@ -42,6 +42,14 @@ and dependency edge, identify its next refill, and only then continue. Never
 promote a lane's local task list into the program plan or report progress
 without the remaining units 1–9 and unit 9 graduation gate still visible.
 
+At each scheduling boundary, write the same five fields into the active
+roadmap before taking another implementation detour: ordered spine, live
+parallel lanes, exact proof gate, next safe refill for each lane, and the final
+unit-9 admission gate. If a probe has not narrowed the owner or changed the
+next falsification step after one investigation cycle, preserve its evidence
+and re-evaluate whether it still blocks the spine. This is the compaction-safe
+working memory; chat summaries are not the program authority.
+
 The 2026-07-14 live-browser baseline in [[roadmap]] is the current falsification
 set: existing feeds partially stale plan/transcript/root units because a
 non-transitive declared-attribute gate skips exact observed reads; root uses the

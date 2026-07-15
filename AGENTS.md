@@ -210,6 +210,17 @@ question gets one coherent audit. External research uses `agy`; long prompts
 go through stdin. Every research agent writes its durable report under the
 active PRD's `research/` directory.
 
+For multi-unit program work, the top-level agent maintains one ordered
+dependency spine and uses every other safe slot for a coherent independent
+implementation, proof, or source-grounded audit. After every lane return,
+material commit, context compaction, or newly discovered blocker, reread the
+complete program ledger—not only the local task—record the changed dependency
+or evidence, integrate or reject the return, and refill the slot from the
+earliest dependency-ready unit. A deep investigation stays on the spine only
+while it blocks a named exit measure; otherwise preserve the finding in its
+owning issue/PRD and resume forward progress. Never invent parallel edits in a
+shared owner merely to keep a slot busy.
+
 Every research or implementation unit begins with a dependency ledger. Name
 the exact libraries and existing Seon mechanisms the unit depends on, their
 selected versions/SHAs, the relevant `reference-code/` paths, and the
