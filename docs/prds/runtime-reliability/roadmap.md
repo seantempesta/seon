@@ -64,9 +64,10 @@ database, renderer, runtime, operator, or packaging mechanisms.
 
 Parallel work is deliberately bounded:
 
-- while unit 0 runs, research may independently ground database lifecycle,
-  reactive/Datahike cursor behavior, runtime containment, Inspect/model
-  evaluation, and release packaging in their exact `reference-code/` sources;
+- while unit 1 implementation follows the database lifecycle dependency spine,
+  research and handback review may independently advance units 2/3, 6/7, and 8
+  in their exact `reference-code/` sources without changing the unsettled
+  lifecycle contract;
 - units 2 and 3 may share a read-only dependency audit, but unit 3 consumes the
   settled unit contract instead of inventing its own transition/feed path;
 - units 4 and 6 may be implemented in parallel after their database/runtime
@@ -75,6 +76,34 @@ Parallel work is deliberately bounded:
   commits and evidence are handed back for unit 7 review; and
 - unit 9 is the only final graduation gate and cannot be parallel-claimed from
   partial subsystem evidence.
+
+### Execution cadence
+
+At every continuation or compaction boundary, the top-level agent rereads this
+ledger and the current chunk roadmap, keeps one lane advancing the earliest
+unfinished dependency, and assigns other available agents coherent work from
+later units only where it cannot create a competing mechanism or assume an
+unsettled contract. Returned research is written into its owning PRD, reviewed
+against source, and either integrated or converted into an explicit ordered
+gap before that slot is reused.
+
+The current dependency spine is:
+
+1. finish unit 1 publication admission, native branch lifecycle, restart/crash
+   recovery, restore/undo, and multi-form failure proof;
+2. implement units 2 and 6 in parallel after their unit-1 prerequisites;
+3. let unit 3 consume unit 2's settled unit/cursor contract while unit 4
+   consumes its settled root/render contract;
+4. finish unit 5 after units 2 and 4, unit 7 after unit 6 plus ACME handback,
+   and unit 8 after the runtime/package contracts from units 1 and 6 stabilize;
+5. run unit 9 only after every prior unit has integrated behavioral and live
+   proof, then perform authorized legacy cleanup.
+
+During unit 1, the default parallel portfolio is lifecycle implementation at
+the top level, one lifecycle audit/proof lane when needed, one Inspect/
+autocomplete handback lane, and one independent-downstream packaging lane.
+When a lane finishes, refill it from the earliest dependency-ready unit rather
+than expanding the current implementation into unrelated files.
 
 Immediate unit-0 queue:
 

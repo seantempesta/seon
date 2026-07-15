@@ -17,6 +17,35 @@ Returned reports are claims to review: read enough source to judge them,
 falsify risky conclusions independently, and keep overlapping shared files at
 the top level.
 
+## Sustained program cadence
+
+The top-level agent keeps the complete active-program ledger visible while it
+works on the dependency-critical slice. At the start of a work period and
+after context compaction, read the high-level program roadmap plus the current
+chunk roadmap, reconcile the working plan with both, and name the next ordered
+implementation boundary and every independent lane that can advance safely.
+
+Use available subagents continuously when concrete independent work exists:
+
+- keep one integration/implementation lane on the critical dependency path;
+- fill other slots with coherent non-overlapping source audits, downstream
+  research, test/proof design, or bounded implementation in separate owners;
+- give each lane the relevant architecture/roadmap context, dependency-ledger
+  and `reference-code/` requirement, owned paths, protected paths, and an exact
+  durable report or code/proof deliverable;
+- do not wait idly for a lane when the top-level agent can advance another
+  safe task, and do not parallelize edits to the same mechanism merely to keep
+  slots busy; and
+- review and integrate each returned result promptly, then refill the slot
+  from the remaining program ledger when another independent task is ready.
+
+Before a long verification run or likely compaction boundary, update the
+current PRD roadmap with durable current state/evidence and leave the working
+plan ordered. Conversation memory, an agent's private context, and a running
+subagent are never the only record of what remains. Parallel throughput never
+overrides dependency order, one-mechanism ownership, shared-tree safety, or
+the requirement that the top-level agent prove the integrated system.
+
 ## Instruction discovery and localization
 
 Before changing a subtree, find and read the closest nested `AGENTS.md`, and
