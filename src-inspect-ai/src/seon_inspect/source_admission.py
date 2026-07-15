@@ -43,8 +43,8 @@ def _git(cwd: Path, *args: str) -> str:
     return proc.stdout.rstrip()
 
 
-def _root_gitlink(repo_root: Path, relative_path: str) -> str:
-    row = _git(repo_root, "ls-files", "-s", "--", relative_path)
+def _gitlink(checkout: Path, relative_path: str) -> str:
+    row = _git(checkout, "ls-files", "-s", "--", relative_path)
     parts = row.split()
     if len(parts) < 2 or parts[0] != "160000":
         raise SourceAdmissionError(
@@ -57,6 +57,38 @@ def _dirty_paths(checkout: Path, admitted: list[str], excluded: list[str]) -> li
     output = _git(
         checkout, "status", "--porcelain", "--untracked-files=all", *pathspecs)
     return [line[3:] for line in output.splitlines() if line]
+
+
+def _nested_source_identities(
+    checkout: Path, selected: dict[str, Any]
+) -> dict[str, dict[str, str]]:
+    identities: dict[str, dict[str, str]] = {}
+    for name, nested in selected.get("nested_sources", {}).items():
+        relative_path = nested["path"]
+        nested_checkout = (checkout / relative_path).resolve()
+        parent_revision = _gitlink(checkout, relative_path)
+        expected_parent_revision = nested["parent_revision"]
+        expected_revision = nested["revision"]
+        checkout_revision = _git(nested_checkout, "rev-parse", "HEAD")
+        if parent_revision != expected_parent_revision:
+            raise SourceAdmissionError(
+                f"source admission: {name} parent revision mismatch; "
+                f"lock={expected_parent_revision} gitlink={parent_revision}")
+        if checkout_revision != expected_revision:
+            raise SourceAdmissionError(
+                f"source admission: {name} revision mismatch; "
+                f"lock={expected_revision} checkout={checkout_revision}")
+        dirty = _dirty_paths(nested_checkout, ["."], [])
+        if dirty:
+            raise SourceAdmissionError(
+                f"source admission: {name} selected source is dirty: {dirty}")
+        identities[name] = {
+            "source_path": relative_path,
+            "parent_revision": expected_parent_revision,
+            "revision": expected_revision,
+            "tree": _git(nested_checkout, "rev-parse", "HEAD^{tree}"),
+        }
+    return identities
 
 
 def _direct_source_path(distribution: importlib.metadata.Distribution) -> Path | None:
@@ -88,17 +120,16 @@ def _source_identity(
     relative_path = selected["path"]
     checkout = (repo_root / relative_path).resolve()
     expected_revision = selected["revision"]
-    root_revision = _root_gitlink(repo_root, relative_path)
+    root_revision = _gitlink(repo_root, relative_path)
     checkout_revision = _git(checkout, "rev-parse", "HEAD")
     if root_revision != expected_revision or checkout_revision != expected_revision:
         raise SourceAdmissionError(
             f"source admission: {name} revision mismatch; lock={expected_revision} "
             f"gitlink={root_revision} checkout={checkout_revision}")
-    dirty = _dirty_paths(
-        checkout,
-        list(selected["admitted_paths"]),
-        list(selected.get("excluded_dirty_paths", [])),
-    )
+    nested_sources = _nested_source_identities(checkout, selected)
+    nested_paths = [nested["path"]
+                    for nested in selected.get("nested_sources", {}).values()]
+    dirty = _dirty_paths(checkout, list(selected["admitted_paths"]), nested_paths)
     if dirty:
         raise SourceAdmissionError(
             f"source admission: {name} selected source is dirty: {dirty}")
@@ -127,6 +158,7 @@ def _source_identity(
         "distribution": selected["distribution"],
         "installed_version": version,
         "source_path": relative_path,
+        "nested_sources": nested_sources,
     }
 
 
@@ -140,7 +172,7 @@ def verify_sources(
 ) -> dict[str, Any]:
     """Verify and return the immutable source identity for one task run."""
     lock = json.loads(lock_path.read_text())
-    if lock.get("schema_version") != 1:
+    if lock.get("schema_version") != 2:
         raise SourceAdmissionError(
             f"source admission: unsupported lock schema {lock.get('schema_version')!r}")
 
@@ -177,7 +209,7 @@ def verify_sources(
             f"source admission: Seon evaluation source is dirty: {seon_dirty}")
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "bench": dict(bench),
         "sources": sources,
         "providers": providers,

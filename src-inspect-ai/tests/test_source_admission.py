@@ -12,12 +12,15 @@ from seon_inspect import source_admission
 
 INSPECT_REV = "a" * 40
 EVALS_REV = "b" * 40
+VIEW_PARENT_REV = "d" * 40
+VIEW_REV = "e" * 40
 
 
 def _lock(repo: Path) -> Path:
     paths = [
         repo / "reference-code" / "inspect-ai",
         repo / "reference-code" / "inspect-evals",
+        repo / "reference-code" / "inspect-ai" / "src" / "inspect_ai" / "_view" / "ts-mono",
         repo / "src-inspect-ai",
         repo / "evals",
     ]
@@ -27,21 +30,26 @@ def _lock(repo: Path) -> Path:
     (repo / "evals" / "datasets.lock").write_text("dataset-lock\n")
     lock_path = repo / "src-inspect-ai" / "evaluation-sources.lock.json"
     lock_path.write_text(json.dumps({
-        "schema_version": 1,
+        "schema_version": 2,
         "sources": {
             "inspect_ai": {
                 "distribution": "inspect-ai", "module": "inspect_ai",
                 "path": "reference-code/inspect-ai", "revision": INSPECT_REV,
                 "version_contains_revision": True,
                 "admitted_paths": ["src/inspect_ai"],
-                "excluded_dirty_paths": [],
+                "nested_sources": {
+                    "inspect_view": {
+                        "path": "src/inspect_ai/_view/ts-mono",
+                        "parent_revision": VIEW_PARENT_REV,
+                        "revision": VIEW_REV,
+                    },
+                },
             },
             "inspect_evals": {
                 "distribution": "inspect-evals", "module": "inspect_evals",
                 "path": "reference-code/inspect-evals", "revision": EVALS_REV,
                 "installed_version": "0.14.3",
                 "admitted_paths": ["src/inspect_evals"],
-                "excluded_dirty_paths": [],
             },
         },
         "providers": {
@@ -58,13 +66,16 @@ def _lock(repo: Path) -> Path:
 def _git_answer(repo: Path):
     def answer(cwd: Path, *args: str) -> str:
         if args[-1] == "HEAD":
+            if cwd.name == "ts-mono":
+                return VIEW_REV
             if cwd.name == "inspect-ai":
                 return INSPECT_REV
             if cwd.name == "inspect-evals":
                 return EVALS_REV
             return "c" * 40
         if args[-1] == "HEAD^{tree}":
-            return ("d" if cwd.name == "inspect-ai" else
+            return ("a" if cwd.name == "ts-mono" else
+                    "d" if cwd.name == "inspect-ai" else
                     "e" if cwd.name == "inspect-evals" else "f") * 40
         raise AssertionError((cwd, args))
     return answer
@@ -84,8 +95,9 @@ def _distributions(repo: Path):
 def _admit(monkeypatch, tmp_path, distributions=None):
     lock_path = _lock(tmp_path)
     monkeypatch.setattr(
-        source_admission, "_root_gitlink",
-        lambda repo, path: INSPECT_REV if path.endswith("inspect-ai") else EVALS_REV)
+        source_admission, "_gitlink",
+        lambda repo, path: (VIEW_PARENT_REV if path.endswith("ts-mono") else
+                            INSPECT_REV if path.endswith("inspect-ai") else EVALS_REV))
     monkeypatch.setattr(source_admission, "_git", _git_answer(tmp_path))
     monkeypatch.setattr(source_admission, "_dirty_paths", lambda *args: [])
     return source_admission.verify_sources(
@@ -100,6 +112,8 @@ def _admit(monkeypatch, tmp_path, distributions=None):
 def test_verify_sources_accepts_exact_selected_world(monkeypatch, tmp_path):
     admitted = _admit(monkeypatch, tmp_path)
     assert admitted["sources"]["inspect_ai"]["revision"] == INSPECT_REV
+    assert (admitted["sources"]["inspect_ai"]["nested_sources"]
+            ["inspect_view"]["revision"] == VIEW_REV)
     assert admitted["sources"]["inspect_evals"]["installed_version"] == "0.14.3"
     assert admitted["providers"]["openai"]["version"] == "2.45.0"
     assert admitted["bench"]["name"] == "bfcl_ast"
@@ -109,7 +123,7 @@ def test_verify_sources_accepts_exact_selected_world(monkeypatch, tmp_path):
 
 def test_verify_sources_rejects_revision_mismatch(monkeypatch, tmp_path):
     lock_path = _lock(tmp_path)
-    monkeypatch.setattr(source_admission, "_root_gitlink", lambda *args: "x" * 40)
+    monkeypatch.setattr(source_admission, "_gitlink", lambda *args: "x" * 40)
     monkeypatch.setattr(source_admission, "_git", _git_answer(tmp_path))
     monkeypatch.setattr(source_admission, "_dirty_paths", lambda *args: [])
     with pytest.raises(source_admission.SourceAdmissionError,
@@ -122,8 +136,9 @@ def test_verify_sources_rejects_revision_mismatch(monkeypatch, tmp_path):
 def test_verify_sources_rejects_dirty_selected_source(monkeypatch, tmp_path):
     lock_path = _lock(tmp_path)
     monkeypatch.setattr(
-        source_admission, "_root_gitlink",
-        lambda repo, path: INSPECT_REV if path.endswith("inspect-ai") else EVALS_REV)
+        source_admission, "_gitlink",
+        lambda repo, path: (VIEW_PARENT_REV if path.endswith("ts-mono") else
+                            INSPECT_REV if path.endswith("inspect-ai") else EVALS_REV))
     monkeypatch.setattr(source_admission, "_git", _git_answer(tmp_path))
     monkeypatch.setattr(
         source_admission, "_dirty_paths",
@@ -132,6 +147,48 @@ def test_verify_sources_rejects_dirty_selected_source(monkeypatch, tmp_path):
                                                else []),
     )
     with pytest.raises(source_admission.SourceAdmissionError, match="is dirty"):
+        source_admission.verify_sources(
+            {"name": "gsm8k"}, repo_root=tmp_path, lock_path=lock_path,
+            distribution_identity=_distributions(tmp_path))
+
+
+def test_verify_sources_rejects_nested_revision_mismatch(monkeypatch, tmp_path):
+    lock_path = _lock(tmp_path)
+    git_answer = _git_answer(tmp_path)
+
+    def mismatched_nested(cwd, *args):
+        if cwd.name == "ts-mono" and args[-1] == "HEAD":
+            return "x" * 40
+        return git_answer(cwd, *args)
+
+    monkeypatch.setattr(
+        source_admission, "_gitlink",
+        lambda repo, path: (VIEW_PARENT_REV if path.endswith("ts-mono") else
+                            INSPECT_REV if path.endswith("inspect-ai") else EVALS_REV))
+    monkeypatch.setattr(source_admission, "_git", mismatched_nested)
+    monkeypatch.setattr(source_admission, "_dirty_paths", lambda *args: [])
+    with pytest.raises(source_admission.SourceAdmissionError,
+                       match="inspect_view revision mismatch"):
+        source_admission.verify_sources(
+            {"name": "gsm8k"}, repo_root=tmp_path, lock_path=lock_path,
+            distribution_identity=_distributions(tmp_path))
+
+
+def test_verify_sources_rejects_dirty_nested_source(monkeypatch, tmp_path):
+    lock_path = _lock(tmp_path)
+    monkeypatch.setattr(
+        source_admission, "_gitlink",
+        lambda repo, path: (VIEW_PARENT_REV if path.endswith("ts-mono") else
+                            INSPECT_REV if path.endswith("inspect-ai") else EVALS_REV))
+    monkeypatch.setattr(source_admission, "_git", _git_answer(tmp_path))
+    monkeypatch.setattr(
+        source_admission, "_dirty_paths",
+        lambda checkout, admitted, excluded: (["apps/inspect/changed.ts"]
+                                               if checkout.name == "ts-mono"
+                                               else []),
+    )
+    with pytest.raises(source_admission.SourceAdmissionError,
+                       match="inspect_view selected source is dirty"):
         source_admission.verify_sources(
             {"name": "gsm8k"}, repo_root=tmp_path, lock_path=lock_path,
             distribution_identity=_distributions(tmp_path))

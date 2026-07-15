@@ -31,7 +31,10 @@ install or the source a reviewer reads under `reference-code/`.
 - The referenced checkout remains at Git commit
   `05322696a0f784ec399ef6abbafd3d2a250ea9cc`; its nested `_view/ts-mono`
   submodule is checked out at `f3588038…` rather than the parent-selected
-  revision, so whole-checkout cleanliness still fails.
+  revision. The source lock now names both the parent-selected `eccde6b7…`
+  coordinate and the intentional checked-out `f3588038…` overlay. Admission
+  verifies the nested checkout revision, tree, and cleanliness independently;
+  it does not hide the subtree with an excluded pathspec.
 
 The source/evidence audit sharpened the mismatch beyond Inspect itself:
 
@@ -52,17 +55,19 @@ Python harness provenance into Node runtime provenance.
 
 The source/run-admission unit is implemented. One reviewed
 `evaluation-sources.lock.json` selects the Inspect and Inspect Evals Gitlink
-revisions, admitted task/scorer paths, exact Python provider, and Python/dataset
-locks. Direct task loading and prebuilt catalog runs verify revision, relevant
+revisions, the explicit nested Inspect view overlay, admitted task/scorer
+paths, exact Python provider, and Python/dataset locks. Direct task loading and
+prebuilt catalog runs verify parent and nested revisions, trees, relevant
 cleanliness, installed source/version, provider, lock digests, and committed
 Seon harness source before model or pod work. The admitted identity map is
 native Inspect metadata, and a missing/unretained `.eval` rejects finalization.
 
 A fresh `uv sync --extra test` synchronized the selected distributions. The
-focused admission/catalog/native-log gate passes 27 tests, including a real
+focused admission/catalog/native-log gate passes 29 tests, including a real
 offline native-log read-back; the complete suite passes 321 tests with eight
 expected skips. Deliberate revision, dirty-source, provider-version, and absent-
-log mismatches fail deterministically.
+log mismatches fail deterministically. Dedicated tests also reject a changed or
+dirty nested view checkout.
 
 The issue remains open only for the successor measurement contract to give
 scorecard summaries a stable correlation to the required native log and, after

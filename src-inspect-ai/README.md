@@ -32,11 +32,13 @@ uv sync --extra test
 
 Inspect and Inspect Evals install from the root-selected source checkouts under
 `reference-code/`. `evaluation-sources.lock.json` names their exact Gitlink
-revisions and the exact Python provider version. Before a task constructs or a
-prebuilt task runs, `seon_inspect.source_admission` verifies those revisions,
-the admitted source paths, installed distribution origins/versions, `uv.lock`,
-`evals/datasets.lock`, and the committed Seon harness source. The immutable
-identity map is stored as `seon_source_admission` in the native Inspect log.
+revisions, the deliberate nested Inspect view overlay, and the exact Python
+provider version. Before a task constructs or a prebuilt task runs,
+`seon_inspect.source_admission` verifies parent and nested revisions/trees,
+nested cleanliness, the admitted source paths, installed distribution
+origins/versions, `uv.lock`, `evals/datasets.lock`, and the committed Seon
+harness source. The immutable identity map is stored as
+`seon_source_admission` in the native Inspect log.
 A mismatch fails before model or pod work. The node eval bundle
 must exist: `clj -M:cljs compile worker-oracle-eval` (the liveness gate tells
 you loudly when it doesn't). `bb` must be on PATH.

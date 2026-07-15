@@ -31,7 +31,7 @@ diagnostic development, but it is not a concurrency or cleanup proof.
 | Dependency or mechanism | Exact identity observed | Maintained source and call sites | Required proof |
 |---|---|---|---|
 | Inspect AI | Superproject gitlink and checkout `05322696a0f784ec399ef6abbafd3d2a250ea9cc`, tag `0.3.246`; installed distribution `0.3.247.dev0+g05322696a.d20260715`; local-directory source in `pyproject.toml` and `uv.lock` | `reference-code/inspect-ai/`; `inspect_ai._eval.task.log.TaskLogger`; `inspect_ai.log.read_eval_log`; `seon_inspect.catalog.run_bench` | Selected gitlink, checkout `HEAD`, clean recursive submodules, installed source, and recorded identity agree before task import. |
-| Inspect view submodule | Parent expects `eccde6b7c67c8d07eef224c1a8a3ff85c51eb1e2`; checkout is `f3588038f399de82eec7d189f82a31402153f553` | `reference-code/inspect-ai/src/inspect_ai/_view/ts-mono` | Recursive source check fails now and passes only after the selected nested gitlink is restored or intentionally advanced in the parent source. |
+| Inspect view submodule | Parent expects `eccde6b7c67c8d07eef224c1a8a3ff85c51eb1e2`; intentional overlay checkout is `f3588038f399de82eec7d189f82a31402153f553`, tree `9fd112592b2f4a3986797f53aa52500a943b66d8` | `reference-code/inspect-ai/src/inspect_ai/_view/ts-mono`; `evaluation-sources.lock.json`; `source_admission._nested_source_identities` | Admission records and verifies the parent coordinate, overlay revision/tree, and nested cleanliness independently. Any change fails before task construction. |
 | Inspect Evals | Superproject gitlink and checkout `97c99f5f6507fc5d1449fe3247f267d591f64350`, tag `v0.14.3`; installed editable distribution reports `0.0.1.dev1+unknown.gce900d638` | `reference-code/inspect-evals/`; `seon_inspect.catalog.BENCHES`; selected upstream task, dataset, and scorer modules | Declare it in `pyproject.toml`/`uv.lock`, synchronize from the selected gitlink, and record the commit independently of generated package-version text. |
 | Python dependency closure | `uv.lock` SHA-256 `34f230184c19b2c03d89eba5cdbc10c6509397a051773fca67a6a33b4de800f4`; `openai` is now locked at `2.45.0` with wheel and source hashes | `src-inspect-ai/pyproject.toml`; `src-inspect-ai/uv.lock`; Inspect direct-model paths | A fresh `uv sync --locked` produces the recorded packages; the run records the lock digest and only records the Python provider client when that path is actually used. |
 | Dataset freeze | `evals/datasets.lock` SHA-256 `ff2496fa6fcf2efe592335c4d7b31d728c162de10da08ce49dc85cee72231ee1`; global seed `20260702` | `seon_inspect.freeze`; `test_freeze.py`; upstream pin constants under the selected Inspect Evals commit | The run records lock digest, split, sample ids allowed by tier, upstream pin, task args, and corpus content digest. |
@@ -68,8 +68,8 @@ turn evidence. That is sufficient to inspect what this model saw and returned.
 
 It does not record:
 
-- the Inspect or Inspect Evals full commit, recursive dirty state, or source
-  tree digest;
+- the Inspect or Inspect Evals full commit, nested overlay identity, recursive
+  dirty state, or source tree digest;
 - the Python lock or dataset-lock digest;
 - the Seon artifact manifest or applied config identity;
 - the provider endpoint/server implementation or model weight/revision digest;
@@ -96,7 +96,8 @@ open, with two facts updated by current evidence:
   the run does not record the check.
 - The lock now contains `openai` `2.45.0` and hashes. The older claim that the
   package is absent from `uv.lock` is stale. Inspect Evals remains undeclared,
-  and recursive Inspect source is demonstrably mismatched at `ts-mono`.
+  while the Inspect view overlay requires an identity distinct from its parent
+  Gitlink.
 
 The smallest repair is not a second vendoring system. Keep the selected
 submodules as reviewed source, declare both Python packages, and put a strict
@@ -164,7 +165,7 @@ model calls. Pass that exact map through Inspect's existing run-level
 
 Acceptance evidence:
 
-- the current wrong `ts-mono` checkout and undeclared/stale Inspect Evals
+- a changed or dirty `ts-mono` overlay and undeclared/stale Inspect Evals
   installation fail before benchmark import;
 - a fresh `uv sync --locked` from clean selected submodules passes;
 - mutating either source, lock, task pin, or selected config makes the same
@@ -253,11 +254,12 @@ Acceptance evidence:
 
 ## Blockers and handoff
 
-The immediate source gate cannot pass today because the Inspect nested
-`ts-mono` checkout differs from its selected gitlink, and Inspect Evals is not
-declared in the Python project despite active imports. Correcting the nested
-checkout must preserve or deliberately reconcile any external source work; it
-must not be hidden by recording `dirty: true`.
+The immediate source gate now admits the deliberate Inspect view overlay
+without hiding it: the lock separately names the parent coordinate and actual
+nested revision, and admission verifies the nested tree and cleanliness.
+Inspect Evals is declared and synchronized. The focused source/catalog/native-
+log gate passes 29 tests; P1a still needs the static ACME artifact/config/model
+identity and bounded scorer evidence before a scored serial claim is complete.
 
 The model gate also needs a launcher-owned artifact identity. The pod can
 report resolved behavior config, but it cannot infer which local weight bytes

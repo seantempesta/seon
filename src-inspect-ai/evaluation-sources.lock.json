@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "sources": {
     "inspect_ai": {
       "distribution": "inspect-ai",
@@ -12,9 +12,13 @@
         "requirements.txt",
         "src/inspect_ai"
       ],
-      "excluded_dirty_paths": [
-        "src/inspect_ai/_view/ts-mono"
-      ]
+      "nested_sources": {
+        "inspect_view": {
+          "path": "src/inspect_ai/_view/ts-mono",
+          "parent_revision": "eccde6b7c67c8d07eef224c1a8a3ff85c51eb1e2",
+          "revision": "f3588038f399de82eec7d189f82a31402153f553"
+        }
+      }
     },
     "inspect_evals": {
       "distribution": "inspect-evals",
@@ -25,8 +29,7 @@
       "admitted_paths": [
         "pyproject.toml",
         "src/inspect_evals"
-      ],
-      "excluded_dirty_paths": []
+      ]
     }
   },
   "providers": {
