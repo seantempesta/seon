@@ -325,18 +325,20 @@ evidence and return to the ledger unless it blocks the active gate.
 Read this short operational handoff before logs, broad tests, or source
 archaeology.
 
-The generated database/namespace workflow unit has a finer-grained live ledger
-in [[research/generated-workflow-freeze-2026-07-15]]. Its source implementation
-and dataset-lock artifacts are present in the shared working tree, and 115
-focused offline tests pass. Commit and a native static-ACME `.eval` remain
-open. Treat its live P0 ready status as **no** until the integrated native
-development slice runs.
+**Active gate:** obtain one admitted, finalized replay of
+`database_workflow-seed1-000` on a ready, ownership-coherent static ACME
+artifact. Inspect its exact prompt, reply, and evaluation bytes. Do not run the
+ten-member slice, start the model matrix, or redesign context until that one
+sample is trustworthy.
 
 ### Proven and committed
 
 - The proposed development slice has ten exact members and fixed category
   floors in [[research/inspect-suite-freeze-2026-07-15]]. Its membership is
   frozen; its native execution path is not yet complete.
+- Native Inspect wrappers for the shell, file, and web rows and generated
+  database/namespace workflows are committed. Focused offline coverage passes;
+  their existence is P0a evidence, not a P0b run.
 - Inspect, Inspect Evals, dataset, Python-lock, pod-client, model, and operator
   identity gaps are localized in
   [[research/inspect-reproducibility-boundary-2026-07-15]]. The Inspect view
@@ -348,46 +350,55 @@ development slice runs.
   [[research/local-model-serving-inventory-2026-07-15]]. No preferred small
   model has been selected. The live candidates are evidence inputs, not a
   leaderboard conclusion.
-- ACME was reset after strict startup correctly rejected retained malformed
-  canvas data. The fresh cluster is ready at `http://127.0.0.1:7994`; its
-  current bridge decodes the stored `"acme.widget/dash"` value to a Clojure
-  symbol. The retained-data incompatibility is preserved in
-  [[../../seon/issues/acme-operator-migration-drift]].
+- Source admission pins the Inspect parent, nested overlay, tree and
+  cleanliness. Native-log finalization reopens the retained `.eval`, requires
+  success, and verifies the exact admission map. Pod `/agents/run` evidence is
+  request-scoped and comes from the same final immutable database snapshot.
+- Infrastructure timeouts and core errors invalidate a sample instead of
+  becoming a model score. A no-forms close remains model/runtime evidence.
 - A fresh ordinary ACME agent renders 22,171 total estimated tokens, including
-  20,406 namespace tokens. P2 must inventory exact frozen-sample contexts;
-  this aggregate is not evidence for a shared-schema redesign.
+  20,406 namespace tokens. The exact closure audit is in
+  [[research/context-schema-closure-measurement-2026-07-15]]: schemas account
+  for 15,155 tokens and one canonical shared section saves 1,642 tokens while
+  preserving the closure. This supports a stable shared-schema topology, not
+  a claim that size reduction alone fixes model behavior.
+- The first Qwen2.5 Coder 0.5B database diagnostic is preserved in
+  [[research/qwen25-coder-05b-database-diagnostic-2026-07-15]]. It produced
+  zero forms, repeated runtime/context narration, and grew from 21,947 to
+  23,201 prompt tokens over three turns. Parser recovery stayed bounded. The
+  run is deliberately **not accepted** because Inspect reported dirty Seon
+  source and the direct task invocation bypassed run-level admission.
 
 ### Current blockers
 
-- `milestone_lift(endpoint="pod")` and
-  `long_term_planning(endpoint="pod")` still call the unavailable ephemeral
-  cluster API. Static ACME support must be explicit in the Inspect solver/task
-  boundary; it must not reintroduce raw process or database lifecycle code.
-- Shell, file, and web rows are frozen data with real scorers but still need
-  native Inspect `Task` wrappers before they count toward P0b.
-- The pod's `/agents/run` response retains ordered turn evidence and a final
-  database coordinate, but milestone and planning scorers still need a current,
-  bounded structured outcome projection. Do not revive removed
-  `seon.db.registry` or raw writer-REPL helpers.
+- Shared source is currently dirty in context/transcript files owned by another
+  lane. Restarting ACME now would build an uncommitted mixed artifact; staging
+  those files here would cross ownership. Wait for that coherent commit, then
+  restart ACME and require ready status.
+- The native milestone task can target static ACME and consumes request-scoped
+  evidence, but the next run must enter through catalog source admission and
+  mandatory finalization before it can satisfy P1a/P0b.
 - A planning restart on the static development target must be owned by the
   semantic ACME operator and preserve the same database/agent identity. The
   full parallel solution remains the P1b lease.
+- The 0.5B diagnostic repeated runtime/context narration. Determine whether
+  those bytes come from the model reply, transcript derivation, or both before
+  attributing the failure solely to model scale or schema weight.
 
 ### Exact next order
 
-1. Finish and review the three narrow in-flight units: native shell/file/web
-   tasks, generated database/namespace tier variants plus safe subset
-   selection, and the exact schema-weight audit.
-2. Finish the remaining P1a static ACME artifact/config/model identity and
-   bounded scorer evidence. Source admission, the explicit `ts-mono` overlay,
-   and native-log finalization are mechanically covered.
-3. Add explicit static-ACME execution and bounded scorer evidence through the
-   existing Inspect solver and `/agents/run` owners.
-4. Run one sample at a time and inspect every native `.eval`; first run the
-   smallest database or namespace sample, then the ten-member development
-   slice. Classify and fix infrastructure failures before model failures.
-5. Update the P0 report and this roadmap with artifact paths and results. Only
-   then begin the P2 model matrix or P3 shared-schema implementation.
+1. Commit this checkpoint and the 0.5B native diagnostic artifact without
+   staging any concurrent lane's files.
+2. When the shared context/transcript edits converge, restart only ACME and
+   prove a ready, ownership-coherent artifact plus clean admitted source.
+3. Run `database_workflow-seed1-000` through catalog source admission and
+   mandatory finalization. Inspect its prompt, reply, eval evidence, database
+   coordinate, model identity, and classification.
+4. If narration repeats, trace its exact database-derived provenance and fix
+   that one owner. Rerun the same sample until the evidence is trustworthy.
+5. Run the remaining nine frozen members serially, inspecting every `.eval`.
+   Only after P0b is recorded may the model matrix or P3 context comparison
+   begin.
 
 ### Stop rules
 

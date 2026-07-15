@@ -52,8 +52,13 @@ owner. The dependency order, parallel lanes, gates, and morning checkpoint are
 maintained in [[roadmap#Execution ledger]].
 
 The immediate resumption authority is [[roadmap#Resumption packet —
-2026-07-15]]. P0 membership is frozen but has not run as one native suite.
-`endpoint="pod"` currently means the unavailable ephemeral lease path, not the
-ready static ACME target. Finish P1a static-target identity/evidence, then run
-P0b serially at `http://127.0.0.1:7994`; leave parallel execution and isolated
-restart graduation behind the P1b operator lease.
+2026-07-15]]. P0 membership, native wrappers, generated workflows, source
+locks, request-scoped evidence, and infrastructure invalidation are complete;
+P0b has not run as one accepted suite. The next action is exactly one admitted,
+finalized replay of `database_workflow-seed1-000` on a ready static ACME target.
+The preserved Qwen2.5 Coder 0.5B diagnostic is not accepted: it used dirty Seon
+source and bypassed run-level admission, but its repeated narration and
+21,947→23,201 prompt growth are the current failure to explain. Do not broaden
+the suite, model matrix, or context redesign until that sample is trustworthy.
+Leave parallel execution and isolated restart graduation behind the P1b
+operator lease.
