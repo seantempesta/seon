@@ -155,3 +155,15 @@ receipt/recovery proof passes 9 tests/82 assertions, including a real
 `eval-batch!` Promise held across recovery. The destructive three-form live
 proof and the canonical position work above remain separate acceptance gates:
 the receipt closes attempted-form addressability, not durable sequence order.
+
+The source-frozen operator runbook found one remaining live-proof door on
+2026-07-15. No public supervisor operation can submit one controlled real turn
+and crash exactly the owned pod generation after observing the middle running
+receipt. `bin/seon restart` is clean quiescence; direct PID/process-group kill,
+private `eval-batch!`, or polling plus shell `kill` bypasses ownership and is
+not admissible evidence. Before the destructive three-form claim, add one
+test/proof-only supervisor-owned pod-death cut addressed to the exact pod
+generation and running eval identity. It must leave the writer alive, await
+absence of the owned pod subtree, and let ordinary `bin/seon up` perform the
+existing recovery path. This is containment proof support, not another eval
+runner or persisted phase.
