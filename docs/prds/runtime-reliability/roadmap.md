@@ -123,7 +123,7 @@ dependency spine and independent evidence consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Restore primitives are strong; end-to-end cold composition is next** | Immutable intent, exact writer-admin results, retained blob materialization, completion facts, and split admission are complete. `b2461d64` resolves the original completion coordinate after later writes; `c2b4013d` carries one closed authoritative startup value through the existing launch descriptor without changing ordinary launch bytes | Correct bootstrap schema-before-policy order after the current `client.cljs` owner commits, then compose fresh attach, reconstruction, completion, exact admission, readiness, and external intent deletion in place |
+| Top-level integration | **Closed cold restore composition is complete; destructive proof waits on native secondary force** | Immutable intent, exact writer-admin results, retained blob materialization, completion facts, and split admission are complete. `b2461d64` resolves the original completion coordinate after later writes; `c2b4013d` carries one closed authoritative startup value; `15f97806` composes fresh attach, preserve-only reconstruction, completion, exact admission, and readiness in the existing cold owner | After the exact Proximum/Datahike artifacts land, run the isolated destructive restore/crash matrix, then delete intent only from the external operator after durable completion proof |
 | Native secondary force | **Proximum guarded existing-destination replacement is active in an isolated dependency worktree** | The real file-backed falsifier proved Datahike's primary root can agree while the destination Proximum root differs. Generation-addressed immutable mmap publication gives the required one-head-switch retry model, but partial-file, collision, reopen, and write-isolation crash cuts must all pass before a dependency commit is accepted | Integrate the accepted primitive through Datahike's one `force-branch!`, run the real Datahike vector/KNN/root fixture, then select and publish exact dependency artifacts before Seon changes its pins |
 | Restore inverse/planner | **Exact restore/undo semantics are grounded; production selection waits for cold composition** | `e58f9b94` proves two guarded directions and records that undo must derive its retained target from one prior completion, while preserving the actual latest head as redo. Arbitrary structurally valid branches cannot be accepted as undo | Implement the ordinary retained-head planner after cold composition, then the stricter completion-derived undo selector through the same intent and transition |
 | Inspect/agent evidence | **The external AI/Inspect lane continues on its own owned files** | Attempt evidence and scorer work can consume settled database/runtime contracts without changing restore semantics. Its current dirty files remain externally owned and are not integration evidence until committed and reviewed | Review and integrate the returned evidence through canonical `my.*`/Inspect owners, then continue unit 6/7 acceptance after lifecycle prerequisites settle |
@@ -132,9 +132,8 @@ Current scheduling card:
 
 1. **Ordered spine:** crash-safe Proximum generation publication and guarded
    destination switch → maintained Datahike integration and exact artifact pin
-   → schema-before-policy correction → in-place cold reconstruction/completion/
-   admission → isolated destructive restore → completion-derived undo → ordered
-   multi-form partial-commit proof.
+   → isolated destructive restore using the now-complete cold composition →
+   completion-derived undo → ordered multi-form partial-commit proof.
 2. **Parallel lane A:** refine the exact cold runtime composition and its crash
    matrix without editing externally owned `client.cljs`; implement only after
    that ownership clears.
@@ -156,16 +155,19 @@ The ordered top-level sequence is therefore:
 2. **Complete:** immutable restore intent, exact prepare/admit split, blob
    materialization, completion publication, later-head coordinate resolution,
    and closed launch transport for restore evidence;
-3. **In progress:** close generation-addressed Proximum publication and consume
-   it through maintained Datahike, then compose the existing cold runtime owners
-   without opening admission early;
-4. implement exact retained-head restore and completion-derived undo through the
+3. **Complete:** schema-before-policy ordering and the existing cold runtime
+   composition now keep restore closed through exact completion and admit the
+   same prepared generation before autonomy (`15f97806`);
+4. **In progress:** close generation-addressed Proximum publication, migrate
+   retained pre-generation/native-`:main` shapes, consume the primitive through
+   maintained Datahike, and select exact public dependency artifacts;
+5. implement exact retained-head restore and completion-derived undo through the
    same transition, then pass crash cuts and multi-form partial-commit proof;
-5. graduate units 2 and 6 from bounded consumers into their complete acceptance
+6. graduate units 2 and 6 from bounded consumers into their complete acceptance
    matrices while starting unit 3/4 only from their settled contracts;
-6. complete canvas, Inspect/autocomplete, and independent artifact consumption
+7. complete canvas, Inspect/autocomplete, and independent artifact consumption
    in dependency order; and
-7. run unit 9's destructive, browser, performance, simultaneous-cluster, and
+8. run unit 9's destructive, browser, performance, simultaneous-cluster, and
    authorized legacy-worktree cleanup matrix last.
 
 The first ACME checkpoint after per-generation grace/trigger publication found
