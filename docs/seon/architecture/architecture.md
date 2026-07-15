@@ -31,24 +31,22 @@ processing, data-only) and a CLJS **agent and web runtime**, sharing
 the `.cljc` **schema** layer. The JVM does not carry a second application or
 renderer. The derived-state rule and transition table are CLJS (`seon.derive` /
 `seon.agent.loop`), reached from the device the same way every read is — through
-the database protocol against either a local replica or the authority's exact
-immutable database value.
+the database protocol against the authority's exact immutable database value.
 
 **Client/server is the shape.** Exactly one authority owns each database's
 ordered writes, immutable indexed values, and shared query computation. The JVM
 service may host many isolated databases and execute their independent reads and
 writes concurrently while preserving one write order per database. Agent
 processes exchange ordinary protocol data rather than rebuilding Datahike
-indexes in every process. A latency-sensitive host may retain one cluster-local
-replica; isolated agent children normally issue direct coordinate-addressed
-queries to the authority. The work fence is arbitrated at that authority. A
-replica or remote query attaches at one complete
-`{database-id, branch, commit-id, t}` coordinate, applies committed transactions
-in order, and repairs a gap without inventing state. Remote attachment,
-bootstrap, state transfer, backfill, cancellation, and retention are owned by a
-versioned database protocol whose semantics do not depend on JVM, Bun, Rust, or
-transport. The JVM/Datahike service is the first conforming implementation, not
-the definition of the interface.
+indexes in every process. Agent children and the web UI issue direct,
+coordinate-addressed requests to the authority; no Bun process retains a
+Datahike replica. The work fence is arbitrated at that authority. A remote
+request attaches at one complete `{database-id, branch, commit-id, t}`
+coordinate and resolves one immutable value before executing. Attachment,
+capabilities, paging, cancellation, selective interests, and retention are
+owned by a versioned database protocol whose semantics do not depend on JVM,
+Bun, Rust, or transport. The JVM/Datahike service is the first conforming
+implementation, not the definition of the interface.
 
 ## The core ideas
 
@@ -213,12 +211,12 @@ pod per active cluster, with three logical roles:
   bounded fair pools. Identical queries over the same database value share
   Datahike's result cache and, where proven, one in-flight computation. Data
   only; it never executes agent code or serves a second web application.
-- **Bun UI host** — the browser's single front door: a read-only replica or
-  direct authority query client + one
-  tx-listener that derives every agent’s **view** (including the root agent’s view
-  at `/`) from `:seon.agent/ctx`, holds the route table, and streams patches. The
-  streamer is a **role, not a process** — any process holding a replica + a
-  tx-listener can play it, so the UI-host is relocatable.
+- **Bun UI host** — the browser's single front door: a direct authority client
+  plus one database-scoped selective interest that derives every agent's
+  **view** (including the root agent's view at `/`) from
+  `:seon.agent/ctx`, holds the route table, and streams patches. The streamer is
+  a **role, not a process**—any protocol client with the capability and interest
+  can play it, so the UI host is relocatable without copying indexes.
 - **Agent execution** — active agents may run as separately supervised Bun
   children for real CPU, heap, cancellation, and crash isolation. They query the
   authority through ordinary data and never build one Datahike index copy per
@@ -235,15 +233,15 @@ the capabilities their platform supports.
 
 Seon's source repository is the release producer; a downstream product does
 not require a Seon source checkout. One release operation publishes a
-coordinated standalone database-server uberjar and a relocatable Node runtime +
+coordinated standalone database-server uberjar and a relocatable Bun runtime +
 consumer SDK. The runtime package contains the immutable pod closure, self-host
 bootstrap, bounded program-source corpus, static web assets, base config,
-production Node dependencies, semantic operator, and license/notices. The SDK
+production Bun runtime, semantic operator, and license/notices. The SDK
 contains the public CLJS source/macros and build entry needed to compile a
 consumer's namespaces into the same runtime.
 
 One compatibility manifest binds the Seon release/source revision, database
-protocol and config/SDK versions, Java/Node requirements, writer/runtime/
+protocol and config/SDK versions, Java/Bun requirements, writer/runtime/
 bootstrap/source/assets digests, maintained Datahike/Konserve dependency
 identities, npm lock, and license/SBOM metadata. A downstream package embeds
 that manifest plus its own source/dependency/config/brand digest. Build and
@@ -264,23 +262,19 @@ it does not patch Seon source or introduce a second runtime mechanism.
 
 Units are isolated in **compute** but share one **DB**, so "pull together data from
 all of them" = read the one DB they all write to — there are no silos to aggregate.
-The reactive loop, end to end: a browser action POSTs a fact → the writer commits and
-fans the tx out → the relevant unit's `listen!` fires, it computes and writes its
-**facts** back → the writer fans out → the Node UI-host's `listen!` fires,
-re-renders the WHOLE element (`view = f(db-at-coordinate)`) and pushes one gzip datastar
-**morph**, which idiomorph diffs client-side (a coalescing throttle collapses a tx
-burst into one morph). Two channels share the database protocol with different reliability:
-reads/writes/heavy calls ride a **request-reply RPC** (only *values* cross —
-`:db.fn/cas` is data and crosses fine, closures can't); the **tx feed** is a separate
-broadcast made lossless across reconnect by a full attachment/commit cursor and
-branch-local tx replay from the bitemporal log (this is the pod↔writer
-replication layer—the dropped event
-is the wake trigger, so it must not be lost; the browser stream needs no UI-side
-`since-t`, it just repaints `view = f(db)` on reconnect). **No agent code ever touches
-an SSE connection** — agents write facts; the UI-host derives and streams. The
-writer publishes raw committed-transaction frames and bounded replay pages; it
-does not persist query subscriptions, changed-row summaries, or another
-in-process invalidation bus.
+The reactive loop, end to end: a browser action submits a fact → the owning
+database writer commits → the UI host's database-scoped interest receives the
+new complete coordinate → one coordinate-pinned read batch derives the affected
+views → the Bun UI host streams whole-element Datastar **morphs**, which
+idiomorph diffs client-side. A coalescing throttle collapses a transaction burst
+into one derivation. Reads, writes, heavy capabilities, cancellation, and
+selective interests share one versioned database protocol; only ordinary values
+cross. `:db.fn/cas` is data and crosses fine, closures cannot. Interests are
+session-owned wakeups, not replicas or a global transaction broadcast; reconnect
+resolves the current coordinate and derives current truth instead of rebuilding
+an index from replay. **No agent code ever touches an SSE connection**—agents
+write facts; the UI host derives and streams. Loopback SSE is uncompressed by
+default; remote compression is an explicit measured transport option.
 
 ### Derive everything
 
@@ -396,10 +390,11 @@ routes: the root agent’s view (`/`), per-agent views (`/agent/{id}`), and apps
 (`/agent/{id}/app/{x}`). Routing is data via **reitit** over `:seon.route/*` datoms;
 `/call` is the one browser-action door and its gate authorizes registered
 agent-owned home callbacks (it is not lifecycle authorization). The **live
-channel is ours**: one tx-listener on a read-replica derives
-every view and streams it as a per-connection gzip whole-element **morph**
-(idiomorph-diffed client-side); reconnect just repaints `view = f(db)`, no UI-side
-`since-t` replay. The doc owns block/render/canvas/slot/layout, the page tree,
+channel is ours**: one database-scoped selective interest wakes a
+coordinate-pinned authority read that derives every affected view and streams
+whole-element **morphs** (idiomorph-diffed client-side); reconnect resolves the
+current coordinate and repaints current truth. No Bun process owns a Datahike
+replica or transaction replay cursor. The doc owns block/render/canvas/slot/layout, the page tree,
 reitit + the gate, the SSE channel, and the seed-copy + variadic `install!`/`remove!`
 override model. See [[ui]].
 

@@ -123,16 +123,13 @@ logical clusters at 1/2/4/8 clusters under identical workloads. It graduates
 only if it materially improves admitted-cluster density without worsening tail
 latency, isolation, cleanup, or cognitive complexity.
 
-The larger fixed cost is likely the JVM writer, not the Bun pod. A writer-family
-service capable of owning several database identities could remove one JVM per
-cluster while keeping one Bun child per active cluster. That topology requires a
-separate database-server contract and must preserve single-writer ordering,
-database identity, replay, branch, and failure isolation.
-Its source-grounded target and research order now live in
-[[../database-authority-mesh/roadmap]]. Bun children consume that one protocol;
-they do not create local Datahike caches, replicas, connection leases, or
-subscription mechanisms unless the database-authority research explicitly
-graduates such an owner.
+The approved [[../database-authority-mesh/roadmap]] removes the larger fixed JVM
+cost per cluster: one JVM initially hosts many database identities, with one
+ordered Datahike writer per connection and parallel immutable reads. Every
+active agent is a separate Bun child with a direct persistent database session;
+no Bun process owns a Datahike replica or copied indexes. Bun work consumes the
+settled capability and execute-many protocol and never creates a local cache,
+lease, coordinate, subscription, broker, or compatibility path.
 
 ## Removal laws
 
