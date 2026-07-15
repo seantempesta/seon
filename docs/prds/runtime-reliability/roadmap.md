@@ -72,6 +72,11 @@ budgets. Native `Bun.serve`, stream/static delivery, child processes, sockets,
 JSC diagnostics, bounded execution cells, test artifact reuse, shared writer
 families, on-demand pods, and `--smol` are separate measured cuts, not assumed
 benefits or permission to create parallel runtime mechanisms.
+The full-control removal plan is now carved as
+[[../bun-native-runtime-simplification/roadmap]]. It is a unit-9 implementation
+chunk after runtime/distribution identities settle, not permission to disturb
+the current unit-1 lifecycle checkpoint. Its cutover begins only under an
+explicit all-lane source and lifecycle freeze.
 
 Parallel work is deliberately bounded:
 

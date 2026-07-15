@@ -52,6 +52,11 @@ external Shadow owner caused its supervisor to drain it. JSC diagnostics,
 bounded execution cells, shared-writer families, and idle pods remain candidates
 rather than graduation evidence. The audit also records the independent UDS fragmentation cost in
 [[../../seon/issues/uds-fragment-accumulation-recopies-complete-prefix]].
+The removal-first implementation and exclusive source-freeze cutover are carved
+in [[../bun-native-runtime-simplification/roadmap]]. That successor assumes all
+other build/lifecycle lanes are paused, replaces every host boundary in one
+coordinated window, deletes the Node compatibility tail before the first final
+artifact, and returns here for the integrated browser/load/cluster graduation.
 
 The audit defines cold/warm sample classes, provisional guardrails and their
 post-unit-8 freeze rule, a content-addressed raw evidence schema, the ordered
