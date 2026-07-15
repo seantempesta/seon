@@ -65,3 +65,7 @@ scope rules must not claim it early from the mutable public ALS scope.
 A planner may reconcile non-lifecycle fields only inside its exact active
 delegated subtree and escalation episode. The grounded transition matrix is in
 [[docs/prds/agent-runtime-correctness/research/plan-transition-authority-audit-2026-07-15]].
+The unforgeable actor dependency and its first bounded proof are specified in
+[[docs/prds/agent-runtime-correctness/research/process-death-containment-audit-2026-07-15]];
+the plan slice must not claim actor-security graduation before that parent-owned
+task capability exists.

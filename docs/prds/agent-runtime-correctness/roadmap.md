@@ -36,6 +36,12 @@ guards; exact-minimum variadic calls receive a removable callable bridge; and
 the coverage denominator no longer hides async targets. The outer provider
 attempt cap now aborts the underlying SDK/fetch request and best-effort cancels
 a known DiffusionGemma remote job; run-lifecycle cancellation remains pending.
+A source-grounded process audit now selects a pod-owned disposable Node child
+as the smallest hard eval/provider task boundary. Worker threads are excluded
+because their engine limits omit external memory and can still abort the pod;
+plain child isolation still requires a measured OS/container ceiling, especially
+on macOS where `RLIMIT_AS` is unavailable. The first implementation slice is a
+non-production child/capability experiment, not an eval cutover.
 A successful plan step has no required verification evidence; cross-agent and
 address-message transitions can reopen or displace
 authored work; narration can echo runtime scaffolding; and arbitrary self-host
@@ -82,6 +88,10 @@ failures or errors).
   Malli, ClojureScript, plan-graph, and runtime-identity grounding; one
   actor/owner/scope authority; schema'd completion evidence; deterministic
   authored/addressed/cross-agent/retry/resume matrix; and ordered source slices.
+- [[research/process-death-containment-audit-2026-07-15]] — exact Node/CLJS/
+  Piscina grounding; pod-owned child and parent capability decision; actor,
+  receipt, cancellation, kill/reap, memory-backend, reconstruction, failure,
+  and ordered implementation laws.
 
 ## Ordered work
 
@@ -116,9 +126,14 @@ failures or errors).
    no live proof is claimed because the default cluster was down.
 5. Remove narration/scaffolding ambiguity by fixing the owning context/runtime
    data rather than rewriting replies.
-6. Measure and implement the smallest hard process boundary for arbitrary eval,
-   with deadlines, cancellation, memory ceilings, crash attribution, receipt
-   fencing, and reconstruction from committed facts.
+6. **Audit complete; experiment pending:** implement the non-production
+   pod-owned disposable-child experiment first. Prove child CPU/heap/external
+   memory death, a hard platform memory ceiling, capability refusal, prompt
+   kill/reap, reconstruction cost, and pod/writer health without moving
+   application eval. Then add durable started/terminal receipts and the
+   parent-stamped actor capability before provider and eval cutovers. Plan
+   lifecycle authority may land its pure decisions earlier, but cannot claim
+   an unforgeable actor while eval can replace `seon.db/with-agent` context.
 7. Integrate Inspect tasks/scorers that falsify each transition, then run paid
    or small-model trials only after deterministic runtime gates pass.
 

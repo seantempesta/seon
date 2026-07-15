@@ -34,6 +34,16 @@ dependency. Node worker `resourceLimits` bound isolate heaps, not necessarily
 process RSS or external/native allocation, so worker thread versus child process
 must be selected from measured hostile-allocation evidence rather than assumed.
 
+The 2026-07-15 exact-source decision is now recorded in
+[[docs/prds/agent-runtime-correctness/research/process-death-containment-audit-2026-07-15]].
+Node `v26.4.0` explicitly excludes `ArrayBuffer`/external data from worker
+`resourceLimits` and allows a global OOM to abort the process, so worker threads
+are rejected. The selected contract is a pod-owned, non-multiplexed disposable
+Node child with parent-owned receipts, capabilities, TERM/KILL/reap, and
+reconstruction. A child alone is not the hard numeric ceiling: Darwin rejected
+`RLIMIT_AS` in the audit, so hostile-memory graduation requires a measured
+per-child OS/container limit rather than V8 old-space flags or RSS polling.
+
 ## Owner
 
 The agent runtime's process-isolation and restart boundary, coordinated with
@@ -53,3 +63,6 @@ writer, or describe SCI as a security boundary.
   database state.
 - The default live cluster proves recovery from a killed or exhausted worker.
 - Inspect uses the same runtime contract rather than a bespoke drive path.
+- The child has no database connection, writer/feed, actor selector, or durable
+  state. Parent-side capability requests stamp actor/provenance and fence writes
+  from the committed task receipt and immutable database coordinate.
