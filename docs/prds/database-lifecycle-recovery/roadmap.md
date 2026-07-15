@@ -114,9 +114,19 @@ live error eid `3097` stored database
 `6a56e16e-47c6-5d2e-82c5-907822251e3a`, and t `536870963`; repro resolved t
 `536870963` and proved that the later error datom was absent from that value.
 
-Slice 1 remains open at the downstream boundary: frozen web caches/bookmarks
-still carry bare numeric basis values. Registry and native branch lifecycle
-also remain later ordered slices.
+The downstream coordinate cut is complete. Historical web selectors are
+all-or-none, resolve the retained containing commit, key frozen subscriptions
+by the full point, and echo it in the SSE response. Public transaction and
+reconcile success envelopes also return the complete point, while the hot
+config-view cache keys plain decoded data by the point and retains no database
+value. Focused web proof passes 36 tests/180 assertions, the combined
+turn/error/autocomplete/web gate passes 64/369, state/config/envelope passes
+48/235, and replica remains green at 17/93. Registry and native branch/restore
+lifecycle are the next Slice 1 boundary. After a full rebuild, a converged live
+reconcile returned exactly default head
+`54b5b7e7-51fb-3220-b079-81a81914d86f`/`:db`/
+`6a56e5fa-0caa-5574-b579-ba8be7a2ae85`/`536870971`; the config cache held
+that coordinate plus the decoded map and no database value.
 
 ## Research evidence
 

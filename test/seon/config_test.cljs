@@ -490,6 +490,13 @@
                         (is (= #{:my.kb :my.plan} (:seon.config/always (config/namespaces-policy))))
                         (is (= :allowlist (:seon.agent.web/policy (config/web-policy))))
                         (is (= ["a.example.com"] (:seon.agent.web/allowed-domains (config/web-policy))))
+                        (let [cache @@#'db/!config-view-cache]
+                          (is (= (db/head-coordinate @conn)
+                                 (:seon.db/cached-config-coordinate cache)))
+                          (is (= #{:seon.db/cached-config-coordinate
+                                   :seon.db/cached-config-view}
+                                 (set (keys cache)))
+                              "the hot config cache retains no database value"))
                         (finally (set! db/*conn* prev) (done)))))
                   (.catch (fn [e] (set! db/*conn* prev) (is false (str e)) (done)))))))
         (.catch (fn [e] (is false (str e)) (done))))))

@@ -32,7 +32,7 @@
 (schema/register! ::changed?  :boolean)
 (schema/register! ::operations [:int {:min 0}])
 (schema/register! ::attempts   [:int {:min 1}])
-(schema/register! ::basis-t    [:int {:min 0}])
+(schema/register! ::coordinate :seon.db.coordinate/coordinate)
 (schema/register! ::tx-data    [:vector :any])
 
 (schema/register!
@@ -51,7 +51,7 @@
     [::changed? ::changed?]
     [::operations ::operations]
     [::attempts ::attempts]
-    [::basis-t ::basis-t]]
+    [::coordinate ::coordinate]]
    [:map
     [::ok? [:= false]]
     [::error ::error]
@@ -372,7 +372,6 @@
       (loop [attempt 1]
         (let [db-value @resolved-conn
               expected-coordinate (db/head-coordinate db-value)
-              basis    (:seon.db.coordinate/t expected-coordinate)
               compiled (compile-reconcile-tx
                          db-value desired scope identity-attrs)]
           (if (false? (::ok? compiled))
@@ -383,7 +382,7 @@
                  ::changed? false
                  ::operations 0
                  ::attempts attempt
-                 ::basis-t basis}
+                 ::coordinate expected-coordinate}
                 (let [envelope
                       (await (db/transact!
                                {:seon.db/conn resolved-conn
@@ -395,7 +394,7 @@
                      ::changed? true
                      ::operations (count tx-data)
                      ::attempts attempt
-                     ::basis-t (:seon.db/tx envelope)}
+                     ::coordinate (:seon.db/coordinate envelope)}
 
                     (and (stale-coordinate-envelope? envelope)
                          (< attempt max-reconcile-attempts))

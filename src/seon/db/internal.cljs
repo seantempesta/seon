@@ -1742,6 +1742,7 @@
    eval value bloats every past-eval render).
 
      {:seon.db/ok? true
+      :seon.db/coordinate <complete committed database coordinate>
       :seon.db/tempids   <report :tempids>   ; LOAD-BEARING — tempid→eid
       :seon.db/tx        <max-tx of :db-after — the committed tx id>
       :seon.db/tx-count  <count of :tx-data>
@@ -1774,6 +1775,8 @@
         retracted (or (:datoms-retracted report)
                       (count (remove :added datoms)))]
     (cond-> {::db/ok?        true
+             ::db/coordinate (or (::coordinate/coordinate report)
+                                 (coordinate/resolved (:db-after report)))
              ::db/tempids    (or (:tempids report) {})
              ::db/tx         (:max-tx (:db-after report))
              ::db/tx-count   (count datoms)

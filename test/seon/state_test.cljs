@@ -164,6 +164,9 @@
                       (is (true? (:seon.state/ok? res)) "reconcile! success envelope")
                       (is (true? (:seon.state/changed? res)))
                       (is (pos? (:seon.state/operations res)))
+                      (is (= (db/head-coordinate db)
+                             (:seon.state/coordinate res))
+                          "a changed reconcile returns its complete point")
                       ;; UPDATE — existing managed row's scalar attr changes
                       (is (= "new" (label "keep1"))
                           "an existing managed row is UPDATED in place (upsert by identity)")
@@ -239,6 +242,8 @@
               (is (true? (:seon.state/ok? again)))
               (is (false? (:seon.state/changed? again)))
               (is (zero? (:seon.state/operations again)))
+              (is (= (db/head-coordinate @@!conn)
+                     (:seon.state/coordinate again)))
               (is (= @!before (db/basis-t @@!conn))
                   "converged reconcile submits no transaction")
               (done)))

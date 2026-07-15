@@ -616,8 +616,9 @@ critical eval/context gates, and live instrumentation census pass.
 - Finish one canonical `{database-id, branch, commit-id, t}` coordinate through
   reads, receipts, feeds, turns, errors, caches, and bookmarks. Protocol,
   replica, turn/autocomplete, error/reproduction, and historical web-feed
-  verticals are complete; the reconcile result and config-view cache are the
-  remaining downstream copies before native branch lifecycle work.
+  verticals are complete. Reconcile results now return the same point and the
+  hot config projection cache keys plain decoded data by that point without
+  retaining a database value. Native branch lifecycle is next.
 - Complete read-only as-of, writable same-database branches, quiesced
   restore/undo, branch-local blob behavior, and non-autonomous forensic reads
   through the maintained Datahike lifecycle. Do not create a Seon-specific
@@ -1642,9 +1643,9 @@ or discover archived behavior.
    `54b5b7e7-51fb-3220-b079-81a81914d86f`/`:db`/
    `6a56e443-1025-554f-80b6-e81e9793e0ca`/`536870968` returned a gzip
    Datastar frame with the exact `Seon-Database-Coordinate` header, while a
-   t-only request returned the structured 422. Remaining in this item: replace
-   the reconcile result's bare basis and the config-view cache's retained db
-   value with the canonical point.
+   t-only request returned the structured 422. The residual reconcile result
+   and config-view cache now use the same coordinate; focused state/config/
+   envelope proof passes 48/235 and replica proof remains green at 17/93.
 12. Finish read-only as-of, same-database writable branches, non-autonomous forensic
    runtimes, quiesced restore/undo, branch-local blobs, and crash recovery
    through the maintained Datahike lifecycle.

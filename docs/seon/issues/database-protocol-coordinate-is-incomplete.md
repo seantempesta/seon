@@ -76,6 +76,12 @@ its pre-record value while excluding the later capture datom. A rebuilt exact
 historical feed echoed default point `54b5b7e7-51fb-3220-b079-81a81914d86f`/
 `:db`/`6a56e443-1025-554f-80b6-e81e9793e0ca`/`536870968` and returned a frozen
 gzip Datastar frame; a t-only selector returned structured 422 instead of live
-data. The reconcile result, config-view cache, and native branch lifecycle still
-need the same coordinate; the issue remains open until those identity copies
-are removed.
+data. Public transaction and reconcile success envelopes now return the same
+complete point; the hot config-view cache keys its plain decoded projection by
+that point and retains no database value. Their focused proof passes 48/235 and
+replica proof remains green at 17/93. Native branch lifecycle and its same-t
+cross-branch acceptance case remain. Rebuilt live proof returned the exact
+default head `54b5b7e7-51fb-3220-b079-81a81914d86f`/`:db`/
+`6a56e5fa-0caa-5574-b579-ba8be7a2ae85`/`536870971` from converged reconcile
+and stored that point—not a db value—as the config cache key. The issue stays
+open until the native lineage boundary is complete.

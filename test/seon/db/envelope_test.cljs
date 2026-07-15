@@ -26,9 +26,16 @@
     [seon.agent.message]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
     [seon.db.internal :as internal]
     [seon.schema :as schema]
     [seon.test.async :refer [settle!]]))
+
+(def ^:private envelope-coordinate
+  {::coordinate/database-id #uuid "11111111-1111-4111-8111-111111111111"
+   ::coordinate/branch :db
+   ::coordinate/commit-id #uuid "22222222-2222-4222-8222-222222222222"
+   ::coordinate/t 9})
 
 ;; ---------------------------------------------------------------------------
 ;; Test schemas — isolated under this ns's keyword namespace.
@@ -647,26 +654,33 @@
     ;; retraction's flag was lost on the wire), but the sole writer
     ;; carried the honest split. Subtraction would give retracted 0.
     (let [report {:tempids {} :db-after {:max-tx 9}
+                  ::coordinate/coordinate envelope-coordinate
                   :datoms-added 2 :datoms-retracted 1
                   :tx-data [{:a :db/txInstant :added true}
                             {:a :seon.db/request-id :added true}
                             {:a ::name :added true}]}
           env    (internal/transact-success-envelope report false)]
       (is (= 2 (:seon.db/added env)) "added = the writer's count")
+      (is (= envelope-coordinate (:seon.db/coordinate env)))
       (is (= 1 (:seon.db/retracted env))
           "retracted = the writer's count, NOT (tx-count - added) = 0")
       (is (= 3 (:seon.db/tx-count env)))))
   (testing "local path — no writer counts, count the real :added flags"
-    (let [report {:tempids {} :db-after {:max-tx 5}
+    (let [point (assoc envelope-coordinate ::coordinate/t 5)
+          report {:tempids {} :db-after {:max-tx 5}
+                  ::coordinate/coordinate point
                   :tx-data [{:a :db/txInstant :added true}
                             {:a ::name :added false}]}
           env    (internal/transact-success-envelope report false)]
       (is (= 1 (:seon.db/added env)))
+      (is (= point (:seon.db/coordinate env)))
       (is (= 1 (:seon.db/retracted env))
           "retracted counted off the :added false datom, not subtracted")
       (is (= 2 (:seon.db/tx-count env)))))
   (testing "pure-add tx — every datom added, nothing retracted"
     (let [report {:tempids {} :db-after {:max-tx 3}
+                  ::coordinate/coordinate
+                  (assoc envelope-coordinate ::coordinate/t 3)
                   :tx-data [{:added true} {:added true} {:added true}]}
           env    (internal/transact-success-envelope report false)]
       (is (= 3 (:seon.db/added env)))

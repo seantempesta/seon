@@ -177,6 +177,7 @@
   [:or
    [:map
     [::ok?        [:= true]]
+    [::coordinate ::coordinate]
     [::tempids    [:map-of :any :int]]
     [::tx         :int]
     [::tx-count   :int]
@@ -2025,14 +2026,16 @@
 ;; falls back to the boot manifest resolve (the pre-conn sliver).
 ;; ---------------------------------------------------------------------------
 
-;; Single-slot memo keyed on the IMMUTABLE db value (identical?) — the config
+;; Single-slot memo keyed on the immutable head's canonical coordinate — the config
 ;; accessors are hot (value.cljs reads several caps per rendered node), and the
 ;; conn's head is stable across a synchronous render stretch, so this collapses
-;; those reads to ONE entity lookup. Self-invalidating: a new db value (a
-;; transact) recomputes. NB the key is the LIVE `@*conn*` head, NOT the turn's
-;; frozen db (the zero-arg accessors carry no db) — a transact landing mid-turn
-;; means later accessor reads see the newer singleton; acceptable for dials.
-(defonce ^:private !config-view-cache (atom {:db nil :view nil}))
+;; those reads to ONE entity lookup. The cache retains no database value and
+;; self-invalidates whenever database, branch, commit, or t changes. The key is
+;; the LIVE `@*conn*` head, not the turn's frozen db (the zero-arg accessors
+;; carry no db) — a transact landing mid-turn means later accessor reads see the
+;; newer singleton; acceptable for dials.
+(defonce ^:private !config-view-cache
+  (atom {::cached-config-coordinate nil ::cached-config-view nil}))
 
 (defn- read-config-singleton
   "Decode the `:seon.config` singleton off `db`, or nil when unseeded."
@@ -2049,9 +2052,12 @@
   (fn config-singleton-view []
     (when *conn*
       (let [db @*conn*
+            coordinate (head-coordinate db)
             c  @!config-view-cache]
-        (if (identical? db (:db c))
-          (:view c)
+        (if (= coordinate (::cached-config-coordinate c))
+          (::cached-config-view c)
           (let [view (read-config-singleton db)]
-            (reset! !config-view-cache {:db db :view view})
+            (reset! !config-view-cache
+                    {::cached-config-coordinate coordinate
+                     ::cached-config-view view})
             view))))))

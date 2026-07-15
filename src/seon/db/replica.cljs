@@ -527,6 +527,7 @@
                            (::protocol/generated-entity-ids resp)
                            report
                            (cond-> {:db-after db
+                                    ::coordinate/coordinate transaction-coordinate
                                     :tx-data  (transaction-datoms->datoms
                                                (::protocol/transaction-data resp))
                                     :tempids  (or tempids {})
