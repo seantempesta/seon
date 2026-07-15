@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, flow]
 ---
@@ -54,3 +54,20 @@ must not gain a second undo meaning.
   admin, cold reconstruction, completion, admission, retry, and crash-cut
   mechanisms as restore. There is no reverse-datom compiler, undo protocol, or
   second state machine.
+
+## Resolution
+
+Resolved by commit `6351790a`. The existing
+`seon.dev.restore/derive-intent` boundary now requires undo to consume one
+frozen current-main/branch-roster/completion observation and select exactly one
+completion by id or retained undo branch. It derives the target only from that
+completion's database id, undo branch, source commit, and source transaction,
+proves the live retained head, preserves the actual latest main as redo, and
+rejects arbitrary branches, crossed lineage, ambiguous or consumed
+completions, advanced heads, stale rosters, and occupied new reserved names.
+
+Focused proof passes `seon.dev.restore-test` at 10 tests/71 assertions. The
+unchanged intent/admin consumer passes `seon.db.restore-admin-test` at 9 tests/
+53 assertions. The remaining Proximum/Datahike dependency cutover and
+destructive operator proof are lifecycle-roadmap work, not a residual bypass
+of this pure selector.

@@ -21,14 +21,24 @@ provenance, and fact-derived retry. Current restore composition and the
 Proximum/Datahike secondary-index repair remain hard predecessors of destructive
 proof.
 
-One downstream semantic gap is concrete: `seon.dev.restore/derive-intent`
-validates an exact non-main target descriptor but treats `restore` and `undo`
-identically apart from the operation value and plan digest. No current owner
-derives an undo target from a prior `:seon.db.restore/*` completion fact or
-proves that the named retained branch still equals the completion-derived
-coordinate. Until that selector exists, an arbitrary retained branch can be
-labeled `undo`. This is recorded in
-[[../../../seon/issues/undo-target-is-not-bound-to-retained-completion]].
+Commit `6351790a` closes the pure retained-head selection gap in the existing
+`seon.dev.restore/derive-intent` boundary. Ordinary restore retains its exact
+non-main descriptor contract. Undo additionally requires one frozen main/head/
+roster/completion observation and an id-or-retained-branch selector. The
+function resolves exactly one completion, derives `T2` only from its database
+id, undo branch, source commit, and source `t`, proves that head still exists,
+and derives `U2` from the actual latest observed main. It rejects arbitrary
+valid branches, crossed databases or lineage, duplicate claims, a previously
+consumed completion, advanced heads, stale rosters, and pre-existing reserved
+branches before producing the unchanged immutable intent shape. No effect path
+or public restore command was added.
+
+Focused Babashka proof passes 10 tests/71 assertions. The adjacent retained
+writer-admin consumer passes 9 tests/53 assertions, proving that restore and
+completion-bound undo still feed the same intent/admin/command mechanism. This
+pure proof does not authorize destructive use: the selected Proximum/Datahike
+force-secondary dependency cutover and integrated restore proof remain hard
+predecessors.
 
 ## Dependency ledger
 
@@ -38,7 +48,7 @@ labeled `undo`. This is recorded in
 | Konserve | `org.replikativ/konserve` `df6818d43ea3363a808cd051c0d68917f1b987a9` | `reference-code/konserve/src/konserve/core.cljc` at `multi-assoc`; `protocols.cljc` | Ordered leaves-before-root publication is crash-safe, but no operation joins external intent, blobs, secondary storage, and a Datahike head atomically. Durable intent plus derived retry remains necessary. |
 | Proximum | released `0.1.25`, source tag `5f7142d532aa173071f5651af91414b983d7320f` | `deps.edn`; `reference-code/proximum/src/proximum/{versioning,writing,vectors}.clj` | Released branch creation rejects an existing destination and branch-derived mmap identity is not a safe force replacement. The guarded existing-destination primitive and Datahike integration must land before main force can graduate with secondary roots. |
 | Exact Seon coordinates | current `seon.db.coordinate` and writer registry | `src/seon/db/registry.clj:694-830`, `:952-1087` | A source is branchable only when its requested `t` equals the containing commit head. Registry create/adopt and restore admin fence complete coordinates, roster, primary data, secondary roots, and release. |
-| Immutable restore intent | current `seon.dev.restore` | `src/seon/dev/restore.clj:164-393`; `test/seon/dev/restore_test.clj` | Intent freezes exact main and target descriptors, expected complete roster, new reserved branches, artifact/protocol/generations, blob-set digest, and preserve-only overlay policy. It stores no phase. |
+| Immutable restore intent | current `seon.dev.restore` | `src/seon/dev/restore.clj`; `test/seon/dev/restore_test.clj`; commit `6351790a` | Intent freezes exact main and target descriptors, expected complete roster, new reserved branches, artifact/protocol/generations, blob-set digest, and preserve-only overlay policy. Undo selection compiles one exact prior completion observation into that same shape; it stores no phase or copied completion proof. |
 | Blob materialization | current `my.blob` internal restore boundary | `src/my/blob.cljs`; [[restore-blob-and-cold-reconstruction-contract-2026-07-15]] | Reachable hashes come from exact `T`, target lookup is overlay-first, and verified bytes become directory-durable in the append-only main archive before force. |
 | Completion and admission | current `seon.db.restore` plus split admission | `src/seon/db/restore.cljs`; `src/seon/runtime/admission.cljs`; [[restore-completion-transaction-coordinate-2026-07-15]] | Completion is one root/boot-provenanced transaction before exact-generation admission. Equal retry resolves its original transaction coordinate without a write. |
 
@@ -106,7 +116,7 @@ No `undo` protocol or reverse-datom compiler is needed.
 ## Exact retained-target selector
 
 The restore planner accepts an explicitly selected retained branch at its live
-exact head. The undo planner is stricter and must derive its target from durable
+exact head. The undo planner is stricter and derives its target from durable
 completion data:
 
 1. Select one completed restore id, or select an undo branch and resolve the
@@ -225,10 +235,13 @@ waits for a source freeze and the full database-lifecycle graduation gate.
    exact admin/blob evidence, attach fresh with writes closed, preserve-only
    reconstruct, record completion, admit the exact generation, prove readiness,
    and durably remove intent.
-3. Implement the retained-head planner/operator for ordinary restore against
-   the settled composition and exact branch-status observations.
-4. Implement the undo selector described above as a stricter producer of the
-   same intent. Do not fork the state machine or writer operation.
+3. The pure retained-head planner for ordinary restore is complete; compose its
+   exact branch-status observations into the operator only after the selected
+   dependency cutover admits destructive proof.
+4. The pure undo selector is complete at `6351790a` as a stricter producer of
+   the same intent. The later operator must query its frozen completion/head
+   observation through the existing writer boundary and may not fork the state
+   machine or writer operation.
 5. Run focused crash cuts, isolated destructive restore/undo, then the
    coordinated default source-frozen REPL/datom/MCP/browser/config-free restart
    checkpoint.

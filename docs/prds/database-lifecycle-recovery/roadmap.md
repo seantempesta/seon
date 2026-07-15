@@ -315,12 +315,21 @@ The exact inverse contract is grounded at
 [[research/retained-head-restore-undo-contract-audit-2026-07-15]]. Undo is not a
 reverse-datom operation: it retains the actual current main head as a redo
 point, selects the prior completion's exact retained undo head, and reuses the
-same force/reconstruction/completion transition. Current intent derivation can
-still label any structurally valid retained target as `undo`; the future
-operator selector must bind it to one prior completion's database id, undo
-branch, source commit, and source transaction before intent publication. That
-gap is tracked at
-[[../../seon/issues/undo-target-is-not-bound-to-retained-completion]].
+same force/reconstruction/completion transition. Commit `6351790a` closes the
+pure selector gap inside the one existing `seon.dev.restore/derive-intent`
+boundary. Undo now requires one frozen current-main/branch-roster/completion
+observation, resolves exactly one completion by id or recorded undo branch,
+derives the retained target only from that completion's database id, undo
+branch, source commit, and source transaction, and proves its exact live head.
+It freezes the actual latest main as the new redo point and rejects arbitrary
+valid branches, crossed database/lineage, duplicate or consumed completions,
+advanced heads, stale rosters, and occupied reserved branches before intent
+publication. The selection evidence compiles into the unchanged immutable
+intent and existing fact-derived command mechanism; no effect path or public
+destructive command was added. Focused pure proof passes 10 tests/71 assertions
+and adjacent writer-admin proof passes 9/53. The remaining ordered predecessor
+is the selected Proximum/Datahike force-secondary dependency cutover followed
+by integrated destructive restore/undo proof.
 
 The first operator-only restore slice now owns one closed immutable intent and
 derives its next command from the current main coordinate, an explicitly
