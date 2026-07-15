@@ -29,6 +29,17 @@ database value. Lazy unit activation also invokes its producer outside read
 capture and rebinds with the inactive subscription's old dependencies, so a
 newly open detail can miss a change read only by that producer.
 
+The complete database-coordinate prerequisite has since landed on committed
+HEAD. `seon.db.coordinate`, writer responses/events, replay pages, replica
+progress, historical lookup, and web selectors now carry the closed
+`{database-id, branch, commit-id, t}` value. Reactive-unit implementation no
+longer waits for a replica commit id. Native branch operations, quiesced
+restart, and post-commit runtime admission remain lifecycle work, but the pure
+unit transition can consume the canonical coordinate now and proceed in
+parallel. [[research/reactive-unit-database-browser-reconciliation-2026-07-14]]
+defines that boundary and keeps the database browser a consumer of the unit
+lifecycle rather than a second cache/listener/activation mechanism.
+
 Completed earlier audits establish two constraints: active-unit reuse needs no
 new library, and a Node `lru-cache` layer is justified only by measured reopen
 reuse. [[research/reactive-render-source-audit-2026-07-14]] reconciles those
@@ -36,6 +47,17 @@ reports with current owners, tests, dependency sources, and the live default
 baseline. It also records that the selected ClojureScript `1.12.145` source is
 not yet mirrored exactly: the current reference checkout identifies itself as
 `1.12.41`, so analyzer-sensitive implementation must close that grounding gap.
+
+The first pure lifecycle kernel is now implemented in `seon.web.view-unit`.
+It attaches equivalent consumers to one retained derivation, invokes producers
+with the exact supplied immutable database value, captures and eagerly replays
+every distinct runtime observation, suppresses equal results and serialized
+output, and removes the complete unit after final close. Retained state is
+closed plain data containing no database value or producer. A focused
+synthetic debug-shaped unit proof passes 1 test/17 assertions. This is the
+dependency-ready kernel only: `seon.web.datastar` and the page-specific
+transitions do not yet consume it, so the production activation bug and false
+declared-attribute veto remain open until the next cutover slice.
 
 ## Research evidence
 
@@ -52,18 +74,24 @@ not yet mirrored exactly: the current reference checkout identifies itself as
   reuse and optional bounded recent-cache decision.
 - [[research/root-reactive-system-view-audit-2026-07-14]] — root layout,
   reactive correctness, and browser acceptance evidence.
+- [[research/reactive-unit-database-browser-reconciliation-2026-07-14]] —
+  current coordinate reconciliation, smallest dependency-ready unit slice,
+  database-browser consumer boundary, and falsifiable proof.
 
 ## Ordered work
 
-1. Define the fully namespaced unit coordinate and pure lifecycle data for
-   activate, observe, index, invalidate, render, serialize, suppress, and close.
-2. Make runtime-observed database read requests derive the conservative reverse
-   candidate index; remove declared-attribute vetoes and page-specific routing.
-3. Retain one active unit's plain inputs, renderer/source digest, captured read
-   results, and last serialized output until its final consumer closes.
+1. **Kernel complete:** `seon.web.view-unit` owns pure attach, observed render,
+   replay-all transition, output suppression, detach, and final release, proven
+   with one lazy debug-shaped unit. Next, connect one real lazy debug descriptor
+   to this kernel without adding another registry.
+2. Move agent/root onto the same lifecycle; remove declared-attribute vetoes and
+   the page-specific dependency map rather than adding an interim routing path.
+3. Derive the conservative reverse candidate index from runtime-observed
+   database read requests. Exact result equality remains the final authority.
 4. Normalize equivalent subscribers across tabs and prove single execution.
    Add recent-output LRU reuse only if profiling crosses its acceptance gate.
-5. Move root, agent, canvas/context, debug, and data detail bodies onto the one
+5. Harden the database navigator and coordinate-bound cursor as consumers, then
+   move root, agent, canvas/context, debug, and data detail bodies onto the one
    lifecycle and delete every superseded transition/feed/cache path.
 6. Attribute query, SCI, Hiccup, serialization, gzip, and drain cost; mechanize
    omission and latency evidence for closed, unchanged, and changed units.
