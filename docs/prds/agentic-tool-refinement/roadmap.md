@@ -193,30 +193,37 @@ requires both typed schema registrations (including unique identity), all five
 records in one transaction, a later strict-threshold query, and separate human
 and completion reports containing 327. The focused freeze/oracle/native-run
 gate passes 151 tests. A diagnostic sample may now run, but formal P0b
-acceptance still needs bounded retained proof that the reported value came from
-the actual query result; that remaining contract is recorded in
+acceptance still needs the committed bounded proof to pass in an admitted live
+run and survive native-log read-back. That remaining proof is recorded in
 [[../../seon/issues/database-workflow-scorer-lacks-query-result-evidence]].
 
-That evidence contract is now source-grounded. The current scorer can pass
-structurally correct eval source with no query result at all, and a
-`db/transact!` error envelope still looks like eval-level success. The repair
-extends the existing AsyncLocalStorage read-capture mechanism into ordered
-per-eval database-operation observations, persists full normalized evidence
-through the existing blob tier, projects bounded descriptors from the final
-immutable database value, and makes the one scorer fail closed. It is global
-database observability, not a benchmark hook. Exact falsifiers and ownership
-are in [[research/database-query-result-evidence-audit-2026-07-15]].
+That evidence contract is implemented through the existing global database
+observer rather than a benchmark hook. Awaited evals retain ordered normalized
+read and transaction observations; nonempty vectors are serialized as stable,
+round-trippable EDN through `my.blob` and attached to the eval in its accepted
+transaction. The composition door derives request eval membership and order
+from the final immutable database value, validates the blob and operation
+coordinates, and exposes only bounded tagged JSON or a bounded failure status.
+The generated database scorer now requires the exact successful transaction
+and later scalar query result from the request's turns. Three focused CLJS
+selectors pass seventeen assertions and the focused Inspect modules pass
+fifty-three tests. The admitted live sample and native-log read-back remain the
+graduation proof. Exact falsifiers and ownership are in
+[[research/database-query-result-evidence-audit-2026-07-15]].
 
 Model transport evidence has the same intent-versus-execution distinction. A
-final coordinate can reconstruct final database intent but cannot prove any
-provider attempt; the OpenAI adapter currently rereads reactive config during
-one request, retries retain only a count, and response model/fingerprint fields
-are discarded. `seon.ai/resolved-config` now derives endpoint, adapter timeout,
-credential-source name, diffusion backend, and extra-body digest with per-key
-provenance from any immutable database value. A-after-B historical resolution
-passes 11 tests and 46 assertions without storing a resolved snapshot. The
-next boundary freezes that value once per attempt, then persists ordered
-bounded attempt facts. Grounding and falsifiers are in
+final coordinate can reconstruct final database intent but cannot prove an
+earlier provider attempt. `seon.ai/resolved-config` derives endpoint, adapter
+timeout, credential-source name, diffusion backend, and extra-body digest with
+per-key provenance from any immutable database value. Each request attempt now
+captures one such value and coordinate before dispatch, passes that immutable
+resolution through the adapter, and persists an ordered turn-owned component
+fact with request identity, effective timeouts, outcome, and bounded response
+identity. Retries may observe a later database value, but no attempt can mix
+two configurations. Historical and split-read tests cover that distinction.
+The remaining boundary makes the evidence bounds database-configured within
+the same immutable resolution and projects the facts through the composition
+door into fail-closed Inspect admission. Grounding and falsifiers are in
 [[research/model-transport-evidence-audit-2026-07-15]].
 
 A subsequent purity probe found that historical result-handle display depends
@@ -514,27 +521,32 @@ readiness from this paragraph.
   reachability/eligibility problems from namespace movement: root's configured
   orchestration namespace exposes no eligible functions, `my.ns` and
   `my.skills` have no home edge, ACME requires empty fixture namespaces instead
-  of its real downstream tools, sample-domain `my.kb` functions pollute the
-  standing surface, and filesystem presents overlapping generations. Those
-  policy changes wait for controlled falsifiers. The audit also found a second
-  global correctness defect: four one-argument canvas controls render returned
-  Hiccup as a phantom positional arity. That defect is recorded separately and
-  must close before the ACME contract replay.
+  of its real downstream tools, sample-domain `my.kb` functions polluted the
+  standing surface, and filesystem presents overlapping generations. Positive
+  eligibility is now removed from the eleven sample-domain functions while
+  their public source and schemas remain inspectable; exactly `remember` and
+  `recall` remain general standing knowledge tools. The audit also found a
+  second global correctness defect: four one-argument canvas controls rendered
+  returned Hiccup as a phantom positional arity. The shared source-arglist
+  indexer is repaired, and the focused gate proves those four controls expose
+  exactly one callable input. Reachability and filesystem policy changes wait
+  for their controlled falsifiers.
 - One OpenAI-compatible attempt now consumes one immutable resolved config
   value. A fake provider call captured config A, transacted ambient config B,
   and retained A for endpoint, credential source, model, sampling, thinking,
-  timeout, extra-body digest, and secret-free response evidence. The exact
-  selector passes sixteen assertions. The resolver helper preserves credential
-  absence through a one-arity call rather than `[:maybe ...]`. Ordered durable
-  per-attempt component facts and the web/Inspect projection remain open.
-- One awaited database-operation observer now spans eval plus auto-await and
+  timeout, extra-body digest, and secret-free response evidence. Ordered
+  turn-owned attempt components retain coordinates, request identity,
+  effective adapter and outer timeouts, outcomes, and present provider response
+  identity; zero temperature and false thinking remain present values. The
+  database-configured cap integration and web/Inspect projection remain open.
+- One awaited database-operation observer spans eval plus auto-await and
   retains ordered normalized reads and transactions with explicit position,
-  success, source classification, and complete coordinate. Failed transaction
-  envelopes remain operation failures even when the eval succeeds; concurrent
-  fibers are isolated and no-operation evals preserve absence. The focused
-  read observer passes 119 assertions and the eval handoff selector passes
-  seven. Canonical blob persistence, atomic eval attachment, door projection,
-  and fail-closed Inspect scoring remain open.
+  success, source classification, and complete coordinate. Canonical blob
+  persistence and atomic eval attachment preserve absence for no-operation
+  evals. The final-snapshot door projection is bounded and lossless for
+  supported EDN, and the generated scorer fails closed without the exact
+  transaction and later query result. The admitted live sample is the one
+  remaining proof for this contract.
 - Failed eval diagnostics now retain the database-configured 1,500-character
   component cap under no flag, `full?`, escape-clipping, or both. Successful
   authored/citable content keeps its existing release behavior. A 100K
@@ -563,44 +575,49 @@ readiness from this paragraph.
   fresh agents/clusters change other database facts, while applying a manifest
   does not rewrite an existing agent's copied context tree. The paired prompt
   experiment waits for the ownership-fenced fork/lease boundary.
-- Multi-form execution order is not yet a durable database fact. The turn's
-  `:seon.agent.turn/evals` connection is cardinality-many, while projected eval
-  evidence has neither originating turn identity nor a per-turn execution
-  position. Timestamp/id sorting is deterministic presentation, not execution
-  truth. This is recorded in
+- Multi-form execution position is not yet an explicit durable database fact.
+  The final-snapshot evidence now carries originating turn identity and orders
+  separate eval entities by their identity-datom transaction, but the contract
+  for several forms emitted and processed within one model reply remains
+  implicit. This is recorded in
   [[../../seon/issues/multi-form-eval-order-is-not-durable]] and belongs to
   P4 after the first accepted serial slice unless it directly invalidates the
   active sample.
-- Formal P0 evidence still cannot prove the actual provider attempt or database
-  answer. Immutable OpenAI request resolution and process-local per-eval
-  operation capture are settled substrates, but attempt component facts and
-  operation-vector blob attachment are not yet queryable from the terminal
-  database snapshot. Web/Inspect must consume those persisted facts losslessly;
-  neither may reconstruct them from final config or rendered transcript text.
+- Formal P0 evidence can now prove the database answer offline from persisted
+  final-snapshot facts, but its admitted live read-back is still pending. The
+  actual provider attempts are persisted as ordered component facts; their
+  immutable database-configured bounds and web/Inspect projection must close
+  before a formal capability score. Neither consumer may reconstruct an
+  attempt from final config or rendered transcript text.
 
 ### Exact next order
 
 1. Read `git status --short` and `bin/acme status --edn`. If another owner still
    has dirty runtime inputs, do documentation or read-only source grounding
    only; do not restart, stage, or repair their files.
-2. When the shared runtime edits converge, restart only ACME and prove a ready,
+2. Finish and review the database-configured model-evidence caps and the
+   model-attempt web/Inspect projection. Do not restart while either source
+   owner or another admitted runtime owner remains dirty.
+3. When the shared runtime edits converge, restart only ACME and prove a ready,
    ownership-coherent artifact plus clean admitted source.
-3. Query the rebuilt immutable database projection and require the stored
+4. Query the rebuilt immutable database projection and require the stored
    `query` and `transact!` contracts to carry `:seon.db/request` with no `&` or
    private accumulator name. Require `my.canvas/button`, `input`, `select`, and
    `toggle` to expose exactly one callable alternative and no implementation
-   body data.
-4. Replay `database_workflow-seed1-000` through common source admission, exact
-   operator snapshot, and mandatory finalization. Compare its prompt, reply,
-   eval evidence, database coordinate, model identity, and classification with
-   the admitted baseline.
-5. Classify any narration repetition using the established raw-reply → parser
+   body data. Require the model-attempt and operation-evidence attributes to be
+   installed and queryable.
+5. Replay `database_workflow-seed1-000` through common source admission, exact
+   operator snapshot, and mandatory finalization. Read back the native log and
+   compare its prompt, reply, eval/database-operation evidence, attempt facts,
+   database coordinate, model identity, and classification with the admitted
+   baseline.
+6. Classify any narration repetition using the established raw-reply → parser
    → stored-eval → transcript trace; do not mutate prompt policy from one
    uncontrolled sample.
-6. Close the bounded query-result and model-transport evidence contracts, then
-   run the remaining nine frozen members serially and inspect every `.eval`.
+7. With both live evidence contracts closed, run the remaining nine frozen
+   members serially and inspect every `.eval`.
    Only after P0b is recorded may the model matrix or P3 comparison begin.
-7. After P0b, repair and prove durable multi-form order before the P4 batch /
+8. After P0b, repair and prove durable multi-form order before the P4 batch /
    stream comparison. Do not substitute timestamps, random ids, Python list
    position, or synthetic Inspect tool calls for a database event fact.
 
