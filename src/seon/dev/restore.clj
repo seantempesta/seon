@@ -25,7 +25,14 @@
 (schema/register! ::overlay-selection [:= :seon.dev.restore.overlay/preserve])
 (schema/register! ::core-overlay-selection ::overlay-selection)
 (schema/register! ::config-overlay-selection ::overlay-selection)
-(schema/register! ::writer-artifact-digest ::digest)
+(schema/register!
+ ::artifact-identity
+ [:map {:closed true}
+  [:seon.dev.artifact/application-digest ::digest]
+  [:seon.dev.artifact/client-digest ::digest]
+  [:seon.dev.artifact/bootstrap-digest ::digest]
+  [:seon.dev.artifact/css-digest ::digest]
+  [:seon.dev.artifact/writer-digest ::digest]])
 (schema/register! ::cluster-dir ::launch/cluster-dir)
 (schema/register! ::intent-path ::launch/path)
 (schema/register! ::branch-heads [:map-of :keyword ::coordinate/coordinate])
@@ -74,13 +81,33 @@
   [::selected-target-descriptor ::selected-target-descriptor]
   [::expected-branch-roster ::expected-branch-roster]
   [::protocol-version ::protocol-version]
-  [::writer-artifact-digest ::writer-artifact-digest]
+  [::artifact-identity ::artifact-identity]
   [::consumer-generations ::consumer-generations]
   [::core-overlay-selection ::core-overlay-selection]
   [::config-overlay-selection ::config-overlay-selection]
   [::reachable-hash-digest ::reachable-hash-digest]
   [::retained-head-observation {:optional true} ::retained-head-observation]
   [::completion-selector {:optional true} ::completion-selector]])
+
+(schema/register!
+ ::intent-payload
+ [:map {:closed true}
+  [::intent-version ::intent-version]
+  [::intent-id ::intent-id]
+  [::operation ::operation]
+  [::pre-restore-main-descriptor ::pre-restore-main-descriptor]
+  [::selected-target-descriptor ::selected-target-descriptor]
+  [::undo-branch ::undo-branch]
+  [::prepared-target-branch ::prepared-target-branch]
+  [::undo-coordinate ::undo-coordinate]
+  [::prepared-target-coordinate ::prepared-target-coordinate]
+  [::expected-branch-roster ::expected-branch-roster]
+  [::protocol-version ::protocol-version]
+  [::artifact-identity ::artifact-identity]
+  [::consumer-generations ::consumer-generations]
+  [::core-overlay-selection ::core-overlay-selection]
+  [::config-overlay-selection ::config-overlay-selection]
+  [::reachable-hash-digest ::reachable-hash-digest]])
 
 (schema/register!
  ::intent
@@ -96,12 +123,29 @@
   [::prepared-target-coordinate ::prepared-target-coordinate]
   [::expected-branch-roster ::expected-branch-roster]
   [::protocol-version ::protocol-version]
-  [::writer-artifact-digest ::writer-artifact-digest]
+  [::artifact-identity ::artifact-identity]
   [::consumer-generations ::consumer-generations]
   [::core-overlay-selection ::core-overlay-selection]
   [::config-overlay-selection ::config-overlay-selection]
   [::reachable-hash-digest ::reachable-hash-digest]
   [::plan-digest ::plan-digest]])
+
+(schema/register! ::canonical-bytes 'bytes?)
+(schema/register!
+ ::confirmation-action
+ [:enum :seon.dev.restore.confirmation/apply
+  :seon.dev.restore.confirmation/abort])
+(schema/register! ::confirmation-text [:string {:min 1 :max 512}])
+(schema/register!
+ ::plan
+ [:map {:closed true}
+  [::intent ::intent]
+  [::confirmation-text ::confirmation-text]])
+(schema/register!
+ ::confirmation-request
+ [:map {:closed true}
+  [::intent ::intent]
+  [::confirmation-action ::confirmation-action]])
 
 (schema/register!
  ::observation
@@ -168,6 +212,12 @@
         (reserved-branch :undo intent-id)
         (reserved-branch :target intent-id)))
 
+(defn writer-artifact-digest
+  "Writer digest derived from one frozen runtime artifact identity."
+  {:malli/schema [:=> [:cat ::artifact-identity] ::digest]}
+  [artifact-identity]
+  (:seon.dev.artifact/writer-digest artifact-identity))
+
 (defn- descriptor-coordinate [descriptor]
   (get-in descriptor [::launch/database ::coordinate/coordinate]))
 
@@ -178,7 +228,7 @@
    ::selected-target-descriptor
    ::expected-branch-roster
    ::protocol-version
-   ::writer-artifact-digest
+   ::artifact-identity
    ::consumer-generations
    ::core-overlay-selection
    ::config-overlay-selection
@@ -296,30 +346,86 @@
          {:seon.db.restore/id completion-id
           :seon.dev.restore/reused-by-completion-ids reused-by})))))
 
-(defn- canonical-digest-data [value]
+(defn- compare-byte-arrays [left right]
+  (let [left-length (alength ^bytes left)
+        right-length (alength ^bytes right)
+        shared-length (min left-length right-length)]
+    (loop [index 0]
+      (if (= index shared-length)
+        (compare left-length right-length)
+        (let [comparison
+              (compare (bit-and 0xff (aget ^bytes left index))
+                       (bit-and 0xff (aget ^bytes right index)))]
+          (if (zero? comparison)
+            (recur (inc index))
+            comparison))))))
+
+(declare canonical-tree)
+
+(defn- canonical-tree-bytes [tree]
+  (.getBytes (pr-str tree) StandardCharsets/UTF_8))
+
+(defn- compare-canonical-trees [left right]
+  (compare-byte-arrays (canonical-tree-bytes left)
+                       (canonical-tree-bytes right)))
+
+(defn- unsupported-canonical-value! [value]
+  (throw
+   (ex-info "The restore intent contains an unsupported canonical value."
+            {:seon.dev.restore/canonical-value value
+             :seon.dev.restore/canonical-class
+             (some-> value class str)
+             :seon.error/kind
+             :seon.dev.restore.error/unsupported-canonical-value})))
+
+(defn- canonical-tree [value]
   (cond
+    (nil? value) [:nil]
+    (boolean? value) [:boolean (if value "true" "false")]
+    (string? value) [:string value]
+    (keyword? value) [:keyword (or (namespace value) "") (name value)]
+    (uuid? value) [:uuid (str value)]
+    (integer? value) [:integer (str value)]
+
+    (record? value) (unsupported-canonical-value! value)
+
     (map? value)
     [:map (->> value
-               (map (fn [[key item]] [(canonical-digest-data key)
-                                      (canonical-digest-data item)]))
-               (sort-by pr-str)
+               (map (fn [[key item]] [(canonical-tree key)
+                                      (canonical-tree item)]))
+               (sort-by first compare-canonical-trees)
                vec)]
 
     (set? value)
-    [:set (->> value (map canonical-digest-data) (sort-by pr-str) vec)]
+    [:set (->> value
+               (map canonical-tree)
+               (sort-by identity compare-canonical-trees)
+               vec)]
 
-    (vector? value) [:vector (mapv canonical-digest-data value)]
-    (sequential? value) [:sequence (mapv canonical-digest-data value)]
-    :else value))
+    (vector? value) [:vector (mapv canonical-tree value)]
+    :else (unsupported-canonical-value! value)))
 
-(defn- sha-256 [value]
-  (let [digest (MessageDigest/getInstance "SHA-256")
-        bytes (.getBytes (pr-str (canonical-digest-data value))
-                         StandardCharsets/UTF_8)]
+(defn canonical-intent-bytes
+  "Encode one digest-free intent as a domain-separated canonical tree."
+  {:malli/schema [:=> [:cat ::intent-payload] ::canonical-bytes]}
+  [intent-payload]
+  (validate! ::intent-payload intent-payload
+             "The digest-free restore intent is invalid.")
+  (canonical-tree-bytes
+   [:seon.dev.restore.canonical/v1 (canonical-tree intent-payload)]))
+
+(defn- sha-256-bytes [bytes]
+  (let [digest (MessageDigest/getInstance "SHA-256")]
     (.update digest bytes)
     (apply str (map #(format "%02x" (bit-and % 0xff)) (.digest digest)))))
 
-(defn- derive-intent-value
+(defn plan-digest
+  "Hash one validated digest-free intent into its sole plan token."
+  {:malli/schema [:=> [:cat ::intent-payload] ::plan-digest]}
+  [intent-payload]
+  (sha-256-bytes (canonical-intent-bytes intent-payload)))
+
+(defn- derive-intent-payload
   [{::keys [intent-id pre-restore-main-descriptor selected-target-descriptor
             expected-branch-roster]
     :as request}]
@@ -384,18 +490,23 @@
      "Writer absence is coordinator evidence, not a consumer generation."
      {::consumer-generations (::consumer-generations request)})
     (validate!
-     ::intent
-     (let [intent (assoc request
-                         ::intent-version 1
-                         ::undo-branch undo-branch
-                         ::prepared-target-branch prepared-target-branch
-                         ::undo-coordinate
-                         (assoc main-coordinate ::coordinate/branch undo-branch)
-                         ::prepared-target-coordinate
-                         (assoc target-coordinate ::coordinate/branch
-                                prepared-target-branch))]
-       (assoc intent ::plan-digest (sha-256 intent)))
-     "The derived restore intent is invalid.")))
+     ::intent-payload
+     (assoc request
+            ::intent-version 1
+            ::undo-branch undo-branch
+            ::prepared-target-branch prepared-target-branch
+            ::undo-coordinate
+            (assoc main-coordinate ::coordinate/branch undo-branch)
+            ::prepared-target-coordinate
+            (assoc target-coordinate ::coordinate/branch
+                   prepared-target-branch))
+     "The derived digest-free restore intent is invalid.")))
+
+(defn- derive-intent-value [request]
+  (let [payload (derive-intent-payload request)]
+    (validate! ::intent
+               (assoc payload ::plan-digest (plan-digest payload))
+               "The derived restore intent is invalid.")))
 
 (defn derive-intent
   "Derive one immutable restore or completion-bound undo intent."
@@ -426,6 +537,59 @@
      "The retained restore intent has inconsistent derived coordinates."
      {::intent-id (::intent-id intent)}))
   intent)
+
+(defn- coordinate-confirmation-text [coordinate]
+  (str (::coordinate/branch coordinate)
+       "/" (::coordinate/commit-id coordinate)
+       "@" (::coordinate/t coordinate)))
+
+(defn confirmation-text
+  "Derive the exact apply or abort authorization text for one intent."
+  {:malli/schema [:=> [:cat ::confirmation-request] ::confirmation-text]}
+  [{::keys [intent confirmation-action] :as request}]
+  (validate! ::confirmation-request request
+             "The restore confirmation request is invalid.")
+  (let [intent (validate-intent intent)
+        main-descriptor (::pre-restore-main-descriptor intent)
+        main (descriptor-coordinate main-descriptor)
+        target (descriptor-coordinate (::selected-target-descriptor intent))
+        prefix
+        (case confirmation-action
+          :seon.dev.restore.confirmation/apply "RESTORE"
+          :seon.dev.restore.confirmation/abort "ABORT RESTORE")
+        target-label
+        (if (= confirmation-action
+               :seon.dev.restore.confirmation/apply)
+          " FROM "
+          " TARGET ")]
+    (str prefix
+         " " (get-in main-descriptor [::launch/runtime
+                                        ::launch/runtime-cluster])
+         " DATABASE " (::coordinate/database-id main)
+         target-label
+         (when (= confirmation-action
+                  :seon.dev.restore.confirmation/apply)
+           (str (coordinate-confirmation-text main) " TO "))
+         (coordinate-confirmation-text target)
+         " INTENT " (::intent-id intent)
+         " PLAN " (::plan-digest intent))))
+
+(defn validate-plan
+  "Validate one intent plan and its exact apply confirmation projection."
+  {:malli/schema [:=> [:cat ::plan] ::plan]}
+  [{::keys [intent confirmation-text] :as plan}]
+  (validate! ::plan plan "The restore plan is invalid.")
+  (let [intent (validate-intent intent)
+        expected
+        (seon.dev.restore/confirmation-text
+         {::intent intent
+          ::confirmation-action :seon.dev.restore.confirmation/apply})]
+    (require-consistency!
+     (= expected confirmation-text)
+     "The restore plan confirmation text does not match its intent."
+     {::intent-id (::intent-id intent)
+      :seon.dev.restore/expected-confirmation-text expected})
+    plan))
 
 (defn startup-identity
   "Project the immutable intent fields required by a fresh restore pod."
@@ -484,6 +648,8 @@
 (defn- validate-observation-consistency! [intent observation]
   (let [pre-restore-main
         (descriptor-coordinate (::pre-restore-main-descriptor intent))
+        selected-target
+        (descriptor-coordinate (::selected-target-descriptor intent))
         database-id (::coordinate/database-id pre-restore-main)
         database-name
         (keyword
@@ -516,6 +682,12 @@
           (every? expected-roster (keys heads)))
      "The observed durable branch roster is missing or contains an unknown branch."
      {::expected-branch-roster expected-roster
+      ::branch-heads heads})
+    (require-consistency!
+     (= selected-target
+        (get heads (::coordinate/branch selected-target)))
+     "The selected retained target moved after confirmation."
+     {::selected-target-descriptor (::selected-target-descriptor intent)
       ::branch-heads heads})
     (require-consistency!
      (and (= (count observed-completion-ids)

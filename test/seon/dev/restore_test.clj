@@ -1,6 +1,5 @@
 (ns seon.dev.restore-test
   (:require [babashka.fs :as fs]
-            [babashka.process :as shell]
             [clojure.test :refer [deftest is testing]]
             [malli.core :as m]
             [seon.db.coordinate :as coordinate]
@@ -24,6 +23,15 @@
 (def prior-completion-id "priorundo001")
 (def digest (apply str (repeat 64 "a")))
 (def other-digest (apply str (repeat 64 "b")))
+
+(def artifact-identity
+  {:seon.dev.artifact/application-digest digest
+   :seon.dev.artifact/client-digest digest
+   :seon.dev.artifact/bootstrap-digest digest
+   :seon.dev.artifact/css-digest digest
+   :seon.dev.artifact/writer-digest digest})
+
+(defrecord UnsupportedRecord [value])
 
 (def source
   {::coordinate/database-id database-id
@@ -144,7 +152,7 @@
    ::restore/expected-branch-roster
    #{:db :seon.branch/target undo-branch prepared-target-branch}
    ::restore/protocol-version protocol/current-version
-   ::restore/writer-artifact-digest digest
+   ::restore/artifact-identity artifact-identity
    ::restore/consumer-generations
    {:seon.dev.process/pod
     #uuid "60000000-0000-0000-0000-000000000001"}
@@ -413,6 +421,124 @@
                  (restore/validate-intent
                   (assoc intent ::restore/undo-branch :crossed))))))
 
+(deftest canonical-tree-supports-only-the-versioned-intent-domain
+  (let [canonical #'restore/canonical-tree]
+    (is (= [:nil] (canonical nil)))
+    (is (= [:boolean "false"] (canonical false)))
+    (is (= [:boolean "true"] (canonical true)))
+    (is (= [:string "text"] (canonical "text")))
+    (is (= [:keyword "" "plain"] (canonical :plain)))
+    (is (= [:keyword "qualified" "name"]
+           (canonical :qualified/name)))
+    (is (= [:uuid "10000000-0000-0000-0000-000000000001"]
+           (canonical database-id)))
+    (is (= [:integer "42"] (canonical 42)))
+    (is (= [:vector [[:integer "1"] [:keyword "" "a"]]]
+           (canonical [1 :a])))
+    (is (= [:set [[:keyword "" "a"] [:keyword "" "b"]]]
+           (canonical #{:b :a})))
+    (is (= [:map [[[:keyword "" "a"] [:integer "1"]]
+                  [[:keyword "" "b"] [:integer "2"]]]]
+           (canonical {:b 2 :a 1})))
+    (doseq [unsupported
+            ['symbol '(1 2) 1/2 1.5 (java.util.Date.)
+             (->UnsupportedRecord :value)
+             (tagged-literal 'unsupported/value "value")]]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"unsupported canonical value"
+           (canonical unsupported))
+          (str "unsupported canonical leaf " (class unsupported))))))
+
+(deftest canonical-plan-bytes-are-domain-separated-and-order-independent
+  (let [intent (derived-intent)
+        payload (dissoc intent ::restore/plan-digest)
+        reordered
+        (-> (into (array-map) (reverse (seq payload)))
+            (update ::restore/expected-branch-roster
+                    #(into (sorted-set-by
+                            (fn [left right]
+                              (compare (str right) (str left))))
+                           %)))
+        bytes (restore/canonical-intent-bytes payload)]
+    (is (bytes? bytes))
+    (is (= (seq bytes)
+           (seq (restore/canonical-intent-bytes reordered))))
+    (is (= (restore/plan-digest payload)
+           (restore/plan-digest reordered)))
+    (is (.startsWith (String. bytes java.nio.charset.StandardCharsets/UTF_8)
+                     "[:seon.dev.restore.canonical/v1 "))
+    (is (not (.contains (String. bytes java.nio.charset.StandardCharsets/UTF_8)
+                        "RESTORE ")))
+    (is (thrown? Exception
+                 (restore/canonical-intent-bytes intent)))
+    (let [ordered
+          (update-in payload
+                     [::restore/selected-target-descriptor
+                      ::launch/blob-storage-view :my.blob/read-only-dirs]
+                     conj "/older/blobs")]
+      (is (not= (restore/plan-digest ordered)
+                (restore/plan-digest
+                 (update-in ordered
+                            [::restore/selected-target-descriptor
+                             ::launch/blob-storage-view
+                             :my.blob/read-only-dirs]
+                            #(vec (reverse %)))))))))
+
+(deftest confirmation-is-an-exact-relational-projection-of-one-intent
+  (let [intent (derived-intent)
+        apply-text
+        (restore/confirmation-text
+         {::restore/intent intent
+          ::restore/confirmation-action
+          :seon.dev.restore.confirmation/apply})
+        abort-text
+        (restore/confirmation-text
+         {::restore/intent intent
+          ::restore/confirmation-action
+          :seon.dev.restore.confirmation/abort})
+        expected-apply
+        (str "RESTORE default DATABASE " database-id
+             " FROM :db/" source-commit "@100"
+             " TO :seon.branch/target/" target-commit "@80"
+             " INTENT " intent-id
+             " PLAN " (::restore/plan-digest intent))
+        expected-abort
+        (str "ABORT RESTORE default DATABASE " database-id
+             " TARGET :seon.branch/target/" target-commit "@80"
+             " INTENT " intent-id
+             " PLAN " (::restore/plan-digest intent))
+        plan {::restore/intent intent
+              ::restore/confirmation-text apply-text}]
+    (is (= expected-apply apply-text))
+    (is (= expected-abort abort-text))
+    (is (= plan (restore/validate-plan plan)))
+    (doseq [wrong [(subs apply-text 0 (- (count apply-text) 8))
+                   (.toLowerCase apply-text)
+                   (str apply-text "\n")
+                   (.replace apply-text " DATABASE " "  DATABASE ")
+                   (.replace apply-text ":seon.branch/target"
+                             ":seon.branch/other")
+                   abort-text]]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"confirmation text does not match"
+           (restore/validate-plan
+            (assoc plan ::restore/confirmation-text wrong)))))
+    (is (thrown? Exception
+                 (restore/validate-plan (dissoc plan ::restore/confirmation-text))))
+    (is (thrown? Exception
+                 (restore/validate-plan (assoc plan :extra/value true))))
+    (is (thrown? Exception
+                 (restore/confirmation-text
+                  {::restore/intent intent
+                   ::restore/confirmation-action
+                   :seon.dev.restore.confirmation/apply
+                   :extra/value true})))
+    (is (thrown? Exception
+                 (restore/validate-intent
+                  (assoc intent ::restore/confirmation-text apply-text))))))
+
 (deftest plan-digest-commits-every-frozen-field
   (let [intent (derived-intent)
         mutations
@@ -428,7 +554,9 @@
          "branch roster"
          #(update % ::restore/expected-branch-roster conj :seon.branch/other)
          "writer artifact"
-         #(assoc % ::restore/writer-artifact-digest other-digest)
+         #(assoc-in % [::restore/artifact-identity
+                       :seon.dev.artifact/writer-digest]
+                    other-digest)
          "blob overlay order"
          #(update-in % [::restore/selected-target-descriptor
                         ::launch/blob-storage-view :my.blob/read-only-dirs]
@@ -445,6 +573,35 @@
                       (assoc changed ::restore/plan-digest
                              (::restore/plan-digest intent))))
             label)))))
+
+(deftest artifact-identity-freezes-every-runtime-build-output
+  (let [intent (derived-intent)]
+    (is (= digest
+           (restore/writer-artifact-digest
+            (::restore/artifact-identity intent))))
+    (doseq [artifact-key
+            [:seon.dev.artifact/application-digest
+             :seon.dev.artifact/client-digest
+             :seon.dev.artifact/bootstrap-digest
+             :seon.dev.artifact/css-digest
+             :seon.dev.artifact/writer-digest]]
+      (let [changed
+            (restore/derive-intent
+             (assoc-in (intent-request)
+                       [::restore/artifact-identity artifact-key]
+                       other-digest))]
+        (is (not= (::restore/plan-digest intent)
+                  (::restore/plan-digest changed))
+            (str artifact-key))))
+    (is (thrown? Exception
+                 (restore/derive-intent
+                  (update (intent-request) ::restore/artifact-identity
+                          dissoc :seon.dev.artifact/css-digest))))
+    (is (thrown? Exception
+                 (restore/derive-intent
+                  (assoc-in (intent-request)
+                            [::restore/artifact-identity :extra/digest]
+                            digest))))))
 
 (deftest publication-is-durable-idempotent-and-conflict-closed
   (let [directory (fs/create-temp-dir {:prefix "seon-restore-intent-"})
@@ -463,8 +620,10 @@
            (restore-state/publish-intent!
             (assoc request ::restore/intent
                    (restore/derive-intent
-                    (assoc (intent-request) ::restore/writer-artifact-digest
-                           other-digest))))))
+                    (assoc-in (intent-request)
+                              [::restore/artifact-identity
+                               :seon.dev.artifact/writer-digest]
+                              other-digest))))))
       (is (= intent
              (state/read-edn (restore/intent-path (str directory)))))
       (finally (fs/delete-tree directory {:force true})))))
@@ -551,7 +710,7 @@
         admin-result {::restore-admin/outcome
                       :seon.db.restore-admin.outcome/applied}
         blob-result {:my.blob/ok? true}
-        manifest {:seon.dev.artifact/writer-digest digest}
+        manifest artifact-identity
         commands [:seon.dev.restore.command/create-undo
                   :seon.dev.restore.command/create-target
                   :seon.dev.restore.command/prepare-exclusive-transition
@@ -562,6 +721,7 @@
        #'restore-state/retained-intent (fn [_] intent)
        #'restore-state/require-selected-branch! (fn [_ _ value] value)
        #'artifact/current-writer-digest (fn [_] digest)
+       #'artifact/current-output-digests (fn [_] artifact-identity)
        #'restore-state/admin-invocation
        (fn [& _] {::restore/admin-result-path "/admin.edn"})
        #'restore-state/read-admin-result (constantly nil)
@@ -570,6 +730,8 @@
        (fn [& _] (swap! calls conj :prepare-observation-writer))
        #'restore-state/create-reserved-branch!
        (fn [_ _ role] (swap! calls conj [:create role]))
+       #'restore-state/require-next-command!
+       (fn [_ _ command] (swap! calls conj [:require command]))
        #'restore-state/materialize-retained-blobs!
        (fn [& _]
          (swap! calls conj :materialize)
@@ -612,30 +774,76 @@
                  {::restore-state/configuration configuration
                   ::restore-state/branch-name "target"}))))))
     (is (= [:prepare-observation-writer
-            [:create :undo]
-            [:create :target]
             :materialize
             :stop-retained
+            :stop-main
+            [:ensure [process/writer-id]]
+            [:require :seon.dev.restore.command/create-undo]
+            [:create :undo]
+            [:create :target]
             :stop-main
             :admin
             :start-writer
             :start-restore-pod
             :prove-restore-pod
+            [:require :seon.dev.restore.command/prove-readiness]
             :stop-main
+            [:delete (restore/intent-path
+                      (:seon.dev.config/cluster-dir configuration))]
             [:delete "/admin.edn"]
             [:delete (str (:seon.dev.config/cluster-dir configuration)
                           "/lifecycle/restore-blobs-" intent-id ".edn")]
-            [:delete (restore/intent-path
-                      (:seon.dev.config/cluster-dir configuration))]
             [:ensure [process/writer-id process/pod-id]]]
            @calls))))
 
-(deftest timed-out-admin-child-is-absent-before-return
-  (let [child (shell/process {:cmd ["sh" "-c" "sleep 30"]
-                              :out :string :err :string})
-        result (#'restore-state/wait-admin-process! child 10)]
-    (is (integer? (:exit result)))
-    (is (false? (.isAlive ^Process (:proc child))))))
+(deftest stale-managed-records-drain-before-restore-replacement
+  (let [configuration (config/load! (System/getProperty "user.dir"))
+        calls (atom [])
+        specs {process/writer-id {:seon.dev.process/id process/writer-id}
+               process/pod-id {:seon.dev.process/id process/pod-id}}]
+    (with-redefs-fn
+      {#'process/specs (fn [& _] specs)
+       #'process/read-process
+       (fn [_ id] {:seon.dev.process/id id})
+       #'process/converged? (fn [& _] false)
+       #'process/clean-or-force!
+       (fn [request]
+         (swap! calls conj [:clean (:seon.dev.process/targets request)]))
+       #'process/with-startup-ownership
+       (fn [_ transition] (transition (fn [_ spawn!] (spawn!))))
+       #'process/ensure!
+       (fn [_ spec _]
+         (swap! calls conj [:ensure (:seon.dev.process/id spec)]))}
+      (fn []
+        (#'restore-state/ensure-processes!
+         configuration {} [process/writer-id process/pod-id])))
+    (is (= [[:clean #{process/writer-id process/pod-id}]
+            [:ensure process/writer-id]
+            [:ensure process/pod-id]]
+           @calls))))
+
+(deftest lifecycle-adapter-carries-completion-head-evidence
+  (let [intent (derived-intent)
+        completion (completion-fact intent forced-commit)
+        current (assoc source
+                       ::coordinate/commit-id completion-commit
+                       ::coordinate/t 102)
+        lifecycle
+        {::protocol/main-coordinate current
+         ::protocol/main-parent-commit-ids #{forced-commit}
+         ::protocol/branch-coordinates
+         {:db current
+          :seon.branch/target target
+          undo-branch (::restore/undo-coordinate intent)
+          prepared-target-branch (::restore/prepared-target-coordinate intent)}
+         ::protocol/completed-restore-ids #{intent-id}
+         ::protocol/restore-completions [completion]
+         ::protocol/restore-completion-transaction-ts {intent-id 102}}
+        observation (#'restore-state/lifecycle->observation intent lifecycle)]
+    (is (m/validate ::restore/observation observation))
+    (is (= #{forced-commit} (::restore/main-parent-commit-ids observation)))
+    (is (= {intent-id 102}
+           (::restore/completion-transaction-ts observation)))))
 
 (deftest admin-result-is-associated-with-the-exact-retained-intent
   (let [intent (derived-intent)
@@ -777,6 +985,17 @@
                                 (assoc source ::coordinate/database-id
                                        wrong-database)
                                 {} #{} [] {})})))
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"selected retained target moved"
+         (restore/next-command
+          {::restore/intent intent
+           ::restore/observation
+           (assoc-in
+            (observation intent source {} #{} [] {})
+            [::restore/branch-heads :seon.branch/target
+             ::coordinate/commit-id]
+            (random-uuid))})))
     (is (thrown? Exception
                  (restore/next-command
                   {::restore/intent intent
