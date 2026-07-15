@@ -205,6 +205,34 @@ three-form crash proof records the committed prefix and absent suffix without
 fabrication; general durable per-form position remains a later
 agentic-refinement contract.
 
+The read-only Slice-3 writer-admin grounding is complete at
+[[research/restore-writer-admin-transition-audit-2026-07-15]]. The smallest
+root-move owner is one no-listener invocation of the existing writer artifact:
+an invocation-local observational registry open proves the exact main,
+prepared-target, undo, and full-roster fences; guarded `force-branch!` moves
+main at most once; full coordinate/parent/value/secondary/roster read-back plus
+awaited release produces one closed result. Retry derives old, exact desired,
+or divergent state from storage, so response loss never repeats force. A
+provisional Slice-2 owner now names intent identity, main/target and derived
+prepared coordinates, artifact flavor, consumer generations, blob view, and
+digests. Its exact backend locator, full expected roster, writer/protocol
+binding, and result transport remain intentionally unsettled rather than being
+guessed in the writer lane.
+The concrete missing source boundary is tracked in
+[[../../seon/issues/restore-writer-admin-transition-is-unimplemented]].
+
+The first operator-only restore slice now owns one closed immutable intent and
+derives its next command from the current main coordinate, main ancestry,
+reserved branch heads, and completion-fact ids; it persists no phase, status,
+or retry counter. `seon.dev.state` synchronizes the temporary file before
+atomic rename and the parent directory afterward, and conflicting retained
+intent bytes fail closed. Public CLI parsing remains deliberately deferred:
+the eventual surface is branch-oriented (`cluster restore <retained-branch>`
+and undo selecting a completed restore or retained undo target), but it cannot
+land until writer/status exposes the exact current branch head. The operator
+must never substitute the retained branch's immutable creation coordinate or
+the unpinned default launch descriptor.
+
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in
 [[research/database-lifecycle-source-audit-2026-07-14]]. Implementation began
@@ -483,6 +511,10 @@ materialization, and retention remain later lifecycle slices.
 - [[research/post-clean-restart-restore-undo-multi-form-card-2026-07-15]] —
   post-restart restore/undo contract, exact branchability limit, blob
   materialization, crash matrix, and bounded ordered multi-form failure proof.
+- [[research/restore-writer-admin-transition-audit-2026-07-15]] — selected
+  dependency grounding, no-listener writer-admin boundary, exact force/read-back
+  fences, closed result, idempotent retry, Slice-2 field boundary, and failure
+  matrix.
 - [[research/post-commit-program-admission-audit-2026-07-14]] — exact
   publication failure paths, runtime admission gates, partial Malli mutation,
   committed-generation reconstruction, readiness, and ordered proof.
