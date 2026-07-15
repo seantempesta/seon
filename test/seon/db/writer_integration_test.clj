@@ -8,7 +8,8 @@
             [seon.db.registry :as registry]
             [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer]
-            [seon.embed :as embed])
+            [seon.embed :as embed]
+            [seon.schema :as schema])
   (:import [java.io File]
            [java.nio.channels Channels SocketChannel]))
 
@@ -55,26 +56,70 @@
           ::writer/database-name database-name
           ::writer/backend :memory
           ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})]
+          ::writer/publish-socket-path publish-path})
+        coordinate-before
+        (::registry/coordinate
+         (registry/resolve-connection
+          {::registry/database-name database-keyword}))]
     (try
       (let [result
             (with-redefs [d/release
                           (fn [_]
                             (throw (ex-info "writer release failed" {})))]
               (writer/stop! server))
-            failure (first (::writer/release-failures result))
+            failure (first (::writer/release-results result))
             retained
             (first
              (filter #(= database-keyword (::registry/database-name %))
                      (::registry/databases (registry/list-databases {}))))]
         (is (false? (::writer/stopped? result)))
+        (is (schema/valid-candidate-value? ::writer/stop-response result))
         (is (= database-keyword (::registry/database-name failure)))
+        (is (= (coordinate/attachment coordinate-before)
+               (::registry/attachment failure)))
+        (is (= coordinate-before (::registry/coordinate failure)))
         (is (false? (::registry/released? failure)))
         (is (re-find #"writer release failed"
                      (::registry/release-error failure)))
         (is (= (::registry/release-error failure)
                (::registry/release-error retained))
             "the failed database identity remains inspectable"))
+      (finally
+        (registry/restore-registry! {::registry/snapshot snapshot})
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
+
+(deftest writer-stop-returns-the-pre-release-coordinate-and-outcome
+  (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
+        database-name (str "writer-release-success-" (random-uuid))
+        database-keyword (keyword database-name)
+        request-path (socket-path "release-success-request")
+        publish-path (socket-path "release-success-publish")
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})
+        before
+        (registry/resolve-connection
+         {::registry/database-name database-keyword})]
+    (try
+      (let [result (writer/stop! server)
+            release (first (::writer/release-results result))]
+        (is (true? (::writer/stopped? result)))
+        (is (schema/valid-candidate-value? ::writer/stop-response result))
+        (is (= 1 (count (::writer/release-results result))))
+        (is (= {::registry/database-name database-keyword
+                ::registry/attachment (::registry/attachment before)
+                ::registry/coordinate (::registry/coordinate before)
+                ::registry/released? true}
+               release))
+        (is (nil? (::registry/conn
+                   (registry/resolve-connection
+                    {::registry/database-name database-keyword})))))
       (finally
         (registry/restore-registry! {::registry/snapshot snapshot})
         (writer/stop! server)

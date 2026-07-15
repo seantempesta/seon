@@ -35,12 +35,12 @@
   [::repl-server {:optional true} ::repl-server]
   [::repl-port-file {:optional true} ::repl-port-file]])
 (schema/register! ::stopped? :boolean)
-(schema/register! ::release-failures :seon.db.writer/release-failures)
+(schema/register! ::release-results :seon.db.writer/release-results)
 (schema/register!
  ::stop-response
- [:map
+ [:map {:closed true}
   [::stopped? ::stopped?]
-  [::release-failures {:optional true} ::release-failures]])
+  [::release-results ::release-results]])
 
 (defn- parse-arguments
   [arguments]
@@ -164,7 +164,7 @@
              ::repl-port-file resolved-repl-port-file))))
 
 (defn stop!
-  "Stop one database server and surface every unproved release."
+  "Stop one database server and surface every database release."
   {:malli/schema [:=> [:catn [::server ::server]] ::stop-response]}
   [server]
   (when-let [repl-server (::repl-server server)]
@@ -173,9 +173,8 @@
   (when-let [port-file (::repl-port-file server)]
     (try (.delete (io/file port-file)) (catch Throwable _)))
   (let [result (writer/stop! (::writer-server server))]
-    (cond-> {::stopped? (::writer/stopped? result)}
-      (seq (::writer/release-failures result))
-      (assoc ::release-failures (::writer/release-failures result)))))
+    {::stopped? (::writer/stopped? result)
+     ::release-results (::writer/release-results result)}))
 
 (defn -main
   "Run the database process or its optional embedding preflight."

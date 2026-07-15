@@ -4,7 +4,8 @@
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [seon.db.registry :as registry]
-            [seon.db.server :as server])
+            [seon.db.server :as server]
+            [seon.schema :as schema])
   (:import [java.io PushbackReader]
            [java.net InetAddress Socket]))
 
@@ -49,17 +50,25 @@
         (server/start! ["--backend" "memory"
                         "--db-name" database-name
                         "--req-sock" (.getPath request-socket)
-                        "--pub-sock" (.getPath publish-socket)])]
+                        "--pub-sock" (.getPath publish-socket)])
+        before
+        (registry/resolve-connection
+         {::registry/database-name (keyword database-name)})]
     (try
       (let [result
             (with-redefs [d/release
                           (fn [_]
                             (throw (ex-info "server release failed" {})))]
               (server/stop! runtime))
-            failure (first (::server/release-failures result))]
+            failure (first (::server/release-results result))]
         (is (false? (::server/stopped? result)))
+        (is (schema/valid-candidate-value? ::server/stop-response result))
         (is (= (keyword database-name)
                (::registry/database-name failure)))
+        (is (= (::registry/attachment before)
+               (::registry/attachment failure)))
+        (is (= (::registry/coordinate before)
+               (::registry/coordinate failure)))
         (is (false? (::registry/released? failure)))
         (is (re-find #"server release failed"
                      (::registry/release-error failure))))

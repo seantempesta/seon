@@ -66,13 +66,19 @@
   [::database-name ::database-name]])
 (schema/register! ::stopped? :boolean)
 (schema/register!
- ::release-failures
- [:vector :seon.db.registry/release-database!-response])
+ ::release-result
+ [:map {:closed true}
+  [::registry/database-name ::registry/database-name]
+  [::registry/attachment ::coordinate/attachment]
+  [::registry/coordinate ::coordinate/coordinate]
+  [::registry/released? :boolean]
+  [::registry/release-error {:optional true} ::registry/release-error]])
+(schema/register! ::release-results [:vector ::release-result])
 (schema/register!
  ::stop-response
- [:map
+ [:map {:closed true}
   [::stopped? ::stopped?]
-  [::release-failures {:optional true} ::release-failures]])
+  [::release-results ::release-results]])
 (schema/register! ::database-initialized? :boolean)
 (schema/register!
  ::initialize-request
@@ -1091,17 +1097,21 @@
             (throw throwable)))))))
 
 (defn stop!
-  "Close one writer server and report every unproved database release."
+  "Close one writer server and report every database release."
   {:malli/schema [:=> [:catn [::server ::server]] ::stop-response]}
   [server]
   (uds/close-request-server! (::request-server server))
   (let [{::registry/keys [databases]} (registry/list-databases {})
-        releases
-        (mapv (fn [{::registry/keys [database-name]}]
-                (registry/release-database!
-                 {::registry/database-name database-name}))
-              databases)
-        failures (filterv (comp not ::registry/released?) releases)]
+        release-results
+        (mapv
+         (fn [{::registry/keys [database-name attachment coordinate]}]
+           (merge
+            {::registry/database-name database-name
+             ::registry/attachment attachment
+             ::registry/coordinate coordinate}
+            (registry/release-database!
+             {::registry/database-name database-name})))
+         databases)]
     (uds/close-publisher! (::publisher server))
-    (cond-> {::stopped? (empty? failures)}
-      (seq failures) (assoc ::release-failures failures))))
+    {::stopped? (every? ::registry/released? release-results)
+     ::release-results release-results}))
