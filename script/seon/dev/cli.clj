@@ -18,10 +18,19 @@
     [(second arguments) (drop 2 arguments)]
     [(System/getProperty "user.dir") arguments]))
 
-(defn- stop-development! [configuration]
-  (doseq [id (reverse process/target-processes)]
-    (process/stop! configuration id))
-  nil)
+(defn- stop-processes! [configuration operation targets]
+  (process/clean-or-force!
+   {:seon.dev.process/configuration configuration
+    :seon.dev.process/operation operation
+    :seon.dev.process/targets targets}))
+
+(defn- stopped-targets [stop-results]
+  (into #{}
+        (map :seon.dev.process/id)
+        (mapcat :seon.dev.process/results stop-results)))
+
+(defn- stop-development! [configuration operation]
+  (stop-processes! configuration operation (set process/target-processes)))
 
 (defn- legacy-database-path [configuration]
   (let [cluster (:seon.dev.config/cluster-dir configuration)
@@ -42,36 +51,52 @@
          (str (fs/path (:seon.dev.config/cluster-dir configuration) "db"))})))
   configuration)
 
-(defn- reconcile-development! [configuration]
-  ;; A one-shot compiler must never share Shadow's mutable build cache with a
-  ;; watcher, and the pod must never read a partially rebuilt output closure.
-  ;; Quiesce both readers before building; the writer can safely keep running
-  ;; from its already-loaded jar until its digest is known to have changed.
-  (assert-current-database-layout! configuration)
-  (process/with-startup-ownership
-   configuration
-   (fn [start-owned!]
-     (process/stop! configuration process/watcher-id)
-     (process/stop! configuration process/pod-id)
-     (let [manifest (artifact/build!
-                     configuration
-                     #(process/prepare-watcher! configuration start-owned!))
-           _ (process/admit-watcher-artifact!
-              configuration (:seon.dev.artifact/client-digest manifest))
-           changed (:seon.dev.artifact/changed manifest)
-           spec-map (process/specs configuration manifest)]
-       (when (contains? changed :seon.dev.artifact/application)
-         (process/stop! configuration process/pod-id))
-       (when (contains? changed :seon.dev.artifact/writer)
-         (process/stop! configuration process/pod-id)
-         (process/stop! configuration process/writer-id))
-       (doseq [id (process/start-order spec-map)]
-         (println (str "▶ reconcile " (name id)))
-         (process/ensure! configuration (get spec-map id) start-owned!)
-         (println (str "  ● " (name id) " ready")))
-       (assoc (process/status configuration manifest)
-              :seon.dev.target/artifact-digest
-              (:seon.dev.artifact/application-digest manifest))))))
+(defn- reconcile-development!
+  ([configuration] (reconcile-development! configuration []))
+  ([configuration prior-stop-results]
+   ;; A one-shot compiler must never share Shadow's mutable build cache with a
+   ;; watcher, and the pod must never read a partially rebuilt output closure.
+   ;; Quiesce both readers before building; the writer can safely keep running
+   ;; from its already-loaded jar until its digest is known to have changed.
+   (assert-current-database-layout! configuration)
+   (process/with-startup-ownership
+    configuration
+    (fn [start-owned!]
+      (let [readers #{process/pod-id process/watcher-id}
+            already-stopped (stopped-targets prior-stop-results)
+            readers-to-stop (set (remove already-stopped readers))
+            reader-stop
+            (when (seq readers-to-stop)
+              (stop-processes!
+               configuration
+               :seon.dev.process.operation/rebuild-readers
+               readers-to-stop))
+            stop-results (cond-> (vec prior-stop-results)
+                           reader-stop (conj reader-stop))
+            manifest (artifact/build!
+                      configuration
+                      #(process/prepare-watcher! configuration start-owned!))
+            _ (process/admit-watcher-artifact!
+               configuration (:seon.dev.artifact/client-digest manifest))
+            changed (:seon.dev.artifact/changed manifest)
+            stopped-after-readers (stopped-targets stop-results)
+            writer-stop
+            (when (and (contains? changed :seon.dev.artifact/writer)
+                       (not (contains? stopped-after-readers process/writer-id)))
+              (stop-processes!
+               configuration
+               :seon.dev.process.operation/rebuild-writer
+               #{process/writer-id}))
+            stop-results (cond-> stop-results writer-stop (conj writer-stop))
+            spec-map (process/specs configuration manifest)]
+        (doseq [id (process/start-order spec-map)]
+          (println (str "▶ reconcile " (name id)))
+          (process/ensure! configuration (get spec-map id) start-owned!)
+          (println (str "  ● " (name id) " ready")))
+        (assoc (process/status configuration manifest)
+               :seon.dev.target/artifact-digest
+               (:seon.dev.artifact/application-digest manifest)
+               :seon.dev.target/stop-results stop-results))))))
 
 (defn- ordinary-agent-url [base-url]
   ;; The feed's first patch is immediate and contains the database-derived
@@ -105,6 +130,9 @@
     (println (str "  agent: " agent-url))
     (println (str "  root:  " root-url))
     (println (str "  data:  " base-url "/data"))
+    (doseq [result (:seon.dev.target/stop-results target)]
+      (println (str "  " (name (:seon.dev.process/operation result)) ": "
+                    (name (:seon.dev.process/classification result)))))
     (when open? (open-url! agent-url))))
 
 (defn- parse-start-options [arguments]
@@ -162,9 +190,13 @@
   (when (seq arguments)
     (throw (ex-info "`down` takes no arguments."
                     {:seon.dev.cli/arguments (vec arguments)})))
-  (state/with-lock configuration :stack 300000
-                   #(stop-development! configuration))
-  (println "○ Seon is down"))
+  (let [result
+        (state/with-lock
+         configuration :stack 300000
+         #(stop-development! configuration
+                             :seon.dev.process.operation/down))]
+    (println (str "○ Seon is down ("
+                  (name (:seon.dev.process/classification result)) ")"))))
 
 (defn- restart! [configuration arguments]
   (let [{:seon.dev.start/keys [open? config-path]}
@@ -173,8 +205,10 @@
         target
         (state/with-lock
           configuration :stack 1800000
-          #(do (stop-development! configuration)
-               (reconcile-development! configuration)))]
+          #(let [stopped
+                 (stop-development!
+                  configuration :seon.dev.process.operation/restart)]
+             (reconcile-development! configuration [stopped])))]
     (print-ready! target open?)))
 
 (defn- apply-live-config!
@@ -475,15 +509,24 @@
                       {:seon.dev.cluster/requested cluster-name
                        :seon.dev.cluster/configured
                        (:seon.dev.config/cluster-name configuration)})))
-    (state/with-lock
-      configuration :stack 1800000
-      #(let [_ (assert-current-database-layout! configuration)
-             database (fs/path (:seon.dev.config/cluster-dir configuration) "db")]
-         (process/stop! configuration process/pod-id)
-         (process/stop! configuration process/writer-id)
-         (when (fs/exists? database) (fs/delete-tree database))
-         (reconcile-development! (select-config configuration nil))))
-    (println (str "● cluster " cluster-name " reset and ready"))))
+    (let [target
+          (state/with-lock
+           configuration :stack 1800000
+           #(let [_ (assert-current-database-layout! configuration)
+                  database
+                  (fs/path (:seon.dev.config/cluster-dir configuration) "db")
+                  stopped
+                  (stop-processes!
+                   configuration
+                   :seon.dev.process.operation/reset
+                   #{process/pod-id process/writer-id})]
+              (when (fs/exists? database) (fs/delete-tree database))
+              (reconcile-development! (select-config configuration nil)
+                                      [stopped])))]
+      (doseq [result (:seon.dev.target/stop-results target)]
+        (println (str "  " (name (:seon.dev.process/operation result)) ": "
+                      (name (:seon.dev.process/classification result)))))
+      (println (str "● cluster " cluster-name " reset and ready")))))
 
 (defn- cluster! [configuration arguments]
   (case (first arguments)

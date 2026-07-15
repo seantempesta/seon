@@ -8,6 +8,20 @@
             [seon.dev.process :as process]
             [seon.dev.state :as state]))
 
+(defn- stop-result
+  ([operation targets]
+   (stop-result operation targets :seon.dev.process.classification/clean))
+  ([operation targets classification]
+   {:seon.dev.process/operation operation
+    :seon.dev.process/classification classification
+    :seon.dev.process/budget-ms 1000
+    :seon.dev.process/elapsed-ms 10
+    :seon.dev.process/results
+    (mapv (fn [id]
+            {:seon.dev.process/id id
+             :seon.dev.process/classification classification})
+          (sort-by name targets))}))
+
 (deftest ready-url-selects-an-ordinary-agent-from-the-root-feed
   (let [requested (atom [])]
     (with-redefs-fn
@@ -38,14 +52,19 @@
                        :seon.dev.config/cluster-dir
                        (str (fs/path root "data/clusters/default"))
                        :seon.dev.config/environment {}}
-        stopped (atom [])]
+        requests (atom [])
+        unwound (atom [])]
     (try
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
            #"injected publication failure"
            (with-redefs-fn
-             {#'process/stop!
-              (fn [_ id] (swap! stopped conj id))
+             {#'process/clean-or-force!
+              (fn [{:seon.dev.process/keys [operation targets] :as request}]
+                (swap! requests conj request)
+                (stop-result operation targets))
+              #'process/stop!
+              (fn [_ id] (swap! unwound conj id))
               #'process/prepare-watcher!
               (fn [_ start-owned!]
                 (start-owned! process/watcher-id
@@ -55,10 +74,117 @@
                 (prepare-client!)
                 (throw (ex-info "injected publication failure" {})))}
              #(#'cli/reconcile-development! configuration))))
-      (is (= [process/watcher-id process/pod-id process/watcher-id]
-             @stopped)
-          "the startup bracket reverses the acquired watcher after publication fails")
+      (is (= [{:seon.dev.process/configuration configuration
+               :seon.dev.process/operation
+               :seon.dev.process.operation/rebuild-readers
+               :seon.dev.process/targets
+               #{process/pod-id process/watcher-id}}]
+             @requests))
+      (is (= [process/watcher-id] @unwound)
+          "only startup ownership directly unwinds the prepared watcher")
       (finally (fs/delete-tree root {:force true})))))
+
+(deftest reconcile-coordinates-readers-and-a-changed-writer-once
+  (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
+        requests (atom [])
+        manifest {:seon.dev.artifact/client-digest (apply str (repeat 64 "a"))
+                  :seon.dev.artifact/application-digest
+                  (apply str (repeat 64 "b"))
+                  :seon.dev.artifact/changed
+                  #{:seon.dev.artifact/writer :seon.dev.artifact/application}}]
+    (with-redefs-fn
+      {#'cli/assert-current-database-layout! identity
+       #'process/with-startup-ownership
+       (fn [_ transition]
+         (transition (fn [_ acquire!] (acquire!))))
+       #'process/clean-or-force!
+       (fn [{:seon.dev.process/keys [operation targets] :as request}]
+         (swap! requests conj request)
+         (stop-result operation targets))
+       #'process/stop!
+       (fn [& _]
+         (throw (ex-info "ordinary reconcile bypassed the coordinator" {})))
+       #'artifact/build! (fn [_ _] manifest)
+       #'process/admit-watcher-artifact! (fn [& _] nil)
+       #'process/specs (fn [& _] {})
+       #'process/start-order (fn [_] [])
+       #'process/status
+       (fn [& _]
+         {:seon.dev.target/status :seon.dev.target.status/ready})}
+      (fn []
+        (let [target (#'cli/reconcile-development! configuration)]
+          (is (= [:seon.dev.process.operation/rebuild-readers
+                  :seon.dev.process.operation/rebuild-writer]
+                 (mapv :seon.dev.process/operation
+                       (:seon.dev.target/stop-results target)))))))
+    (is (= [[:seon.dev.process.operation/rebuild-readers
+              #{process/pod-id process/watcher-id}]
+            [:seon.dev.process.operation/rebuild-writer
+              #{process/writer-id}]]
+           (mapv (juxt :seon.dev.process/operation
+                       :seon.dev.process/targets)
+                 @requests)))))
+
+(deftest reconcile-consumes-prior-stop-evidence
+  (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
+        prior (stop-result :seon.dev.process.operation/restart
+                           (set process/target-processes))
+        manifest {:seon.dev.artifact/client-digest (apply str (repeat 64 "a"))
+                  :seon.dev.artifact/application-digest
+                  (apply str (repeat 64 "b"))
+                  :seon.dev.artifact/changed #{:seon.dev.artifact/writer}}]
+    (with-redefs-fn
+      {#'cli/assert-current-database-layout! identity
+       #'process/with-startup-ownership
+       (fn [_ transition]
+         (transition (fn [_ acquire!] (acquire!))))
+       #'process/clean-or-force!
+       (fn [& _]
+         (throw (ex-info "prior stop evidence was ignored" {})))
+       #'artifact/build! (fn [_ _] manifest)
+       #'process/admit-watcher-artifact! (fn [& _] nil)
+       #'process/specs (fn [& _] {})
+       #'process/start-order (fn [_] [])
+       #'process/status
+       (fn [& _]
+         {:seon.dev.target/status :seon.dev.target.status/ready})}
+      (fn []
+        (is (= [prior]
+               (:seon.dev.target/stop-results
+                (#'cli/reconcile-development! configuration [prior]))))))))
+
+(deftest reconcile-after-reset-stops-only-the-unproven-watcher
+  (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
+        reset-result (stop-result :seon.dev.process.operation/reset
+                                  #{process/pod-id process/writer-id})
+        requests (atom [])
+        manifest {:seon.dev.artifact/client-digest (apply str (repeat 64 "a"))
+                  :seon.dev.artifact/application-digest
+                  (apply str (repeat 64 "b"))
+                  :seon.dev.artifact/changed #{:seon.dev.artifact/writer}}]
+    (with-redefs-fn
+      {#'cli/assert-current-database-layout! identity
+       #'process/with-startup-ownership
+       (fn [_ transition]
+         (transition (fn [_ acquire!] (acquire!))))
+       #'process/clean-or-force!
+       (fn [{:seon.dev.process/keys [operation targets] :as request}]
+         (swap! requests conj request)
+         (stop-result operation targets))
+       #'artifact/build! (fn [_ _] manifest)
+       #'process/admit-watcher-artifact! (fn [& _] nil)
+       #'process/specs (fn [& _] {})
+       #'process/start-order (fn [_] [])
+       #'process/status
+       (fn [& _]
+         {:seon.dev.target/status :seon.dev.target.status/ready})}
+      (fn []
+        (#'cli/reconcile-development! configuration [reset-result])))
+    (is (= [[:seon.dev.process.operation/rebuild-readers
+             #{process/watcher-id}]]
+           (mapv (juxt :seon.dev.process/operation
+                       :seon.dev.process/targets)
+                 @requests)))))
 
 (defn- configuration [root]
   {:seon.dev.config/root root
@@ -97,6 +223,76 @@
          (#'cli/parse-start-options ["--config" "config/system.edn" "--open"])))
   (is (thrown? Exception (#'cli/parse-start-options ["--config"])))
   (is (thrown? Exception (#'cli/parse-start-options ["--unknown"]))))
+
+(deftest down-reports-the-coordinator-classification
+  (let [configuration {:seon.dev.config/cluster-name "default"}
+        request (atom nil)
+        result (stop-result :seon.dev.process.operation/down
+                            (set process/target-processes)
+                            :seon.dev.process.classification/forced)]
+    (with-redefs-fn
+      {#'state/with-lock (fn [_ _ _ transition] (transition))
+       #'process/clean-or-force!
+       (fn [value]
+         (reset! request value)
+         result)}
+      (fn []
+        (is (= "○ Seon is down (forced)\n"
+               (with-out-str (#'cli/down! configuration []))))))
+    (is (= {:seon.dev.process/configuration configuration
+            :seon.dev.process/operation :seon.dev.process.operation/down
+            :seon.dev.process/targets (set process/target-processes)}
+           @request))))
+
+(deftest restart-coordinates-one-full-stop-before-reconcile
+  (let [configuration {:seon.dev.config/cluster-name "default"}
+        stopped (stop-result :seon.dev.process.operation/restart
+                             (set process/target-processes)
+                             :seon.dev.process.classification/absent)
+        calls (atom [])]
+    (with-redefs-fn
+      {#'cli/select-config (fn [selected _] selected)
+       #'state/with-lock (fn [_ _ _ transition] (transition))
+       #'process/clean-or-force!
+       (fn [request]
+         (swap! calls conj [:stop request])
+         stopped)
+       #'cli/reconcile-development!
+       (fn [selected stop-results]
+         (swap! calls conj [:reconcile selected stop-results])
+         {:seon.dev.target/status :seon.dev.target.status/ready})
+       #'cli/print-ready!
+       (fn [target open?]
+         (swap! calls conj [:print target open?]))}
+      (fn [] (#'cli/restart! configuration [])))
+    (is (= [[:stop {:seon.dev.process/configuration configuration
+                    :seon.dev.process/operation
+                    :seon.dev.process.operation/restart
+                    :seon.dev.process/targets (set process/target-processes)}]
+            [:reconcile configuration [stopped]]
+            [:print {:seon.dev.target/status :seon.dev.target.status/ready}
+             false]]
+           @calls))))
+
+(deftest restart-uncertainty-prevents-reconcile-and-start
+  (let [configuration {:seon.dev.config/cluster-name "default"}
+        reconciled? (atom false)]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"uncertain"
+         (with-redefs-fn
+           {#'cli/select-config (fn [selected _] selected)
+            #'state/with-lock (fn [_ _ _ transition] (transition))
+            #'process/clean-or-force!
+            (fn [_]
+              (throw (ex-info "containment uncertain"
+                              {:seon.dev.process/classification
+                               :seon.dev.process.classification/containment-uncertain})))
+            #'cli/reconcile-development!
+            (fn [& _]
+              (reset! reconciled? true))}
+           #(#'cli/restart! configuration []))))
+    (is (false? @reconciled?))))
 
 (deftest branch-commands-call-only-the-retained-lifecycle-owner
   (let [configuration {:seon.dev.config/launch-descriptor :source}
@@ -260,7 +456,7 @@
                        :seon.dev.config/cluster-dir (str cluster)
                        :seon.dev.config/cluster-name "default"
                        :seon.dev.config/environment {}}
-        stopped (atom [])
+        requests (atom [])
         reconciled (atom [])]
     (try
       (fs/create-dirs database)
@@ -268,18 +464,54 @@
       (with-redefs-fn
         {#'state/with-lock (fn [_configuration _owner _timeout thunk]
                             (thunk))
-         #'process/stop! (fn [_configuration process-id]
-                           (swap! stopped conj process-id))
-         #'artifact/read-manifest
-         (fn [_]
-           (throw (ex-info "reset must not reuse a manifest" {})))
+         #'process/clean-or-force!
+         (fn [{:seon.dev.process/keys [operation targets] :as request}]
+           (swap! requests conj request)
+           (stop-result operation targets
+                        :seon.dev.process.classification/forced))
          #'cli/select-config (fn [selected _path] selected)
          #'cli/reconcile-development!
-         (fn [selected]
+         (fn [selected stop-results]
            (is (not (fs/exists? database)))
-           (swap! reconciled conj selected)
-           {:seon.dev.target/status :seon.dev.target.status/ready})}
+           (swap! reconciled conj [selected stop-results])
+           {:seon.dev.target/status :seon.dev.target.status/ready
+            :seon.dev.target/stop-results stop-results})}
         (fn [] (#'cli/reset-cluster! configuration ["default"])))
-      (is (= [process/pod-id process/writer-id] @stopped))
-      (is (= [configuration] @reconciled))
+      (is (= [{:seon.dev.process/configuration configuration
+               :seon.dev.process/operation :seon.dev.process.operation/reset
+               :seon.dev.process/targets #{process/pod-id process/writer-id}}]
+             @requests))
+      (is (= configuration (ffirst @reconciled)))
+      (is (= :seon.dev.process.operation/reset
+             (-> @reconciled first second first
+                 :seon.dev.process/operation)))
+      (finally (fs/delete-tree root {:force true})))))
+
+(deftest cluster-reset-uncertainty-preserves-the-database
+  (let [root (fs/create-temp-dir {:prefix "seon-cli-reset-uncertain-"})
+        cluster (fs/path root "data/clusters/default")
+        database (fs/path cluster "db")
+        configuration {:seon.dev.config/root (str root)
+                       :seon.dev.config/cluster-dir (str cluster)
+                       :seon.dev.config/cluster-name "default"
+                       :seon.dev.config/environment {}}
+        reconciled? (atom false)]
+    (try
+      (fs/create-dirs database)
+      (spit (str (fs/path database "old.ksv")) "old database")
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"uncertain"
+           (with-redefs-fn
+             {#'state/with-lock (fn [_ _ _ transition] (transition))
+              #'process/clean-or-force!
+              (fn [_]
+                (throw (ex-info "containment uncertain"
+                                {:seon.dev.process/classification
+                                 :seon.dev.process.classification/containment-uncertain})))
+              #'cli/reconcile-development!
+              (fn [& _] (reset! reconciled? true))}
+             #(#'cli/reset-cluster! configuration ["default"]))))
+      (is (fs/exists? (fs/path database "old.ksv")))
+      (is (false? @reconciled?))
       (finally (fs/delete-tree root {:force true})))))
