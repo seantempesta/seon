@@ -123,24 +123,21 @@ contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Join containment, pod quiescence, and writer release evidence into one clean-or-force restart path** | Public branch proof is complete. Admission/run/loop quiescence primitives landed at `b9c39ac1`; writer shutdown now returns every exact release coordinate at `272de2f3`. Neither local result alone proves process shutdown, so the top level owns their generation-matched integration and the live migration from the retained pre-containment processes | Integrate the two path-bounded implementations, add the one terminal-result bridge and operator sequence, then prove a clean default restart before crash replacement, restore/undo, or multi-form work |
-| Database lifecycle | **Anchored process containment and the loopback pod quiescence endpoint are active non-overlapping implementation lanes** | Typed UDS (`ce342572`), crash-safe adoption (`e7bd160c`), retained pod lifecycle (`74bfa7e2`), both interruption inverses (`fbb8c399`, `c95f8e03`), public commands, serialized restart, MCP discovery, watcher publication, descriptor-owned replica routing, readiness preparation, the complete live branch inverse, turn-boundary quiescence, and writer release responses settle every prerequisite below the shared terminal-result seam | Review publication/adoption failure cuts and retryable pod cleanup, then connect both results through the existing supervisor without logs, a second shutdown registry, or unowned signals |
-| Reactive/database views | **Implementation and replay-all soundness oracle are complete; live browser/feed proof waits for the next source-frozen checkpoint** | `365052f0` lands candidate-only routing; `afc70d3f` proves six retained read shapes against every nonempty combination of seven actual transactions. The exact gate passes 1 test/10 assertions | Refill only after the unit-1 source checkpoint: prove gzip/SSE sharing, related/unrelated updates, and release in a real browser, then continue unit-2 consumer migration |
-| Agent runtime correctness | **Turn-boundary quiescence is integrated; endpoint/drain and process containment are under focused proof** | Receipt/recovery Slice A remains complete at `defb8014`; `f2c1f1c8` defines one parent-owned child handle/capability. `f18d0282` rejects dead-leader numeric-PGID signaling. `b9c39ac1` atomically changes admission from available to quiescing, closes an owned run as `:quiesced` only at a turn boundary, and derives remaining runs/running turns from one database value. `272de2f3` surfaces writer releases rather than hiding them in a shutdown log | Finish the loopback endpoint's idempotent retry contract and the containment owner's publication/terminal cuts, then let the top level integrate their one clean-or-force lifecycle before unit-6 child cutover |
+| Top-level integration | **Join writer application evidence and portable pod response data to anchored containment through one clean-or-force restart path** | Anchored containment landed at `f59a8b75`; the loopback pod endpoint landed at `3c2671a1`; writer shutdown returns exact releases at `272de2f3`. `d380215a` fixes the shared order and deadline without adding another owner | Review the two portable result slices, add per-generation grace/trigger capture, implement the one coordinator, then migrate and prove a clean default restart before crash replacement, restore/undo, or multi-form work |
+| Database lifecycle | **Writer terminal publication and portable pod lifecycle schema are active non-overlapping implementation lanes** | The process owner now proves subtree absence, while the pod and writer already produce their in-process application results. These lanes transport and share those values without changing operator order | Integrate both, then make `process/stop!` return validated terminal data and implement `clean-or-force!` with pod -> writer -> watcher order and one turn-bound-plus-120-second deadline |
+| Reactive/database views | **Replay-all soundness and the post-lifecycle live checkpoint are specified; bounded per-unit transition diagnostics are active** | `365052f0` lands candidate-only routing; `afc70d3f` proves six retained read shapes against every nonempty combination of seven actual transactions; `cdc28ac6` defines the exact gzip/feed/browser proof. Current logs cannot distinguish zero internal work from equal-output suppression, so the active slice adds bounded metrics at the existing unit owner | Review the metrics slice, then execute the scripted live proof only after unit-1 source and default runtime are frozen |
+| Agent runtime correctness | **Turn-boundary quiescence, loopback drain, and anchored containment are integrated; clean-or-force operator integration remains** | Receipt/recovery Slice A remains complete at `defb8014`; `f2c1f1c8` defines one parent-owned child handle/capability. `f18d0282` rejects dead-leader numeric-PGID signaling. `b9c39ac1` closes admission and runs at turn boundaries, `3c2671a1` owns retryable pod cleanup, and `f59a8b75` proves exact subtree absence | Complete generation-matched application evidence and the one operator coordinator, then let unit 6 consume the settled containment contract for child cutover |
 
 Current scheduling card:
 
 1. **Ordered spine:** integrate anchored containment plus clean restart
    quiescence → prove clean default restart → prove unexpected crash
    replacement → restore/undo → multi-form failure proof.
-2. **Parallel lane A:** implement the grounded persistent-owner/live-
-   anchor containment contract in the process owner; this is shared by crash
-   replacement and later unit-6 child containment.
-3. **Parallel lane B:** finish the loopback-only pod lifecycle endpoint over
-   the integrated admission, run closure, database-derived drain, replica
-   release, and retained cleanup capability. It runs beside containment
-   because their owned paths do not overlap; the top level owns their shared
-   integration contract.
+2. **Parallel lane A:** publish the writer's exact shutdown/release result to
+   its generation-bound application-result path after the existing stop owner
+   completes.
+3. **Parallel lane B:** move the pod quiescence response schema into one
+   effect-free portable `.cljc` owner consumed by both CLJS and Babashka.
 4. **Parallel lane C:** audit eval/query materialization and retained-result
    memory against the already pinned dependency source and live evidence. Its
    current finding does not block unit 1; retain the remaining explicit
@@ -157,10 +154,12 @@ The ordered top-level sequence is therefore:
 3. **Complete:** non-autonomous runtime stop/start plus closed launch, replica,
    client, blob consumption, and retained pod-only branch ownership are
    integrated through `74bfa7e2`;
-4. **In progress:** ordinary and retained SIGINT ownership are complete in
-   `fbb8c399` and `c95f8e03`; integrate the two public CLI/status/MCP ownership
-   slices, run the first live create/write/restart/close transition, and
-   continue through restart/crash, restore/undo, and multi-form proof;
+4. **In progress:** ordinary and retained SIGINT ownership, public branch
+   lifecycle, anchored containment, and the pod quiescence endpoint are
+   complete. Integrate writer/pod application evidence, per-generation grace
+   and trigger capture, and the one clean-or-force coordinator; then migrate
+   the retained legacy default exactly once and continue through clean restart,
+   crash, restore/undo, and multi-form proof;
 5. graduate units 2 and 6 from bounded consumers into their complete acceptance
    matrices while starting unit 3/4 only from their settled contracts;
 6. complete canvas, Inspect/autocomplete, and independent artifact consumption

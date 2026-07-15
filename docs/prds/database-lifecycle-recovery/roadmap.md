@@ -157,35 +157,40 @@ blob, and log paths, the registry route, and the durable Datahike branch.
 Branch-qualified MCP then failed closed while default remained ready and
 unchanged. ACME was observed only in MCP inventory and was not operated.
 
-The pod-crash containment prerequisite is now source-grounded at
-[[research/dead-leader-process-subtree-containment-2026-07-15]]. A dead
-workload leader does not leave a safe numeric PGID handle: identifier reuse
-makes later operator signaling ambiguous. Keep the current refusal until the
-existing detach boundary becomes one persistent containment owner outside the
-execution group plus one live anchor that self-signals its pinned group and
-publishes a generation-matched drained result. Missing owner, anchor, or result
-evidence remains `containment-uncertain`; replacement and destructive branch
-inverse stay closed. This is now one of two safe parallel implementation lanes.
-The other is clean quiescence: `:quiescing` admission, current-turn completion,
-CAS-closed `:quiesced` run, database-derived drain, loopback lifecycle action,
-and the same typed terminal-result owner. Both precede default crash replacement;
-containment also precedes unit-6 child cutover.
+The pod-crash containment prerequisite is implemented at `f59a8b75`, following
+[[research/dead-leader-process-subtree-containment-2026-07-15]]. Every new
+generation has one persistent owner outside the execution group and one live
+session-leading anchor that alone signals its pinned group. Publication and
+adoption retain exact owner, anchor, and workload start identities; a terminal
+result requires anchor-originated escalation, final group absence, and the
+matching generation. Missing owner, anchor, or result evidence remains
+`containment-uncertain`; replacement and destructive branch inverse stay
+closed. Focused process/branch/CLI proof passes 48 tests/282 assertions,
+including publication/adoption cuts, TERM delivery, individual-anchor death,
+dead-workload descendants, and one exact live-legacy retirement path. The
+retained default processes have not yet been migrated through that path.
 
-The first two clean-shutdown primitives are integrated but do not yet form an
-operator guarantee. `b9c39ac1` adds one atomic
+The clean-shutdown primitives are integrated but do not yet form an operator
+guarantee. `b9c39ac1` adds one atomic
 `:available` -> `:quiescing` admission transition, closes an already admitted
 run as `:quiesced` only at a turn recurrence boundary, and derives both
 pointer-owned open runs and every running turn bracket from one database
-value. `272de2f3` makes `seon.db.server/stop!` return whether shutdown completed
-plus every exact registry attachment, final coordinate, release outcome, and
-release error after the UDS transport has closed and joined. Focused runtime
-proof passes 44 tests/228 assertions across admission, run, and loop; focused
-writer proof passes 19 tests/112 assertions across transport, integration, and
-server. The remaining seam is generation-bound process evidence: the pod's
-loopback lifecycle response and the JVM application result must reach the one
-persistent containment owner, then the Babashka operator must reject missing,
-stale, malformed, or incomplete results as a clean shutdown claim and route
-the replacement through the existing unexpected-recovery transaction.
+value. `3c2671a1` exposes that drain through a loopback-peer-only lifecycle
+action, retains retryable cleanup capability, and keeps HTTP alive long enough
+to flush its closed EDN result; focused proof passes 32 tests/205 assertions.
+`272de2f3` makes `seon.db.server/stop!` return whether shutdown completed plus
+every exact registry attachment, final coordinate, release outcome, and
+release error after the UDS transport has closed and joined; focused writer
+proof passes 19 tests/112 assertions. The exact remaining seam is now ordered:
+publish the writer's generation-bound application result, extract the pod
+response schema into one portable `.cljc` owner, extend containment with
+per-process immutable grace plus requested-versus-unexpected trigger evidence,
+and add the one clean-or-force coordinator specified by
+[[research/clean-or-force-operator-coordinator-audit-2026-07-15]]. The
+coordinator uses pod -> writer -> watcher order and one absolute deadline equal
+to the configured turn bound plus 120 seconds. Missing application evidence
+after proven subtree absence is forced recovery; uncertain containment retains
+the record and blocks replacement.
 
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in
