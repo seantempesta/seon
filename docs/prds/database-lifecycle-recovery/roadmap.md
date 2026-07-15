@@ -23,8 +23,10 @@ from that registry, installed through Datahike's creation transaction, and
 validated before an existing connection is published. One fail-closed runtime
 admission now reconstructs and verifies the committed generation before agent,
 eval, web-command, schedule, wake, run-loop, or ticker work proceeds.
-Deterministic publication-failure and config-free live restart evidence remain
-before this transition graduates.
+Deterministic publication-failure and config-free live restart evidence are
+integrated. The exact public dependency and root artifact closure is also
+selected and published; destructive retained-head restore remains the earliest
+unsettled transition.
 
 The maintained Datahike SHA contains same-store branch/delete, commit/branch
 root reads, historical-secondary-index correction, awaited connection release,
@@ -32,8 +34,23 @@ and guarded/read-back-verified force. Seon's writer exposes typed native
 create/release/delete and has removed the physical-copy fork. Its registry,
 feed, replica, launch descriptor, public operator, and CLJ/CLJS MCP discovery
 now own branch-qualified runtimes through the source writer without a second
-registry or writer. Quiesced clean restart, crash replacement, restore/undo,
-promotion, and ordered multi-form process-failure proof remain unimplemented.
+registry or writer. The ordered remainder is public retained-head
+restore/crash-convergent destructive proof, completion-derived undo through the
+same transition, and real three-form pod-death proof. Promotion remains later.
+
+Root cutover `be30f420`, dependency evidence `db88d148` + `b9acfa16`, and
+config source `9a60761f` close the publication predecessor. Default and ACME
+manifest-v4 dependency vectors are byte-equal at Datahike
+`9ada755087228e10cfb179fa5779ce227a6ed220`, Konserve
+`b5c99bc02a7175652a610324215288b78551801f`, Proximum
+`9846d3e79e1aee48474bc876d3d563d7137209c6`, Shadow CLJS
+`4e72595f57618f5c43388ad13d5136cd3bede566`, superv.async
+`3e6ed755f83634c9e9bbb58707f9446420d32ce9`, and partial-cps
+`1e119b03ea908ad925b98f9ba0a26371c65441e3`. Both record normalized writer
+digest `3cbacfc0852807f0726c2b82ff7d2b673f68343c3affaaf126aa621453e45ceb`.
+Their owner reports both clusters' pages and gzip feeds healthy, while the
+task-independent PATH identity failure at `fd1cac29`/`20ac543d` remains open
+and prevents a universal-readiness claim.
 
 The branch-qualified replica/operator audit is complete at
 [[research/branch-qualified-replica-operator-launch-audit-2026-07-15]]. It
@@ -224,10 +241,11 @@ fixture reopens with equal EAVT and KNN results but unequal secondary roots.
 Focused admin proof passes 9 tests and 53 assertions; the combined writer-admin
 gate passes 22 tests and 131 assertions, including the real dependency
 falsifier and injected connect, operation, first/second release, post-force
-read-back, invalid-result, and result-loss failures. No public
-restore command may invoke this boundary until the now-public guarded
-Proximum/Datahike repair is selected and proven through Seon's exact writer
-artifact and file fixture. Ordinary legacy Proximum `branch!` rejects the
+read-back, invalid-result, and result-loss failures. The guarded
+Proximum/Datahike repair is now selected and proven through Seon's exact writer
+artifact and file fixture. Public destructive restore still must remain closed
+until the integrated retained-head transition passes its crash-convergent
+proof. Ordinary legacy Proximum `branch!` rejects the
 already-existing live `:db`, and key-map relabeling cannot change the source
 branch recorded in a committed snapshot; the rejected Datahike-only prototype
 and exact dependency contract are retained at
@@ -303,9 +321,10 @@ generation publication through the one force path, including legacy-shape
 migration, response-loss retry, stale destination rejection, and cold source-
 branch non-clobber (108 tests/570 assertions across all three index backends);
 its Node gate passes 105/824 after Konserve's idempotent absent-store delete
-correction. The root pin/build-input cutover and cold selected-artifact proof
-remain the hard predecessor of the destructive integrated gate; therefore no
-public restore command or destructive default/ACME proof is claimed yet.
+correction. Root cutover `be30f420` and the byte-equal manifest-v4 default/ACME
+closure now complete that hard predecessor. No public destructive restore proof
+is claimed yet; the next ordered gate is retained-head restore from this frozen
+closure.
 Focused cold-composition proof
 passes 29 tests/195 assertions, including post-completion crash and idempotent
 retry before exact admission, with zero compile warnings at
@@ -328,9 +347,9 @@ advanced heads, stale rosters, and occupied reserved branches before intent
 publication. The selection evidence compiles into the unchanged immutable
 intent and existing fact-derived command mechanism; no effect path or public
 destructive command was added. Focused pure proof passes 10 tests/72 assertions
-and adjacent writer-admin proof passes 9/53. The remaining ordered predecessor
-is the selected Proximum/Datahike force-secondary dependency cutover followed
-by integrated destructive restore/undo proof.
+and adjacent writer-admin proof passes 9/53. The dependency cutover is complete;
+the remaining ordered work is integrated retained-head restore/crash proof,
+then completion-derived undo through the same transition.
 
 The first operator-only restore slice now owns one closed immutable intent and
 derives its next command from the current main coordinate, an explicitly

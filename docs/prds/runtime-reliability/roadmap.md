@@ -28,7 +28,7 @@ compensate for unclear functions.
 
 ## Current position
 
-**Current phase: unit 0 graduated; database lifecycle/recovery is next.**
+**Current phase: unit 0 graduated; database lifecycle/recovery is active.**
 The permanent JVM database server, canonical CLJS runtime, Babashka operator,
 database protocol, shared Datastar feed, database-authoritative program/schema
 projection, and focused test doors are already active. Work from the original
@@ -52,7 +52,7 @@ database, renderer, runtime, operator, or packaging mechanisms.
 | Order | Unit | State | Depends on | Measurable exit |
 |---|---|---|---|---|
 | 0 | Current branch graduation | **COMPLETE** | none | Reconciled docs and successor PRDs; clean full pod/writer/operator/Inspect-offline gates; destructive default reset; live CLJ+CLJS MCP, browser, gzip SSE, database read-back, restart, and retained-result/query-budget proof; legacy lane evidence classified before cleanup. |
-| 1 | `database-lifecycle-recovery` | **CARVED + GROUNDED** | 0 | Fresh, converged, config-free reopen, clean restart, crash recovery, canonical coordinates, as-of/fork/restore/undo, and multi-form transitions pass without replay or duplicate registries. |
+| 1 | `database-lifecycle-recovery` | **IMPLEMENTING** | 0 | Fresh, converged, config-free reopen, clean restart, crash recovery, canonical coordinates, as-of/fork/restore/undo, and multi-form transitions pass without replay or duplicate registries. |
 | 2 | `reactive-render-units` | **CARVED + GROUNDED** | 1 | One runtime-observed unit engine serves root, agent, canvas, debug, and data views; helper-indirected reads update; unrelated writes do no work; equivalent tabs share bounded plain-data/output reuse. |
 | 3 | `database-browser` | **CARVED + GROUNDED** | 1, unit contract from 2 | Entity, refs, transactions, provenance, and history are navigable through bounded Datahike index cursors; closed details construct no expensive body; no global scan or second feed exists. |
 | 4 | `root-workspace-sessions` | **CARVED + GROUNDED** | 2 | Root has its distinct system layout and concise context; ordinary-agent cards use the same derived focus; database-backed per-tab locations prove two tabs do not fight. |
@@ -99,8 +99,8 @@ failure.
 
 The current dependency spine is:
 
-1. finish unit 1 publication admission, native branch lifecycle, restart/crash
-   recovery, restore/undo, and multi-form failure proof;
+1. finish unit 1 retained-head restore/crash-convergent destructive proof,
+   completion-derived undo, and real three-form pod-death proof;
 2. implement units 2 and 6 in parallel after their unit-1 prerequisites;
 3. let unit 3 consume unit 2's settled unit/cursor contract while unit 4
    consumes its settled root/render contract;
@@ -123,18 +123,16 @@ dependency spine and independent evidence consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Closed cold restore composition is complete; the exact public dependency cutover is active** | Immutable intent, exact writer-admin results, retained blob materialization, completion facts, and split admission are complete. `b2461d64` resolves the original completion coordinate after later writes; `c2b4013d` carries one closed authoritative startup value; `15f97806` composes fresh attach, preserve-only reconstruction, completion, exact admission, and readiness in the existing cold owner | Finish the root pin/build-input cutover to the published compatibility set, prove its cold artifact identity, then run the isolated destructive restore/crash matrix |
-| Native secondary force | **COMPLETE in public dependencies; Seon artifact proof pending** | Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6`, Konserve `b5c99bc02a7175652a610324215288b78551801f`, and Datahike `9ada755087228e10cfb179fa5779ce227a6ed220` are exact public HTTPS coordinates. Proximum passes 181 tests/9,922 assertions; Datahike guarded force passes 108/570 across all index backends and its Node gate passes 105/824. Konserve also makes absent Node filestore deletion idempotent | Remove checkout-local `src-secondary` build inputs, bind the three SHAs into artifact manifest version 4, and prove the selected Seon writer/CLJS closure before destructive restore |
-| Restore inverse/planner | **Completion-derived undo planning is implemented; canonical schema cleanup is active** | `6351790a` makes the existing intent derivation resolve exactly one prior completion, target its exact retained undo head, retain actual latest main as redo, and reject arbitrary, stale, ambiguous, cross-lineage, or consumed selections (10 tests/71 assertions; writer admin 9/53) | Remove the temporary cross-runtime completion-schema duplication by making `seon.db.restore` the one CLJC shape owner, then consume the same transition in destructive restore/undo proof after dependency cutover |
-| Inspect/agent evidence | **Frozen execution evidence is integrated; immutable model-server identity/live admission remain** | `46693087` and `da66936c` reuse exact transaction-origin resolution, validate historical request config and final-snapshot caps, and re-derive adapter plus stream mode from their frozen owners. Focused config/web/retry proof is 20/95, 12/69, and 8/54 | Keep ACME rebuild withheld until dependency handoff; independently bind immutable model-server revision/weights and then run one native admitted sample through the canonical `my.*`/Inspect owners |
+| Top-level integration | **Public dependency/artifact cutover is complete; destructive retained-head restore is active** | Root cutover `be30f420`, dependency evidence `db88d148` + `b9acfa16`, and config source `9a60761f` are committed. Default and ACME publish byte-equal manifest-v4 dependency vectors and normalized writer digest `3cbacfc0852807f0726c2b82ff7d2b673f68343c3affaaf126aa621453e45ceb` | Run the public retained-head restore/crash-convergent destructive proof, then completion-derived undo and real three-form pod-death proof |
+| Native secondary force | **COMPLETE through the selected Seon artifacts** | Both manifests bind Datahike `9ada755087228e10cfb179fa5779ce227a6ed220`, Konserve `b5c99bc02a7175652a610324215288b78551801f`, Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6`, Shadow CLJS `4e72595f57618f5c43388ad13d5136cd3bede566`, superv.async `3e6ed755f83634c9e9bbb58707f9446420d32ce9`, and partial-cps `1e119b03ea908ad925b98f9ba0a26371c65441e3` | Consume the frozen closure in destructive restore; do not reopen dependency publication absent a new falsifier |
+| Restore inverse/planner | **Completion-derived undo planning and canonical schema ownership are complete** | `6351790a` derives the exact retained undo head and `9a60761f` closes the intervening pure-data config/schema source collision. The same immutable transition is ready to consume the destructive restore result | Run completion-derived undo immediately after retained-head restore passes |
+| Inspect/agent evidence | **Frozen execution and model-server admission evidence are integrated; task-independent PATH identity remains open** | The ACME owner reports both clusters' pages and gzip feeds healthy on the shared digest. Task-independent status still fails the PATH identity contract at `fd1cac29`/`20ac543d`, so this is not universal readiness | Keep the PATH finding in its owning lane while lifecycle proof advances; do not treat it as a dependency-publication blocker |
 
 Current scheduling card:
 
-1. **Ordered spine:** exact root pins/build inputs for public Konserve
-   `b5c99bc0`, Proximum `9846d3e7`, and Datahike `9ada7550` → cold
-   artifact-manifest proof
-   → isolated destructive restore using the now-complete cold composition →
-   completion-derived undo → ordered multi-form partial-commit proof.
+1. **Ordered spine:** public retained-head restore with crash-convergent
+   destructive proof → completion-derived undo through the same transition →
+   real three-form pod-death proof with committed prefix and absent suffix.
 2. **Parallel lane A:** refine the exact cold runtime composition and its crash
    matrix without editing externally owned `client.cljs`; implement only after
    that ownership clears.
@@ -159,10 +157,10 @@ The ordered top-level sequence is therefore:
 3. **Complete:** schema-before-policy ordering and the existing cold runtime
    composition now keep restore closed through exact completion and admit the
    same prepared generation before autonomy (`15f97806`);
-4. **In progress:** remove checkout-local dependency inputs and prove the
-   public `9846d3e7`/`b5c99bc0`/`9ada7550` compatibility set through cold
-   preparation, exact dependency trees, stable writer artifact, and manifest;
-5. implement exact retained-head restore and completion-derived undo through the
+4. **Complete:** `be30f420` removes checkout-local dependency inputs and both
+   manifest-v4 flavors prove the exact six-coordinate maintained closure plus
+   normalized writer digest `3cbacfc0852807f0726c2b82ff7d2b673f68343c3affaaf126aa621453e45ceb`;
+5. **In progress:** implement exact retained-head restore and completion-derived undo through the
    same transition, then pass crash cuts and multi-form partial-commit proof;
 6. graduate units 2 and 6 from bounded consumers into their complete acceptance
    matrices while starting unit 3/4 only from their settled contracts;
@@ -184,8 +182,8 @@ boundary before the agentic-tool sample resumes.
 On every lane return, the top-level agent first reviews source and proof,
 updates the owning roadmap, and integrates or rejects the result. It then fills
 the free slot with the earliest dependency-ready row above. The immediate
-refills are destructive restore/crash proof after the public dependency
-artifact freezes, completion-derived undo through the same transition, and
+refills are destructive retained-head restore/crash proof from the frozen
+public artifact, completion-derived undo through the same transition, and
 then the earliest unit 2/6 consumer of the settled lifecycle contract.
 Findings that do not block those exits are recorded
 with evidence and acceptance criteria instead of becoming an unplanned detour.
@@ -424,9 +422,10 @@ assertions and the complete operator checkpoint passes 94 tests/581
 assertions. That checkpoint's two live CLJS classpaths resolved maintained
 Datahike `6f90b339…`, Konserve `df6818d4…`, superv.async `3e6ed755…`, and
 partial-cps `1e119b03…`; both writer artifacts used the same root `:writer`
-Datahike/Konserve basis. The next coordinated rebuild must replace the first
-two historical coordinates with public Datahike `9ada7550…` and Konserve
-`b5c99bc0…` in both default and ACME evidence.
+Datahike/Konserve basis. That dated checkpoint is superseded by root cutover
+`be30f420`: current default and ACME manifest-v4 dependency vectors are
+byte-equal at public Datahike `9ada7550…`, Konserve `b5c99bc0…`, Proximum
+`9846d3e7…`, and the other three maintained coordinates.
 
 A later concurrent default restart and ACME start exposed one remaining shared
 source-build boundary: both target-local lifecycle locks could enter the fixed
@@ -462,9 +461,10 @@ post-publication hot-reload drift degrades status instead of advertising stale
 artifact identity. Structured status exposes the non-secret PID start,
 environment digest, and artifact digest needed for Inspect admission while
 never returning environment values. Root review repeated the focused operator
-gate at 25 tests/95 assertions. A clean ACME rebuild remains ordered after the
-current shared runtime owners commit; this evidence does not authorize a mixed
-source restart.
+gate at 25 tests/95 assertions. The later source-frozen rebuild completed for
+both targets at normalized writer digest `3cbacfc0…`; their pages and gzip
+feeds are healthy. Task-independent status still has a separate PATH identity
+failure at `fd1cac29`/`20ac543d`, so no universal-readiness claim follows.
 
 Inspect source/run admission is content-pinned and required in native run
 metadata; the synchronized offline environment passes 403 tests with eight
@@ -1135,8 +1135,10 @@ single responsibilities; legacy server/store namespaces are deleted; and the
 managed database leaf is `/db`. Fifteen replica tests (87 assertions) and the
 eleven-namespace writer gate (47 tests/295 assertions) cover retry/recovery,
 replay/live overlap, explicit routing, generated identities, durable receipt
-encapsulation, bounded publication, and lifecycle. Typed administration, cold
-live transition proof, and a published artifact manifest remain outstanding.
+encapsulation, bounded publication, and lifecycle. At that checkpoint typed
+administration, cold live transition proof, and a published artifact manifest
+remained outstanding; the current manifest-v4 cutover above supersedes that
+dated gap.
 
 The archival cut is now committed. `38a4dbe8` removes the atom-backed agent
 membership registry and derives MCP addressing from database agent facts;
@@ -1635,13 +1637,13 @@ is evaluated behaviorally, not by asserting prose.
 | Area | Current defect |
 |---|---|
 | JVM source | The retained writer reaches twelve namespaces. The old Integrant/core.async/agent/web application remains searchable until the archive cut. |
-| JVM artifact | Source and uberjar use the same complete `:writer` basis with the maintained forks and one SLF4J provider, but no published launch manifest yet records the artifact/runtime contract. |
+| JVM artifact | Source and uberjar use the same complete `:writer` basis with the maintained forks and one SLF4J provider. Manifest version 4 records the exact maintained dependency vector and normalized writer digest; default and ACME currently agree at `3cbacfc0…`. |
 | Dependencies | The writer and writer-test closures are honest and narrow. Heavy paused-app dependencies still live in the base graph used by old JVM/tools, and CLJS/tool ownership is not yet fully separated. |
 | Writer protocol | The semantic protocol, JVM writer/server, CLJS replica, and UDS transports are separated and the duplicate operations/helpers are deleted. A typed supervisor administration surface and cold process proof remain. |
 | Database vocabulary | The protocol/backend/replica path is canonical, the managed leaf is `/db`, and the generic `store-inventory` API/context/tooling family is deleted. Runtime and developer skills are converged; downstream ACME still needs the proven vocabulary cut. |
 | Database browser | The obsolete inventory surfaces are deleted. `/data` uses the canonical shared gzip feed, cheap shell, schema navigator, and bounded AEVT cursor pages. Entity/ref/transaction/history units remain. |
 | Developer hooks | The direct Babashka hook is repository-contained before config/artifact access, runtime-independent, locally deterministic, and log-bounded under a cross-process lock. Automatic model review is deleted. The operator gate includes its Markdown/docstring checks. |
-| Operator | The Babashka graph and thin launcher are built and focused-tested; active caller migration plus default/ACME/Inspect live proof remain. |
+| Operator | The Babashka graph and thin launcher are built and focused-tested; default and ACME share one admitted artifact identity and serve healthy pages/feeds. Task-independent PATH identity remains open, so the broader live matrix is not universally green. |
 | Tests | Public pod/database/operator doors delegate to one runner each; focused pod builds use compile-time namespace selection, one bundle lock, and exact freshness fingerprints. Disabled/paused-application tests and remaining intentional expected-failure noise still need removal. |
 | UI | The four dormant context renderers and their unconditional boot load are deleted. Active symbols, CSS, DOM, docs, and ACME still need the tile-to-surface/card vocabulary cut; skill teaching is already converged. |
 | Live rendering | Agent surfaces and the whole debug/data targets use runtime-observed reads; normalized subscriptions suppress identical consecutive output. Per-region debug/data unitization, layout/focus browser proof, and grown-database profiling remain. |
