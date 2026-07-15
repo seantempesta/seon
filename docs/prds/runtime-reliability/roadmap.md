@@ -126,7 +126,7 @@ contract work and independent consumers:
 | Top-level integration | Review returned slices, preserve the full ledger, and integrate branch launch/runtime ownership without outrunning its lifecycle proofs | Integration and design judgment cannot be delegated; typed native create/release/delete is settled at `f34b7bda` + `989b6ed3` | Review non-autonomous launch, then branch-qualified replica/operator ownership and restart/crash proof |
 | Database lifecycle | **Non-autonomous launch/stop under integration:** make attachment distinct from activation, publish an honest runtime phase, suppress replay writes during validation, and unwind feeds, agents, replica, and Datahike ownership through one retryable stop | Native create/adopt/release/delete, honest cleanup, bounded equality, and physical-fork deletion are green at 76 tests/456 assertions; the current slice consumes those settled writer-local contracts | Review and falsify this slice, then implement branch-qualified replica/operator launch, restart/crash recovery, restore/undo, and multi-form proof in that order |
 | Reactive render units | **System-header cut in progress:** the ordinary agent header is integrated at `1ec738e2`; move the next system-header consumer through the same demanded-unit first-paint and shared-subscription seam | The kernel, live debug consumer, ordinary header, and same-subscription framing are settled; this cut can remove another page-specific dependency authority without assuming later lifecycle behavior | Review the system-header cut, then take the next bounded surface consumer or settle unit 3's cursor contract when the unit contract is complete |
-| Agent runtime correctness | **Async instrumentation under integration:** generalize the one instrumentation constructor from exact Malli/compiler source, including fixed, variadic, and multi-arity Promise results without duplicate fault recording | Exact provider evidence and callable shapes are settled independently of database and web work; the focused slice must enter the canonical test manifest before it is accepted | Review the async slice, then assign complete-form/process-death containment and finally consume its settled boundary in unit 7 |
+| Agent runtime correctness | **Attachment-scoped projection repair in progress:** async instrumentation is integrated at `d809866c`; remove the process-global activated projection leak that crosses from connection A into fresh connection B | The Promise-aware fixed/variadic/multi-arity owner is green at 77 assertions; contaminant-first failure evidence and its exact acceptance gate are recorded in [[docs/seon/issues/activated-schema-projection-crosses-database-attachments]] | Prove the original current-ns test alone and after contaminant order, then assign complete-form/process-death containment and consume the settled boundary in unit 7 |
 
 The ordered top-level sequence is therefore:
 
@@ -148,9 +148,9 @@ updates the owning roadmap, and integrates or rejects the result. It then fills
 the free slot with the earliest dependency-ready row above. The immediate
 refills are branch-qualified replica/operator ownership after non-autonomous
 launch, the next demanded render consumer after system header, and
-complete-form/process-death containment after async instrumentation. Findings
-that do not block those exits are recorded with evidence and acceptance
-criteria instead of becoming an unplanned detour.
+attachment-scoped projection cleanup before complete-form/process-death
+containment. Findings that do not block those exits are recorded with evidence
+and acceptance criteria instead of becoming an unplanned detour.
 
 The portfolio is a rolling queue, not a batch barrier. A lane may begin its
 documented refill as soon as its owned paths are committed and the top-level
