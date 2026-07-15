@@ -2832,23 +2832,28 @@
                      {::agent-runtime/unhosted-ids host-ids})
         progress (::quiesce-progress state)]
     (replica/detach!)
-    (let [detached (admission/detach!)]
-      (when (false? (::admission/detached? detached))
-        (throw (ex-info "Runtime projection detach failed." detached))))
-    (let [coordinate (when capture-coordinate? (db/head-coordinate @conn))
-          generation (process-generation)]
-      (await (db/release-connection! {::db/conn conn}))
-      (set! db/*conn* nil)
-      (swap! !state dissoc
-             ::launch-capability
-             ::cleanup-requires-connection?
-             ::quiesce-progress)
-      (cond->
-       (assoc progress ::quiesced? true)
-        coordinate (assoc ::db.coordinate/coordinate coordinate)
-        generation
-        (assoc ::runtime.lifecycle/process-generation
-               generation)))))
+    ;; Resolve the final immutable point while the active schema projection is
+    ;; still installed. `admission/detach!` intentionally activates the empty
+    ;; projection; a later coordinate validation would then resolve its
+    ;; symbolic schema against that empty registry and fail the otherwise
+    ;; complete quiesce with `:malli.core/invalid-schema`.
+    (let [coordinate (when capture-coordinate? (db/head-coordinate @conn))]
+      (let [detached (admission/detach!)]
+        (when (false? (::admission/detached? detached))
+          (throw (ex-info "Runtime projection detach failed." detached))))
+      (let [generation (process-generation)]
+        (await (db/release-connection! {::db/conn conn}))
+        (set! db/*conn* nil)
+        (swap! !state dissoc
+               ::launch-capability
+               ::cleanup-requires-connection?
+               ::quiesce-progress)
+        (cond->
+         (assoc progress ::quiesced? true)
+          coordinate (assoc ::db.coordinate/coordinate coordinate)
+          generation
+          (assoc ::runtime.lifecycle/process-generation
+                 generation))))))
 
 (defn- quiesce-failure
   [message]

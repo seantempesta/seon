@@ -780,6 +780,10 @@
                       result))
                (is (= :seon.client.runtime/quiesced
                       ((deref #'client/runtime-phase))))
+               (let [positions (zipmap @effects (range))]
+                 (is (< (get positions :coordinate)
+                        (get positions :projection))
+                     "the final coordinate validates before schema projection detach"))
                (is (nil? db/*conn*))
                (is (not (contains? @client/!state
                                    ::client/launch-capability)))

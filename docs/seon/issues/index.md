@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (13)
+## Blocker (14)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -27,8 +27,9 @@ See `README.md` for the convention.
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
 | [Prove database workflow answers from retained query evidence](database-workflow-scorer-lacks-query-result-evidence.md) | blocker | agent |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
+| [Validate the final pod coordinate before schema projection detach](pod-quiesce-validates-coordinate-after-schema-detach.md) | blocker | Core |
 
-## Friction (33)
+## Friction (34)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -65,6 +66,7 @@ See `README.md` for the convention.
 | [Shadow deps-mode declarations imply inactive build paths](shadow-deps-mode-declaration-drift.md) | friction | docs |
 | [Thread one database value through debug and data feeds](debug-feed-captures-foreign-database-reads.md) | friction | UI |
 | [Transcript decay does not bound total context](transcript-decay-does-not-bound-total-context.md) | friction | agent |
+| [Validate database-browser cursor boundaries before index reads](database-browser-cursor-boundary-is-not-pre-read-validated.md) | friction | UI |
 
 ## Cleanup (9)
 
