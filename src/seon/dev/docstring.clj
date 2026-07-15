@@ -24,8 +24,8 @@
    the five `seon.agent.ctx/reserved-glyphs`). Those glyphs are RUNTIME-ONLY
    (the transcript emits them from the constants); a docstring renders into
    agent context, so a literal example there both models the fabrication shape
-   the pod's `strip-result-claims` strips AND drifts if the glyph ever
-   changes (static text can't reference the constant). Static agent-facing text
+   can imitate runtime chrome AND drifts if the glyph ever changes (static text
+   can't reference the constant). Static agent-facing text
    shows the CALL and describes the return in PROSE. Computed via
    [[wrong-echo-re]] (a structural regex over the glyph set, never a file
    list). The value-VOCABULARY glyphs (`⟨N tok⟩`/`‹…›`/`«…»`) are NOT reserved
@@ -69,9 +69,9 @@
    (U+27F9), result-close `⟸` (U+27F8), status-open/close `⋘`/`⋙`
    (U+22D8/U+22D9), or prompt `❯` (U+276F). These are RUNTIME-ONLY glyphs
    (`seon.agent.ctx/reserved-glyphs`) the transcript emits from its constants;
-   a docstring renders into agent context, so a literal one both models the
-   fabrication shape the pod's `strip-result-claims` strips AND drifts if
-   the glyph changes (static text can't reference the constant). A char class
+   a docstring renders into agent context, so a literal one both imitates
+   runtime chrome AND drifts if the glyph changes (static text can't reference
+   the constant). A char class
    over exactly the five reserves — the value-VOCABULARY glyphs
    (`⟨⟩`/`‹›`/`«»`) are NOT reserved and NOT matched. Any occurrence on a line
    is flagged (this is the anti-fabrication inversion of the old

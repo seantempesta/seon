@@ -107,14 +107,10 @@
 ;; top-level provider fields. Both ABSENT on a stub-LLM turn.
 (schema/register! :seon.agent.turn/llm-usage    :string)
 (schema/register! :seon.agent.turn/llm-meta     :string)
-;; repl-mode telemetry. `:batch`: how many model-authored
-;; result-claims were STRIPPED from this turn's reply at the boundary
-;; (absent = none — optional-is-absent; the fabrication count survives even
-;; though the fabrication itself does not enter the record). `:stream`:
-;; the turn's `:seon.agent.turn/llm-usage` numbers are
+;; repl-mode telemetry. In `:stream`, the turn's
+;; `:seon.agent.turn/llm-usage` numbers are
 ;; CLIENT-SIDE estimates (the aborted stream lost the provider's usage
 ;; chunk) — marked so a reader never treats them as provider-reported.
-(schema/register! :seon.agent.turn/results-stripped :int)
 (schema/register! :seon.agent.turn/usage-estimated? :boolean)
 (schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 
@@ -139,7 +135,6 @@
    [:seon.agent.turn/llm-retries  {:optional true} :seon.agent.turn/llm-retries]
    [:seon.agent.turn/llm-usage    {:optional true} :seon.agent.turn/llm-usage]
    [:seon.agent.turn/llm-meta     {:optional true} :seon.agent.turn/llm-meta]
-   [:seon.agent.turn/results-stripped {:optional true} :seon.agent.turn/results-stripped]
    [:seon.agent.turn/usage-estimated? {:optional true} :seon.agent.turn/usage-estimated?]
    [:seon.agent.turn/evals        {:optional true} :seon.agent.turn/evals]])
 
@@ -358,7 +353,6 @@
                                                    :seon.agent.turn/llm-retries
                                                    :seon.agent.turn/llm-usage
                                                    :seon.agent.turn/llm-meta
-                                                   :seon.agent.turn/results-stripped
                                                    :seon.agent.turn/usage-estimated?
                                                    :seon.agent.turn/reply-blob
                                                    :seon.agent.turn/error]))]}))]
@@ -399,19 +393,11 @@
    blob capture pairs this verbatim reply with the same turn's prompt."
   [resp id id-of-turn compile-state run-id stream? start-ns]
   (let [raw-reply  (or (:text resp) "")
-        ;; repl-mode reply-boundary fix-up: DELETE every model-authored
-        ;; result-claim BEFORE persist + eval (`:batch`; `:stream`
-        ;; structurally has none — its stream aborted at the
-        ;; first form's close, so there is no fabricated tail — but the
-        ;; strip is idempotent and safe on both). The forms eval as normal;
-        ;; the next turn's transcript interleaves the REAL `⟹` rows.
-        {reply-text :seon.agent.ctx/strip-text
-         n-stripped :seon.agent.ctx/strip-count}
-        (ctx/strip-result-claims raw-reply)
-        ;; Always-on reply capture — the (cleaned) reply is the byte ground
-        ;; truth that goes to the blob store (best-effort; a lost capture
-        ;; never wedges the turn). The fabrication never enters the record.
-        reply-blob (await (capture-blob! reply-text :reply))
+        ;; Always-on reply capture — the provider string is the byte ground
+        ;; truth that goes to the blob store unchanged (best-effort; a lost
+        ;; capture never wedges the turn). Parser classification, not reply
+        ;; rewriting, decides which spans are executable forms.
+        reply-blob (await (capture-blob! raw-reply :reply))
         ;; Link the reply blob onto the turn NOW, not only at close-turn!:
         ;; a turn that dies mid-eval (e.g. a `:core` crash under the
         ;; on-core-error dial) otherwise strands the captured blob with no
@@ -428,7 +414,7 @@
                          (js/console.warn
                            "[seon.agent.turn] eager reply-blob link failed (turn continues):"
                            e))))
-        parsed     (repl-internal/parse-forms reply-text)
+        parsed     (repl-internal/parse-forms raw-reply)
         ;; `:stream` single-form close (repl-milestone rung-0 verdict, 2026-07-10):
         ;; the stream aborts at the FIRST complete form, but the delta that
         ;; completed it can carry a tail that parses into extra entries
@@ -461,8 +447,7 @@
       ;; failed eval must yield a next turn that shows the error.
       {:seon.agent/eval-count (+ (:seon.eval/n-ok batch)
                                  (:seon.eval/n-fail batch))}
-      reply-blob      (assoc :seon.agent.turn/reply-blob reply-blob)
-      (pos? n-stripped) (assoc :seon.agent.turn/results-stripped n-stripped))))
+      reply-blob (assoc :seon.agent.turn/reply-blob reply-blob))))
 
 ;; LLM retry tuning. The agent loop is the SOLE retry authority (the
 ;; adapters ship `maxRetries 0`); these shape the exponential-backoff

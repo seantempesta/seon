@@ -77,7 +77,6 @@
     [seon.handlers.schema :as h-schema]
     [seon.handlers.test :as h-test]
     [seon.render :as render]
-    [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]
     [seon.ui.markdown :as md]))
 
@@ -665,23 +664,19 @@
    the `⟸` handle is the runtime's; the value is deliberately NOT
    comment-shaped, so a model can't fabricate one by writing a `;` comment
    (the `; ⟹` shape that agents copied — T4 6/24). It is RUNTIME OUTPUT
-   ONLY: an agent never authors it, and a model-typed `⟹` is DELETED at the
-   reply boundary (`:batch` [[strip-result-claims]], via [[first-result-claim]]
-   /[[reserved-glyph-re]]) before the reply is persisted. The emit site
-   ([[format-eval-row]] + `seon.agent.ctx.transcript`), the detector
-   ([[reserved-glyph-re]]), and [[system-text]]'s teaching all reference
+   ONLY: model-authored copies remain evidence in the raw reply but acquire no
+   runtime authority. The emit site ([[format-eval-row]] +
+   `seon.agent.ctx.transcript`) and [[system-text]]'s teaching both reference
    THIS def — never a bare `\"⟹\"` literal, so the marker is one swappable
-   edit and can never drift between what the runtime emits, what the strip
-   catches, and what the context teaches."
+   edit and cannot drift between runtime output and context teaching."
   "⟹")
 
 (def result-close
   "The reserved RUNTIME result-CLOSE glyph `⟸` — CARRIES THE HANDLE.
 
    Fences the end of a real result and precedes its live-var handle:
-   `⟹ <value> ⟸ result/<id>`. Reserved like [[result-marker]] (the runtime
-   is its only writer; [[reserved-glyph-re]] flags a model-typed one for the
-   reply-boundary strip).
+   `⟹ <value> ⟸ result/<id>`. Reserved like [[result-marker]]: only committed
+   eval facts give a rendered copy runtime authority.
    ONE swappable edit — every emit site references THIS def, never a bare
    `\"⟸\"` literal."
   "⟸")
@@ -710,78 +705,12 @@
   "The FIVE reserved result-grammar glyphs, as a set of the single-source
    constants: result-open [[result-marker]] `⟹`, result-close
    [[result-close]] `⟸`, status [[status-open]]/[[status-close]] `⋘`/`⋙`,
-   and [[prompt]] `❯`. The runtime is the ONLY writer of any of these; the
-   detector ([[reserved-glyph-re]]) flags a model-typed one for the strip, and
-   the no-mixed-references lint (`seon.dev.docstring`) flags a literal outside
-   the constant defs. Distinct from the value-VOCABULARY glyphs
+   and [[prompt]] `❯`. The no-mixed-references lint (`seon.dev.docstring`)
+   flags a literal outside the constant defs. Distinct from the
+   value-VOCABULARY glyphs
    (`⟨N tok⟩` · `‹partial›` · `#‹…›` · `{…N keys}` · `«…»`) which are NOT
    reserved and appear legitimately elsewhere (compacted values / `my.plan`)."
   #{result-marker result-close status-open status-close prompt})
-
-(def ^:private result-claim-re
-  "A comment posing as a REPL result read: one-or-more `;`, optional
-   whitespace, then `=>` or `⇒` — `;; =>`, `;; ⇒`, `; =>`, `;⇒`,
-   `;;=>` all match — through to end of line. Shape-match, line-
-   position preserving: applies anywhere in a line, so inline claims
-   (`(+ 1 2) ;; => 3`) lose only the comment, never the code.
-   `[^\\n]*` instead of `(?m)…$` because CLJS `str/replace` rebuilds
-   the RegExp with only the `g` flag, dropping `m`."
-  #";+[ \t]*(?:=>|⇒)[^\n]*")
-
-(def ^:private bare-result-claim-re
-  "The DOMINANT fabrication shape — a BARE result line with NO leading
-   `;`: a line whose first non-space char is `=>` or `⇒`, e.g.
-   `=> #{...} ;; result/OKf` or `=> 61 ;; result/LFd`. This is how weak
-   models continue the transcript's `(form)` → `=> value ;; result/<id>`
-   adjacency, fabricating the value and the handle (6 captured response
-   files carried this shape vs 1 the commented `;; =>` shape).
-   `[[result-claim-re]] requires a leading `;` and is BLIND to it.
-
-   ANCHORED TO COLUMN 0 (`^` + optional indent): this is LOAD-BEARING.
-   It must NOT clobber `:=>` inside :malli/schema vectors
-   (`{:malli/schema [:=> [:cat …] …]}`) — those appear mid-line, always
-   preceded by `[`, never as `=>` at the start of a line. The `(?m)` flag
-   survives `str/replace` in this CLJS runtime (verified), and `[^\\n]*`
-   bounds each match to a single line so the anchor is what selects the
-   line, not the trailer."
-  #"(?m)^[ \t]*(?:=>|⇒)[^\n]*")
-
-(def ^:private reserved-glyph-re
-  "A RESERVED runtime result-grammar glyph appearing in model-authored text
-   — ALWAYS a fabrication, because the runtime is the only writer of a real
-   `⟹ <value> ⟸ result/<id>` result line or a `⋘ … ⋙` status line (a real
-   one is composed by [[format-eval-row]] at render time, never fed through
-   the reply-boundary strip this feeds). Unlike `=>`, these glyphs are
-   RESERVED, so this needs none of the fragile `;`-counting or column-0
-   `:=>`-collision anchoring the two `=>` regexes carry — any one of them,
-   with its optional leading `;` comment markers, through end of line, is a
-   match.
-
-   Keys on the VALUE/STATUS-bearing reserves only —
-   [[result-marker]] `⟹`, [[result-close]] `⟸`, [[status-open]] `⋘`,
-   [[status-close]] `⋙` — the ones that carry (or fence) a fabricatable
-   value or a turn's status. [[prompt]] `❯` is DELIBERATELY EXCLUDED: it is
-   a common shell-prompt glyph an agent may legitimately paste (a pasted
-   terminal transcript), carries no value, and matching it would be a
-   false positive (owner-flagged 2026-07-07). Built from a char class over
-   the constants so each glyph is defined in exactly one place. One of the
-   three [[result-claim-res]] the detector/strip single-source from."
-  (re-pattern (str "(?:;+[ \\t]*)?["
-                   result-marker result-close status-open status-close
-                   "][^\\n]*")))
-
-;; ============================================================
-;; The fabrication DETECTOR + reply-boundary STRIP (repl-mode Phase 1).
-;; ONE source of truth: the three shape regexes
-;; ([[reserved-glyph-re]] / [[bare-result-claim-re]] / [[result-claim-re]]).
-;; The detector reports the offset of the first MODEL-AUTHORED result-claim
-;; — a match whose start falls OUTSIDE every successfully-parsed form span
-;; (so a `(println "⟹")` string literal or a `[:=> …]` malli schema never
-;; fires). `:batch` uses [[strip-result-claims]] to DELETE those
-;; spans at the reply boundary before the reply is persisted + eval'd, so
-;; the fabricated value never enters the record and the next turn shows the
-;; real `⟹` rows interleaved.
-;; ============================================================
 
 (defn repl-mode
   "The cluster's live REPL mode datom — `:batch` (default) | `:stream`.
@@ -798,105 +727,6 @@
         (:seon.config/repl-mode
           (db/entity {:seon.db/db db :seon.db/ref [:seon.config/id config/cluster-config-id]})))
       :batch))
-
-(def ^:private result-claim-res
-  "The three fabrication-detection regexes — the ONE definition each is
-   built from ([[reserved-glyph-re]] / [[bare-result-claim-re]] /
-   [[result-claim-re]]), single-sourced here for the detector + strip."
-  [reserved-glyph-re bare-result-claim-re result-claim-re])
-
-(defn- form-spans
-  "Absolute `[start end)` char spans of every successfully-parsed evaluable
-   `:form` entry in `text` (via `seon.repl.internal/parse-forms`) — the
-   regions a result-claim match must be SKIPPED inside (a legit `⟹`/`=>`
-   the agent typed as code, not a fabricated result). Read/broken `:read`
-   spans are excluded: a match inside broken source is still narration."
-  [text]
-  (->> (repl-internal/parse-forms text)
-       (keep (fn [e] (when (= :form (:seon.repl/kind e))
-                       (:seon.repl/span e))))
-       vec))
-
-(defn- span-containing
-  "The `[s e)` span in `spans` containing char offset `o`, nil when none."
-  [spans o]
-  (some (fn [[s e :as span]] (when (and (<= s o) (< o e)) span)) spans))
-
-(defn- claim-ranges
-  "Sorted, merged `[start end)` ranges of every MODEL-AUTHORED result-claim
-   in `text` — a match of any [[result-claim-res]] regex whose START is
-   NOT inside a parsed `:form` span. A match that DOES start inside a form
-   span (a legit in-code glyph — its `[^\\n]*` trailer would swallow the
-   rest of the line) resumes the scan at that span's END, so a fabrication
-   AFTER the form on the same line is still caught. Merges overlapping/
-   adjacent matches so a line caught by two regexes counts once."
-  [text]
-  (let [spans (form-spans text)
-        raw   (mapcat
-                (fn [re]
-                  ;; "gm" restores each regex's own flags: `g` for the exec
-                  ;; walk, `m` so bare-result-claim-re's col-0 `^` anchor
-                  ;; stays per-line (its source drops the (?m) into a flag).
-                  (let [g (js/RegExp. (.-source re) "gm")]
-                    (loop [acc []]
-                      (if-let [mm (.exec g text)]
-                        (let [start (.-index mm)]
-                          (if-let [[_ e] (span-containing spans start)]
-                            (do (set! (.-lastIndex g) e) (recur acc))
-                            (recur (conj acc [start (+ start (count (aget mm 0)))]))))
-                        acc))))
-                result-claim-res)]
-    (reduce (fn [acc [s e]]
-              (if-let [[ps pe] (peek acc)]
-                (if (<= s pe)
-                  (conj (pop acc) [ps (max pe e)])
-                  (conj acc [s e]))
-                (conj acc [s e])))
-            []
-            (sort-by first raw))))
-
-(defn first-result-claim
-  "Char offset of the first model-authored result-claim, nil when none.
-
-   A result-claim is a match of any of the three shape regexes
-   ([[reserved-glyph-re]] `⟹⟸⋘⋙`, [[bare-result-claim-re]] col-0
-   `=>`/`⇒`, [[result-claim-re]] `;+ =>`) whose START falls OUTSIDE every
-   successfully-parsed form span — so a `(println \"⟹\")` string literal
-   does NOT fire, a `:=>` inside a `:malli/schema` vector does NOT fire,
-   and the shell-prompt `❯` stays excluded (never in the regex set). The
-   detector behind `:batch`'s strip and the anti-fabrication telemetry;
-   nil ⇒ a clean reply."
-  {:malli/schema [:=> [:catn [::reply :string]] [:maybe :int]]}
-  [reply]
-  (some-> (claim-ranges reply) first first))
-
-(schema/register! ::strip-text   :string)
-(schema/register! ::strip-count  :int)
-(schema/register! ::strip-result-response
-  [:map [::strip-text ::strip-text] [::strip-count ::strip-count]])
-
-(defn strip-result-claims
-  "Delete every model-authored result-claim from `reply` (`:batch` fix-up).
-
-   Returns the cleaned text + the count stripped, applied at the reply
-   boundary before persist + eval. For each fabrication range
-   ([[claim-ranges]] — a `⟹ …`/`=> …` tail to the right of a form or a
-   standalone fabricated result line, never a match inside a parsed form)
-   the span is spliced out (the match runs to
-   end-of-line, so the fabricated value + its fake `result/<id>` handle go
-   with it; the form to its left survives). Idempotent — a cleaned reply
-   has zero ranges. The forms eval as normal and the next turn's transcript
-   interleaves the REAL `⟹ <value> ⟸ result/<id>` rows in those positions."
-  {:malli/schema [:=> [:catn [::reply :string]] ::strip-result-response]}
-  [reply]
-  (let [ranges (claim-ranges reply)]
-    (if (empty? ranges)
-      {::strip-text reply ::strip-count 0}
-      (let [cleaned (loop [rs (reverse ranges) s reply]
-                      (if-let [[a b] (first rs)]
-                        (recur (rest rs) (str (subs s 0 a) (subs s b)))
-                        s))]
-        {::strip-text cleaned ::strip-count (count ranges)}))))
 
 (defn- error-lines
   "Render an error/guidance body `s` as the REPL FAILURE shape: the FIRST
@@ -1023,8 +853,8 @@
          limit       eval-render-cap
          comment-only? (str/blank? (str src))
          ;; Comment-preamble — the agent's `;`/prose thinking, re-prefixed to
-         ;; `;`. Fabricated result-claims are stripped at the reply boundary
-         ;; (`:batch` `strip-result-claims`), so the stored narration is clean.
+         ;; `;`. Model-authored runtime-like text stays preserved as narration;
+         ;; only committed database facts give results or events authority.
          ;; `(str narr)` coerces an off-shape stored narration (a non-string
          ;; that slipped past the write boundary) so a bad datom renders
          ;; instead of sinking the whole transcript — never throw into render.

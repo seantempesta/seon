@@ -56,8 +56,9 @@
 
    A top-level read form is a `:kind :form` entry (EVALUATED) iff it is a
    LIST/SEQ — `(…)` plus the reader-macros that read as seqs (`@x`/`'x`/
-   `#(…)`/`` `(…) ``/`#'x`) — OR a bare `result/<id>` symbol (a stash
-   RE-REFERENCE that self-evaluates into its prior value, #39).
+   `#(…)`/`` `(…) ``/`#'x`) — OR a bare `result/<id>` symbol that is the
+   only code on its logical line (a stash RE-REFERENCE that self-evaluates
+   into its prior value, #39).
    EVERYTHING else is prose:
 
      - real `;`/`;;` comments → kept as narration (the taught reasoning
@@ -448,6 +449,18 @@
    `:read` failure, unchanged."
   [form]
   (and (symbol? form) (= "result" (namespace form))))
+
+(defn- standalone-result-ref?
+  "True when a result reference is the only code on its logical line."
+  [text offset end form]
+  (when (result-ref-symbol? form)
+    (let [prefix      (subs text 0 offset)
+          line-start  (inc (or (str/last-index-of prefix "\n") -1))
+          next-newline (or (str/index-of text "\n" end) (count text))
+          suffix      (str/triml (subs text end next-newline))]
+      (and (str/blank? (subs text line-start offset))
+           (or (str/blank? suffix)
+               (str/starts-with? suffix ";"))))))
 
 (defn- prose-token?
   "True if a parsed top-level token is PROSE (not evaluated). `form` is
@@ -949,8 +962,11 @@
    FORMS-AND-PROSE-ONLY (#50/#52): a top-level read form is a
    `:seon.repl/kind :form` entry (EVALUATED) iff it is a LIST/SEQ — `(…)` and the
    reader-macros that read as seqs (`@x`/`'x`/`#(…)`/`` `(…) ``/`#'x`) —
-   or a bare `result/<id>` stash RE-REFERENCE symbol (#39, which
-   self-evaluates into its prior value). EVERYTHING else is prose and is
+   or a bare `result/<id>` stash RE-REFERENCE symbol on its own logical line
+   (#39, which self-evaluates into its prior value). A result-like symbol after
+   other same-line text is prose: provider-authored output tails must not gain
+   execution authority merely because they end in the result namespace.
+   EVERYTHING else is prose and is
    DROPPED (NOT echoed back as a `;;`
    line — that echo was the `;;`-imitation trap). Prose covers: bare
    atoms (symbols incl. `do`/`if`, numbers, strings, keywords, a bare
@@ -1014,7 +1030,10 @@
             (cond
               ;; A genuine form (list/seq, not a tagged literal) — emit,
               ;; carrying any accumulated `;;` preamble as narration.
-              (not (prose-token? (::form token) (::tag token)))
+              (and (not (prose-token? (::form token) (::tag token)))
+                   (or (not (result-ref-symbol? (::form token)))
+                       (standalone-result-ref? text offset (::end token)
+                                               (::form token))))
               (recur (::end token)
                      []
                      (conj out {:seon.repl/kind      :form

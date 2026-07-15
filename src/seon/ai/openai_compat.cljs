@@ -354,8 +354,8 @@
    depth 0 but demotes to prose, so keep streaming). On confirm: `.abort()`
    the stream and resolve the `::stream-result` `{::text … ::aborted? true}`
    — the text through the delta that COMPLETED the first form (delta
-   granularity: a same-delta tail rides along; `:batch`'s reply-boundary strip
-   still cleans any fabricated remainder). On natural end (no form ever
+   granularity: a same-delta tail rides along; parser classification keeps
+   non-form remainder as evidence without executing it). On natural end (no form ever
    completes): `{::text <all> ::aborted? false}`. The usage-only final chunk
    (`:stream_options {:include_usage true}`) has no `choices` — guarded.
 

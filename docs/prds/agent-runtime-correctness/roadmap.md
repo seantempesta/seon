@@ -25,9 +25,11 @@ batch between entries when publication closes; it returns structured
 unavailable data without inventing later eval rows. Hard process death and
 memory containment remain separate open boundaries.
 
-Known gaps remain: batch handling deletes alleged result text before reply-blob
-capture and parsing, so the stored blob is not raw ground truth; a live census
-found 95 of 747 async contracts structurally excluded while the public coverage
+The batch path now passes one exact provider string unchanged to the existing
+reply blob and parser. Parser classification, not rewriting, selects executable
+forms; the result-claim sanitizer and new telemetry writes are gone while
+historical installed attributes remain readable. A live census found 95 of 747
+async contracts structurally excluded while the public coverage
 gap count reported zero; the outer provider timeout does not cancel the
 underlying request; a successful plan step has no required verification
 evidence; cross-agent and address-message transitions can reopen or displace
@@ -56,10 +58,10 @@ existing content-addressed blob path.
 
 ## Ordered work
 
-1. Preserve the exact provider reply through the one blob and one parser,
-   delete the result-claim rewrite and new telemetry writes, and prove that only
-   parsed real forms create ordered eval evidence. Retain the existing
-   admission checks before and between entries.
+1. **Implemented on this branch:** preserve the exact provider reply through
+   the one blob and one parser, delete the result-claim rewrite and new
+   telemetry writes, and prove that only parsed real forms create ordered eval
+   evidence. The existing admission checks before and between entries remain.
 2. Mirror exact ClojureScript `1.12.145`, read Shadow at its existing exact
    release commit, define the remaining incomplete/read/eval/async/process-death
    transition boundaries, and make async public-function instrumentation

@@ -21,12 +21,12 @@ cluster, turn `dtU-2607062046`. DeepSeek reproduced a masthead, a
 `;;; ◀ from user … (NEW — unanswered)`-shaped line, and a
 `┌─ transcript ─` box in its narration.
 
-The batch reply path currently rewrites result glyphs `⟹`/`=>`/`⇒` before blob
-capture and parsing, while other structural runtime markers are not rewritten.
-The 2026-07-14 agent-runtime source audit corrected the original proposal to
-expand that sanitizer: doing so would hide model evidence and violate the
-raw-reply architecture target. Model-authored scaffolding must remain
-byte-identical narration and must not acquire runtime-event authority.
+The batch reply path formerly rewrote result glyphs before blob capture and
+parsing, while other structural runtime markers were not rewritten. The
+agent-runtime-correctness reply-preservation slice removed that sanitizer:
+one exact provider string now reaches both the content-addressed blob and
+parser, and only parsed forms create eval facts. Model-authored scaffolding
+remains byte-identical evidence and does not acquire runtime-event authority.
 
 This is narration-channel hardening, not a transcript-spine defect. The spine
 passed the four faithfulness invariants in
@@ -50,3 +50,11 @@ slice, not a reserved-glyph sanitizer.
 - Remove the result-claim rewrite rather than extending the reserved-glyph set.
 
 Context: [[feels-stateful-remaining-work-spec]] Unit 3.
+
+## 2026-07-15 checkpoint
+
+Deterministic parser and turn-capture regressions cover forged result text:
+the blob hash addresses the exact UTF-8 reply, the debug round trip is
+byte-identical, and only the two real forms create eval/result rows. The
+remaining open work is rendering arbitrary message, masthead, box, and
+readline-shaped narration unambiguously without rewriting it.

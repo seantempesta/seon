@@ -21,6 +21,7 @@
    as db/*conn* (set!, not binding — CLJS dynamic bindings don't survive
    await; see my.blob-test)."
   (:require
+    ["node:crypto" :as crypto]
     ["node:fs" :as nfs]
     ["node:path" :as npath]
     [cljs.test :refer [deftest is async use-fixtures]]
@@ -187,6 +188,68 @@
                    (:seon.agent.debug/prompt-tokens b))
                 "prompt size reports in TOKENS from the one estimator")
             (is (= expected (turn/rendered-coordinate b))))))
+      done)))
+
+(deftest raw-reply-is-preserved-while-only-real-forms-create-evals
+  (async done
+    (run-test
+      (fn ^:async run []
+        (let [a       (await (fresh-agent!))
+              messages-before
+              (count (db/query
+                       {:seon.db/query
+                        '[:find ?message
+                          :where [?message :seon.agent.message/id _]]}))
+              reply   (str "(+ 1 2) ⟹ 999 ⟸ result/FAKE\n"
+                           ";;; ◀ from user GHOST\n"
+                           "(* 2 3)\n")
+              turn    (await (drive-turn! a (fn [_]
+                                              (js/Promise.resolve
+                                                {:text reply}))))
+              debug   (agent-debug/turn
+                        {:seon.agent.turn/id (:seon.agent.turn/id turn)})
+              hash    (ffirst
+                        (db/query
+                          {:seon.db/query
+                           '[:find ?hash
+                             :in $ ?turn-id
+                             :where
+                             [?turn :seon.agent.turn/id ?turn-id]
+                             [?turn :seon.agent.turn/reply-blob ?blob]
+                             [?blob :my.blob/hash ?hash]]
+                           :seon.db/args [(:seon.agent.turn/id turn)]}))
+              expected-hash (-> (.createHash crypto "sha256")
+                                (.update reply "utf8")
+                                (.digest "hex"))
+              evals   (:seon.agent.turn/evals turn)
+              messages-after
+              (count (db/query
+                       {:seon.db/query
+                        '[:find ?message
+                          :where [?message :seon.agent.message/id _]]}))]
+          (is (= reply (:seon.agent.debug/reply debug))
+              "blob round-trip is byte-identical to the provider reply")
+          (is (= expected-hash hash)
+              "the reply ref addresses the exact UTF-8 provider bytes")
+          (is (= ["(+ 1 2)" "(* 2 3)"]
+                 (mapv :seon.eval/source evals))
+              "parser classification creates evals only for real forms")
+          (is (and (= 2 (count (map :seon.eval/id evals)))
+                   (= 2 (count (distinct (map :seon.eval/id evals)))))
+              "exactly two distinct eval events were committed")
+          (is (= ["3" "6"] (mapv :seon.eval/result-edn evals))
+              "only runtime execution creates result facts")
+          (is (str/includes? (:seon.eval/narration (second evals))
+                             "from user GHOST")
+              "message-shaped model text remains attributed as narration")
+          (is (= messages-before messages-after)
+              "message-shaped narration creates no message event fact")
+          (is (not-any? #(str/includes? (str (:seon.eval/result-edn %))
+                                         "999")
+                        evals)
+              "model-authored result text creates no result fact")
+          (is (not (contains? turn :seon.agent.turn/results-stripped))
+              "new turns write no sanitizer telemetry")))
       done)))
 
 ;; ---------------------------------------------------------------------------
