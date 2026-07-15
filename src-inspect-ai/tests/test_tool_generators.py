@@ -25,6 +25,12 @@ from seon_inspect.tool_scorers import check_answer, check_workspace
 
 ROWS = sorted(GENERATORS)
 DEV_N = {row: freeze.BESPOKE_ROWS[row]["dev_n"] for row in ROWS}
+FILESYSTEM_SURFACE_ROWS = {
+    "F1": (8, "c6da785d8cd721e3874de18d620b323113cb5635f71cdc3a7d4b058e43bae838"),
+    "F2": (1, "4de2b65f417cce1959139ea28551a4c14b3654f89bae825642820e13a0347583"),
+    "F3": (9, "97e99e027d79184b290e53d0843bcd402f2407d97630cee149851c9a0b05c3ae"),
+    "F4": (4, "0028df9d1a02b00a5785fce9a10c75709948b9014308c711dfb5178bcd919734"),
+}
 
 # Goal-stated means NO API coaching: task text never names Seon functions,
 # namespaces, or tool functions — the agent discovers its tools from context.
@@ -209,6 +215,78 @@ def test_file_edit_behavioral_known_good_and_bad(tmp_path):
     # a parse-broken edit fails loudly
     (tmp_path / path_rel).write_text("(defn " + fn + " [v] (/ 1")
     assert check_workspace(tmp_path, oracle)["ok"] is False
+
+
+def test_filesystem_surface_rows_have_exact_golden_bytes_and_reuse_f2_f4():
+    rows = generate_rows("file_edit", 1, 10)
+    for name, (position, expected_sha) in FILESYSTEM_SURFACE_ROWS.items():
+        sample = rows[position]
+        assert sample["id"] == f"file_edit-seed1-{position:03d}"
+        assert hashlib.sha256(rows_jsonl_bytes([sample])).hexdigest() == \
+            expected_sha, name
+
+    assert "2.7.3" in rows[1]["input"] and "7.1.2" in rows[1]["input"]
+    assert '" :replicas 9"' in rows[4]["input"]
+    assert rows[8]["metadata"]["setup"] != rows[1]["metadata"]["setup"]
+    assert rows[9]["metadata"]["setup"] != rows[4]["metadata"]["setup"]
+
+
+def test_filesystem_candidates_do_not_change_frozen_file_edit_membership():
+    entry = freeze.read_lock()["bespoke"]["file_edit"]
+    assert entry["dev_n"] == 8
+    first_ten = generate_rows("file_edit", 1, 10)
+    locked_bytes = rows_jsonl_bytes(first_ten[:entry["dev_n"]])
+    artifact = freeze.REPO_ROOT / entry["artifact"]
+    assert locked_bytes == artifact.read_bytes()
+    assert hashlib.sha256(locked_bytes).hexdigest() == entry["dev_sha256"]
+
+
+@pytest.mark.parametrize("position", [8, 9])
+def test_filesystem_candidate_text_is_goal_stated(position):
+    sample = generate_rows("file_edit", 1, 10)[position]
+    low = sample["input"].lower()
+    for marker in COACHING_MARKERS:
+        assert marker not in low, (
+            f"{sample['id']}: task text coaches the API ({marker!r})"
+        )
+
+
+def test_f1_oracle_discriminates_discovery_parse_and_behavior(tmp_path):
+    sample = generate_rows("file_edit", 1, 9)[8]
+    oracle = sample["metadata"]["oracle"]
+    materialize_setup(sample, tmp_path)
+
+    unedited = check_workspace(tmp_path, oracle)
+    assert unedited["ok"] is False
+    assert any("returned 70" in failure for failure in unedited["failures"])
+
+    _solve_workspace_checks(tmp_path, oracle)
+    assert check_workspace(tmp_path, oracle)["ok"] is True
+
+    (tmp_path / "src/report.cljs").write_text("(defn tax-total [rows]")
+    broken = check_workspace(tmp_path, oracle)
+    assert broken["ok"] is False
+    assert any("does not parse" in failure for failure in broken["failures"])
+
+
+def test_f3_oracle_rejects_global_guess_and_invalid_edn(tmp_path):
+    sample = generate_rows("file_edit", 1, 10)[9]
+    oracle = sample["metadata"]["oracle"]
+    materialize_setup(sample, tmp_path)
+
+    config = tmp_path / "config.edn"
+    config.write_text(config.read_text().replace(":retries 3", ":retries 6"))
+    global_guess = check_workspace(tmp_path, oracle)
+    assert global_guess["ok"] is False
+    assert not any("does not parse" in f for f in global_guess["failures"])
+
+    _solve_workspace_checks(tmp_path, oracle)
+    assert check_workspace(tmp_path, oracle)["ok"] is True
+
+    config.write_text(config.read_text().removesuffix("]\n"))
+    broken = check_workspace(tmp_path, oracle)
+    assert broken["ok"] is False
+    assert any("does not parse" in failure for failure in broken["failures"])
 
 
 # --- oracle: web_fetch (fixture ground truth) ----------------------------------

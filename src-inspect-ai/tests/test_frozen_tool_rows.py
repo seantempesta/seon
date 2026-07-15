@@ -120,6 +120,22 @@ def test_each_row_scores_through_native_inspect(
     assert not Path(sample.metadata["workspace"]).exists()
 
 
+@pytest.mark.parametrize(
+    "position,expected_id",
+    [(8, "file_edit-seed1-008"), (9, "file_edit-seed1-009")],
+)
+def test_filesystem_candidates_use_native_task_and_workspace_scorer(
+    monkeypatch, tmp_path, position, expected_id
+):
+    log = _run(monkeypatch, tmp_path, "file_edit", position)
+    assert log.status == "success", log.error
+    sample = log.samples[0]
+    assert sample.id == expected_id
+    assert sample.metadata["row"] == "file_edit"
+    assert next(iter(sample.scores.values())).value == "C"
+    assert not Path(sample.metadata["workspace"]).exists()
+
+
 def test_untouched_workspace_is_a_native_incorrect_score(monkeypatch, tmp_path):
     log = _run(
         monkeypatch, tmp_path, "shell_use", 1, touch_workspace=False
@@ -188,6 +204,17 @@ def test_selection_is_an_exact_projection_without_generator_drift():
     assert selected == [generated[7], generated[0], generated[3]]
     assert rows_jsonl_bytes(generate_rows("shell_use", 1, 8)) == \
         rows_jsonl_bytes(generated)
+
+
+def test_filesystem_comparison_positions_reuse_one_generator_projection():
+    generated = generate_rows("file_edit", 1, 10)
+    selected = tasks.selected_rows("file_edit", 1, "8,1,9,4")
+    assert selected == [
+        generated[8],  # F1 experimental candidate
+        generated[1],  # F2 existing frozen development row
+        generated[9],  # F3 experimental candidate
+        generated[4],  # F4 existing frozen development row
+    ]
 
 
 @pytest.mark.parametrize("positions", ["", "-1", "1,1", "wat"])

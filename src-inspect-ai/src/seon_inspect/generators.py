@@ -592,9 +592,85 @@ def _fe_docstring_swap(rng: random.Random) -> dict[str, Any]:
                 {"path": "src/report.cljs", "clj_parses": True}]}}
 
 
+def _fe_tax_total_discovery(_rng: random.Random) -> dict[str, Any]:
+    """F1: discover one definition among source and comment distractors."""
+    report = (
+        "(defn tax-total\n"
+        "  [rows]\n"
+        "  (reduce + 0 (map :subtotal rows)))\n"
+    )
+    expected = report.replace(":subtotal", ":tax")
+    invoice = "(defn subtotal\n  [row]\n  (:subtotal row))\n"
+    archive = (
+        ";; tax-total is defined by the reporting module.\n"
+        "(def archived-tax [])\n"
+    )
+    task = (
+        "Under " + WS + "/src, find the ClojureScript file that defines "
+        "`tax-total`. Change that function so it sums each row's `:tax` "
+        "value instead of its `:subtotal` value. Leave every other byte in "
+        "every file unchanged. The edited file must parse, and "
+        "`(tax-total [{:tax 2 :subtotal 20} {:tax 5 :subtotal 50}])` must "
+        "return `7`."
+    )
+    return {
+        "input": task,
+        "setup": {
+            "src/archive.cljs": archive,
+            "src/invoice.cljs": invoice,
+            "src/report.cljs": report,
+        },
+        "oracle": {"checks": [
+            {"path": "src/archive.cljs", "equals": archive},
+            {"path": "src/invoice.cljs", "equals": invoice},
+            {"path": "src/report.cljs", "equals": expected},
+            {"path": "src/report.cljs", "clj_parses": True},
+            {"path": "src/report.cljs", "behavioral": {
+                "fn_name": "tax-total",
+                "cases": [{
+                    "call": "(tax-total [{:tax 2 :subtotal 20} "
+                            "{:tax 5 :subtotal 50}])",
+                    "expect": 7,
+                }],
+            }},
+        ]},
+    }
+
+
+def _fe_disambiguate_service(_rng: random.Random) -> dict[str, Any]:
+    """F3: change one value under a repeated local anchor."""
+    original = (
+        "[{:service \"willow\"\n"
+        "  :retries 3\n"
+        "  :timeout-ms 4000}\n"
+        " {:service \"ember\"\n"
+        "  :retries 3\n"
+        "  :timeout-ms 2500}]\n"
+    )
+    expected = original.replace(
+        ':service "ember"\n  :retries 3',
+        ':service "ember"\n  :retries 6',
+    )
+    task = (
+        WS + "/config.edn contains two service maps. Change only the "
+        "`:retries` value in the map whose `:service` is `\"ember\"` from "
+        "`3` to `6`. Preserve all other bytes exactly, and leave the file "
+        "valid EDN."
+    )
+    return {
+        "input": task,
+        "setup": {"config.edn": original},
+        "oracle": {"checks": [
+            {"path": "config.edn", "equals": expected},
+            {"path": "config.edn", "clj_parses": True},
+        ]},
+    }
+
+
 _FILE_EDIT_TEMPLATES = [
     _fe_edn_value, _fe_version_bump, _fe_append_line, _fe_fix_mean_fn,
     _fe_edn_add_key, _fe_rename_word, _fe_delete_line, _fe_docstring_swap,
+    _fe_tax_total_discovery, _fe_disambiguate_service,
 ]
 
 
