@@ -296,11 +296,11 @@
                   stale-eids)]
         {::ok? true ::tx-data tx-data}))))
 
-(defn- stale-basis-envelope?
+(defn- stale-coordinate-envelope?
   [envelope]
   (let [data (get-in envelope [:seon.db/error :seon.error/data])]
     (or (= :transaction/stale-basis (:error data))
-        (= protocol/stale-basis-error
+        (= protocol/stale-coordinate-error
            (:seon.db.protocol/error-kind data)))))
 
 (defn- envelope-message
@@ -328,9 +328,9 @@
         are NEVER touched.
 
    The operations land in ONE atomic transaction guarded by that frozen db's
-   full `basis-t`. A concurrent winner makes the serialized writer reject the
-   stale basis, so reconcile rereads/recompiles up to three times. An empty diff
-   submits NO transaction. Writes inherit the ambient
+   full coordinate. A concurrent winner makes the serialized writer reject the
+   stale coordinate, so reconcile rereads/recompiles up to three times. An
+   empty diff submits NO transaction. Writes inherit the ambient
    `seon.db/with-tx-context` user/process refs, so the caller establishes the
    appropriate boot or config process — the
    re-added rows then stay managed for the next reconcile. Errors are values:
@@ -357,7 +357,8 @@
     (let [resolved-conn (or conn db/*conn*)]
       (loop [attempt 1]
         (let [db-value @resolved-conn
-              basis    (db/basis-t db-value)
+              expected-coordinate (db/head-coordinate db-value)
+              basis    (:seon.db.coordinate/t expected-coordinate)
               compiled (compile-reconcile-tx
                          db-value desired scope identity-attrs)]
           (if (false? (::ok? compiled))
@@ -372,7 +373,7 @@
                 (let [envelope
                       (await (db/transact!
                                {:seon.db/conn resolved-conn
-                                :seon.db/expected-basis-t basis
+                                :seon.db/expected-coordinate expected-coordinate
                                 :seon.db/tx-data tx-data}))]
                   (cond
                     (true? (:seon.db/ok? envelope))
@@ -382,11 +383,11 @@
                      ::attempts attempt
                      ::basis-t (:seon.db/tx envelope)}
 
-                    (and (stale-basis-envelope? envelope)
+                    (and (stale-coordinate-envelope? envelope)
                          (< attempt max-reconcile-attempts))
                     (recur (inc attempt))
 
-                    (stale-basis-envelope? envelope)
+                    (stale-coordinate-envelope? envelope)
                     {::ok? false
                      ::attempts attempt
                      ::error (str "reconcile!: database head changed during "

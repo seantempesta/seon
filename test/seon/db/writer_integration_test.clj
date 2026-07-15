@@ -204,24 +204,33 @@
                       {:db/ident :writer.fence/value
                        :db/valueType :db.type/string
                        :db/cardinality :db.cardinality/one}]}))
-            frozen (get-in schema [::protocol/coordinate ::coordinate/t])
+            frozen (::protocol/coordinate schema)
             accepted
             (call! request-channel
                    (protocol/transaction-request
                     {::protocol/database-name database-name
                      ::protocol/request-id "fence/accepted"
-                     ::protocol/expected-basis-t frozen
+                     ::protocol/expected-coordinate frozen
                      ::protocol/transaction-data
                      [{:writer.fence/id "one"
                        :writer.fence/value "accepted"}]}))
-            committed (get-in accepted
-                              [::protocol/coordinate ::coordinate/t])
+            committed (::protocol/coordinate accepted)
+            wrong-branch
+            (call! request-channel
+                   (protocol/transaction-request
+                    {::protocol/database-name database-name
+                     ::protocol/request-id "fence/wrong-branch"
+                     ::protocol/expected-coordinate
+                     (assoc committed ::coordinate/branch :experiment)
+                     ::protocol/transaction-data
+                     [{:writer.fence/id "one"
+                       :writer.fence/value "wrong-branch-must-not-land"}]}))
             rejected
             (call! request-channel
                    (protocol/transaction-request
                     {::protocol/database-name database-name
                      ::protocol/request-id "fence/rejected"
-                     ::protocol/expected-basis-t frozen
+                     ::protocol/expected-coordinate frozen
                      ::protocol/transaction-data
                      [{:writer.fence/id "one"
                        :writer.fence/value "must-not-land"}]}))
@@ -233,12 +242,16 @@
                            [:writer.fence/id "one"])]
         (is (true? (::protocol/success? opened)))
         (is (true? (::protocol/success? accepted)))
+        (is (= protocol/stale-coordinate-error
+               (::protocol/error-kind wrong-branch)))
+        (is (= committed (::protocol/current-coordinate wrong-branch))
+            "equal t and commit cannot cross a different branch attachment")
         (is (protocol/valid-response? rejected))
-        (is (= protocol/stale-basis-error
+        (is (= protocol/stale-coordinate-error
                (::protocol/error-kind rejected)))
-        (is (= frozen (::protocol/expected-basis-t rejected)))
-        (is (= committed (::protocol/current-basis-t rejected)))
-        (is (= committed (:max-tx (d/db connection)))
+        (is (= frozen (::protocol/expected-coordinate rejected)))
+        (is (= committed (::protocol/current-coordinate rejected)))
+        (is (= (::coordinate/t committed) (:max-tx (d/db connection)))
             "the rejected request creates no receipt or transaction")
         (is (= "accepted" (:writer.fence/value stored))
             "none of the stale request lands"))

@@ -110,7 +110,7 @@ inside this PRD.
   stable UUID and hardened file path.
 - `seon.db.registry/ensure-database!` serializes first open, runs one fixed
   initializer before publishing an entry, and releases a failed connection.
-- `seon.db.writer` is the only application writer. It checks expected basis,
+- `seon.db.writer` is the only application writer. It checks the expected head,
   adds durable request receipts, recovers a committed lost reply, and rejects
   request-id reuse with a different logical transaction hash.
 - Writer replay reconstructs bounded transaction pages from Datahike history
@@ -236,7 +236,7 @@ there is no intent from which a new supervisor can derive the next safe action.
 | Writable branch | Maintained Datahike `branch!`, `branch-as-db`, `delete-branch!` and secondary-index behavior exist | Seon uses physical `fork-database`; attachments, feeds, registry, membership, blobs, and operator are not branch-qualified | Branch at historical commit; primary and every secondary query match; source and branch accept isolated writes; branch release cannot delete source |
 | Restore and undo | Maintained guarded `force-branch!` and commit roots exist | No quiescence, external intent, undo branch, attachment rebuild, completion fact, or crash-resume derivation | Kill after every restore boundary; restart derives next action, preserves undo head, rebuilds from promoted facts, then undo follows the same restore path |
 | Branch-local blobs | Core blob facts are content addressed | No read-only source base plus branch-local writable overlay or restore materialization rule | Branch reads source blobs, writes only its overlay, release deletes only overlay, restore verifies every referenced blob before admission |
-| Stale writer/cursor rejection | Expected basis fences writes; replay pages validate numeric cursor chains | No branch/commit attachment token, so a head move or same-t lineage change can pass numeric checks | Frames/requests from an old commit ancestry fail as typed stale-lineage data; reconnect after restore resets rather than numerically replays |
+| Stale writer/cursor rejection | A full expected coordinate now fences writes; replay pages validate a frozen commit and complete cursor chain | Restore/reset admission and downstream turn/error/cache identity remain incomplete | Frames/requests from an old commit ancestry fail as typed stale-lineage data; reconnect after restore resets rather than numerically replays |
 | Ordered multi-form process failure | Parser/eval records real forms sequentially and durable eval facts exist | Process death boundary lacks a destructive acceptance case proving no later result is fabricated | Kill after form N commits in a multi-form batch; exactly forms through N have results, later forms have none, reconstruction replays declarations only |
 
 ## Exact owners and ordered implementation slices

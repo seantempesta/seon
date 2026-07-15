@@ -110,7 +110,7 @@
                     (is false (str "unexpected rejection: " e))
                     (done)))))))
 
-(deftest expected-basis-fences-the-whole-database-head
+(deftest expected-coordinate-fences-the-whole-database-head
   (async done
     (-> (fresh-conn)
         (.then
@@ -125,10 +125,10 @@
                 (.then
                   (fn [seed]
                     (is (true? (:seon.db/ok? seed)))
-                    (let [frozen (db/basis-t @conn)]
+                    (let [frozen (db/head-coordinate @conn)]
                       (-> (db/transact!
                             {:seon.db/conn conn
-                             :seon.db/expected-basis-t frozen
+                             :seon.db/expected-coordinate frozen
                              :seon.db/tx-data
                              [{:seon.db.precondition/id "one"
                                :seon.db.precondition/value "accepted"}]})
@@ -139,7 +139,7 @@
                               (let [committed (db/basis-t @conn)]
                                 (-> (db/transact!
                                       {:seon.db/conn conn
-                                       :seon.db/expected-basis-t frozen
+                                       :seon.db/expected-coordinate frozen
                                        :seon.db/tx-data
                                        [{:seon.db.precondition/id "one"
                                          :seon.db.precondition/value

@@ -62,6 +62,6 @@ progress, replay, bookmark, error, or cache identity.
 
 ## Remaining
 
-Expected-write fences and stale-fence errors, turn/error capture, frozen
-caches, bookmarks, and native branch lifecycle still need the same coordinate.
-The issue remains open until those downstream identity copies are removed.
+Turn/error capture, frozen caches, bookmarks, and native branch lifecycle still
+need the same coordinate. The issue remains open until those downstream
+identity copies are removed.

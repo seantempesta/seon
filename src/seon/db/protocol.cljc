@@ -32,7 +32,7 @@
 (def internal-error :seon.db.protocol.error/internal)
 (def not-found-error :seon.db.protocol.error/not-found)
 (def request-conflict-error :seon.db.protocol.error/request-conflict)
-(def stale-basis-error :seon.db.protocol.error/stale-basis)
+(def stale-coordinate-error :seon.db.protocol.error/stale-coordinate)
 (def generated-candidate-conflict-error
   :seon.db.protocol.error/generated-candidate-conflict)
 
@@ -40,7 +40,7 @@
 (def unknown-status :seon.db.protocol.status/unknown)
 (def feed-behind-status :seon.db.protocol.status/feed-behind)
 
-(def current-version 1)
+(def current-version 2)
 
 ;;; Shared schemas
 
@@ -61,8 +61,8 @@
 (schema/register! ::since-coordinate ::coordinate/coordinate)
 (schema/register! ::through-coordinate ::coordinate/coordinate)
 (schema/register! ::continuation-coordinate ::coordinate/coordinate)
-(schema/register! ::expected-basis-t [:int {:min 0}])
-(schema/register! ::current-basis-t [:int {:min 0}])
+(schema/register! ::expected-coordinate ::coordinate/coordinate)
+(schema/register! ::current-coordinate ::coordinate/coordinate)
 (schema/register! ::complete? :boolean)
 (schema/register! ::replayed-count [:int {:min 0}])
 (schema/register! ::datoms-added [:int {:min 0}])
@@ -85,7 +85,7 @@
 (schema/register!
  ::error-kind
  [:enum protocol-error database-error internal-error not-found-error
-  request-conflict-error stale-basis-error
+  request-conflict-error stale-coordinate-error
   generated-candidate-conflict-error])
 (schema/register! ::error [:string {:min 1}])
 (schema/register!
@@ -128,7 +128,7 @@
   [::database-name ::database-name]
   [::request-id ::request-id]
   [::transaction-data ::transaction-data]
-  [::expected-basis-t {:optional true} ::expected-basis-t]
+  [::expected-coordinate {:optional true} ::expected-coordinate]
   [::transaction-meta {:optional true} ::transaction-meta]
   [::generated-candidates {:optional true} ::generated-candidates]])
 (schema/register!
@@ -161,8 +161,8 @@
   [::success? [:= false]]
   [::error-kind ::error-kind]
   [::error ::error]
-  [::expected-basis-t {:optional true} ::expected-basis-t]
-  [::current-basis-t {:optional true} ::current-basis-t]])
+  [::expected-coordinate {:optional true} ::expected-coordinate]
+  [::current-coordinate {:optional true} ::current-coordinate]])
 (schema/register!
  ::ping-response
  [:map
@@ -235,7 +235,7 @@
   [::database-name ::database-name]
   [::request-id ::request-id]
   [::transaction-data ::transaction-data]
-  [::expected-basis-t {:optional true} ::expected-basis-t]
+  [::expected-coordinate {:optional true} ::expected-coordinate]
   [::transaction-meta {:optional true} ::transaction-meta]
   [::generated-candidates {:optional true} ::generated-candidates]])
 (schema/register!
@@ -275,13 +275,13 @@
   {:malli/schema [:=> [:cat ::transaction-request-input]
                   ::transaction-request]}
   [{::keys [database-name request-id transaction-data transaction-meta
-            expected-basis-t generated-candidates]
+            expected-coordinate generated-candidates]
     :as input}]
   (cond-> {::operation transact-operation
            ::database-name database-name
            ::request-id request-id
            ::transaction-data transaction-data}
-    (some? expected-basis-t) (assoc ::expected-basis-t expected-basis-t)
+    expected-coordinate (assoc ::expected-coordinate expected-coordinate)
     (seq transaction-meta) (assoc ::transaction-meta transaction-meta)
     (contains? input ::generated-candidates)
     (assoc ::generated-candidates generated-candidates)))
@@ -381,7 +381,7 @@
   (hasch/uuid
    {::version current-version
     ::transaction-data (::transaction-data request)
-    ::expected-basis-t (::expected-basis-t request)
+    ::expected-coordinate (::expected-coordinate request)
     ::transaction-meta (or (::transaction-meta request) {})
     ::generated-candidates (or (::generated-candidates request) [])}))
 

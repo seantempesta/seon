@@ -54,7 +54,7 @@ durable-receipt recovery, frozen replay pages/cursors, replica progress, and
 own-write correlation. One immutable replay commit contains every page cut;
 later writes cannot move its watermark, and the writer proves an initial cursor
 commit is an ancestor before replay. Focused proof passes the complete JVM gate
-(55 tests/327 assertions), the replica gate (17/93), and the complete CLJS gate
+(55 tests/329 assertions), the replica gate (17/93), and the complete CLJS gate
 (1,311/6,195). After a public rebuild/restart, the writer and replica both
 reported database `54b5b7e7-51fb-3220-b079-81a81914d86f`, branch `:db`, commit
 `6a56c8da-68c9-5c20-b4f4-99b6fc150056`, and `t` `536870935`; feed attachment
@@ -65,10 +65,20 @@ commit can contain multiple temporal cuts. `commit-id` therefore pins the
 immutable containing value while `t` selects a cut inside it. `as-of` is only a
 read filter; no code searches ancestry for an exact-`t` commit.
 
-Slice 1 remains open at the downstream boundary: expected-write fences and
-their errors, turn/error capture, frozen caches, and bookmarks still carry bare
-numeric basis values. Registry and native branch lifecycle also remain later
-ordered slices.
+Whole-head writes now carry `expected-coordinate` through `seon.db`, the remote
+writer, protocol hashing, rejection errors, and the serialized JVM comparison.
+The local Datahike writer receives only the extracted `t` at its third-party
+boundary. An equal `t` and commit on a different branch is rejected without a
+write. The breaking protocol shape increments the durable receipt version to
+2. After the second public rebuild/restart, the JVM writer, public
+`seon.db/head-coordinate`, and replica status all reported database
+`54b5b7e7-51fb-3220-b079-81a81914d86f`, branch `:db`, commit
+`6a56cd91-5f6c-58cc-be3c-eb732741fb5b`, and `t` `536870938`; both runtimes
+reported protocol version 2.
+
+Slice 1 remains open at the downstream boundary: turn/error capture, frozen
+caches, and bookmarks still carry bare numeric basis values. Registry and
+native branch lifecycle also remain later ordered slices.
 
 ## Research evidence
 

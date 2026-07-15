@@ -398,15 +398,15 @@
       {::protocol/error-kind error-kind
        :seon.error/kind
        (if (contains? #{protocol/generated-candidate-conflict-error
-                        protocol/stale-basis-error}
+                        protocol/stale-coordinate-error}
                       error-kind)
          :user-input
          :core-bug)}
-       (= protocol/stale-basis-error error-kind)
-       (assoc ::protocol/expected-basis-t
-              (::protocol/expected-basis-t response)
-              ::protocol/current-basis-t
-              (::protocol/current-basis-t response))
+       (= protocol/stale-coordinate-error error-kind)
+       (assoc ::protocol/expected-coordinate
+              (::protocol/expected-coordinate response)
+              ::protocol/current-coordinate
+              (::protocol/current-coordinate response))
        (= protocol/generated-candidate-conflict-error error-kind)
        (assoc :seon.db.id/error :seon.db.id.error/candidate-conflict)
        candidate
@@ -474,9 +474,9 @@
           (let [arg-map    (first args)
                 tx-data    (if (map? arg-map) (:tx-data arg-map) arg-map)
                 tx-meta    (when (map? arg-map) (:tx-meta arg-map))
-                expected-basis-t
+                expected-coordinate
                 (when (map? arg-map)
-                  (:datahike/expected-basis-t arg-map))
+                  (:seon.db/expected-coordinate arg-map))
                 generated? (and (map? arg-map)
                               (contains? arg-map
                                          :seon.db.id/generated-candidates))
@@ -490,8 +490,8 @@
                        ::protocol/request-id request-id}
                 (seq tx-meta)
                 (assoc ::protocol/transaction-meta tx-meta)
-                (some? expected-basis-t)
-                (assoc ::protocol/expected-basis-t expected-basis-t)
+                expected-coordinate
+                (assoc ::protocol/expected-coordinate expected-coordinate)
                 generated?
                 (assoc ::protocol/generated-candidates
                        (vec generated-candidates)))

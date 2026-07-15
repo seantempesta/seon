@@ -67,6 +67,7 @@
     [datahike.impl.entity :as dentity]
     [malli.core :as m]
     [seon.config :as config]
+    [seon.db.coordinate :as db.coordinate]
     [seon.db.id]
     [seon.db.internal :as internal]
     [seon.db.protocol]
@@ -139,7 +140,8 @@
 (schema/register! ::conn :any)
 (schema/register! ::tx-meta :map)   ; positional 3-arity convenience slot
 (schema/register! ::return-report? :boolean)
-(schema/register! ::expected-basis-t :seon.db.protocol/expected-basis-t)
+(schema/register! ::coordinate :seon.db.coordinate/coordinate)
+(schema/register! ::expected-coordinate ::coordinate)
 
 (schema/register!
   ::transact-request
@@ -148,7 +150,7 @@
    [::opts           {:optional true} ::opts]
    [::conn           {:optional true} ::conn]
    ;; Full-head precondition checked by the serialized database writer.
-   [::expected-basis-t {:optional true} ::expected-basis-t]
+   [::expected-coordinate {:optional true} ::expected-coordinate]
    ;; Escape hatch: include the raw datahike tx-report at
    ;; `::tx-report` in the success envelope. OFF by default — the
    ;; agent value stays the compact data summary.
@@ -590,7 +592,7 @@
 
    - map-in / map-out (preferred):
        (db/transact! {::db/tx-data [{::name \"A\"}]
-                      ::db/expected-basis-t <basis> ; optional full-head fence
+                      ::db/expected-coordinate (db/head-coordinate) ; optional fence
                       ::db/opts {:tx-meta {…}}   ; optional
                       ::db/conn <conn>})          ; optional, defaults *conn*
    - positional, mirroring datahike `(d/transact! conn tx-data)` — conn
@@ -621,13 +623,14 @@
    `:user-input` (fix tx-data and retry) vs `:core-bug` (the pod
    survived; report it, don't retry blindly).
 
-   `::db/expected-basis-t` is an optional whole-database precondition. The
-   serialized writer commits only when its current head still equals that
-   basis; otherwise the request resolves to an error envelope and writes
-   nothing. Freeze it AFTER any first-use schema installation—the automatic
-   installation of a newly registered attribute is necessarily an earlier
-   transaction. Desired-state reconcilers use this to compile from one
-   immutable db value and retry if another writer wins before commit.
+   `::db/expected-coordinate` is an optional whole-database precondition. The
+   serialized writer commits only when its current head still equals that full
+   database/branch/commit/t coordinate; otherwise the request resolves to an
+   error envelope and writes nothing. Freeze it AFTER any first-use schema
+   installation—the automatic installation of a newly registered attribute is
+   necessarily an earlier transaction. Desired-state reconcilers use this to
+   compile from one immutable db value and retry if another writer wins before
+   commit.
 
    Before committing it validates shape, attrs, and values; installs
    datahike schema for any newly-registered attr; and auto-merges the
@@ -1556,6 +1559,18 @@
   (if (instance? AsOfDB db)
     (dbi/-time-point db)
     (dbi/-max-tx db)))
+
+(defn head-coordinate
+  "The complete coordinate of one committed database value.
+
+   Omit db to identify the current immutable head. Temporal `as-of` wrappers
+   are not committed containers and fail; pin a complete coordinate before
+   constructing a filtered historical view."
+  {:malli/schema [:function
+                  [:=> [:cat] ::coordinate]
+                  [:=> [:catn [::db ::db-val]] ::coordinate]]}
+  ([] (head-coordinate @(internal/resolve-conn *conn*)))
+  ([db] (db.coordinate/resolved db)))
 
 (defn basis-t
   "The selected tx coordinate of a db value.

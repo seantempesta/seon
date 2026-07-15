@@ -20,6 +20,7 @@
     [datahike.impl.entity :as dentity]
     [seon.ai.tokens :as tokens]
     [seon.db :as-alias db]
+    [seon.db.coordinate :as coordinate]
     [seon.error :as error]
     [seon.schema :as schema]))
 
@@ -1806,7 +1807,7 @@
    (malformed call shape, before this fn is reached)."
   [arg]
   (try
-    (let [{::db/keys [tx-data opts conn return-report? expected-basis-t]} arg
+    (let [{::db/keys [tx-data opts conn return-report? expected-coordinate]} arg
           ;; Allocation metadata is internal request DATA owned by
           ;; `seon.db.id`. It rides Datahike's ordinary arg-map to the active
           ;; serialized writer: `:seon-wire` forwards it to the sole JVM
@@ -1852,8 +1853,11 @@
       (let [arg-map (cond->
                       (merge {:tx-data (encode-edn-slot-values tx-data)}
                              merged-opts)
-                      (some? expected-basis-t)
-                      (assoc :datahike/expected-basis-t expected-basis-t)
+                      expected-coordinate
+                      (assoc :datahike/expected-basis-t
+                             (::coordinate/t expected-coordinate)
+                             :seon.db/expected-coordinate
+                             expected-coordinate)
                       generated?
                       (assoc :seon.db.id/generated-candidates
                              generated-candidates))
