@@ -26,9 +26,20 @@ those functions are excluded from its denominator. The existing
 `injecting-fschema` validates resolved output for a simple fixed-arity `:=>`,
 while variadic, multi-arity, and `:function` shapes remain outside that owner.
 
+The 2026-07-15 exact-source audit fetched official ClojureScript tag
+`r1.12.145` at `bd23d9a2475d822ea8dfd65deaa6732428b9ed25` and read Shadow
+`3.4.10` at `d3c04691952aa9ea33f7287ffe9a2b3109c1e510`. ClojureScript emits
+native async outer functions and async fixed/variadic accessors with the normal
+callable-shape properties Malli already edits. Shadow does not replace those
+parser/emitter paths. An isolated Malli `0.20.0` probe reproduced a valid async
+multi-arity call rejecting as `:malli.core/invalid-output` because stock
+instrumentation validates the Promise object synchronously.
+
 ## Owner
 
 `seon.instrument` and the one Promise-resolution boundary in `seon.eval`.
+Implementation must remain in `seon.instrument`; `seon.eval` consumes the
+resulting Promise but does not become a second contract validator.
 
 ## Acceptance
 
@@ -38,3 +49,6 @@ validates resolved values once, returns structured failures, and does not
 reintroduce global reinstrumentation or a giant context warning. Any remaining
 exception must be explicit, source-grounded, and measured rather than silently
 excluded from coverage.
+
+Plan and dependency evidence:
+[[../prds/agent-runtime-correctness/research/async-contract-exact-source-implementation-audit-2026-07-15]].

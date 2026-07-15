@@ -38,14 +38,14 @@ evaluation has bounded result retention but no measured hard process-memory
 containment. Pod-restart recovery is already transactionally fenced and
 idempotent, but it is not an isolated eval-process boundary.
 
-The selected ClojureScript `1.12.145` source is not yet mirrored exactly. The
-current checkout is useful reference but cannot ground analyzer-boundary
-implementation. Exact Shadow `3.4.10` is already available at release commit
-`d3c04691952aa9ea33f7287ffe9a2b3109c1e510` in the reference checkout's
-history; its parent `2911c908…` is still `3.4.9`. That missing mirror blocks
-the analyzer/async and containment slices, not the independent raw-reply cut,
-whose selected parser is rewrite-clj `1.2.51` and whose storage owner is the
-existing content-addressed blob path.
+The exact ClojureScript `1.12.145` source is now available as official tag
+`r1.12.145`, commit `bd23d9a2475d822ea8dfd65deaa6732428b9ed25`, fetched into
+the reference checkout without moving its working tree. Exact Shadow `3.4.10`
+is release commit `d3c04691952aa9ea33f7287ffe9a2b3109c1e510`; its parent
+`2911c908…` is still `3.4.9`. The exact-source audit grounds the analyzer,
+compiler, self-host, Shadow bootstrap, and Malli accessor boundaries. Async
+implementation is no longer source-blocked, but remains deliberately unstarted
+until its bounded plan is reviewed.
 
 ## Research evidence
 
@@ -55,6 +55,9 @@ existing content-addressed blob path.
 - [[research/raw-reply-preservation-implementation-audit-2026-07-14]] —
   implementation-ready raw-evidence boundary, exact dependency ledger,
   deletion map, deterministic matrix, and live acceptance proof.
+- [[research/async-contract-exact-source-implementation-audit-2026-07-15]] —
+  exact ClojureScript, Shadow, and Malli identities; executable function-shape
+  probes; one-owner implementation plan; and deterministic transition matrix.
 
 ## Ordered work
 
@@ -62,11 +65,10 @@ existing content-addressed blob path.
    the one blob and one parser, delete the result-claim rewrite and new
    telemetry writes, and prove that only parsed real forms create ordered eval
    evidence. The existing admission checks before and between entries remain.
-2. Mirror exact ClojureScript `1.12.145`, read Shadow at its existing exact
-   release commit, define the remaining incomplete/read/eval/async/process-death
-   transition boundaries, and make async public-function instrumentation
-   validate the awaited value without leaking Promises or throwing into the
-   loop.
+2. **Exact-source audit complete; implementation pending:** generalize the one
+   Promise-aware function-schema construction across fixed, variadic, and
+   multi-arity contracts; make the census count every contract; then validate
+   awaited values without leaking Promises or throwing into the loop.
 3. Thread cancellation through the existing provider attempt and adapters while
    retaining one retry owner.
 4. Give plan completion schema'd verification evidence and settle authority for
