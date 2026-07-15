@@ -264,6 +264,23 @@ blob proof, cold reconstruction, completion, exact admission, readiness, and
 intent deletion. It must not add shadow completion metadata or another restore
 state machine.
 
+The current-source cold-composition reconciliation is retained at
+[[research/restore-cold-composition-reconciliation-2026-07-15]]. The local blob,
+completion, and split admission primitives are sufficient, but the current
+`seon.client/start-runtime!` ordering is not: autonomous attach can install
+schema, boot, config, and crash-recovery writes before restore evidence is
+validated, while both autonomous and non-autonomous cold calls admit internally
+before an external completion call can close the transition. The next in-place
+runtime unit is one optional closed, digest-bound restore startup value in the
+existing launch/process descriptor, followed by a fresh main attach with writes
+closed, exact intent/admin/blob validation, preserve-only reconstruction,
+`prepare-committed!`, root/boot completion recording, and
+`admit-prepared!` of that same generation. Autonomy and readiness start last;
+intent deletion remains the external operator's durable inverse. No restore-
+only boot path, callback, status, or ambient intent-file reread is permitted.
+The transaction-coordinate resolver and Proximum force-secondary repair remain
+hard predecessors of the destructive integrated gate.
+
 The first operator-only restore slice now owns one closed immutable intent and
 derives its next command from the current main coordinate, an explicitly
 observed forced-main coordinate, main ancestry, reserved branch heads, and
