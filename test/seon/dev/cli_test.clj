@@ -1,6 +1,7 @@
 (ns seon.dev.cli-test
   (:require [babashka.fs :as fs]
             [babashka.process :as shell]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.dev.artifact :as artifact]
             [seon.dev.branch :as branch]
@@ -20,7 +21,91 @@
     (mapv (fn [id]
             {:seon.dev.process/id id
              :seon.dev.process/classification classification})
-          (sort-by name targets))}))
+          (filterv targets
+                   [process/pod-id process/writer-id process/watcher-id]))}))
+
+(defn- component-result
+  ([id classification]
+   {:seon.dev.process/id id
+    :seon.dev.process/classification classification})
+  ([id classification generation]
+   (assoc (component-result id classification)
+          :seon.dev.process/terminal
+          {:seon.dev.process.containment/generation generation
+           :seon.dev.process.containment/status
+           :seon.dev.process.containment.status/drained
+           :seon.dev.process.containment/trigger
+           :seon.dev.process.containment.trigger/requested
+           :seon.dev.process.containment/anchor-exit -9})))
+
+(deftest stop-evidence-selects-only-bounded-correlation-fields
+  (let [generation #uuid "00000000-0000-0000-0000-000000000001"
+        digest (apply str (repeat 64 "a"))
+        sentinel (apply str (repeat 2048 "UNBOUNDED-APPLICATION-RESULT"))
+        pod
+        (assoc (component-result process/pod-id
+                                 :seon.dev.process.classification/forced
+                                 generation)
+               :seon.dev.process/reason
+               :seon.dev.process.reason/incomplete-application
+               :seon.dev.process/application-result {:sentinel sentinel}
+               :seon.dev.process/application-error-message sentinel)
+        writer
+        (assoc (component-result process/writer-id
+                                 :seon.dev.process.classification/forced
+                                 generation)
+               :seon.dev.process/reason
+               :seon.dev.process.application-error/invalid-schema
+               :seon.dev.process/application-capture
+               {:seon.dev.process.application-capture/status
+                :seon.dev.process.application-capture/captured
+                :seon.dev.process.application-capture/sha256 digest
+                :seon.dev.process.application-capture/bytes 123
+                :seon.dev.process.application-capture/error sentinel})
+        watcher (component-result process/watcher-id
+                                  :seon.dev.process.classification/clean
+                                  generation)
+        extra (assoc watcher :seon.dev.process/reason
+                     :seon.dev.process.reason/should-not-render)
+        lines
+        (#'cli/stop-evidence-lines
+         {:seon.dev.process/operation :seon.dev.process.operation/restart
+          :seon.dev.process/classification
+          :seon.dev.process.classification/forced
+          :seon.dev.process/results [pod writer watcher extra]})]
+    (is (= ["restart: forced"
+            (str "  pod: forced reason=incomplete-application"
+                 " generation=" generation " trigger=requested")
+            (str "  writer: forced reason=invalid-schema"
+                 " generation=" generation " trigger=requested"
+                 " capture=captured sha256=" digest " bytes=123")
+            (str "  watcher: clean generation=" generation
+                 " trigger=requested")]
+           lines))
+    (is (= 4 (count lines)))
+    (is (not-any? #(str/includes? % sentinel) lines))
+    (is (not-any? #(str/includes? % "should-not-render") lines))))
+
+(deftest ready-output-renders-bounded-restart-component-evidence
+  (let [target
+        {:seon.dev.target/url "http://127.0.0.1:7890"
+         :seon.dev.target/stop-results
+         [(stop-result :seon.dev.process.operation/restart
+                       (set process/target-processes)
+                       :seon.dev.process.classification/forced)]}]
+    (with-redefs-fn
+      {#'cli/ordinary-agent-url
+       (constantly "http://127.0.0.1:7890/agent/proof")}
+      (fn []
+        (is (= (str "\n◆ Seon is ready\n"
+                    "  agent: http://127.0.0.1:7890/agent/proof\n"
+                    "  root:  http://127.0.0.1:7890/\n"
+                    "  data:  http://127.0.0.1:7890/data\n"
+                    "  restart: forced\n"
+                    "    pod: forced\n"
+                    "    writer: forced\n"
+                    "    watcher: forced\n")
+               (with-out-str (#'cli/print-ready! target false))))))))
 
 (deftest ready-url-selects-an-ordinary-agent-from-the-root-feed
   (let [requested (atom [])]
@@ -237,7 +322,11 @@
          (reset! request value)
          result)}
       (fn []
-        (is (= "○ Seon is down (forced)\n"
+        (is (= (str "○ Seon is down\n"
+                    "  down: forced\n"
+                    "    pod: forced\n"
+                    "    writer: forced\n"
+                    "    watcher: forced\n")
                (with-out-str (#'cli/down! configuration []))))))
     (is (= {:seon.dev.process/configuration configuration
             :seon.dev.process/operation :seon.dev.process.operation/down
@@ -476,7 +565,13 @@
            (swap! reconciled conj [selected stop-results])
            {:seon.dev.target/status :seon.dev.target.status/ready
             :seon.dev.target/stop-results stop-results})}
-        (fn [] (#'cli/reset-cluster! configuration ["default"])))
+        (fn []
+          (is (= (str "  reset: forced\n"
+                      "    pod: forced\n"
+                      "    writer: forced\n"
+                      "● cluster default reset and ready\n")
+                 (with-out-str
+                   (#'cli/reset-cluster! configuration ["default"]))))))
       (is (= [{:seon.dev.process/configuration configuration
                :seon.dev.process/operation :seon.dev.process.operation/reset
                :seon.dev.process/targets #{process/pod-id process/writer-id}}]

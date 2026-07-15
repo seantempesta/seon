@@ -121,6 +121,39 @@
     (shell/process {:out :discard :err :discard :cmd argv})
     nil))
 
+(defn- stop-component-line [result]
+  (let [terminal (:seon.dev.process/terminal result)
+        capture (:seon.dev.process/application-capture result)]
+    (str "  " (name (:seon.dev.process/id result)) ": "
+         (name (:seon.dev.process/classification result))
+         (when-let [reason (:seon.dev.process/reason result)]
+           (str " reason=" (name reason)))
+         (when-let [generation
+                    (:seon.dev.process.containment/generation terminal)]
+           (str " generation=" generation))
+         (when-let [trigger
+                    (:seon.dev.process.containment/trigger terminal)]
+           (str " trigger=" (name trigger)))
+         (when-let [status
+                    (:seon.dev.process.application-capture/status capture)]
+           (str " capture=" (name status)))
+         (when-let [sha256
+                    (:seon.dev.process.application-capture/sha256 capture)]
+           (str " sha256=" sha256))
+         (when-let [bytes
+                    (:seon.dev.process.application-capture/bytes capture)]
+           (str " bytes=" bytes)))))
+
+(defn- stop-evidence-lines [result]
+  (into [(str (name (:seon.dev.process/operation result)) ": "
+              (name (:seon.dev.process/classification result)))]
+        (map stop-component-line)
+        (take 3 (:seon.dev.process/results result))))
+
+(defn- print-stop-evidence! [indent result]
+  (doseq [line (stop-evidence-lines result)]
+    (println (str indent line))))
+
 (defn- print-ready! [target open?]
   (let [base-url (:seon.dev.target/url target)
         root-url (str base-url "/")
@@ -131,8 +164,7 @@
     (println (str "  root:  " root-url))
     (println (str "  data:  " base-url "/data"))
     (doseq [result (:seon.dev.target/stop-results target)]
-      (println (str "  " (name (:seon.dev.process/operation result)) ": "
-                    (name (:seon.dev.process/classification result)))))
+      (print-stop-evidence! "  " result))
     (when open? (open-url! agent-url))))
 
 (defn- parse-start-options [arguments]
@@ -195,8 +227,8 @@
          configuration :stack 300000
          #(stop-development! configuration
                              :seon.dev.process.operation/down))]
-    (println (str "○ Seon is down ("
-                  (name (:seon.dev.process/classification result)) ")"))))
+    (println "○ Seon is down")
+    (print-stop-evidence! "  " result)))
 
 (defn- restart! [configuration arguments]
   (let [{:seon.dev.start/keys [open? config-path]}
@@ -524,8 +556,7 @@
               (reconcile-development! (select-config configuration nil)
                                       [stopped])))]
       (doseq [result (:seon.dev.target/stop-results target)]
-        (println (str "  " (name (:seon.dev.process/operation result)) ": "
-                      (name (:seon.dev.process/classification result)))))
+        (print-stop-evidence! "  " result))
       (println (str "● cluster " cluster-name " reset and ready")))))
 
 (defn- cluster! [configuration arguments]
