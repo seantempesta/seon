@@ -9,7 +9,6 @@
             [seon.dev.test-artifact :as artifact]
             [seon.dev.test-roots :as test-roots])
   (:import [java.io File FileInputStream]
-           [java.nio.charset StandardCharsets]
            [java.security MessageDigest]
            [java.time Instant]
            [java.util.concurrent TimeUnit]))
@@ -17,6 +16,107 @@
 (def manifest-wait-ms 3000)
 (def test-timeout-ms 300000)
 (def termination-wait-ms 2000)
+(def hook-publication-timeout-ms 3000)
+
+(declare normalize-paths)
+
+(defn- hook-directory [configuration]
+  (fs/path (:seon.dev.config/process-dir configuration) "changed-test-hook"))
+
+(defn- hook-state-path [configuration name]
+  (fs/path (hook-directory configuration) (str name ".edn")))
+
+(defn- hook-pending [configuration]
+  (state/read-edn (hook-state-path configuration "pending")))
+
+(defn- delete-if-present! [path]
+  (when (fs/exists? path) (fs/delete path))
+  nil)
+
+(defn- next-hook-generation! [configuration]
+  (let [path (hook-state-path configuration "generation")
+        generation (inc (long (or (:seon.dev.changed-test/generation
+                                    (state/read-edn path))
+                                  0)))]
+    (state/write-edn! path {:seon.dev.changed-test/generation generation})
+    generation))
+
+(defn- current-process-identity []
+  (let [pid (.pid (java.lang.ProcessHandle/current))]
+    {:seon.dev.process/pid pid
+     :seon.dev.process/start-instant (state/process-start-instant pid)}))
+
+(defn- hook-worker-alive? [configuration]
+  (some-> (state/read-edn (hook-state-path configuration "worker"))
+          state/process-identity-alive?))
+
+(defn- default-hook-worker-command [configuration]
+  (let [root (:seon.dev.config/root configuration)]
+    ["bb" "--config" (str (fs/path root "bb.edn"))
+     "--deps-root" root "-m" "seon.dev.changed-test"
+     "hook-worker" "--root" root]))
+
+(defn- start-hook-worker! [configuration command]
+  (let [root (:seon.dev.config/root configuration)
+        log (fs/path (hook-directory configuration) "worker.log")
+        _ (fs/create-dirs (hook-directory configuration))
+        worker (process/process {:cmd command
+                                 :dir root
+                                 :out :append
+                                 :out-file log
+                                 :err :out})
+        pid (.pid ^Process (:proc worker))
+        start-instant
+        (loop [attempt 0]
+          (or (state/process-start-instant pid)
+              (when (< attempt 100)
+                (Thread/sleep 10)
+                (recur (inc attempt)))))]
+    (when-not start-instant
+      (process/destroy-tree worker)
+      (throw (ex-info "Changed-test worker identity was unavailable."
+                      {:seon.dev.process/pid pid})))
+    (state/write-edn!
+     (hook-state-path configuration "worker")
+     {:seon.dev.process/pid pid
+      :seon.dev.process/start-instant start-instant})
+    pid))
+
+(defn enqueue-hook!
+  "Union hook paths into one pending generation and ensure one worker."
+  ([configuration paths]
+   (enqueue-hook! configuration paths nil))
+  ([configuration paths worker-command]
+   (let [root (:seon.dev.config/root configuration)
+         paths (normalize-paths root paths)]
+     (state/with-lock
+      configuration :changed-test-hook-publication
+      hook-publication-timeout-ms
+      (fn []
+        (let [worker-alive? (hook-worker-alive? configuration)
+              pending (hook-pending configuration)
+              running (when-not worker-alive?
+                        (state/read-edn
+                         (hook-state-path configuration "running")))
+              generation (next-hook-generation! configuration)
+              requested-paths
+              (->> (concat (:seon.dev.changed-test/paths pending)
+                           (:seon.dev.changed-test/paths running)
+                           paths)
+                   distinct sort vec)
+              request {:seon.dev.changed-test/generation generation
+                       :seon.dev.changed-test/paths requested-paths
+                       :seon.dev.changed-test/published-at
+                       (str (Instant/now))}]
+          (when running
+            (delete-if-present! (hook-state-path configuration "running")))
+          (state/write-edn! (hook-state-path configuration "pending") request)
+          (when-not worker-alive?
+            (start-hook-worker!
+             configuration
+             (or worker-command
+                 (default-hook-worker-command configuration))))
+          request))))))
 
 (def host-analysis-config
   "{:output {:format :edn} :analysis {:var-usages false :var-definitions {:shallow true}}}")
@@ -568,83 +668,164 @@
     (state/write-edn! report result)
     (assoc result :seon.dev.changed-test/report (str report))))
 
+(defn- run-changed-unlocked!
+  "Run the selected boundaries while the caller owns the changed-test lock."
+  [configuration requested-paths]
+  (let [root (:seon.dev.config/root configuration)
+        paths (filterv root-runtime-path? requested-paths)
+        dependency-source-paths
+        (filterv (complement root-runtime-path?) requested-paths)
+        host-result (analyze-host root)
+        host-selection (assoc (host-impact host-result paths)
+                              :seon.dev.changed-test/host-graph
+                              (:seon.dev.changed-test/host-graph host-result))
+        current-manifest (artifact/read-current root)
+        shadow (if current-manifest
+                 (shadow-plan current-manifest host-selection paths)
+                 {:seon.dev.changed-test/shadow?
+                  (boolean (some potential-shadow-input? paths))
+                  :seon.dev.changed-test/shadow-paths
+                  (filterv potential-shadow-input? paths)
+                  :seon.dev.changed-test/shadow-seeds #{}})
+        manifest (when (:seon.dev.changed-test/shadow? shadow)
+                   (wait-current root
+                                 (:seon.dev.changed-test/shadow-paths shadow)
+                                 manifest-wait-ms))
+        pod-selection (when manifest
+                        (impact manifest paths
+                                (:seon.dev.changed-test/shadow-seeds shadow)))
+        pod-tests (when pod-selection
+                    (if (:seon.dev.changed-test/full? pod-selection)
+                      :all
+                      (:seon.dev.changed-test/test-namespaces pod-selection)))
+        operator-tests
+        (:seon.dev.changed-test/operator-tests host-selection)
+        writer-tests
+        (:seon.dev.changed-test/writer-tests host-selection)
+        boundary-results
+        (cond-> []
+          (or (= :all operator-tests) (seq operator-tests))
+          (conj (run-operator! root operator-tests))
+
+          (or (= :all writer-tests) (seq writer-tests))
+          (conj (run-writer! root writer-tests))
+
+          (and manifest (or (= :all pod-tests) (seq pod-tests)))
+          (conj (run-node! configuration manifest pod-tests))
+
+          (and (:seon.dev.changed-test/shadow? shadow) (nil? manifest))
+          (conj (run-pod-fallback! configuration)))]
+    {:seon.dev.changed-test/paths requested-paths
+     :seon.dev.changed-test/status (aggregate-status boundary-results)
+     :seon.dev.changed-test/boundaries boundary-results
+     :seon.dev.changed-test/test-namespaces
+     (vec (:seon.dev.changed-test/test-namespaces pod-selection))
+     :seon.dev.changed-test/host-status
+     (:seon.dev.changed-test/host-status host-result)
+     :seon.dev.changed-test/widening
+     (vec
+      (concat
+       (when (seq dependency-source-paths)
+         [{:seon.dev.changed-test/reason
+           :independent-reference-repository
+           :seon.dev.changed-test/paths dependency-source-paths}])
+       (:seon.dev.changed-test/widening host-selection)
+       (:seon.dev.changed-test/widening pod-selection)))}))
+
+(def changed-test-lock-timeout-ms
+  (+ manifest-wait-ms (* 3 test-timeout-ms) 10000))
+
 (defn run-changed!
   "Run affected pod, writer, and operator tests from current graph facts."
   [configuration paths]
   (let [root (:seon.dev.config/root configuration)
-        requested-paths (normalize-paths root paths)
-        paths (filterv root-runtime-path? requested-paths)
-        dependency-source-paths
-        (filterv (complement root-runtime-path?) requested-paths)]
+        requested-paths (normalize-paths root paths)]
+    (state/with-lock
+     configuration :changed-test changed-test-lock-timeout-ms
+     #(persist-report root
+                      (run-changed-unlocked! configuration requested-paths)))))
+
+(defn- with-hook-publication [configuration transition]
+  (state/with-lock configuration :changed-test-hook-publication
+                   hook-publication-timeout-ms transition))
+
+(defn- claim-hook-request! [configuration]
+  (with-hook-publication
+   configuration
+   (fn []
+     (let [path (hook-state-path configuration "pending")
+           request (state/read-edn path)]
+       (when request
+         (state/write-edn! (hook-state-path configuration "running") request)
+         (delete-if-present! path))
+       request))))
+
+(defn- complete-hook-request! [configuration request]
+  (with-hook-publication
+   configuration
+   (fn []
+     (when (= (:seon.dev.changed-test/generation request)
+              (:seon.dev.changed-test/generation
+               (state/read-edn (hook-state-path configuration "running"))))
+       (delete-if-present! (hook-state-path configuration "running"))))))
+
+(defn- continue-hook-worker? [configuration identity]
+  (with-hook-publication
+   configuration
+   (fn []
+     (if (hook-pending configuration)
+       true
+       (do
+         (when (= identity
+                  (state/read-edn (hook-state-path configuration "worker")))
+           (delete-if-present! (hook-state-path configuration "worker")))
+         false)))))
+
+(defn- run-hook-request! [configuration request]
+  (let [root (:seon.dev.config/root configuration)
+        result
+        (try
+          (run-changed-unlocked!
+           configuration (:seon.dev.changed-test/paths request))
+          (catch Throwable error
+            {:seon.dev.changed-test/paths
+             (:seon.dev.changed-test/paths request)
+             :seon.dev.changed-test/status :failed
+             :seon.dev.changed-test/boundaries []
+             :seon.dev.changed-test/test-namespaces []
+             :seon.dev.changed-test/host-status :unavailable
+             :seon.dev.changed-test/widening
+             [{:seon.dev.changed-test/reason :worker-failure
+               :seon.dev.changed-test/detail (.getMessage error)}]}))]
     (persist-report
      root
-     (state/with-lock
-       configuration :changed-test
-       (+ manifest-wait-ms (* 3 test-timeout-ms) 10000)
-       (fn []
-         (let [host-result (analyze-host root)
-              host-selection (assoc (host-impact host-result paths)
-                                    :seon.dev.changed-test/host-graph
-                                    (:seon.dev.changed-test/host-graph
-                                     host-result))
-              current-manifest (artifact/read-current root)
-              shadow (if current-manifest
-                       (shadow-plan current-manifest host-selection paths)
-                       {:seon.dev.changed-test/shadow?
-                        (boolean (some potential-shadow-input? paths))
-                        :seon.dev.changed-test/shadow-paths
-                        (filterv potential-shadow-input? paths)
-                        :seon.dev.changed-test/shadow-seeds #{}})
-              manifest (when (:seon.dev.changed-test/shadow? shadow)
-                         (wait-current root
-                                       (:seon.dev.changed-test/shadow-paths
-                                        shadow)
-                                       manifest-wait-ms))
-              pod-selection (when manifest
-                              (impact manifest paths
-                                      (:seon.dev.changed-test/shadow-seeds
-                                       shadow)))
-              pod-tests (when pod-selection
-                          (if (:seon.dev.changed-test/full? pod-selection)
-                            :all
-                            (:seon.dev.changed-test/test-namespaces
-                             pod-selection)))
-              operator-tests
-              (:seon.dev.changed-test/operator-tests host-selection)
-              writer-tests
-              (:seon.dev.changed-test/writer-tests host-selection)
-              boundary-results
-              (cond-> []
-                (or (= :all operator-tests) (seq operator-tests))
-                (conj (run-operator! root operator-tests))
+     (merge result
+            (select-keys request
+                         [:seon.dev.changed-test/generation
+                          :seon.dev.changed-test/published-at])))))
 
-                (or (= :all writer-tests) (seq writer-tests))
-                (conj (run-writer! root writer-tests))
+(defn run-hook-worker!
+  "Drain at most one coalesced hook generation at a time."
+  ([configuration]
+   (run-hook-worker! configuration #(run-hook-request! configuration %)))
+  ([configuration execute!]
+   (let [identity (current-process-identity)]
+     (loop []
+       (state/with-lock
+        configuration :changed-test changed-test-lock-timeout-ms
+        (fn []
+          (when-let [request (claim-hook-request! configuration)]
+            (execute! request)
+            (complete-hook-request! configuration request))))
+       (when (continue-hook-worker? configuration identity)
+         (recur))))))
 
-                (and manifest
-                     (or (= :all pod-tests) (seq pod-tests)))
-                (conj (run-node!
-                       configuration manifest pod-tests))
-
-                (and (:seon.dev.changed-test/shadow? shadow)
-                     (nil? manifest))
-                (conj (run-pod-fallback! configuration)))]
-          {:seon.dev.changed-test/paths requested-paths
-           :seon.dev.changed-test/status (aggregate-status boundary-results)
-           :seon.dev.changed-test/boundaries boundary-results
-           :seon.dev.changed-test/test-namespaces
-           (vec (:seon.dev.changed-test/test-namespaces pod-selection))
-           :seon.dev.changed-test/host-status
-           (:seon.dev.changed-test/host-status host-result)
-           :seon.dev.changed-test/widening
-           (vec
-             (concat
-               (when (seq dependency-source-paths)
-                 [{:seon.dev.changed-test/reason
-                   :independent-reference-repository
-                   :seon.dev.changed-test/paths dependency-source-paths}])
-               (:seon.dev.changed-test/widening host-selection)
-               (:seon.dev.changed-test/widening pod-selection)))}))))))
+(defn -main [& arguments]
+  (when-not (= ["hook-worker" "--root"] (vec (take 2 arguments)))
+    (throw (ex-info "Choose `hook-worker --root ROOT`."
+                    {:seon.dev.changed-test/arguments (vec arguments)})))
+  (let [load-configuration (requiring-resolve 'seon.dev.config/load!)]
+    (run-hook-worker! (load-configuration (nth arguments 2)))))
 
 (defn format-result
   "Format one bounded advisory result for a human or edit hook."

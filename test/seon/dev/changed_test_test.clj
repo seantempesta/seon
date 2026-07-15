@@ -1,7 +1,13 @@
 (ns seon.dev.changed-test-test
   (:require [babashka.fs :as fs]
-            [clojure.test :refer [deftest is testing]]
-            [seon.dev.changed-test :as changed]))
+            [babashka.process :as process]
+            [cheshire.core :as json]
+            [clojure.edn :as edn]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
+            [seon.dev.config :as config]
+            [seon.dev.changed-test :as changed]
+            [seon.dev.state :as state]))
 
 (defn- wait-until [pred timeout-ms]
   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
@@ -21,6 +27,10 @@
 (defn- force-pid! [pid]
   (when-let [handle (pid-handle pid)]
     (when (.isAlive handle) (.destroyForcibly handle))))
+
+(defn- edn-lines [path]
+  (when (fs/regular-file? path)
+    (mapv edn/read-string (fs/read-all-lines path))))
 
 (def manifest
   {:seon.dev.test.artifact/test-namespaces
@@ -260,4 +270,125 @@
         (when (fs/regular-file? grandchild-file)
           (force-pid!
             (parse-long (first (fs/read-all-lines grandchild-file)))))
+        (fs/delete-tree directory)))))
+
+(deftest hook-burst-retains-one-worker-and-one-coalesced-generation
+  (let [root (System/getProperty "user.dir")
+        directory (fs/path root "tmp" (str "changed-hook-" (random-uuid)))
+        process-dir (fs/path directory "operator")
+        worker-starts (fs/path directory "worker-starts.edn")
+        running (fs/path directory "running")
+        release (fs/path directory "release")
+        completed (fs/path directory "completed.edn")
+        latest (fs/path directory "latest.report.edn")
+        hook-config (fs/path directory "hook.edn")
+        configuration
+        (assoc (config/load! root)
+               :seon.dev.config/process-dir (str process-dir))
+        worker-expression
+        (str
+         "(require '[babashka.fs :as fs] '[seon.dev.changed-test :as changed] "
+         "'[seon.dev.config :as config] '[seon.dev.state :as state]) "
+         "(let [configuration (assoc (config/load! " (pr-str root) ") "
+         ":seon.dev.config/process-dir " (pr-str (str process-dir)) ") "
+         "execute! (fn [request] "
+         "(when-not (fs/exists? " (pr-str (str running)) ") "
+         "(spit " (pr-str (str running)) " \"ready\\n\") "
+         "(loop [] (when-not (fs/exists? " (pr-str (str release)) ") "
+         "(Thread/sleep 10) (recur)))) "
+         "(spit " (pr-str (str completed))
+         " (str (pr-str request) \"\\n\") :append true) "
+         "(state/write-edn! " (pr-str (str latest)) " request))] "
+         "(spit " (pr-str (str worker-starts)) " \"{:worker/start true}\\n\" "
+         ":append true) (changed/run-hook-worker! configuration execute!))")
+        worker-command
+        ["bb" "--config" (str (fs/path root "bb.edn"))
+         "--deps-root" root "-e" worker-expression]
+        burst-paths
+        (mapv #(str "test/seon/dev/generated_hook_burst_" % ".clj")
+              (range 16))]
+    (fs/create-dirs directory)
+    (spit (str hook-config)
+          "{:seon.config/on-core-error :log\n :lint {:enabled false}\n :markdown-lint {:enabled false}\n :docstring-lint {:enabled false}\n :changed-tests {:enabled true}}\n")
+    (try
+      (changed/enqueue-hook! configuration
+                             ["test/seon/dev/changed_test_test.clj"]
+                             worker-command)
+      (is (wait-until #(fs/regular-file? running) 5000)
+          "the one worker claims the initial generation")
+      (is (= ["test/seon/dev/changed_test_test.clj"]
+             (:seon.dev.changed-test/paths
+              (edn/read-string
+               (slurp
+                (str (fs/path process-dir "changed-test-hook"
+                              "running.edn"))))))
+          "the claimed generation remains recoverable across worker death")
+      (let [environment
+            (assoc (into {} (System/getenv))
+                   "SEON_PROC_DIR" (str process-dir)
+                   "SEON_HOOK_CONFIG" (str hook-config))
+            publishers
+            (mapv
+             (fn [path]
+               (process/process
+                {:cmd [(str (fs/path root "bin/seon-hook"))]
+                 :dir root
+                 :env environment
+                 :in (json/generate-string
+                      {:hook_event_name "PostToolUse"
+                       :tool_name "Edit"
+                       :tool_input {:file_path path}})
+                 :out :string
+                 :err :string}))
+             burst-paths)
+            results (mapv deref publishers)
+            pending-path
+            (fs/path process-dir "changed-test-hook" "pending.edn")
+            worker-path
+            (fs/path process-dir "changed-test-hook" "worker.edn")
+            pending (edn/read-string (slurp (str pending-path)))
+            worker (edn/read-string (slurp (str worker-path)))]
+        (is (every? #(zero? (:exit %)) results))
+        (is (every? #(re-find #"Changed tests queued as generation"
+                              (str (:out %)))
+                    results)
+            "every publisher exits promptly with advisory queue evidence")
+        (is (= (set burst-paths)
+               (set (:seon.dev.changed-test/paths pending)))
+            "all newer paths occupy one pending generation")
+        (is (state/process-identity-alive? worker)
+            "only the published worker identity remains long-lived")
+        (is (pos? (:seon.dev.process/pid worker)))
+        (when (fs/which "ps")
+          (let [rss (-> (process/sh
+                         {:cmd ["ps" "-o" "rss=" "-p"
+                                (str (:seon.dev.process/pid worker))]})
+                        :out str str/trim parse-long)]
+            (is (and (pos? rss) (< rss (* 256 1024)))
+                "one transient worker keeps the retained RSS below 256 MiB")))
+        (is (= 1 (count (edn-lines worker-starts)))
+            "the process burst starts no duplicate worker"))
+      (spit (str release) "release\n")
+      (is (wait-until
+           #(not (fs/regular-file?
+                  (fs/path process-dir "changed-test-hook" "worker.edn")))
+           10000)
+          "the worker exits after draining its one pending generation")
+      (is (not (fs/regular-file?
+                (fs/path process-dir "changed-test-hook" "running.edn")))
+          "a completed generation releases its crash-recovery claim")
+      (let [runs (edn-lines completed)
+            report (edn/read-string (slurp (str latest)))]
+        (is (= 2 (count runs))
+            "one running generation is followed by one coalesced generation")
+        (is (= (set burst-paths)
+               (set (:seon.dev.changed-test/paths (second runs)))))
+        (is (= (second runs) report)
+            "the final report covers the latest generation's complete union"))
+      (finally
+        (when-let [worker
+                   (some-> (fs/path process-dir "changed-test-hook" "worker.edn")
+                           (#(when (fs/regular-file? %) (slurp (str %))))
+                           edn/read-string)]
+          (force-pid! (:seon.dev.process/pid worker)))
         (fs/delete-tree directory)))))

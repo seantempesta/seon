@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, flow, agent]
 ---
@@ -60,3 +60,29 @@ test runner or daemon.
 - A process-level regression sends a burst larger than the current worker
   count, proves the bounded process/RSS envelope, and proves the final report
   covers the union belonging to the latest generation.
+
+## Resolution
+
+Resolved by the commit that archives this note. The edit hook now publishes
+normalized paths into one atomically replaced pending generation and returns
+immediately with advisory queue evidence. One transient worker owns the
+existing changed-test lock, claims one generation at a time, persists its
+running claim for crash recovery, writes the existing latest report, and
+drains at most one newer coalesced generation before releasing its recorded
+process identity. A replacement publisher recovers the running path union if
+the recorded worker identity is stale. Explicit `bin/seon test changed`
+remains a synchronous foreground operation over the exact requested union.
+
+Behavioral proof on 2026-07-15:
+
+- `bin/seon test operator seon.dev.changed-test-test
+  seon.dev.hook-cli-test` passed 21 tests containing 65 assertions;
+- the process-level regression launched 16 concurrent real `bin/seon-hook`
+  publishers while one isolated worker held its first generation, then proved
+  one live worker identity below the 256 MiB RSS bound, one pending union of
+  all 16 paths, exactly two executed generations, and a final report equal to
+  the complete latest union; and
+- a shared-tree live run absorbed generations 12 through 31 with one worker
+  and one test child at a time, then exited with no worker, running, or pending
+  record. Failures from the selected tests remained advisory in
+  `tmp/test-changed/latest.report.edn` and their bounded boundary logs.

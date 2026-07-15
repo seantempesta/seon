@@ -13,7 +13,6 @@
 ;; directly into Babashka only for the file type that needs them.
 
 (require '[babashka.deps :as deps]
-         '[babashka.process :as process]
          '[cheshire.core :as json]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io]
@@ -329,21 +328,20 @@
                (seq paths)
                (not invalid-source?))
       (try
-        (let [argv (into [(str (root-file "bin/seon")) "test" "changed"]
-                         (mapcat #(vector "--path" %) paths))
-              result (process/sh {:cmd argv
-                                  :dir repo-root
-                                  :env (into {} (System/getenv))
-                                  :out :string
-                                  :err :string
-                                  :continue true})
-              output (str/trim (str (:out result) (:err result)))
+        (load-direct-check! 'seon.dev.changed-test)
+        (load-direct-check! 'seon.dev.config)
+        (let [configuration
+              ((requiring-resolve 'seon.dev.config/load!) repo-root)
+              request
+              ((requiring-resolve 'seon.dev.changed-test/enqueue-hook!)
+               configuration paths)
               message
               (str "ADVISORY — the edit was accepted; tests never gate refactoring.\n"
-                   (if (str/blank? output)
-                     (str "Changed-test operation exited " (:exit result)
-                          " without output.")
-                     output))]
+                   "Changed tests queued as generation "
+                   (:seon.dev.changed-test/generation request)
+                   " for " (count (:seon.dev.changed-test/paths request))
+                   " coalesced path(s). Latest result: "
+                   (root-file "tmp/test-changed/latest.report.edn"))]
           (clip-feedback config message))
         (catch Exception error
           (str "ADVISORY — changed-test feedback could not run: "
