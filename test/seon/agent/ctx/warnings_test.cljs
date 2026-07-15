@@ -85,7 +85,15 @@
 ;; `:seon.fn/spec` row below. Unwrapped ⇒ a coverage gap.
 (defn gap-probe [s] (str s))
 
+(defn ^:async async-gap-probe
+  ([x] x)
+  ([x y] [x y]))
+
 (def ^:private gap-probe-spec [:=> [:cat :string] :string])
+(def ^:private async-gap-probe-spec
+  [:function
+   [:=> [:cat :int] :int]
+   [:=> [:cat :int :int] [:tuple :int :int]]])
 
 (defn- coverage-seed-tx []
   [{:seon.ns/name :seon.agent.ctx.warnings-test
@@ -97,14 +105,13 @@
     :seon.fn/fn-var? true
     :seon.fn/private? false
     :seon.fn/spec    (pr-str gap-probe-spec)}
-   ;; A STRUCTURAL async opt-out: `seon.db/transact!` is live, `^:async`,
-   ;; multi-arity — `async-unwrappable?` ⇒ never a gap, must be EXCLUDED.
-   {:seon.fn/sym     "seon.db/transact!"
+   ;; Async contracts participate in the exact same denominator.
+   {:seon.fn/sym     "seon.agent.ctx.warnings-test/async-gap-probe"
     :seon.fn/ns      [:seon.ns/name :seon.agent.ctx.warnings-test]
-    :seon.fn/source  "(defn ^:async transact! ...)"
+    :seon.fn/source  "(defn ^:async async-gap-probe ...)"
     :seon.fn/fn-var? true
     :seon.fn/private? false
-    :seon.fn/spec    "[:function [:=> [:cat [:map]] [:map]]]"}
+    :seon.fn/spec    (pr-str async-gap-probe-spec)}
    ;; A row whose var is NOT live (a prior session's fn) — not a gap
    ;; (an uncallable fn has no coverage risk).
    {:seon.fn/sym     "seon.agent.ctx.warnings-test/never-compiled"
@@ -123,11 +130,13 @@
                        (.then
                          (fn [_]
                            (let [dbv @conn]
-                             (testing "the unwrapped specced fn IS a gap; opt-out + dead rows are NOT"
+                             (testing "sync and async live contracts are gaps; dead rows are not"
                                (let [gaps (instrument/coverage-gaps dbv)]
-                                 (is (= ["seon.agent.ctx.warnings-test/gap-probe"]
+                                 (is (= ["seon.agent.ctx.warnings-test/async-gap-probe"
+                                         "seon.agent.ctx.warnings-test/gap-probe"]
                                         (mapv :seon.instrument/sym gaps)))
-                                 (is (= [:seon.instrument/unwrapped]
+                                 (is (= [:seon.instrument/unwrapped
+                                         :seon.instrument/unwrapped]
                                         (mapv :seon.instrument/reason gaps)))))
                              (testing "the block renders the gap (root-agent surface)"
                                (let [out (warnings/instrumentation-gaps-block {:seon.db/db dbv})]
@@ -136,11 +145,16 @@
                              (testing "re-asserting coverage self-heals: gap vanishes, block renders empty"
                                (instrument/instrument-delta!
                                  {::instrument/changed-syms
-                                  #{'seon.agent.ctx.warnings-test/gap-probe}
+                                  #{'seon.agent.ctx.warnings-test/gap-probe
+                                    'seon.agent.ctx.warnings-test/async-gap-probe}
                                   ::instrument/targets
                                   [{::instrument/sym
                                     'seon.agent.ctx.warnings-test/gap-probe
-                                    ::instrument/schema-form gap-probe-spec}]})
+                                    ::instrument/schema-form gap-probe-spec}
+                                   {::instrument/sym
+                                    'seon.agent.ctx.warnings-test/async-gap-probe
+                                    ::instrument/schema-form
+                                    async-gap-probe-spec}]})
                                (is (= [] (instrument/coverage-gaps dbv)))
                                (is (= "" (warnings/instrumentation-gaps-block
                                            {:seon.db/db dbv})))))))))))

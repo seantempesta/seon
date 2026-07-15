@@ -8,7 +8,7 @@
    never populates Malli's process-global function-schema registry and never
    scans it as a second authority.
 
-   The injecting wrapper, structural async opt-out, and coverage census
+   The injecting wrapper, async callable-shape detection, and coverage census
    remain colocated here because they operate on the same live function
    objects."
   (:require
@@ -78,7 +78,7 @@
       variadic/multi-arity fns, so its absence is the marker. This is
       exactly the case where `malli.instrument` takes its simple `:else`
       replace path and hands the wrapper RAW args (no `[fixed… rest]`
-      marshalling), which is the only shape [[async-fschema]]'s wrapper
+      marshalling), which is the only shape [[injecting-fschema]]'s wrapper
       validates correctly."
      [f]
      (and (fn? f) (nil? (gobj/get f "cljs$lang$maxFixedArity")))))
@@ -92,43 +92,6 @@
      ([schema-form schema-options]
       (try (= :=> (m/type (m/schema schema-form schema-options)))
            (catch :default _ false)))))
-
-#?(:cljs
-   (defn async-unwrappable?
-     "True when an `^:async` fn has NO correct wrapper today — the
-      STRUCTURAL instrumentation opt-out (computed from real properties;
-      never a name list).
-
-      An async fn returns a `js/Promise`, so only the Promise-aware
-      [[injecting-fschema]] wrapper validates it correctly — and that
-      wrapper handles exactly the simple single-fixed-arity `:=>` shape.
-      For any OTHER async shape (variadic / multi-arity / `:function`
-      schema / live var unresolvable) every available wrapper is wrong:
-
-        - malli's stock SYNC wrapper validates the returned Promise
-          against the output schema → `:malli.core/invalid-output` on
-          EVERY call;
-        - the input-only stock wrapper (`{:scope #{:input}}`) THROWS on a
-          shape-invalid call, which breaks the errors-as-values contract
-          async envelope functions carry — the canonical instance is
-          `seon.db/transact!`, whose bad-invocation-shape → `{::ok?
-          false}` ENVELOPE behavior is documented and pinned by
-          `db_test/transact!-returns-envelope-on-bad-invocation-shape`,
-          and which core internals (boot, tickers, the loop) call under
-          the never-throw-into-the-loop invariant.
-
-      So: async ∧ not(injecting-wrappable) ⇒ register NOTHING. The
-      `:malli/schema` stays the discoverable contract; the fn's own body
-      is the validation boundary. When a Promise-aware wrapper for
-      variadic/multi-arity shapes exists, this rule collapses to false
-      and those fns instrument like everything else."
-     {:malli/schema [:=> [:cat :boolean :any :any] :boolean]}
-     [async? the-fn schema-form]
-     (boolean
-       (and async?
-            (not (and the-fn
-                      (-arrow-schema? schema-form)
-                      (-simple-fixed-arity-fn? the-fn)))))))
 
 #?(:cljs
    (def injectables
@@ -200,9 +163,9 @@
       An AGENT form's failure first surfaces as a rejection inside the
       WRAPPED fns of the eval path (`seon.eval/eval-batch!`,
       `record-eval!`, …) — the outer conduits themselves are NOT
-      instrumented (`seon.eval/eval` is a structural [[async-unwrappable?]]
-      opt-out; `raw-eval` is private, never in the instrumentation targets). So the wrapped
-      fn's symbol alone ('what were we calling') misclassifies agent typos
+      instrumented (`raw-eval` is private, never in the instrumentation
+      targets). So the wrapped fn's symbol alone ('what were we calling')
+      misclassifies agent typos
       as `:core` and reds the strict gate forever. Content wins when it
       identifies the population:
 
@@ -259,10 +222,11 @@
 
 #?(:cljs
    (defn injecting-fschema
-     "A malli function-schema OBJECT (not a form) for a single simple
-      fixed-arity `:=>` schema — SYNC or `^:async`. Delegates every `Schema`/
-      `FunctionSchema` method to the real `:=>` schema EXCEPT `-instrument-f`,
-      which it overrides to INJECT-then-validate:
+     "A Malli function-schema object for one `:=>` contract.
+
+      Delegates every `Schema`/`FunctionSchema` method to the real `:=>`
+      schema EXCEPT `-instrument-f`, which it overrides to
+      INJECT-then-validate:
 
         - INJECT: every DECLARED-BUT-ABSENT injectable key ([[injectables]],
           pre-computed via [[declared-injectables]]) is filled into the first
@@ -274,13 +238,13 @@
           validates output synchronously (the sync path). Either way the
           value re-resolves unchanged.
 
-      Replaces the older async-only wrapper: it handles BOTH sync and async
-      map-in fns (a fn declaring no injectable key is behavior-identical to
-      the stock wrapper — no injection, same input+output validation), so
-      [[prepare-targets]] routes every simple fixed-arity `:=>` fn here. This
-      is the ONE injecting boundary — no second wrapper. The resulting object
-      rides in Malli's explicit instrumentation data, so stock
-      `mi/instrument!` reuses all its var surgery without a second registry.
+      Handles sync and async map-in functions across fixed, variadic, and
+      multi-arity callable shapes. [[prepare-targets]] places one instance at
+      every async arrow in Malli's raw `:function` dispatch form, so Malli
+      retains all live-var/accessor surgery while this one owner validates the
+      resolved domain value. A function declaring no injectable key is
+      behavior-identical to the stock wrapper. The resulting object rides in
+      Malli's explicit instrumentation data; there is no second registry.
 
       `fn-sym` (the wrapped fn's QUALIFIED symbol) decides the
       `:seon.error/fault` population once, at register time — \"what were
@@ -314,14 +278,20 @@
          (-function-schema? [_] true)
          (-function-schema-arities [_] (m/-function-schema-arities s))
          (-function-info [_] (m/-function-info s))
-         (-instrument-f [_ {:keys [scope report] :as _props} f _opts]
+         (-instrument-f [_ {:keys [scope report gen] :as _props} f _opts]
            (let [{:keys [min max input output]} (m/-function-info s)
-                 scope    (or scope #{:input :output})
+                 guard    (:guard (m/-function-info s))
+                 scope    (or scope #{:input :output :guard})
                  report   (or report m/-fail!)
                  vin      (m/-validator input)
                  vout     (m/-validator output)
+                 vguard   (or (some-> guard m/-validator) any?)
                  wrap-in  (contains? scope :input)
-                 wrap-out (contains? scope :output)]
+                 wrap-out (contains? scope :output)
+                 wrap-guard (contains? scope :guard)
+                 f        (or (when gen (gen s)) f
+                              (m/-fail! :malli.core/missing-function
+                                        {:schema s}))]
              (fn [& args]
                (let [args (vec args)
                      ;; INJECT declared-absent deps into the request map before
@@ -362,43 +332,82 @@
                                         :seon.error/fault (wrapper-fault e fault)}))
                                    (throw e)))
                          (.then (fn [v]
+                                  ;; Async output/guard failures become
+                                  ;; rejections. Record before the report throw
+                                  ;; rides that rejected Promise; the upstream
+                                  ;; rejection arm cannot see errors created in
+                                  ;; this downstream continuation.
                                   (when (and wrap-out (not (vout v)))
-                                    ;; An async invalid-output becomes a
-                                    ;; REJECTION, not a sync throw — visible
-                                    ;; only if the caller awaits/catches. So
-                                    ;; record! runs HERE, before the report
-                                    ;; throw rides the rejected Promise.
-                                    ;; No refinement: the wrapped fn ITSELF
-                                    ;; broke its output contract, so its own
-                                    ;; population is the right fault.
                                     (try (report :malli.core/invalid-output
                                                  {:output output :value v
                                                   :args args :schema s})
                                          (catch :default e
-                                           (error/record! {:seon.error/raw   e
-                                                           :seon.error/fault fault})
+                                           (error/record!
+                                             {:seon.error/raw e
+                                              :seon.error/fault fault})
+                                           (throw e))))
+                                  (when (and wrap-guard
+                                             (not (vguard [args v])))
+                                    (try (report :malli.core/invalid-guard
+                                                 {:guard guard :value v
+                                                  :args args :schema s})
+                                         (catch :default e
+                                           (error/record!
+                                             {:seon.error/raw e
+                                              :seon.error/fault fault})
                                            (throw e))))
                                   v)))
                      (do (when (and wrap-out (not (vout ret)))
                            (report :malli.core/invalid-output
                                    {:output output :value ret
                                     :args args :schema s}))
+                         (when (and wrap-guard
+                                    (not (vguard [args ret])))
+                           (report :malli.core/invalid-guard
+                                   {:guard guard :value ret
+                                    :args args :schema s}))
                          ret))))))))))))
 
 #?(:cljs
    (defn async-fn?
-     "True when `f` is (or wraps) a JS async function — the runtime shape
-      `^:async` compiles to. Lets [[instrument-projection!]] route async
-      wrappers without the analyzer's `:async` flag. Sees THROUGH a malli
-      instrumentation wrapper ([[-original-fn]]): the ctor-name check is
-      only ever applied to the real fn, so an already-instrumented
-      `^:async` fn (whose wrapper is a plain `Function` returning a
-      Promise) is still detected async — re-instrumentation is
-      detection-safe by construction."
+     "True when `f` or one of its original accessors is async.
+
+      ClojureScript emits native `AsyncFunction` objects for the outer
+      callable plus fixed and variadic accessors. Malli's multi-arity
+      `meta-fn` makes the outer callable an ordinary `Function`, but its copied
+      accessors retain `malli$instrument$original` links to those async
+      objects. Inspecting the original outer plus every original accessor
+      therefore survives cold wrapping, delta refresh, and reconciliation
+      without a persisted async flag."
      {:malli/schema [:=> [:cat :any] :boolean]}
      [f]
-     (let [f (-original-fn f)]
-       (and (fn? f) (= "AsyncFunction" (.. f -constructor -name))))))
+     (let [f (-original-fn f)
+           max-fixed (when (fn? f) (gobj/get f "cljs$lang$maxFixedArity"))
+           accessors
+           (when (number? max-fixed)
+             (cond->
+               (keep (fn [arity]
+                       (gobj/get
+                         f
+                         (str "cljs$core$IFn$_invoke$arity$" arity)))
+                     (range (inc max-fixed)))
+               (fn? (gobj/get f "cljs$core$IFn$_invoke$arity$variadic"))
+               (conj (gobj/get f "cljs$core$IFn$_invoke$arity$variadic"))))
+           native-async?
+           (fn [candidate]
+             (let [candidate (-original-fn candidate)]
+               (and (fn? candidate)
+                    (= "AsyncFunction"
+                       (.. candidate -constructor -name)))))]
+       (boolean (or (native-async? f) (some native-async? accessors))))))
+
+#?(:cljs
+   (defn- async-function-form
+     "Raw Malli `:function` form with one Seon schema object per arity."
+     [function-schema sym options]
+     (into [:function]
+           (map #(injecting-fschema % sym options))
+           (m/-function-schema-arities function-schema))))
 
 #?(:cljs
    (defn- qualified-target-parts
@@ -425,9 +434,17 @@
              (into (sorted-set)
                    (filter
                      (fn [arity]
-                       (fn? (gobj/get
-                              f
-                              (str "cljs$core$IFn$_invoke$arity$" arity)))))
+                       (let [accessor
+                             (gobj/get
+                               f
+                               (str "cljs$core$IFn$_invoke$arity$" arity))]
+                         (and
+                           (fn? accessor)
+                           (not
+                             (true?
+                               (gobj/get
+                                 accessor
+                                 "seon$instrument$variadicMaxBridge")))))))
                    (range (inc max-fixed)))
              (sorted-set (.-length f)))]
        (cond-> {::fixed-arities fixed-arities}
@@ -497,27 +514,33 @@
 
            :else
            (try
-             (let [async? (async-fn? the-fn)]
-               (if (async-unwrappable? async? the-fn schema-form)
-                 {::sym sym ::reason ::skipped}
-                 (let [function-schema (m/function-schema schema-form options)]
-                   (if-let [mismatch
-                            (arity-mismatch sym the-fn function-schema)]
-                     mismatch
-                     (let [compiled
-                           (if (and (-arrow-schema? schema-form options)
-                                    (-simple-fixed-arity-fn? the-fn))
-                             (injecting-fschema schema-form sym options)
-                             ;; Malli's CLJS multi-arity surgery calls `rest`
-                             ;; on the `:function` FORM (`-arity->schema`), so
-                             ;; this entry must remain the raw form. The
-                             ;; compiled object above proves both resolution
-                             ;; and a profile safe for Malli's accessor surgery.
-                             schema-form)]
-                       {::sym sym
-                        ::ns ns-sym
-                        ::name fn-sym
-                        ::entry (malli-entry ns-sym fn-sym compiled)})))))
+             (let [async? (async-fn? the-fn)
+                   arrow? (-arrow-schema? schema-form options)
+                   function-schema (m/function-schema schema-form options)]
+               (if-let [mismatch
+                        (arity-mismatch sym the-fn function-schema)]
+                 mismatch
+                 (let [compiled
+                       (cond
+                         (and async? arrow?)
+                         (injecting-fschema schema-form sym options)
+
+                         async?
+                         ;; Malli's CLJS multi-arity surgery calls `rest` on
+                         ;; this raw outer form. Each child may itself be a
+                         ;; compiled FunctionSchema object, so all accessor
+                         ;; replacement stays inside Malli while Seon's one
+                         ;; wrapper owns Promise resolution.
+                         (async-function-form function-schema sym options)
+
+                         (and arrow? (-simple-fixed-arity-fn? the-fn))
+                         (injecting-fschema schema-form sym options)
+
+                         :else schema-form)]
+                   {::sym sym
+                    ::ns ns-sym
+                    ::name fn-sym
+                    ::entry (malli-entry ns-sym fn-sym compiled)})))
              (catch :default _
                {::sym sym ::reason ::unresolvable-schema}))))
        {::sym sym ::reason ::invalid-symbol})))
@@ -576,6 +599,68 @@
        syms)))
 
 #?(:cljs
+   (defn- install-variadic-max-bridges!
+     "Make minimum-variadic direct calls use Malli's replaced accessor."
+     [syms]
+     (doseq [sym syms
+             :let [[ns-sym fn-sym] (qualified-target-parts sym)
+                   f (when ns-sym (find-js-var ns-sym fn-sym))
+                   max-fixed (when f (gobj/get f "cljs$lang$maxFixedArity"))
+                   fixed-key (when (number? max-fixed)
+                               (str "cljs$core$IFn$_invoke$arity$" max-fixed))
+                   fixed (when fixed-key (gobj/get f fixed-key))
+                   variadic (when f
+                              (gobj/get
+                                f
+                                "cljs$core$IFn$_invoke$arity$variadic"))]
+             :when (and fixed-key (not (fn? fixed)) (fn? variadic))]
+       ;; Exact CLJS 1.12.145 emits no fixed accessor at a variadic method's
+       ;; minimum arity. A compiled direct call at exactly that arity therefore
+       ;; falls back to the async outer dispatcher and bypasses Malli's replaced
+       ;; variadic accessor. Add the missing callable bridge to Malli's live
+       ;; wrapper, never the original function. Malli's own unstrument walk
+       ;; clears it because the bridge deliberately has no `original` link.
+       (let [bridge (fn [& args] (apply variadic args))]
+         (gobj/set bridge "seon$instrument$variadicMaxBridge" true)
+         (gobj/set f fixed-key bridge)))))
+
+#?(:cljs
+   (defn- clear-instrumentation-markers!
+     "Clear Malli's stale in-place marker and any Seon variadic bridge."
+     [syms]
+     (doseq [sym syms
+             :let [[ns-sym fn-sym] (qualified-target-parts sym)
+                   f (when ns-sym (find-js-var ns-sym fn-sym))]
+             :when f]
+       ;; Malli 0.20.0 restores multi/variadic accessors but leaves this flag
+       ;; on the live function object. That makes removed targets look wrapped
+       ;; to coverage/reconciliation. Seon's exact-data owner completes the
+       ;; removal instead of teaching every reader to reinterpret stale state.
+       (gobj/remove f "malli$instrument$instrumented?")
+       (when-let [max-fixed (gobj/get f "cljs$lang$maxFixedArity")]
+         (let [fixed-key (str "cljs$core$IFn$_invoke$arity$" max-fixed)
+               fixed (gobj/get f fixed-key)]
+           (when (true? (some-> fixed
+                                (gobj/get "seon$instrument$variadicMaxBridge")))
+             (gobj/remove f fixed-key)))))))
+
+#?(:cljs
+   (defn- unstrument-data!
+     "Remove Malli data and complete its exact unwrapped callable state."
+     [data syms]
+     (when (seq data)
+       (mi/unstrument! {:data data})
+       (clear-instrumentation-markers! syms))))
+
+#?(:cljs
+   (defn- instrument-data!
+     "Apply Malli data and complete its exact variadic callable shape."
+     [data accepted-syms]
+     (when (seq data)
+       (mi/instrument! {:data data :report ei/report-fn})
+       (install-variadic-max-bridges! accepted-syms))))
+
+#?(:cljs
    (defn instrument-targets!
      "Instrument the complete supplied target set exactly once.
 
@@ -596,7 +681,7 @@
         ::accepted-syms #{} ::rejected []}
        (let [{::keys [data accepted-syms rejected] :as prepared}
              (prepare-targets targets)
-             fatal-rejections (remove #(= ::skipped (::reason %)) rejected)]
+             fatal-rejections rejected]
          ;; Malli mutates each target as it walks `:data`. Reject the complete
          ;; candidate before that walk so one invalid arity contract cannot
          ;; leave an earlier target wrapped and a later target corrupted.
@@ -606,8 +691,7 @@
                   ::ok? false
                   ::n-instrumented 0)
            (do
-             (when (seq data)
-               (mi/instrument! {:data data :report ei/report-fn}))
+             (instrument-data! data accepted-syms)
              (assoc prepared
                     ::enabled? true
                     ::ok? true
@@ -639,11 +723,10 @@
         ::accepted-syms #{} ::rejected []}
        (let [{::keys [data accepted-syms rejected] :as prepared}
              (prepare-targets targets)
-             fatal-rejections (remove #(= ::skipped (::reason %)) rejected)]
+             fatal-rejections rejected]
          ;; Compile the complete replacement set before touching a live var.
          ;; A bad target must not remove its still-valid old wrapper and leave
-         ;; the runtime in a mixed generation. Structural async opt-outs are
-         ;; intentional removals and therefore are not fatal.
+         ;; the runtime in a mixed generation.
          (if (seq fatal-rejections)
            (assoc prepared
                   ::enabled? true
@@ -651,10 +734,8 @@
                   ::n-unstrumented 0
                   ::n-instrumented 0)
            (let [old-data (symbol-data changed-syms)]
-             (when (seq old-data)
-               (mi/unstrument! {:data old-data}))
-             (when (seq data)
-               (mi/instrument! {:data data :report ei/report-fn}))
+             (unstrument-data! old-data changed-syms)
+             (instrument-data! data accepted-syms)
              (assoc prepared
                     ::enabled? true
                     ::ok? true
@@ -682,7 +763,6 @@
          (assoc result
                 ::registered (::n-instrumented result)
                 ::bad-spec 0
-                ::skipped (get rejected-counts ::skipped 0)
                 ::no-var (get rejected-counts ::no-var 0)
                 ::unresolvable-schema
                 (get rejected-counts ::unresolvable-schema 0))))))
@@ -704,7 +784,7 @@
       Preparation validates the complete new target population before Malli
       mutates a var. Reconciliation then unstruments the union of old and new
       symbols, instruments the complete accepted generation, and verifies both
-      positive and removed/async-skipped wrapper state. The caller owns
+      positive and removed wrapper state. The caller owns
       admission, retry, projection publication, and fault recording."
      {:malli/schema
       [:=>
@@ -733,8 +813,7 @@
                    new-contracts)
              {::keys [data accepted-syms rejected] :as prepared}
              (prepare-targets targets)
-             fatal-rejections
-             (into [] (remove #(= ::skipped (::reason %))) rejected)]
+             fatal-rejections rejected]
          (if (seq fatal-rejections)
            (assoc prepared
                   ::enabled? true
@@ -743,10 +822,8 @@
                   ::n-instrumented 0
                   ::verification-gaps [])
            (let [old-data (symbol-data all-syms)
-                 _ (when (seq old-data)
-                     (mi/unstrument! {:data old-data}))
-                 _ (when (seq data)
-                     (mi/instrument! {:data data :report ei/report-fn}))
+                 _ (unstrument-data! old-data all-syms)
+                 _ (instrument-data! data accepted-syms)
                  verification-gaps
                  (into []
                        (keep
@@ -867,11 +944,6 @@
                {::sym sym-str ::target-sym target-sym
                 ::schema-form schema ::reason ::unresolvable-schema}
 
-               ;; The function body is the validation boundary for the one
-               ;; async shape Malli cannot wrap correctly.
-               (async-unwrappable? (async-fn? f) f schema)
-               nil
-
                :else
                {::sym sym-str ::target-sym target-sym
                 ::schema-form schema ::reason ::unwrapped})))))))
@@ -944,9 +1016,9 @@
      "Specced program-graph fns whose live var has no Malli wrapper.
 
       This is a derived invariant over canonical DB rows plus live function
-      objects; it stores no registry or dirty flag. Rows with no live var and
-      structural async opt-outs are not gaps. A result names an unwrapped,
-      unreadable, or currently unresolvable contract."
+      objects; it stores no registry or dirty flag. Rows with no live var are
+      not gaps. Every live canonical contract is wrapped or appears here as an
+      unwrapped, unreadable, or currently unresolvable contract."
      {:malli/schema [:=> [:catn [::db :any]]
                      [:vector [:map
                                [::sym :string]

@@ -28,11 +28,14 @@ memory containment remain separate open boundaries.
 The batch path now passes one exact provider string unchanged to the existing
 reply blob and parser. Parser classification, not rewriting, selects executable
 forms; the result-claim sanitizer and new telemetry writes are gone while
-historical installed attributes remain readable. A live census found 95 of 747
-async contracts structurally excluded while the public coverage
-gap count reported zero; the outer provider timeout does not cancel the
-underlying request; a successful plan step has no required verification
-evidence; cross-agent and address-message transitions can reopen or displace
+historical installed attributes remain readable. The 95 async contracts that
+were structurally excluded from the 747-contract census now pass through the
+same exact Promise-aware owner as synchronous contracts. Fixed, variadic,
+multi-arity, and multi-plus-variadic functions validate resolved output and
+guards; exact-minimum variadic calls receive a removable callable bridge; and
+the coverage denominator no longer hides async targets. The outer provider
+timeout does not cancel the underlying request; a successful plan step has no
+required verification evidence; cross-agent and address-message transitions can reopen or displace
 authored work; narration can echo runtime scaffolding; and arbitrary self-host
 evaluation has bounded result retention but no measured hard process-memory
 containment. Pod-restart recovery is already transactionally fenced and
@@ -44,8 +47,8 @@ the reference checkout without moving its working tree. Exact Shadow `3.4.10`
 is release commit `d3c04691952aa9ea33f7287ffe9a2b3109c1e510`; its parent
 `2911c908…` is still `3.4.9`. The exact-source audit grounds the analyzer,
 compiler, self-host, Shadow bootstrap, and Malli accessor boundaries. Async
-implementation is no longer source-blocked, but remains deliberately unstarted
-until its bounded plan is reviewed.
+implementation is complete in `seon.instrument`, including completion of
+Malli's stale in-place unstrument marker cleanup.
 
 ## Research evidence
 
@@ -65,10 +68,12 @@ until its bounded plan is reviewed.
    the one blob and one parser, delete the result-claim rewrite and new
    telemetry writes, and prove that only parsed real forms create ordered eval
    evidence. The existing admission checks before and between entries remain.
-2. **Exact-source audit complete; implementation pending:** generalize the one
-   Promise-aware function-schema construction across fixed, variadic, and
-   multi-arity contracts; make the census count every contract; then validate
-   awaited values without leaking Promises or throwing into the loop.
+2. **Implemented on this branch:** one Promise-aware function-schema owner now
+   covers fixed, variadic, multi-arity, and multi-plus-variadic contracts,
+   including injection and guards. The census counts async contracts, resolved
+   failures record once, and generation/reconciliation/removal preserve exact
+   callable state. Focused proof: `tmp/test-cljs-20260715-012122-80190.log`
+   (77 assertions, zero failures or errors).
 3. Thread cancellation through the existing provider attempt and adapters while
    retaining one retry owner.
 4. Give plan completion schema'd verification evidence and settle authority for
