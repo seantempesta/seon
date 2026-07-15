@@ -95,7 +95,7 @@ gate passes ten tests/32 assertions, and the focused CLJS restore gate passes
 six tests/34 assertions for the pod wrapper, original-coordinate result,
 structured error kind, and zero-write retry.
 
-## Fresh-schema integration defect
+## Fresh schema integration fixed
 
 The full CLJS gate exposed a separate cold-bootstrap ordering defect. Requiring
 `seon.db.restore` registers the generated identity
@@ -111,6 +111,14 @@ The canonical fix belongs at the existing initial-schema owner:
 restore-completion attribute set there so schema precedes policy and later
 completion publication. Do not weaken generator-policy validation, filter the
 globally registered candidate opportunistically, or patch individual fixtures.
-Acceptance is a fresh isolated connection whose installed schema contains
-`:seon.db.restore/id` before its policy transaction, followed by the complete
-CLJS gate without `invalid-generator-policy` failures.
+
+The fix is now implemented without duplicating that closure.
+`seon.db.restore/completion-attrs` publicly owns the identity plus all thirteen
+architecture attributes, and `seon.client/agent-bootstrap-attrs` derives its
+final vector by adding that one collection. A fresh isolated connection proves
+every completion attribute is installed, the compact generator policy is
+readable through `seon.db.id/generator-policies`, and the native
+`:db/ident :seon.db.restore/id` transaction precedes its policy transaction.
+The focused `seon.db.restore-test` gate passes 7 tests/37 assertions with zero
+failures, errors, or compile warnings at
+`tmp/test-cljs-20260715-110003-54902.log`.

@@ -6,8 +6,10 @@
     [malli.core :as m]
     [seon.agent]
     [seon.agent.message]
+    [seon.client :as client]
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
+    [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
     [seon.db.process :as process]
     [seon.db.replica :as replica]
@@ -118,6 +120,39 @@
     (is (= 14 (count facets)) "identity plus thirteen architecture values")
     (is (= :db.unique/identity
            (:db/unique (first facets))))))
+
+(deftest completion-schema-precedes-its-generator-policy
+  (async done
+    (-> (client/open-agent-conn!)
+        (.then
+          (fn [conn]
+            (let [database @conn
+                  installed (db/installed-schema database)
+                  policies (db.id/generator-policies
+                             {::db.id/db-value database})
+                  [schema-t policy-t]
+                  (first
+                    (db/query
+                      {:seon.db/db (db/history database)
+                       :seon.db/query
+                       '[:find ?schema-t ?policy-t
+                         :where
+                         [_ :db/ident :seon.db.restore/id ?schema-t true]
+                         [?schema :seon.schema/key :seon.db.restore/id]
+                         [?schema :seon.db.id/generator
+                          :seon.db.id.generator/compact ?policy-t true]]}))]
+              (is (every? #(contains? installed %) restore/completion-attrs)
+                  "fresh pod schema installs the complete restore fact")
+              (is (= :seon.db.id.generator/compact
+                     (get policies ::restore/id)))
+              (is (and (int? schema-t) (int? policy-t) (< schema-t policy-t))
+                  "native identity schema commits before generator policy")
+              (d/release conn))))
+        (.then (fn [_] (done)))
+        (.catch
+          (fn [error]
+            (is false (str "fresh restore schema proof threw " error))
+            (done))))))
 
 (deftest record-commits-one-exact-fact-with-root-boot-provenance
   (async done

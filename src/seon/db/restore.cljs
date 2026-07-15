@@ -63,7 +63,8 @@
     [::ok? [:= false]]
     [:seon/error :map]]])
 
-(def ^:private completion-attrs
+(def completion-attrs
+  "The complete Datahike attribute closure for restore completion facts."
   [::id
    ::db-name
    ::database-id

@@ -16,28 +16,30 @@ completion transaction, and `seon.runtime.admission/prepare-committed!` plus
 The missing owner is the existing `seon.client/start-runtime!` cold entry and
 its operator-supplied immutable startup input—not another restore runtime.
 
-No production seam is safe to add in isolation yet. The current cold entry
-performs autonomous schema/boot/config/recovery writes before it begins program
-publication, and then admits inside the same call before an external caller can
-record completion. Its non-autonomous path avoids those early writes but still
-admits and publishes a running web runtime. Adding a callback, a second boot
-function, or an ambient restore file read would hide rather than settle the
-cross-process contract.
+The current cold entry still performs autonomous schema/boot/config/recovery
+writes before it begins program publication, and then admits inside the same
+call before an external caller can record completion. Its non-autonomous path
+avoids those early writes but still admits and publishes a running web runtime.
+Adding a callback, a second boot function, or an ambient restore file read
+would hide rather than settle the cross-process contract.
 
-Three predecessor blockers remain explicit:
+Two of the three original predecessor contracts are now complete:
+
+- `b2461d64` supplies the canonical writer-backed transaction-coordinate
+  resolver, including later-head completion retry; and
+- `c2b4013d` carries one closed digest-bound startup value through the existing
+  launch descriptor and exact process publication.
+
+One destructive predecessor remains explicit:
 
 - selected Datahike cannot yet force a file-backed Proximum secondary to the
   destination branch with equal Merkle roots, so the closed writer-admin result
-  correctly rejects the transition;
-- `seon.db.restore/record!` cannot return the original completion coordinate
-  after a later main transaction because Seon's database protocol has no
-  transaction-to-containing-commit resolver; and
-- no closed, digest-bound startup operation carries the immutable intent,
-  writer-admin result, and retained-blob result through the existing process
-  specification into `start-runtime!`.
+  correctly rejects the transition.
 
-This report therefore leaves source unchanged and gives the implementation-
-ready call graph and failure order below.
+The client source is now ready for the in-place cold-composition refactor. A
+separate fresh-schema defect found by the complete CLJS checkpoint is fixed at
+the canonical bootstrap owner below; it does not relax the preserve-only
+restore rule.
 
 ## Dependency ledger
 
@@ -60,6 +62,11 @@ The repository MCP watcher was live but the default build advertised zero pod
 runtimes, so a live CLJS probe correctly failed instead of selecting ACME. No
 default restart was triggered while shared source lanes were editing build
 inputs.
+
+After the startup evidence landed, `bin/seon status` observed the default
+cluster as degraded: watcher alive but not ready, writer alive, and pod drained
+and not ready. This is the expected safe posture for source planning; no live
+runtime claim or destructive restore proof is inferred from it.
 
 A disposable memory database against the exact `:writer` basis directly
 probed the missing resolver primitive:
@@ -234,10 +241,162 @@ variable or process implementation change. Focused proof is:
 - `seon.dev.restore-test`: nine tests/57 assertions, including exact immutable
   startup-identity projection.
 
-The broader CLJS gate remains independently blocked by the documented fresh
-schema ordering defect in
-[[../../seon/issues/restore-completion-cannot-precede-admission]]: the globally
-registered restore identity contributes a generator policy before
-`seon.client/agent-bootstrap-attrs` installs the completion schema. That owner
-is intentionally untouched in this slice because another lane owns the dirty
-`seon.client` bootstrap list.
+The fresh-schema ordering defect found by the broader CLJS gate is now fixed at
+the canonical owner. `seon.db.restore/completion-attrs` owns the complete
+identity-plus-thirteen-attribute closure, and
+`seon.client/agent-bootstrap-attrs` includes that collection before
+`install-runtime-schema!` publishes generator policies. A fresh isolated
+database proves native schema transaction precedes the compact policy
+transaction. The focused `seon.db.restore-test` gate passes 7 tests/37
+assertions with zero failures, errors, or compile warnings at
+`tmp/test-cljs-20260715-110003-54902.log`. Preserve-only restore still validates
+that this schema already exists after force; it never installs current-source
+schema as an implicit overlay.
+
+## Exact in-place client plan after the landed contracts
+
+The remaining runtime change strengthens `seon.client/start-runtime!` and its
+existing helpers. It does not add a `restore-runtime!`, another process mode,
+another admission state, or another replay/registry path.
+
+### Pure selection and evidence projection
+
+Add `seon.db.restore` as the completion owner used by `seon.client`. At the top
+of `start-runtime-impl!`, validate the already parsed
+`replica/process-launch-descriptor` through `launch/validate-descriptor` and
+bind its optional `::launch/restore-startup` once. Before the first await:
+
+- reject restore startup on an already attached process; retry must be a fresh
+  process with no inherited connection, feed, compiler value, host, or web
+  owner;
+- require the ordinary autonomous main capability; a retained non-autonomous
+  branch cannot consume a main restore transition;
+- compare `SEON_PROCESS_GENERATION` byte-for-byte with the UUID string stored at
+  `[:seon.dev.restore/startup-identity
+  :seon.dev.restore/consumer-generations :seon.dev.process/pod]`; absence or
+  difference is a core startup error before database effects; and
+- retain the exact startup value in the async lexical scope. Never reread an
+  intent/result path or process environment after this selection.
+
+One private pure projection in `seon.db.restore` should construct the existing
+closed `::completion` value from authoritative fields, rather than assembling
+the same thirteen keys in `seon.client`. Its request consumes the logical
+database name plus the validated startup value. The projection is exact:
+
+| Completion value | Authoritative source |
+|---|---|
+| `id` | startup identity `intent-id` |
+| `db-name` | launch database name, converted to the architecture keyword |
+| `database-id` | admin `forced-main-coordinate` |
+| `from-*` | admin `pre-restore-main-coordinate` |
+| `to-*` | admin `selected-target-coordinate` |
+| `forced-commit-id` | admin `forced-main-coordinate` |
+| `undo-branch` | admin `undo-coordinate` branch |
+| `target-branch` | admin `prepared-target-coordinate` branch |
+| optional overlay digests | absent for the v1 preserve-only transition |
+
+The helper validates the finished `::completion`. It never derives a commit,
+target, branch, digest, or identity from current database state.
+
+### Fresh attachment and write-closed validation
+
+Call the existing `open-database-connection!` with
+`::prepare-writes? false` whenever restore startup is present. Its ping,
+writer-open, Datahike connect, and feed attachment remain the one attachment
+mechanism; provenance/schema installation is skipped. After binding
+`db/*conn*`, freeze one database value and require all of the following before
+recovery or any other transaction:
+
+- its complete head equals the launch descriptor coordinate and the admin
+  `forced-main-coordinate`, including database id, `:db`, commit id, and `t`;
+- the admin result remains the closed released `applied` or `already-applied`
+  success already required by `::launch/restore-startup`;
+- blob success names the admin selected-target coordinate and the startup
+  reachable-set digest; and
+- every `seon.db.restore/completion-attrs` member is installed in the restored
+  database. Preserve-only restore never installs missing current-source schema
+  after force.
+
+`db/assert-preconditions!` is read-only and follows this exact evidence check.
+Any mismatch throws one core `ex-info`; the existing `start-runtime!` owner
+changes its phase to `cleanup-required`, and `-main` exits without reporting
+readiness. No mismatch is coerced into an ordinary non-restore boot.
+
+### Reconstruction, completion, and exact admission
+
+Select the remainder of the current cold sequence with data, retaining the
+ordinary branch unchanged:
+
+1. Restore omits `boot-seed!`, ambient manifest/config reconciliation,
+   `agent/create!`, `agent/ensure-initial-agent!`, `ai/sync!`, and
+   `web.brand/sync!` until their explicit places below. The forced database is
+   the complete preserve-only source.
+2. Run the existing `recovery/recover!` once under root/boot provenance. A
+   false `:seon.db/ok?` envelope is fatal and leaves admission closed; a
+   converged recovery writes nothing.
+3. Resolve the existing root/primary/resumable agent projections from the
+   restored database, await `repl/ensure-bootstrap!`, acquire the one
+   `admission/begin-publication!`, and call the existing
+   `replay-program-graph!` with failure recording enabled.
+4. Replace the restore branch's call to `publish-committed!` with
+   `prepare-committed!`. Require `::admission/prepared? true` and retain that
+   exact returned map; its fingerprint is disposable process state, not a
+   restore fact.
+5. Under root/boot transaction provenance, call `seon.db.restore/record!` with
+   the pure completion projection. Require `::restore/ok? true`, exact
+   completion read-back, and its complete original completion coordinate.
+   Equal retry may call the settled writer resolver and performs no write.
+6. Pass the unchanged preparation map to `admission/admit-prepared!`. Require
+   `::admission/published? true`; a lost or changed generation remains closed.
+7. Only after exact admission resume eligible agent hosts, start the web
+   surface, then run provider and brand synchronization and install the ticker.
+   The ordinary no-restore branch continues using
+   `admission/publish-committed!` and its existing boot/config policy.
+
+The existing failure values remain the contract: recovery and completion use
+their closed `ok?` envelopes; preparation and admission use their closed
+`prepared?`/`published?` maps with `:seon/error`. `start-runtime!` converts any
+false result into the one existing core startup exception and
+`cleanup-required` phase. No callback, restore status, or second error shape is
+introduced.
+
+### Readiness and durable intent deletion
+
+`/_seon/ready` remains derived from `admission/available?`, so it cannot return
+2xx before the exact completion read-back and admission above. HTTP 2xx alone
+is not permission to delete the intent. After normal pod readiness, the
+external operator must re-read the same completion id and prove the ordinary
+writer/main coordinate is at or descends from the returned completion
+coordinate. Only `seon.dev.restore-state`, under the retained cluster lock,
+deletes the fsync-published intent. `seon.client` never owns that filesystem
+inverse.
+
+### Crash cuts and focused proof
+
+| Cut | Required observation on retry |
+|---|---|
+| Generation or startup/head mismatch | No database transaction, recovery, replay, host, web, provider, brand, ticker, completion, or admission effect. |
+| Recovery failure | Admission remains closed; no completion fact exists. |
+| Replay or preparation failure | One existing bounded core-fault path; no completion or executable boundary. |
+| Completion rejects after preparation | Prepared projection stays hidden under `:publishing`; no admission, host, web, or autonomy. |
+| Completion commits and process dies before admission | Fresh retry reconstructs disposable compiler/projection state, `record!` returns the original coordinate without a write, and the exact new preparation alone admits. |
+| Admission succeeds and intent deletion is lost | Operator re-proves readiness plus completion ancestry and deletes the same intent; no force, overlay, recovery repair, or second completion is inferred from a phase file. |
+
+Extend `test/seon/client_runtime_test.cljs` at its existing async-safe stub owner
+rather than creating another harness. The focused cases are ordinary-effect
+parity, restore generation/head mismatch before writes, exact
+attach/recovery/replay/prepare/completion/admit/host/web/autonomy order,
+completion failure remaining closed, and equal-completion crash retry. Retain
+the current focused owners in `test/seon/launch_test.cljs`,
+`test/seon/db/restore_test.cljs`, and
+`test/seon/runtime/admission_test.cljs`. Run each namespace through the one
+`bin/test-cljs --test=<namespace>` selector while iterating, then one combined
+source-frozen checkpoint before the destructive named-cluster proof.
+
+The production ownership for the later implementation is limited to
+`src/seon/client.cljs` and, for the pure projection only,
+`src/seon/db/restore.cljs`; focused proof belongs to
+`test/seon/client_runtime_test.cljs` and `test/seon/db/restore_test.cljs`.
+`seon.launch`, process publication, blob materialization, writer admin,
+admission, replica transport, web readiness, and operator intent deletion are
+consumers with settled owners, not new edit surfaces for this unit.

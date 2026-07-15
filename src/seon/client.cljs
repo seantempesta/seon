@@ -228,6 +228,7 @@
     ;; Local reads plus the sole-writer transaction and feed attachment.
     [seon.db.protocol :as db.protocol]
     [seon.db.replica :as replica]
+    [seon.db.restore :as db.restore]
     ;; Use Shadow's own reload-source selection for build notifications;
     ;; this must stay identical to the files its Node client actually loaded.
     ;; Pure MCP runtime-addressing values. The pod advertisement below queries
@@ -505,7 +506,8 @@
   "The full set of registered seon attr keywords whose datahike schema the
    agent conn needs. Public so tests can build an isolated `:memory` conn with
    the same schema the pod boots against (see index-core-test)."
-  [;; --- Agent (state is DERIVED — no stored :seon.agent/state) ---
+  (into
+   [;; --- Agent (state is DERIVED — no stored :seon.agent/state) ---
    ;; :seon.agent/current-ns deleted 2026-05-23 — derived from the
    ;; latest successful eval's :seon.eval/ns. See
    ;; docs/seon/concepts/reactive-context.
@@ -751,7 +753,8 @@
    :seon.agent.testrun/test-name
    :seon.agent.testrun/path
    :seon.agent.testrun/line
-   :seon.agent.testrun/message])
+   :seon.agent.testrun/message]
+   db.restore/completion-attrs))
 
 ;; ---------------------------------------------------------------------------
 ;; Cluster database connection.
