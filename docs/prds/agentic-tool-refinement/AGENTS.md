@@ -40,25 +40,28 @@ harness for Seon-native tasks and established benchmarks.
 
 ## Current checkpoint
 
-Read [[roadmap]] and the current unit's file under `research/`. The initial
-ordinary-agent baseline was 21,839 estimated tokens for the namespaces block.
-Positive `:seon.fn/agent-facing?` eligibility is now shared by indexing, eval,
-namespace cards, menus, and `my.ns/functions`; the rebuilt ACME database has
-1,034 indexed functions, 114 eligible functions, and a 20,406-token namespace
-block. Schema closure is now the dominant measured weight. Do not resume broad
-surface editing from intuition: first freeze the serial Inspect development
-slice, then measure an exact failed sample and change its smallest current
-owner. The dependency order, parallel lanes, gates, and morning checkpoint are
-maintained in [[roadmap#Execution ledger]].
-
 The immediate resumption authority is [[roadmap#Resumption packet —
-2026-07-15]]. P0 membership, native wrappers, generated workflows, source
-locks, request-scoped evidence, and infrastructure invalidation are complete;
-P0b has not run as one accepted suite. The next action is exactly one admitted,
-finalized replay of `database_workflow-seed1-000` on a ready static ACME target.
-The preserved Qwen2.5 Coder 0.5B diagnostic is not accepted: it used dirty Seon
-source and bypassed run-level admission, but its repeated narration and
-21,947→23,201 prompt growth are the current failure to explain. Do not broaden
-the suite, model matrix, or context redesign until that sample is trustworthy.
-Leave parallel execution and isolated restart graduation behind the P1b
-operator lease.
+2026-07-15]]. Resume at its **Exact next order**, not at an interesting open
+issue.
+
+The single active action is an admitted, finalized replay of
+`database_workflow-seed1-000` on a ready, ownership-coherent static ACME target.
+P0 membership, native wrappers, source locks, request-scoped evidence,
+database-owned deadlines, effective-timeout evidence, and interrupted native-
+log retention are committed. P0b has not run. Shared runtime source is dirty
+under other owners and the live ACME target is degraded after hot reload; do
+not restart it or stage those paths. Recheck status, wait for coherent source
+commits, restart only ACME, require ready status, then run exactly that sample.
+
+The multi-form ordering defect is real but queued for P4, not the active gate:
+`:seon.agent.turn/evals` is cardinality-many and current evidence has no durable
+per-turn execution position. See
+[[../../seon/issues/multi-form-eval-order-is-not-durable]] and
+[[research/inspect-batch-stream-cancellation-2026-07-15]]. Do not edit eval,
+projection, or solver code until the first admitted sample is recorded unless
+that sample is invalidated by this exact defect.
+
+Do not broaden into the remaining nine samples, model selection, shared-schema
+rendering, parser changes, streaming transport, or the operator lease before
+the active action. The rejected Qwen2.5 Coder 0.5B diagnostic remains useful
+only as evidence: it used dirty source and bypassed run-level admission.

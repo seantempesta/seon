@@ -331,6 +331,12 @@ artifact. Inspect its exact prompt, reply, and evaluation bytes. Do not run the
 ten-member slice, start the model matrix, or redesign context until that one
 sample is trustworthy.
 
+**Last durable lane checkpoint:** `85f4bbd0` follows `de176aad`, `9428aebe`,
+`0a8c5288`, `6c2e80ae`, and `8a6ebf60`. Later shared-tree commits may exist and
+are not automatically part of this lane. Always re-read `git status --short`
+and `bin/acme status --edn`; never infer ownership or readiness from this
+paragraph.
+
 ### Proven and committed
 
 - The proposed development slice has ten exact members and fixed category
@@ -420,11 +426,20 @@ sample is trustworthy.
   fresh agents/clusters change other database facts, while applying a manifest
   does not rewrite an existing agent's copied context tree. The paired prompt
   experiment waits for the ownership-fenced fork/lease boundary.
+- Multi-form execution order is not yet a durable database fact. The turn's
+  `:seon.agent.turn/evals` connection is cardinality-many, while projected eval
+  evidence has neither originating turn identity nor a per-turn execution
+  position. Timestamp/id sorting is deterministic presentation, not execution
+  truth. This is recorded in
+  [[../../seon/issues/multi-form-eval-order-is-not-durable]] and belongs to
+  P4 after the first accepted serial slice unless it directly invalidates the
+  active sample.
 
 ### Exact next order
 
-1. Keep the operator/readiness and composition-door checkpoints isolated from
-   concurrent lane files.
+1. Read `git status --short` and `bin/acme status --edn`. If another owner still
+   has dirty runtime inputs, do documentation or read-only source grounding
+   only; do not restart, stage, or repair their files.
 2. When the shared runtime edits converge, restart only ACME and prove a ready,
    ownership-coherent artifact plus clean admitted source.
 3. Run `database_workflow-seed1-000` through common source admission, exact
@@ -436,6 +451,9 @@ sample is trustworthy.
 5. Run the remaining nine frozen members serially, inspecting every `.eval`.
    Only after P0b is recorded may the model matrix or P3 context comparison
    begin.
+6. After P0b, repair and prove durable multi-form order before the P4 batch /
+   stream comparison. Do not substitute timestamps, random ids, Python list
+   position, or synthetic Inspect tool calls for a database event fact.
 
 ### Stop rules
 

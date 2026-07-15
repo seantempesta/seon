@@ -82,3 +82,14 @@ a truthful `started` log; retention does not coerce statuses.
    policy; compare semantic projections, not timestamped `.eval` bytes.
 4. An Inspect early-stopping arm skips only future epochs after a completed
    score and records its native summary without relabeling running work.
+
+The second experiment is now a localized, deferred defect rather than an
+invitation to interrupt P0b. `seon.eval/eval-batch!` returns ordered eval ids in
+process memory, but the turn stores those refs in cardinality-many
+`:seon.agent.turn/evals`; the database projection currently reconstructs a
+deterministic display order from timestamp and id. It therefore cannot prove
+the model's authored form order. The repair must record execution position with
+the eval event, project originating turn and position, and make the Inspect
+solver reject missing, duplicated, or non-contiguous evidence as an
+infrastructure failure. See
+[[../../../seon/issues/multi-form-eval-order-is-not-durable]].
