@@ -29,6 +29,16 @@ Historical research and the archived dual-path audit already identify stale
 schema projections across hot reload, but there is no open issue owning this
 observed partial-import/readiness behavior.
 
+The ACME evidence run reproduced the dangerous consequence on 2026-07-15. A
+stale hot-reloaded pod accepted `POST /agents/run`, then crashed under the
+intentional core-fault policy because the transcript renderer resolved
+`seon.agent.ctx.run_policy` as a non-function. The same pod had already logged
+repeated `Invalid database replay page: writer returned not-ok` failures. A
+target-level down/reset rebuilt the current source and database into a ready
+watcher, writer, and pod; the identical request then completed normally. Keep
+the crash policy: the missing mechanism is atomic generation admission and
+readiness invalidation, not error suppression.
+
 ## Owner
 
 The one core program/schema publication generation and

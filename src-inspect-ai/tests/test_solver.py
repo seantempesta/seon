@@ -4,10 +4,11 @@ import contextlib
 import http.server
 import json
 import threading
+from types import SimpleNamespace
 
 import pytest
 
-from seon_inspect.solver import AgentRunRefused, pod_run
+from seon_inspect.solver import AgentRunRefused, _record_result, pod_run
 
 
 @contextlib.contextmanager
@@ -62,3 +63,25 @@ def test_pod_run_422_raises_distinct_refusal():
     with _fake_door(422, {"error": "unknown agent_id: nope"}, capture) as url:
         with pytest.raises(AgentRunRefused, match="unknown agent_id: nope"):
             pod_run("hi", 30000, url, agent_id="nope")
+
+
+def test_record_result_preserves_database_and_turn_evidence():
+    coordinate = {"database_id": "db-1", "branch": "db",
+                  "commit_id": "commit-1", "t": 536870930}
+    turns = [{"turn_id": "turn-1", "prompt": "exact prompt",
+              "reply": "raw reply", "rendered_coordinate": coordinate}]
+    state = SimpleNamespace(output=SimpleNamespace(completion=""), metadata={})
+
+    _record_result(state, {"reply": "answer",
+                           "database_coordinate": coordinate,
+                           "turn_evidence": turns})
+
+    assert state.output.completion == "answer"
+    assert state.metadata["pod_database_coordinate"] == coordinate
+    assert state.metadata["pod_turn_evidence"] == turns
+
+    incomplete = SimpleNamespace(output=SimpleNamespace(completion=""),
+                                 metadata={})
+    _record_result(incomplete, {"reply": "legacy"})
+    assert "pod_database_coordinate" not in incomplete.metadata
+    assert "pod_turn_evidence" not in incomplete.metadata

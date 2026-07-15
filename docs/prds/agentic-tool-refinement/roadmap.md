@@ -49,6 +49,17 @@ sixteen configured required namespaces as inert compact cards with public
 function names, named arguments, complete input/output contracts, and schema
 definitions. Its size and relevance have not yet passed the small-model test.
 
+Static-URL Inspect runs now retain the evidence Seon already captures. The
+pod response includes its final complete database coordinate and a stable
+ordered turn bundle with stored rendered coordinates, exact prompt/reply bytes,
+token estimates, and bounded errors; the Python solver preserves the bundle in
+native `.eval` sample metadata. Focused Python and CLJS checks pass, and a live
+ACME Qwen 3.5 2B BFCL smoke preserves four inspectable turns. The first reply
+used the wrong JSON function identity and the next three were empty, converting
+the prior opaque `:no-forms` score into actionable model/context/parser
+evidence. The dependency ledger and proof are in
+[[research/turn-evidence-retention-2026-07-15]].
+
 The first policy unit now resolves run ceilings through one config manifest
 section and persists three scalar singleton facts. The live isolated database
 reports 100 batch turns, 300 stream forms, and a 1,800,000 ms deadline; both

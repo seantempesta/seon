@@ -112,6 +112,15 @@ def _record_result(state: TaskState, result: dict) -> TaskState:
         # scorecard.model_provenance_from_run maps it onto ledger-row fields.
         "pod_model_config": result.get("model_config"),
     })
+    # Seon captures these on every turn. Keep the complete immutable database
+    # point and exact model-facing bytes in the native Inspect sample metadata
+    # so a scored failure remains reconstructable after the live cluster
+    # advances or is removed. Presence is meaningful: an older/broken pod that
+    # omitted evidence must not be normalized into a plausible null/empty set.
+    if "database_coordinate" in result:
+        state.metadata["pod_database_coordinate"] = result["database_coordinate"]
+    if "turn_evidence" in result:
+        state.metadata["pod_turn_evidence"] = result["turn_evidence"]
     if result.get("evidence_blobs") is not None:
         state.metadata["pod_evidence_blobs"] = result["evidence_blobs"]
     return state

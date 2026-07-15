@@ -30,10 +30,12 @@
     [seon.agent :as agent]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
+    [seon.agent.debug :as agent-debug]
     [seon.agent.lifecycle :as lifecycle]
     [seon.agent.run :as run]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
     [seon.derive :as derive]
     [seon.eval :as seval]
     [seon.log :as log]
@@ -411,6 +413,56 @@
        (map (fn [[^js started]] (.getTime started)))
        (reduce max 0)))
 
+(defn- coordinate-json
+  "JSON-safe external projection of one complete database coordinate."
+  [point]
+  {:database_id (str (::coordinate/database-id point))
+   :branch (name (::coordinate/branch point))
+   :commit_id (str (::coordinate/commit-id point))
+   :t (::coordinate/t point)})
+
+(defn- captured-turn-coordinate-json
+  "JSON-safe complete coordinate stored on one debug turn bundle."
+  [bundle]
+  (when (every? #(contains? bundle %)
+                [:seon.agent.turn/rendered-database-id
+                 :seon.agent.turn/rendered-branch
+                 :seon.agent.turn/rendered-commit-id
+                 :seon.agent.turn/rendered-t])
+    {:database_id (str (:seon.agent.turn/rendered-database-id bundle))
+     :branch (name (:seon.agent.turn/rendered-branch bundle))
+     :commit_id (str (:seon.agent.turn/rendered-commit-id bundle))
+     :t (:seon.agent.turn/rendered-t bundle)}))
+
+(defn- turn-evidence
+  "Stable external projection of captured turn prompts and raw replies."
+  [turn-ids]
+  (mapv
+    (fn [turn-id]
+      (let [bundle (agent-debug/turn {:seon.agent.turn/id turn-id})
+            rendered-coordinate (captured-turn-coordinate-json bundle)]
+        (cond-> {:turn_id turn-id
+                 :ok (:seon.agent.debug/ok? bundle)}
+          (:seon.agent.turn/status bundle)
+          (assoc :status (name (:seon.agent.turn/status bundle)))
+          (:seon.agent.turn/at bundle)
+          (assoc :at (.toISOString ^js (:seon.agent.turn/at bundle)))
+          rendered-coordinate
+          (assoc :rendered_coordinate rendered-coordinate)
+          (contains? bundle :seon.agent.debug/prompt)
+          (assoc :prompt (:seon.agent.debug/prompt bundle))
+          (contains? bundle :seon.agent.debug/prompt-tokens)
+          (assoc :prompt_tokens (:seon.agent.debug/prompt-tokens bundle))
+          (contains? bundle :seon.agent.debug/reply)
+          (assoc :reply (:seon.agent.debug/reply bundle))
+          (contains? bundle :seon.agent.debug/reply-tokens)
+          (assoc :reply_tokens (:seon.agent.debug/reply-tokens bundle))
+          (:seon.agent.turn/error bundle)
+          (assoc :turn_error (:seon.agent.turn/error bundle))
+          (:seon.agent.debug/error bundle)
+          (assoc :capture_error (:seon.agent.debug/error bundle)))))
+    turn-ids))
+
 (defn- ^:async run-agent-task!
   "Drive ONE task through an agent in the pod's own cluster to completion.
 
@@ -482,7 +534,11 @@
                         (await (run/close-run!
                                  {:seon.agent.run/id            (:seon.agent.run/id run)
                                   :seon.agent.run/closed-reason :superseded}))))
-                    (let [agent-eid (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id aid]}))
+                    ;; A timeout close is itself a commit. Refresh once after
+                    ;; that write so response metadata and its head coordinate
+                    ;; describe the same immutable final database value.
+                    (let [db        (if timeout? @conn db)
+                          agent-eid (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id aid]}))
                           user-eid  (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.user/id "user"]}))
                           ;; the runs THIS request opened (window scoping)
                           run-eids  (->> (db/query {:seon.db/db db
@@ -493,13 +549,19 @@
                                          (keep (fn [[r ^js started]]
                                                  (when (>= (.getTime started) injected-at) r)))
                                          set)
-                          turn-eids (->> (db/query {:seon.db/db db
-                                                    :seon.db/query '[:find ?t ?r :in $ ?ag :where
+                          turn-rows (->> (db/query {:seon.db/db db
+                                                    :seon.db/query '[:find ?t ?id ?at ?r :in $ ?ag :where
                                                                      [?r :seon.agent.run/agent ?ag]
-                                                                     [?t :seon.agent.turn/run ?r]]
+                                                                     [?t :seon.agent.turn/run ?r]
+                                                                     [?t :seon.agent.turn/id ?id]
+                                                                     [?t :seon.agent.turn/at ?at]]
                                                     :seon.db/args [agent-eid]})
-                                         (keep (fn [[t r]] (when (contains? run-eids r) t)))
-                                         set)
+                                         (filter (fn [[_ _ _ r]]
+                                                   (contains? run-eids r)))
+                                         (sort-by (fn [[_ id ^js at _]]
+                                                    [(.getTime at) id])))
+                          turn-eids (into #{} (map first) turn-rows)
+                          turn-ids  (mapv second turn-rows)
                           evals     (->> (db/query {:seon.db/db db
                                                     :seon.db/query '[:find ?e ?t :in $ ?ag :where
                                                                      [?r :seon.agent.run/agent ?ag]
@@ -544,6 +606,9 @@
                       ;; derived last-closed-reason from an earlier close.
                       (cond-> {:agent_id aid :turns (count turn-eids) :evals evals
                                :reply (or reply "") :elapsed_ms elapsed
+                               :database_coordinate
+                               (coordinate-json (db/head-coordinate db))
+                               :turn_evidence (turn-evidence turn-ids)
                                ;; always present — the resolver always resolves
                                ;; (worst case: all shipped defaults).
                                :model_config model-cfg

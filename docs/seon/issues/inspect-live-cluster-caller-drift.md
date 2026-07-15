@@ -101,6 +101,16 @@ the exact model replies cannot be reconstructed. The run is scoreable but not
 forensically adequate for deciding whether context, parser repair, or model
 reasoning caused the failure.
 
+The explicitly provisioned static-URL path now closes that evidence-loss edge:
+`POST /agents/run` returns the final complete database coordinate and the
+ordered exact prompt/reply/error bundle for every turn, and the Python solver
+stores it unchanged in native sample metadata. A 2026-07-15 live ACME BFCL
+smoke preserved four Qwen 3.5 2B turns that cluster cleanup would otherwise
+have made inaccessible. The first wrong-identity JSON call and three empty
+replies are directly visible in the `.eval`. This does not close the issue:
+concurrent per-sample allocation, restart, and cleanup still require the
+ownership-fenced lease described below.
+
 This is distinct from `acme-operator-migration-drift.md`. That issue owns the
 ACME process/artifact/database migration itself; this issue owns Inspect's
 live consumers after the current operator boundary exists.

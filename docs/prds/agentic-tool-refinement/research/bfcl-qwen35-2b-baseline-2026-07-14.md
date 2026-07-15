@@ -49,3 +49,9 @@ three raw replies that produced its no-forms streak are unavailable.
 This run remains a valid zero-score baseline, but it cannot support a context or
 parser root-cause claim. Future accepted live Inspect evidence must preserve the
 lease/database coordinate and complete turn bundle before sample cleanup.
+
+The static-URL evidence loss is repaired and live-proven in
+[[turn-evidence-retention-2026-07-15]]. The historical baseline remains
+irrecoverable; new samples retain their exact turn bytes and coordinates in
+the native `.eval`. The separate ownership-fenced per-sample lease remains
+open.
