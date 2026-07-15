@@ -10,6 +10,7 @@ wrong/absent one scores 0 through the bench's own oracle — the whole point of
 from __future__ import annotations
 
 import anyio
+import pytest
 from inspect_ai.model import ChatMessageAssistant, ChatMessageUser, ModelName
 from inspect_ai.solver import TaskState
 from inspect_evals.bfcl.score.scorer import ast_match
@@ -18,11 +19,14 @@ from inspect_evals.bfcl.utils.task_categories import CATEGORIES
 from seon_inspect.bfcl_adapter import (
     BFCL_AST_CATEGORIES,
     _to_tool_calls,
+    bfcl_adapt,
     bfcl_parse,
     bfcl_prompt,
     parse_calls,
     render_bfcl_prompt,
 )
+from seon_inspect import solver as solver_module
+from seon_inspect.solver import PodRunInfrastructureError, seon_pod_solver
 
 # A minimal "simple" BFCL sample: one candidate function, one required int arg.
 SIMPLE_TOOLS = [{
@@ -163,6 +167,69 @@ def test_bfcl_prompt_rewrites_user_prompt():
 
 async def _run_solver(solver, state):
     return await solver(state, None)
+
+
+async def _run_chain(solvers, state):
+    for step in solvers:
+        state = await step(state, None)
+    return state
+
+
+@pytest.mark.parametrize(
+    "terminal",
+    [
+        {"timed_out": True, "closed_reason": "timeout"},
+        {"timed_out": False, "closed_reason": ":error"},
+        {"timed_out": False, "closed_reason": ":quiesced"},
+    ],
+)
+def test_bfcl_capability_chain_rejects_before_parse(
+    monkeypatch, terminal
+):
+    monkeypatch.setattr(
+        solver_module,
+        "pod_run",
+        lambda *_args, **_kwargs: {
+            "agent_id": "agent-1",
+            "reply": '[{"name": "circle_area", "arguments": {"radius": 5}}]',
+            **terminal,
+        },
+    )
+    state = _state_with_reply("")
+    original_messages = list(state.messages)
+    chain = bfcl_adapt(
+        None,
+        seon_pod_solver(cluster_url="http://pod.test/agents/run"),
+    )
+
+    with pytest.raises(PodRunInfrastructureError):
+        anyio.run(_run_chain, chain, state)
+
+    assert state.messages == original_messages
+    assert "bfcl_parse_error" not in state.metadata
+
+
+def test_bfcl_completed_control_reaches_unchanged_ast_scorer(monkeypatch):
+    monkeypatch.setattr(
+        solver_module,
+        "pod_run",
+        lambda *_args, **_kwargs: {
+            "agent_id": "agent-1",
+            "reply": '[{"name": "circle_area", "arguments": {"radius": 5}}]',
+            "timed_out": False,
+            "closed_reason": ":completed",
+        },
+    )
+    state = _state_with_reply("")
+    chain = bfcl_adapt(
+        None,
+        seon_pod_solver(cluster_url="http://pod.test/agents/run"),
+    )
+
+    anyio.run(_run_chain, chain, state)
+
+    score = ast_match(state, state.target, CATEGORIES["simple_python"])
+    assert score.value == 1
 
 
 # ---------------------------------------------------------------------------

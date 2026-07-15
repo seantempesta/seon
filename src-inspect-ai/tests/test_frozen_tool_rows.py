@@ -54,15 +54,30 @@ def fake_pod(row: str, *, touch_workspace: bool = True,
 
 def _run(monkeypatch, tmp_path, row, position, *, touch_workspace=True,
          infrastructure=None, fail_on_error=False):
-    monkeypatch.setattr(
-        tasks,
-        "seon_pod_solver",
-        lambda **_kwargs: fake_pod(
-            row,
-            touch_workspace=touch_workspace,
-            infrastructure=infrastructure,
-        ),
-    )
+    if infrastructure is None:
+        monkeypatch.setattr(
+            tasks,
+            "seon_pod_solver",
+            lambda **_kwargs: fake_pod(
+                row,
+                touch_workspace=touch_workspace,
+            ),
+        )
+    else:
+        closed_reason = {
+            "timeout": "timeout",
+            "error": ":error",
+            "quiesced": ":quiesced",
+        }[infrastructure]
+        monkeypatch.setattr(
+            "seon_inspect.solver.pod_run",
+            lambda *_args, **_kwargs: {
+                "agent_id": "test-agent",
+                "reply": "would otherwise score",
+                "timed_out": infrastructure == "timeout",
+                "closed_reason": closed_reason,
+            },
+        )
     task = tasks.frozen_tool_rows(
         row=row,
         seed=1,
@@ -115,7 +130,7 @@ def test_untouched_workspace_is_a_native_incorrect_score(monkeypatch, tmp_path):
     assert score.metadata["failures"]
 
 
-@pytest.mark.parametrize("infrastructure", ["timeout", "error"])
+@pytest.mark.parametrize("infrastructure", ["timeout", "error", "quiesced"])
 def test_infrastructure_close_invalidates_instead_of_scoring(
     monkeypatch, tmp_path, infrastructure
 ):
@@ -131,6 +146,40 @@ def test_infrastructure_close_invalidates_instead_of_scoring(
     assert len(log.samples) == 1
     assert log.samples[0].error is not None
     assert not log.samples[0].scores
+
+
+def test_completed_default_solver_reaches_the_unchanged_static_scorer(
+    monkeypatch, tmp_path
+):
+    task = tasks.frozen_tool_rows(
+        row="web_fetch",
+        seed=1,
+        positions="0",
+        cluster_url="http://127.0.0.1:7994",
+        workspaces_root=str(tmp_path / "workspaces"),
+        _admission=ADMISSION,
+    )
+    expected = task.dataset[0].metadata["oracle"]["answer"]
+    monkeypatch.setattr(
+        "seon_inspect.solver.pod_run",
+        lambda *_args, **_kwargs: {
+            "agent_id": "test-agent",
+            "reply": expected,
+            "timed_out": False,
+            "closed_reason": ":completed",
+        },
+    )
+
+    log = inspect_eval(
+        task,
+        model="mockllm/model",
+        display="none",
+        log_dir=str(tmp_path / "logs"),
+        max_samples=1,
+    )[0]
+
+    assert log.status == "success", log.error
+    assert next(iter(log.samples[0].scores.values())).value == "C"
 
 
 def test_selection_is_an_exact_projection_without_generator_drift():

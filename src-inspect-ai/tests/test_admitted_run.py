@@ -2,13 +2,14 @@
 
 from pathlib import Path
 
+import pytest
 from inspect_ai import Task
 from inspect_ai.dataset import Sample
 from inspect_ai.log import read_eval_log, write_eval_log
 from inspect_ai.scorer import match
 from inspect_ai.solver import solver
 
-from seon_inspect import catalog, scorecard, source_admission
+from seon_inspect import catalog, scorecard, solver as solver_module, source_admission
 
 
 @solver
@@ -60,6 +61,57 @@ def test_run_bench_retains_native_log_with_source_identity(monkeypatch, tmp_path
     admitted = native.eval.metadata["seon_source_admission"]
     assert admitted["bench"]["name"] == "gsm8k"
     assert admitted["sources"]["inspect_ai"]["revision"] == "a" * 40
+
+
+@pytest.mark.parametrize(
+    "terminal",
+    [
+        {"timed_out": True, "closed_reason": "timeout"},
+        {"timed_out": False, "closed_reason": ":error"},
+        {"timed_out": False, "closed_reason": ":quiesced"},
+    ],
+)
+def test_admitted_static_bench_publishes_no_capability_score_for_terminal_state(
+    monkeypatch, tmp_path, terminal
+):
+    identity = {
+        "schema_version": 2,
+        "bench": {"name": "gsm8k", "kind": "case1"},
+    }
+    monkeypatch.setattr(
+        catalog.source_admission, "verify_sources", lambda _selected: identity)
+    monkeypatch.setattr(
+        solver_module,
+        "pod_run",
+        lambda *_args, **_kwargs: {
+            "agent_id": "agent-1",
+            "reply": "accepted",
+            **terminal,
+        },
+    )
+    task = Task(
+        dataset=[Sample(id="terminal", input="return accepted",
+                        target="accepted")],
+        solver=[],
+        scorer=match(),
+    )
+
+    logs = catalog.run_bench(
+        "gsm8k",
+        task=task,
+        evidence_dir=tmp_path / "evidence",
+        limit=1,
+        log_dir=str(tmp_path / "logs"),
+        display="none",
+        fail_on_error=False,
+    )
+
+    native = read_eval_log(logs[0].location)
+    sample = native.samples[0]
+    assert native.eval.metadata["seon_source_admission"] == identity
+    assert sample.error is not None
+    assert not sample.scores
+    assert sample.metadata["pod_closed_reason"] == terminal["closed_reason"]
 
 
 def test_run_native_task_retains_log_with_exact_admission(monkeypatch, tmp_path):

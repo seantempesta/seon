@@ -23,7 +23,7 @@ from seon_inspect.generators import (
     serve_fixtures,
 )
 from seon_inspect import source_admission
-from seon_inspect.solver import require_scorable_pod_state, seon_pod_solver
+from seon_inspect.solver import seon_pod_solver
 from seon_inspect.tool_scorers import fixture_answer_scorer, workspace_scorer
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -126,7 +126,6 @@ def frozen_tool_row_solver(
                     )
                     state = await pod_solver(state, generate)
 
-            require_scorable_pod_state(state)
             if admission is not None:
                 end = source_admission.verify_sources(_bench_identity(row))
                 if end != admission:

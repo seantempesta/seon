@@ -252,10 +252,12 @@ def executions_from_eval_log(log: Any) -> list[dict[str, Any]]:
     Previously each run hand-rolled this conversion in an ad-hoc script
     (evidence jsonls existed, the code didn't) — this is the one shared
     reducer. Per (sample, epoch): pod-reported timeout → `solve_timeout`;
-    a crashed run (closed_reason ":error") → `run_error`; an inspect-side
-    sample error → `harness_error`; otherwise pass/fail from the sample's
-    first scorer value ("C"/1 = pass). Each record carries the reply text
-    (completion) + the pod summary metadata as evidence."""
+    close reason ``:error`` → `run_error`; ``:quiesced`` →
+    `run_quiesced`; an otherwise inspect-side sample error →
+    `harness_error`; otherwise pass/fail from the sample's first scorer value
+    ("C"/1 = pass). Pod terminal evidence takes precedence over the native
+    error raised by the capability guard, so an older/imported log cannot
+    relabel infrastructure as model capability evidence."""
     out: list[dict[str, Any]] = []
     for s in (getattr(log, "samples", None) or []):
         md = s.metadata or {}
@@ -266,15 +268,19 @@ def executions_from_eval_log(log: Any) -> list[dict[str, Any]]:
         base = {"pod": pod, "reply": getattr(s.output, "completion", "")}
         if md.get("pod_evidence_blobs") is not None:
             base["evidence_blobs"] = md["pod_evidence_blobs"]
-        if getattr(s, "error", None) is not None:
-            out.append(execution(str(s.id), s.epoch, "harness_error",
-                                 error=str(s.error), **base))
-            continue
         if md.get("pod_timed_out"):
             out.append(execution(str(s.id), s.epoch, "solve_timeout", **base))
             continue
-        if str(md.get("pod_closed_reason") or "") == ":error":
+        closed_reason = str(md.get("pod_closed_reason") or "")
+        if closed_reason == ":error":
             out.append(execution(str(s.id), s.epoch, "run_error", **base))
+            continue
+        if closed_reason == ":quiesced":
+            out.append(execution(str(s.id), s.epoch, "run_quiesced", **base))
+            continue
+        if getattr(s, "error", None) is not None:
+            out.append(execution(str(s.id), s.epoch, "harness_error",
+                                 error=str(s.error), **base))
             continue
         score = next(iter((s.scores or {}).values()), None)
         val = getattr(score, "value", None)

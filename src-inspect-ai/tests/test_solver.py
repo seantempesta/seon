@@ -7,6 +7,11 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+from inspect_ai import Task, eval as inspect_eval
+from inspect_ai.dataset import Sample
+from inspect_ai.scorer import match
+
+from seon_inspect import solver as solver_module
 
 from seon_inspect.solver import (
     AgentRunRefused,
@@ -15,6 +20,9 @@ from seon_inspect.solver import (
     _record_result,
     pod_run,
     require_scorable_pod_state,
+    seon_diagnostic_pod_solver,
+    seon_pod_solver,
+    timeout_honesty,
 )
 
 
@@ -137,3 +145,104 @@ def test_completed_pod_state_is_scorable():
     state = SimpleNamespace(
         metadata={"pod_timed_out": False, "pod_closed_reason": ":completed"})
     assert require_scorable_pod_state(state) is state
+
+
+@pytest.mark.parametrize(
+    "terminal",
+    [
+        {"timed_out": True, "closed_reason": "timeout"},
+        {"timed_out": False, "closed_reason": ":error"},
+        {"timed_out": False, "closed_reason": ":quiesced"},
+    ],
+)
+def test_static_capability_solver_records_then_errors_without_score(
+    monkeypatch, tmp_path, terminal
+):
+    monkeypatch.setattr(
+        solver_module,
+        "pod_run",
+        lambda *_args, **_kwargs: {
+            "agent_id": "agent-1",
+            "reply": "accepted",
+            **terminal,
+        },
+    )
+    task = Task(
+        dataset=[Sample(id="terminal", input="return accepted",
+                        target="accepted")],
+        solver=seon_pod_solver(cluster_url="http://pod.test/agents/run"),
+        scorer=match(),
+    )
+    log = inspect_eval(
+        task,
+        model="mockllm/model",
+        display="none",
+        log_dir=str(tmp_path),
+        fail_on_error=True,
+    )[0]
+
+    assert log.status == "error"
+    sample = log.samples[0]
+    assert sample.error is not None
+    assert not sample.scores
+    assert sample.metadata["pod_agent_id"] == "agent-1"
+    assert sample.metadata["pod_closed_reason"] == terminal["closed_reason"]
+    assert sample.metadata["pod_timed_out"] is terminal["timed_out"]
+
+
+def test_static_capability_solver_completed_control_reaches_scorer(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        solver_module,
+        "pod_run",
+        lambda *_args, **_kwargs: {
+            "agent_id": "agent-1",
+            "reply": "accepted",
+            "timed_out": False,
+            "closed_reason": ":completed",
+        },
+    )
+    task = Task(
+        dataset=[Sample(id="completed", input="return accepted",
+                        target="accepted")],
+        solver=seon_pod_solver(cluster_url="http://pod.test/agents/run"),
+        scorer=match(),
+    )
+    log = inspect_eval(
+        task,
+        model="mockllm/model",
+        display="none",
+        log_dir=str(tmp_path),
+    )[0]
+
+    assert log.status == "success"
+    assert log.samples[0].scores["match"].value == "C"
+
+
+def test_timeout_diagnostic_explicitly_uses_raw_solver(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        solver_module,
+        "pod_run",
+        lambda *_args, **_kwargs: {
+            "agent_id": "agent-1",
+            "reply": "",
+            "timed_out": True,
+            "closed_reason": "timeout",
+        },
+    )
+    task = Task(
+        dataset=[Sample(id="diagnostic", input="wait", target="")],
+        solver=seon_diagnostic_pod_solver(
+            cluster_url="http://pod.test/agents/run"),
+        scorer=timeout_honesty(),
+    )
+    log = inspect_eval(
+        task,
+        model="mockllm/model",
+        display="none",
+        log_dir=str(tmp_path),
+    )[0]
+
+    assert log.status == "success"
+    assert log.samples[0].scores["timeout_honesty"].value == "C"

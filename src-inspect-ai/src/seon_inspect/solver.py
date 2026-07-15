@@ -10,6 +10,10 @@ agent's LLM calls through inspect and replaces Seon's loop — rejected; see the
 spike doc §1). Isolation is a whole CLUSTER (one pod per cluster); per-sample
 isolation = one ephemeral cluster per sample (`seon_cluster_solver`), while
 `seon_pod_solver` drives a LONG-LIVED cluster's pod at a static URL (acme).
+Both capability solvers reject infrastructure terminal states after recording
+their evidence and before any task parser or scorer runs. The deliberately raw
+`seon_diagnostic_pod_solver` exists only for diagnostics such as timeout
+honesty, where the infrastructure close itself is the observation.
 
 The pod records honestly under the clock: the door returns `timed_out` +
 `closed_reason "timeout"` on a clock cut-off (never a stale :completed/greeting
@@ -166,14 +170,14 @@ def require_scorable_pod_state(state: TaskState) -> TaskState:
 
 
 @solver
-def seon_pod_solver(cluster_url: str | None = None,
-                    timeout_s: int | None = None):
-    """Drive ONE long-lived cluster's pod as the solver (static URL mode).
+def seon_diagnostic_pod_solver(cluster_url: str | None = None,
+                               timeout_s: int | None = None):
+    """Record one static-pod result without capability-state admission.
 
-    `cluster_url` (or SEON_CLUSTER_URL) selects the cluster's pod door —
-    e.g. acme. Every sample lands on the SAME cluster serially. Records the
-    pod-side metadata (turns / closed_reason / evals / timed_out / elapsed)
-    so the eval log proves the multi-turn loop ran AND recorded honestly."""
+    Diagnostic-only: callers intentionally measuring timeout/close honesty
+    need the raw terminal state. Capability tasks must use ``seon_pod_solver``
+    so infrastructure closes become native Inspect sample errors, not scores.
+    """
 
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         import anyio
@@ -182,6 +186,28 @@ def seon_pod_solver(cluster_url: str | None = None,
             pod_run, _prompt_text(state),
             _resolve_timeout_ms(state, timeout_s), cluster_url)
         return _record_result(state, result)
+
+    return solve
+
+
+@solver
+def seon_pod_solver(cluster_url: str | None = None,
+                    timeout_s: int | None = None):
+    """Drive one long-lived cluster through the capability-scoring boundary.
+
+    `cluster_url` (or SEON_CLUSTER_URL) selects the cluster's pod door —
+    e.g. acme. Every sample lands on the SAME cluster serially. Records the
+    pod-side metadata (turns / closed_reason / evals / timed_out / elapsed)
+    so the eval log proves the multi-turn loop ran, then rejects timeout,
+    ``:error``, and ``:quiesced`` before downstream parsing or scoring."""
+
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        import anyio
+
+        result = await anyio.to_thread.run_sync(
+            pod_run, _prompt_text(state),
+            _resolve_timeout_ms(state, timeout_s), cluster_url)
+        return require_scorable_pod_state(_record_result(state, result))
 
     return solve
 
@@ -222,7 +248,7 @@ def seon_cluster_solver(timeout_s: int | None = None,
                 return out
 
         result = await anyio.to_thread.run_sync(drive)
-        return _record_result(state, result)
+        return require_scorable_pod_state(_record_result(state, result))
 
     return solve
 

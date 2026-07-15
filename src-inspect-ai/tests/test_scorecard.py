@@ -67,6 +67,53 @@ def test_metrics_empty_raises():
         compute_metrics([])
 
 
+@pytest.mark.parametrize(
+    "metadata,expected",
+    [
+        ({"pod_timed_out": True, "pod_closed_reason": "timeout"},
+         "solve_timeout"),
+        ({"pod_timed_out": False, "pod_closed_reason": ":error"},
+         "run_error"),
+        ({"pod_timed_out": False, "pod_closed_reason": ":quiesced"},
+         "run_quiesced"),
+    ],
+)
+def test_pod_terminal_state_wins_over_native_error_and_score(
+    metadata, expected
+):
+    sample = SimpleNamespace(
+        id="terminal",
+        epoch=1,
+        metadata=metadata,
+        output=SimpleNamespace(completion="would otherwise pass"),
+        error=SimpleNamespace(message="capability guard rejected state"),
+        scores={"match": SimpleNamespace(value="C")},
+    )
+
+    executions = scorecard.executions_from_eval_log(
+        SimpleNamespace(samples=[sample]))
+
+    assert len(executions) == 1
+    assert executions[0]["outcome"] == expected
+    assert compute_metrics(executions)["flakes_by_class"] == {expected: 1}
+
+
+def test_non_pod_sample_error_remains_a_harness_error():
+    sample = SimpleNamespace(
+        id="harness",
+        epoch=1,
+        metadata={},
+        output=SimpleNamespace(completion=""),
+        error=SimpleNamespace(message="broken harness"),
+        scores={},
+    )
+
+    executions = scorecard.executions_from_eval_log(
+        SimpleNamespace(samples=[sample]))
+
+    assert executions[0]["outcome"] == "harness_error"
+
+
 def test_failure_classification_is_explicit_and_preserves_score(monkeypatch):
     score = SimpleNamespace(
         value="I", answer="327", explanation="oracle explanation",
