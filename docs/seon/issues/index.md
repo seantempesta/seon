@@ -23,7 +23,7 @@ See `README.md` for the convention.
 | [Scope the activated schema projection to one database attachment](activated-schema-projection-crosses-database-attachments.md) | blocker | agent |
 | [Unwind managed processes when the operator is interrupted](operator-interruption-can-orphan-managed-process.md) | blocker | Core |
 
-## Friction (33)
+## Friction (34)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -52,6 +52,7 @@ See `README.md` for the convention.
 | [Make schema hot reload atomic](hot-reload-schema-import-can-partially-fail.md) | friction | agent |
 | [Model can ghost-echo runtime scaffolding into the transcript spine](narration-ghost-echo-not-neutralized.md) | friction | agent |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
+| [Prepare selected git dependencies before test compilation](test-runner-does-not-prepare-selected-git-dependencies.md) | friction | Core |
 | [Preserve distinct large BigInts in cardinality-many attributes](datahike-cljs-cardinality-many-collapses-large-bigints.md) | friction | Core |
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |
 | [Remove undeclared-var warnings from the self-host bootstrap build](bootstrap-analyzer-api-emits-undeclared-var-warnings.md) | friction | agent |
