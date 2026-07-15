@@ -72,8 +72,9 @@ Parallel work is deliberately bounded:
   settled unit contract instead of inventing its own transition/feed path;
 - units 4 and 6 may be implemented in parallel after their database/runtime
   prerequisites because they own separate UI-session and agent-loop domains;
-- the separately owned ACME tool-refinement lane remains isolated until its
-  commits and evidence are handed back for unit 7 review; and
+- the ACME tool-refinement handback is integrated; its clean worktree remains
+  only as an ignored-database evidence owner until archive/discard review, while
+  unit 7 advances through the canonical shared-tree implementation; and
 - unit 9 is the only final graduation gate and cannot be parallel-claimed from
   partial subsystem evidence.
 
@@ -94,14 +95,15 @@ The current dependency spine is:
 2. implement units 2 and 6 in parallel after their unit-1 prerequisites;
 3. let unit 3 consume unit 2's settled unit/cursor contract while unit 4
    consumes its settled root/render contract;
-4. finish unit 5 after units 2 and 4, unit 7 after unit 6 plus ACME handback,
+4. finish unit 5 after units 2 and 4, unit 7 after unit 6 and the integrated
+   ACME evidence requirements,
    and unit 8 after the runtime/package contracts from units 1 and 6 stabilize;
 5. run unit 9 only after every prior unit has integrated behavioral and live
    proof, then perform authorized legacy cleanup.
 
 During unit 1, the default parallel portfolio is lifecycle implementation at
 the top level, one lifecycle audit/proof lane when needed, one Inspect/
-autocomplete handback lane, and one independent-downstream packaging lane.
+autocomplete implementation lane, and one independent-downstream packaging lane.
 When a lane finishes, refill it from the earliest dependency-ready unit rather
 than expanding the current implementation into unrelated files.
 
@@ -306,21 +308,20 @@ first-pass operator error was a stale generated Claude copy of the maintained
 Datastar skill; the canonical adapter projection repaired it and the repeated
 gate is green.
 
-Inspect remains deliberately on its previously proven installed framework
-build while the mutable source checkout is newer and dirty. Content-pinning
-that source dependency and recording it in run provenance is an open
-reproducibility issue; it does not block simultaneous default/ACME runtime
-experiments.
+Inspect source/run admission is now content-pinned and required in native run
+metadata; the synchronized offline environment passes 321 tests with eight
+expected skips. This closes source-attribution drift, not lifecycle isolation,
+canonical autocomplete replay/scoring, or the model graduation battery.
 
-The agentic tool refinement work is carved into
-[[../agentic-tool-refinement/roadmap.md]]. It owns the isolated ACME small-model
-evaluation loop, dynamic namespace/tool-contract audit, frozen Inspect suites,
-planning-arm comparison, failure classification, and graduation evidence. It
-is downstream of the local ACME/operator integration already proven here and
-does not block runtime-reliability branch graduation. Its first fresh-agent
-baseline renders 21,839 estimated tokens in the namespaces block; reducing
-that cost without hiding complete relevant contracts is the first measured
-tool-surface question.
+The agentic tool-refinement handback is reconciled in
+[[../inspect-autocomplete-evidence/research/agentic-inspect-autocomplete-reconciliation-2026-07-14]].
+Its commits and tracked run evidence are integrated or superseded; the clean
+worktree remains only because its ignored database evidence lacks an accepted
+archive/discard disposition. Unit 7 now owns the canonical shared-tree
+autocomplete artifact, frozen Inspect suites, planning-arm comparison,
+failure classification, and graduation evidence. Its measured namespace
+weight must be reduced through one shared schema closure, never by hiding
+complete relevant contracts.
 
 The independent distribution audit in
 [[../independent-downstream-distribution/research/independent-acme-distribution-audit-2026-07-14]] establishes the
