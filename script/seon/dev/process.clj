@@ -111,17 +111,57 @@
 (def ^:private operation-environment-keys
   #{"SEON_CONFIG"})
 
-(defn- managed-environment [environment]
-  (into (sorted-map)
-        (filter (fn [[env-key _]]
-                  (and (not (contains? operation-environment-keys env-key))
-                       (or (contains? managed-environment-keys env-key)
-                           (some #(str/starts-with? env-key %)
-                                 managed-environment-prefixes)))))
-        environment))
+(defn- selected-path-executable [path argv]
+  (let [working-directory (System/getProperty "user.dir")
+        directories
+        (map #(if (str/blank? %) working-directory %)
+             (str/split (or path "") #":" -1))
+        executable-name (first argv)
+        _ (when-not (and (string? executable-name)
+                         (not (str/blank? executable-name)))
+            (throw
+             (ex-info "The managed process executable is missing."
+                      {:seon.dev.process/argv argv})))
+        _ (when (and (str/includes? executable-name "/")
+                     (not (fs/absolute? executable-name)))
+            (throw
+             (ex-info "A managed process executable path must be absolute."
+                      {:seon.dev.process/executable executable-name})))
+        _ (when (and (not (str/includes? executable-name "/"))
+                     (nil? path))
+            (throw
+             (ex-info "PATH is missing for a managed process executable."
+                      {:seon.dev.process/executable executable-name})))
+        candidates
+        (if (str/includes? executable-name "/")
+          [(fs/path executable-name)]
+          (map #(fs/path % executable-name) directories))]
+    (or
+     (some
+      (fn [candidate]
+        (try
+          (when (and (fs/regular-file? candidate)
+                     (fs/executable? candidate))
+            (str (fs/canonicalize candidate)))
+          (catch Throwable _ nil)))
+      candidates)
+     (throw
+      (ex-info "The managed process executable is not resolvable."
+               {:seon.dev.process/executable executable-name})))))
 
-(defn- environment-digest [environment]
-  (sha256-text (managed-environment environment)))
+(defn- managed-environment [environment argv]
+  (assoc
+   (into (sorted-map)
+         (filter (fn [[env-key _]]
+                   (and (not (contains? operation-environment-keys env-key))
+                        (or (contains? managed-environment-keys env-key)
+                            (some #(str/starts-with? env-key %)
+                                  managed-environment-prefixes)))))
+         environment)
+   "PATH" (selected-path-executable (get environment "PATH") argv)))
+
+(defn- environment-digest [environment argv]
+  (sha256-text (managed-environment environment argv)))
 
 (defn- state-file [config id]
   (let [descriptor (:seon.dev.config/launch-descriptor config)
@@ -728,7 +768,8 @@
                :seon.dev.process/process-group process-group
                :seon.dev.process/argv (:seon.dev.process/argv spec)
                :seon.dev.process/environment-digest
-               (environment-digest (:seon.dev.process/environment spec))
+               (environment-digest (:seon.dev.process/environment spec)
+                                   (:seon.dev.process/argv spec))
                :seon.dev.process/artifact-digest
                (:seon.dev.process/artifact-digest spec)
                :seon.dev.process/target :seon.dev.target/development
@@ -773,7 +814,8 @@
   (and (= (:seon.dev.process/argv spec) (:seon.dev.process/argv record))
        (= (:seon.dev.process/artifact-digest spec)
           (:seon.dev.process/artifact-digest record))
-       (= (environment-digest (:seon.dev.process/environment spec))
+       (= (environment-digest (:seon.dev.process/environment spec)
+                              (:seon.dev.process/argv spec))
           (:seon.dev.process/environment-digest record))))
 
 (defn converged?

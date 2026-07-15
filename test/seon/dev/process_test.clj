@@ -37,6 +37,11 @@
    :seon.dev.process/shutdown-grace-ms 100
    :seon.dev.process/artifact-digest "test-artifact"})
 
+(defn- executable! [path]
+  (spit (str path) "#!/bin/sh\nexit 0\n")
+  (fs/set-posix-file-permissions path "rwxr-xr-x")
+  path)
+
 (defn- live-probe-record [configuration record]
   (let [pid (.pid (java.lang.ProcessHandle/current))
         start (state/process-start-instant pid)
@@ -538,6 +543,89 @@
           (is (= (:seon.dev.process/pid first-record)
                  (some-> (:out result) str/trim parse-long)))))
       (finally (cleanup! configuration [id])))))
+
+(deftest path-identity-follows-selected-executables-not-task-ordering
+  (let [directory (fs/create-temp-dir {:prefix "seon-path-identity-"})
+        shared (fs/path directory "shared")
+        first-path (fs/path directory "first")
+        second-path (fs/path directory "second")
+        codex-one (fs/path directory ".codex/tmp/arg0/task-one")
+        codex-two (fs/path directory ".codex/tmp/arg0/task-two")]
+    (try
+      (doseq [path [shared first-path second-path codex-one codex-two]]
+        (fs/create-dirs path))
+      (let [shared-tool (executable! (fs/path shared "bb"))
+            _ (fs/create-sym-link (fs/path codex-one "bb") shared-tool)
+            _ (fs/create-sym-link (fs/path codex-two "bb") shared-tool)
+            _ (executable! (fs/path first-path "alpha"))
+            _ (executable! (fs/path second-path "beta"))
+            base {"HOME" "/home/seon"
+                  "SEON_SHELL" "1"}
+            left (assoc base
+                        "PATH" (str/join ":" [codex-one first-path second-path])
+                        "PWD" "/task/one"
+                        "OLDPWD" "/task/one/old"
+                        "SHLVL" "2"
+                        "_" "/usr/bin/env"
+                        "CODEX_THREAD_ID" "task-one")
+            right (assoc base
+                         "PATH" (str/join ":" [second-path codex-two first-path])
+                         "PWD" "/task/two"
+                         "OLDPWD" "/task/two/old"
+                         "SHLVL" "9"
+                         "_" "/bin/sh"
+                         "CODEX_THREAD_ID" "task-two")
+            without-unrelated (assoc left "PATH" (str codex-one))]
+        (is (= (#'process/managed-environment left ["bb"])
+               (#'process/managed-environment right ["bb"]))
+            "wrapper aliases and unrelated PATH ordering have one identity")
+        (is (= (#'process/environment-digest left ["bb"])
+               (#'process/environment-digest right ["bb"])))
+        (is (= (#'process/environment-digest left ["bb"])
+               (#'process/environment-digest without-unrelated ["bb"]))
+            "unrelated executable installation is not process identity")
+        (is (= (#'process/environment-digest left [(str shared-tool)])
+               (#'process/environment-digest right [(str shared-tool)]))
+            "an absolute process executable does not depend on PATH")
+        (is (not= (get left "PATH") (get right "PATH"))
+            "the launched child retains the caller's executable PATH"))
+      (finally
+        (fs/delete-tree directory {:force true})))))
+
+(deftest path-identity-detects-selected-executable-and-config-drift
+  (let [directory (fs/create-temp-dir {:prefix "seon-path-selection-"})
+        first-path (fs/path directory "first")
+        second-path (fs/path directory "second")]
+    (try
+      (doseq [path [first-path second-path]]
+        (fs/create-dirs path)
+        (executable! (fs/path path "node")))
+      (let [first {"PATH" (str/join ":" [first-path second-path])
+                   "SEON_SHELL" "1"}
+            second (assoc first "PATH"
+                          (str/join ":" [second-path first-path]))]
+        (is (not= (#'process/environment-digest first ["node"])
+                  (#'process/environment-digest second ["node"]))
+            "changing the selected executable remains process identity")
+        (is (not= (#'process/environment-digest first ["node"])
+                  (#'process/environment-digest
+                   (assoc first "SEON_SHELL" "0") ["node"]))
+            "declared Seon configuration remains process identity")
+        (is (thrown-with-msg?
+             Exception #"executable is missing"
+             (#'process/environment-digest first [])))
+        (is (thrown-with-msg?
+             Exception #"must be absolute"
+             (#'process/environment-digest first ["tools/node"])))
+        (is (thrown-with-msg?
+             Exception #"PATH is missing"
+             (#'process/environment-digest
+              (dissoc first "PATH") ["node"])))
+        (is (thrown-with-msg?
+             Exception #"not resolvable"
+             (#'process/environment-digest first ["missing-command"]))))
+      (finally
+        (fs/delete-tree directory {:force true})))))
 
 (deftest ensure-refuses-to-replace-a-nonconverged-managed-process
   (let [record {:seon.dev.process/id process/pod-id
@@ -1644,7 +1732,8 @@
                 :seon.dev.process/argv (:seon.dev.process/argv spec)
                 :seon.dev.process/environment-digest
                 (#'process/environment-digest
-                 (:seon.dev.process/environment spec))
+                 (:seon.dev.process/environment spec)
+                 (:seon.dev.process/argv spec))
                 :seon.dev.process/artifact-digest
                 @#'process/unpublished-client-digest
                 :seon.dev.process/target :seon.dev.target/development
@@ -1701,7 +1790,8 @@
         pid (.pid (java.lang.ProcessHandle/current))
         start-instant (state/process-start-instant pid)
         environment-digest (#'process/environment-digest
-                            (:seon.dev.process/environment spec))
+                            (:seon.dev.process/environment spec)
+                            (:seon.dev.process/argv spec))
         log (str (fs/path directory "watcher.log"))
         record {:seon.dev.process/id process/watcher-id
                 :seon.dev.process/pid pid
@@ -1948,9 +2038,12 @@
       (is (= branch-descriptor published))
       (is (not= (#'process/environment-digest
                   (get-in ordinary-specs
-                          [process/pod-id :seon.dev.process/environment]))
+                          [process/pod-id :seon.dev.process/environment])
+                  (get-in ordinary-specs
+                          [process/pod-id :seon.dev.process/argv]))
                 (#'process/environment-digest
-                  (:seon.dev.process/environment pod))))
+                  (:seon.dev.process/environment pod)
+                  (:seon.dev.process/argv pod))))
       (is (thrown-with-msg?
            Exception #"external process owner is unavailable"
            (process/ensure! branch-config pod)))
