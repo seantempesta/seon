@@ -69,6 +69,25 @@ The exact one-turn evidence is in
 did not prevent this selection; namespace weight remains an independent audit
 for tasks that actually navigate or compose Seon functions.
 
+The first live namespace audit localizes the excess. The exact ACME projection
+for `metal-hairs-lose` contains 22,106 namespace tokens. `seon.db` is 3,966,
+filesystem 2,732, plan 2,309, shell 2,085, and canvas 1,695. Schema records and
+referenced closure dominate: 508 rendered schema lines cost about 16k tokens,
+while exact duplicate definitions account for only 988. More importantly,
+compact cards currently treat every public implementation function as an agent
+capability. `seon.schema` advertises projection activation, registry reset,
+snapshots, and rollback beside `register!`; `seon.db` advertises boot,
+provenance, listener, transaction-scope, schema-bridge, and raw-entity internals
+beside query/pull/transact.
+
+The next unit is structural eligibility, not string compression. Agent-facing
+function declaration is colocated metadata persisted on the ordinary
+`:seon.fn` entity. Required compact cards derive their callable set and schema
+closure from those facts; current namespace source stays full. Domain/entity
+schemas retain a positive data-model inclusion rule. No renderer blocklist or
+benchmark-specific exclusion list is admitted. The exact audit and acceptance
+boundary are in [[research/namespace-surface-audit-2026-07-15]].
+
 The first policy unit now resolves run ceilings through one config manifest
 section and persists three scalar singleton facts. The live isolated database
 reports 100 batch turns, 300 stream forms, and a 1,800,000 ms deadline; both
