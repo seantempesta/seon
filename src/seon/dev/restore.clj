@@ -180,6 +180,17 @@
   [::observation ::observation]])
 
 (schema/register!
+ ::completion-evidence-request
+ [:map {:closed true}
+  [::intent ::intent]
+  [::observation ::observation]])
+(schema/register!
+ ::completion-evidence
+ [:map {:closed true}
+  [::db.restore/completion ::db.restore/current-completion]
+  [::db.restore/completion-coordinate ::coordinate/coordinate]])
+
+(schema/register!
  ::next-command-result
  [:map {:closed true}
   [::intent-id ::intent-id]
@@ -721,6 +732,36 @@
       ::completion-coordinates completion-coordinates})
     observation))
 
+(defn- completions-for-intent [intent observation]
+  (filterv #(= (::plan-digest intent) (::db.restore/plan-digest %))
+           (::completion-facts observation)))
+
+(defn completion-evidence
+  "Return the generated completion and exact coordinate for one intent."
+  {:malli/schema
+   [:=> [:cat ::completion-evidence-request] ::completion-evidence]}
+  [{::keys [intent observation] :as request}]
+  (validate! ::completion-evidence-request request
+             "The restore completion evidence request is invalid.")
+  (let [intent (validate-intent intent)
+        observation (validate-observation-consistency! intent observation)
+        matches (completions-for-intent intent observation)]
+    (require-consistency!
+     (= 1 (count matches))
+     "A restore plan digest does not resolve exactly one completion."
+     {::intent-id (::intent-id intent)
+      ::plan-digest (::plan-digest intent)
+      :seon.dev.restore/matching-completion-ids
+      (mapv ::db.restore/id matches)})
+    (let [completion (first matches)]
+      (validate!
+       ::completion-evidence
+       {::db.restore/completion completion
+        ::db.restore/completion-coordinate
+        (get (::completion-coordinates observation)
+             (::db.restore/id completion))}
+       "The restore completion lacks its exact generated-id coordinate."))))
+
 (defn next-command
   "Next restore command derived only from intent and current facts."
   {:malli/schema [:=> [:cat ::next-command-request] ::next-command-result]}
@@ -746,9 +787,7 @@
         selected-target-parent?
         (= #{(::coordinate/commit-id selected-target)}
            main-parents)
-        matching-completions
-        (filterv #(= plan-digest (::db.restore/plan-digest %))
-                 (::completion-facts observation))
+        matching-completions (completions-for-intent intent observation)
         _
         (require-consistency!
          (<= (count matching-completions) 1)

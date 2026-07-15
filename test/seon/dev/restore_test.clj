@@ -4,6 +4,7 @@
             [malli.core :as m]
             [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
+            [seon.db.restore :as db.restore]
             [seon.db.restore-admin :as restore-admin]
             [seon.dev.artifact :as artifact]
             [seon.dev.branch :as branch]
@@ -952,6 +953,57 @@
                    ::restore/observation
                    (observation intent current heads #{forced-commit}
                                 [completion] {intent-id current})})))))
+
+(deftest restore-pod-proof-reads-the-exact-closed-readiness-body
+  (let [configuration (config/load! (System/getProperty "user.dir"))
+        intent (derived-intent)
+        completion (completion-fact intent forced-commit)
+        current (assoc source
+                       ::coordinate/commit-id completion-commit
+                       ::coordinate/t 102)
+        observation
+        (observation
+         intent current
+         {undo-branch (::restore/undo-coordinate intent)
+          prepared-target-branch (::restore/prepared-target-coordinate intent)}
+         #{forced-commit} [completion] {completion-id current})
+        expected {::db.restore/ready? true
+                  ::db.restore/executable? false
+                  ::db.restore/completion completion
+                  ::db.restore/completion-coordinate current}
+        response (atom expected)
+        calls (atom [])]
+    (with-redefs-fn
+      {#'restore-state/restore-startup-descriptor (fn [& _] target-descriptor)
+       #'restore-state/selected-configuration (fn [value _] value)
+       #'process/specs
+       (fn [& _]
+         {process/pod-id
+          {:seon.dev.process/id process/pod-id
+           :seon.dev.process/http-port-file "/restore.port"}})
+       #'process/read-process (fn [& _] {:seon.dev.process/id process/pod-id})
+       #'process/converged? (fn [& _] true)
+       #'fs/regular-file? (fn [path] (= "/restore.port" (str path)))
+       #'clojure.core/slurp (fn [_] "17890")
+       #'restore-state/get-edn!
+       (fn [url response-schema]
+         (swap! calls conj [url response-schema])
+         @response)}
+      (fn []
+        (is (= expected
+               (#'restore-state/prove-restore-pod!
+                configuration artifact-identity intent {} {} observation)))
+        (is (= [["http://127.0.0.1:17890/_seon/ready"
+                 ::db.restore/readiness-response]]
+               @calls))
+        (reset! response
+                (assoc expected ::db.restore/completion-coordinate
+                       (assoc current ::coordinate/commit-id (random-uuid))))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"does not prove exact completion"
+             (#'restore-state/prove-restore-pod!
+              configuration artifact-identity intent {} {} observation)))))))
 
 (deftest plan-is-read-only-and-returns-one-exact-confirmation
   (let [configuration (config/load! (System/getProperty "user.dir"))

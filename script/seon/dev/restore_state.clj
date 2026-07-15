@@ -8,6 +8,7 @@
             [my.blob.schema]
             [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
+            [seon.db.restore :as db.restore]
             [seon.db.restore-admin :as restore-admin]
             [seon.db.transport.uds :as uds]
             [seon.dev.artifact :as artifact]
@@ -223,6 +224,26 @@
     (when-not (and (zero? (:exit result))
                    (m/validate response-schema response))
       (throw (ex-info "The retained-blob operator returned invalid evidence."
+                      {:seon.dev.restore-state/url url
+                       :seon.dev.restore-state/exit (:exit result)
+                       :seon.dev.restore-state/response response
+                       :seon.dev.restore-state/error (str/trim (:err result))
+                       :seon.dev.restore-state/explanation
+                       (m/explain response-schema response)})))
+    response))
+
+(defn- get-edn! [url response-schema]
+  (let [result
+        (shell/sh
+         {:continue true :out :string :err :string
+          :cmd ["curl" "--fail-with-body" "--silent" "--show-error"
+                "--max-time" "120" url]})
+        response
+        (when-not (str/blank? (:out result))
+          (try (edn/read-string (:out result)) (catch Exception _ nil)))]
+    (when-not (and (zero? (:exit result))
+                   (m/validate response-schema response))
+      (throw (ex-info "The restore pod returned invalid readiness evidence."
                       {:seon.dev.restore-state/url url
                        :seon.dev.restore-state/exit (:exit result)
                        :seon.dev.restore-state/response response
@@ -673,7 +694,7 @@
       configuration)))
 
 (defn- prove-restore-pod!
-  [configuration manifest intent admin-result blob-result]
+  [configuration manifest intent admin-result blob-result observation]
   (let [restore-config
         (selected-configuration
          configuration
@@ -691,7 +712,31 @@
     (when-not (process/converged? restore-config restore-pod)
       (throw (ex-info "The restore pod did not converge to its frozen identity."
                       {::restore/intent-id (::restore/intent-id intent)})))
-    :seon.dev.restore.runtime/restore))
+    (let [port-file (or (:seon.dev.process/http-port-file restore-pod)
+                        (:seon.dev.config/http-port-file restore-config))
+          port (when (fs/regular-file? port-file)
+                 (some-> (slurp port-file) str/trim parse-long))
+          _ (when-not (pos-int? port)
+              (throw
+               (ex-info "The restore pod did not publish its readiness port."
+                        {:seon.dev.process/http-port-file port-file
+                         ::restore/intent-id (::restore/intent-id intent)})))
+          expected
+          (assoc
+           (restore/completion-evidence
+            {::restore/intent intent ::restore/observation observation})
+           ::db.restore/ready? true
+           ::db.restore/executable? false)
+          actual
+          (get-edn! (str "http://127.0.0.1:" port "/_seon/ready")
+                    ::db.restore/readiness-response)]
+      (when-not (= expected actual)
+        (throw
+         (ex-info "The restore pod readiness does not prove exact completion."
+                  {:seon.dev.restore-state/expected-readiness expected
+                   :seon.dev.restore-state/actual-readiness actual
+                   ::restore/intent-id (::restore/intent-id intent)})))
+      actual)))
 
 (declare converge!)
 
@@ -744,7 +789,8 @@
           ::observe!
           (fn [_] (observe-restore! configuration intent))
           ::effect!
-          (fn [{command ::restore/command}]
+          (fn [{command ::restore/command
+                observation ::restore/observation}]
             (case command
               :seon.dev.restore.command/create-undo
               (do
@@ -806,7 +852,8 @@
               :seon.dev.restore.command/prove-readiness
               (do
                 (prove-restore-pod!
-                 configuration manifest intent @!admin-result @!blob-result)
+                 configuration manifest intent @!admin-result @!blob-result
+                 observation)
                 (require-next-command!
                  configuration intent
                  :seon.dev.restore.command/prove-readiness)

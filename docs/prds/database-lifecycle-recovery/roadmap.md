@@ -311,9 +311,10 @@ admission, records and reads back the generated completion under root/boot
 provenance, and exposes only the existing `/_seon/ready` route. That disposable
 pod remains nonautonomous and reports `executable? false`; no agent hosting,
 provider/brand sync, ticker, or Shadow admission may advance `C`. The operator
-must compare the exact returned completion plus `C`, remove external intent
-evidence, stop restore consumers, and start one fresh ordinary autonomous
-runtime. The
+now parses the portable response and compares the exact returned completion
+plus `C` before it removes external intent evidence, stops restore consumers,
+and starts one fresh ordinary autonomous runtime. The caller implementation is
+the remaining source-freeze gate. The
 transaction-coordinate resolver is complete at `b2461d64`, and the fresh
 schema owner now installs the complete restore closure before generator-policy
 publication. The dependency repair is now published as exact public HTTPS Git

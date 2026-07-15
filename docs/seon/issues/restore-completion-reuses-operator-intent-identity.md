@@ -41,11 +41,13 @@ completion coordinate maps remain keyed by generated completion id. Exact
 legacy 14-character hexadecimal intents remain read-only inputs; the former
 compact-id overlap is no longer accepted for new planning.
 
-The issue remains open until the cold-runtime caller and operator readiness
-read-back carry and compare the exact returned completion plus coordinate.
-Focused operator proof passes 28 tests/166 assertions; the complete operator
-gate passes 219/1,258 and focused restore-admin plus registry proof passes
-25/152.
+The public readiness response schema is now portable, and the operator parses
+the existing `/_seon/ready` response and requires the exact returned completion
+plus coordinate before intent deletion. The issue remains open only until the
+cold-runtime caller supplies that exact response from the generated completion
+result. Focused operator proof passes 29 tests/169 assertions; the complete
+operator gate passes 219/1,258 and focused restore-admin plus registry proof
+passes 25/152.
 
 ## Acceptance
 

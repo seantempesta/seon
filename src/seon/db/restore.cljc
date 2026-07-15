@@ -55,6 +55,8 @@
 (schema/register! ::already-completed? :boolean)
 (schema/register! ::completion-coordinate ::coordinate/coordinate)
 (schema/register! ::expected-coordinate ::coordinate/coordinate)
+(schema/register! ::ready? :boolean)
+(schema/register! ::executable? :boolean)
 (schema/register! ::record-request
                   [:map {:closed true}
                    [::completion-claim ::completion-claim]
@@ -70,6 +72,23 @@
                    [:map {:closed true}
                     [::ok? [:= false]]
                     [:seon/error :map]]])
+
+(schema/register!
+ ::readiness-response
+ [:or
+  [:map {:closed true}
+   [::ready? [:= true]]
+   [::executable? [:= false]]
+   [::completion ::current-completion]
+   [::completion-coordinate ::completion-coordinate]]
+  [:map {:closed true}
+   [::ready? [:= false]]
+   [::executable? ::executable?]]
+  [:map {:closed true}
+   [::ok? [:= false]]
+   [::ready? [:= false]]
+   [::executable? [:= false]]
+   [:seon/error :map]]])
 
 (def completion-attrs
   "The complete Datahike attribute closure for restore completion facts."
@@ -300,8 +319,6 @@
 
 #?(:cljs
    (do
-     (schema/register! ::ready? :boolean)
-     (schema/register! ::executable? :boolean)
      (schema/register!
      ::readiness-request
       [:map {:closed true}
@@ -313,23 +330,7 @@
           [:enum :starting :publishing :available :quiescing :unavailable]]
          [:seon.runtime.admission/generation {:optional true} :int]
          [:seon.runtime.admission/reason {:optional true} :string]]]
-       [:seon.db/db :seon.db/db-val]])
-     (schema/register!
-     ::readiness-response
-      [:or
-       [:map {:closed true}
-        [::ready? [:= true]]
-        [::executable? [:= false]]
-        [::completion ::current-completion]
-        [::completion-coordinate ::completion-coordinate]]
-       [:map {:closed true}
-        [::ready? [:= false]]
-        [::executable? ::executable?]]
-       [:map {:closed true}
-        [::ok? [:= false]]
-        [::ready? [:= false]]
-        [::executable? [:= false]]
-        [:seon/error :map]]])))
+       [:seon.db/db :seon.db/db-val]])))
 
 #?(:cljs
    (defn readiness
