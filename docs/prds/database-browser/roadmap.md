@@ -67,6 +67,19 @@ checkpoint exposed separate runner defects recorded in
 [[test-cljs-multiple-exact-selectors-run-zero-tests]] and
 [[changed-test-interruption-orphans-test-runner]].
 
+The read-only entity/ref/transaction reconciliation at
+[[research/entity-reference-projection-reconciliation-2026-07-15]] confirms
+that selected Datahike `417649383c65e13f15ea41d394fb1ed742477965`
+already supplies the bounded EAVT and AVET primitives for the next slice. It
+also found one remaining Slice A pre-read validation gap: decoded `last` data
+is not proven canonical and prefix-consistent before the index seek. The defect
+and zero-read acceptance are recorded in
+[[../../seon/issues/database-browser-cursor-boundary-is-not-pre-read-validated]].
+The earliest source-disjoint executable work is therefore cursor-boundary
+hardening plus pure entity/outbound-ref/reverse-ref projections in
+`seon.db.browser` and a new focused test namespace. It requires no web,
+reactive-unit, feed, route, pod, or ACME edit.
+
 ## Research evidence
 
 - [[research/database-browser-source-audit-2026-07-14]] — selected dependency
@@ -75,6 +88,9 @@ checkpoint exposed separate runner defects recorded in
 - [[research/coordinate-bound-cursor-contract-2026-07-15]] — settled coordinate
   reconciliation, Transit cursor envelope, Datahike current/history seek edge,
   narrow two-slice ownership, deletion boundary, and falsifiable tests.
+- [[research/entity-reference-projection-reconciliation-2026-07-15]] — current
+  selected-source refresh, acceptance comparison, cursor pre-read defect, and
+  the source-disjoint entity/reference projection slice.
 
 ## Ordered work
 
@@ -86,8 +102,11 @@ checkpoint exposed separate runner defects recorded in
    through `/data`, dependency system attrs are classified correctly, and the
    web adapter consumes the opaque coordinate-bound cursor without a second
    parser or mutable retained database value.
-3. Add bounded EAVT entity/outbound-ref and AVET reverse-ref units, with raw
-   rendering only for the already selected bounded value.
+3. First harden canonical/prefix-consistent cursor boundaries before any index
+   read. Then add pure bounded EAVT entity/outbound-ref and AVET reverse-ref
+   projections in the database owner. Compose them as units only after the
+   active reactive lane settles; raw rendering uses only the already selected
+   bounded value.
 4. Add backward transaction navigation, exact transaction metadata,
    user/process provenance, and a closed capped effective-datom unit.
 5. Add five-component assertion/retraction history and frozen as-of links;
