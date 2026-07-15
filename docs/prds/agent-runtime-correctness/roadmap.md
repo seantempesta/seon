@@ -121,6 +121,10 @@ failures or errors).
   facts versus process-local handles, launch/kill/reap/restart laws, remaining
   dead-leader subtree dependency, Inspect oracle boundary, and measured source
   gates for the first non-production child experiment.
+- [[research/synthetic-disposable-child-hostile-gate-2026-07-15]] — the exact
+  generated hostile fixture, direct versus hard-backend falsifiers, measured
+  TERM/KILL, heap, external-memory, Node-version/permission evidence, and the
+  smallest post-restart non-production implementation slice.
 
 ## Ordered work
 
@@ -192,6 +196,18 @@ failures or errors).
    receipt, closed frames, parent-stamped read/refused-write probes, bounded
    TERM/KILL/`close`, and hard-backend hostile-memory proof. Application eval,
    provider attempts, warm slots, and Inspect model trials stay unchanged.
+   The synthetic Unit-6 preflight is now exact and independently measured:
+   ten TERM-refusing host children closed after KILL, five 24 MiB old-space
+   probes aborted near 78–79 MiB RSS, and a non-root 96 MiB Docker cgroup
+   killed an external-buffer allocator while V8 heap stayed near 4 MiB.
+   These are fixture/backend observations, not live Seon graduation. They also
+   prove the current `seon:slice1` Node `22.23.1` permission model allows a
+   network listener and cannot inherit audited host Node `26.4.0` claims.
+   After the clean restart and dead-subtree gate, implement only the private
+   disposable-child adapter plus non-production hostile artifact and direct/
+   hard measurement harness. Keep receipt wiring, capability effects,
+   provider/eval cutover, warm slots, and Inspect trials out of that first
+   source slice.
 7. Integrate Inspect tasks/scorers that falsify each transition, then run paid
    or small-model trials only after deterministic runtime gates pass.
 

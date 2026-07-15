@@ -44,6 +44,26 @@ reconstruction. A child alone is not the hard numeric ceiling: Darwin rejected
 `RLIMIT_AS` in the audit, so hostile-memory graduation requires a measured
 per-child OS/container limit rather than V8 old-space flags or RSS polling.
 
+The retained synthetic-gate audit at
+[[docs/prds/agent-runtime-correctness/research/synthetic-disposable-child-hostile-gate-2026-07-15]]
+adds measured preflight evidence. Five host Node `26.4.0` children with a 24
+MiB old-space cap all ended by `SIGABRT` at roughly 78–79 MiB sampled peak RSS,
+showing that the heap flag is not a total-memory bound. A non-root
+`seon:slice1` container with a 96 MiB memory/swap ceiling allocated external
+buffers while heap use stayed near 4 MiB; Docker recorded exit 137 and
+`OOMKilled=true` after cgroup use approached the configured ceiling. Ten
+TERM-refusing host children were reaped by KILL/`close`, with measured
+KILL-to-close maxima under 1.5 ms in this isolated preflight.
+
+The same audit exposes a concrete artifact gap: host/audited Node is `26.4.0`,
+but `seon:slice1` contains Node `22.23.1` at an executable path absent from
+`PATH`. Node 22 `--permission` denied filesystem, child-process, and worker
+probes but allowed a network listener, whereas Node 26 denied it. The packaged
+runtime therefore cannot claim Node 26 permission behavior; Docker
+`network=none` is its only measured network boundary. The issue stays open
+because these disposable probes did not run through a live pod, writer,
+durable receipt, parent capability, or dead-parent subtree inverse.
+
 ## Owner
 
 The agent runtime's process-isolation and restart boundary, coordinated with
