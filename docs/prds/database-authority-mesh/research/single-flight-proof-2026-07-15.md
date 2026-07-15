@@ -298,3 +298,31 @@ and remote cancellation policy; Datahike owns compute-once correctness.
 - Active entry/waiter counts return to zero after success, failure, cancellation,
   overflow, database release, and authority shutdown.
 - Existing synchronous CLJ and CLJS query behavior remains unchanged.
+
+## Implemented result
+
+Datahike `f8192962` implements this design in
+`datahike.query.single-flight`. The retained coordinator uses a separate
+process-local in-flight registry and `LongAdder` counters on the JVM. A shared
+cooperative cancellation volatile is passed into the existing Datahike query
+safe points; remote request detachment will be exposed through the Unit 3
+capability seam.
+
+An adversarial audit found that explicit cache clearing could otherwise race a
+late owner publication. The completed-cache state now carries an epoch that is
+incremented atomically with clear or resize, and every miss captures the epoch
+required for its eventual cache put. Exact generation admission independently
+fences connection release. A stale owner is therefore allowed to finish its
+immutable computation for its initiating caller, but cannot repopulate a
+cleared/released cache or remove a newer same-key flight.
+
+The completed-hit path was also kept outside the coordinator before allocating
+the flight key, promise, waiter identity, or delayed attribute-dependency
+analysis. Coordination cost therefore applies only to cache misses. The
+earlier disposable measurement of about 0.64 microseconds remains directional,
+not a retained cross-SHA benchmark; Unit 4 should measure global-atom admission
+contention before considering stripes.
+
+Focused retained proof passes 135 tests and 537 assertions across PSS, HHT,
+and specs. The maintained Node ClojureScript suite passes 107 tests and 838
+assertions with direct synchronous execution.

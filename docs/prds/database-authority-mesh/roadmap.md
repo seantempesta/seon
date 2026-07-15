@@ -79,7 +79,7 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `999e26a2` (graduated Unit 1 atop
+- Datahike `f8192962` (graduated Units 1–2 atop
   `9ada755087228e10cfb179fa5779ce227a6ed220`):
   `db.cljc`, `connections.cljc`, `connector.cljc`, `core.cljc`,
   `writing.cljc`, `writer.cljc`, `query.cljc`, `resource.cljc`,
@@ -130,7 +130,7 @@ and late-put resurrection. The maintained Node CLJS gate passes 107 tests and
 identity, propagation behavior, release eviction, reconnect generation, and
 stale cleanup.
 
-### Unit 2 — Datahike single-flight and cancellation
+### Unit 2 — Datahike single-flight and cancellation — graduated
 
 Add one JVM-only in-flight coordinator beside the completed weighted cache.
 Completed hits bypass it. The owner rechecks cache, computes once, caches only a
@@ -145,6 +145,23 @@ Exit proof:
 - failure, retry, cancellation, last waiter, reentrancy, overflow, propagation,
   release, and shutdown leave zero retained in-flight state; and
 - existing synchronous CLJ/CLJS query semantics remain unchanged.
+
+Graduated evidence: Datahike `f8192962` adds the JVM-only coordinator beside
+the completed weighted cache. Completed hits bypass it; owners recheck, compute
+with the shared cooperative cancellation signal, atomically fence publication
+against release and explicit clear/resize epochs, and compare-remove by
+completion identity. Retained proofs cover 2/8/32 identical callers, parallel
+database keys, shared failure/retry, independent and final-waiter cancellation,
+reentrancy, overflow state bounds, clear/release, stale-owner ABA, and real
+concurrent Datahike queries. The focused CLJ gate passes 135 tests and 537
+assertions across PSS, HHT, and specs. The maintained Node CLJS gate remains
+green at 107 tests and 838 assertions, preserving synchronous semantics.
+
+Remote request cancellation remains a Unit 3 capability concern: the
+transport-free seam must retain each request's waiter identity and call the
+coordinator's detach operation. Unit 4 admission, rather than single-flight,
+bounds unique-key computation; local synchronous overflow deliberately retains
+Datahike's direct-compute behavior.
 
 ### Unit 3 — Datahike capability seam
 
