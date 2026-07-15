@@ -95,6 +95,16 @@ owned watcher and pod are drained. The focused branch/CLI/process selector
 passes 31 tests/153 assertions. Full evidence and the dependency ledger are in
 [[ordinary-startup-sigint-ownership-2026-07-15]].
 
+A later full-process rerun after `00b57db1` corrected one stale fixture
+expectation without changing the product mechanism. SIGINT cancels the
+fixture's deliberate sleep before `spawn-detached!`, so the pre-spawn side of
+the synchronized boundary correctly produces no PID file. The corrected test
+also accepts the other safe outcome only when its published PID is already
+absent. Published-identity drain remains covered by the real watcher, writer,
+and pod readiness cuts. The corrected complete process namespace passes 53
+tests/250 assertions; the grounded correction is recorded in
+[[ordinary-startup-sigint-ownership-2026-07-15]].
+
 ## Resolution
 
 Resolved by `c95f8e03`. `seon.dev.branch/open!` now registers exact native

@@ -73,6 +73,27 @@ assertions with zero failures or errors. The final process-only edit-hook gate
 passes 21 tests/106 assertions at
 `tmp/test-changed/changed-operator-1784106925892-6e71d17d-bc88-47b5-92db-cd1f945e856e.log`.
 
+### Pre-spawn fixture correction
+
+Revalidation after `00b57db1` exposed a stale assertion in the first row, not a
+containment leak. The fixture marks entry and then deliberately sleeps before
+calling the real spawn. Babashka 1.12.212 cancels that interrupted sleep, so
+the admitted acquisition never calls `spawn-detached!`; the missing PID file
+is the exact evidence that shutdown closed pre-spawn admission. The old test
+unconditionally read the absent file and incorrectly claimed the main thread
+must finish a spawn.
+
+The corrected test accepts exactly the two safe sides of the synchronized
+boundary: either no spawn sentinel exists, or its published PID is already
+absent; the managed record must be absent in both cases. The separate real
+watcher, writer, and pod readiness cuts still exercise published identities
+and prove their complete groups absent before owner exit. `babashka.process`
+remains pinned at
+`16a84e0af0da51b8c84e289970f6b7cc35b35d18`; its blocking `sh` still dereferences
+the process created through executor-backed stream copies, so no shutdown-hook
+cleanup was moved onto that dependency. The complete focused process namespace
+passes 53 tests/250 assertions.
+
 ## Remaining boundary
 
 This closes ordinary startup signal ownership and supplies the process inverse

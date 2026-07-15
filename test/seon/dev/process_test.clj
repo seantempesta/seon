@@ -546,11 +546,14 @@
                        (str (.pid ^java.lang.Process (:proc owner)))]})
       (is (.waitFor ^java.lang.Process (:proc owner) 10 TimeUnit/SECONDS))
       (let [result @owner
-            spawned-pid (some-> (slurp (str pid-file)) str/trim parse-long)]
+            spawned-pid
+            (when (fs/regular-file? pid-file)
+              (some-> (slurp (str pid-file)) str/trim parse-long))]
         (is (= 130 (:exit result)))
-        (is (pos-int? spawned-pid) "the main thread completed a real spawn")
-        (is (nil? (state/process-start-instant spawned-pid))
-            "the hook waited for publication and drained the process")
+        (is (or (nil? spawned-pid)
+                (and (pos-int? spawned-pid)
+                     (nil? (state/process-start-instant spawned-pid))))
+            "shutdown either closes spawn admission or drains its publication")
         (is (nil? (process/read-process configuration process/watcher-id))))
       (finally
         (try (process/stop! configuration process/watcher-id)
