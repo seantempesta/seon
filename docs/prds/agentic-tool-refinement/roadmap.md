@@ -385,17 +385,18 @@ evidence and return to the ledger unless it blocks the active gate.
 Read this short operational handoff before logs, broad tests, or source
 archaeology.
 
-**Active gate:** obtain one admitted, finalized replay of
-`database_workflow-seed1-000` on a ready, ownership-coherent static ACME
-artifact. Inspect its exact prompt, reply, and evaluation bytes. Do not run the
-ten-member slice, start the model matrix, or redesign context until that one
-sample is trustworthy.
+**Active gate:** rebuild the committed callable-contract projection into ACME,
+prove the database-indexed `query` and `transact!` contracts from one immutable
+database value, then replay the exact admitted
+`database_workflow-seed1-000` sample. Do not run the ten-member slice or model
+matrix until that controlled before/after pair is retained.
 
-**Last durable lane checkpoint:** `85f4bbd0` follows `de176aad`, `9428aebe`,
-`0a8c5288`, `6c2e80ae`, and `8a6ebf60`. Later shared-tree commits may exist and
-are not automatically part of this lane. Always re-read `git status --short`
-and `bin/acme status --edn`; never infer ownership or readiness from this
-paragraph.
+**Last durable lane checkpoint:** `de5e606d` archives the stale diagnostic-
+schema test after `6c597259` retained and classified the first admitted 0.5B
+sample and fixed the shared callable projection. Later shared-tree commits may
+exist and are not automatically part of this lane. Always re-read
+`git status --short` and `bin/acme status --edn`; never infer ownership or
+readiness from this paragraph.
 
 ### Proven and committed
 
@@ -459,12 +460,22 @@ paragraph.
   for 15,155 tokens and one canonical shared section saves 1,642 tokens while
   preserving the closure. This supports a stable shared-schema topology, not
   a claim that size reduction alone fixes model behavior.
-- The first Qwen2.5 Coder 0.5B database diagnostic is preserved in
+- The first dirty Qwen2.5 Coder 0.5B database diagnostic is preserved in
   [[research/qwen25-coder-05b-database-diagnostic-2026-07-15]]. It produced
   zero forms, repeated runtime/context narration, and grew from 21,947 to
   23,201 prompt tokens over three turns. Parser recovery stayed bounded. The
   run is deliberately **not accepted** because Inspect reported dirty Seon
   source and the direct task invocation bypassed run-level admission.
+- The corresponding clean admitted replay is retained at revision `8bae7ae9`.
+  Source and static-target identities are equal before and after. Three replies
+  repeated only the agent namespace header, created three bounded narration
+  evals with empty source, and closed `:no-forms`; the score is incorrect with
+  zero fabrication and reviewed classification `model reasoning failure`.
+- The global callable projection now separates one physical pure-variadic body
+  from several logical Malli arities, uses named request inputs for `query` and
+  `transact!`, and omits `&` as an argument label. Five focused tests pass with
+  32 assertions. A clean ACME reindex and exact replay remain before/after
+  proof, not additional design work.
 - Failed eval diagnostics now retain the database-configured 1,500-character
   component cap under no flag, `full?`, escape-clipping, or both. Successful
   authored/citable content keeps its existing release behavior. A 100K
@@ -509,16 +520,20 @@ paragraph.
    only; do not restart, stage, or repair their files.
 2. When the shared runtime edits converge, restart only ACME and prove a ready,
    ownership-coherent artifact plus clean admitted source.
-3. Run `database_workflow-seed1-000` through common source admission, exact
-   operator snapshot, and mandatory finalization. Inspect its prompt, reply,
-   eval evidence, database coordinate, model identity, and classification.
-4. Classify any narration repetition using the established raw-reply → parser
+3. Query the rebuilt immutable database projection and require the stored
+   `query` and `transact!` contracts to carry `:seon.db/request` with no `&` or
+   private accumulator name.
+4. Replay `database_workflow-seed1-000` through common source admission, exact
+   operator snapshot, and mandatory finalization. Compare its prompt, reply,
+   eval evidence, database coordinate, model identity, and classification with
+   the admitted baseline.
+5. Classify any narration repetition using the established raw-reply → parser
    → stored-eval → transcript trace; do not mutate prompt policy from one
    uncontrolled sample.
-5. Run the remaining nine frozen members serially, inspecting every `.eval`.
-   Only after P0b is recorded may the model matrix or P3 context comparison
-   begin.
-6. After P0b, repair and prove durable multi-form order before the P4 batch /
+6. Close the bounded query-result and model-transport evidence contracts, then
+   run the remaining nine frozen members serially and inspect every `.eval`.
+   Only after P0b is recorded may the model matrix or P3 comparison begin.
+7. After P0b, repair and prove durable multi-form order before the P4 batch /
    stream comparison. Do not substitute timestamps, random ids, Python list
    position, or synthetic Inspect tool calls for a database event fact.
 
