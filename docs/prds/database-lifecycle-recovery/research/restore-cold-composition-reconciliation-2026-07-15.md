@@ -55,7 +55,7 @@ attempted.
 | Cold runtime owner | current `seon.client/start-runtime!` | `src/seon/client.cljs:825-872,2464-2640,3080-3134` | Autonomous open installs provenance/runtime schema, boot/config, crash recovery, root/initial agents, replay, immediate admission, hosts, surfaces, and ticker in that order. Restore must factor this same entry and change only data-selected steps/order. |
 | Admission owner | commits `ace68173` and current source | `src/seon/runtime/admission.cljs:224-343`, `test/seon/runtime/admission_test.cljs` | Preparation activates and retains one verified fingerprint under `:publishing`; only the exact returned generation can admit. No new status is needed. |
 | Blob owner | commit `31bb8973` | `src/my/blob.cljs:405-597`, `test/my/blob_test.cljs` | Materialization consumes an already-resolved exact target database plus frozen source/destination views and digest. It performs no database write and is not operator-callable by itself. |
-| Completion owner | commit `86d75924` | `src/seon/db/restore.cljs`, `test/seon/db/restore_test.cljs` | `record!` is root/boot-provenance-neutral, whole-head fenced, identity-idempotent, and admission-neutral. All completion schemas must already be installed. |
+| Completion owner | commit `86d75924` | `src/seon/db/restore.cljc`, `test/seon/db/restore_test.cljs` | `record!` is root/boot-provenance-neutral, whole-head fenced, identity-idempotent, and admission-neutral. All completion schemas must already be installed. |
 | Writer-admin owner | commit `75a5fe12` | `src/seon/db/restore_admin.clj`, `src/seon/db/{registry,server,writer}.clj`, writer-admin tests | Only `applied` or `already-applied` with exact forced coordinate, target, roster, and released connection may feed cold reconstruction. Unknown/rejected results cannot be upgraded by observation. |
 
 ## Executable probes
@@ -432,7 +432,7 @@ source-frozen checkpoint before the destructive named-cluster proof.
 
 The production ownership for the later implementation is limited to
 `src/seon/client.cljs` and, for the pure projection only,
-`src/seon/db/restore.cljs`; focused proof belongs to
+`src/seon/db/restore.cljc`; focused proof belongs to
 `test/seon/client_runtime_test.cljs` and `test/seon/db/restore_test.cljs`.
 `seon.launch`, process publication, blob materialization, writer admin,
 admission, replica transport, web readiness, and operator intent deletion are

@@ -218,6 +218,9 @@
 
 (deftest undo-derives-the-same-transition-from-one-retained-completion
   (let [undo-intent (restore/derive-intent (undo-intent-request))]
+    (is (= [:vector :seon.db.restore/completion]
+           (m/form (m/deref ::restore/completion-facts)))
+        "the planner references the canonical completion schema")
     (is (= :seon.dev.restore.operation/undo
            (::restore/operation undo-intent)))
     (is (= (descriptor-at main-descriptor latest-source)

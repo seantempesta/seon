@@ -33,7 +33,7 @@ consumed completion, advanced heads, stale rosters, and pre-existing reserved
 branches before producing the unchanged immutable intent shape. No effect path
 or public restore command was added.
 
-Focused Babashka proof passes 10 tests/71 assertions. The adjacent retained
+Focused Babashka proof passes 10 tests/72 assertions. The adjacent retained
 writer-admin consumer passes 9 tests/53 assertions, proving that restore and
 completion-bound undo still feed the same intent/admin/command mechanism. This
 pure proof does not authorize destructive use: the selected Proximum/Datahike
@@ -50,7 +50,7 @@ predecessors.
 | Exact Seon coordinates | current `seon.db.coordinate` and writer registry | `src/seon/db/registry.clj:694-830`, `:952-1087` | A source is branchable only when its requested `t` equals the containing commit head. Registry create/adopt and restore admin fence complete coordinates, roster, primary data, secondary roots, and release. |
 | Immutable restore intent | current `seon.dev.restore` | `src/seon/dev/restore.clj`; `test/seon/dev/restore_test.clj`; commit `6351790a` | Intent freezes exact main and target descriptors, expected complete roster, new reserved branches, artifact/protocol/generations, blob-set digest, and preserve-only overlay policy. Undo selection compiles one exact prior completion observation into that same shape; it stores no phase or copied completion proof. |
 | Blob materialization | current `my.blob` internal restore boundary | `src/my/blob.cljs`; [[restore-blob-and-cold-reconstruction-contract-2026-07-15]] | Reachable hashes come from exact `T`, target lookup is overlay-first, and verified bytes become directory-durable in the append-only main archive before force. |
-| Completion and admission | current `seon.db.restore` plus split admission | `src/seon/db/restore.cljs`; `src/seon/runtime/admission.cljs`; [[restore-completion-transaction-coordinate-2026-07-15]] | Completion is one root/boot-provenanced transaction before exact-generation admission. Equal retry resolves its original transaction coordinate without a write. |
+| Completion and admission | current `seon.db.restore` plus split admission | `src/seon/db/restore.cljc`; `src/seon/runtime/admission.cljs`; [[restore-completion-transaction-coordinate-2026-07-15]] | Completion is one root/boot-provenanced transaction before exact-generation admission. Equal retry resolves its original transaction coordinate without a write. |
 
 The protected `reference-code/datahike` checkout was at test-only
 `eb3e2239b650635977fdc8e73e7c657b23bf3383` during this audit. Dependency

@@ -326,7 +326,7 @@ valid branches, crossed database/lineage, duplicate or consumed completions,
 advanced heads, stale rosters, and occupied reserved branches before intent
 publication. The selection evidence compiles into the unchanged immutable
 intent and existing fact-derived command mechanism; no effect path or public
-destructive command was added. Focused pure proof passes 10 tests/71 assertions
+destructive command was added. Focused pure proof passes 10 tests/72 assertions
 and adjacent writer-admin proof passes 9/53. The remaining ordered predecessor
 is the selected Proximum/Datahike force-secondary dependency cutover followed
 by integrated destructive restore/undo proof.

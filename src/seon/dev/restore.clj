@@ -3,6 +3,7 @@
   (:require [malli.core :as m]
             [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
+            [seon.db.restore :as db.restore]
             [seon.dev.restore.schema]
             [seon.launch :as launch]
             [seon.schema :as schema])
@@ -31,24 +32,7 @@
 (schema/register! ::forced-main-coordinate ::coordinate/coordinate)
 (schema/register! ::forced-main-parent-commit-ids [:set :uuid])
 (schema/register! ::completed-intent-ids [:set ::intent-id])
-(schema/register!
- ::completion
- [:map {:closed true}
-  [:seon.db.restore/id ::intent-id]
-  [:seon.db.restore/db-name :keyword]
-  [:seon.db.restore/database-id :uuid]
-  [:seon.db.restore/from-branch :keyword]
-  [:seon.db.restore/from-commit-id :uuid]
-  [:seon.db.restore/from-t :int]
-  [:seon.db.restore/to-branch :keyword]
-  [:seon.db.restore/to-commit-id :uuid]
-  [:seon.db.restore/to-t :int]
-  [:seon.db.restore/forced-commit-id :uuid]
-  [:seon.db.restore/undo-branch :keyword]
-  [:seon.db.restore/target-branch :keyword]
-  [:seon.db.restore/core-overlay-digest {:optional true} :string]
-  [:seon.db.restore/config-overlay-digest {:optional true} :string]])
-(schema/register! ::completion-facts [:vector ::completion])
+(schema/register! ::completion-facts [:vector ::db.restore/completion])
 (schema/register! ::selected-completion-id ::intent-id)
 (schema/register! ::selected-undo-branch :keyword)
 (schema/register!

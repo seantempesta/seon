@@ -30,7 +30,7 @@ commit.
 | Malli | `0.20.0` | `reference-code/malli`, `seon.schema` | the portable request is closed and restricts the frozen head to branch `:db` |
 | Seon database protocol | protocol v2 | `src/seon/db/protocol.cljc`, `src/seon/db/writer.clj` | one typed writer request/response and canonical protocol failure envelope; no restore-only transport |
 | Seon replica RPC | current branch | `src/seon/db/replica.cljs` | the one pod-to-writer UDS owner sends the request; `seon.db` does not open another socket path |
-| Restore completion | current branch | `src/seon/db/restore.cljs` | equal identity retry already finds the identity datom's transaction and emits no write |
+| Restore completion | current branch | `src/seon/db/restore.cljc` | equal identity retry already finds the identity datom's transaction and emits no write |
 
 The checked-out Datahike directory is at test-only child `eb3e2239`, but its
 only delta from the selected SHA is in test files. The grounded versioning and
