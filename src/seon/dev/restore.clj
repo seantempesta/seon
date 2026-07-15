@@ -38,11 +38,11 @@
 (schema/register! ::branch-heads [:map-of :keyword ::coordinate/coordinate])
 (schema/register! ::main-coordinate ::coordinate/coordinate)
 (schema/register! ::main-parent-commit-ids [:set :uuid])
-(schema/register! ::completed-intent-ids [:set ::intent-id])
+(schema/register! ::completed-restore-ids [:set ::db.restore/id])
 (schema/register! ::completion-facts [:vector ::db.restore/completion])
 (schema/register! ::completion-coordinates
-                  [:map-of ::intent-id ::coordinate/coordinate])
-(schema/register! ::selected-completion-id ::intent-id)
+                  [:map-of ::db.restore/id ::coordinate/coordinate])
+(schema/register! ::selected-completion-id ::db.restore/id)
 (schema/register! ::selected-undo-branch :keyword)
 (schema/register!
  ::completion-selector
@@ -75,7 +75,7 @@
 (schema/register!
  ::derive-request
  [:map {:closed true}
-  [::intent-id ::intent-id]
+  [::intent-id :seon.dev.restore/new-intent-id]
   [::operation ::operation]
   [::pre-restore-main-descriptor ::pre-restore-main-descriptor]
   [::selected-target-descriptor ::selected-target-descriptor]
@@ -153,7 +153,7 @@
   [::main-coordinate ::main-coordinate]
   [::main-parent-commit-ids ::main-parent-commit-ids]
   [::branch-heads ::branch-heads]
-  [::completed-intent-ids ::completed-intent-ids]
+  [::completed-restore-ids ::completed-restore-ids]
   [::completion-facts ::completion-facts]
   [::completion-coordinates ::completion-coordinates]])
 
@@ -623,7 +623,7 @@
 (defn- completion-ids [completion-facts]
   (mapv ::db.restore/id completion-facts))
 
-(defn- expected-completion-with-forced-commit
+(defn- expected-completion-claim-with-forced-commit
   [intent forced-commit-id]
   (let [from
         (descriptor-coordinate (::pre-restore-main-descriptor intent))
@@ -632,7 +632,7 @@
         database-name
         (get-in intent [::pre-restore-main-descriptor
                         ::launch/database ::protocol/database-name])]
-    {::db.restore/id (::intent-id intent)
+    {::db.restore/plan-digest (::plan-digest intent)
      ::db.restore/db-name (keyword database-name)
      ::db.restore/database-id (::coordinate/database-id from)
      ::db.restore/from-branch (::coordinate/branch from)
@@ -660,7 +660,7 @@
         heads (::branch-heads observation)
         completions (::completion-facts observation)
         observed-completion-ids (completion-ids completions)
-        completed-intent-ids (::completed-intent-ids observation)
+        completed-restore-ids (::completed-restore-ids observation)
         completion-coordinates (::completion-coordinates observation)
         expected-roster (::expected-branch-roster intent)
         undo-branch (::undo-branch intent)
@@ -692,11 +692,11 @@
     (require-consistency!
      (and (= (count observed-completion-ids)
              (count (set observed-completion-ids)))
-          (= completed-intent-ids (set observed-completion-ids))
-          (= completed-intent-ids
+          (= completed-restore-ids (set observed-completion-ids))
+          (= completed-restore-ids
              (set (keys completion-coordinates))))
      "Restore completion facts and exact coordinate evidence disagree."
-     {::completed-intent-ids completed-intent-ids
+     {::completed-restore-ids completed-restore-ids
       :seon.dev.restore/completion-fact-ids observed-completion-ids
       ::completion-coordinates completion-coordinates})
     (require-consistency!
@@ -730,6 +730,7 @@
   (let [intent (validate-intent intent)
         observation (validate-observation-consistency! intent observation)
         intent-id (::intent-id intent)
+        plan-digest (::plan-digest intent)
         pre-restore-main
         (descriptor-coordinate (::pre-restore-main-descriptor intent))
         selected-target
@@ -746,18 +747,29 @@
         (= #{(::coordinate/commit-id selected-target)}
            main-parents)
         matching-completions
-        (filterv #(= intent-id (::db.restore/id %))
+        (filterv #(= plan-digest (::db.restore/plan-digest %))
                  (::completion-facts observation))
+        _
+        (require-consistency!
+         (<= (count matching-completions) 1)
+         "A restore plan digest resolves more than one completion."
+         {::intent-id intent-id
+          ::plan-digest plan-digest
+          :seon.dev.restore/matching-completion-ids
+          (mapv ::db.restore/id matching-completions)})
         completion (first matching-completions)
+        completion-id (::db.restore/id completion)
         completion-coordinate
-        (get (::completion-coordinates observation) intent-id)
+        (get (::completion-coordinates observation) completion-id)
         completion-forced-commit-id
         (::db.restore/forced-commit-id completion)
         completion-current?
         (and completion
              (= completion
-                (expected-completion-with-forced-commit
-                 intent completion-forced-commit-id))
+                (assoc
+                 (expected-completion-claim-with-forced-commit
+                  intent completion-forced-commit-id)
+                 ::db.restore/id completion-id))
              (= completion-coordinate main)
              (= #{completion-forced-commit-id} main-parents))
         reserved-heads-converged?

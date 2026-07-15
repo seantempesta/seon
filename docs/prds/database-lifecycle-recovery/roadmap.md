@@ -48,9 +48,10 @@ manifest-v4 dependency vectors are byte-equal at Datahike
 `3e6ed755f83634c9e9bbb58707f9446420d32ce9`, and partial-cps
 `1e119b03ea908ad925b98f9ba0a26371c65441e3`. Both record normalized writer
 digest `3cbacfc0852807f0726c2b82ff7d2b673f68343c3affaaf126aa621453e45ceb`.
-Their owner reports both clusters' pages and gzip feeds healthy, while the
-task-independent PATH identity failure at `fd1cac29`/`20ac543d` remains open
-and prevents a universal-readiness claim.
+Commit `74530d90` makes process identity depend only on each process's selected
+executable and preserves intentional managed-provider environment drift. Both
+clusters' pages and gzip feeds then passed task-independent readiness proof;
+`901be2a9` records the subsequent admitted local-model P0b result.
 
 The branch-qualified replica/operator audit is complete at
 [[research/branch-qualified-replica-operator-launch-audit-2026-07-15]]. It
@@ -270,15 +271,15 @@ passes 21 tests and 148 assertions with a warning-free 510-file CLJS compile,
 including target-coordinate, frozen-digest, missing-source, corrupt-overlay,
 orphan, repair, publication-failure, final-readback, and retry falsifiers.
 
-The independent Slice-5 completion-fact owner is complete in
-`seon.db.restore`. Its closed schema is exactly the compact identity plus the
-thirteen architecture payload attributes, with only the core/config overlay
-digests optional. After schemas are preinstalled, one root/boot-provenanced,
-whole-head-fenced `seon.db/transact!` records the fact and proves the exact
-entity plus identity-datom transaction on read-back. An equal retry performs no
-write; a same-id value conflict fails closed. Focused fresh-Datahike proof
-passes 5 tests and 31 assertions. Commit `b2461d64` closes the later-head retry
-gap through one canonical writer-backed transaction-coordinate resolver: it
+The Slice-5 completion-fact owner is complete in `seon.db.restore`. A caller
+supplies one closed claim containing the unique plan digest and payload but no
+id. Commit `2e58e8d1` uses the sole `seon.db.id/allocate!` mechanism to commit
+the generated compact id, plan digest, payload, and provenance atomically at
+the exact expected predecessor. Retry and a concurrent winner adopt only the
+byte-equal claim found by plan digest and return its original exact completion
+coordinate; legacy rows without plan digest remain read/undo-only. Commit
+`b2461d64` closes the later-head retry gap through one canonical writer-backed
+transaction-coordinate resolver: it
 walks raw immutable main-branch commit ancestry, skips force commits that
 repeat a parent's transaction id, requires exactly one original ordinary
 commit, and returns that original coordinate without another transaction.
@@ -302,15 +303,17 @@ success. Relational validation derives agreement on intent, plan, reachable
 blobs, selected target, the required pod generation member, and the descriptor's
 actual forced-main coordinate; ordinary descriptor bytes remain unchanged.
 Focused proof passes launch 7 tests/47 assertions, blob 21/148, admin 9/53, and
-operator restore 9/57. The second in-place unit is now implemented in the
-existing cold entry: a fresh main attach keeps writes closed, validates the
-exact startup generation/head and preinstalled completion schema, performs
-preserve-only recovery and replay, calls `prepare-committed!`, records and
-reads back completion under root/boot provenance, and admits that exact
-generation. Any replay or completion failure stays closed; ordinary cold start
-retains its existing composition. Autonomy and readiness start last; intent
-deletion remains the external operator's durable inverse. No restore-only boot
-path, callback, status, or ambient intent-file reread was added. The
+operator restore 9/57. The second in-place unit is being corrected in the
+existing cold entry. A fresh main attach validates the exact startup
+generation/head and preinstalled completion schema, reconstructs the program
+without recovery or seed writes, prepares instrumentation under closed
+admission, records and reads back the generated completion under root/boot
+provenance, and exposes only the existing `/_seon/ready` route. That disposable
+pod remains nonautonomous and reports `executable? false`; no agent hosting,
+provider/brand sync, ticker, or Shadow admission may advance `C`. The operator
+must compare the exact returned completion plus `C`, remove external intent
+evidence, stop restore consumers, and start one fresh ordinary autonomous
+runtime. The
 transaction-coordinate resolver is complete at `b2461d64`, and the fresh
 schema owner now installs the complete restore closure before generator-policy
 publication. The dependency repair is now published as exact public HTTPS Git
@@ -351,7 +354,7 @@ and adjacent writer-admin proof passes 9/53. The dependency cutover is complete;
 the remaining ordered work is integrated retained-head restore/crash proof,
 then completion-derived undo through the same transition.
 
-The first operator-only restore slice now owns one closed immutable intent and
+The operator restore slice now owns one closed immutable intent and
 derives its next command from the current main coordinate, an explicitly
 observed forced-main coordinate, main ancestry, reserved branch heads, and
 completion-fact ids; it persists no phase, status, or retry counter. Target
@@ -360,14 +363,17 @@ pinned launch descriptors so overlay-first lookup cannot be masked by the
 destination; those descriptors also bind the physical backend/path, database
 identity, writer owner, artifact flavor, and exact main/target heads. The
 intent additionally freezes the post-preparation branch roster, protocol
-version, writer artifact digest, and process generations. Its canonical
-SHA-256 plan digest derives from every frozen and deterministic field rather
+version, all five runtime artifact digests, and process generations. Its
+canonical SHA-256 plan digest derives from every frozen and deterministic field rather
 than accepting an arbitrary digest-shaped string. This v1 intent explicitly
 preserves both core and config populations; its closed schema rejects ambient
 or requested overlays until the later overlay slice can freeze their exact
-bytes and digests. Intent and completion use the same compact-string identity
-shape. The pure contract lives in the writer-visible `seon.dev.restore` source
-owner; script-only `seon.dev.restore-state` owns fsync publication. The bounded
+bytes and digests. New operator intents are UUIDs; their canonical plan digest
+is the natural completion key, while the database allocates a separate compact
+completion id. Exact legacy hexadecimal intents remain readable only for
+pre-cutover recovery. The pure contract lives in the writer-visible
+`seon.dev.restore` source owner; script-only `seon.dev.restore-state` owns fsync
+publication. The bounded
 admin invocation derives one intent-specific atomic-EDN result destination,
 and passes the canonical fsync-published intent path rather than EDN in process
 arguments. Consumer generations are nonempty and deliberately exclude the

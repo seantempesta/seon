@@ -35,10 +35,17 @@ single original transaction.
 Legacy completions without a plan digest remain valid read/undo facts and are
 never backfilled.
 
-The issue remains open until every operator and cold-runtime caller uses the
-new relationship: active intent is matched by plan digest, completion
-coordinate maps remain keyed by generated completion id, and readiness carries
-the exact returned completion plus coordinate.
+The operator now uses the new relationship: fresh intent ids are UUIDs, active
+intent is matched by plan digest, abort checks the same association, and
+completion coordinate maps remain keyed by generated completion id. Exact
+legacy 14-character hexadecimal intents remain read-only inputs; the former
+compact-id overlap is no longer accepted for new planning.
+
+The issue remains open until the cold-runtime caller and operator readiness
+read-back carry and compare the exact returned completion plus coordinate.
+Focused operator proof passes 28 tests/166 assertions; the complete operator
+gate passes 219/1,258 and focused restore-admin plus registry proof passes
+25/152.
 
 ## Acceptance
 

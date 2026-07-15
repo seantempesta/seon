@@ -173,7 +173,8 @@
 
 (defn- startup-identity
   [reachable-hash-digest]
-  {:seon.dev.restore/intent-id "restoredoor1"
+  {:seon.dev.restore/intent-id
+   #uuid "70000000-0000-4000-8000-000000000003"
    :seon.dev.restore/plan-digest (apply str (repeat 64 "1"))
    :seon.dev.restore/reachable-hash-digest reachable-hash-digest
    :seon.dev.restore/consumer-generations

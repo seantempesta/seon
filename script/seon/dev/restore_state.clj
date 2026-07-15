@@ -257,7 +257,7 @@
     response))
 
 (defn- fresh-intent-id []
-  (subs (str/replace (str (random-uuid)) "-" "") 0 14))
+  (random-uuid))
 
 (defn- branch-close-request [configuration branch-name]
   (let [request (branch/request {::branch/configuration configuration
@@ -456,7 +456,7 @@
    ::restore/main-parent-commit-ids
    (::protocol/main-parent-commit-ids lifecycle)
    ::restore/branch-heads (::protocol/branch-coordinates lifecycle)
-   ::restore/completed-intent-ids
+   ::restore/completed-restore-ids
    (::protocol/completed-restore-ids lifecycle)
    ::restore/completion-facts (::protocol/restore-completions lifecycle)
    ::restore/completion-coordinates
@@ -929,7 +929,7 @@
         (set (map :seon.db.restore/id (::restore/completion-facts observation)))
         indexed-completion-ids
         (set (keys (::restore/completion-coordinates observation)))
-        observed-completion-ids (::restore/completed-intent-ids observation)
+        observed-completion-ids (::restore/completed-restore-ids observation)
         heads (::restore/branch-heads observation)
         reserved #{(::restore/undo-branch intent)
                    (::restore/prepared-target-branch intent)}]
@@ -940,7 +940,9 @@
         "Restore completion evidence is inconsistent; abort fails closed."
         {::restore/intent-id intent-id
          :seon.error/kind :seon.dev.restore.error/abort-unsafe})))
-    (when (or (contains? observed-completion-ids intent-id)
+    (when (or (some #(= (::restore/plan-digest intent)
+                        (:seon.db.restore/plan-digest %))
+                    (::restore/completion-facts observation))
               (some #(contains? heads %) reserved))
       (throw
        (ex-info

@@ -38,7 +38,7 @@
                 ::coordinate/branch :restore.test/selected
                 ::coordinate/commit-id (random-uuid)
                 ::coordinate/t 110}
-        intent-id "restoretest1"
+        intent-id #uuid "70000000-0000-4000-8000-000000000002"
         digest (apply str (repeat 64 "a"))
         writer-owner
         {::launch/writer-cluster "default"
@@ -82,7 +82,12 @@
       ::restore/expected-branch-roster
       #{:db :restore.test/selected undo-branch prepared-branch}
       ::restore/protocol-version protocol/current-version
-      ::restore/writer-artifact-digest digest
+      ::restore/artifact-identity
+      {:seon.dev.artifact/application-digest digest
+       :seon.dev.artifact/client-digest digest
+       :seon.dev.artifact/bootstrap-digest digest
+       :seon.dev.artifact/css-digest digest
+       :seon.dev.artifact/writer-digest digest}
       ::restore/consumer-generations
       {:seon.dev.process/pod (random-uuid)}
       ::restore/core-overlay-selection :seon.dev.restore.overlay/preserve

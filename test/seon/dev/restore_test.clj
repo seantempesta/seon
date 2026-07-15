@@ -20,7 +20,8 @@
 (def forced-commit #uuid "40000000-0000-0000-0000-000000000001")
 (def latest-commit #uuid "50000000-0000-0000-0000-000000000001")
 (def completion-commit #uuid "60000000-0000-0000-0000-000000000001")
-(def intent-id "q66ljwup2b5r")
+(def intent-id #uuid "70000000-0000-4000-8000-000000000001")
+(def completion-id "restore00001")
 (def prior-completion-id "priorundo001")
 (def digest (apply str (repeat 64 "a")))
 (def other-digest (apply str (repeat 64 "b")))
@@ -164,6 +165,26 @@
 (defn- derived-intent []
   (restore/derive-intent (intent-request)))
 
+(deftest new-intents-are-uuids-while-exact-legacy-intents-remain-readable
+  (let [legacy-id "abcdef12345678"
+        legacy
+        (#'restore/derive-intent-value
+         (assoc (intent-request)
+                ::restore/intent-id legacy-id
+                ::restore/expected-branch-roster
+                (restore/reserved-branch-roster
+                 legacy-id #{:db :seon.branch/target})))]
+    (is (uuid? (::restore/intent-id (derived-intent))))
+    (is (= legacy (restore/validate-intent legacy)))
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"intent request is invalid"
+         (restore/derive-intent
+          (assoc (intent-request) ::restore/intent-id legacy-id))))
+    (is (false? (m/validate ::restore/intent-id "zzzzzzzzzzzzzz")))
+    (is (false? (m/validate ::restore/intent-id "restore00001")))
+    (is (false? (m/validate ::restore/digest (str digest "a"))))))
+
 (defn- undo-intent-request []
   (let [observation (retained-observation)]
     (-> (intent-request)
@@ -198,7 +219,8 @@
                              ::launch/database ::coordinate/coordinate])
         to (get-in intent [::restore/selected-target-descriptor
                            ::launch/database ::coordinate/coordinate])]
-    {:seon.db.restore/id (::restore/intent-id intent)
+    {:seon.db.restore/id completion-id
+     :seon.db.restore/plan-digest (::restore/plan-digest intent)
      :seon.db.restore/db-name
      (keyword
       (get-in intent [::restore/pre-restore-main-descriptor
@@ -220,7 +242,7 @@
    ::restore/main-parent-commit-ids parents
    ::restore/branch-heads
    (merge {:db main :seon.branch/target target} heads)
-   ::restore/completed-intent-ids
+   ::restore/completed-restore-ids
    (set (map :seon.db.restore/id completions))
    ::restore/completion-facts completions
    ::restore/completion-coordinates
@@ -663,7 +685,7 @@
                              prepared-target-branch
                              (::restore/prepared-target-coordinate intent)}
                             #{forced-commit} [completion]
-                            {intent-id 102})])
+                            {completion-id 102})])
         effects (atom [])
         result
         (restore-state/converge!
@@ -706,7 +728,7 @@
               {undo-branch (::restore/undo-coordinate intent)
                prepared-target-branch
                (::restore/prepared-target-coordinate intent)}
-              #{forced-commit} [completion] {intent-id 102}))
+              #{forced-commit} [completion] {completion-id 102}))
            ::restore-state/effect!
            (fn [effect] (swap! effects conj effect))})))
     (is (empty? @effects))))
@@ -877,13 +899,13 @@
           :seon.branch/target target
           undo-branch (::restore/undo-coordinate intent)
           prepared-target-branch (::restore/prepared-target-coordinate intent)}
-         ::protocol/completed-restore-ids #{intent-id}
+         ::protocol/completed-restore-ids #{completion-id}
          ::protocol/restore-completions [completion]
-         ::protocol/restore-completion-coordinates {intent-id current}}
+         ::protocol/restore-completion-coordinates {completion-id current}}
         observation (#'restore-state/lifecycle->observation intent lifecycle)]
     (is (m/validate ::restore/observation observation))
     (is (= #{forced-commit} (::restore/main-parent-commit-ids observation)))
-    (is (= {intent-id current}
+    (is (= {completion-id current}
            (::restore/completion-coordinates observation)))))
 
 (deftest completion-admission-requires-the-exact-commit-coordinate
@@ -900,9 +922,36 @@
          {undo-branch (::restore/undo-coordinate intent)
           prepared-target-branch (::restore/prepared-target-coordinate intent)}
          #{forced-commit} [completion]
-         {intent-id other-force-at-same-t})]
+         {completion-id other-force-at-same-t})]
     (is (= :seon.dev.restore.command/diagnose-divergence
            (command intent observed)))))
+
+(deftest completion-admission-joins-one-generated-id-by-plan-digest
+  (let [intent (derived-intent)
+        completion (completion-fact intent forced-commit)
+        duplicate-id "restore00002"
+        duplicate (assoc completion :seon.db.restore/id duplicate-id)
+        current (assoc source
+                       ::coordinate/commit-id completion-commit
+                       ::coordinate/t 102)
+        heads {undo-branch (::restore/undo-coordinate intent)
+               prepared-target-branch
+               (::restore/prepared-target-coordinate intent)}]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"plan digest resolves more than one completion"
+         (restore/next-command
+          {::restore/intent intent
+           ::restore/observation
+           (observation intent current heads #{forced-commit}
+                        [completion duplicate]
+                        {completion-id current duplicate-id current})})))
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (restore/next-command
+                  {::restore/intent intent
+                   ::restore/observation
+                   (observation intent current heads #{forced-commit}
+                                [completion] {intent-id current})})))))
 
 (deftest plan-is-read-only-and-returns-one-exact-confirmation
   (let [configuration (config/load! (System/getProperty "user.dir"))
@@ -1043,7 +1092,48 @@
              {::restore-state/configuration configuration
               ::restore-state/branch-name "target"
               ::restore/confirmation-text confirmation}))))
+    (is (not-any? #(and (vector? %) (= :delete (first %))) @calls))
+    (reset! calls [])
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"forbids abort"
+         (with-redefs-fn
+           (assoc redefs #'restore-state/observe-restore!
+                  (fn [& _]
+                    (observation
+                     intent source {} #{}
+                     [(completion-fact intent forced-commit)]
+                     {completion-id source})))
+           #(restore-state/abort!
+             {::restore-state/configuration configuration
+              ::restore-state/branch-name "target"
+              ::restore/confirmation-text confirmation}))))
     (is (not-any? #(and (vector? %) (= :delete (first %))) @calls))))
+
+(deftest abort-associates-completion-only-through-the-plan-digest
+  (let [intent (derived-intent)
+        matching (completion-fact intent forced-commit)
+        unrelated (assoc matching
+                         :seon.db.restore/id "restore00002"
+                         :seon.db.restore/plan-digest other-digest)
+        matching-observation
+        (observation intent source {} #{} [matching] {completion-id source})
+        unrelated-observation
+        (observation intent source {} #{} [unrelated] {"restore00002" source})
+        legacy-observation
+        (observation intent source {} #{} [prior-completion]
+                     {prior-completion-id source})]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"forbids abort"
+         (#'restore-state/require-abortable-observation!
+          intent matching-observation)))
+    (is (= unrelated-observation
+           (#'restore-state/require-abortable-observation!
+            intent unrelated-observation)))
+    (is (= legacy-observation
+           (#'restore-state/require-abortable-observation!
+            intent legacy-observation)))))
 
 (deftest admin-result-is-associated-with-the-exact-retained-intent
   (let [intent (derived-intent)
@@ -1086,7 +1176,7 @@
            (::restore/admin-result-transport invocation)))
     (is (= "/cluster/lifecycle/restore.edn"
            (::restore/intent-path invocation)))
-    (is (= "/cluster/lifecycle/restore-admin-q66ljwup2b5r.edn"
+    (is (= (str "/cluster/lifecycle/restore-admin-" intent-id ".edn")
            (::restore/admin-result-path invocation)))
     (is (= 30000 (::restore/admin-timeout-ms invocation)))))
 
@@ -1124,12 +1214,12 @@
              (command intent
                       (observation intent completed reserved
                                    #{forced-commit} [completion]
-                                   {intent-id 102}))))
+                                   {completion-id 102}))))
       (is (= :seon.dev.restore.command/diagnose-divergence
              (command intent
                       (observation intent later reserved
                                    #{completion-commit} [completion]
-                                   {intent-id 102})))
+                                   {completion-id 102})))
           "a later ordinary write cannot masquerade as completion readiness"))
     (testing "target ancestry cannot masquerade as an observed forced main"
       (is (= :seon.dev.restore.command/create-undo
@@ -1162,7 +1252,7 @@
                                    [(assoc completion
                                            :seon.db.restore/to-commit-id
                                            (random-uuid))]
-                                   {intent-id 102}))))
+                                   {completion-id 102}))))
       (is (= :seon.dev.restore.command/diagnose-divergence
              (command intent
                       (observation intent promoted {undo-branch undo}
@@ -1208,14 +1298,14 @@
                   {::restore/intent intent
                    ::restore/observation
                    (assoc (observation intent source {} #{} [] {})
-                          ::restore/completed-intent-ids #{intent-id})})))
+                          ::restore/completed-restore-ids #{completion-id})})))
     (is (thrown? Exception
                  (restore/next-command
                   {::restore/intent intent
                    ::restore/observation
                    (observation intent completed reserved #{forced-commit}
                                 [completion completion]
-                                {intent-id 102})})))
+                                {completion-id 102})})))
     (is (thrown? Exception
                  (restore/next-command
                   {::restore/intent intent
@@ -1224,17 +1314,17 @@
                     intent completed reserved #{forced-commit}
                     [(assoc completion :seon.db.restore/database-id
                             wrong-database)]
-                    {intent-id 102})})))
+                    {completion-id 102})})))
     (is (thrown? Exception
                  (restore/next-command
                   {::restore/intent intent
                    ::restore/observation
                    (observation intent completed reserved #{forced-commit}
                                 [(dissoc completion :seon.db.restore/to-t)]
-                                {intent-id 102})})))
+                                {completion-id 102})})))
     (is (thrown? Exception
                  (restore/next-command
                   {::restore/intent intent
                    ::restore/observation
                    (observation intent completed reserved #{forced-commit}
-                                [completion] {intent-id 103})})))))
+                                [completion] {completion-id 103})})))))

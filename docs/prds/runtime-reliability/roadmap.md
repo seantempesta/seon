@@ -123,21 +123,20 @@ dependency spine and independent evidence consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Retained-head source integration is implementing the executable confirmation/abort state machine** | `55271a82` defines one canonical plan digest and exact confirmation projection; `2159dd1d` proves restore-admin absence without mutation; `fa147bfc` replaces transaction-`t` admission with the exact completion commit coordinate. The coordinator now has distinct read-only plan, confirmed apply, prompt-free resume, and narrow abort doors, freezes all five runtime outputs, fences the watcher, and rechecks retained consumers. Focused restore+CLI proof is 49 tests/213 assertions; completion identity allocation and nonautonomous restore startup remain open P0s before source freeze | Finish generated completion identity and closed-admission restore startup, expand crash/CLI falsifiers, run the complete focused checkpoint, then execute crash-cut restore/undo and three-form pod-death proof |
+| Top-level integration | **Retained-head operator identity is integrated; source freeze waits on the closed caller** | `2e58e8d1` allocates the database completion id atomically and makes plan digest the unique adoption key. The operator now mints UUID intents, reads only exact legacy hexadecimal intents, joins completion by plan digest, keys completion coordinates by the generated id, and blocks abort on that relationship. Full operator proof passes 219 tests/1,258 assertions; focused writer restore-admin plus registry proof passes 25/152. The launch/client/web lane is adapting the committed claim/returned-completion API and exact non-executable readiness body | Review and commit the closed caller, add operator read-back of exact completion plus `C`, run the source-frozen checkpoint, then execute crash-cut restore/undo and three-form pod-death proof |
 | Native secondary force | **COMPLETE through the selected Seon artifacts** | Both manifests bind Datahike `9ada755087228e10cfb179fa5779ce227a6ed220`, Konserve `b5c99bc02a7175652a610324215288b78551801f`, Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6`, Shadow CLJS `4e72595f57618f5c43388ad13d5136cd3bede566`, superv.async `3e6ed755f83634c9e9bbb58707f9446420d32ce9`, and partial-cps `1e119b03ea908ad925b98f9ba0a26371c65441e3` | Consume the frozen closure in destructive restore; do not reopen dependency publication absent a new falsifier |
 | Restore inverse/planner | **Completion-derived undo planning and canonical schema ownership are complete** | `6351790a` derives the exact retained undo head and `9a60761f` closes the intervening pure-data config/schema source collision. The same immutable transition is ready to consume the destructive restore result | Run completion-derived undo immediately after retained-head restore passes |
 | Inspect/agent evidence | **PATH identity and P0b evidence are closed; namespace/tool refinement is active** | `74530d90` makes process identity depend on the selected executable, and `901be2a9` records the admitted local-model P0b result. The external lane owns only its declared config/agent/Inspect paths and keeps ACME lifecycle untouched until the next source freeze | Review the bounded namespace/tool return after the retained-head source freeze; ACME rebuild remains downstream of default proof |
 
 Current scheduling card:
 
-1. **Ordered spine:** finish generated completion identity plus nonautonomous
-   restore preparation → freeze and checkpoint the confirmed/abortable
-   retained-head coordinator → destructive
+1. **Ordered spine:** integrate nonautonomous restore preparation and exact
+   readiness read-back against the completed generated identity → freeze and
+   checkpoint the confirmed/abortable retained-head coordinator → destructive
    crash-convergent restore → completion-derived undo → real three-form
    pod-death proof with committed prefix and absent suffix.
-2. **Parallel lane A:** integrate generated completion identity through the
-   existing database allocator and exact completion-coordinate resolver; it
-   may not edit the unsettled operator or client coordinator.
+2. **Parallel lane A:** finish the declared launch/client/web caller against
+   `2e58e8d1`; it may not edit the now-settled operator or lifecycle files.
 3. **Parallel lane B:** keep the external namespace/tool and Inspect evidence
    paths isolated, then review their committed return against canonical schemas
    and offline scorers after source freeze.
@@ -155,19 +154,19 @@ The ordered top-level sequence is therefore:
 2. **Complete:** immutable restore intent, exact prepare/admit split, blob
    materialization, completion publication, later-head coordinate resolution,
    and closed launch transport for restore evidence;
-3. **Reopened P0:** schema-before-policy ordering is complete, but live source
-   review falsified the old restore startup contract: it still admits and starts
-   autonomous work after `C` before operator proof. The replacement keeps the
+3. **Reopened P0, caller implementing:** schema-before-policy ordering and the
+   allocator-owned completion contract are complete. The replacement keeps the
    disposable restore pod nonautonomous and admission closed, serves exact
-   non-executable readiness at `C`, then lets only a fresh ordinary pod admit;
+   non-executable readiness containing the returned completion and `C`, then
+   lets only a fresh ordinary pod admit;
 4. **Complete:** `be30f420` removes checkout-local dependency inputs and both
    manifest-v4 flavors prove the exact six-coordinate maintained closure plus
    normalized writer digest `3cbacfc0852807f0726c2b82ff7d2b673f68343c3affaaf126aa621453e45ceb`;
-5. **In progress:** exact completion-coordinate, contained-admin,
-   confirmation, artifact-freeze, and abort contracts are integrated in the
-   focused operator path; finish allocator-owned completion identity and
-   nonautonomous restore startup, then freeze and pass restore/undo crash cuts
-   and multi-form partial-commit proof;
+5. **In progress:** exact completion-coordinate, allocator-owned identity,
+   contained-admin, confirmation, artifact-freeze, abort, and UUID/plan-digest
+   contracts are integrated in the operator path; finish nonautonomous caller
+   readiness and operator read-back, then freeze and pass restore/undo crash
+   cuts and multi-form partial-commit proof;
 6. graduate units 2 and 6 from bounded consumers into their complete acceptance
    matrices while starting unit 3/4 only from their settled contracts;
 7. complete canvas, Inspect/autocomplete, and independent artifact consumption
@@ -469,8 +468,9 @@ environment digest, and artifact digest needed for Inspect admission while
 never returning environment values. Root review repeated the focused operator
 gate at 25 tests/95 assertions. The later source-frozen rebuild completed for
 both targets at normalized writer digest `3cbacfc0…`; their pages and gzip
-feeds are healthy. Task-independent status still has a separate PATH identity
-failure at `fd1cac29`/`20ac543d`, so no universal-readiness claim follows.
+feeds are healthy. Commit `74530d90` subsequently closed task-independent PATH
+identity through process-specific selected-executable resolution, and
+`901be2a9` records the admitted local-model P0b result.
 
 Inspect source/run admission is content-pinned and required in native run
 metadata; the synchronized offline environment passes 403 tests with eight
@@ -1649,7 +1649,7 @@ is evaluated behaviorally, not by asserting prose.
 | Database vocabulary | The protocol/backend/replica path is canonical, the managed leaf is `/db`, and the generic `store-inventory` API/context/tooling family is deleted. Runtime and developer skills are converged; downstream ACME still needs the proven vocabulary cut. |
 | Database browser | The obsolete inventory surfaces are deleted. `/data` uses the canonical shared gzip feed, cheap shell, schema navigator, and bounded AEVT cursor pages. Entity/ref/transaction/history units remain. |
 | Developer hooks | The direct Babashka hook is repository-contained before config/artifact access, runtime-independent, locally deterministic, and log-bounded under a cross-process lock. Automatic model review is deleted. The operator gate includes its Markdown/docstring checks. |
-| Operator | The Babashka graph and thin launcher are built and focused-tested; default and ACME share one admitted artifact identity and serve healthy pages/feeds. Task-independent PATH identity remains open, so the broader live matrix is not universally green. |
+| Operator | The Babashka graph and thin launcher are built and focused-tested; default and ACME share one admitted artifact identity and serve healthy pages/feeds. Task-independent process identity is closed at `74530d90`; destructive restore remains the current live gate. |
 | Tests | Public pod/database/operator doors delegate to one runner each; focused pod builds use compile-time namespace selection, one bundle lock, and exact freshness fingerprints. Disabled/paused-application tests and remaining intentional expected-failure noise still need removal. |
 | UI | The four dormant context renderers and their unconditional boot load are deleted. Active symbols, CSS, DOM, docs, and ACME still need the tile-to-surface/card vocabulary cut; skill teaching is already converged. |
 | Live rendering | Agent surfaces and the whole debug/data targets use runtime-observed reads; normalized subscriptions suppress identical consecutive output. Per-region debug/data unitization, layout/focus browser proof, and grown-database profiling remain. |
