@@ -123,24 +123,26 @@ contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Keep unit 1 as the ordered spine while reviewing three bounded returns:** retained-branch interruption, the exact schema/setup contaminant, and the unit-6 child-containment contract | Ordinary startup interruption is integrated through `fbb8c399`; reverse-routing soundness is integrated through `afc70d3f`; the bounded Inspect/autocomplete evidence reconciliation is integrated through `1d6f12c8`. These completed lanes are evidence, not still-active work | Integrate or reject each live return, update its owning PRD/issue, and immediately refill from the earliest dependency-ready boundary. After retained-branch proof, advance CLI/status/MCP and the first live create/write/restart/close transition |
+| Top-level integration | **Keep unit 1 as the ordered spine while reviewing two implementation returns and one next-consumer audit:** retained-branch interruption, isolated-diagnostic schema parity, and branch CLI/status/MCP plus live proof | Ordinary startup interruption is integrated through `fbb8c399`; reverse-routing soundness through `afc70d3f`; Inspect evidence through `1d6f12c8`; and the unit-6 parent capability/child lifecycle contract through `f2c1f1c8`. These completed lanes are evidence, not still-active work | Integrate or reject each live return, update its owning PRD/issue, and immediately refill from the earliest dependency-ready boundary. After retained-branch proof, consume the source-grounded CLI/status/MCP audit and run the first live create/write/restart/close transition |
 | Database lifecycle | **Retained branch open is consuming the settled signal-safe startup inverse:** prove interruption before/through pod publication and during readiness without claiming a converged pod or branch | Typed UDS (`ce342572`), crash-safe adoption (`e7bd160c`), retained pod lifecycle (`74bfa7e2`), and ordinary interruption (`fbb8c399`) are integrated. The active lane is restricted to branch/process ownership and its real signal gate | Expose the settled branch lifecycle through CLI/status/MCP, then run live create/write/restart/close. Continue unit 1 through default restart/crash, restore/undo, and multi-form failure proof in that order |
 | Reactive/database views | **Implementation and replay-all soundness oracle are complete; live browser/feed proof waits for the next source-frozen checkpoint** | `365052f0` lands candidate-only routing; `afc70d3f` proves six retained read shapes against every nonempty combination of seven actual transactions. The exact gate passes 1 test/10 assertions | Refill only after the unit-1 source checkpoint: prove gzip/SSE sharing, related/unrelated updates, and release in a real browser, then continue unit-2 consumer migration |
-| Agent runtime correctness | **The ordered schema/setup contaminant is the bounded correctness blocker; child-containment design proceeds independently without implementing unsettled process ownership** | Receipt/recovery Slice A remains complete at `defb8014`. Current probes show the coordinate schema and registry are valid through allocation and the failure occurs inside `setup-agent-ns!`; earlier attachment-projection attribution is disproven. The active lane must capture the exact rejection owner, remove diagnostics, and retain only evidence-backed fixes | Once the exact ordered gate is green, update the issue/roadmap with the actual owner. Then consume unit-1 ownership for immutable parent capabilities and measured child launch/kill/reap; the integrated Inspect evidence leaves the named large-planner/small-executor trial as a later unit-7 implementation gate |
+| Agent runtime correctness | **The ordered schema contaminant is narrowed to isolated-diagnostic database parity; the child-containment contract is complete but production implementation waits on unit 1** | Receipt/recovery Slice A remains complete at `defb8014`. Exact probes show `setup-agent-ns!` succeeds and candidate/active schemas are complete before `eval-batch!`; the later function-contract publication reconstructs from the fresh diagnostic database's missing canonical schema facts and activates an empty projection. `f2c1f1c8` separately defines one parent-owned child handle/capability and the dead-leader subtree prerequisite | Make `open-agent-conn!` fulfill its full-bootstrap promise by installing canonical schema facts idempotently, remove diagnostics/speculative relinks, and pass the exact ordered gate. Production child work then waits for unit-1 backend descriptor plus old-subtree absence; the named planner/small-executor trial remains a later unit-7 gate |
 
 Current scheduling card:
 
 1. **Ordered spine:** retained-branch interruption → CLI/status/MCP → live
    create/write/restart/close → default restart/crash → restore/undo →
    multi-form failure proof.
-2. **Parallel lane A:** exact `setup-agent-ns!` contaminant diagnosis and
-   focused regression, with all probes removed before integration.
-3. **Parallel lane B:** source-grounded immutable parent capability and child
-   launch/deadline/kill/reap audit; implementation waits for the settled unit-1
-   owner boundary.
-4. **Parallel lane C:** reverse routing and Inspect evidence are complete; the
-   next refill is respectively coordinated live UI proof after source freeze
-   and the named planner/small-executor experiment after unit 6.
+2. **Parallel lane A:** repair isolated diagnostic database/schema-fact parity
+   at `open-agent-conn!`, then remove every probe and speculative relink before
+   the exact ordered regression integrates.
+3. **Parallel lane B:** the parent capability/child launch/deadline/kill/reap
+   contract is integrated at `f2c1f1c8`; production code waits for unit 1's
+   stable backend descriptor and dead-leader subtree proof.
+4. **Parallel lane C:** audit branch CLI/status/MCP and the first live branch
+   journey while retained-branch signal ownership finishes. Reverse routing
+   and Inspect evidence remain complete; their next implementations wait for
+   source freeze and unit 6 respectively.
 5. **Final admission:** unit 9 remains blocked on integrated units 1–8 and is
    the only place for destructive simultaneous-cluster, performance, and
    authorized legacy-worktree cleanup proof.
