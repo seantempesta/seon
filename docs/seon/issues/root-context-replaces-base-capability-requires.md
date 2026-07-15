@@ -49,3 +49,15 @@ render regression proves that changing one worker purpose changes only root's
 late `:canvas` block; the seven earlier root blocks remain byte-identical. Live
 persisted-edge and prompt proof waits for the next coordinated ACME rebuild
 after the runtime lane releases the source checkpoint.
+
+One compact-card gap remains before that live proof. Required namespaces are
+present through the correct context edges, but
+`seon.agent.ctx.namespaces/render-one-ns-compact` still filters public
+functions through the rejected `:seon.fn/agent-facing?` fact. Root refers
+`seon.agent/set-purpose!`, yet that function has no marker and therefore
+disappears from the compact required-namespace card. The repair must remove
+this parallel presentation allowlist and derive visibility from the existing
+current/required namespace context plus ordinary public/private semantics. Do
+not add markers to patch individual functions. Focused proof must resolve the
+root context and show all explicitly referred public functions, including
+`set-purpose!`, through the one namespace-context mechanism.
