@@ -61,6 +61,13 @@ explicit pending integration/proof boundaries. If the current work cannot be
 traced to one of those exits, stop, record the finding if useful, and resume
 the ordered program.
 
+When the harness provides a persistent goal, its objective names the complete
+program outcome and final graduation gate, never only the current lane. Check
+that goal against the program ledger after every compaction and lane return.
+Do not mark the program blocked because one lane is waiting: keep the goal
+active while any dependency-ready spine, integration, research, or proof work
+can advance, and record the local wait in its owning roadmap or issue instead.
+
 Separate sequencing from concurrency explicitly. The earliest unsettled
 contract and its integrated proof form the ordered spine; no consumer may
 invent or assume that contract. Everything else is a rolling parallel
