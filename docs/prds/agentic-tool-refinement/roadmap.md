@@ -197,6 +197,28 @@ acceptance still needs bounded retained proof that the reported value came from
 the actual query result; that remaining contract is recorded in
 [[../../seon/issues/database-workflow-scorer-lacks-query-result-evidence]].
 
+That evidence contract is now source-grounded. The current scorer can pass
+structurally correct eval source with no query result at all, and a
+`db/transact!` error envelope still looks like eval-level success. The repair
+extends the existing AsyncLocalStorage read-capture mechanism into ordered
+per-eval database-operation observations, persists full normalized evidence
+through the existing blob tier, projects bounded descriptors from the final
+immutable database value, and makes the one scorer fail closed. It is global
+database observability, not a benchmark hook. Exact falsifiers and ownership
+are in [[research/database-query-result-evidence-audit-2026-07-15]].
+
+Model transport evidence has the same intent-versus-execution distinction. A
+final coordinate can reconstruct final database intent but cannot prove any
+provider attempt; the OpenAI adapter currently rereads reactive config during
+one request, retries retain only a count, and response model/fingerprint fields
+are discarded. `seon.ai/resolved-config` now derives endpoint, adapter timeout,
+credential-source name, diffusion backend, and extra-body digest with per-key
+provenance from any immutable database value. A-after-B historical resolution
+passes 11 tests and 46 assertions without storing a resolved snapshot. The
+next boundary freezes that value once per attempt, then persists ordered
+bounded attempt facts. Grounding and falsifiers are in
+[[research/model-transport-evidence-audit-2026-07-15]].
+
 A subsequent purity probe found that historical result-handle display depends
 on a process-local cache. The target is now explicit and falsifiable: the same
 agent and resolved database coordinate regenerate a byte-identical cacheable
@@ -211,6 +233,15 @@ block hashes and sizes, estimates change probability from that database
 changelog, and sorts within semantic bands by change risk per cacheable token.
 Orders freeze for measured epochs with hysteresis so the optimizer cannot
 create more cache churn than it removes.
+
+The batch/stream decision is frozen as an experiment rather than a preference.
+Batch is the hypothesis to beat because one large stable prompt can carry
+several sequentially awaited forms; OpenAI-compatible stream already cuts off
+at the first parser-confirmed executable form and may win on feedback and
+fabricated-tail avoidance. A valid comparison first needs durable per-turn eval
+positions, addressable cancellation through the blocking Inspect door,
+exact-prefix cutoff evidence, and database-owned no-form/repetition limits. The
+paired native design is in [[research/batch-stream-cutoff-audit-2026-07-15]].
 
 ## Experimental contract
 
