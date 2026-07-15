@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, eval, inspect-ai, model, agent]
+tags: [research, agent]
 ---
 
 # BFCL Qwen 3.5 2B unchanged baseline — 2026-07-14
@@ -35,3 +35,17 @@ exact rendered namespace/tool contracts, model outputs, repaired parser
 entries, and transcript that led each run to its no-forms streak. The frozen
 sample membership and raw log remain the regression input after each general
 parser/context/tool-surface fix.
+
+## Forensic gap
+
+The native Inspect log is sufficient to reproduce membership and scoring, but
+not the observed Seon behavior. It records each pod agent id, turn/eval counts,
+close reason, model configuration, elapsed time, and final solver sentence; it
+does not retain the agent's database coordinate, prompt/reply blobs, eval rows,
+or transcript. After the cluster's later lifecycle operations, querying current
+and historical database views found no `neat-rice-taste` identity, so the exact
+three raw replies that produced its no-forms streak are unavailable.
+
+This run remains a valid zero-score baseline, but it cannot support a context or
+parser root-cause claim. Future accepted live Inspect evidence must preserve the
+lease/database coordinate and complete turn bundle before sample cleanup.

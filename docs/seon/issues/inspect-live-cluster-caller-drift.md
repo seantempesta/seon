@@ -92,6 +92,15 @@ basis and suppress copy errors. Lease finalization must make the complete raw
 evidence bundle mandatory; a score without its log/coordinate bundle is not an
 accepted run.
 
+The frozen Qwen 3.5 2B BFCL baseline makes that loss concrete. Its native log
+preserves ten sample ids, zero scores, pod agent ids, three-to-seven-turn
+`:no-forms` closures, eval counts, and model configuration, but no Seon database
+coordinate, prompt/reply blob refs, eval rows, or transcript. The later live
+ACME database and its history contain no sampled `neat-rice-taste` identity, so
+the exact model replies cannot be reconstructed. The run is scoreable but not
+forensically adequate for deciding whether context, parser repair, or model
+reasoning caused the failure.
+
 This is distinct from `acme-operator-migration-drift.md`. That issue owns the
 ACME process/artifact/database migration itself; this issue owns Inspect's
 live consumers after the current operator boundary exists.
