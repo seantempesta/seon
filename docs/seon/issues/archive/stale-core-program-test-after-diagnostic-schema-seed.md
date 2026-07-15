@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, cljs]
 ---
@@ -37,3 +37,8 @@ selectors pass: five tests, 32 assertions, zero failures.
 - Transacting the remaining function delta makes the next complete program
   delta empty.
 - The isolated bootstrap selector passes.
+
+## Resolution
+
+Resolved in `6c597259`. The isolated bootstrap selector plus the four focused
+callable-contract/index selectors pass with 32 assertions and no failures.
