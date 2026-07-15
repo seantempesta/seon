@@ -192,6 +192,19 @@ to the configured turn bound plus 120 seconds. Missing application evidence
 after proven subtree absence is forced recovery; uncertain containment retains
 the record and blocks replacement.
 
+The implementation card after that clean-or-force boundary is now reconciled at
+[[research/post-clean-restart-restore-undo-multi-form-card-2026-07-15]]. Restore
+and undo use one fsync-durable immutable intent, stop every pod consuming the
+selected writer, materialize every reachable target blob into the main archive,
+run guarded `force-branch!` through a no-listener invocation of the existing
+writer artifact, then reconstruct and transact completion before admission
+opens. Initially only a retained branch's exact commit-head coordinate is
+branchable: a Datahike `as-of` interior cut is a read view, not a concrete store,
+and must fail explicitly rather than round to its containing commit. The Unit-1
+three-form crash proof records the committed prefix and absent suffix without
+fabrication; general durable per-form position remains a later
+agentic-refinement contract.
+
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in
 [[research/database-lifecycle-source-audit-2026-07-14]]. Implementation began
@@ -467,6 +480,9 @@ materialization, and retention remain later lifecycle slices.
 - [[research/clean-planned-restart-quiescence-refresh-2026-07-15]] — current
   planned-restart-only admission, turn drain, pod action, writer proof gap,
   failure matrix, tests, and live default gate.
+- [[research/post-clean-restart-restore-undo-multi-form-card-2026-07-15]] —
+  post-restart restore/undo contract, exact branchability limit, blob
+  materialization, crash matrix, and bounded ordered multi-form failure proof.
 - [[research/post-commit-program-admission-audit-2026-07-14]] — exact
   publication failure paths, runtime admission gates, partial Malli mutation,
   committed-generation reconstruction, readiness, and ordered proof.
