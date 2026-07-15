@@ -123,10 +123,10 @@ contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Source-frozen review and gate coordination:** review the final unit-1 descriptor publication diff, the unit-6 receipt/recovery Slice A, and the dependency-owned runner changes against their settled contracts; admit no lane from its own focused claim alone | The persistent goal still covers units 1–9. Three non-overlapping owned diffs are frozen, but queued edit-hook CLJS owners are contending for the single runner, so no current automatic run is integrated evidence | Let the extant runner owner finish, inspect its process/lock/report outcome, then run one coordinated fresh-cache exact-selector gate followed by one integrated unit-1/unit-6 focused CLJS gate. Commit reviewed slices separately and only then release source for the next implementation |
-| Database lifecycle | **Operator Slice 2 frozen for integration:** the portable coordinate/protocol owners retain one mechanism while Babashka excludes only Datahike/Hasch runtime dependencies; config derives and validates the ordinary launch descriptor, the supervisor publishes it in the pod environment, and pod replica/client consumers validate it before use | Babashka config/process proof is green at 20 tests/83 assertions and the earlier coordinate/launch CLJS proof is green at 7 tests/37 assertions. Final review added public Malli schemas, full configuration validation, malformed-reader error framing, and focused invalid-descriptor coverage; the post-review integrated CLJS gate is still pending | After the integrated gate, commit descriptor publication, then implement pod-owned native branch create/close. Prove default restart/crash recovery before restore/undo and prove multi-form transitions last; do not let later lifecycle consumers guess this contract |
-| Reactive/database views | **Dependency-owned runner repair frozen for proof:** the Shadow fork fixes exact selector identity after hash-set promotion and fails unmatched requests; `bin/test-cljs` verifies requested/matched/executed counts and the shared artifact owner prepares dependencies for CLJS, writer, and downstream bases | An earlier unchanged-bin ten-selector run was green at 10 tests/72 assertions, but the final fork pin, wrapper telemetry, fresh-cache path, and actual compile/Node interruption behavior still require one source-frozen public-command proof. Queued reparented edit-hook owners are now a recorded issue, not acceptance evidence | When the current queued owner exits, prove the fork from an empty exact gitlib cache, prove an unmatched selector fails closed, and interrupt real compile and Node phases while checking descendants, lock recovery, and artifact quiescence. Commit the one runner mechanism, then refill with reverse render-unit candidate selection and unrelated-write proof |
-| Agent runtime correctness | **Receipt/recovery Slice A frozen for integration:** eval receipt schema/transition mechanics live under `seon.eval.internal`; terminalization is one CAS; recovery closes running evals with their run/turn in one transaction; the existing plan compiler remains the sole plan mechanism | Static checks and focused design review are green. The receipt tests cover component reachability, duplicate/conflicting terminal CAS, unchanged basis, recovery provenance, second-pass idempotency, and absence of a running receipt below a closed owner. Automatic mid-edit full runs reported genesis-schema failures, so only a clean frozen focused run can accept or falsify the slice | Run receipt/recovery together with the unit-1 descriptor consumers. If genesis failures reproduce, diagnose the schema-owner/load boundary with the smallest REPL/test probe; otherwise commit Slice A. Child process launch stays ordered behind unit-1 ownership, while independent Inspect task/scorer grounding may refill the lane |
+| Top-level integration | **Review the first native branch lifecycle implementation boundary while preserving the full units 1–9 ledger:** integrate only exact typed transport, retained lifecycle intent, and create/close behavior that consume the committed descriptor contract | Descriptor publication is committed at `c60e698e`, receipt/recovery Slice A at `defb8014`, and runner lifecycle at `8d938d56`. The single-run gates are free; a separate exact two-test probe isolated the remaining full-suite schema-projection contaminant and cleared receipts as its cause | Review and falsify the Babashka UDS boundary, then the retained pod-owned branch transition. Coordinate the first real create/close proof before releasing unit 1 into restart/crash; keep the activated-projection repair as an explicit independent proof blocker rather than mixing it into lifecycle code |
+| Database lifecycle | **Typed UDS portability and retained native branch lifecycle in progress:** ordinary and branch descriptors are committed; the next owner must retain the exact source descriptor/create request before mutation and close from the current target head rather than the immutable creation cut | The operator gate passes 20 tests/83 assertions, coordinate/launch passes 7/37, and every unit-1 namespace in the integrated 55-test/351-assertion run passed. Source audit proved Babashka cannot currently require `seon.db.transport.uds`, and the descriptor intentionally does not retain the source logical route needed for close | Make the existing typed UDS call boundary Babashka-callable, then implement exact retained open/close with crash-safe inverse evidence. After a real create/close gate, prove default restart/crash, restore/undo, and multi-form transitions in that order |
+| Reactive/database views | **Runner lifecycle complete; reverse render-unit candidate selection is the active refill:** Shadow exact selectors, fail-closed telemetry, serialized dependency prep, and changed-test descendant cleanup are committed in `df24a9ff` + `8d938d56` | Fresh fork preparation and the ten exact selectors pass 10/72 with requested=matched=executed=10; an unmatched selector exits before execution at 11/10/0; public writer gates pass 4/16 and 4/21; real Node and Shadow-compile interruption remove descendants/lock and leave artifacts stable. The stale queued-hook admission issue and downstream prep graduation remain honestly open | Ground and implement the one reverse candidate index from the public query-attribute projection, then prove a related write selects the unit and an unrelated write does no work. Run live `/data` browser/SSE proof at the next coordinated checkpoint |
+| Agent runtime correctness | **Receipt/recovery Slice A complete; parent capability/child launch waits on unit 1:** `seon.eval` owns eval attributes, `seon.eval.internal` owns pure receipt mechanics, terminalization is one CAS, and recovery closes run/turn/eval in one transaction | Commit `defb8014` passes 7 tests/67 assertions. The exact ordered contaminant probe proves `client-runtime`'s real-replay fixture leaves an attachment-incomplete active schema projection before the next eval test; `10b7ac4f` records the owning fix and explicitly clears Slice A | Repair the attachment-scoped projection fixture/contract independently, then consume unit-1 process ownership for immutable parent capabilities and measured child launch/kill/reap. Inspect task/scorer grounding continues without claiming the unsettled child boundary |
 
 The ordered top-level sequence is therefore:
 
@@ -167,22 +167,21 @@ Read this card after the program ledger whenever work resumes. It records the
 next safe decisions, not a second architecture:
 
 1. keep the persistent goal on the complete units 1–9 graduation outcome;
-2. keep the three current source diffs frozen while the extant queued CLJS
-   owner finishes; its output is diagnostic because it began across edits, not
-   an integrated acceptance run;
-3. admit the Shadow dependency pin and wrapper only after one fresh-cache,
-   one-process exact-selector proof, an unmatched-selector negative proof, and
-   real compile/Node interruption evidence with descendant and lock cleanup;
-4. run one integrated focused gate over the post-review unit-1 descriptor
-   consumers plus unit-6 receipt/recovery. Reproduce and own any schema-genesis
-   failure before committing either slice;
-5. commit coherent lane-owned slices separately, then resume the unit-1 spine
-   with pod-owned native branch create/close followed by restart/crash,
-   restore/undo, and multi-form proof in that order; and
-6. refill released lanes with reverse render-unit selection, independent
-   Inspect task/scorer grounding, and downstream artifact work that consumes
-   only settled contracts. Never turn a newly found smell into the spine unless
-   it invalidates the named acceptance proof.
+2. treat `c60e698e`, `defb8014`, and `8d938d56` as the settled descriptor,
+   receipt/recovery, and runner boundaries; do not reopen them to house the
+   next lifecycle or render work;
+3. make the existing typed UDS call boundary Babashka-callable, then retain
+   source descriptor/create intent before implementing pod-owned native branch
+   create/close. Close from a freshly ensured target head, never the creation
+   coordinate, and never infer the source logical route from writer cluster;
+4. repair the exact activated-projection contaminant recorded by `10b7ac4f`
+   independently so later integrated/full gates carry valid schema authority;
+5. after real create/close proof, continue unit 1 through default
+   restart/crash, restore/undo, and multi-form failure proof in that order; and
+6. keep the remaining slots on reverse render-unit selection, Inspect task/
+   scorer grounding, and downstream artifact work that consumes only settled
+   contracts. Never turn a newly found smell into the spine unless it
+   invalidates the named acceptance proof.
 
 The persistent goal remains the whole unit 1–9 program. After every lane return
 or local commit, reconcile the compact working plan with this section before
