@@ -254,6 +254,188 @@ convergence plus the frozen candidates below is one coherent, falsifiable
 boundary. The observation and listing simplifications can follow using the
 same admitted model matrix.
 
+## Implementation-ready handoff
+
+This follow-up re-read the current shared checkout at `3649375d`. The audited
+filesystem implementation is unchanged since `bc2f587b`; the exact Git blob
+identities are `785700f7` for `fs.cljs`, `5d0f0818` for `internal.cljs`,
+`40179a88` for `match.cljc`, and `a4ad165d` for `fs_test.cljs`. The pinned
+Inspect `read_file` and `list_files` blobs are `9fee8ad1` and `896570a9`; the
+Clojure MCP guarded writer blob is `f3a54404`. This is a source-grounded
+implementation plan, not permission to edit while another lane owns a source
+freeze.
+
+### Exact current owners
+
+- `seon.agent.fs/read-file` owns the natural read name, but its body delegates
+  optional raw paging to `seon.agent.fs.internal/page-lines` and otherwise
+  returns the whole file. `seon.agent.fs/view` separately repeats the read,
+  paging, SHA, and response assembly while using
+  `seon.agent.fs.match/content-lines` and `number-lines`.
+- `seon.agent.fs/edit-file` selects two legacy modes and delegates through the
+  private `apply-edit` function to `internal/line-range-edit` or
+  `internal/match-edit`. Their supporting `content->lines`,
+  `replacement->lines`, `count-matches`, `edit-context-window`, and two
+  hardcoded context constants have no purpose after the legacy public path is
+  removed.
+- `seon.agent.fs/replace!` is the existing deterministic replacement owner.
+  `seon.agent.fs.match/decide` owns candidate selection and byte-preserving
+  splice decisions; `stale-file`, `cascade-fail`, and `edit-success` only map
+  those decisions to public results and perform the guarded write.
+- `seon.agent.fs/insert!` is the line-anchor insertion owner and already uses
+  the same line splitting, numbering, SHA, and anchored success facts.
+- `seon.agent.fs/write-file` is the distinct create/full-replacement owner. It
+  currently writes directly and returns no content identity. It must reuse the
+  same immediately-before-write SHA comparison and failure constructor as
+  `replace!`; a mutable timestamp registry would be a second mechanism.
+- `internal/->err`, `denied`, `scope-denied`, and `wasi-pending` currently own
+  the ordinary `:seon.agent.fs/error` dialect. The private `anchored-msg` and
+  `->anchored-fail` functions translate that dialect into flat
+  `:seon.error/message` facts. This translation pair is the exact duplication
+  to remove when the envelope converges.
+- Colocated Malli forms in `fs.cljs` are the public contract authority.
+  Positive `^:seon.fn/agent-facing?` metadata is the only visibility switch;
+  `my.ns/functions` and compact namespace rendering consume its persisted
+  projection without a filesystem-specific registry.
+
+### Minimal one-mechanism change order
+
+The first source commit is one read/edit-generation replacement, not all of
+the later observation, directory, and configurable-policy work:
+
+1. Freeze and run positions `8,1,9,4` through `frozen_tool_rows:file_edit`
+   before touching the surface. Retain each admitted native log separately so
+   a failure in one row cannot hide the other three trajectories.
+2. In `fs.cljs`, make `read-file` always return the bounded, numbered,
+   SHA-bearing projection now owned by `view`. Use the existing
+   `match/content-lines`, `match/number-lines`, and `internal/file-sha`; do not
+   create another reader namespace or wrapper. Preserve the load-bearing map
+   order with SHA and paging facts before content.
+3. Delete `view`, `default-view-lines`, `view-request`, and `view-response` in
+   that same edit. Update `replace!`, `stale-file`, the namespace examples,
+   and line-one documentation to name `read-file`. Removal, not merely hidden
+   eligibility, proves there is one implementation and removes the duplicate
+   schema closure.
+4. Delete `edit-file` and private `apply-edit`; then delete only their now-dead
+   helpers and schemas from `internal.cljs` and `fs.cljs`. Keep
+   `match/decide`, `replace!`, and `insert!` in place as the one mutation
+   family. Confirm every deletion with `rg` before changing the next owner.
+5. In a following coherent commit, delete or remove positive eligibility from
+   `file-exists?` and `home-dir`, then make every remaining visible filesystem
+   response use the discriminated result family below. This eliminates
+   `->anchored-fail` rather than teaching every caller to understand both
+   error dialects. `stat` and `grants` remain their exact replacement owners.
+6. Fence `write-file` in that envelope commit or the immediately following
+   commit: creation succeeds without a prior SHA; an existing target requires
+   `:seon.agent.fs/file-sha`, reads current bytes immediately before the
+   write, refuses absence or mismatch without mutation, and returns the new
+   SHA. Do not claim this is an OS-atomic compare-and-swap; it is the same
+   optimistic content fence already promised by `replace!`.
+
+The observation removal and envelope/write fence remain separate from the
+first read/edit commit; the listing experiment and database-owned bound policy
+remain later units. Pulling configuration work into the first source commit
+would destroy the controlled read/edit before-after comparison.
+
+### Schema and envelope target
+
+The current response maps mix optional success and error keys, so Malli can
+accept nonsensical combinations. Each operation instead owns an exact success
+map and references one shared filesystem failure map:
+
+```clojure
+(schema/register! :seon.agent.fs/failure-response
+  [:map
+   [:seon.agent.fs/ok? [:= false]]
+   [:seon.agent.fs/path :seon.agent.fs/path]
+   [:seon/error
+    [:map
+     [:seon.error/message :string]
+     [:seon.error/data {:optional true} :map]]]])
+```
+
+`read-response`, `write-response`, `list-response`, `stat-response`,
+`walk-response`, and `anchored-response` are `:or` forms over their exact
+`ok? true` success map and that referenced failure. A successful read always
+carries path, SHA, 1-based `from-line`, `lines-returned`, `total-lines`, an
+honest `truncated?`, and numbered content. A successful write carries path and
+the new SHA; a later measurement may justify a `created?` fact, but the first
+unit must not add speculative output. Anchored success retains path, SHA,
+range, line deltas, and bounded excerpt. Failure-specific recovery facts such
+as actual SHA, total lines, or match candidates live under
+`:seon.error/data`, never as a second top-level dialect.
+
+`grants` is an infallible observation and should add exact
+`:seon.agent.fs/ok? true` to its existing facts when the namespace-wide
+envelope changes. `configure!` is host-facing rather than positively callable,
+but its schema should use the same error nesting for internal consistency.
+This keeps the owning-namespace discriminator required by the toolkit
+architecture while using the standard structured `:seon/error` value. Do not
+move filesystem contracts into `seon.db`, `seon.result`, or a synthetic shared
+schema catalog.
+
+### Smallest focused proofs
+
+The code gate is deliberately narrow:
+
+```text
+bin/test-cljs --test=seon.agent.fs-test
+bin/test-cljs --test=seon.agent.ctx.namespaces-test
+src-inspect-ai/.venv/bin/pytest -q \
+  src-inspect-ai/tests/test_tool_generators.py \
+  src-inspect-ai/tests/test_frozen_tool_rows.py
+```
+
+Refactor the existing `view-*` assertions into `read-file-*` assertions and
+delete the legacy `edit-file-*` tests with their deleted behavior. Add focused
+cases for default bounded numbering and SHA, paging/off-end honesty, schema
+failure rather than silent negative bounds, unique/ambiguous/all/near anchored
+replacement, insert boundaries, grant denial, read-only denial, nested error
+shape, and no mutation on every failure. The write-fence unit adds four exact
+cases: new file without SHA, existing file without SHA refused, matching SHA
+accepted with new SHA returned, and external byte change after read refused
+without overwrite. The namespace selector needs one database-seeded inventory
+assertion that `read-file`, `replace!`, `insert!`, and `write-file` are present
+while `view` and `edit-file` are absent; it must inspect program facts, not
+source text.
+
+The shortest live REPL falsifiers after a coherent ACME rebuild are:
+
+```clojure
+(seon.agent.fs/grants)
+
+(my.ns/functions {:my.ns/ns 'seon.agent.fs})
+
+(seon.agent.fs.match/number-lines
+  (seon.agent.fs.match/content-lines "alpha\nbeta\ngamma\n") 1)
+```
+
+The first proves the exact root used by the later workspace row; the second
+must show one read generation and no legacy edit; the third isolates the pure
+numbering dependency before filesystem IO. For IO, materialize the native
+Inspect workspace first and call `read-file` on its known target. The returned
+map must have SHA and complete paging facts before numbered content, and a
+`replace!` with a deliberately wrong SHA must return `ok? false` with the
+actual SHA nested under `:seon.error/data` while exact file bytes remain
+unchanged. Do not create an untracked repository fixture as REPL evidence.
+
+### Dependency edges after reachability
+
+Filesystem implementation is dependency-ready only after all four namespace
+reachability rows and `namespace_workflow-seed1-000` have admitted, finalized
+evidence. That gate proves a small model can see and move through the ordinary
+dynamic namespace mechanism; otherwise a filesystem failure cannot be
+classified as surface selection versus general navigation failure.
+
+Once that gate closes, run F1–F4 on the unchanged filesystem surface, commit
+the read/edit replacement, rebuild the isolated ACME artifact once from a
+coherent source freeze, query the rebuilt program facts, and rerun the exact
+four rows with the same model-server/config identities. Only the classified
+before/after pair unlocks the common-envelope/write-fence follow-up. The
+directory merge and configurable bounds depend on that follow-up; durable
+multi-form position and batch/stream experiments do not depend on filesystem
+source and must retain their separate owner.
+
 ## Exact frozen task candidates
 
 Each candidate is a deterministic `file_edit` generator row under the existing
