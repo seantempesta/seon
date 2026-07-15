@@ -61,6 +61,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.db.id :as db.id]
+            [seon.db.internal :as db.internal]
             [seon.db.protocol :as db.protocol]
             [seon.db.process :as db.process]
             [seon.diffusion.grammar :as grammar]
@@ -3243,7 +3244,8 @@
    fallback. Returns an error envelope or a success carrying the one committed
    `:seon.eval/id`; no result handle is bound here."
   {:malli/schema [:=> [:catn [::record-request :map]] :any]}
-  [{::keys [at narration source result duration-ms tee output pending?]
+  [{::keys [at narration source result duration-ms tee output pending?
+            database-operations]
     turn-id :seon.agent.turn/id-of-turn
     ns      ::ending-ns}]
   (let [result (if (and (::ok? result) (not pending?))
@@ -3317,6 +3319,9 @@
         {:seon.db/ok? true
          :seon.eval/id (get-in primary [::db.id/ids ::eval-allocation])
          ::tee-recorded? true}
+        (seq database-operations)
+        (assoc ::database-operations database-operations)
+
         (and (::ok? result) (not pending?))
         (assoc ::retained-value (::value result)))
       (do
@@ -3356,6 +3361,9 @@
                   {:seon.db/ok? true
                    :seon.eval/id eval-id
                    ::tee-recorded? false}
+                  (seq database-operations)
+                  (assoc ::database-operations database-operations)
+
                   (and (::ok? result) (not pending?))
                   (assoc ::retained-value (::value result))))
               (do
@@ -4209,16 +4217,23 @@
             ;; `.run` callback is an `^:async` iife so the store propagates
             ;; through eval + maybe-await-value; we await its result.
             out-bucket  (atom "")
-            captured    (await
-                          (.run print-als out-bucket
-                            (fn ^:async run-with-capture! []
-                              (let [raw (await (eval compile-state source
-                                                     {::starting-ns @current-ns
-                                                      ::analyze-deps? false}))]
-                                {::raw raw
-                                 ::awaited (when (::ok? raw)
-                                             (await (maybe-await-value
-                                                      (::value raw))))}))))
+            operation-capture
+            (await
+              (db.internal/capture-operations!
+                (when db/*conn* @db/*conn*)
+                (fn ^:async run-with-operation-capture! []
+                  (await
+                    (.run print-als out-bucket
+                      (fn ^:async run-with-print-capture! []
+                        (let [raw (await (eval compile-state source
+                                               {::starting-ns @current-ns
+                                                ::analyze-deps? false}))]
+                          {::raw raw
+                           ::awaited (when (::ok? raw)
+                                       (await (maybe-await-value
+                                                (::value raw))))})))))))
+            captured    (::db/result operation-capture)
+            database-operations (::db/read-observations operation-capture)
             raw-result  (::raw captured)
             awaited     (::awaited captured)
             ;; A still-running Promise — auto-await timeout OR an explicit
@@ -4442,16 +4457,20 @@
               ;; commit before a process-local result handle can exist.
               recorded (await
                          (record-eval!
-                           {:seon.agent.turn/id-of-turn turn-id
-                            ::at           at
-                            ::duration-ms  duration-ms
-                            ::narration    narration
-                            ::source       source
-                            ::ending-ns    @current-ns
-                            ::result       result
-                            ::pending?     pending?
-                            ::output       output
-                            ::tee          tee}))
+                           (cond->
+                             {:seon.agent.turn/id-of-turn turn-id
+                              ::at           at
+                              ::duration-ms  duration-ms
+                              ::narration    narration
+                              ::source       source
+                              ::ending-ns    @current-ns
+                              ::result       result
+                              ::pending?     pending?
+                              ::output       output
+                              ::tee          tee}
+                             (seq database-operations)
+                             (assoc ::database-operations
+                                    database-operations))))
               eval-id (:seon.eval/id recorded)
               new-projection
               (when (and (::candidate-projection candidate-outcome)

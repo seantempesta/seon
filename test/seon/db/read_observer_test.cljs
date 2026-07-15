@@ -133,9 +133,9 @@
                       {:seon.db/db db-value
                        :seon.db/thunk
                        (fn []
-                         (let [captures (internal/current-read-captures)
+                         (let [captures (internal/current-operation-captures)
                                bigint (js/BigInt "9007199254740993")]
-                           (internal/record-read!
+                           (internal/record-operation!
                              captures :seon.db.read.operation/query db-value
                              {:seon.db/args [at token bigint]}
                              [at token bigint]
@@ -683,4 +683,147 @@
                                     :seon.db/read-source
                                     :seon.db.read.source/foreign))))
                   "foreign observations cannot authorize narrowing"))))
+        (settle! done))))
+
+(deftest awaited-operation-capture-retains-write-query-order-and-coordinates
+  (async done
+    (-> (fresh-seeded)
+        (.then
+          (fn [{conn :conn db-value :db}]
+            (internal/capture-operations!
+              db-value
+              (fn ^:async capture-write-query! []
+                (let [written
+                      (await
+                        (db/transact!
+                          {:seon.db/conn conn
+                           :seon.db/tx-data
+                           [{::id "child" ::value 11}]}))
+                      scalar
+                      (db/query
+                        {:seon.db/db @conn
+                         :seon.db/query
+                         '[:find ?value .
+                           :where
+                           [?e :seon.db.read-observer-test/id "child"]
+                           [?e :seon.db.read-observer-test/value ?value]]})]
+                  {:written written
+                   :scalar scalar
+                   :head (db/head-coordinate @conn)})))))
+        (.then
+          (fn [capture]
+            (let [operations (:seon.db/read-observations capture)
+                  [write query] operations
+                  result (:seon.db/result capture)]
+              (is (= 2 (count operations)))
+              (is (= [0 1] (mapv :seon.db/operation-position operations)))
+              (is (= [:seon.db.read.operation/transact
+                      :seon.db.read.operation/query]
+                     (mapv :seon.db/read-operation operations)))
+              (is (every? true? (map :seon.db/operation-ok? operations)))
+              (is (every? #(= :seon.db.read.source/captured
+                              (:seon.db/read-source %))
+                          operations)
+                  "a post-write read on the same attachment remains captured")
+              (is (= [{::id "child" ::value 11}]
+                     (:seon.db/tx-data (:seon.db/read-request write))))
+              (is (= 11 (:scalar result)))
+              (is (= 11 (:seon.db/read-result query)))
+              (is (= (:seon.db/coordinate (:written result))
+                     (:seon.db/operation-coordinate write)))
+              (is (= (:head result)
+                     (:seon.db/operation-coordinate query))))))
+        (settle! done))))
+
+(deftest failed-transaction-envelope-is-an-operation-failure
+  (async done
+    (-> (fresh-seeded)
+        (.then
+          (fn [{conn :conn db-value :db}]
+            (internal/capture-operations!
+              db-value
+              (fn ^:async capture-failed-write! []
+                (await
+                  (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data
+                     [{:seon.db.read-observer-test/unregistered 1}]}))))))
+        (.then
+          (fn [capture]
+            (let [operations (:seon.db/read-observations capture)
+                  operation (first operations)
+                  envelope (:seon.db/result capture)]
+              (is (= 1 (count operations)))
+              (is (false? (:seon.db/ok? envelope))
+                  "the Clojure eval can succeed while the write envelope fails")
+              (is (false? (:seon.db/operation-ok? operation)))
+              (is (false? (:seon.db/ok?
+                            (:seon.db/read-result operation))))
+              (is (= 0 (:seon.db/operation-position operation))))))
+        (settle! done))))
+
+(deftest awaited-operation-capture-is-nested-and-fiber-local
+  (async done
+    (-> (fresh-seeded)
+        (.then
+          (fn [{db-value :db}]
+            (let [capture-one
+                  (internal/capture-operations!
+                    db-value
+                    (fn ^:async capture-one! []
+                      (await (js/Promise.resolve :yield))
+                      (helper-query db-value "child")))
+                  capture-two
+                  (internal/capture-operations!
+                    db-value
+                    (fn ^:async capture-two! []
+                      (let [inner
+                            (await
+                              (internal/capture-operations!
+                                db-value
+                                (fn ^:async capture-inner! []
+                                  (await (js/Promise.resolve :yield))
+                                  (helper-query db-value "parent"))))]
+                        (helper-query db-value "child")
+                        inner)))]
+              (js/Promise.all #js [capture-one capture-two]))))
+        (.then
+          (fn [captures]
+            (let [one (aget captures 0)
+                  two (aget captures 1)
+                  inner (:seon.db/result two)]
+              (is (= 1 (count (:seon.db/read-observations one)))
+                  "a concurrent capture never receives the other fiber's reads")
+              (is (= 2 (count (:seon.db/read-observations two)))
+                  "an outer capture includes its nested scope and later read")
+              (is (= 1 (count (:seon.db/read-observations inner)))
+                  "the nested capture owns only its dynamic extent")
+              (is (= [0 1]
+                     (mapv :seon.db/operation-position
+                           (:seon.db/read-observations two)))))))
+        (settle! done))))
+
+(deftest historical-query-is-not-current-attachment-evidence
+  (async done
+    (-> (fresh-seeded)
+        (.then
+          (fn [{db-value :db}]
+            (let [historical (db/as-of db-value (dec (db/basis-t db-value)))
+                  capture
+                  (db/capture-reads
+                    {:seon.db/db db-value
+                     :seon.db/thunk
+                     #(db/query
+                        {:seon.db/db historical
+                         :seon.db/query
+                         '[:find (count ?e) .
+                           :where
+                           [?e :seon.db.read-observer-test/id]]})})
+                  operation (first (:seon.db/read-observations capture))]
+              (is (= :seon.db.read.source/foreign
+                     (:seon.db/read-source operation)))
+              (is (false? (:seon.db/read-replayable? operation)))
+              (is (< (:seon.db.coordinate/t
+                       (:seon.db/operation-coordinate operation))
+                     (:seon.db.coordinate/t (db/head-coordinate db-value)))))))
         (settle! done))))

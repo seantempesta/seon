@@ -42,3 +42,35 @@ pod, or copy unbounded eval results into the response.
 - Offline good/bad fixtures and one admitted live sample prove a correct query
   result passes while prompt-only arithmetic, wrong stored facts, or a query
   result from another turn fails.
+
+## Operation-capture checkpoint — 2026-07-15
+
+The first internal boundary is implemented in the existing database observer.
+One awaited `AsyncLocalStorage` scope now retains ordered query, pull, index,
+and transaction operations for an eval. A transaction is observed only after
+its envelope resolves, so `:seon.db/ok? false` remains an explicit operation
+failure even when the Clojure eval succeeds. Every observation carries a
+zero-based position and the actual read or committed database coordinate;
+nested scopes compose, concurrent fibers remain isolated, and an older
+historical coordinate is foreign rather than current-attachment evidence.
+
+The normal eval path passes the nonempty normalized vector to `record-eval!`
+after auto-await and before recorder persistence. It deliberately does not yet
+register an eval attribute or call `my.blob`: the next owner must put the
+canonical bytes through the one blob tier and attach that ref in the existing
+eval transaction. Until that persistence, composition-door projection,
+fail-closed scorer consumption, native-log read-back, and the admitted live
+sample land together, this issue remains open.
+
+Focused proof is green:
+
+- `seon.db.read-observer-test`: 14 tests, 119 assertions; and
+- `seon.eval.promise-ergonomics-test/eval-hands-awaited-database-operations-to-the-recorder`:
+  one test, seven assertions.
+
+The remaining persistence owner is the existing `my.blob` content-addressed
+tier plus the eval schema/transaction builder in `seon.eval`. It must write one
+canonical observation vector, attach its blob lookup ref in the same accepted
+eval transaction, and preserve attribute absence for an eval with no database
+operations. No downstream door or scorer may consume this process-local value
+until that link exists.

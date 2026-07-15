@@ -59,12 +59,11 @@
   (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
     (AsyncLocalStorage.)))
 
-(defonce read-capture-als
+(defonce operation-capture-als
   ;; Runtime-only stack of `[captured-db bucket-atom]` pairs. Separate from
-  ;; transaction/agent context: read capture is a synchronous render concern,
-  ;; not durable provenance or identity. AsyncLocalStorage makes nested scopes
-  ;; compositional and prevents a future Promise fiber from sharing a global
-  ;; collector accidentally.
+  ;; transaction/agent context: operation capture is runtime evidence, not
+  ;; durable provenance or identity. AsyncLocalStorage makes nested scopes
+  ;; compositional and keeps awaited and concurrent eval fibers isolated.
   (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
     (AsyncLocalStorage.)))
 
@@ -108,25 +107,35 @@
   [f]
   (.exit agent-id-als f))
 
-(defn current-read-captures
-  "The active read-capture stack, or nil outside a capture scope.
+(defn current-operation-captures
+  "The active database-operation capture stack, or nil outside a scope.
 
    Kept internal so an unobserved `seon.db` read pays one `getStore` and
    allocates no request/event data."
   []
-  (let [captures (.getStore read-capture-als)]
+  (let [captures (.getStore operation-capture-als)]
     (when (some? captures) captures)))
 
-(defn run-with-read-capture
-  "Run synchronous `f` with a fresh read bucket relative to `captured-db`.
+(defn run-with-operation-capture
+  "Run `f` with a fresh operation bucket relative to `captured-db`.
 
-   Nested scopes append to the active stack. A read is therefore recorded in
-   both the inner bucket and every enclosing bucket; each normalizes database
-   source relative to its own captured value."
+   Nested scopes append to the active stack. An operation is therefore
+   recorded in both the inner bucket and every enclosing bucket. A returned
+   Promise remains inside the ALS scope until it settles."
   [captured-db bucket f]
-  (.run read-capture-als
-        (conj (vec (or (current-read-captures) [])) [captured-db bucket])
+  (.run operation-capture-als
+        (conj (vec (or (current-operation-captures) []))
+              [captured-db bucket])
         f))
+
+(defn ^:async capture-operations!
+  "Await `f` and return its value with ordered database observations."
+  [captured-db f]
+  (let [bucket (atom [])
+        result (await
+                 (run-with-operation-capture captured-db bucket f))]
+    {::db/result result
+     ::db/read-observations @bucket}))
 
 ;; ---------------------------------------------------------------------------
 ;; Persisted transaction provenance. The generic ALS map remains useful to
@@ -1241,33 +1250,61 @@
               :else false))]
     (boolean (valid? value))))
 
-(defn record-read!
-  "Append one normalized read fact to every active capture bucket.
+(defn record-operation!
+  "Append one normalized database operation to every active capture bucket.
 
    `captures` is the already-read ALS stack, so an unbound read never calls
-   this function or allocates request/event data. `operation-replayable?` is
-   false for lazy/temporal operations whose returned handle cannot be replayed
-   as a synchronous immutable read."
-  [captures operation actual-db request result operation-replayable?]
+   this function or allocates request/event data. Reads derive their complete
+   coordinate from `actual-db`; writes pass the committed coordinate returned
+   by the writer. `operation-replayable?` remains false for writes and for
+   lazy/temporal reads."
+  ([captures operation actual-db request result operation-replayable?]
+   (record-operation! captures operation actual-db request result
+                      operation-replayable?
+                      (try
+                        (coordinate/resolved actual-db)
+                        (catch :default _ nil))))
+  ([captures operation actual-db request result operation-replayable?
+    operation-coordinate]
   (doseq [[captured-db bucket] captures]
-    (let [captured-source? (identical? captured-db actual-db)
+    (let [captured-coordinate
+          (try (coordinate/resolved captured-db) (catch :default _ nil))
+          actual-coordinate
+          (try (coordinate/resolved actual-db) (catch :default _ nil))
+          captured-source?
+          (or (identical? captured-db actual-db)
+              (and captured-coordinate
+                   actual-coordinate
+                   (coordinate/same-attachment? captured-coordinate
+                                                actual-coordinate)
+                   (<= (::coordinate/t captured-coordinate)
+                       (::coordinate/t actual-coordinate))))
           [request' request-replayable?]
           (normalize-read-value captured-db request)
           [result' result-replayable?]
-          (normalize-read-value captured-db result)]
+          (normalize-read-value captured-db result)
+          position (count @bucket)]
       (swap! bucket conj
-             {::db/read-operation operation
-              ::db/read-source
-              (if captured-source?
-                :seon.db.read.source/captured
-                :seon.db.read.source/foreign)
-              ::db/read-request request'
-              ::db/read-result result'
-              ::db/read-replayable?
-              (boolean (and operation-replayable?
-                            captured-source?
-                            request-replayable?
-                            result-replayable?))}))))
+             (cond->
+               {::db/read-operation operation
+                ::db/operation-position position
+                ::db/operation-ok?
+                (if (= operation :seon.db.read.operation/transact)
+                  (true? (::db/ok? result))
+                  true)
+                ::db/read-source
+                (if captured-source?
+                  :seon.db.read.source/captured
+                  :seon.db.read.source/foreign)
+                ::db/read-request request'
+                ::db/read-result result'
+                ::db/read-replayable?
+                (boolean (and operation-replayable?
+                              captured-source?
+                              request-replayable?
+                              result-replayable?))}
+               operation-coordinate
+               (assoc ::db/operation-coordinate operation-coordinate)))))))
 
 (defn normalize-transact-args
   "Normalize `transact!`'s variadic args into the canonical map-in

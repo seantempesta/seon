@@ -481,9 +481,15 @@
 (schema/register! ::empty-read-request [:map {:closed true}])
 (schema/register! ::read-result :any)
 (schema/register! ::read-replayable? :boolean)
+(schema/register! ::operation-position [:int {:min 0}])
+(schema/register! ::operation-ok? :boolean)
+(schema/register! ::operation-coordinate ::coordinate)
 (schema/register! ::read-observation
   [:map
    [::read-operation ::read-operation]
+   [::operation-position ::operation-position]
+   [::operation-ok? ::operation-ok?]
+   [::operation-coordinate {:optional true} ::operation-coordinate]
    [::read-source ::read-source]
    [::read-request ::read-request]
    [::read-result ::read-result]
@@ -582,7 +588,7 @@
                   ::capture-reads-response]}
   [{::keys [db thunk]}]
   (let [bucket (atom [])
-        result (internal/run-with-read-capture db bucket thunk)]
+        result (internal/run-with-operation-capture db bucket thunk)]
     (when (instance? js/Promise result)
       (throw (ex-info
                "seon.db/capture-reads requires a synchronous thunk"
@@ -725,13 +731,29 @@
     [:=> [:catn [::conn ::conn] [::tx-data ::tx-data] [::tx-meta ::tx-meta]]
          ::transact-response]]}
   [& call-args]
-  (try
-    (let [arg (internal/normalize-transact-args call-args)]
-      (internal/assert-invocation-shape! arg)
-      ;; AWAIT is load-bearing: rejections must resolve to the envelope.
-      (await (internal/transact!* (update arg ::conn #(or % *conn*)))))
-    (catch :default e
-      (internal/commit-error-envelope e))))
+  (let [captures (internal/current-operation-captures)
+        [arg actual-db result]
+        (try
+          (let [arg (internal/normalize-transact-args call-args)]
+            (internal/assert-invocation-shape! arg)
+            (let [arg (update arg ::conn #(or % *conn*))
+                  actual-db @(internal/resolve-conn (::conn arg))]
+              ;; AWAIT is load-bearing: rejections must resolve to the envelope.
+              [arg actual-db (await (internal/transact!* arg))]))
+          (catch :default e
+            [nil nil (internal/commit-error-envelope e)]))]
+    (when captures
+      (internal/record-operation!
+        captures :seon.db.read.operation/transact actual-db
+        (dissoc (or arg {::tx-data (vec call-args)})
+                ::conn ::return-report?)
+        (dissoc result ::tx-report)
+        false
+        (or (::coordinate result)
+            (when actual-db
+              (try (db.coordinate/resolved actual-db)
+                   (catch :default _ nil))))))
+    result))
 
 ;; ---------------------------------------------------------------------------
 ;; Provenance genesis.
@@ -877,8 +899,8 @@
   [db q inputs budget-request]
   (let [budget (clamp-budget query-budget-ceilings budget-request)
         result (raw-query db q inputs budget)]
-    (when-let [captures (internal/current-read-captures)]
-      (internal/record-read!
+    (when-let [captures (internal/current-operation-captures)]
+      (internal/record-operation!
         captures :seon.db.read.operation/query db
         (merge {::query q ::args (vec inputs)} (captured-budget budget))
         result true))
@@ -1019,8 +1041,8 @@
   [{::keys [db index components index-limit seek?]
     :or {components [] seek? false}}]
   (let [result (raw-index-datoms db index components index-limit seek?)]
-    (when-let [captures (internal/current-read-captures)]
-      (internal/record-read!
+    (when-let [captures (internal/current-operation-captures)]
+      (internal/record-operation!
         captures :seon.db.read.operation/index-datoms db
         {::index index
          ::components components
@@ -1062,8 +1084,8 @@
   [{::keys [db index components index-limit index-prefix?]
     :or {components [] index-prefix? false}}]
   (let [result (raw-rseek-datoms db index components index-limit index-prefix?)]
-    (when-let [captures (internal/current-read-captures)]
-      (internal/record-read!
+    (when-let [captures (internal/current-operation-captures)]
+      (internal/record-operation!
         captures :seon.db.read.operation/rseek-datoms db
          {::index index
           ::components components
@@ -1121,8 +1143,8 @@
   {:malli/schema [:=> [:catn [::db :any]] :map]}
   [db]
   (let [result (installed-schema* db)]
-    (when-let [captures (internal/current-read-captures)]
-      (internal/record-read!
+    (when-let [captures (internal/current-operation-captures)]
+      (internal/record-operation!
         captures :seon.db.read.operation/installed-schema db {} result true))
     result))
 
@@ -1356,8 +1378,8 @@
   [db pattern ref budget-request]
   (let [budget (clamp-budget pull-budget-ceilings budget-request)
         result (guarded-pull db pattern ref budget)]
-    (when-let [captures (internal/current-read-captures)]
-      (internal/record-read!
+    (when-let [captures (internal/current-operation-captures)]
+      (internal/record-operation!
         captures :seon.db.read.operation/pull db
         (merge {::pull-pattern pattern ::ref ref} (captured-budget budget))
         result true))
@@ -1424,8 +1446,8 @@
   "Resolve a lazy Entity and record a deliberately non-replayable read."
   [db ref]
   (let [result (raw-entity db ref)]
-    (when-let [captures (internal/current-read-captures)]
-      (internal/record-read!
+    (when-let [captures (internal/current-operation-captures)]
+      (internal/record-operation!
         captures :seon.db.read.operation/entity-lazy db
         {::ref ref} result false))
     result))
@@ -1467,8 +1489,8 @@
   "Resolve and touch an entity under one public read observation."
   [db ref]
   (let [result (touch->map (raw-entity db ref))]
-    (when-let [captures (internal/current-read-captures)]
-      (internal/record-read!
+    (when-let [captures (internal/current-operation-captures)]
+      (internal/record-operation!
         captures :seon.db.read.operation/entity db {::ref ref} result true))
     result))
 
@@ -1537,8 +1559,8 @@
   ([] (history @(internal/resolve-conn *conn*)))
   ([db]
    (let [result (d/history db)]
-     (when-let [captures (internal/current-read-captures)]
-       (internal/record-read!
+     (when-let [captures (internal/current-operation-captures)]
+       (internal/record-operation!
          captures :seon.db.read.operation/history db {} result false))
      result)))
 
@@ -1557,8 +1579,8 @@
   ([t] (as-of @(internal/resolve-conn *conn*) t))
   ([db t]
    (let [result (d/as-of db t)]
-     (when-let [captures (internal/current-read-captures)]
-       (internal/record-read!
+     (when-let [captures (internal/current-operation-captures)]
+       (internal/record-operation!
          captures :seon.db.read.operation/as-of db
          {::time-point t} result false))
      result)))
@@ -1644,8 +1666,8 @@
   ([t] (since @(internal/resolve-conn *conn*) t))
   ([db t]
    (let [result (d/since db t)]
-     (when-let [captures (internal/current-read-captures)]
-       (internal/record-read!
+     (when-let [captures (internal/current-operation-captures)]
+       (internal/record-operation!
          captures :seon.db.read.operation/since db
          {::time-point t} result false))
      result)))
@@ -1692,8 +1714,8 @@
   ([] (basis-t @(internal/resolve-conn *conn*)))
   ([db]
    (let [result (basis-t* db)]
-     (when-let [captures (internal/current-read-captures)]
-       (internal/record-read!
+     (when-let [captures (internal/current-operation-captures)]
+       (internal/record-operation!
          captures :seon.db.read.operation/basis-t db {} result true))
      result)))
 

@@ -199,6 +199,46 @@
                   (is false (str "threw — " e))
                   (done))))))
 
+(deftest eval-hands-awaited-database-operations-to-the-recorder
+  (async done
+    (let [captured (atom [])
+          original seval/record-eval!]
+      (set! seval/record-eval!
+            (fn [request]
+              (swap! captured conj
+                     (select-keys request [:seon.eval/database-operations]))
+              (original request)))
+      (-> (with-conn
+            (fn []
+              (-> (run-batch
+                    "operation-capture" "operation-capture-turn"
+                    "(seon.db/query '[:find (count ?e) . :where [?e :seon.agent/id]])")
+                  (.then
+                    (fn [_]
+                      (run-batch
+                        "operation-absence" "operation-absence-turn"
+                        "(+ 1 1)"))))))
+          (.then
+            (fn [batch]
+              (let [[operation-request absence-request] @captured
+                    operations
+                    (:seon.eval/database-operations operation-request)
+                    operation (first operations)]
+                (is (= 1 (:seon.eval/n-ok batch)))
+                (is (= 1 (count operations)))
+                (is (= :seon.db.read.operation/query
+                       (:seon.db/read-operation operation)))
+                (is (= 0 (:seon.db/operation-position operation)))
+                (is (number? (:seon.db/read-result operation)))
+                (is (map? (:seon.db/operation-coordinate operation)))
+                (is (= {} absence-request)
+                    "a form without database operations preserves absence"))))
+          (.finally (fn [] (set! seval/record-eval! original)))
+          (.then (fn [_] (done)))
+          (.catch (fn [e]
+                    (is false (str "threw — " e))
+                    (done)))))))
+
 ;; ---------------------------------------------------------------------------
 ;; defer e2e — the form does NOT block; it records the placeholder and stores
 ;; the live Promise; re-referencing result/<id> auto-awaits it to data.
