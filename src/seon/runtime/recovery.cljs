@@ -41,9 +41,12 @@
 ;; ---------------------------------------------------------------------------
 
 (schema/register! ::repaired? :boolean)
-(schema/register! ::agent-ids [:vector :seon.agent/id])
-(schema/register! ::run-ids [:vector :seon.agent.run/id])
-(schema/register! ::turn-ids [:vector :seon.agent.turn/id])
+;; These are response values, not entity attributes. Use their shared value
+;; shapes so recovery has no hidden load-order dependency on the namespaces
+;; that own the corresponding identity attributes.
+(schema/register! ::agent-ids [:vector :string])
+(schema/register! ::run-ids [:vector ::db.id/compact-value])
+(schema/register! ::turn-ids [:vector ::db.id/compact-value])
 (schema/register! ::recover-request
   [:map
    [:seon.runtime.recovery/detail
@@ -188,9 +191,9 @@
 
 (schema/register! ::transaction :int)
 (schema/register! ::at :inst)
-(schema/register! ::agents [:vector :seon.agent/id])
-(schema/register! ::runs [:vector :seon.agent.run/id])
-(schema/register! ::turns [:vector :seon.agent.turn/id])
+(schema/register! ::agents [:vector :string])
+(schema/register! ::runs [:vector ::db.id/compact-value])
+(schema/register! ::turns [:vector ::db.id/compact-value])
 (schema/register! ::notice
   [:map
    [:seon.runtime.recovery/id :seon.runtime.recovery/id]
