@@ -627,10 +627,12 @@ readiness from this paragraph.
   the coordinate handoff and coherent source commits, then restart ACME and
   require ready status.
 - The interim guarded-force Datahike candidate passed its focused integration,
-  but freshness review found upstream delete/GC fixes that require Konserve
-  0.9.357 or newer. The runtime lane rejected that stale candidate and is
-  forward-porting Seon's maintained compatibility patch onto Konserve 0.9.359
-  before rebuilding and publishing the final Datahike descendant. This is a
+  but the full Node CLJS gate found one lower dependency failure: Konserve
+  0.9.359's Node filestore delete rejects an already-absent path with `ENOENT`
+  instead of succeeding idempotently. The runtime lane owns the existing
+  mechanism and must publish its corrected exact SHA, republish Datahike
+  against it, verify both public HTTPS coordinates, cut root pins/build inputs,
+  and pass the default-cluster artifact/runtime proof before handoff. This is a
   withheld dependency coordinate, not an ACME failure to work around locally.
 - The native milestone task can now enter through common source admission,
   mandatory finalization, and exact before/after operator status. The remaining

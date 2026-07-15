@@ -75,10 +75,13 @@ callback maps retained around the finalized native sample close P0b. The exact
 invocation-local callback and replay command are in
 [[research/mlx-live-wiring-audit-2026-07-15]].
 
-The current handoff is withheld because a freshness audit rejected the interim
-Datahike candidate: upstream delete/GC fixes require Konserve 0.9.357 or newer,
-and the maintained compatibility patch is being forward-ported to 0.9.359.
-Never pin or rebuild against the interim candidate from this lane.
+The current handoff is withheld because the full Datahike Node CLJS gate found
+that Konserve 0.9.359's Node filestore delete rejects an already-absent path
+with `ENOENT` instead of succeeding idempotently. The runtime lane must repair
+and publish that existing Konserve mechanism, republish Datahike against the
+new exact SHA, prove both public HTTPS coordinates, cut the root pins/build
+inputs, and pass default-cluster artifact/runtime proof. Never pin or rebuild
+against an interim candidate from this lane.
 
 The multi-form ordering defect is real but queued for P4, not the active gate:
 `:seon.agent.turn/evals` is cardinality-many and its identity datom transaction
