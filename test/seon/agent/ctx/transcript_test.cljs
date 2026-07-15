@@ -22,6 +22,13 @@
    (cond-> {::t/turn-idx turn ::t/kind kind}
      edn (assoc ::t/entity {:seon.eval/result-edn edn}))))
 
+(deftest transcript-policy-defaults-come-from-current-declarations
+  (testing "a stale activated registry cannot turn source-owned defaults nil"
+    (is (= 25 (deref #'t/default-turns-retained)))
+    (is (= 50 (deref #'t/default-turn-window-size)))
+    (is (= 25 (deref #'t/default-turn-eviction-size)))
+    (is (= 8192 (deref #'t/default-settled-token-cap)))))
+
 (deftest host-telemetry-is-bounded-unix-load-line
   (let [line (t/host-telemetry)]
     (is (re-find #"^; host · load 1m/5m/15m [0-9.]+/[0-9.]+/[0-9.]+ · rss [0-9.]+ (MiB|GiB) · heap [0-9.]+ (MiB|GiB)$"

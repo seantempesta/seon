@@ -65,6 +65,14 @@ facts and blobs remain queryable. Focused config, run, and transcript tests
 pass 41 tests and 174 assertions, and the rebuilt ACME pod reports the exact
 policy datoms through the repository REPL boundary.
 
+The first combined default-cluster restart exposed a warm-schema edge: the
+transcript fallback resolved policy keys through Malli's last activated
+database projection, which could predate the new `:default` properties. The
+fallback now compiles the current `seon.schema` declaration itself. The full
+CLJS checkpoint passes 911 tests/4,645 assertions, and an existing default
+database now restarts, resumes both agents, and serves `/` without the prior
+nil retention-window core fault.
+
 The config-apply operator defect is now fixed through one live pod operation
 shared with boot. An already-ready target resolves the selected manifest once
 through the canonical Aero reader and reconciles only routes, skills, and the

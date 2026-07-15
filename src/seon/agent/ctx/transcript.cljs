@@ -101,9 +101,17 @@
 (schema/register! ::settled-token-cap   [:int {:default 8192 :min 0}])
 
 (defn- schema-default
-  "Read one colocated policy default from its registered Malli schema."
+  "Read one colocated policy default from its current source declaration.
+
+   Compile the collected definition itself, not `schema-key` through Malli's
+   process-global registry: after database activation that registry is the
+   last committed projection and may legitimately lag a newly loaded source
+   declaration until reconciliation commits."
   [schema-key]
-  (:default (m/properties (m/schema schema-key))))
+  (some-> (schema/schema-definition schema-key)
+          m/schema
+          m/properties
+          :default))
 
 (def ^:private default-turns-retained     (schema-default ::turns-retained))
 (def ^:private default-turn-window-size   (schema-default ::turn-window-size))

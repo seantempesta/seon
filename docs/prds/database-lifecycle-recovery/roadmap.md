@@ -82,9 +82,9 @@ UUID through maintained Datahike, proves it belongs to the currently attached
 database branch, validates the selected t inside that container, and returns
 the `as-of` view. Partial coordinates, wrong attachments, missing commits, and
 out-of-range cuts return structured error values. The focused CLJS proof passes
-2 tests/11 assertions. After a public rebuild/restart, live CLJS resolved
+2 tests/11 assertions. After the combined public rebuild/restart, live CLJS resolved
 database `54b5b7e7-51fb-3220-b079-81a81914d86f`, branch `:db`, commit
-`6a56d188-81ea-593c-8bd4-b9e8108b8d7e`, t `536870941`; the returned view
+`6a56d546-9284-5854-beb5-e0902938c200`, t `536870953`; the returned view
 reported the same t and queried root successfully. Changing only the branch to
 `:experiment` returned a `:user-input` error value. This is the dependency for
 migrating turn, error, autocomplete, and frozen-web consumers without retaining
