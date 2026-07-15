@@ -23,6 +23,7 @@
      (cljs.test/run-tests 'seon.index-core-test)"
   (:require
     [clojure.string :as str]
+    [cljs.reader :as reader]
     [cljs.test :as t :refer [deftest is async]]
     [datahike.api :as d]
     [seon.client :as client]
@@ -141,6 +142,17 @@
    names, which is the point: it asserts parser fidelity, not db/*'s signature."
   [arglists-str]
   (count (re-seq #"\[" (str arglists-str))))
+
+(deftest single-arity-vector-bodies-stay-out-of-indexed-arglists
+  (doseq [sym ["my.canvas/button" "my.canvas/input"
+               "my.canvas/select" "my.canvas/toggle"]]
+    (let [row    (by-sym @core-tx sym)
+          parsed (reader/read-string (:seon.fn/arglists row))]
+      (is (= 1 (count parsed))
+          (str sym " has exactly one physical callable arglist: "
+               (pr-str parsed)))
+      (is (map? (ffirst parsed))
+          (str sym " retains its real map destructuring input")))))
 
 (deftest transact!-indexes-with-real-source-spec-arglists
   ;; The single most important criterion: transact! carries the real spec

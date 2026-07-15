@@ -648,6 +648,9 @@
    :seon.eval/output
    :seon.eval/error
    :seon.eval/error-data
+   ;; Full ordered database-operation evidence is one canonical blob. This
+   ;; must be boot-installed because eval rows are nested turn components.
+   :seon.eval/database-operations-blob
    ;; :seon.eval/ns — ending ns from cljs.js/eval-str's :ns, or
    ;; unchanged accumulator on parse/eval failure (v1.md:236).
    :seon.eval/ns
@@ -1497,20 +1500,27 @@
 (defn- arglists-from-source
   "Parse the pr-str-style arglists string (e.g. \"([{::keys [a b]}])\") from a
    `(defn …)` source text. Reader-free: an arg-vector is a `[..]` sitting
-   either directly inside the defn list (paren-depth 1, brace-depth 0 —
-   single-arity) or as the FIRST element of a list directly inside the defn
+   either FIRST directly inside the defn list (paren-depth 1, brace-depth 0 —
+   single-arity) or as the FIRST element of each list directly inside the defn
    (paren-depth 2 — each `([args] body)` arity of a multi-arity defn; the
    `fresh?` flag tracks \"just entered a depth-2 list, nothing but whitespace
    since\", so vectors elsewhere in arity bodies are never captured). This
-   skips `{:malli/schema [...]}` metadata maps (brace-depth > 0). Collects
-   every arg-vector across arities, wraps in parens. Tracks string, escape,
-   `\\(` char-literal, and `;`-to-EOL comment state. Returns \"()\" if none
-   found (caller treats that as no arglists)."
+   skips `{:malli/schema [...]}` metadata maps (brace-depth > 0). Candidate
+   vectors retain their parenthesis depth until the scan finishes: the first
+   depth-1 vector makes the definition single-arity and excludes later
+   vector-valued body data; otherwise all depth-2 arity vectors survive.
+   Wraps the selected vectors in parens. Tracks string, escape, `\\(`
+   char-literal, and `;`-to-EOL comment state. Returns \"()\" if none found
+   (caller treats that as no arglists)."
   [src]
   (let [n (count src)]
     (loop [i 0 pdepth 0 bdepth 0 in-str? false esc? false fresh? false vecs []]
       (if (>= i n)
-        (str "(" (str/join " " vecs) ")")
+        (let [single (some (fn [[depth source]]
+                             (when (= 1 depth) source))
+                           vecs)
+              selected (if single [single] (map second vecs))]
+          (str "(" (str/join " " selected) ")"))
         (let [c (nth src i)]
           (cond
             esc?                   (recur (inc i) pdepth bdepth in-str? false fresh? vecs)
@@ -1545,7 +1555,7 @@
                                  (= vc \])           (if (= vd 1) j (recur (inc j) (dec vd) vs? false))
                                  :else               (recur (inc j) vd vs? false)))))]
               (recur (inc vend) pdepth bdepth in-str? false false
-                     (conj vecs (subs src i (inc vend)))))
+                     (conj vecs [pdepth (subs src i (inc vend))])))
             (or (= c \space) (= c \newline) (= c \tab) (= c \,) (= c \return))
             (recur (inc i) pdepth bdepth in-str? false fresh? vecs)
             :else (recur (inc i) pdepth bdepth in-str? false false vecs)))))))

@@ -55,8 +55,25 @@ unspecced functions still expose every stored physical arglist.
 
 A table-driven focused regression covers nested Hiccup and recursive vector
 output data. Together with the existing pure-variadic regressions, the focused
-gate passes four tests and twenty assertions. The issue remains open until the
-coordinated clean ACME rebuild proves all four database-derived canvas cards.
+gate passes four tests and twenty assertions. This renderer defense is
+necessary but does not make the underlying program facts truthful by itself.
+
+## Index repair checkpoint — 2026-07-15
+
+`seon.client/arglists-from-source` is the first corrupt owner. Its reader-free
+scanner previously collected every vector directly inside a single-arity
+`defn`, including a vector-valued implementation body. Candidate vectors now
+retain their parenthesis depth until the scan completes. The first depth-one
+vector establishes a single-arity definition and excludes all later body data;
+when no depth-one vector exists, all depth-two multi-arity parameter vectors
+survive.
+
+The exact boot-index regression proves each of `my.canvas/button`, `input`,
+`select`, and `toggle` now stores one physical map-destructuring arglist.
+Existing real-source tests simultaneously preserve pure variadic `query`,
+multi-arity `pull` and `entity`, the variadic `transact!` body, and local
+auto-qualified destructuring keywords. The focused indexing gate passes four
+tests and twenty-three assertions.
 
 ## Acceptance criteria
 
@@ -73,6 +90,8 @@ coordinated clean ACME rebuild proves all four database-derived canvas cards.
 
 ## Scheduling
 
-Keep this separate from the completed pure-variadic logical-arity change. Run
-the stored-fact falsifier after the coordinated ACME rebuild, then fix the first
-corrupt owner before changing namespace policy or context prose.
+Keep this separate from the completed pure-variadic logical-arity change. The
+fix and focused source proof are complete. The remaining exit is a coordinated
+clean ACME rebuild proving the durable database rows and all four derived cards
+from one immutable database value. Namespace policy and context prose are
+outside this defect.
