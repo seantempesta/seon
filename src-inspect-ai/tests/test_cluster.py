@@ -58,6 +58,113 @@ def test_static_target_snapshot_rejects_wrong_url_or_status():
                 ':url "http://127.0.0.1:9999"}'))
 
 
+def test_mlx_model_server_snapshot_hashes_closed_identity(tmp_path):
+    revision = "a" * 40
+    snapshot = tmp_path / "models--owner--model" / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text('{"quantization":"4bit"}')
+    (snapshot / "model.safetensors").write_bytes(b"weights-a")
+    server = tmp_path / "server.py"
+    server.write_text("VERSION = 'fixture'\n")
+    process = {
+        "pid": 123,
+        "start_instant": "2026-07-15T12:00:00Z",
+        "argv": ["python", "-m", "mlx_lm.server", "--model", str(snapshot)],
+    }
+
+    identity = cl.mlx_model_server_snapshot(
+        "http://127.0.0.1:18081/v1/chat/completions", snapshot,
+        process_snapshot=lambda: process,
+        server_module=server,
+        package_versions={"mlx-lm": "0.31.3", "mlx": "0.32.0"},
+        system_fingerprint="0.31.3-0.32.0-macos-arm64",
+        quantization="4bit",
+    )
+
+    assert identity["endpoint"] == \
+        "http://127.0.0.1:18081/v1/chat/completions"
+    assert identity["artifact"]["request_model"] == str(snapshot)
+    assert identity["artifact"]["revision"] == revision
+    assert identity["artifact"]["size_bytes"] > 0
+    assert len(identity["artifact"]["manifest_sha256"]) == 64
+    assert identity["response"]["model"] == str(snapshot)
+
+    (snapshot / "model.safetensors").write_bytes(b"weights-b")
+    changed = cl.mlx_model_server_snapshot(
+        "http://127.0.0.1:18081/v1/chat/completions", snapshot,
+        process_snapshot=lambda: process,
+        server_module=server,
+        package_versions={"mlx-lm": "0.31.3", "mlx": "0.32.0"},
+        system_fingerprint="0.31.3-0.32.0-macos-arm64",
+        quantization="4bit",
+    )
+    assert changed["artifact"]["manifest_sha256"] != \
+        identity["artifact"]["manifest_sha256"]
+
+
+def test_model_server_identity_rejects_open_or_mislabeled_mlx_map():
+    identity = {
+        "schema_version": 1,
+        "implementation": "mlx-lm",
+        "endpoint": "http://127.0.0.1:18081/v1/chat/completions",
+        "process": {"pid": 123, "start_instant": "instant",
+                    "argv_sha256": "a" * 64},
+        "runtime": {"module_sha256": "b" * 64,
+                    "packages": {"mlx-lm": "0.31.3"}},
+        "artifact": {
+            "mechanism": "huggingface-snapshot",
+            "request_model": "/cache/snapshots/" + "c" * 40,
+            "revision": "c" * 40,
+            "manifest_sha256": "d" * 64,
+            "size_bytes": 1,
+            "quantization": "4bit",
+            "config_sha256": "e" * 64,
+        },
+        "response": {"model": "/wrong", "system_fingerprint": "fp"},
+    }
+    with pytest.raises(ValueError, match="response model"):
+        cl.validate_model_server_identity(identity)
+    with pytest.raises(ValueError, match="closed map"):
+        cl.validate_model_server_identity({**identity, "unexpected": True})
+
+
+def test_mlx_snapshot_rejects_wrong_or_changing_process(tmp_path):
+    revision = "a" * 40
+    snapshot = tmp_path / "models--owner--model" / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}")
+    server = tmp_path / "server.py"
+    server.write_text("pass\n")
+    kwargs = {
+        "server_module": server,
+        "package_versions": {"mlx-lm": "0.31.3", "mlx": "0.32.0"},
+        "system_fingerprint": "mlx-fixture",
+        "quantization": "4bit",
+    }
+    with pytest.raises(ValueError, match="does not select"):
+        cl.mlx_model_server_snapshot(
+            "http://127.0.0.1:18081/v1/chat/completions", snapshot,
+            process_snapshot=lambda: {
+                "pid": 1, "start_instant": "a",
+                "argv": ["python", "-m", "mlx_lm.server", "--model", "/wrong"],
+            },
+            **kwargs,
+        )
+
+    processes = iter([
+        {"pid": 1, "start_instant": "a",
+         "argv": ["mlx_lm.server", "--model", str(snapshot)]},
+        {"pid": 2, "start_instant": "b",
+         "argv": ["mlx_lm.server", "--model", str(snapshot)]},
+    ])
+    with pytest.raises(ValueError, match="changed during snapshot"):
+        cl.mlx_model_server_snapshot(
+            "http://127.0.0.1:18081/v1/chat/completions", snapshot,
+            process_snapshot=lambda: next(processes),
+            **kwargs,
+        )
+
+
 def test_create_cluster_refuses_retired_operator_command():
     runner = FakeRunner()
     with pytest.raises(cl.ClusterLeaseUnavailable, match="structured per-sample lease"):

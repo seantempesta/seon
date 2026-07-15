@@ -10,6 +10,34 @@ class _FakeTask:
     solver = []
 
 
+def _model_server_identity(**overrides):
+    revision = "a" * 40
+    identity = {
+        "schema_version": 1,
+        "implementation": "mlx-lm",
+        "endpoint": "http://127.0.0.1:18081/v1/chat/completions",
+        "process": {"pid": 123, "start_instant": "instant",
+                    "argv_sha256": "b" * 64},
+        "runtime": {"module_sha256": "c" * 64,
+                    "packages": {"mlx-lm": "0.31.3", "mlx": "0.32.0"}},
+        "artifact": {
+            "mechanism": "huggingface-snapshot",
+            "request_model": f"/cache/models--owner--model/snapshots/{revision}",
+            "revision": revision,
+            "manifest_sha256": "d" * 64,
+            "size_bytes": 123,
+            "quantization": "4bit",
+            "config_sha256": "e" * 64,
+        },
+        "response": {
+            "model": f"/cache/models--owner--model/snapshots/{revision}",
+            "system_fingerprint": "mlx-fixture",
+        },
+    }
+    identity.update(overrides)
+    return identity
+
+
 @pytest.fixture(autouse=True)
 def _admitted_sources(monkeypatch):
     """Catalog mechanics run under one deterministic admitted source map."""
@@ -21,7 +49,7 @@ def _admitted_sources(monkeypatch):
     monkeypatch.setattr(
         catalog.source_admission,
         "finalize_native_logs",
-        lambda logs, evidence_dir=None, expected_admission=None: [
+        lambda logs, **kwargs: [
             {"location": "fake.eval", "sha256": "abc",
              "retained_path": "fake.eval"}],
     )
@@ -125,11 +153,14 @@ def test_run_native_task_admits_before_construction_and_finalizes(monkeypatch):
         {"name": "native"}, factory,
         task_kwargs={"cluster_url": "http://example.test/agents/run"},
         target_snapshot=lambda: {"artifact": "stable"},
+        model_server_snapshot=_model_server_identity,
     )
     assert captured["identity"] == {"name": "native"}
     assert captured["factory_kwargs"]["_admission"] == admitted
     assert captured["eval_kwargs"]["metadata"][
         "seon_source_admission"] == admitted
+    assert captured["eval_kwargs"]["metadata"][
+        "seon_model_server_identity"] == _model_server_identity()
     assert captured["eval_kwargs"]["max_samples"] == 1
     assert "solver" not in captured["eval_kwargs"]
 
@@ -142,6 +173,21 @@ def test_run_native_task_rejects_before_construction(monkeypatch):
             catalog.source_admission.SourceAdmissionError("source mismatch")))
     with pytest.raises(catalog.source_admission.SourceAdmissionError,
                        match="source mismatch"):
+        catalog.run_native_task(
+            {"name": "native"},
+            lambda **kwargs: constructed.append(kwargs) or _FakeTask(),
+            target_snapshot=lambda: {"artifact": "stable"},
+            model_server_snapshot=_model_server_identity,
+        )
+    assert constructed == []
+
+
+def test_run_native_task_requires_model_server_before_construction(monkeypatch):
+    constructed = []
+    monkeypatch.setattr(
+        catalog.source_admission, "verify_sources",
+        lambda identity: {"bench": dict(identity)})
+    with pytest.raises(ValueError, match="model_server_snapshot"):
         catalog.run_native_task(
             {"name": "native"},
             lambda **kwargs: constructed.append(kwargs) or _FakeTask(),
@@ -169,6 +215,7 @@ def test_run_native_task_rejects_target_drift(monkeypatch):
             {"name": "native"},
             lambda **kwargs: _FakeTask(),
             target_snapshot=lambda: next(snapshots),
+            model_server_snapshot=_model_server_identity,
         )
     assert len(finalized) == 1
     assert finalized[0][0] == ([log],)
@@ -198,8 +245,39 @@ def test_run_native_task_rejects_source_drift_and_retains_log(monkeypatch):
             {"name": "native"},
             lambda **kwargs: _FakeTask(),
             target_snapshot=lambda: {"artifact": "stable"},
+            model_server_snapshot=_model_server_identity,
         )
 
+    assert finalized[0][0] == ([log],)
+    assert finalized[0][1]["require_success"] is False
+
+
+def test_run_native_task_rejects_model_server_drift_and_retains_log(monkeypatch):
+    finalized = []
+    admitted = {"bench": {"name": "native"}}
+    log = type("Log", (), {"location": "run.eval"})()
+    identities = iter([
+        _model_server_identity(),
+        _model_server_identity(process={
+            "pid": 124, "start_instant": "other", "argv_sha256": "b" * 64}),
+    ])
+    monkeypatch.setattr(catalog.source_admission, "verify_sources",
+                        lambda identity: admitted)
+    monkeypatch.setattr(catalog, "inspect_eval", lambda *args, **kwargs: [log])
+    monkeypatch.setattr(catalog, "edit_eval_log",
+                        lambda value, edits, provenance: value)
+    monkeypatch.setattr(catalog, "write_eval_log", lambda value: None)
+    monkeypatch.setattr(
+        catalog.source_admission, "finalize_native_logs",
+        lambda *args, **kwargs: finalized.append((args, kwargs)))
+
+    with pytest.raises(RuntimeError, match="model server identity changed"):
+        catalog.run_native_task(
+            {"name": "native"},
+            lambda **kwargs: _FakeTask(),
+            target_snapshot=lambda: {"artifact": "stable"},
+            model_server_snapshot=lambda: next(identities),
+        )
     assert finalized[0][0] == ([log],)
     assert finalized[0][1]["require_success"] is False
 
@@ -230,12 +308,14 @@ def test_run_native_task_retains_end_source_and_target(monkeypatch):
         {"name": "native"},
         lambda **kwargs: _FakeTask(),
         target_snapshot=lambda: next(snapshots),
+        model_server_snapshot=_model_server_identity,
     )
 
     assert result == [edited]
     assert captured["metadata"] == {
         "seon_source_admission_end": admitted,
         "seon_static_target_end": {"artifact": "stable"},
+        "seon_model_server_identity_end": _model_server_identity(),
     }
     assert captured["provenance"].author == "seon_inspect.catalog"
     assert captured["written"] is edited
@@ -266,14 +346,17 @@ def test_admitted_run_retains_new_cancelled_log_then_reraises(
             lambda **kwargs: _FakeTask(),
             evidence_dir=tmp_path / "evidence",
             target_snapshot=lambda: {"artifact": "stable"},
+            model_server_snapshot=_model_server_identity,
             log_dir=str(tmp_path),
         )
-    assert finalized == [
-        ([str(cancelled)], {
-            "evidence_dir": tmp_path / "evidence",
-            "expected_admission": admitted,
-            "require_success": False,
-        })]
+    assert finalized[0][0] == [str(cancelled)]
+    kwargs = finalized[0][1]
+    assert kwargs["evidence_dir"] == tmp_path / "evidence"
+    assert kwargs["expected_admission"] == admitted
+    assert kwargs["require_success"] is False
+    assert kwargs["expected_metadata"]["eval"][
+        "seon_model_server_identity"] == _model_server_identity()
+    assert kwargs["expected_metadata"]["log"] == {}
 
 
 def test_admitted_run_retains_terminal_log_when_inspect_returns_empty(
@@ -301,6 +384,7 @@ def test_admitted_run_retains_terminal_log_when_inspect_returns_empty(
             lambda **kwargs: _FakeTask(),
             evidence_dir=tmp_path / "evidence",
             target_snapshot=lambda: {"artifact": "stable"},
+            model_server_snapshot=_model_server_identity,
             log_dir=str(tmp_path),
         )
     assert finalized[0][0] == [str(cancelled)]

@@ -363,3 +363,28 @@ def test_finalize_native_logs_rejects_wrong_admission(monkeypatch, tmp_path):
             [_Log(source.as_uri())],
             expected_admission={"revision": "expected"},
         )
+
+
+def test_finalize_native_logs_rejects_wrong_start_or_end_metadata(
+    monkeypatch, tmp_path
+):
+    source = tmp_path / "wrong-model-server.eval"
+    source.write_bytes(b"native")
+    monkeypatch.setattr(
+        source_admission,
+        "read_eval_log",
+        lambda path: SimpleNamespace(
+            status="success",
+            eval=SimpleNamespace(metadata={"server_start": {"digest": "a"}}),
+            metadata={"server_end": {"digest": "b"}},
+        ),
+    )
+    with pytest.raises(source_admission.SourceAdmissionError,
+                       match="log.server_end"):
+        source_admission.finalize_native_logs(
+            [_Log(source.as_uri())],
+            expected_metadata={
+                "eval": {"server_start": {"digest": "a"}},
+                "log": {"server_end": {"digest": "c"}},
+            },
+        )

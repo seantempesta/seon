@@ -103,15 +103,15 @@ the pre-task admitted identity and its end recheck.
 The host snapshot is a closed, non-secret map with these semantic fields:
 
 - schema version and serving implementation;
-- normalized endpoint origin;
+- exact credential-free chat-completions request endpoint;
 - executable/module content digest and package versions;
 - managed PID and process start instant, plus a digest of the exact argument
   vector rather than an unbounded command string;
 - artifact mechanism (`huggingface-snapshot`, `ollama-manifest`, or
   `externally-mutable`);
 - exact request model identity;
-- revision or manifest digest, canonical artifact-manifest digest, byte size,
-  and quantization/config digest when locally knowable; and
+- for local artifacts, revision or manifest digest, canonical
+  artifact-manifest digest, byte size, and quantization/config digest; and
 - expected response model and server fingerprint, or explicit absence when
   that protocol does not provide one.
 
@@ -166,11 +166,13 @@ to make Ollama look equivalent to the MLX absolute-snapshot path.
 ### Remote or dedicated API without exposed weights
 
 A separately dedicated endpoint may provide strong process isolation but no
-weights digest. Record its endpoint origin, declared provider/model revision,
-server deployment identity if available, response model, and an explicit
-`externally-mutable` artifact mechanism. Such a row can sanity-check whether
-the task is solvable, but it cannot be compared as if its weights were locally
-reconstructable.
+weights digest. Record its exact request endpoint, provider/model name,
+declared revision, server deployment identity, response model, or fingerprint
+only when each is actually available, plus an explicit `externally-mutable`
+artifact mechanism. Local process/runtime and response fields remain absent
+when the remote protocol does not expose them; nulls and invented digests are
+not evidence. Such a row can sanity-check whether the task is solvable, but it
+cannot be compared as if its weights were locally reconstructable.
 
 ## Exact minimal implementation
 

@@ -26,6 +26,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Sequence
+from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -221,6 +222,251 @@ def static_target_snapshot(
         "status_edn": status_edn,
         "status_sha256": hashlib.sha256(status_edn.encode()).hexdigest(),
     }
+
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
+_LOCAL_MODEL_SERVER_KEYS = {
+    "schema_version", "implementation", "endpoint", "process",
+    "runtime", "artifact", "response",
+}
+_EXTERNAL_MODEL_SERVER_KEYS = {
+    "schema_version", "implementation", "endpoint", "artifact", "response",
+}
+_MODEL_PROCESS_KEYS = {"pid", "start_instant", "argv_sha256"}
+_MODEL_RUNTIME_KEYS = {"module_sha256", "packages"}
+_LOCAL_MODEL_ARTIFACT_KEYS = {
+    "mechanism", "request_model", "revision", "manifest_sha256",
+    "size_bytes", "quantization", "config_sha256",
+}
+_EXTERNAL_MODEL_ARTIFACT_KEYS = {
+    "mechanism", "request_model",
+}
+_MODEL_RESPONSE_KEYS = {"model", "system_fingerprint"}
+
+
+def _closed_map(value: Any, keys: set[str], label: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ValueError(f"{label} must be a closed map with keys {sorted(keys)}")
+    return value
+
+
+def _nonempty_string(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} must be a nonempty string")
+    return value
+
+
+def _sha256(value: Any, label: str) -> str:
+    value = _nonempty_string(value, label)
+    if not _SHA256_RE.fullmatch(value):
+        raise ValueError(f"{label} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _request_endpoint(value: Any) -> str:
+    endpoint = _nonempty_string(value, "model server endpoint").rstrip("/")
+    parsed = urlsplit(endpoint)
+    if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or parsed.query or parsed.fragment
+            or not parsed.path.endswith("/chat/completions")):
+        raise ValueError(
+            "model server endpoint must be the credential-free chat-completions URL")
+    return endpoint
+
+
+def validate_model_server_identity(identity: Any) -> dict[str, Any]:
+    """Validate and detach one closed non-secret model-server identity."""
+    if not isinstance(identity, dict) or not isinstance(identity.get("artifact"), dict):
+        raise ValueError("model server identity and artifact must be maps")
+    mechanism = _nonempty_string(identity["artifact"].get("mechanism"),
+                                 "model artifact mechanism")
+    if mechanism not in {"huggingface-snapshot", "ollama-manifest",
+                         "externally-mutable"}:
+        raise ValueError("unsupported model artifact mechanism")
+    identity = _closed_map(
+        identity,
+        (_EXTERNAL_MODEL_SERVER_KEYS
+         if mechanism == "externally-mutable" else _LOCAL_MODEL_SERVER_KEYS),
+        "model server identity",
+    )
+    if identity["schema_version"] != 1:
+        raise ValueError("unsupported model server identity schema")
+    _nonempty_string(identity["implementation"], "model server implementation")
+    endpoint = _request_endpoint(identity["endpoint"])
+
+    if mechanism != "externally-mutable":
+        process = _closed_map(identity["process"], _MODEL_PROCESS_KEYS,
+                              "model server process")
+        if (isinstance(process["pid"], bool)
+                or not isinstance(process["pid"], int) or process["pid"] <= 0):
+            raise ValueError("model server pid must be a positive integer")
+        _nonempty_string(process["start_instant"], "model server start instant")
+        _sha256(process["argv_sha256"], "model server argv digest")
+
+        runtime = _closed_map(identity["runtime"], _MODEL_RUNTIME_KEYS,
+                              "model server runtime")
+        _sha256(runtime["module_sha256"], "model server module digest")
+        packages = runtime["packages"]
+        if (not isinstance(packages, dict) or not packages
+                or any(not isinstance(name, str) or not name
+                       or not isinstance(version, str) or not version
+                       for name, version in packages.items())):
+            raise ValueError("model server packages must be a nonempty string map")
+    external_with_revision = _EXTERNAL_MODEL_ARTIFACT_KEYS | {"declared_revision"}
+    artifact_keys = ((external_with_revision
+                      if "declared_revision" in identity["artifact"]
+                      else _EXTERNAL_MODEL_ARTIFACT_KEYS)
+                     if mechanism == "externally-mutable"
+                     else _LOCAL_MODEL_ARTIFACT_KEYS)
+    artifact = _closed_map(identity["artifact"], artifact_keys,
+                           "model server artifact")
+    request_model = _nonempty_string(artifact["request_model"],
+                                     "model request identity")
+    if mechanism == "huggingface-snapshot":
+        revision = _nonempty_string(artifact["revision"],
+                                    "Hugging Face revision")
+        if not _REVISION_RE.fullmatch(revision):
+            raise ValueError("Hugging Face revision must be a full commit")
+        path = Path(request_model)
+        if (not path.is_absolute() or path.name != revision
+                or path.parent.name != "snapshots"):
+            raise ValueError("Hugging Face request model must be its absolute snapshot path")
+    elif mechanism == "ollama-manifest":
+        _nonempty_string(artifact["revision"], "Ollama manifest digest")
+    else:
+        revision = artifact.get("declared_revision")
+        if revision is not None:
+            _nonempty_string(revision, "declared external revision")
+    if mechanism != "externally-mutable":
+        _sha256(artifact["manifest_sha256"], "model artifact manifest digest")
+        _sha256(artifact["config_sha256"], "model artifact config digest")
+        if (isinstance(artifact["size_bytes"], bool)
+                or not isinstance(artifact["size_bytes"], int)
+                or artifact["size_bytes"] <= 0):
+            raise ValueError("model artifact size must be a positive integer")
+        _nonempty_string(artifact["quantization"], "model quantization")
+
+    response = identity["response"]
+    if not isinstance(response, dict) or not set(response).issubset(
+            _MODEL_RESPONSE_KEYS):
+        raise ValueError("model server response identity has unknown fields")
+    for key, value in response.items():
+        _nonempty_string(value, f"response {key} identity")
+    if mechanism == "huggingface-snapshot":
+        response = _closed_map(response, _MODEL_RESPONSE_KEYS,
+                               "model server response identity")
+        if response["model"] != request_model:
+            raise ValueError(
+                "Hugging Face response model must equal the snapshot request")
+
+    detached = json.loads(json.dumps(identity, sort_keys=True))
+    detached["endpoint"] = endpoint
+    return detached
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def mlx_model_server_snapshot(
+    endpoint: str,
+    snapshot_path: str | Path,
+    *,
+    process_snapshot: Callable[[], dict[str, Any]],
+    server_module: str | Path,
+    package_versions: dict[str, str],
+    system_fingerprint: str,
+    quantization: str,
+) -> dict[str, Any]:
+    """Observe one dedicated MLX listener and immutable HF snapshot."""
+    snapshot = Path(snapshot_path).resolve(strict=True)
+    revision = snapshot.name
+    if snapshot.parent.name != "snapshots" or not _REVISION_RE.fullmatch(revision):
+        raise ValueError("MLX model must resolve to a full-revision snapshot path")
+    process = process_snapshot()
+    descendants = list(snapshot.rglob("*"))
+    if any(path.is_symlink() and not path.exists() for path in descendants):
+        raise ValueError("MLX snapshot contains a broken symlink")
+    files = sorted(path for path in descendants if path.is_file())
+    if not files:
+        raise ValueError("MLX snapshot contains no files")
+    entries = []
+    size_bytes = 0
+    for path in files:
+        before = path.stat()
+        digest = _file_sha256(path)
+        after = path.stat()
+        if ((before.st_size, before.st_mtime_ns)
+                != (after.st_size, after.st_mtime_ns)):
+            raise ValueError("MLX snapshot changed while hashing")
+        size = after.st_size
+        size_bytes += size
+        entries.append({
+            "path": str(path.relative_to(snapshot)),
+            "sha256": digest,
+            "size": size,
+        })
+    final_files = sorted(
+        path for path in snapshot.rglob("*") if path.is_file())
+    if [str(path.relative_to(snapshot)) for path in final_files] != [
+            entry["path"] for entry in entries]:
+        raise ValueError("MLX snapshot membership changed while hashing")
+    manifest_bytes = json.dumps(
+        entries, sort_keys=True, separators=(",", ":")).encode()
+    config_path = snapshot / "config.json"
+    if not config_path.is_file():
+        raise ValueError("MLX snapshot lacks config.json")
+    if not isinstance(process, dict):
+        raise ValueError("MLX process snapshot must be a map")
+    argv = process.get("argv")
+    if (not isinstance(argv, list) or not argv
+            or any(not isinstance(part, str) or not part for part in argv)):
+        raise ValueError("MLX process argv must be a nonempty string vector")
+    if not any(part == "--model" and argv[index + 1] == str(snapshot)
+               for index, part in enumerate(argv[:-1])):
+        raise ValueError("MLX process argv does not select the admitted snapshot")
+    if process_snapshot() != process:
+        raise ValueError("MLX process identity changed during snapshot")
+    if not {"mlx-lm", "mlx"}.issubset(package_versions):
+        raise ValueError("MLX package identity requires mlx-lm and mlx")
+    argv_bytes = json.dumps(argv, separators=(",", ":")).encode()
+    module_path = Path(server_module).resolve(strict=True)
+    if not module_path.is_file():
+        raise ValueError("MLX server module must be a file")
+    identity = {
+        "schema_version": 1,
+        "implementation": "mlx-lm",
+        "endpoint": endpoint,
+        "process": {
+            "pid": process.get("pid"),
+            "start_instant": process.get("start_instant"),
+            "argv_sha256": hashlib.sha256(argv_bytes).hexdigest(),
+        },
+        "runtime": {
+            "module_sha256": _file_sha256(module_path),
+            "packages": dict(package_versions),
+        },
+        "artifact": {
+            "mechanism": "huggingface-snapshot",
+            "request_model": str(snapshot),
+            "revision": revision,
+            "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+            "size_bytes": size_bytes,
+            "quantization": quantization,
+            "config_sha256": _file_sha256(config_path),
+        },
+        "response": {
+            "model": str(snapshot),
+            "system_fingerprint": system_fingerprint,
+        },
+    }
+    return validate_model_server_identity(identity)
 
 
 def ensure_bench_bundle(runner: Callable[..., Any] = subprocess.run

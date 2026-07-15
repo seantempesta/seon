@@ -260,6 +260,7 @@ def _eval_admitted_task(
     solver_override: Solver | Sequence[Solver] | None = None,
     evidence_dir: Path | None = None,
     before_finalize: Callable[[list[Any]], list[Any]] | None = None,
+    expected_metadata: dict[str, dict[str, Any]] | None = None,
     **eval_kwargs: Any,
 ):
     """Execute and finalize one already-admitted Task through Inspect."""
@@ -287,6 +288,7 @@ def _eval_admitted_task(
                 interrupted_logs,
                 evidence_dir=evidence_dir,
                 expected_admission=admission,
+                expected_metadata=expected_metadata,
                 require_success=False,
             )
         raise
@@ -301,6 +303,7 @@ def _eval_admitted_task(
                 logs,
                 evidence_dir=evidence_dir,
                 expected_admission=admission,
+                expected_metadata=expected_metadata,
                 require_success=False,
             )
             raise
@@ -311,6 +314,7 @@ def _eval_admitted_task(
                 terminal_logs,
                 evidence_dir=evidence_dir,
                 expected_admission=admission,
+                expected_metadata=expected_metadata,
                 require_success=False,
             )
             raise source_admission.SourceAdmissionError(
@@ -320,6 +324,7 @@ def _eval_admitted_task(
         logs,
         evidence_dir=evidence_dir,
         expected_admission=admission,
+        expected_metadata=expected_metadata,
     )
     return logs
 
@@ -331,6 +336,7 @@ def run_native_task(
     task_kwargs: dict[str, Any] | None = None,
     evidence_dir: Path | None = None,
     target_snapshot: Callable[[], dict[str, Any]] | None = None,
+    model_server_snapshot: Callable[[], dict[str, Any]] | None = None,
     **eval_kwargs: Any,
 ):
     """Run one Seon-native Task with mandatory admission and finalization.
@@ -345,14 +351,35 @@ def run_native_task(
     if target_snapshot is None:
         raise ValueError(
             "target_snapshot is required for an admitted native live run")
+    if model_server_snapshot is None:
+        raise ValueError(
+            "model_server_snapshot is required for an admitted native live run")
     target_start = target_snapshot()
+    model_server_start = cluster_mod.validate_model_server_identity(
+        model_server_snapshot())
     task = task_factory(_admission=admission, **(task_kwargs or {}))
     md = dict(eval_kwargs.pop("metadata", None) or {})
     md["seon_static_target"] = target_start
+    md["seon_model_server_identity"] = model_server_start
+    retained_metadata = {
+        "eval": {
+            "seon_source_admission": admission,
+            "seon_static_target": target_start,
+            "seon_model_server_identity": model_server_start,
+        },
+        "log": {},
+    }
 
     def verify_run_end(logs: list[Any]) -> list[Any]:
         admission_end = source_admission.verify_sources(identity)
         target_end = target_snapshot()
+        model_server_end = cluster_mod.validate_model_server_identity(
+            model_server_snapshot())
+        retained_metadata["log"].update({
+            "seon_source_admission_end": admission_end,
+            "seon_static_target_end": target_end,
+            "seon_model_server_identity_end": model_server_end,
+        })
         edited_logs = []
         for log in logs:
             edited = edit_eval_log(
@@ -360,6 +387,7 @@ def run_native_task(
                 [MetadataEdit(metadata_set={
                     "seon_source_admission_end": admission_end,
                     "seon_static_target_end": target_end,
+                    "seon_model_server_identity_end": model_server_end,
                 })],
                 ProvenanceData(
                     author="seon_inspect.catalog",
@@ -372,6 +400,8 @@ def run_native_task(
             raise RuntimeError("source identity changed during native run")
         if target_end != target_start:
             raise RuntimeError("static target identity changed during native run")
+        if model_server_end != model_server_start:
+            raise RuntimeError("model server identity changed during native run")
         return edited_logs
 
     return _eval_admitted_task(
@@ -381,6 +411,7 @@ def run_native_task(
         max_samples=config.POD_MAX_SAMPLES,
         metadata=md,
         before_finalize=verify_run_end,
+        expected_metadata=retained_metadata,
         **eval_kwargs,
     )
 

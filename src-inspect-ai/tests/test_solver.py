@@ -138,18 +138,52 @@ def _model_transport_evidence(coordinate=None):
     coordinate = coordinate or {
         "database_id": "db-1", "branch": "db",
         "commit_id": "attempt-1", "t": 20}
+    model = "/cache/models--owner--model/snapshots/" + "a" * 40
     attempt = {
         "turn_id": "turn-1", "ordinal": 0,
         "coordinate": coordinate, "coordinate_valid": True,
         "provider": "deepseek", "adapter": "openai-compat",
-        "requested_model": "small-model", "temperature": 0.0,
+        "requested_model": model, "temperature": 0.0,
         "max_tokens": 512,
-        "endpoint": "http://127.0.0.1:8080/v1",
+        "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
         "adapter_timeout_ms": 30000, "outer_timeout_ms": 45000,
         "stream": False, "credential_class": "environment",
+        "response_model": model, "system_fingerprint": "mlx-fixture",
         "outcome": "success"}
     return {"status": "inline", "transport_drift": False,
             "turns": [{"turn_id": "turn-1", "attempts": [attempt]}]}
+
+
+def _model_server_identity(mechanism="huggingface-snapshot"):
+    revision = "a" * 40
+    model = f"/cache/models--owner--model/snapshots/{revision}"
+    identity = {
+        "schema_version": 1,
+        "implementation": "mlx-lm",
+        "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
+        "process": {"pid": 123, "start_instant": "instant",
+                    "argv_sha256": "b" * 64},
+        "runtime": {"module_sha256": "c" * 64,
+                    "packages": {"mlx-lm": "0.31.3", "mlx": "0.32.0"}},
+        "artifact": ({
+            "mechanism": "externally-mutable",
+            "request_model": model,
+        } if mechanism == "externally-mutable" else {
+            "mechanism": mechanism,
+            "request_model": model,
+            "revision": revision,
+            "manifest_sha256": "d" * 64,
+            "size_bytes": 123,
+            "quantization": "4bit",
+            "config_sha256": "e" * 64,
+        }),
+        "response": ({} if mechanism == "externally-mutable" else {
+            "model": model, "system_fingerprint": "mlx-fixture"}),
+    }
+    if mechanism == "externally-mutable":
+        identity.pop("process")
+        identity.pop("runtime")
+    return identity
 
 
 def _admitted_state(evidence=None):
@@ -157,6 +191,7 @@ def _admitted_state(evidence=None):
              "commit_id": "final", "t": 30}
     return SimpleNamespace(metadata={
         "seon_source_admission": {"revision": "admitted"},
+        "seon_model_server_identity": _model_server_identity(),
         "pod_timed_out": False, "pod_closed_reason": ":completed",
         "pod_database_coordinate": final,
         "pod_turn_evidence": [{"turn_id": "turn-1"}],
@@ -168,6 +203,41 @@ def _admitted_state(evidence=None):
 def test_admitted_model_transport_evidence_is_scorable():
     state = _admitted_state()
     assert require_scorable_pod_state(state) is state
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda metadata: metadata.pop("seon_model_server_identity"),
+        lambda metadata: metadata["seon_model_server_identity"].update(
+            endpoint="http://127.0.0.1:9999/v1/chat/completions"),
+        lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
+            "attempts"][0].update(requested_model="/other/snapshot"),
+        lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
+            "attempts"][0].update(response_model="same-name-wrong-artifact"),
+        lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
+            "attempts"][0].update(system_fingerprint="other-runtime"),
+    ],
+)
+def test_admitted_model_server_join_fails_closed(mutate):
+    import copy
+
+    state = _admitted_state()
+    state.metadata = copy.deepcopy(state.metadata)
+    mutate(state.metadata)
+    with pytest.raises(
+        PodRunInfrastructureError,
+        match="model server|model response|model attempt",
+    ):
+        require_scorable_pod_state(state)
+
+
+def test_externally_mutable_model_identity_is_not_formally_scorable():
+    state = _admitted_state()
+    state.metadata["seon_model_server_identity"] = _model_server_identity(
+        "externally-mutable")
+    with pytest.raises(PodRunInfrastructureError, match="externally mutable"):
+        require_scorable_pod_state(state)
 
 
 def _add_retry(metadata, *, t, drift=False):

@@ -32,6 +32,7 @@ import urllib.request
 from inspect_ai.scorer import Score, Scorer, Target, accuracy, scorer
 from inspect_ai.solver import Generate, TaskState, solver
 
+from seon_inspect import cluster as cluster_mod
 from seon_inspect import config
 
 
@@ -173,7 +174,7 @@ def _coordinate_at_or_before(point: object, final: object) -> bool:
             and point["t"] <= final["t"])
 
 
-def _require_model_transport_evidence(metadata: dict) -> None:
+def _require_model_transport_evidence(metadata: dict) -> list[dict]:
     """Fail closed on incomplete or inconsistent admitted provider proof."""
     evidence = metadata.get("pod_model_transport_evidence")
     final = metadata.get("pod_database_coordinate")
@@ -206,6 +207,7 @@ def _require_model_transport_evidence(metadata: dict) -> None:
         "api_key_env")
     configurations = []
     attempt_ts = []
+    all_attempts = []
     outcomes = {"success", "provider-error", "adapter-timeout",
                 "outer-timeout"}
     for turn_id, turn in zip(expected_turn_ids, turns, strict=True):
@@ -262,6 +264,7 @@ def _require_model_transport_evidence(metadata: dict) -> None:
             configurations.append(tuple(
                 (key, attempt[key]) for key in comparable_keys if key in attempt))
             attempt_ts.append(attempt["coordinate"]["t"])
+            all_attempts.append(attempt)
         if ([attempt.get("outcome") for attempt in attempts].count("success")
                 != 1 or attempts[-1].get("outcome") != "success"):
             raise PodRunInfrastructureError(
@@ -273,6 +276,40 @@ def _require_model_transport_evidence(metadata: dict) -> None:
     if len(set(configurations)) != 1:
         raise PodRunInfrastructureError(
             "admitted model transport configuration drifted during the run")
+    return all_attempts
+
+
+def _require_model_server_identity(metadata: dict,
+                                   attempts: list[dict]) -> None:
+    """Join admitted server/artifact identity to every provider attempt."""
+    try:
+        identity = cluster_mod.validate_model_server_identity(
+            metadata.get("seon_model_server_identity"))
+    except ValueError as error:
+        raise PodRunInfrastructureError(
+            f"admitted model server identity is invalid: {error}") from None
+    artifact = identity["artifact"]
+    if artifact["mechanism"] == "externally-mutable":
+        raise PodRunInfrastructureError(
+            "externally mutable model weights cannot support formal scoring")
+    if artifact["mechanism"] != "huggingface-snapshot":
+        raise PodRunInfrastructureError(
+            "model artifact mechanism lacks a request-time loaded digest proof")
+
+    endpoint = identity["endpoint"]
+    requested_model = artifact["request_model"]
+    response = identity["response"]
+    for attempt in attempts:
+        if (str(attempt.get("endpoint") or "").rstrip("/") != endpoint
+                or attempt.get("requested_model") != requested_model):
+            raise PodRunInfrastructureError(
+                "model attempt does not match the admitted server artifact")
+        if attempt.get("outcome") == "success" and (
+                attempt.get("response_model") != response["model"]
+                or attempt.get("system_fingerprint")
+                != response["system_fingerprint"]):
+            raise PodRunInfrastructureError(
+                "successful model response does not match admitted server identity")
 
 
 def require_scorable_pod_state(state: TaskState) -> TaskState:
@@ -289,7 +326,8 @@ def require_scorable_pod_state(state: TaskState) -> TaskState:
         raise PodRunInfrastructureError(
             "pod quiesced during the run; model capability was not scored")
     if "seon_source_admission" in metadata:
-        _require_model_transport_evidence(metadata)
+        attempts = _require_model_transport_evidence(metadata)
+        _require_model_server_identity(metadata, attempts)
     return state
 
 

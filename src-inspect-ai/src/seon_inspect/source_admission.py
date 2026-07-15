@@ -232,6 +232,7 @@ def finalize_native_logs(
     *,
     evidence_dir: Path | None = None,
     expected_admission: dict[str, Any] | None = None,
+    expected_metadata: dict[str, dict[str, Any]] | None = None,
     require_success: bool = True,
 ) -> list[dict[str, Any]]:
     """Retain, reopen, and identity-check native logs."""
@@ -275,6 +276,23 @@ def finalize_native_logs(
             raise SourceAdmissionError(
                 "evidence finalization: retained log source admission "
                 "does not match the admitted run")
+        if expected_metadata is not None:
+            if set(expected_metadata) != {"eval", "log"}:
+                raise SourceAdmissionError(
+                    "evidence finalization: expected metadata scopes are invalid")
+            actual_scopes = {
+                "eval": native.eval.metadata or {},
+                "log": native.metadata or {},
+            }
+            for scope, expected in expected_metadata.items():
+                if not isinstance(expected, dict):
+                    raise SourceAdmissionError(
+                        "evidence finalization: expected metadata is invalid")
+                for key, value in expected.items():
+                    if actual_scopes[scope].get(key) != value:
+                        raise SourceAdmissionError(
+                            "evidence finalization: retained log metadata "
+                            f"does not match {scope}.{key}")
         manifest.append({
             "location": location,
             "sha256": _sha256(source),

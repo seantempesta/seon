@@ -20,6 +20,26 @@ def _fixed_reply():
     return solve
 
 
+def _model_server_identity():
+    revision = "a" * 40
+    model = f"/cache/models--owner--model/snapshots/{revision}"
+    return {
+        "schema_version": 1,
+        "implementation": "mlx-lm",
+        "endpoint": "http://127.0.0.1:18081/v1/chat/completions",
+        "process": {"pid": 123, "start_instant": "instant",
+                    "argv_sha256": "b" * 64},
+        "runtime": {"module_sha256": "c" * 64,
+                    "packages": {"mlx-lm": "0.31.3", "mlx": "0.32.0"}},
+        "artifact": {"mechanism": "huggingface-snapshot",
+                     "request_model": model, "revision": revision,
+                     "manifest_sha256": "d" * 64, "size_bytes": 123,
+                     "quantization": "4bit", "config_sha256": "e" * 64},
+        "response": {"model": model,
+                     "system_fingerprint": "mlx-fixture"},
+    }
+
+
 def test_run_bench_retains_native_log_with_source_identity(monkeypatch, tmp_path):
     identity = {
         "schema_version": 1,
@@ -137,6 +157,7 @@ def test_run_native_task_retains_log_with_exact_admission(monkeypatch, tmp_path)
         task_factory,
         evidence_dir=evidence,
         target_snapshot=lambda: {"artifact": "stable"},
+        model_server_snapshot=_model_server_identity,
         log_dir=str(tmp_path / "logs"),
         display="none",
     )
@@ -147,6 +168,10 @@ def test_run_native_task_retains_log_with_exact_admission(monkeypatch, tmp_path)
     assert native.metadata["seon_source_admission_end"] == identity
     assert native.metadata["seon_static_target_end"] == {
         "artifact": "stable"}
+    assert native.eval.metadata["seon_model_server_identity"] == \
+        _model_server_identity()
+    assert native.metadata["seon_model_server_identity_end"] == \
+        _model_server_identity()
     assert native.log_updates[-1].provenance.author == "seon_inspect.catalog"
 
 
@@ -172,6 +197,7 @@ def test_classified_failure_roundtrips_with_native_evidence(monkeypatch, tmp_pat
         task_factory,
         evidence_dir=evidence,
         target_snapshot=lambda: {"artifact": "stable"},
+        model_server_snapshot=_model_server_identity,
         log_dir=str(tmp_path / "logs"),
         display="none",
     )
@@ -199,3 +225,5 @@ def test_classified_failure_roundtrips_with_native_evidence(monkeypatch, tmp_pat
     assert native.metadata["seon_source_admission_end"] == identity
     assert native.metadata["seon_static_target_end"] == {
         "artifact": "stable"}
+    assert native.metadata["seon_model_server_identity_end"] == \
+        _model_server_identity()
