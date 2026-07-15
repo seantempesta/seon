@@ -673,13 +673,16 @@ dedicated root/session/canvas behavior, database lifecycle, and blob policy stay
 owned by their named successor PRDs. The protected untracked report remains
 unchanged.
 
-One explicit source-to-target gap remains at the batch reply boundary:
-`seon.agent.turn` currently calls `ctx/strip-result-claims` before persistence
-and evaluation, while [[docs/seon/architecture/context]] forbids output
-rewriting in the target. Remove that filter only in the owning runtime unit,
-preserve raw replies, attempt every complete parsed form, and prove that only
-real execution results become evidence. Until that cut lands, localized source
-instructions describe the current filter honestly.
+The explicit batch reply-boundary gap closed at `80475818`. One exact provider
+string now reaches the content-addressed blob and parser unchanged; the former
+result-claim rewrite and new telemetry writes are deleted. Parser position
+admits only real complete forms and standalone `result/<id>` references, so
+runtime-shaped narration remains byte-identical evidence without creating eval,
+result, or message authority. Focused CLJS/JVM parser, turn-capture, context,
+and docstring gates are green; the broader retained run has only the two
+already-known current-namespace failures. Remaining narration presentation and
+complete-form/async/process-death work belongs to the agent-runtime-correctness
+unit rather than another reply filter.
 
 - Reconcile every remaining claim below with active source, tests, routes,
   process/classpath inspection, and the running default cluster. Delete or
