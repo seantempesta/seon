@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: friction
+severity: blocker
 tags: [issue, agent, research, component]
 ---
 
@@ -94,11 +94,30 @@ scorecard summaries a stable correlation to the required native log and, after
 the lifecycle lease exists, add its artifact/config identities. The source and
 native-log admission described above is complete.
 
+That completion claim has one remaining admission hole. `source_admission.py`
+derives dirty selected paths with ordinary `git status`, so the worktree's
+current `.gitignore` controls whether untracked files beneath admitted paths are
+visible. `evaluation-sources.lock.json` admits the runtime and harness paths but
+does not admit `.gitignore` itself. Commit `419aa0a5` added repository-wide
+Python bytecode rules, and its regression copies the current root `.gitignore`
+into a temporary repository before asserting that bytecode is ignored. The test
+therefore proves the desired generated-file behavior but does not prove that the
+ignore policy used by a scored checkout is itself admitted.
+
+An uncommitted ignore rule can consequently hide an untracked source file under
+an admitted directory without either the file or the policy appearing in the
+dirty-path result. Tracked modifications remain visible, but that is not enough
+for the claimed content closure. The recent source-admission, closing-identity,
+bytecode, and failure-classification commits are valuable harness hardening;
+they do not complete the Unit 7 capability-evidence gate while this bypass and
+the successor measurement gaps remain.
+
 ## Owner
 
 The `src-inspect-ai` Python dependency and evaluation-provenance boundary:
 `pyproject.toml`, `uv.lock`, the vendored/reference source policy, and scorecard
-run metadata.
+run metadata. The repository source-admission mechanism must consume one
+admitted ignore policy rather than trusting mutable worktree classification.
 
 ## Acceptance
 
@@ -113,6 +132,13 @@ run metadata.
   native `.eval` log, and Seon runtime/artifact/config identities. A dirty or
   mismatched source fails before task construction; it is not merely labeled
   after a score exists.
+- Changing `.gitignore` without committing the selected policy fails source
+  admission, and an untracked maintained file beneath an admitted path cannot
+  be hidden from admission by a local ignore rule.
+- Generated `__pycache__` and `.pyc` files remain excluded without admitting
+  arbitrary executable Python bytecode as an unverified source input. A
+  temporary-repository regression varies both the committed ignore policy and
+  the worktree policy and proves which bytes control classification.
 
 The admitted Seon closure also includes `config/` and `seon-skills/`. These are
 runtime inputs, not documentation: the selected manifest seeds system text,

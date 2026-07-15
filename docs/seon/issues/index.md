@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (9)
+## Blocker (11)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -18,13 +18,15 @@ See `README.md` for the convention.
 | [Capture dependencies when a lazy view unit activates](lazy-view-unit-activation-drops-read-observations.md) | blocker | UI |
 | [Carry one complete database coordinate through the protocol](database-protocol-coordinate-is-incomplete.md) | blocker | Core |
 | [Changed-test hooks can queue stale runs behind an active owner](changed-test-hooks-queue-stale-runs-behind-active-owner.md) | blocker | Core |
+| [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | blocker | agent |
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
 | [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
 | [Keep a stable owner until the pod execution subtree drains](dead-process-group-leader-blocks-safe-subtree-drain.md) | blocker | Core |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
+| [Reject infrastructure closes in every Inspect capability task](inspect-capability-solvers-score-infrastructure-closes.md) | blocker | agent |
 
-## Friction (35)
+## Friction (34)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -38,7 +40,6 @@ See `README.md` for the convention.
 | [Canvas controls hide pending and handler failure](canvas-controls-hide-pending-and-failure.md) | friction | UI |
 | [Coalesce superseded changed-test hook requests](changed-test-hook-backlog-is-not-coalesced.md) | friction | agent |
 | [Config apply rebuilds an unchanged runtime](config-apply-rebuilds-unchanged-runtime.md) | friction | general |
-| [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | friction | agent |
 | [Context block order is static](context-block-order-is-static.md) | friction | agent |
 | [Cross-agent planners can reopen worker-completed steps](plan-reopen-cross-agent-authority.md) | friction | agent |
 | [Database query tuple results are hard for agents to read](database-query-tuple-shape-legibility.md) | friction | agent |

@@ -27,8 +27,10 @@ worker endpoint, implementation, weights, or transport state that actually
 failed.
 
 The initial native log incorrectly carried an ordinary incorrect milestone
-score. The shared Inspect pod boundary now rejects timeout and `:error` closes
-before capability scorers run, so a repeat becomes an errored/unscored sample.
+score. A scorable-state guard now rejects timeout and `:error` closes on the
+task paths that invoke it, but the common static-pod solver does not yet apply
+that guard. [[inspect-capability-solvers-score-infrastructure-closes]] owns the
+remaining shared-boundary correction.
 
 ## Owner
 
