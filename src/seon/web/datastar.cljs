@@ -278,6 +278,7 @@
 (def ^:private empty-feed-registry
   {::views {}
    ::subscriptions {}
+   ::listener-installed? false
    ::view-unit/state view-unit/empty-state})
 
 (defonce ^{:doc "Ephemeral views and their normalized subscription authorities.
@@ -859,16 +860,30 @@
 (defn install!
   "Install the view tx-listener. Idempotent — same key replaces."
   []
-  (db/listen! {:seon.db/key ::views :seon.db/handler on-tx}))
+  (let [result (db/listen! {:seon.db/key ::views :seon.db/handler on-tx})]
+    (swap! !feeds assoc ::listener-installed? true)
+    result))
+
+(defn- release-runtime!
+  "Release listener and timer ownership from one prior runtime state."
+  [listener-installed?]
+  (try
+    (when listener-installed?
+      (db/unlisten! {:seon.db/key ::views}))
+    (finally
+      (clear-coalescer!)
+      (stop-heartbeat!))))
 
 (defn uninstall!
   "Remove the view listener, pending broadcast, and shared heartbeat."
   []
-  (try
-    (db/unlisten! {:seon.db/key ::views})
-    (finally
-      (clear-coalescer!)
-      (stop-heartbeat!))))
+  (let [[before _]
+        (swap-vals! !feeds assoc ::listener-installed? false)
+        listener-installed?
+        (or (true? (::listener-installed? before))
+            (and (nil? (::listener-installed? before))
+                 (seq (::views before))))]
+    (release-runtime! listener-installed?)))
 
 (defn ^:dev/before-load before-reload
   "Uninstall the view tx-listener before a hot reload."
@@ -1080,6 +1095,23 @@
   [conn]
   (when-let [gz (:seon.web.feed/gzip conn)]
     (try (.end ^js gz) (catch :default _ nil))))
+
+(defn close-all-feeds!
+  "Close every Datastar feed and release its complete runtime state."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (let [[before _] (reset-vals! !feeds empty-feed-registry)
+        connections (vals (::views before))
+        listener-installed? (true? (::listener-installed? before))
+        runtime-owned? (or listener-installed?
+                           (seq connections)
+                           (seq @!coalescer)
+                           (some? @!heartbeat-timer))]
+    (doseq [conn connections]
+      (close-feed-socket! conn))
+    (when runtime-owned?
+      (release-runtime! listener-installed?))
+    nil))
 
 (declare active-managed-descriptors reconcile-active-managed-units)
 

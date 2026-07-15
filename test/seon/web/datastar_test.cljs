@@ -1582,6 +1582,65 @@
       (is (= [:example.timer/heartbeat] @heartbeat-clears)
           "reload clears the timer owned by the feed lifecycle"))))
 
+(deftest close-all-feeds-atomically-releases-the-datastar-runtime
+  (let [ended (atom #{})
+        socket (fn [socket-id]
+                 (let [ended? (atom false)]
+                   #js {:end (fn []
+                               (when (compare-and-set! ended? false true)
+                                 (swap! ended conj socket-id)))}))
+        feed-a (test-feed "bulk-close-a"
+                          {:seon.web.feed/gzip (socket :socket/a)})
+        feed-b (test-feed "bulk-close-b"
+                          {:seon.web.feed/gzip (socket :socket/b)})
+        retained-state
+        {::view-unit/units
+         {"retained-unit"
+          {::view-unit/consumers #{"bulk-close-a" "bulk-close-b"}}}}
+        registry (-> (feed-registry [feed-a feed-b])
+                     (assoc ::datastar/listener-installed? true)
+                     (assoc ::view-unit/state retained-state))
+        pending-state {::datastar/pending-change {:seon.db/db :db/pending}
+                       ::datastar/timer :timer/pending
+                       ::datastar/timer-token (random-uuid)
+                       ::datastar/enqueued-at 0
+                       ::datastar/due-at 500}
+        unlisten-requests (atom [])
+        cleared-timeouts (atom [])
+        cleared-heartbeats (atom [])]
+    (with-redefs [datastar/!feeds (atom registry)
+                  datastar/!coalescer (atom pending-state)
+                  datastar/!heartbeat-timer (atom :timer/heartbeat)
+                  db/unlisten!
+                  #(do (swap! unlisten-requests conj %) {:seon.db/ok? true})
+                  datastar/clear-broadcast-timeout!
+                  #(swap! cleared-timeouts conj %)
+                  datastar/clear-heartbeat-interval!
+                  #(swap! cleared-heartbeats conj %)]
+      (is (nil? (datastar/close-all-feeds!)))
+      (is (= @#'datastar/empty-feed-registry @datastar/!feeds)
+          "one atomic reset drops views, subscriptions, and retained units")
+      (is (= #{:socket/a :socket/b} @ended)
+          "every socket current at the reset boundary is ended")
+      (is (= [{:seon.db/key ::datastar/views}] @unlisten-requests)
+          "the owned database listener is uninstalled once")
+      (is (= [:timer/pending] @cleared-timeouts))
+      (is (= [:timer/heartbeat] @cleared-heartbeats))
+      (is (= @#'datastar/empty-coalescer @datastar/!coalescer))
+      (is (nil? @datastar/!heartbeat-timer))
+
+      ;; Node may deliver close callbacks after `.end`. Stale ownership cannot
+      ;; release or reinstall anything after the atomic registry reset.
+      (is (false? (@#'datastar/release-feed!
+                    "bulk-close-a" (:seon.web.feed/id feed-a))))
+      (@#'datastar/close-feed-socket! feed-a)
+      (is (nil? (datastar/close-all-feeds!)))
+      (is (= #{:socket/a :socket/b} @ended))
+      (is (= 1 (count @unlisten-requests))
+          "late callbacks and repeated bulk close are cleanup no-ops")
+      (is (= 1 (count @cleared-timeouts)))
+      (is (= 1 (count @cleared-heartbeats))))))
+
 (deftest heartbeat-flushes-without-displacing-pending-state
   (let [writes (atom [])
         flushes (atom 0)
