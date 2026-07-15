@@ -104,6 +104,34 @@
         (is (= [:first :second] @!selections)
             "the closure retains no boot-time adapter")))))
 
+(deftest dispatching-llm-consumes-a-supplied-attempt-resolution
+  (async done
+    (let [env (.. js/process -env)
+          names ["SEON_AI_API_KEY" "SEON_DISPATCH_TEST_KEY"]
+          saved (into {} (map (fn [name] [name (aget env name)])) names)
+          resolution {:seon.ai/resolved-config
+                      {:seon.ai/provider :openai-compat
+                       :seon.ai/api-key-env "SEON_DISPATCH_TEST_KEY"}
+                      :seon.ai/provenance {:seon.ai/provider :default}}
+          llm (dispatch/llm-fn)]
+      (doseq [name names] (js-delete env name))
+      (-> (llm {:seon.ai/ctx "ctx"
+                :seon.ai/config-resolution resolution})
+          (.then
+            (fn [response]
+              (is (= :stub (:seon.ai/adapter response))
+                  "the supplied openai-compatible resolution selects stub")))
+          (.finally
+            (fn []
+              (doseq [[name value] saved]
+                (if (some? value)
+                  (aset env name value)
+                  (js-delete env name)))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error]
+                    (is false (str "threw — " error))
+                    (done)))))))
+
 (deftest stub-keeps-the-buffered-and-streaming-call-shapes-equivalent
   (async done
     (let [ctx "eightchr"

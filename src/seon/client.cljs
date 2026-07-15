@@ -594,6 +594,32 @@
    ;; with this run).
    :seon.agent.turn/run
    :seon.agent.turn/evals
+   :seon.agent.turn/llm-attempts
+   :seon.ai.attempt/ordinal
+   :seon.ai.attempt/database-id
+   :seon.ai.attempt/branch
+   :seon.ai.attempt/commit-id
+   :seon.ai.attempt/t
+   :seon.ai.attempt/provider
+   :seon.ai.attempt/adapter
+   :seon.ai.attempt/requested-model
+   :seon.ai.attempt/temperature
+   :seon.ai.attempt/max-tokens
+   :seon.ai.attempt/thinking
+   :seon.ai.attempt/endpoint
+   :seon.ai.attempt/adapter-timeout-ms
+   :seon.ai.attempt/outer-timeout-ms
+   :seon.ai.attempt/stream?
+   :seon.ai.attempt/extra-body-digest
+   :seon.ai.attempt/dg-backend
+   :seon.ai.attempt/api-key-env
+   :seon.ai.attempt/credential-class
+   :seon.ai.attempt/outcome
+   :seon.ai.attempt/error-status
+   :seon.ai.attempt/response-model
+   :seon.ai.attempt/system-fingerprint
+   :seon.ai.attempt/request-id
+   :seon.ai.attempt/evidence-error
 
    ;; --- Message (from/to refs since unit 1.5 — role/agent retired) ---
    :seon.agent.message/id

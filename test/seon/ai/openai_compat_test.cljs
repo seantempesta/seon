@@ -307,18 +307,24 @@
    and `tool-calls` rides the content delta when given."
   ([] (sse-completion {} nil))
   ([extra-top tool-calls]
-   (str (chunk-line (merge {:id "x" :object "chat.completion.chunk" :created 1
+   (let [identity-top (select-keys extra-top [:id :model :system_fingerprint])]
+     (str (chunk-line (merge {:id "x" :object "chat.completion.chunk" :created 1
                             :model "m"
                             :choices [{:index 0
                                        :delta (cond-> {:role "assistant" :content "hi"}
                                                 tool-calls (assoc :tool_calls tool-calls))
                                        :finish_reason nil}]}
                            extra-top))
-        (chunk-line {:id "x" :object "chat.completion.chunk" :created 1 :model "m"
-                     :choices [{:index 0 :delta {} :finish_reason "stop"}]})
-        (chunk-line {:id "x" :object "chat.completion.chunk" :created 1 :model "m"
-                     :choices [] :usage usage-fixture})
-        "data: [DONE]\n\n")))
+          (chunk-line (merge {:id "x" :object "chat.completion.chunk"
+                              :created 1 :model "m"
+                              :choices [{:index 0 :delta {}
+                                         :finish_reason "stop"}]}
+                             identity-top))
+          (chunk-line (merge {:id "x" :object "chat.completion.chunk"
+                              :created 1 :model "m"
+                              :choices [] :usage usage-fixture}
+                             identity-top))
+          "data: [DONE]\n\n"))))
 
 (deftest parse-completion-retains-bounded-response-identity
   (let [response
@@ -342,6 +348,14 @@
     (is (not (contains? response :seon.ai/response-model)))
     (is (not (contains? response :seon.ai/system-fingerprint)))
     (is (not (contains? response :seon.ai/request-id)))))
+
+(deftest endpoint-evidence-normalizes-and-redacts-url-secrets
+  (is (= "https://gateway.example/v1/chat/completions"
+         (ai/openai-request-endpoint
+           "https://user:password@gateway.example/v1?signature=secret#fragment")))
+  (is (= "https://gateway.example/v1/chat/completions"
+         (ai/openai-request-endpoint
+           "https://gateway.example/v1/chat/completions?signature=secret"))))
 
 (defn- streaming-fetch
   "An injected fetch that records [url init] into `captured` and returns
@@ -455,6 +469,9 @@
               (is (= "hi" text) "the streamed content deltas assemble to text")
               (is (= usage-fixture usage) "usage ALWAYS set on success")
               (is (= "stop" (:seon.ai.openai-compat/finish-reason resp)))
+              (is (= "m" (:seon.ai/response-model resp)))
+              (is (= "x" (:seon.ai/request-id resp)))
+              (is (not (contains? resp :seon.ai/system-fingerprint)))
               ;; The SDK posts to <root>/chat/completions and sends the
               ;; bearer — proves sdk-base-url strip-reconciliation here is
               ;; the default /v1 root path.
@@ -464,6 +481,34 @@
                   ":stream_options rides the wire")))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest oversized-response-identity-resolves-to-provider-error
+  (async done
+    (let [captured (atom nil)
+          oversized-model (apply str (repeat 513 "m"))]
+      (-> (with-conn
+            (fn [_conn]
+              (with-stubbed
+                (streaming-fetch captured
+                                 (sse-completion
+                                   {:model oversized-model
+                                    :system_fingerprint "fp-present"}
+                                   nil))
+                #(complete {:seon.ai/ctx "hi"}))))
+          (.then
+            (fn [response]
+              (is (= "" (:seon.ai/text response)))
+              (is (map? (:seon.ai/error response))
+                  "invalid evidence is an adapter error value, not a rejection")
+              (is (= "Provider response identity is invalid or exceeds the evidence bound."
+                     (get-in response [:seon.ai/error :seon.ai/evidence-error])))
+              (is (not (contains? response :seon.ai/response-model)))
+              (is (not (str/includes? (pr-str response) oversized-model))
+                  "the bounded error never echoes the oversized identity")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e]
+                    (is false (str "threw instead of returning evidence error — " e))
+                    (done)))))))
 
 (deftest agent-adapter-threads-attempt-signal-to-sdk-fetch
   (async done

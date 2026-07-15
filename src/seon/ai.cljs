@@ -63,12 +63,16 @@
 (schema/register! ::response-model [:string {:min 1 :max 512}])
 (schema/register! ::system-fingerprint [:string {:min 1 :max 512}])
 (schema/register! ::request-id [:string {:min 1 :max 512}])
+(schema/register! ::adapter
+  [:enum :openai-compat :anthropic :diffusiongemma :typeahead :stub])
+(schema/register! ::endpoint [:string {:min 1 :max 2048}])
 (schema/register! ::temperature :double)
 (schema/register! ::max-tokens :int)
 (schema/register! ::system-prompt :string)
 (schema/register! ::ctx :string)
 (schema/register! ::usage :map)
 (schema/register! ::msg :string)
+(schema/register! ::endpoint-error [:map [::msg ::msg]])
 (schema/register! ::status :int)
 (schema/register! ::timeout? :boolean)
 ;; TRANSPORT-shaped failure: js/fetch THREW before any HTTP status
@@ -86,6 +90,7 @@
 ;; negative). Present ONLY when the provider sent the header on a
 ;; retryable HTTP-status error; the agent turn loop's backoff honors it.
 (schema/register! ::retry-after-ms :int)
+(schema/register! ::evidence-error [:string {:min 1 :max 512}])
 
 ;; Tool/function-calling + extra-request + provider-metadata vocabulary
 ;; (SDK migration, 2026-06-16). These ride third-party-shaped maps: the
@@ -111,6 +116,44 @@
 ;; Process-local host cancellation capability. AbortSignal is a third-party JS
 ;; object and is never persisted; :any is intentional at this boundary.
 (schema/register! ::abort-signal :any)
+
+(defn openai-sdk-base-url
+  "The OpenAI SDK root derived from one configured endpoint."
+  {:malli/schema [:=> [:catn [::base-url ::base-url]] ::base-url]}
+  [url]
+  (cond
+    (str/ends-with? url "/chat/completions")
+    (subs url 0 (- (count url) (count "/chat/completions")))
+
+    (str/ends-with? url "/completions")
+    (subs url 0 (- (count url) (count "/completions")))
+
+    :else url))
+
+(defn openai-request-endpoint
+  "The redacted normalized chat-completions endpoint for evidence."
+  {:malli/schema [:=> [:catn [::base-url ::base-url]]
+                  [:or ::endpoint ::endpoint-error]]}
+  [url]
+  (try
+    (let [parsed (js/URL. url)
+          path (.-pathname parsed)
+          root-path
+          (cond
+            (str/ends-with? path "/chat/completions")
+            (subs path 0 (- (count path) (count "/chat/completions")))
+
+            (str/ends-with? path "/completions")
+            (subs path 0 (- (count path) (count "/completions")))
+
+            :else path)
+          endpoint-path
+          (str (str/replace root-path #"/+$" "") "/chat/completions")]
+      ;; URL.origin intentionally excludes userinfo; query and fragment are
+      ;; excluded by reconstructing from protocol/host/pathname only.
+      (str (.-protocol parsed) "//" (.-host parsed) endpoint-path))
+    (catch :default _
+      {::msg "The configured OpenAI endpoint is not a valid URL."})))
 
 (defn llm-arg->ctx
   "The ctx string from a bare-string or request-map llm-fn argument.
@@ -160,6 +203,7 @@
    [::timeout?       {:optional true} ::timeout?]
    [::transport?     {:optional true} ::transport?]
    [::retry-after-ms {:optional true} ::retry-after-ms]
+   [::evidence-error {:optional true} ::evidence-error]
    [::raw-body       {:optional true} ::raw-body]])
 
 ;; ------------------------------------------------------------

@@ -113,6 +113,65 @@
 ;; chunk) — marked so a reader never treats them as provider-reported.
 (schema/register! :seon.agent.turn/usage-estimated? :boolean)
 (schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
+(schema/register! :seon.agent.turn/llm-attempts [:vector {:seon.db/component true} :seon.db/ref])
+
+;; One bounded, queryable transport fact per provider attempt. The turn owns
+;; these component rows; the effective config remains derived from the retained
+;; coordinate and is projected here only as the non-secret values actually
+;; used. Absence remains absence.
+(schema/register! :seon.ai.attempt/ordinal :int)
+(schema/register! :seon.ai.attempt/database-id ::coordinate/database-id)
+(schema/register! :seon.ai.attempt/branch ::coordinate/branch)
+(schema/register! :seon.ai.attempt/commit-id ::coordinate/commit-id)
+(schema/register! :seon.ai.attempt/t ::coordinate/t)
+(schema/register! :seon.ai.attempt/provider :seon.ai/provider)
+(schema/register! :seon.ai.attempt/adapter :seon.ai/adapter)
+(schema/register! :seon.ai.attempt/requested-model :seon.ai/model)
+(schema/register! :seon.ai.attempt/temperature :seon.ai/temperature)
+(schema/register! :seon.ai.attempt/max-tokens :seon.ai/max-tokens)
+(schema/register! :seon.ai.attempt/thinking :seon.ai/thinking)
+(schema/register! :seon.ai.attempt/endpoint :seon.ai/endpoint)
+(schema/register! :seon.ai.attempt/adapter-timeout-ms :seon.ai/timeout-ms)
+(schema/register! :seon.ai.attempt/outer-timeout-ms :int)
+(schema/register! :seon.ai.attempt/stream? :boolean)
+(schema/register! :seon.ai.attempt/extra-body-digest :seon.ai/extra-body-digest)
+(schema/register! :seon.ai.attempt/dg-backend :seon.ai/dg-backend)
+(schema/register! :seon.ai.attempt/api-key-env :seon.ai/api-key-env)
+(schema/register! :seon.ai.attempt/credential-class :seon.ai/credential-class)
+(schema/register! :seon.ai.attempt/outcome
+                  [:enum :success :provider-error :adapter-timeout :outer-timeout])
+(schema/register! :seon.ai.attempt/error-status :seon.ai/status)
+(schema/register! :seon.ai.attempt/response-model :seon.ai/response-model)
+(schema/register! :seon.ai.attempt/system-fingerprint :seon.ai/system-fingerprint)
+(schema/register! :seon.ai.attempt/request-id :seon.ai/request-id)
+(schema/register! :seon.ai.attempt/evidence-error [:string {:min 1 :max 512}])
+(schema/register! :seon.ai.attempt/entity
+  [:map {:seon.db/entity true}
+   [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
+   [:seon.ai.attempt/database-id :seon.ai.attempt/database-id]
+   [:seon.ai.attempt/branch :seon.ai.attempt/branch]
+   [:seon.ai.attempt/commit-id :seon.ai.attempt/commit-id]
+   [:seon.ai.attempt/t :seon.ai.attempt/t]
+   [:seon.ai.attempt/provider :seon.ai.attempt/provider]
+   [:seon.ai.attempt/adapter :seon.ai.attempt/adapter]
+   [:seon.ai.attempt/requested-model {:optional true} :seon.ai.attempt/requested-model]
+   [:seon.ai.attempt/temperature {:optional true} :seon.ai.attempt/temperature]
+   [:seon.ai.attempt/max-tokens {:optional true} :seon.ai.attempt/max-tokens]
+   [:seon.ai.attempt/thinking {:optional true} :seon.ai.attempt/thinking]
+   [:seon.ai.attempt/endpoint {:optional true} :seon.ai.attempt/endpoint]
+   [:seon.ai.attempt/adapter-timeout-ms {:optional true} :seon.ai.attempt/adapter-timeout-ms]
+   [:seon.ai.attempt/outer-timeout-ms :seon.ai.attempt/outer-timeout-ms]
+   [:seon.ai.attempt/stream? :seon.ai.attempt/stream?]
+   [:seon.ai.attempt/extra-body-digest {:optional true} :seon.ai.attempt/extra-body-digest]
+   [:seon.ai.attempt/dg-backend {:optional true} :seon.ai.attempt/dg-backend]
+   [:seon.ai.attempt/api-key-env {:optional true} :seon.ai.attempt/api-key-env]
+   [:seon.ai.attempt/credential-class {:optional true} :seon.ai.attempt/credential-class]
+   [:seon.ai.attempt/outcome :seon.ai.attempt/outcome]
+   [:seon.ai.attempt/error-status {:optional true} :seon.ai.attempt/error-status]
+   [:seon.ai.attempt/response-model {:optional true} :seon.ai.attempt/response-model]
+   [:seon.ai.attempt/system-fingerprint {:optional true} :seon.ai.attempt/system-fingerprint]
+   [:seon.ai.attempt/request-id {:optional true} :seon.ai.attempt/request-id]
+   [:seon.ai.attempt/evidence-error {:optional true} :seon.ai.attempt/evidence-error]])
 
 ;; Entity shape. NB: seon.db validates per-ATTRIBUTE, not entity-level, so the
 ;; non-:optional entries below are documentation, not an enforced required-key
@@ -136,7 +195,8 @@
    [:seon.agent.turn/llm-usage    {:optional true} :seon.agent.turn/llm-usage]
    [:seon.agent.turn/llm-meta     {:optional true} :seon.agent.turn/llm-meta]
    [:seon.agent.turn/usage-estimated? {:optional true} :seon.agent.turn/usage-estimated?]
-   [:seon.agent.turn/evals        {:optional true} :seon.agent.turn/evals]])
+   [:seon.agent.turn/evals        {:optional true} :seon.agent.turn/evals]
+   [:seon.agent.turn/llm-attempts {:optional true} :seon.agent.turn/llm-attempts]])
 
 (def ^:private coordinate->turn-attr
   {::coordinate/database-id :seon.agent.turn/rendered-database-id
@@ -354,6 +414,7 @@
                                                    :seon.agent.turn/llm-usage
                                                    :seon.agent.turn/llm-meta
                                                    :seon.agent.turn/usage-estimated?
+                                                   :seon.agent.turn/llm-attempts
                                                    :seon.agent.turn/reply-blob
                                                    :seon.agent.turn/error]))]}))]
       (when (false? (:seon.db/ok? close))
@@ -493,6 +554,86 @@
       (retry/max-retries (ai/agent-max-retries id llm-retry-default-n))
       (retry/max-duration llm-retry-total-cap-ms)))
 
+(defn- resolved-adapter
+  "The provider adapter selected by one immutable resolved config."
+  [config]
+  (case (:seon.ai/provider config)
+    :anthropic :anthropic
+    :diffusiongemma (if (= :control (:seon.ai/dg-backend config))
+                      :diffusiongemma
+                      :openai-compat)
+    :typeahead :typeahead
+    :openai-compat))
+
+(defn- attempt-outcome
+  [response outer-timeout?]
+  (cond
+    outer-timeout? :outer-timeout
+    (get-in response [:seon.ai/error :seon.ai/timeout?]) :adapter-timeout
+    (:seon.ai/error response) :provider-error
+    :else :success))
+
+(defn- attempt-row
+  "One bounded queryable component row from immutable request evidence."
+  [ordinal point resolution outer-timeout-ms stream? response outer-timeout?]
+  (let [config (:seon.ai/resolved-config resolution)
+        raw (or (:seon.ai/raw response) response)
+        credential (get-in raw [:seon.ai/config-evidence
+                                :seon.ai/credential-source])
+        endpoint-result
+        (when (contains? #{:deepseek :openai-compat}
+                         (:seon.ai/provider config))
+          (some-> (:seon.ai/base-url config) ai/openai-request-endpoint))
+        adapter (or (:seon.ai/adapter response) (resolved-adapter config))
+        status (get-in response [:seon.ai/error :seon.ai/status])]
+    (cond->
+      {:seon.ai.attempt/ordinal ordinal
+       :seon.ai.attempt/database-id (::coordinate/database-id point)
+       :seon.ai.attempt/branch (::coordinate/branch point)
+       :seon.ai.attempt/commit-id (::coordinate/commit-id point)
+       :seon.ai.attempt/t (::coordinate/t point)
+       :seon.ai.attempt/provider (:seon.ai/provider config)
+       :seon.ai.attempt/adapter adapter
+       :seon.ai.attempt/outer-timeout-ms outer-timeout-ms
+       :seon.ai.attempt/stream? stream?
+       :seon.ai.attempt/outcome (attempt-outcome response outer-timeout?)}
+      (:seon.ai/model config)
+      (assoc :seon.ai.attempt/requested-model (:seon.ai/model config))
+      (:seon.ai/temperature config)
+      (assoc :seon.ai.attempt/temperature (:seon.ai/temperature config))
+      (:seon.ai/max-tokens config)
+      (assoc :seon.ai.attempt/max-tokens (:seon.ai/max-tokens config))
+      (contains? config :seon.ai/thinking)
+      (assoc :seon.ai.attempt/thinking (:seon.ai/thinking config))
+      (string? endpoint-result)
+      (assoc :seon.ai.attempt/endpoint endpoint-result)
+      (map? endpoint-result)
+      (assoc :seon.ai.attempt/evidence-error (:seon.ai/msg endpoint-result))
+      (:seon.ai/timeout-ms config)
+      (assoc :seon.ai.attempt/adapter-timeout-ms (:seon.ai/timeout-ms config))
+      (:seon.ai/extra-body-digest config)
+      (assoc :seon.ai.attempt/extra-body-digest
+             (:seon.ai/extra-body-digest config))
+      (:seon.ai/dg-backend config)
+      (assoc :seon.ai.attempt/dg-backend (:seon.ai/dg-backend config))
+      (:seon.ai/api-key-env config)
+      (assoc :seon.ai.attempt/api-key-env (:seon.ai/api-key-env config))
+      (:seon.ai/credential-class credential)
+      (assoc :seon.ai.attempt/credential-class
+             (:seon.ai/credential-class credential))
+      status
+      (assoc :seon.ai.attempt/error-status status)
+      (get-in response [:seon.ai/error :seon.ai/evidence-error])
+      (assoc :seon.ai.attempt/evidence-error
+             (get-in response [:seon.ai/error :seon.ai/evidence-error]))
+      (:seon.ai/response-model raw)
+      (assoc :seon.ai.attempt/response-model (:seon.ai/response-model raw))
+      (:seon.ai/system-fingerprint raw)
+      (assoc :seon.ai.attempt/system-fingerprint
+             (:seon.ai/system-fingerprint raw))
+      (:seon.ai/request-id raw)
+      (assoc :seon.ai.attempt/request-id (:seon.ai/request-id raw)))))
+
 (defn ^:async ^:private bounded-llm-attempt!
   "ONE adapter attempt under the per-attempt wall-clock cap.
 
@@ -511,24 +652,34 @@
    canonical request map. In repl-mode `:stream`, `:seon.ai/stream? true` asks
    the adapter to consume the SDK stream and stop it at the first complete
    form. Every retry gets a fresh controller."
-  [llm-fn prompt-text stream?]
-  (let [ms         (config/llm-attempt-timeout-ms)
+  [id ordinal llm-fn prompt-text stream?]
+  (let [database   @db/*conn*
+        resolution (ai/resolved-config
+                     {:seon.db/db database :seon.agent/id id})
+        point      (db/head-coordinate database)
+        ms         (config/llm-attempt-timeout-ms)
         controller (js/AbortController.)
         signal     (.-signal controller)
         arg        (cond-> {:seon.ai/ctx          prompt-text
-                            :seon.ai/abort-signal signal}
+                            :seon.ai/abort-signal signal
+                            :seon.ai/config-resolution resolution}
                      stream? (assoc :seon.ai/stream? true))
         v          (await (seval/race-timeout
                             (llm-fn arg)
                             ms
                             (fn [] (.abort controller))))]
-    (if (seval/timed-out? v)
-      {:seon.ai/error {:seon.ai/msg      (str "LLM attempt exceeded the per-attempt "
-                                              "cap (" ms "ms, SEON_LLM_ATTEMPT_"
-                                              "TIMEOUT_MS) — provider request "
-                                              "cancelled")
-                       :seon.ai/timeout? true}}
-      v)))
+    (let [outer-timeout? (seval/timed-out? v)
+          response
+          (if outer-timeout?
+            {:seon.ai/error
+             {:seon.ai/msg      (str "LLM attempt exceeded the per-attempt "
+                                     "cap (" ms "ms, SEON_LLM_ATTEMPT_"
+                                     "TIMEOUT_MS) — provider request cancelled")
+              :seon.ai/timeout? true}}
+            v)]
+      (assoc response ::attempt-row
+             (attempt-row ordinal point resolution ms (boolean stream?)
+                          response outer-timeout?)))))
 
 (defn ^:async ^:private call-llm!
   "Internal — `(llm-fn prompt-text)` with bounded retry-with-backoff on a
@@ -541,12 +692,19 @@
    ceiling) over the strategy's delay. On exhaustion the last (error) resp
    flows through unchanged — the turn surfaces its `:seon.ai/error` as a
    value, never a throw. When any retry fired, the resp carries
-   `:seon.agent.turn/llm-retries n` so the turn record is honest."
+  `:seon.agent.turn/llm-retries n` so the turn record is honest."
   [id id-of-turn llm-fn prompt-text stream?]
-  (let [{:seon.retry/keys [result retries]}
+  (let [!attempts (atom [])
+        {:seon.retry/keys [result retries]}
         (await
           (retry/with-retry!
-            {:seon.retry/thunk    (fn [] (bounded-llm-attempt! llm-fn prompt-text stream?))
+            {:seon.retry/thunk
+             (fn ^:async run-attempt! []
+               (let [ordinal (count @!attempts)
+                     response
+                     (await (bounded-llm-attempt! id ordinal llm-fn prompt-text stream?))]
+                 (swap! !attempts conj (::attempt-row response))
+                 (dissoc response ::attempt-row)))
              :seon.retry/strategy (llm-retry-strategy id)
              :seon.retry/retry?   llm-retryable?
              :seon.retry/override (fn [resp]
@@ -558,7 +716,7 @@
                (log id id-of-turn "llm transient error — retry"
                     (str attempt " in " delay-ms "ms — "
                          (get-in result [:seon.ai/error :seon.ai/msg]))))}))]
-    (cond-> result
+    (cond-> (assoc result :seon.agent.turn/llm-attempts @!attempts)
       (pos? retries) (assoc :seon.agent.turn/llm-retries retries))))
 
 (defn ^:async ask-and-eval!
@@ -578,6 +736,7 @@
     :seon.agent.turn/keys  [id-of-turn turn-idx prompt-text]}]
   (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text (boolean stream?)))
         retries (:seon.agent.turn/llm-retries resp)
+        attempts (:seon.agent.turn/llm-attempts resp)
         raw     (:seon.ai/raw resp)
         usage   (:seon.ai/usage raw)
         estimated? (:seon.ai/estimated? raw)
@@ -592,10 +751,12 @@
            :seon.agent.turn/status :error
            ;; Capture the failure as data — the error record must not
            ;; depend on turn success (observability.md).
-           :seon.agent.turn/error  (turn-error-str err)}
+           :seon.agent.turn/error  (turn-error-str err)
+           :seon.agent.turn/llm-attempts attempts}
           retries (assoc :seon.agent.turn/llm-retries retries)))
       (cond-> (await (ask-and-eval-reply! resp id id-of-turn compile-state run-id
                                           (boolean stream?) start-ns))
+        true        (assoc :seon.agent.turn/llm-attempts attempts)
         retries     (assoc :seon.agent.turn/llm-retries retries)
         (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
         estimated?  (assoc :seon.agent.turn/usage-estimated? true)
@@ -697,7 +858,8 @@
             (log id turn-idx (name (or (:seon.agent.turn/status result) :done)) n-ok
                  (if (:seon.agent.turn/status result) "llm-error" "ok"))
             (assoc (db/pull {:seon.db/pull-pattern
-                             '[* {:seon.agent.turn/evals [*]}]
+                             '[* {:seon.agent.turn/evals [*]}
+                                  {:seon.agent.turn/llm-attempts [*]}]
                              :seon.db/ref [:seon.agent.turn/id turn-id]})
                    :seon.agent/eval-count n-ok))))
       (catch :default e

@@ -27,15 +27,19 @@ ambient configuration. Its response also retains bounded response model,
 system fingerprint, and request id when those fields are present; absence
 remains absence.
 
-The remaining first dependency is ownership of the immutable attempt value.
-`seon.ai.dispatch/llm-fn` currently captures the database value and resolution
-inside the promise-returning provider call. The turn's outer timeout can win
-before that promise returns, so `seon.agent.turn` has no coordinate or resolved
-configuration to persist for the timed-out attempt. Ordered component facts
-must therefore wait until dispatch hands the captured attempt value to the
-turn synchronously (or the turn captures it and dispatch consumes that exact
-value). Persisting success/error attempts alone would make outer-timeout facts
-structurally incomplete and falsely plausible.
+The turn retry thunk now owns the immutable database value and resolution
+before starting the outer timeout race, and dispatch consumes that supplied
+resolution without overwriting it. Each attempt becomes an ordered component
+fact connected to its turn, including outer timeouts that return no adapter
+response. The retained endpoint is reconstructed from parsed URL components,
+so userinfo, query, and fragment bytes never enter evidence. Invalid or
+oversized response identity becomes a bounded evidence error without echoing
+the rejected bytes.
+
+The remaining dependency is the public projection: `seon.web.serve` does not
+yet query these attempt components into `/agents/run`, and Inspect therefore
+cannot retain or validate them. That projection remains intentionally outside
+this source boundary.
 
 Inspect's public `read_eval_log` shows that native sample metadata retains a
 complete `pod_database_coordinate` with database id, branch, commit id, and

@@ -15,7 +15,7 @@
 
    baseURL reconciliation: `SEON_AI_BASE_URL` was historically the FULL
    chat-completions URL; the SDK wants the `/v1` ROOT and appends
-   `/chat/completions` itself. [[sdk-base-url]] strips a trailing
+   `/chat/completions` itself. [[seon.ai/openai-sdk-base-url]] strips a trailing
    `/chat/completions` (or `/completions`) so BOTH the full-URL form
    and the `/v1` root keep working (the `/v1` root is now preferred).
 
@@ -141,19 +141,6 @@
   (= :openai-compat
      (get-in resolution [:seon.ai/resolved-config :seon.ai/provider])))
 
-(defn- sdk-base-url
-  "The SDK root derived from one resolved endpoint string."
-  [url]
-  (when url
-    (cond
-      (str/ends-with? url "/chat/completions")
-      (subs url 0 (- (count url) (count "/chat/completions")))
-
-      (str/ends-with? url "/completions")
-      (subs url 0 (- (count url) (count "/completions")))
-
-      :else url)))
-
 (defn- resolved-credential
   "Resolve a secret at call time and retain only its non-secret source."
   [resolution]
@@ -267,6 +254,18 @@
    REMAINDER is preserved as :seon.ai/provider-fields (#25)."
   #{:choices :usage :id :object :created :model :system_fingerprint})
 
+(defn- validated-response-identity
+  "Validate one optional provider identity without echoing invalid bytes."
+  [schema-key label value]
+  (when (some? value)
+    (if (schema/valid-candidate-value? schema-key value)
+      value
+      (throw
+        (ex-info (str "OpenAI-compatible response " label
+                      " is invalid or exceeds the evidence bound.")
+                 {:seon.error/kind :user-input
+                  :seon.ai/response-identity? true})))))
+
 (defn parse-completion
   "Map an assembled OpenAI ChatCompletion OBJECT to a complete-response.
 
@@ -290,6 +289,14 @@
         msg        (:content message)
         reasoning  (:reasoning_content message)
         tool-calls (:tool_calls message)
+        response-model
+        (validated-response-identity :seon.ai/response-model "model" (:model body))
+        fingerprint
+        (validated-response-identity :seon.ai/system-fingerprint
+                                     "system fingerprint"
+                                     (:system_fingerprint body))
+        request-id
+        (validated-response-identity :seon.ai/request-id "request id" (:id body))
         extras     (apply dissoc body known-completion-keys)]
     ;; Diagnosis evidence, not behavior (downstream ask 20): a
     ;; thinking-mode completion can land EVERY token in
@@ -307,10 +314,9 @@
              :seon.ai.openai-compat/finish-reason (:finish_reason choice)}
       (some? (:usage body)) (assoc :seon.ai/usage (:usage body))
       (seq tool-calls)      (assoc :seon.ai/tool-calls tool-calls)
-      (some? (:model body)) (assoc :seon.ai/response-model (:model body))
-      (some? (:system_fingerprint body))
-      (assoc :seon.ai/system-fingerprint (:system_fingerprint body))
-      (some? (:id body)) (assoc :seon.ai/request-id (:id body))
+      response-model (assoc :seon.ai/response-model response-model)
+      fingerprint (assoc :seon.ai/system-fingerprint fingerprint)
+      request-id (assoc :seon.ai/request-id request-id)
       (seq extras)          (assoc :seon.ai/provider-fields extras))))
 
 (defn- config-error
@@ -348,7 +354,11 @@
         ra (assoc :seon.ai/retry-after-ms ra)))
 
     :else
-    {:seon.ai/msg (str label " call failed: " (error/->message e))}))
+    (if (:seon.ai/response-identity? (ex-data e))
+      {:seon.ai/msg (str label " response identity failed evidence validation")
+       :seon.ai/evidence-error
+       "Provider response identity is invalid or exceeds the evidence bound."}
+      {:seon.ai/msg (str label " call failed: " (error/->message e))})))
 
 (def ^:dynamic *fetch*
   "Test seam ONLY. When bound to a fetch fn, [[make-client]] hands it to
@@ -471,7 +481,7 @@
         config     (:seon.ai/resolved-config resolution)
         compat? (openai-compat? resolution)
         label   (if compat? "OpenAI-compat" "DeepSeek")
-        url     (sdk-base-url (:seon.ai/base-url config))
+        url     (some-> (:seon.ai/base-url config) ai/openai-sdk-base-url)
         credential (resolved-credential resolution)
         key     (::api-key credential)
         credential-source (:seon.ai/credential-source credential)

@@ -32,7 +32,8 @@
 
 ;; `:text` is the established turn-loop adapter result key. Provider adapters
 ;; may add raw/error fields; the deterministic stub returns only this minimum.
-(schema/register! ::stub-response [:map [:text :string]])
+(schema/register! ::stub-response
+  [:map [:text :string] [:seon.ai/adapter :seon.ai/adapter]])
 
 (defn stub
   "Return the deterministic no-credentials LLM reply."
@@ -47,7 +48,8 @@
                (pr-str (str "hello from the stub LLM — saw "
                             (tokens/estimate ctx) " tokens of ctx"))
                ")\n")]
-    (.then (.resolve js/Promise nil) (fn [_] {:text text}))))
+    (.then (.resolve js/Promise nil)
+           (fn [_] {:text text :seon.ai/adapter :stub}))))
 
 (defn adapter
   "The agent adapter for the currently effective provider."
@@ -113,11 +115,14 @@
   {:malli/schema [:=> [:cat] ::llm-fn]}
   []
   (fn [arg]
-    (let [database @db/*conn*
-          agent-id (db/current-agent-id)
-          resolution (ai/resolved-config
-                       (cond-> {:seon.db/db database}
-                         agent-id (assoc :seon.agent/id agent-id)))
+    (let [supplied-resolution
+          (when (map? arg) (:seon.ai/config-resolution arg))
+          database (when-not supplied-resolution @db/*conn*)
+          agent-id (when-not supplied-resolution (db/current-agent-id))
+          resolution (or supplied-resolution
+                         (ai/resolved-config
+                           (cond-> {:seon.db/db database}
+                             agent-id (assoc :seon.agent/id agent-id))))
           request (if (map? arg)
                     (assoc arg :seon.ai/config-resolution resolution)
                     {:seon.ai/ctx arg
