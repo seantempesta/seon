@@ -353,6 +353,89 @@
                ::registry/backend :memory
                ::registry/attachment (::registry/attachment created)})))))))
 
+(deftest lifecycle-observation-reads-the-complete-native-roster
+  (let [database-name :registry/lifecycle-observation
+        main (ensure-database!
+              {::registry/database-name database-name
+               ::registry/backend :memory})
+        connection (::registry/conn main)
+        main-coordinate (coordinate/resolved (d/db connection))
+        retained-branch :registry.branch/unopened]
+    (d/branch! connection
+               (::coordinate/commit-id main-coordinate)
+               retained-branch)
+    (let [retained-coordinate
+          (coordinate/resolved (d/branch-as-db connection retained-branch))
+          observation
+          (registry/observe-database-lifecycle
+           {::registry/database-name database-name})]
+      (is (= #{:db retained-branch}
+             (::registry/branch-roster observation)))
+      (is (= main-coordinate (::registry/main-coordinate observation)))
+      (is (= {:db main-coordinate retained-branch retained-coordinate}
+             (::registry/branch-coordinates observation)))
+      (is (= {}
+             (registry/lookup-connection
+              {::registry/database-name :registry/unopened-branch}))
+          "native roster membership never depends on an open branch route"))))
+
+(deftest lifecycle-observation-fails-closed-on-partial-or-moving-storage
+  (let [database-name :registry/lifecycle-observation-failure
+        main (ensure-database!
+              {::registry/database-name database-name
+               ::registry/backend :memory})
+        connection (::registry/conn main)
+        original-branches d/branches
+        original-branch-as-db d/branch-as-db
+        missing
+        (with-redefs [d/branches (fn [_] #{:db :registry.branch/missing})
+                      d/branch-as-db
+                      (fn [conn branch]
+                        (when (= :db branch)
+                          (original-branch-as-db conn branch)))]
+          (try
+            (registry/observe-database-lifecycle
+             {::registry/database-name database-name})
+            nil
+            (catch clojure.lang.ExceptionInfo exception exception)))
+        reads (atom 0)
+        moved
+        (with-redefs [d/branches
+                      (fn [conn]
+                        (if (= 1 (swap! reads inc))
+                          (original-branches conn)
+                          (conj (set (original-branches conn))
+                                :registry.branch/late)))]
+          (try
+            (registry/observe-database-lifecycle
+             {::registry/database-name database-name})
+            nil
+            (catch clojure.lang.ExceptionInfo exception exception)))
+        branch-reads (atom 0)
+        moved-head
+        (with-redefs [d/branch-as-db
+                      (fn [conn branch]
+                        (when (= 2 (swap! branch-reads inc))
+                          (d/transact
+                           conn
+                           [{:db/ident :registry.lifecycle.observation/moved
+                             :db/valueType :db.type/boolean
+                             :db/cardinality :db.cardinality/one}]))
+                        (original-branch-as-db conn branch))]
+          (try
+            (registry/observe-database-lifecycle
+             {::registry/database-name database-name})
+            nil
+            (catch clojure.lang.ExceptionInfo exception exception)))]
+    (is (= :seon.db.protocol.error/branch-missing
+           (:seon.error/kind (ex-data missing))))
+    (is (= :seon.db.protocol.error/stale-branch-roster
+           (:seon.error/kind (ex-data moved))))
+    (is (= :seon.db.protocol.error/stale-target-head
+           (:seon.error/kind (ex-data moved-head))))
+    (is (= #{:db}
+           (set (original-branches connection))))))
+
 (deftest native-branch-create-retries-adopt-the-exact-published-route
   (let [source-name :registry/retry-source
         target-name :registry/retry-target

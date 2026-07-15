@@ -20,6 +20,8 @@
 (def ping-operation :seon.db.protocol.operation/ping)
 (def ensure-database-operation
   :seon.db.protocol.operation/ensure-database)
+(def observe-database-lifecycle-operation
+  :seon.db.protocol.operation/observe-database-lifecycle)
 (def create-branch-operation :seon.db.protocol.operation/create-branch)
 (def release-database-operation
   :seon.db.protocol.operation/release-database)
@@ -88,6 +90,7 @@
  ::operation
  [:enum ping-operation
   ensure-database-operation
+  observe-database-lifecycle-operation
   create-branch-operation
   release-database-operation
   delete-branch-operation
@@ -122,6 +125,10 @@
 (schema/register! ::attachment ::coordinate/attachment)
 (schema/register! ::target-attachment ::coordinate/attachment)
 (schema/register! ::target-branch :keyword)
+(schema/register! ::main-coordinate ::coordinate/coordinate)
+(schema/register! ::branch-coordinates
+                  [:map-of :keyword ::coordinate/coordinate])
+(schema/register! ::branch-roster [:set :keyword])
 (schema/register! ::source-database-name ::database-name)
 (schema/register! ::target-database-name ::database-name)
 (schema/register! ::created? :boolean)
@@ -247,6 +254,11 @@
   [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [::database-path {:optional true} ::database-path]])
 (schema/register!
+ ::observe-database-lifecycle-request
+ [:map {:closed true}
+  [::operation [:= observe-database-lifecycle-operation]]
+  [::database-name ::database-name]])
+(schema/register!
  ::create-branch-request
  [:map {:closed true}
   [::operation [:= create-branch-operation]]
@@ -308,6 +320,8 @@
  [:multi {:dispatch ::operation}
   [ping-operation ::ping-request]
   [ensure-database-operation ::ensure-database-request]
+  [observe-database-lifecycle-operation
+   ::observe-database-lifecycle-request]
   [create-branch-operation ::create-branch-request]
   [release-database-operation ::release-database-request]
   [delete-branch-operation ::delete-branch-request]
@@ -337,6 +351,14 @@
   [::coordinate/coordinate ::coordinate/coordinate]
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]])
+(schema/register!
+ ::observe-database-lifecycle-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::database-name ::database-name]
+  [::main-coordinate ::main-coordinate]
+  [::branch-coordinates ::branch-coordinates]
+  [::branch-roster ::branch-roster]])
 (schema/register!
  ::create-branch-response
  [:map {:closed true}
@@ -405,6 +427,7 @@
   ::failed-response
   ::ping-response
   ::ensure-database-response
+  ::observe-database-lifecycle-response
   ::create-branch-response
   ::release-database-response
   ::delete-branch-response
@@ -427,6 +450,10 @@
   [::backend ::backend]
   [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [::database-path {:optional true} ::database-path]])
+(schema/register!
+ ::observe-database-lifecycle-request-input
+ [:map {:closed true}
+  [::database-name ::database-name]])
 (schema/register!
  ::create-branch-request-input
  [:map {:closed true}
@@ -496,6 +523,14 @@
            ::backend backend}
     attachment (assoc ::coordinate/attachment attachment)
     database-path (assoc ::database-path database-path)))
+
+(defn observe-database-lifecycle-request
+  "Construct one exact native database-lifecycle observation request."
+  {:malli/schema
+   [:=> [:cat ::observe-database-lifecycle-request-input]
+    ::observe-database-lifecycle-request]}
+  [input]
+  (assoc input ::operation observe-database-lifecycle-operation))
 
 (defn create-branch-request
   "Construct one exact native branch-creation request."

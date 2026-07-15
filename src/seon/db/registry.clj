@@ -72,6 +72,8 @@
   :seon.db.restore-admin.connection/cleanup-unproved])
 (schema/register! ::expected-branch-roster [:set :keyword])
 (schema/register! ::branch-roster [:set :keyword])
+(schema/register! ::main-coordinate ::coordinate)
+(schema/register! ::branch-coordinates [:map-of :keyword ::coordinate])
 (schema/register! ::pre-restore-main-coordinate ::coordinate)
 (schema/register! ::selected-target-coordinate ::coordinate)
 (schema/register! ::prepared-target-coordinate ::coordinate)
@@ -125,6 +127,18 @@
                     ::initialization-error]])
 
 (schema/register! ::ensure-database!-response ::entry-view)
+
+(schema/register!
+ ::observe-database-lifecycle-request
+ [:map {:closed true}
+  [::database-name ::database-name]])
+(schema/register!
+ ::observe-database-lifecycle-response
+ [:map {:closed true}
+  [::database-name ::database-name]
+  [::main-coordinate ::main-coordinate]
+  [::branch-coordinates ::branch-coordinates]
+  [::branch-roster ::branch-roster]])
 
 (schema/register!
  ::create-branch!-request
@@ -587,6 +601,86 @@
      kind
      (str label " changed before the lifecycle operation.")
      (assoc data ::expected-coordinate expected ::coordinate actual))))
+
+(defn- observe-native-branch-coordinates!
+  [database-name connection attachment roster]
+  (into {}
+        (map
+         (fn [branch]
+           (let [db-value (d/branch-as-db connection branch)]
+             (when-not db-value
+               (lifecycle-fail!
+                :seon.db.protocol.error/branch-missing
+                "A native branch disappeared during lifecycle observation."
+                {::database-name database-name
+                 ::branch-roster roster
+                 ::target-branch branch}))
+             (let [resolved (coordinate/resolved db-value)
+                   expected-attachment
+                   (assoc attachment ::coordinate/branch branch)]
+               (require-attachment!
+                "Observed native branch" expected-attachment
+                (coordinate/attachment resolved)
+                {::database-name database-name
+                 ::target-branch branch
+                 ::coordinate resolved})
+               [branch resolved])))
+         (sort roster))))
+
+(defn observe-database-lifecycle
+  "Observe every exact native branch head from the registered main route."
+  {:malli/schema
+   [:=> [:cat ::observe-database-lifecycle-request]
+    ::observe-database-lifecycle-response]}
+  [{::keys [database-name]}]
+  (locking !registry
+    (let [entry (require-ready-entry! database-name)
+          attachment (::attachment entry)
+          connection (::conn entry)]
+      (when-not (= :db (::coordinate/branch attachment))
+        (lifecycle-fail!
+         :seon.db.protocol.error/attachment-mismatch
+         "Database lifecycle observation requires the main :db route."
+         {::database-name database-name
+          ::attachment attachment}))
+      (locking connection
+        (let [roster-before (set (d/branches connection))
+              coordinates-before
+              (observe-native-branch-coordinates!
+               database-name connection attachment roster-before)
+              roster-middle (set (d/branches connection))
+              branch-coordinates
+              (observe-native-branch-coordinates!
+               database-name connection attachment roster-before)
+              roster-after (set (d/branches connection))
+              main-coordinate (get branch-coordinates :db)]
+          (when-not (= roster-before roster-middle roster-after)
+            (lifecycle-fail!
+             :seon.db.protocol.error/stale-branch-roster
+             "The native branch roster changed during lifecycle observation."
+             {::database-name database-name
+              ::expected-branch-roster roster-before
+              ::branch-roster roster-after}))
+          (when-not (= coordinates-before branch-coordinates)
+            (lifecycle-fail!
+             :seon.db.protocol.error/stale-target-head
+             "A native branch head changed during lifecycle observation."
+             {::database-name database-name
+              ::expected-coordinate coordinates-before
+              ::coordinate branch-coordinates}))
+          (when-not (and (contains? roster-before :db)
+                         main-coordinate
+                         (= roster-before (set (keys branch-coordinates))))
+            (lifecycle-fail!
+             :seon.db.protocol.error/stale-branch-roster
+             "Database lifecycle observation is incomplete."
+             {::database-name database-name
+              ::branch-roster roster-before
+              ::branch-coordinates branch-coordinates}))
+          {::database-name database-name
+           ::main-coordinate main-coordinate
+           ::branch-coordinates branch-coordinates
+           ::branch-roster roster-before})))))
 
 (defn- datahike-lifecycle-kind
   [throwable]

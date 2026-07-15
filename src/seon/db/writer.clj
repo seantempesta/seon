@@ -1045,6 +1045,19 @@
        (::registry/path result)
        (assoc ::protocol/database-path (::registry/path result))))))
 
+(defn- handle-observe-database-lifecycle
+  [request]
+  (let [database-name (::protocol/database-name request)
+        observation
+        (registry/observe-database-lifecycle
+         {::registry/database-name (keyword database-name)})]
+    (protocol/success
+     {::protocol/database-name database-name
+      ::protocol/main-coordinate (::registry/main-coordinate observation)
+      ::protocol/branch-coordinates
+      (::registry/branch-coordinates observation)
+      ::protocol/branch-roster (::registry/branch-roster observation)})))
+
 (defn- handle-release-database
   [request]
   (let [result
@@ -1222,6 +1235,9 @@
 
          :seon.db.protocol.operation/ensure-database
          (handle-ensure-database runtime request)
+
+         :seon.db.protocol.operation/observe-database-lifecycle
+         (handle-observe-database-lifecycle request)
 
          :seon.db.protocol.operation/create-branch
          (handle-create-branch runtime request)

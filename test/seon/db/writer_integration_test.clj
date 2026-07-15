@@ -331,6 +331,23 @@
               (::registry/conn
                (registry/resolve-connection
                 {::registry/database-name (keyword target-name)}))]
+          (let [unopened-branch :experiment/unopened
+                _ (d/branch! source-connection
+                             (::coordinate/commit-id source-head)
+                             unopened-branch)
+                observation
+                (call! channel
+                       (protocol/observe-database-lifecycle-request
+                        {::protocol/database-name source-name}))]
+            (is (::protocol/success? observation))
+            (is (= source-head (::protocol/main-coordinate observation)))
+            (is (= #{:db branch unopened-branch}
+                   (::protocol/branch-roster observation)))
+            (is (= (::protocol/branch-roster observation)
+                   (set (keys (::protocol/branch-coordinates observation)))))
+            (is (= (assoc source-head ::coordinate/branch unopened-branch)
+                   (get (::protocol/branch-coordinates observation)
+                        unopened-branch))))
           (is (= protocol/stale-source-head-error
                  (::protocol/error-kind stale)))
           (is (::protocol/success? created))
