@@ -46,6 +46,8 @@
     "src",
     "script",
     "resources",
+    "config",
+    "seon-skills",
     "acme",
     "build.clj",
     "deps.edn",

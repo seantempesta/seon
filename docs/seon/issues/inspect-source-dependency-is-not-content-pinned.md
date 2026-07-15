@@ -113,3 +113,9 @@ run metadata.
   native `.eval` log, and Seon runtime/artifact/config identities. A dirty or
   mismatched source fails before task construction; it is not merely labeled
   after a score exists.
+
+The admitted Seon closure also includes `config/` and `seon-skills/`. These are
+runtime inputs, not documentation: the selected manifest seeds system text,
+namespace/tool requirements, context and policy facts, while the configured
+skill corpus supplies discoverable agent material. Artifact digests alone do
+not prove either database-applied input, so dirty changes now reject admission.
