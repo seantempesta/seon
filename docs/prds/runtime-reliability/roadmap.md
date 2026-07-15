@@ -123,10 +123,10 @@ contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | Review every returned slice against its owning source contract, preserve the full ledger, and keep operator/restart work on the unit-1 spine | Typed native create/release/delete, attachment-scoped projection, non-autonomous pod lifecycle, provider cancellation, opaque database cursors, the public Datahike query-dependency projection, and closed launch/replica/client/blob consumption are integrated; `9edf26f1` is the settled descriptor boundary for operator consumers | Review the operator portability split, the single-run test-runner repair, and the containment handback; integrate each coherent boundary, then coordinate a source-frozen restart/crash proof before restore/undo |
-| Database lifecycle | **Descriptor/replica Slice 1 complete; operator Slice 2 implementation in progress:** one closed descriptor composes the client capability, retains creation provenance, rejects path containment, claims blob storage once, routes exact replica/feed/remote writes, and accepts a complete advanced current head only on the same attachment | Focused gates are green at 53 tests/330 assertions and the post-ownership-move 29 tests/197 assertions. The operator plan found that `seon.launch` must consume a genuinely portable coordinate/protocol owner: schema extraction alone is insufficient because launch also derives the pure attachment coordinate | Preserve one coordinate mechanism while separating Datahike/Hasch runtime dependencies; implement typed pod-only descriptor publication and owned-process create/close; then prove restart/crash recovery, restore/undo, and multi-form transitions in that order |
-| Reactive/database views | **Cursor and `/data` adapter slices complete; dependency-owned runner repair in proof:** `b70871cd` and `a82917e6` provide opaque coordinate-bound current/history cursors, frozen retained feeds, one-snapshot first paint, and 10 tests/72 assertions; `3bd25026` plus the pushed Datahike dependency expose the public query-attribute projection needed by reverse unit selection | The exact-selector false green is grounded in Shadow's symbol reconstruction after hash-set promotion. The maintained fork fix now has a standard prep-lib boundary and fresh-gitlib proof; the original unchanged `bin/test-cljs` is running the ten-selector regression as one Node run. Interrupted changed-test process-tree cleanup remains in the same lane | Integrate the fresh-cache fork pin and focused process-tree proof without adding a second runner, then refill the lane with reverse render-unit candidate selection and its unrelated-write proof; run the source-frozen live `/data` browser/SSE checkpoint at the next integrated live gate |
-| Agent runtime correctness | **Provider cancellation, plan authority audit, and process-containment audit complete; task-capability design next:** `8c4ab4d7` cancels each timed-out attempt through the sole retry owner, `2684821f` defines scoped coordinate-bearing reconcile and schema'd completion evidence, and `47b73f51` selects non-authoritative Node children with a parent-framed capability plus hardened OS/container enforcement | Public `seon.db/with-agent` can replace the current ALS identity, so the parent must stamp actor/provenance and own receipts, deadlines, termination, and recovery. Node permissions are defense in depth only; the packaged Node 22/26 mismatch and missing hard-container properties must converge before isolation is claimed | Specify the one parent-owned task capability and receipt transitions against current source now; implement dependency-independent scope/CAS only after root review, and implement child launch only after unit-1 process ownership settles; then route plan mutations through that actor stamp before unit 7 trials |
+| Top-level integration | **Source-frozen review and gate coordination:** review the final unit-1 descriptor publication diff, the unit-6 receipt/recovery Slice A, and the dependency-owned runner changes against their settled contracts; admit no lane from its own focused claim alone | The persistent goal still covers units 1–9. Three non-overlapping owned diffs are frozen, but queued edit-hook CLJS owners are contending for the single runner, so no current automatic run is integrated evidence | Let the extant runner owner finish, inspect its process/lock/report outcome, then run one coordinated fresh-cache exact-selector gate followed by one integrated unit-1/unit-6 focused CLJS gate. Commit reviewed slices separately and only then release source for the next implementation |
+| Database lifecycle | **Operator Slice 2 frozen for integration:** the portable coordinate/protocol owners retain one mechanism while Babashka excludes only Datahike/Hasch runtime dependencies; config derives and validates the ordinary launch descriptor, the supervisor publishes it in the pod environment, and pod replica/client consumers validate it before use | Babashka config/process proof is green at 20 tests/83 assertions and the earlier coordinate/launch CLJS proof is green at 7 tests/37 assertions. Final review added public Malli schemas, full configuration validation, malformed-reader error framing, and focused invalid-descriptor coverage; the post-review integrated CLJS gate is still pending | After the integrated gate, commit descriptor publication, then implement pod-owned native branch create/close. Prove default restart/crash recovery before restore/undo and prove multi-form transitions last; do not let later lifecycle consumers guess this contract |
+| Reactive/database views | **Dependency-owned runner repair frozen for proof:** the Shadow fork fixes exact selector identity after hash-set promotion and fails unmatched requests; `bin/test-cljs` verifies requested/matched/executed counts and the shared artifact owner prepares dependencies for CLJS, writer, and downstream bases | An earlier unchanged-bin ten-selector run was green at 10 tests/72 assertions, but the final fork pin, wrapper telemetry, fresh-cache path, and actual compile/Node interruption behavior still require one source-frozen public-command proof. Queued reparented edit-hook owners are now a recorded issue, not acceptance evidence | When the current queued owner exits, prove the fork from an empty exact gitlib cache, prove an unmatched selector fails closed, and interrupt real compile and Node phases while checking descendants, lock recovery, and artifact quiescence. Commit the one runner mechanism, then refill with reverse render-unit candidate selection and unrelated-write proof |
+| Agent runtime correctness | **Receipt/recovery Slice A frozen for integration:** eval receipt schema/transition mechanics live under `seon.eval.internal`; terminalization is one CAS; recovery closes running evals with their run/turn in one transaction; the existing plan compiler remains the sole plan mechanism | Static checks and focused design review are green. The receipt tests cover component reachability, duplicate/conflicting terminal CAS, unchanged basis, recovery provenance, second-pass idempotency, and absence of a running receipt below a closed owner. Automatic mid-edit full runs reported genesis-schema failures, so only a clean frozen focused run can accept or falsify the slice | Run receipt/recovery together with the unit-1 descriptor consumers. If genesis failures reproduce, diagnose the schema-owner/load boundary with the smallest REPL/test probe; otherwise commit Slice A. Child process launch stays ordered behind unit-1 ownership, while independent Inspect task/scorer grounding may refill the lane |
 
 The ordered top-level sequence is therefore:
 
@@ -167,20 +167,22 @@ Read this card after the program ledger whenever work resumes. It records the
 next safe decisions, not a second architecture:
 
 1. keep the persistent goal on the complete units 1–9 graduation outcome;
-2. review and integrate the operator portability plan into unit 1, preserving
-   one portable coordinate/protocol mechanism and ordinary default behavior;
-3. admit the Shadow dependency pin only after the unchanged one-process exact
-   selector proof and admit changed-test cleanup only after descendant
-   TERM/KILL/reap evidence;
-4. let unit 6 finish the parent-owned task-capability plan while source edits
-   that depend on unit-1 process ownership remain closed;
-5. freeze source once those shared boundaries are coherent, then run the unit-1
-   restart/crash checkpoint and continue restore/undo followed by multi-form
-   failure proof; and
-6. refill completed lanes with reverse render-unit selection, the safe unit-6
-   implementation slice, and Inspect/downstream work in earliest dependency
-   order. Never turn a newly found smell into the spine unless it invalidates
-   the named acceptance proof.
+2. keep the three current source diffs frozen while the extant queued CLJS
+   owner finishes; its output is diagnostic because it began across edits, not
+   an integrated acceptance run;
+3. admit the Shadow dependency pin and wrapper only after one fresh-cache,
+   one-process exact-selector proof, an unmatched-selector negative proof, and
+   real compile/Node interruption evidence with descendant and lock cleanup;
+4. run one integrated focused gate over the post-review unit-1 descriptor
+   consumers plus unit-6 receipt/recovery. Reproduce and own any schema-genesis
+   failure before committing either slice;
+5. commit coherent lane-owned slices separately, then resume the unit-1 spine
+   with pod-owned native branch create/close followed by restart/crash,
+   restore/undo, and multi-form proof in that order; and
+6. refill released lanes with reverse render-unit selection, independent
+   Inspect task/scorer grounding, and downstream artifact work that consumes
+   only settled contracts. Never turn a newly found smell into the spine unless
+   it invalidates the named acceptance proof.
 
 The persistent goal remains the whole unit 1–9 program. After every lane return
 or local commit, reconcile the compact working plan with this section before

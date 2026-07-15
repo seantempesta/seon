@@ -69,6 +69,15 @@ explicit pending integration/proof boundaries. If the current work cannot be
 traced to one of those exits, stop, record the finding if useful, and resume
 the ordered program.
 
+Keep four durable fields visible in the active PRD whenever several lanes are
+running: the earliest unsettled contract, the integrated proof that closes it,
+the dependency-ready parallel portfolio, and the next refill for each occupied
+slot. A lane report without one of those destinations is context, not a reason
+to displace the spine. Begin every investigation with the shortest falsifier
+for a named exit; once evidence shows that the finding is independent, record
+or delegate it and return to the ordered boundary instead of exhaustively
+polishing it in the top-level context.
+
 When the harness provides a persistent goal, its objective names the complete
 program outcome and final graduation gate, never only the current lane. Check
 that goal against the program ledger after every compaction and lane return.
