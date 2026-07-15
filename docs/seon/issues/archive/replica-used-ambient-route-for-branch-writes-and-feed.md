@@ -25,6 +25,16 @@ configuration. `database-config` also accepted only an attachment and derived
 the path and socket from namespace-load defaults. The observed mismatch was one
 explicit target attachment paired with an unrelated default logical route.
 
+A later live boot on the descriptor route failed in
+`logs/operator/pod/62b1f669-225a-4133-9776-e0720dc0c293.log`: the config passed
+to `d/connect` contained the route, but `connection-coordinate` read nil after
+deref. The selected Datahike source explains the mismatch. Its non-streaming
+`Connection` deref reloads the durable branch record
+(`reference-code/datahike/src/datahike/connector.cljc:81-90`), whose persisted
+config carries the self writer rather than connection-time remote routing
+keys. Therefore neither `:writer :database-name` nor its remote backend is a
+fact of an immutable database value.
+
 ## Owner
 
 `seon.launch` owns the closed immutable launch composition. `seon.db.replica`
@@ -48,6 +58,14 @@ private process owner, the smallest affected client/blob selector passed 29
 tests with 197 assertions and zero failures or errors at
 `tmp/test-cljs-20260715-030704-86367.log`.
 
+The follow-up fix makes `attach!` consume the same closed launch descriptor as
+database open. It joins the descriptor-owned logical route and remote backend
+with one immutable database point, and derives both feed socket paths from the
+descriptor's writer owner. No route is recovered from durable Datahike config,
+ambient process naming, connection metadata, or a second registry.
+Focused replica/client proof passed 42 tests with 253 assertions and zero
+failures or errors at `tmp/test-cljs-20260715-064157-4262.log`.
+
 ## Acceptance
 
 - A branch ensure request uses its target route and attachment plus the source
@@ -60,3 +78,6 @@ tests with 197 assertions and zero failures or errors at
 - An observational reopen accepts a complete newer head on the same attachment;
   the immutable launch coordinate remains creation provenance, not a stale-head
   fence.
+- A real non-streaming connected database may expose its durable self-writer
+  config after deref while attachment still retains the descriptor route and
+  remote backend.

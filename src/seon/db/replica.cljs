@@ -54,6 +54,11 @@
  [:map {:closed true}
   [::launch/descriptor ::launch/descriptor]])
 (schema/register!
+ ::attach-request
+ [:map {:closed true}
+  [::conn ::conn]
+  [::launch/descriptor ::launch/descriptor]])
+(schema/register!
  ::ensure-response-validation-request
  [:map {:closed true}
   [::launch/descriptor ::launch/descriptor]
@@ -743,16 +748,19 @@
   (atom (stopped-attachment-state 0)))
 
 (defn- connection-coordinate
-  "Derive the branch-qualified identity of one Datahike connection."
-  [db]
-  (let [config         (:config db)
-        resolved       (coordinate/resolved db)
-        attachment     (coordinate/attachment resolved)
-        writer-backend (get-in config [:writer :backend])
-        routed-database-name (get-in config [:writer :database-name])]
-    (when-not (keyword? writer-backend)
-      (throw (ex-info "The attached database has no writer backend identity."
-                      {::writer-backend writer-backend
+  "Join one immutable database point with its descriptor-owned writer route."
+  [db descriptor]
+  (let [resolved (coordinate/resolved db)
+        attachment (coordinate/attachment resolved)
+        database-selection (::launch/database descriptor)
+        selected-attachment (::coordinate/attachment database-selection)
+        routed-database-name (::protocol/database-name database-selection)
+        writer-backend :seon.db.writer/remote]
+    (when (and selected-attachment
+               (not= selected-attachment attachment))
+      (throw (ex-info "The attached database differs from its launch selection."
+                      {::coordinate/attachment attachment
+                       ::launch/descriptor descriptor
                        :seon.error/kind :core-bug})))
     (when-not (and (string? routed-database-name)
                    (not (str/blank? routed-database-name)))
@@ -1382,17 +1390,17 @@
    the attachment never dies silently. The FIRST connect is fail-loud (boot is
    ping-gated; a pod that can't reach its feed must not run).
 
-   Map-in: `{::conn <conn> ::request-socket-path <path>? ::publish-socket-path <path>?}`.
+   Map-in: `{::conn <conn> ::launch/descriptor <immutable launch value>}`.
    Returns a Promise of the feed's db-name once a new attachment is live. An
    already-active identical attachment returns its db-name without opening a
    second socket."
-  {:malli/schema [:=> [:cat [:map [::conn ::conn]
-                                  [::request-socket-path {:optional true} ::request-socket-path]
-                                  [::publish-socket-path {:optional true} ::request-socket-path]]] :any]}
-  [{::keys [conn request-socket-path publish-socket-path]
-    :or {request-socket-path default-request-socket-path publish-socket-path default-publish-socket-path}}]
+  {:malli/schema [:=> [:cat ::attach-request] :any]}
+  [{::keys [conn] descriptor ::launch/descriptor}]
   (let [db                  @conn
-        database-coordinate (connection-coordinate db)
+        writer-owner        (::launch/writer-owner descriptor)
+        request-socket-path (::launch/request-socket-path writer-owner)
+        publish-socket-path (::launch/publish-socket-path writer-owner)
+        database-coordinate (connection-coordinate db descriptor)
         head-coordinate     (coordinate/resolved db)
         current             @!attachment]
     (if (same-attachment?

@@ -190,6 +190,19 @@
       ::launch/http-port-file "tmp/experiment/http.port"
       ::launch/writable-blob-dir "data/branches/experiment/blobs"})))
 
+(defn- attachment-descriptor
+  ([point route]
+   (attachment-descriptor point route "req.sock" "pub.sock"))
+  ([point route request-socket-path publish-socket-path]
+   (-> (launch/with-coordinate
+        {::launch/descriptor replica/default-launch-descriptor
+         ::coordinate/coordinate point})
+       (assoc-in [::launch/database ::protocol/database-name] route)
+       (assoc-in [::launch/writer-owner ::launch/request-socket-path]
+                 request-socket-path)
+       (assoc-in [::launch/writer-owner ::launch/publish-socket-path]
+                 publish-socket-path))))
+
 (defn- open-response
   [descriptor]
   (let [database-selection (::launch/database descriptor)
@@ -253,13 +266,51 @@
              :writer {:backend :seon.db.writer/remote
                       :database-name route}}}))
 
-(deftest connection-coordinate-retains-the-descriptor-feed-route
-  (let [coordinate (#'replica/connection-coordinate
-                    (fake-db 17 :experiment "experiment-route"))]
+(deftest connection-coordinate-joins-the-descriptor-feed-route
+  (let [db (fake-db 17 :experiment nil)
+        descriptor (attachment-descriptor
+                    (point 17 :experiment)
+                    "experiment-route")
+        coordinate (#'replica/connection-coordinate db descriptor)]
     (is (= "experiment-route" (::replica/database-name coordinate)))
+    (is (= :seon.db.writer/remote (::replica/writer-backend coordinate)))
     (is (= :experiment
            (get-in coordinate
                    [::coordinate/attachment ::coordinate/branch])))))
+
+(deftest connected-coordinate-retains-route-after-non-streaming-deref
+  (async done
+    (let [database-id (random-uuid)
+          base-config {:store {:backend :memory :id database-id}
+                       :keep-history? true
+                       :schema-flexibility :write}
+          route "connected-experiment-route"
+          remote-config
+          (assoc base-config
+                 :writer {:backend :seon.db.writer/remote
+                          :database-name route
+                          :socket-path "unused.sock"})]
+      (-> (d/create-database base-config)
+          (.then (fn [_]
+                   (d/connect remote-config {:sync? false})))
+          (.then
+           (fn [conn]
+             (let [db @conn
+                   point (coordinate/resolved db)
+                   descriptor (attachment-descriptor point route)
+                   connection-point
+                   (#'replica/connection-coordinate db descriptor)]
+               (is (= :self (get-in db [:config :writer :backend]))
+                   "non-streaming deref exposes the durable self-writer config")
+               (is (nil? (get-in db [:config :writer :database-name]))
+                   "the logical route is runtime launch data, not a stored DB fact")
+               (is (= route (::replica/database-name connection-point)))
+               (is (= (coordinate/attachment point)
+                      (::coordinate/attachment connection-point)))
+               (d/release conn))))
+          (.catch (fn [error]
+                    (is false (str "real connected route probe threw: " error))))
+          (.finally done)))))
 
 (defn- fake-conn
   "Minimal conn surface used by the wire writer and native listeners."
@@ -333,7 +384,10 @@
 (defn- attached-state
   ([conn basis-t] (attached-state conn basis-t ::replica/live))
   ([conn basis-t phase]
-   (let [coordinate (#'replica/connection-coordinate @conn)]
+   (let [db @conn
+         descriptor (attachment-descriptor (coordinate/resolved db)
+                                           replica/database-name)
+         coordinate (#'replica/connection-coordinate db descriptor)]
      {::replica/phase phase
       ::replica/generation 1
       ::replica/conn conn
@@ -779,10 +833,13 @@
                                (replay-page db-name since-t since-t since-t
                                             true [] branch))))
           start!          (fn [conn]
-                            (replica/attach!
-                             {::replica/conn conn
-                              ::replica/request-socket-path "req.sock"
-                              ::replica/publish-socket-path "pub.sock"}))
+                            (let [db @conn]
+                              (replica/attach!
+                               {::replica/conn conn
+                                ::launch/descriptor
+                                (attachment-descriptor
+                                 (coordinate/resolved db)
+                                 db-name)})))
           lifecycle!      (fn []
                             (-> (start! conn-a)
                                 (.then

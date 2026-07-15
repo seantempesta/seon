@@ -864,10 +864,7 @@
         (await (install-runtime-schema! conn false)))
       (await (replica/attach!
               {::replica/conn conn
-               ::replica/request-socket-path
-               (::launch/request-socket-path writer-owner)
-               ::replica/publish-socket-path
-               (::launch/publish-socket-path writer-owner)}))
+               ::launch/descriptor descriptor}))
       conn)))
 
 ;; ---------------------------------------------------------------------------
@@ -2484,7 +2481,9 @@
             primary (or (first (remove #{"root"} available-ids))
                         (first available-ids)
                         "root")
-            _ (await (replica/attach! {::replica/conn conn}))
+            _ (await (replica/attach!
+                      {::replica/conn conn
+                       ::launch/descriptor replica/process-launch-descriptor}))
             {:seon.web/keys [port port-file]} (await (web.serve/start!))]
         {:seon.agent/id primary
          ::autonomous? autonomous?
