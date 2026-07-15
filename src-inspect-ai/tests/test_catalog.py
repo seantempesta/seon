@@ -146,10 +146,14 @@ def test_run_native_task_rejects_before_construction(monkeypatch):
 
 
 def test_run_native_task_rejects_target_drift(monkeypatch):
+    finalized = []
     monkeypatch.setattr(
         catalog.source_admission, "verify_sources",
         lambda identity: {"bench": identity})
     monkeypatch.setattr(catalog, "inspect_eval", lambda *args, **kwargs: ["log"])
+    monkeypatch.setattr(
+        catalog.source_admission, "finalize_native_logs",
+        lambda *args, **kwargs: finalized.append((args, kwargs)))
     snapshots = iter([{"artifact": "before"}, {"artifact": "after"}])
     with pytest.raises(RuntimeError, match="identity changed"):
         catalog.run_native_task(
@@ -157,6 +161,7 @@ def test_run_native_task_rejects_target_drift(monkeypatch):
             lambda **kwargs: _FakeTask(),
             target_snapshot=lambda: next(snapshots),
         )
+    assert finalized == []
 
 
 def test_run_bench_max_samples_overridable(monkeypatch):

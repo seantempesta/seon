@@ -124,11 +124,15 @@ this issue.
 Static artifact binding is now executable for native runs. Inspect consumes
 the caller-selected semantic operator status command, requires `:ready` and an
 exact URL match, retains the status EDN and digest in the `.eval`, and rejects
-any before/after change. It does not derive artifact paths, ports, or process
-ownership itself. A clean target rebuild remains necessary before an accepted
-sample because a development watcher can compile shared dirty source after the
-last manifest publication; the per-sample lease remains the parallel/restart
-owner.
+any before/after change before finalizing the log into admitted evidence. A
+regression proves target drift invokes no finalizer. It does not derive
+artifact paths, ports, or process ownership itself. A clean target rebuild
+remains necessary before an accepted sample because a development watcher can
+compile shared dirty source after the last manifest publication; the
+per-sample lease remains the parallel/restart owner. The snapshot reader still
+recognizes the ready status and URL by text inside retained EDN; replace that
+with semantic operator data parsing before treating malformed or adversarial
+status output as covered.
 
 A generated-workflow probe exposed one remaining static-path contradiction.
 `planning.fetch_eval_rows` still sent a raw sentinel-printing form to the

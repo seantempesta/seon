@@ -252,6 +252,7 @@ def _eval_admitted_task(
     *,
     solver_override: Solver | Sequence[Solver] | None = None,
     evidence_dir: Path | None = None,
+    before_finalize: Callable[[], None] | None = None,
     **eval_kwargs: Any,
 ):
     """Execute and finalize one already-admitted Task through Inspect."""
@@ -265,6 +266,8 @@ def _eval_admitted_task(
     if solver_override is not None:
         call_kwargs["solver"] = solver_override
     logs = inspect_eval(task, **call_kwargs)
+    if before_finalize is not None:
+        before_finalize()
     source_admission.finalize_native_logs(
         logs,
         evidence_dir=evidence_dir,
@@ -298,18 +301,20 @@ def run_native_task(
     task = task_factory(_admission=admission, **(task_kwargs or {}))
     md = dict(eval_kwargs.pop("metadata", None) or {})
     md["seon_static_target"] = target_start
-    logs = _eval_admitted_task(
+
+    def verify_static_target() -> None:
+        if target_snapshot() != target_start:
+            raise RuntimeError("static target identity changed during native run")
+
+    return _eval_admitted_task(
         task,
         admission,
         evidence_dir=evidence_dir,
         max_samples=config.POD_MAX_SAMPLES,
         metadata=md,
+        before_finalize=verify_static_target,
         **eval_kwargs,
     )
-    target_end = target_snapshot()
-    if target_end != target_start:
-        raise RuntimeError("static target identity changed during native run")
-    return logs
 
 
 def run_bench(
