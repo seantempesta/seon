@@ -41,6 +41,21 @@ wrappers remain live. Exact maintained Datahike source in
 `connector.cljc` confirms `release` drains and invalidates the connection; it
 does not own Seon's process-local Malli state.
 
+A minimal ordered test falsifier now isolates the remaining suite contaminant.
+`tmp/test-cljs-20260715-040022-85363.log` runs only
+`seon.client-runtime-test/real-non-autonomous-replay-continues-without-a-database-write`
+followed by
+`seon.eval.auto-refer-test/after-new-agent-ns-via-batch-resolves-db-alias`.
+The replay fixture completes its expected one-good/one-broken namespace proof,
+then the next test fails immediately because the active Malli projection cannot
+resolve `:seon.db.coordinate/coordinate` (two tests, six assertions, one
+failure). Source identifies the first publisher: the fixture calls the real
+`replay-program-graph!`, which activates the forms read from its fresh
+attachment, but it neither proves its preceding `index-schemas` transaction
+envelope nor restores the exact process-local schema state afterward. Slice A's
+receipt assertions did not cause this mutation; they only supplied another
+ordinary Malli consumer that exposed the already-incomplete active projection.
+
 ## Dependency ledger
 
 - Datahike fork `6f90b339768b1a02066dce3b6fcc93a200758fcc`:
@@ -80,5 +95,10 @@ must persist dependency-complete canonical facts.
 - The original `current-ns-persists-across-turns` test passes both alone and in
   its complete-suite order, and its two expected eval rows name
   `:probe.tc.move`.
+- Every fixture that invokes real replay against a disposable attachment first
+  asserts that the complete dependency-closed schema population committed, and
+  restores the exact prior schema/projection state after its full asynchronous
+  span. The two-test `client-runtime` → `auto-refer` falsifier passes without
+  relying on namespace order.
 - The complete CLJS gate contains no `:malli.core/invalid-schema` core fault
   attributable to attachment or test-order contamination.
