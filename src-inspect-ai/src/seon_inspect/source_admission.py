@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import unquote, urlparse
 
+from inspect_ai.log import read_eval_log
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_LOCK_PATH = REPO_ROOT / "src-inspect-ai" / "evaluation-sources.lock.json"
 
@@ -229,8 +231,9 @@ def finalize_native_logs(
     logs: Any,
     *,
     evidence_dir: Path | None = None,
-) -> list[dict[str, str]]:
-    """Require every returned Inspect log and retain it when requested."""
+    expected_admission: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Retain, reopen, and identity-check every successful native log."""
     rows = list(logs or [])
     if not rows:
         raise SourceAdmissionError(
@@ -252,9 +255,28 @@ def finalize_native_logs(
             if not retained.is_file() or _sha256(retained) != _sha256(source):
                 raise SourceAdmissionError(
                     f"evidence finalization: failed to retain {source}")
+        try:
+            native = read_eval_log(retained)
+        except Exception as error:
+            raise SourceAdmissionError(
+                f"evidence finalization: retained log is unreadable: {retained}"
+            ) from error
+        if native.status != "success":
+            raise SourceAdmissionError(
+                f"evidence finalization: retained log status is "
+                f"{native.status!r}, not 'success'")
+        actual_admission = (native.eval.metadata or {}).get(
+            "seon_source_admission")
+        if (expected_admission is not None
+                and actual_admission != expected_admission):
+            raise SourceAdmissionError(
+                "evidence finalization: retained log source admission "
+                "does not match the admitted run")
         manifest.append({
             "location": location,
             "sha256": _sha256(source),
             "retained_path": str(retained),
+            "status": native.status,
+            "source_admission": actual_admission,
         })
     return manifest

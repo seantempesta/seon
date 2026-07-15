@@ -60,14 +60,17 @@ paths, exact Python provider, and Python/dataset locks. Direct task loading and
 prebuilt catalog runs verify parent and nested revisions, trees, relevant
 cleanliness, installed source/version, provider, lock digests, and committed
 Seon harness source before model or pod work. The admitted identity map is
-native Inspect metadata, and a missing/unretained `.eval` rejects finalization.
+native Inspect metadata. Finalization copies, hashes, reopens, requires a
+successful native status, and compares that exact identity map; a missing,
+unreadable, incomplete, or wrong-run `.eval` is rejected.
 
 A fresh `uv sync --extra test` synchronized the selected distributions. The
-focused admission/catalog/native-log gate passes 29 tests, including a real
+focused admission/catalog/native-log gate passes 34 tests, including a real
 offline native-log read-back; the complete suite passes 321 tests with eight
 expected skips. Deliberate revision, dirty-source, provider-version, and absent-
 log mismatches fail deterministically. Dedicated tests also reject a changed or
-dirty nested view checkout.
+dirty nested view checkout, corrupt archive, non-success status, and wrong
+admission identity.
 
 The issue remains open only for the successor measurement contract to give
 scorecard summaries a stable correlation to the required native log and, after

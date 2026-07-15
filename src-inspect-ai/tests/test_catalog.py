@@ -14,14 +14,14 @@ class _FakeTask:
 def _admitted_sources(monkeypatch):
     """Catalog mechanics run under one deterministic admitted source map."""
     def admit(bench):
-        return {"schema_version": 1, "bench": dict(bench),
+        return {"schema_version": 2, "bench": dict(bench),
                 "sources": {"inspect_ai": {}, "inspect_evals": {}}}
 
     monkeypatch.setattr(catalog.source_admission, "verify_sources", admit)
     monkeypatch.setattr(
         catalog.source_admission,
         "finalize_native_logs",
-        lambda logs, evidence_dir=None: [
+        lambda logs, evidence_dir=None, expected_admission=None: [
             {"location": "fake.eval", "sha256": "abc",
              "retained_path": "fake.eval"}],
     )

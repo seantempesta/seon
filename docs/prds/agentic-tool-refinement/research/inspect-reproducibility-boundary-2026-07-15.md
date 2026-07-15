@@ -258,7 +258,10 @@ The immediate source gate now admits the deliberate Inspect view overlay
 without hiding it: the lock separately names the parent coordinate and actual
 nested revision, and admission verifies the nested tree and cleanliness.
 Inspect Evals is declared and synchronized. The focused source/catalog/native-
-log gate passes 29 tests; P1a still needs the static ACME artifact/config/model
+log gate passes 34 tests. Finalization now reopens the retained archive,
+requires success, and compares the exact admitted identity; corrupt,
+incomplete, and wrong-run logs fail. P1a still needs the static ACME
+artifact/config/model
 identity and bounded scorer evidence before a scored serial claim is complete.
 
 The model gate also needs a launcher-owned artifact identity. The pod can

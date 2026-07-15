@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -210,18 +211,35 @@ class _Log:
         self.location = location
 
 
-def test_finalize_native_logs_requires_and_copies_exact_bytes(tmp_path):
+def test_finalize_native_logs_requires_and_copies_exact_bytes(
+    monkeypatch, tmp_path
+):
     source = tmp_path / "native.eval"
     source.write_bytes(b"inspect-native-log")
     evidence = tmp_path / "evidence"
+    admission = {"schema_version": 2, "bench": {"name": "bfcl_ast"}}
+    monkeypatch.setattr(
+        source_admission,
+        "read_eval_log",
+        lambda path: SimpleNamespace(
+            status="success",
+            eval=SimpleNamespace(
+                metadata={"seon_source_admission": admission}),
+        ),
+    )
     manifest = source_admission.finalize_native_logs(
-        [_Log(source.as_uri())], evidence_dir=evidence)
+        [_Log(source.as_uri())],
+        evidence_dir=evidence,
+        expected_admission=admission,
+    )
     retained = evidence / "inspect-logs" / "native.eval"
     assert retained.read_bytes() == source.read_bytes()
     assert manifest == [{
         "location": source.as_uri(),
         "sha256": source_admission._sha256(source),
         "retained_path": str(retained),
+        "status": "success",
+        "source_admission": admission,
     }]
 
 
@@ -230,3 +248,52 @@ def test_finalize_native_logs_rejects_absent_evidence(logs):
     with pytest.raises(source_admission.SourceAdmissionError,
                        match="no native eval log|native eval log is absent"):
         source_admission.finalize_native_logs(logs)
+
+
+def test_finalize_native_logs_rejects_unreadable_archive(monkeypatch, tmp_path):
+    source = tmp_path / "corrupt.eval"
+    source.write_bytes(b"not an eval archive")
+    monkeypatch.setattr(
+        source_admission, "read_eval_log",
+        lambda path: (_ for _ in ()).throw(ValueError("corrupt")),
+    )
+    with pytest.raises(source_admission.SourceAdmissionError,
+                       match="retained log is unreadable"):
+        source_admission.finalize_native_logs([_Log(source.as_uri())])
+
+
+@pytest.mark.parametrize("status", ["started", "cancelled", "error"])
+def test_finalize_native_logs_rejects_non_success_status(
+    monkeypatch, tmp_path, status
+):
+    source = tmp_path / f"{status}.eval"
+    source.write_bytes(b"native")
+    monkeypatch.setattr(
+        source_admission,
+        "read_eval_log",
+        lambda path: SimpleNamespace(
+            status=status, eval=SimpleNamespace(metadata={})),
+    )
+    with pytest.raises(source_admission.SourceAdmissionError,
+                       match="not 'success'"):
+        source_admission.finalize_native_logs([_Log(source.as_uri())])
+
+
+def test_finalize_native_logs_rejects_wrong_admission(monkeypatch, tmp_path):
+    source = tmp_path / "wrong.eval"
+    source.write_bytes(b"native")
+    monkeypatch.setattr(
+        source_admission,
+        "read_eval_log",
+        lambda path: SimpleNamespace(
+            status="success",
+            eval=SimpleNamespace(
+                metadata={"seon_source_admission": {"revision": "wrong"}}),
+        ),
+    )
+    with pytest.raises(source_admission.SourceAdmissionError,
+                       match="does not match"):
+        source_admission.finalize_native_logs(
+            [_Log(source.as_uri())],
+            expected_admission={"revision": "expected"},
+        )

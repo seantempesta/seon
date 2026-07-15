@@ -353,7 +353,11 @@ def run_bench(
         max_samples=max_samples,
         **eval_kwargs,
     )
-    source_admission.finalize_native_logs(logs, evidence_dir=evidence_dir)
+    source_admission.finalize_native_logs(
+        logs,
+        evidence_dir=evidence_dir,
+        expected_admission=admission,
+    )
     if per_sample_cluster:
         violation = cluster_mod.bundle_violation(bundle_start)
         if violation:
