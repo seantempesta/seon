@@ -31,7 +31,8 @@
     [my.blob :as blob]
     [seon.ai.tokens :as tokens]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixtures — pid-scoped blob dir + fresh :memory conn per test.
@@ -54,6 +55,9 @@
 
 (def ^:private node-publication-effects
   @#'blob/node-publication-effects)
+
+(def ^:private materialize-retained-with-effects!
+  @#'blob/materialize-retained-with-effects!)
 
 (use-fixtures :once
   {:before (fn []
@@ -117,6 +121,55 @@
   "Publish `content` through explicit immutable filesystem effects."
   [content effects]
   (put-with-publication-effects! {:my.blob/content content} effects))
+
+(defn- content-hash
+  [content]
+  (-> (.createHash crypto "sha256")
+      (.update content "utf8")
+      (.digest "hex")))
+
+(defn- retained-set-digest
+  [hashes]
+  (content-hash (pr-str (vec (sort (distinct hashes))))))
+
+(defn- write-content!
+  [dir content]
+  (let [hash (content-hash content)
+        shard (.join npath dir (subs hash 0 2))
+        path (.join npath shard hash)]
+    (.mkdirSync nfs shard #js {:recursive true})
+    (.writeFileSync nfs path content "utf8")
+    {::blob/hash hash ::blob/path path}))
+
+(defn- write-path!
+  [dir hash content]
+  (let [shard (.join npath dir (subs hash 0 2))
+        path (.join npath shard hash)]
+    (.mkdirSync nfs shard #js {:recursive true})
+    (.writeFileSync nfs path content "utf8")
+    path))
+
+(defn- materialization-dirs
+  [label]
+  (let [root (.join npath fixture-dir "materialization" label)
+        overlay (.join npath root "target-overlay")
+        main (.join npath root "main")]
+    (.rmSync nfs root #js {:recursive true :force true})
+    {::overlay overlay ::main main}))
+
+(defn- materialization-request
+  [target-database overlay main hashes]
+  {::blob/target-database target-database
+   ::blob/target-coordinate (db/head-coordinate target-database)
+   ::blob/source-storage-view (storage-view overlay main)
+   ::blob/destination-storage-view (storage-view main)
+   ::blob/reachable-hash-digest (retained-set-digest hashes)})
+
+(defn- transact-hashes!
+  [conn hashes]
+  (db/transact!
+    {::db/conn conn
+     ::db/tx-data (mapv (fn [hash] {::blob/hash hash}) hashes)}))
 
 ;; ---------------------------------------------------------------------------
 ;; 1. put → stat → text/get roundtrip.
@@ -323,6 +376,278 @@
               (.finally
                 (fn []
                   (reset! blob/!storage-view (storage-view fixture-dir)))))))
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; Restore reconstruction — exact B(T), frozen digest, overlay-first source,
+;; one durable publisher, and verified idempotent destination readback.
+;; ---------------------------------------------------------------------------
+
+(deftest retained-set-is-empty-when-blob-schema-is-absent
+  (async done
+    (run-test
+      (fn [conn]
+        (let [{::keys [overlay main]} (materialization-dirs "empty")
+              target @conn
+              point (db/head-coordinate target)
+              result (blob/materialize-retained!
+                       (materialization-request target overlay main []))]
+          (is (true? (::blob/ok? result)))
+          (is (= 0 (::blob/hash-count result)))
+          (is (= 0 (::blob/verified-count result)))
+          (is (= (retained-set-digest [])
+                 (::blob/reachable-hash-digest result)))
+          (is (= point (db/head-coordinate @conn))
+              "materialization performs no database write")
+          (is (schema/valid-candidate-value?
+                ::blob/materialization-result result))))
+      done)))
+
+(deftest target-coordinate-mismatch-fails-before-filesystem-effects
+  (async done
+    (run-test
+      (fn [conn]
+        (let [{::keys [overlay main]} (materialization-dirs "coordinate-fence")
+              target @conn
+              request (materialization-request target overlay main [])
+              wrong-coordinate
+              (update (::blob/target-coordinate request)
+                      :seon.db.coordinate/t dec)
+              result
+              (blob/materialize-retained!
+                (assoc request ::blob/target-coordinate wrong-coordinate))]
+          (is (false? (::blob/ok? result)))
+          (is (= :my.blob.materialization.operation/derive-retained-set
+                 (::blob/materialization-operation result)))
+          (is (not (.existsSync nfs main))
+              "coordinate disagreement precedes archive creation")
+          (is (schema/valid-candidate-value?
+                ::blob/materialization-result result))))
+      done)))
+
+(deftest missing-retained-source-reports-every-ordered-path
+  (async done
+    (run-test
+      (fn [conn]
+        (let [{::keys [overlay main]} (materialization-dirs "missing-source")
+              lower-base (.join npath (.dirname npath main) "older-base")]
+          (-> (transact-hashes! conn [absent-hash])
+              (.then
+                (pinned conn
+                  (fn [tx]
+                    (is (true? (::db/ok? tx)))
+                    (let [target @conn
+                          request
+                          (assoc
+                            (materialization-request
+                              target overlay main [absent-hash])
+                            ::blob/source-storage-view
+                            (storage-view overlay main lower-base))
+                          result (blob/materialize-retained! request)
+                          paths
+                          (mapv (fn [dir]
+                                  (.join npath dir
+                                         (subs absent-hash 0 2)
+                                         absent-hash))
+                                [overlay main lower-base])]
+                      (is (false? (::blob/ok? result)))
+                      (is (= :my.blob.materialization.operation/verify-source
+                             (::blob/materialization-operation result)))
+                      (is (= absent-hash (::blob/hash result)))
+                      (is (= paths (::blob/searched-source-paths result))
+                          "missing lookup reports the complete ordered search")
+                      (is (= (second paths) (::blob/destination-path result)))
+                      (is (not (.existsSync nfs (second paths)))
+                          "missing source never publishes a destination")
+                      (is (schema/valid-candidate-value?
+                            ::blob/materialization-result result)))))))))
+      done)))
+
+(deftest retained-projections-materialize-but-overlay-orphans-do-not
+  (async done
+    (run-test
+      (fn [conn]
+        (let [{::keys [overlay main]} (materialization-dirs "projection-set")
+              overlay-blob (write-content! overlay "projected overlay blob")
+              main-blob (write-content! main "projected main blob")
+              orphan (write-content! overlay "unprojected overlay orphan")
+              hashes [(::blob/hash overlay-blob) (::blob/hash main-blob)]]
+          (-> (transact-hashes! conn hashes)
+              (.then
+                (pinned conn
+                  (fn [tx]
+                    (is (true? (::db/ok? tx)))
+                    (let [target @conn
+                          request (materialization-request
+                                    target overlay main hashes)
+                          point (db/head-coordinate target)
+                          first-result (blob/materialize-retained! request)
+                          retry-result (blob/materialize-retained! request)
+                          copied-path (.join npath main
+                                             (subs (::blob/hash overlay-blob) 0 2)
+                                             (::blob/hash overlay-blob))
+                          orphan-destination
+                          (.join npath main
+                                 (subs (::blob/hash orphan) 0 2)
+                                 (::blob/hash orphan))]
+                      (is (= {::blob/hash-count 2
+                              ::blob/verified-count 2
+                              ::blob/newly-materialized-count 1
+                              ::blob/repaired-count 0}
+                             (select-keys
+                               first-result
+                               [::blob/hash-count ::blob/verified-count
+                                ::blob/newly-materialized-count
+                                ::blob/repaired-count])))
+                      (is (= "projected overlay blob"
+                             (.readFileSync nfs copied-path "utf8")))
+                      (is (not (.existsSync nfs orphan-destination))
+                          "directory-only orphan is outside B(T)")
+                      (is (= {::blob/hash-count 2
+                              ::blob/verified-count 2
+                              ::blob/newly-materialized-count 0
+                              ::blob/repaired-count 0}
+                             (select-keys
+                               retry-result
+                               [::blob/hash-count ::blob/verified-count
+                                ::blob/newly-materialized-count
+                                ::blob/repaired-count]))
+                          "retry verifies converged destinations without copying")
+                      (is (= point (db/head-coordinate @conn)))
+                      (is (schema/valid-candidate-value?
+                            ::blob/materialization-result first-result))
+                      (is (schema/valid-candidate-value?
+                            ::blob/materialization-result retry-result)))))))))
+      done)))
+
+(deftest corrupt-target-overlay-does-not-fall-through-to-valid-main
+  (async done
+    (run-test
+      (fn [conn]
+        (let [{::keys [overlay main]} (materialization-dirs "corrupt-overlay")
+              content "valid lower-base bytes"
+              hash (content-hash content)
+              overlay-path (write-path! overlay hash "corrupt overlay bytes")
+              _ (write-path! main hash content)]
+          (-> (transact-hashes! conn [hash])
+              (.then
+                (pinned conn
+                  (fn [tx]
+                    (is (true? (::db/ok? tx)))
+                    (let [target @conn
+                          result
+                          (blob/materialize-retained!
+                            (materialization-request target overlay main [hash]))]
+                      (is (false? (::blob/ok? result)))
+                      (is (= :my.blob.materialization.operation/verify-source
+                             (::blob/materialization-operation result)))
+                      (is (= hash (::blob/hash result)))
+                      (is (= [overlay-path]
+                             (::blob/searched-source-paths result))
+                          "the first existing corrupt path terminates lookup")
+                      (is (= (content-hash "corrupt overlay bytes")
+                             (::blob/actual-digest result)))
+                      (is (schema/valid-candidate-value?
+                            ::blob/materialization-result result)))))))))
+      done)))
+
+(deftest corrupt-main-is-repaired-from-independently-verified-overlay
+  (async done
+    (run-test
+      (fn [conn]
+        (let [{::keys [overlay main]} (materialization-dirs "repair-main")
+              content "verified replacement bytes"
+              hash (content-hash content)
+              _ (write-path! overlay hash content)
+              main-path (write-path! main hash "corrupt main bytes")]
+          (-> (transact-hashes! conn [hash])
+              (.then
+                (pinned conn
+                  (fn [tx]
+                    (is (true? (::db/ok? tx)))
+                    (let [target @conn
+                          request (materialization-request
+                                    target overlay main [hash])
+                          repaired (blob/materialize-retained! request)
+                          retried (blob/materialize-retained! request)]
+                      (is (true? (::blob/ok? repaired)))
+                      (is (= 1 (::blob/verified-count repaired)))
+                      (is (= 0 (::blob/newly-materialized-count repaired)))
+                      (is (= 1 (::blob/repaired-count repaired)))
+                      (is (= content (.readFileSync nfs main-path "utf8")))
+                      (is (= 0 (::blob/newly-materialized-count retried)))
+                      (is (= 0 (::blob/repaired-count retried)))
+                      (is (= 1 (::blob/verified-count retried)))
+                      (is (schema/valid-candidate-value?
+                            ::blob/materialization-result repaired)))))))))
+      done)))
+
+(deftest frozen-set-digest-is-required-before-publication
+  (async done
+    (run-test
+      (fn [conn]
+        (let [{::keys [overlay main]} (materialization-dirs "digest-fence")
+              content "digest-fenced bytes"
+              hash (content-hash content)
+              _ (write-path! overlay hash content)
+              destination (.join npath main (subs hash 0 2) hash)]
+          (-> (transact-hashes! conn [hash])
+              (.then
+                (pinned conn
+                  (fn [tx]
+                    (is (true? (::db/ok? tx)))
+                    (let [target @conn
+                          result
+                          (blob/materialize-retained!
+                            (assoc (materialization-request
+                                     target overlay main [hash])
+                                   ::blob/reachable-hash-digest absent-hash))]
+                      (is (false? (::blob/ok? result)))
+                      (is (= :my.blob.materialization.operation/derive-retained-set
+                             (::blob/materialization-operation result)))
+                      (is (= (retained-set-digest [hash])
+                             (::blob/actual-digest result)))
+                      (is (not (.existsSync nfs destination))
+                          "no filesystem effect occurs before digest agreement")
+                      (is (schema/valid-candidate-value?
+                            ::blob/materialization-result result)))))))))
+      done)))
+
+(deftest publication-failure-remains-retryable-through-the-one-publisher
+  (async done
+    (run-test
+      (fn [conn]
+        (let [{::keys [overlay main]} (materialization-dirs "publish-retry")
+              content "restore publication retry bytes"
+              hash (content-hash content)
+              _ (write-path! overlay hash content)
+              destination (.join npath main (subs hash 0 2) hash)]
+          (-> (transact-hashes! conn [hash])
+              (.then
+                (pinned conn
+                  (fn [tx]
+                    (is (true? (::db/ok? tx)))
+                    (let [target @conn
+                          request (materialization-request
+                                    target overlay main [hash])
+                          failed
+                          (materialize-retained-with-effects!
+                            request
+                            (effects-with
+                              ::blob/atomic-rename!
+                              (fn [& _]
+                                (throw (js/Error. "injected restore rename failure")))))
+                          retried (blob/materialize-retained! request)]
+                      (is (false? (::blob/ok? failed)))
+                      (is (= :my.blob.materialization.operation/publish-destination
+                             (::blob/materialization-operation failed)))
+                      (is (str/includes? (::blob/error failed)
+                                         "injected restore rename failure"))
+                      (is (true? (::blob/ok? retried)))
+                      (is (= 1 (::blob/newly-materialized-count retried)))
+                      (is (= content (.readFileSync nfs destination "utf8")))
+                      (is (schema/valid-candidate-value?
+                            ::blob/materialization-result failed)))))))))
       done)))
 
 ;; ---------------------------------------------------------------------------

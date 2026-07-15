@@ -34,6 +34,7 @@
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
+    [seon.db.coordinate :as db.coordinate]
     [my.blob.schema]
     [seon.platform :as platform]
     [seon.schema :as schema]))
@@ -51,6 +52,67 @@
 (schema/register! ::ok?     :boolean)
 (schema/register! ::error   :string)
 (schema/register! ::exists? :boolean)
+(schema/register! ::digest [:re "[0-9a-f]{64}"])
+(schema/register! ::target-database :seon.db/db)
+(schema/register! ::target-coordinate ::db.coordinate/coordinate)
+(schema/register! ::source-storage-view ::storage-view)
+(schema/register! ::destination-storage-view ::storage-view)
+(schema/register! ::reachable-hash-digest ::digest)
+(schema/register! ::hash-count [:int {:min 0}])
+(schema/register! ::verified-count [:int {:min 0}])
+(schema/register! ::newly-materialized-count [:int {:min 0}])
+(schema/register! ::repaired-count [:int {:min 0}])
+(schema/register! ::searched-source-paths [:vector :string])
+(schema/register! ::destination-path :string)
+(schema/register! ::expected-digest ::digest)
+(schema/register! ::actual-digest ::digest)
+(schema/register!
+  ::materialization-operation
+  [:enum
+   :my.blob.materialization.operation/validate-request
+   :my.blob.materialization.operation/derive-retained-set
+   :my.blob.materialization.operation/verify-source
+   :my.blob.materialization.operation/publish-destination
+   :my.blob.materialization.operation/verify-destination])
+
+(schema/register!
+  ::materialization-request
+  [:map {:closed true}
+   [::target-database ::target-database]
+   [::target-coordinate ::target-coordinate]
+   [::source-storage-view ::source-storage-view]
+   [::destination-storage-view ::destination-storage-view]
+   [::reachable-hash-digest ::reachable-hash-digest]])
+
+(schema/register!
+  ::materialization-success
+  [:map {:closed true}
+   [::ok? [:= true]]
+   [::target-coordinate ::target-coordinate]
+   [::reachable-hash-digest ::reachable-hash-digest]
+   [::hash-count ::hash-count]
+   [::verified-count ::verified-count]
+   [::newly-materialized-count ::newly-materialized-count]
+   [::repaired-count ::repaired-count]])
+
+(schema/register!
+  ::materialization-failure
+  [:map {:closed true}
+   [::ok? [:= false]]
+   [::target-coordinate ::target-coordinate]
+   [::reachable-hash-digest ::reachable-hash-digest]
+   [::hash-count ::hash-count]
+   [::materialization-operation ::materialization-operation]
+   [::hash {:optional true} :string]
+   [::searched-source-paths {:optional true} ::searched-source-paths]
+   [::destination-path {:optional true} ::destination-path]
+   [::expected-digest ::expected-digest]
+   [::actual-digest {:optional true} ::actual-digest]
+   [::error ::error]])
+
+(schema/register!
+  ::materialization-result
+  [:or ::materialization-success ::materialization-failure])
 
 ;; text paging — 1-based line window + honest totals (the fs precedent).
 (schema/register! ::from-line      :int)
@@ -143,24 +205,28 @@
       (.update s "utf8")
       (.digest "hex")))
 
+(defn- normalize-storage-view
+  "Normalize one explicit storage view, or return an errors-as-data envelope."
+  [view]
+  (if-not (schema/valid-candidate-value? ::storage-view view)
+    {::ok? false
+     ::error (str "invalid blob storage view — expected "
+                  "{:my.blob/writable-dir string "
+                  ":my.blob/read-only-dirs [string …]}")}
+    (let [writable-dir (.resolve npath (::writable-dir view))
+          read-only-dirs (mapv #(.resolve npath %) (::read-only-dirs view))
+          all-dirs (into [writable-dir] read-only-dirs)]
+      (if (= (count all-dirs) (count (distinct all-dirs)))
+        {::ok? true
+         ::storage-view {::writable-dir writable-dir
+                         ::read-only-dirs read-only-dirs}}
+        {::ok? false
+         ::error "invalid blob storage view — every directory must be distinct"}))))
+
 (defn- validated-storage-view
-  "The normalized storage view, or an errors-as-data envelope."
+  "The normalized ambient storage view, or an errors-as-data envelope."
   []
-  (let [view @!storage-view]
-    (if-not (schema/valid-candidate-value? ::storage-view view)
-      {::ok? false
-       ::error (str "invalid blob storage view — expected "
-                    "{:my.blob/writable-dir string "
-                    ":my.blob/read-only-dirs [string …]}")}
-      (let [writable-dir (.resolve npath (::writable-dir view))
-            read-only-dirs (mapv #(.resolve npath %) (::read-only-dirs view))
-            all-dirs (into [writable-dir] read-only-dirs)]
-        (if (= (count all-dirs) (count (distinct all-dirs)))
-          {::ok? true
-           ::storage-view {::writable-dir writable-dir
-                           ::read-only-dirs read-only-dirs}}
-          {::ok? false
-           ::error "invalid blob storage view — every directory must be distinct"})))))
+  (normalize-storage-view @!storage-view))
 
 (defn- blob-path
   "Absolute path for `hash` below one archive directory."
@@ -188,22 +254,49 @@
    ::error (str "no blob stored under " hash
                 " — (my.blob/stat {:my.blob/hash …}) checks the DB projection")})
 
-(defn- read-path
-  "Read and verify one existing content-addressed path."
+(defn- inspect-path
+  "Read one path through the archive's single SHA-256 verification owner."
   [hash path]
   (try
     (let [content (.readFileSync nfs path "utf8")
           actual (sha256 content)]
       (if (= hash actual)
-        {::ok? true ::hash hash ::content content}
+        {::ok? true
+         ::hash hash
+         ::path path
+         ::actual-digest actual
+         ::content content}
         {::ok? false
          ::hash hash
+         ::path path
+         ::actual-digest actual
          ::error (str "blob integrity failure under " hash
                       " — stored bytes hash to " actual)}))
     (catch :default e
       {::ok? false
        ::hash hash
+       ::path path
        ::error (or (some-> e .-message) (str e))})))
+
+(defn- read-path
+  "Read and verify one path without exposing internal filesystem evidence."
+  [hash path]
+  (select-keys (inspect-path hash path) [::ok? ::hash ::content ::error]))
+
+(defn- resolve-blob-evidence
+  "Resolve the first existing path and retain the paths searched in order."
+  [{::keys [writable-dir read-only-dirs]} hash]
+  (reduce
+    (fn [{::keys [searched-source-paths]} dir]
+      (let [path (blob-path dir hash)
+            searched (conj searched-source-paths path)]
+        (if (.existsSync nfs path)
+          (reduced
+            (assoc (inspect-path hash path)
+                   ::searched-source-paths searched))
+          {::searched-source-paths searched})))
+    {::searched-source-paths []}
+    (into [writable-dir] read-only-dirs)))
 
 (defn- resolve-blob
   "Read the first existing path in overlay-to-base order."
@@ -278,15 +371,19 @@
   (sync-directory! effects (.dirname npath path)))
 
 (defn- publish!
-  "Publish complete bytes through file sync, rename, and directory sync."
-  [effects writable-dir hash content]
+  "Publish complete bytes through file sync, rename, and directory sync.
+
+   `replace-existing?` is reserved for restore after an independent source
+   verification has proved the replacement bytes. Ordinary puts never replace
+   an existing content-addressed pathname."
+  [effects writable-dir hash content replace-existing?]
   (let [path (blob-path writable-dir hash)
         shard (.dirname npath path)
         tmp (.join npath shard (str hash "." (.randomUUID crypto) ".new"))]
     (try
       (ensure-directory-durable! effects writable-dir)
       (ensure-directory-durable! effects shard)
-      (if (.existsSync nfs path)
+      (if (and (.existsSync nfs path) (not replace-existing?))
         (sync-published! effects path)
         (do
           (let [fd (.openSync nfs tmp "wx")]
@@ -303,6 +400,201 @@
       (finally
         (when (.existsSync nfs tmp)
           (.unlinkSync nfs tmp))))))
+
+(defn- materialization-failure
+  [target-coordinate frozen-digest hash-count operation error evidence]
+  (merge
+    {::ok? false
+     ::target-coordinate target-coordinate
+     ::reachable-hash-digest frozen-digest
+     ::hash-count hash-count
+     ::materialization-operation operation
+     ::expected-digest (or (::expected-digest evidence) frozen-digest)
+     ::error error}
+    (select-keys evidence
+                 [::hash ::searched-source-paths ::destination-path
+                  ::actual-digest])))
+
+(defn- retained-hashes
+  "Derive canonical B(T) from one exact immutable retained database value."
+  [target-database]
+  (if (contains? (db/installed-schema target-database) ::hash)
+    (->> (db/query
+           '[:find [?hash ...]
+             :where
+             [?blob :my.blob/hash ?hash]]
+           target-database)
+         distinct
+         sort
+         vec)
+    []))
+
+(defn- materialize-hash!
+  [effects source-view destination-dir target-coordinate frozen-digest
+   hash-count counts hash]
+  (let [destination (blob-path destination-dir hash)
+        source (resolve-blob-evidence source-view hash)
+        source-paths (::searched-source-paths source)]
+    (cond
+      (not (contains? source ::ok?))
+      (reduced
+        (materialization-failure
+          target-coordinate frozen-digest hash-count
+          :my.blob.materialization.operation/verify-source
+          (str "no retained source blob exists under " hash)
+          {::hash hash
+           ::searched-source-paths source-paths
+           ::destination-path destination
+           ::expected-digest hash}))
+
+      (false? (::ok? source))
+      (reduced
+        (materialization-failure
+          target-coordinate frozen-digest hash-count
+          :my.blob.materialization.operation/verify-source
+          (::error source)
+          (cond->
+            {::hash hash
+             ::searched-source-paths source-paths
+             ::destination-path destination
+             ::expected-digest hash}
+            (::actual-digest source)
+            (assoc ::actual-digest (::actual-digest source)))))
+
+      :else
+      (let [before (when (.existsSync nfs destination)
+                     (inspect-path hash destination))
+            replace-existing? (and before (false? (::ok? before)))
+            publish-error
+            ;; A valid pathname can be the complete result of an interrupted
+            ;; prior publication whose final directory sync failed. Route it
+            ;; through the same publisher so retry re-syncs file + shard.
+            (publish! effects destination-dir hash (::content source)
+                      replace-existing?)]
+        (if publish-error
+          (reduced
+            (materialization-failure
+              target-coordinate frozen-digest hash-count
+              :my.blob.materialization.operation/publish-destination
+              publish-error
+              {::hash hash
+               ::searched-source-paths source-paths
+               ::destination-path destination
+               ::expected-digest hash}))
+          (let [final (inspect-path hash destination)]
+            (if (false? (::ok? final))
+              (reduced
+                (materialization-failure
+                  target-coordinate frozen-digest hash-count
+                  :my.blob.materialization.operation/verify-destination
+                  (::error final)
+                  (cond->
+                    {::hash hash
+                     ::searched-source-paths source-paths
+                     ::destination-path destination
+                     ::expected-digest hash}
+                    (::actual-digest final)
+                    (assoc ::actual-digest (::actual-digest final)))))
+              (cond-> (update counts ::verified-count inc)
+                (nil? before) (update ::newly-materialized-count inc)
+                replace-existing? (update ::repaired-count inc)))))))))
+
+(defn- materialize-retained-with-effects!
+  "Verify and materialize one frozen intent's exact retained blob set."
+  [{::keys [target-database target-coordinate source-storage-view
+            destination-storage-view reachable-hash-digest]}
+   effects]
+  (let [source-result (normalize-storage-view source-storage-view)
+        destination-result (normalize-storage-view destination-storage-view)
+        source-view (::storage-view source-result)
+        destination-view (::storage-view destination-result)
+        destination-dir (::writable-dir destination-view)]
+    (cond
+      (false? (::ok? source-result))
+      (materialization-failure
+        target-coordinate reachable-hash-digest 0
+        :my.blob.materialization.operation/validate-request
+        (::error source-result)
+        {})
+
+      (false? (::ok? destination-result))
+      (materialization-failure
+        target-coordinate reachable-hash-digest 0
+        :my.blob.materialization.operation/validate-request
+        (::error destination-result)
+        {})
+
+      (not= destination-dir (first (::read-only-dirs source-view)))
+      (materialization-failure
+        target-coordinate reachable-hash-digest 0
+        :my.blob.materialization.operation/validate-request
+        "the main writable archive must be the target view's first inherited base"
+        {::destination-path destination-dir})
+
+      :else
+      (try
+        (if-not (= target-coordinate (db/head-coordinate target-database))
+          (materialization-failure
+            target-coordinate reachable-hash-digest 0
+            :my.blob.materialization.operation/derive-retained-set
+            "the retained database value does not resolve the frozen target coordinate"
+            {})
+          (let [hashes (retained-hashes target-database)
+                hash-count (count hashes)
+                invalid-hash (first (remove valid-hash? hashes))
+                derived-digest (sha256 (pr-str hashes))]
+            (cond
+              invalid-hash
+              (materialization-failure
+                target-coordinate reachable-hash-digest hash-count
+                :my.blob.materialization.operation/derive-retained-set
+                "the retained database contains a malformed :my.blob/hash"
+                {::hash invalid-hash})
+
+              (not= reachable-hash-digest derived-digest)
+              (materialization-failure
+                target-coordinate reachable-hash-digest hash-count
+                :my.blob.materialization.operation/derive-retained-set
+                "the retained blob set does not match the frozen intent digest"
+                {::actual-digest derived-digest})
+
+              :else
+              (let [result
+                    (reduce
+                      (partial materialize-hash!
+                               effects source-view destination-dir
+                               target-coordinate reachable-hash-digest
+                               hash-count)
+                      {::verified-count 0
+                       ::newly-materialized-count 0
+                       ::repaired-count 0}
+                      hashes)]
+                (if (false? (::ok? result))
+                  result
+                  (merge
+                    {::ok? true
+                     ::target-coordinate target-coordinate
+                     ::reachable-hash-digest derived-digest
+                     ::hash-count hash-count}
+                    result))))))
+        (catch :default e
+          (materialization-failure
+            target-coordinate reachable-hash-digest 0
+            :my.blob.materialization.operation/derive-retained-set
+            (or (some-> e .-message) (str e))
+            {}))))))
+
+(defn ^:no-doc materialize-retained!
+  "Internal restore boundary for exact retained blob reconstruction.
+
+   The request is extracted from one validated immutable restore intent and
+   carries the already-resolved target database value. This function performs
+   no database writes and is intentionally not agent-facing."
+  {:malli/schema
+   [:=> [:cat ::materialization-request] ::materialization-result]
+   :seon.fn/agent-facing? false}
+  [request]
+  (materialize-retained-with-effects! request node-publication-effects))
 
 (defn- text-content?
   "Whether `content` reads as text rather than binary — a COMPUTED sniff.
@@ -358,9 +650,9 @@
                    (and existing
                         (.existsSync nfs
                                      (blob-path (::writable-dir view) hash)))
-                   (publish! effects (::writable-dir view) hash content)
+                   (publish! effects (::writable-dir view) hash content false)
                    existing nil
-                   :else (publish! effects (::writable-dir view) hash content))]
+                   :else (publish! effects (::writable-dir view) hash content false))]
         (if werr
           {::ok? false ::hash hash ::error werr}
           (let [{ok? ::db/ok? :as env}

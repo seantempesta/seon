@@ -42,4 +42,8 @@ literal content — `put!` in chunks, then `concat!` the hashes into ONE canonic
 blob. A new content address publishes only after every missing archive directory
 entry, its temporary file, and final shard have been fsynced around the atomic
 rename. Retrying an existing verified writable blob re-syncs its directory chain,
-file, and shard without replacing it.
+file, and shard without replacing it. The non-agent-facing restore boundary
+derives the canonical sorted retained-hash vector only from an exact immutable
+database value, verifies its frozen digest and overlay-first source bytes, and
+materializes missing or corrupt main-archive destinations through that same
+durable publisher with final read-back.

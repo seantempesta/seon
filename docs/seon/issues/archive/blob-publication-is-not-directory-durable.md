@@ -63,6 +63,14 @@ remaining pathname is absent or hash-verifiable; and proves retries converge
 without replacing an existing verified blob. Retained evidence is
 `tmp/test-cljs-20260715-100822-31792.log` and its `.report.edn` projection.
 
-Restore materialization itself remains the ordered later Slice 4 consumer in
-the database-lifecycle-recovery roadmap; this resolution closes the publication
-owner it must reuse and does not claim that consumer is already implemented.
+Restore Slice 4 now consumes this exact publisher. Its closed internal
+`my.blob/materialize-retained!` boundary derives the canonical sorted hash
+vector from one exact immutable target database value through `seon.db`, fences
+all filesystem work on the frozen SHA-256 set digest, verifies the target view
+overlay-first, and repairs or creates main-archive content only from independently
+verified source bytes. Every destination is read and hashed again before
+success; retry reports the same digest/count with no new copies. The focused
+CLJS gate passes 21 tests/148 assertions, including empty-schema, exact-coordinate,
+missing-source-path, overlay-orphan, corrupt-overlay, corrupt-destination,
+digest-fence, publisher-failure, and retry falsifiers. Retained evidence is
+`tmp/test-cljs-20260715-102649-17757.log` and its `.report.edn` projection.
