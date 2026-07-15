@@ -45,10 +45,28 @@ regression places an injected completion-verification effect between those
 halves and rejects a mismatched generation before admitting the exact prepared
 result.
 
-The issue remains open because the restore-aware cold caller is not yet
-implementable: Slice 3 still owns the closed forced-main result and Slice 5
-still owns the architecture-defined completion transaction and read-back.
-Neither contract is inferred or represented by a new admission status here.
+The durable fact owner is also implemented independently in
+`seon.db.restore`. It colocates the compact completion identity and all thirteen
+architecture payload attributes, then records or proves one exact completion
+through `seon.db`. An equal identity retry returns its completion transaction
+coordinate without a write while that transaction remains the current head;
+any required-value or optional-digest conflict fails closed. The operation
+neither reads nor changes admission.
+
+The remaining retry boundary is explicit. A completion identity can still be
+present after the branch head advances, but the public CLJS database surface
+does not yet resolve a transaction id to its containing immutable commit.
+Returning the later head would lie about the completion coordinate, so the
+operation fails closed and emits no transaction in that case. The ordered
+integration slice must add one canonical writer-backed coordinate resolver;
+the completion fact must not grow a shadow commit attribute to compensate.
+
+The issue remains open because the restore-aware cold caller has not yet
+composed the closed forced-main result, exact completion transaction and
+read-back, reconstruction, and final admission. The transaction-to-containing-
+commit resolver is also required before a later-head completion retry can
+return the original full coordinate. Neither contract is inferred or
+represented by a new admission status here.
 
 ## Acceptance
 
@@ -63,3 +81,6 @@ Neither contract is inferred or represented by a new admission status here.
 - A crash after completion but before admission observes the same completion,
   does not repeat guarded force or overlays, and safely reconstructs runtime
   state before opening.
+- An exact retry after a later branch transaction resolves and returns the
+  original completion coordinate without writing or inventing stored commit
+  metadata.
