@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (14)
+## Blocker (13)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -20,7 +20,6 @@ See `README.md` for the convention.
 | [Carry one complete database coordinate through the protocol](database-protocol-coordinate-is-incomplete.md) | blocker | Core |
 | [Changed-test hooks can queue stale runs behind an active owner](changed-test-hooks-queue-stale-runs-behind-active-owner.md) | blocker | Core |
 | [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | blocker | agent |
-| [Enforce the eval render cap for failed diagnostics](failed-eval-diagnostics-bypass-render-cap.md) | blocker | agent |
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
 | [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
 | [Keep a stable owner until the pod execution subtree drains](dead-process-group-leader-blocks-safe-subtree-drain.md) | blocker | Core |

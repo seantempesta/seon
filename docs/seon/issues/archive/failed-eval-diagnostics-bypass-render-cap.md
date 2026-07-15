@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, flow]
 ---
@@ -53,3 +53,30 @@ another cap, or output-repair regexes.
   and coordinate.
 - The live REPL falsifiers above render within the configured component caps
   after the change.
+
+## Resolution
+
+Resolved by `b043589e`. Failed eval rows now force their source, captured
+stdout, Malli body, and ordinary/read/runtime error through the existing eval
+cap under no flag, `full?`, escape-clipping, or both. Successful authored
+source/stdout and successful citable results retain their prior release
+semantics. Runtime error projection continues to discard stacks; raw reply and
+blob evidence are unchanged; core/dev escalation still follows the existing
+`:seon.config/on-core-error` policy.
+
+The live before/after probes measured:
+
+- 100K source + 100K stdout + 100K error: 300,006 rendered characters without
+  truncation before; 4,934 with loud truncation after, with all tail sentinels
+  absent;
+- 100K malformed source line: 200,284 producer characters and 200,290 rendered
+  characters before; 3,278 producer characters and 3,287 rendered characters
+  after, with the exact line/column preserved.
+
+The exact focused gate passed four tests and 20 assertions for ordinary
+runtime failures, Malli failures, read failures, 100K components, stack
+suppression, all four flag combinations, and unchanged successful rendering:
+
+```bash
+bin/test-cljs --test=seon.ctx-test/failed-eval-hard-cap-ignores-full-and-escape-flags,seon.ctx-test/failed-malli-diagnostic-hard-cap-ignores-render-flags,seon.ctx-test/large-read-error-is-windowed-before-the-transcript-hard-cap,seon.ctx-test/successful-eval-retains-authored-full-and-escape-semantics
+```
