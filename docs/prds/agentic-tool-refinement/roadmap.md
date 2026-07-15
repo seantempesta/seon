@@ -160,6 +160,15 @@ end target identity coexist after write, finalization, copy, and read-back.
 The focused native-run, classification, admission, cluster, and milestone gate
 passes 127 tests.
 
+The pre-run model reconciliation corrected two provenance assumptions. The
+0.5B listener on port 18081 is gone and must be restarted as an owned dedicated
+listener. MLX-LM switches models from each request, so neither `/v1/models` nor
+the process command proves immutable loaded bytes; every arm instead uses the
+same absolute Hugging Face snapshot path in its dedicated server and Seon
+database model value. The prior local Qwen 3.5 2B quant has vanished and is
+replaced in the candidate matrix by the complete revision-pinned BF16 snapshot.
+Exact evidence and order remain in [[research/local-model-serving-inventory-2026-07-15]].
+
 A subsequent purity probe found that historical result-handle display depends
 on a process-local cache. The target is now explicit and falsifiable: the same
 agent and resolved database coordinate regenerate a byte-identical cacheable

@@ -33,10 +33,9 @@ development slice freezes, not a model selection.
   `http://localhost:11434/v1` and needs no real credential.
 - MLX serving is `mlx_lm.server`. The listener on port 8081 uses `mlx 0.32.0`,
   `mlx-lm 0.31.3`, `transformers 5.13.1`, and `huggingface-hub 1.23.0` from
-  `/Users/sean/src/seon-stable/src-needle/.venv`. The listener on port 18081
-  uses `mlx 0.31.2`, `mlx-lm 0.31.3`, `transformers 5.12.1`, and
-  `huggingface-hub 1.21.0` from
-  `/Users/sean/ml/diffusion-gemma/.venv`.
+  `/Users/sean/src/seon-stable/src-needle/.venv`. A former listener on port
+  18081 used the diffusion-gemma environment; it was absent at the later
+  pre-run reconciliation.
 - Ollama is application and CLI version `0.32.0`. Its API and on-disk manifest
   are the identity sources inspected here.
 - Existing Seon evidence owners are the native `.eval` files under
@@ -46,13 +45,13 @@ development slice freezes, not a model selection.
 
 ## Live serving state
 
-Three OpenAI-compatible listeners were ready without intervention.
+Two OpenAI-compatible listeners remained ready at the pre-run reconciliation.
 
 | endpoint | observed process identity | readiness | identity caveat |
 |---|---|---|---|
-| `http://127.0.0.1:8081/v1` | `mlx_lm.server --model mlx-community/Qwen3.6-35B-A3B-4bit-DWQ --port 8081` | `GET /v1/models` returned 14 cached model ids | the response lists the shared cache, not just the loaded 35B model |
-| `http://127.0.0.1:18081/v1` | `mlx_lm.server --model mlx-community/Qwen2.5-Coder-0.5B-Instruct-4bit --port 18081` | `GET /v1/models` returned the same 14 cached ids | the process command is the evidence that 0.5B is loaded |
-| `http://127.0.0.1:11434/v1` | `ollama serve`, version `0.32.0` | `/api/version` and `/api/tags` returned successfully | only one Ollama artifact is installed, and it is not a small-model candidate |
+| `http://127.0.0.1:8081/v1` | `mlx_lm.server --model mlx-community/Qwen3.6-35B-A3B-4bit-DWQ --port 8081` | `GET /v1/models` returned the compatible cache | MLX switches on each request's `model`; neither the listing nor command proves immutable loaded bytes |
+| `http://127.0.0.1:18081/v1` | absent | connection refused | the cached 0.5B artifact needs a newly owned dedicated listener |
+| `http://127.0.0.1:11434/v1` | `ollama serve`, version `0.32.0` | `/api/version` and `/api/tags` succeeded; `/api/ps` was empty | one 35B artifact is installed but not loaded |
 
 The Ollama artifact is
 `qwen3.5:35b-a3b-coding-nvfp4`, 21,909,194,238 bytes, manifest digest
@@ -73,9 +72,11 @@ curl -fsS http://127.0.0.1:11434/api/tags
 
 ```
 
-For MLX, acceptance must record both the listener response and the exact
-`mlx_lm.server --model ...` process command. Treating `/v1/models` alone as
-loaded-model identity would silently mislabel a run.
+MLX-LM 0.31.3's `ModelProvider` resolves and can switch the model named by each
+request. `--model` only supplies the `default_model` alias. Acceptance therefore
+uses a dedicated listener plus the same immutable snapshot path in the request,
+and records the listener/process/package/source identity. A process command or
+`/v1/models` response alone would silently mislabel a run.
 
 ## Exact local artifacts
 
@@ -85,21 +86,18 @@ weights, config and tokenizer files present, and zero broken symlinks.
 | bracket | artifact | revision | disk | relevant contract |
 |---|---|---|---:|---|
 | sub-1B | `mlx-community/Qwen2.5-Coder-0.5B-Instruct-4bit` | `6b16732e5af5cd9bd600186ad59fa618867ef7a4` | 276 MB | Qwen2 causal LM, 24 layers, 32,768 context, 4-bit group 64, chat template present |
-| sub-1B | `mlx-community/Qwen3.5-0.8B-OptiQ-4bit` | `9affd71fc70de2bb08a666ac2d08a3fff5c858e0` | 845 MB | Qwen3.5 hybrid, 24 text layers, 262,144 context, mixed 4/8-bit group 64, no chat template in cached tokenizer config |
+| sub-1B | `mlx-community/Qwen3.5-0.8B-OptiQ-4bit` | `9affd71fc70de2bb08a666ac2d08a3fff5c858e0` | 845 MB | Qwen3.5 hybrid, 24 text layers, 262,144 context, mixed 4/8-bit group 64, separate `chat_template.jinja` |
 | 1.5B | `mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit` | `b3252a2f97102b1fb1571fec2c9b27219a8536be` | 839 MB | Qwen2 causal LM, 28 layers, 32,768 context, 4-bit group 64, chat template present |
-| 2B | `src-needle/checkpoints/qwen3.5-2b-4bit` | local conversion; config SHA-256 `8893a91e9b7763d7b94c6db181f5b7c79c6f4881a69cefb11549eefcab1823bf` | 1.0 GB | Qwen3.5 hybrid, 24 text layers, 262,144 context, 4-bit affine group 64 |
+| 2B | `Qwen/Qwen3.5-2B` | `15852e8c16360a2fea060d615a32b45270f8a8fc` | 4.3 GB | Qwen3.5 hybrid BF16, 24 text layers, 262,144 context, separate `chat_template.jinja` |
 | 3B | `mlx-community/Qwen2.5-Coder-3B-Instruct-4bit` | `3dd939c621c08e5753d5b89f35a2642cd83b98ca` | 1.6 GB | Qwen2 causal LM, 36 layers, 32,768 context, 4-bit group 64, chat template present |
 | 3B control | `mlx-community/starcoder2-3b-4bit` | `d90b61f0a26e018c1505ea6ed0fdfeca4e649789` | 1.8 GB | StarCoder2, 30 layers, 16,384 context, 4-bit group 64, no chat template |
 | strong local sanity | `mlx-community/Qwen3.6-35B-A3B-4bit-DWQ` | `73c707af4243243b18193444467872d20cff9399` | 19 GB | Qwen3.5 MoE family, mixed 4/8-bit group 64; currently served on 8081 |
 
 Additional complete cached artifacts include base variants for the Qwen2.5
 Coder 0.5B, 1.5B, and 3B models; full upstream Qwen 3.5 0.8B Base and 2B Base
-snapshots; and a full upstream `Qwen/Qwen3.5-2B` snapshot at revision
-`15852e8c16360a2fea060d615a32b45270f8a8fc`. The local 2B conversion does not
-embed its upstream repository or revision, so matching it to that snapshot is
-an inference and not reproducible artifact identity. The same directory also
-contains local Qwen 3.5 0.8B Base and 2B Base conversions; these are useful
-completion controls, not the first agentic-chat baselines.
+snapshots. The previously recorded `src-needle/checkpoints/qwen3.5-2b-4bit`
+conversion was no longer present anywhere under `/Users/sean`; it is removed
+from the runnable matrix rather than inferred from the complete BF16 snapshot.
 
 No exact 4B-or-smaller 4B artifact is installed. The P2 matrix can cover the
 roadmap's `4B-or-smaller` ceiling with the two 3B candidates without a download;
@@ -144,34 +142,34 @@ diagnostic probes; no row is the recommended winner.
 
 | bracket | primary row | comparison question | readiness |
 |---|---|---|---|
-| sub-1B | Qwen2.5-Coder-0.5B-Instruct-4bit | Can the smallest installed chat-tuned coder follow Seon's executable-form and lifecycle contract? | artifact complete and currently served on 18081 |
-| sub-1B stretch | Qwen3.5-0.8B-OptiQ-4bit | Does the newer long-context hybrid improve namespace navigation despite lacking a cached chat template? | artifact complete; server compatibility must be generation-smoked after lifecycle coordination |
+| sub-1B | Qwen2.5-Coder-0.5B-Instruct-4bit | Can the smallest installed chat-tuned coder follow Seon's executable-form and lifecycle contract? | artifact complete; dedicated 18081 listener must be restarted |
+| sub-1B stretch | Qwen3.5-0.8B-OptiQ-4bit | Does the newer long-context hybrid improve namespace navigation with its separate chat template? | artifact complete; server compatibility must be generation-smoked after lifecycle coordination |
 | 1.5B | Qwen2.5-Coder-1.5B-Instruct-4bit | Does the prior few-shot-sensitive model gain from ordinary dynamic context without benchmark-specific examples? | artifact complete; previously exercised locally |
-| 2B | Qwen3.5-2B 4-bit | Does the model with current retained Seon evidence generalize beyond one corrected BFCL sample? | local quant complete, but artifact provenance and serving identity must be fixed before scoring |
+| 2B | Qwen3.5-2B BF16 | Does newer instruction training help at a middle size with exact provenance? | complete upstream snapshot; larger memory arm |
 | 3B | Qwen2.5-Coder-3B-Instruct-4bit | Does added scale help tool composition and verification over 1.5B? | artifact complete |
 | 3B family control | StarCoder2-3B-4bit | Are results Qwen-specific, and how costly is a completion model with shorter context? | artifact complete; requires an explicit, unchanged completion framing arm |
-| strong local sanity | Qwen3.6-35B-A3B-4bit-DWQ | Can the unchanged task/context succeed at all through the same local provider path? | ready on 8081; outside small-model graduation |
+| strong local sanity | Qwen3.6-35B-A3B-4bit-DWQ | Can the unchanged task/context succeed at all through the same local provider path? | shared 8081 listener exists, but a dedicated exact-snapshot arm is required |
 | strong remote sanity | Meta Muse or DeepSeek | Is a failure systemic when a stronger model sees identical bytes and budgets? | use configured provider only; not a small-model candidate |
 
 Keep each small-model scored arm serial against static ACME until the P1 lease
 exists. Hold Seon source, config, frozen sample membership, execution mode,
 temperature, thinking policy, maximum output tokens, turn/deadline ceilings,
-and scorer constant. A practical first deterministic setting is temperature
-zero with thinking disabled where the provider implements that contract; any
-model that cannot honor the same setting gets a separately labeled arm rather
-than silent coercion.
+and scorer constant. The first comparison preserves the admitted 0.2
+temperature, 1,024 output-token, thinking-disabled arm; temperature zero is a
+later deterministic experiment rather than a silent baseline change.
 
-For an already-coordinated MLX listener, the standard Inspect provider form is:
+Future MLX arms use one owned listener and one immutable snapshot path:
 
 ```bash
-cd src-inspect-ai
-export LOCAL_BASE_URL="http://127.0.0.1:<port>/v1"
-export LOCAL_API_KEY="sk-local-nokey"
-.venv/bin/inspect eval <frozen-task> \
-  --model "openai-api/local/<exact-model-id>" \
-  --epochs 1 --temperature 0 --display plain --log-dir <unique-log-dir>
+VENV=/Users/sean/src/seon-stable/src-needle/.venv
+SNAPSHOT="$HOME/.cache/huggingface/hub/models--<owner>--<model>/snapshots/<revision>"
+"$VENV/bin/mlx_lm.server" --model "$SNAPSHOT" \
+  --host 127.0.0.1 --port <owned-port>
 
 ```
+
+The Seon database model value uses that same absolute `SNAPSHOT`; native tasks
+still run Inspect as inert `mockllm/model` because the pod owns the real call.
 
 For the installed Ollama artifact, provider wiring is
 `--model ollama/qwen3.5:35b-a3b-coding-nvfp4`; it is an optional strong sanity
@@ -208,14 +206,13 @@ insufficient by itself.
 - Inspect, Inspect Evals, and `openai` are still not reproducibly content-pinned
   as one Python environment. The `pyproject.toml` Inspect version comment is
   stale relative to the installed/current source build.
-- MLX `/v1/models` does not prove the loaded model. Future run metadata needs
-  the process command or a stronger server-owned loaded-model identity.
-- The local Qwen 3.5 2B quant lacks an embedded upstream revision, and existing
-  `.eval` evidence lacks endpoint and artifact revision.
+- MLX `/v1/models` and the process command do not prove immutable loaded bytes.
+  Future arms require a dedicated listener and request the absolute snapshot.
+- Port 18081 must be restarted before the admitted 0.5B sample. The vanished
+  local 2B quant is not a runnable artifact.
 - No exact 4B artifact is installed. No download is needed for the initial
   ceiling matrix because two complete 3B controls are available.
-- The 0.8B OptiQ tokenizer config has no chat template; its correct unchanged
-  agentic framing and MLX server behavior need a bounded smoke before it enters
-  a scored run.
+- The 0.8B OptiQ snapshot carries a separate chat template; its MLX application
+  and unchanged agent framing still need a bounded smoke before scoring.
 - No baseline result yet compares the installed matrix on the frozen ordinary
   Seon context, and no winner should be selected until that evidence exists.
