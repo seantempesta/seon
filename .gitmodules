@@ -285,3 +285,7 @@
 	path = reference-code/konserve
 	url = https://github.com/seantempesta/konserve.git
 	ignore = dirty
+[submodule "reference-code/bun"]
+	path = reference-code/bun
+	url = https://github.com/oven-sh/bun.git
+	shallow = true
