@@ -11,6 +11,7 @@ import pytest
 from seon_inspect.solver import (
     AgentRunRefused,
     PodRunInfrastructureError,
+    _resolve_timeout_ms,
     _record_result,
     pod_run,
     require_scorable_pod_state,
@@ -60,6 +61,20 @@ def test_pod_run_passes_agent_id_for_reuse():
     with _fake_door(200, {"agent_id": "a1", "reply": "ok"}, capture) as url:
         pod_run("phase 2", 30000, url, agent_id="a1")
     assert capture["payload"]["agent_id"] == "a1"
+
+
+def test_pod_run_preserves_absent_timeout_for_database_policy():
+    capture = {}
+    with _fake_door(200, {"agent_id": "a1", "reply": "ok"}, capture) as url:
+        pod_run("database-owned bound", None, url)
+    assert capture["payload"] == {"input": "database-owned bound"}
+
+
+def test_solver_timeout_precedence_preserves_absence():
+    assert _resolve_timeout_ms(SimpleNamespace(metadata={}), None) is None
+    assert _resolve_timeout_ms(SimpleNamespace(metadata={}), 12) == 12000
+    assert _resolve_timeout_ms(
+        SimpleNamespace(metadata={"timeout_ms": 3456}), 12) == 3456
 
 
 def test_pod_run_422_raises_distinct_refusal():

@@ -631,10 +631,8 @@ def pod_planning_driver(
     `"agent_id"` (attribution evidence). Feed it to `check_planning` with the
     row's generation-time oracle."""
     from seon_inspect import cluster as cl
-    from seon_inspect.config import DEFAULT_RUN_TIMEOUT_S
     from seon_inspect.solver import pod_run
 
-    budget_ms = timeout_ms or DEFAULT_RUN_TIMEOUT_S * 1000
     # `seon_config` (e.g. config/minimal-plan.edn — the rung-2 minimal
     # context) rides BOTH the create and the mid-sample restart: a bare
     # restart would re-seed the default manifest and swap the context.
@@ -645,14 +643,14 @@ def pod_planning_driver(
             extra_env=env)}
     try:
         def run_phase1(text: str) -> dict[str, Any]:
-            return pod_run(text, budget_ms, holder["cluster"].url)
+            return pod_run(text, timeout_ms, holder["cluster"].url)
 
         def restart() -> None:
             holder["cluster"] = cl.restart_pod(holder["cluster"],
                                                extra_env=env)
 
         def run_phase2(text: str, r1: dict[str, Any]) -> dict[str, Any]:
-            return pod_run(text, budget_ms, holder["cluster"].url,
+            return pod_run(text, timeout_ms, holder["cluster"].url,
                            agent_id=r1["agent_id"])
 
         def fetch(r1: dict[str, Any]) -> list[dict[str, Any]]:

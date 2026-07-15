@@ -42,7 +42,7 @@ class PodRunInfrastructureError(RuntimeError):
     """A pod run ended before capability scoring was meaningful."""
 
 
-def pod_run(prompt: str, timeout_ms: int, url: str | None = None,
+def pod_run(prompt: str, timeout_ms: int | None = None, url: str | None = None,
             agent_id: str | None = None) -> dict:
     """One request/response call to a cluster pod's /agents/run door.
 
@@ -54,7 +54,9 @@ def pod_run(prompt: str, timeout_ms: int, url: str | None = None,
     window. SERIAL-ONLY per pod (config.POD_MAX_SAMPLES = 1 by construction:
     one cluster = one sample's isolation unit); parallelism = more clusters,
     one URL each. HTTP 422 → AgentRunRefused."""
-    payload: dict = {"input": prompt, "timeout_ms": timeout_ms}
+    payload: dict = {"input": prompt}
+    if timeout_ms is not None:
+        payload["timeout_ms"] = timeout_ms
     if agent_id is not None:
         payload["agent_id"] = agent_id
     req = urllib.request.Request(
@@ -62,9 +64,15 @@ def pod_run(prompt: str, timeout_ms: int, url: str | None = None,
         headers={"Content-Type": "application/json"},
     )
     try:
-        # HTTP read budget = pod budget + margin — the POD bails on ITS timeout_ms.
+        # An explicit pod budget gets a bounded transport margin. With no
+        # explicit budget, leave the socket unbounded: the pod's database run
+        # policy is the one behavioral deadline and owns the response.
+        transport_timeout = (
+            timeout_ms / 1000 + config.HTTP_MARGIN_S
+            if timeout_ms is not None else None
+        )
         with urllib.request.urlopen(
-            req, timeout=timeout_ms / 1000 + config.HTTP_MARGIN_S
+            req, timeout=transport_timeout
         ) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
@@ -78,10 +86,14 @@ def pod_run(prompt: str, timeout_ms: int, url: str | None = None,
         raise
 
 
-def _resolve_timeout_ms(state: TaskState, timeout_s: int | None) -> int:
-    """Per-sample metadata["timeout_ms"] > timeout_s arg > config default."""
-    default_ms = (timeout_s or config.DEFAULT_RUN_TIMEOUT_S) * 1000
-    return int((state.metadata or {}).get("timeout_ms", default_ms))
+def _resolve_timeout_ms(state: TaskState, timeout_s: int | None) -> int | None:
+    """Resolve an explicit sample/run timeout, preserving absence."""
+    metadata = state.metadata or {}
+    if "timeout_ms" in metadata:
+        return int(metadata["timeout_ms"])
+    if timeout_s is not None:
+        return int(timeout_s * 1000)
+    return None
 
 
 def _prompt_text(state: TaskState) -> str:

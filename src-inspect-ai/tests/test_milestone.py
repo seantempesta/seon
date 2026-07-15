@@ -269,6 +269,21 @@ def test_pod_driver_rejects_missing_response_evidence(monkeypatch):
             cluster_url="http://127.0.0.1:7994/agents/run")
 
 
+def test_pod_driver_preserves_absent_database_owned_timeout(monkeypatch):
+    calls = []
+
+    def fake_run(text, timeout_ms, url):
+        calls.append((text, timeout_ms, url))
+        return {"reply": _DB_GOOD_REPLY, "agent_id": "a-static",
+                "eval_evidence": _DB_GOOD_ROWS}
+
+    monkeypatch.setattr("seon_inspect.solver.pod_run", fake_run)
+    pod_milestone_driver(
+        DB_MEMORY_CONTRACT, "db",
+        cluster_url="http://127.0.0.1:7994/agents/run")
+    assert calls[0][1] is None
+
+
 def test_generated_milestone_task_requires_and_records_static_target():
     from seon_inspect.tasks.milestone_lift import milestone_lift
 

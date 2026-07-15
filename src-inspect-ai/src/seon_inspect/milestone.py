@@ -360,13 +360,10 @@ def pod_milestone_driver(
     restarts, or releases a cluster. The response's database-derived evidence
     keeps the useful static ACME path live while the ownership-fenced
     per-sample lease remains unavailable."""
-    from seon_inspect.config import DEFAULT_RUN_TIMEOUT_S
     from seon_inspect.solver import pod_run
 
-    budget_ms = timeout_ms or DEFAULT_RUN_TIMEOUT_S * 1000
-
     def run(text: str) -> dict[str, Any]:
-        return pod_run(text, budget_ms, cluster_url)
+        return pod_run(text, timeout_ms, cluster_url)
 
     def fetch(r: dict[str, Any]) -> list[dict[str, Any]]:
         rows = r.get("eval_evidence")

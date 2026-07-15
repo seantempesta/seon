@@ -1,10 +1,11 @@
 """Harness run parameters — the ONE config surface for cluster benchmarking.
 
-Defaults here are CALIBRATION-DERIVED (see docs/prds/agent-ctx/research/
-calibration-run-2026-07-02.md) and overridable PER-RUN via function arguments
+Explicit values here are CALIBRATION-DERIVED (see docs/prds/agent-ctx/research/
+calibration-run-2026-07-02.md) and selectable PER-RUN via function arguments
 (`run_bench(run_timeout_s=…, max_samples=…)`, `seon_pod_solver(timeout_s=…)`,
-or per-sample `metadata["timeout_ms"]`). Precedence: per-sample metadata >
-per-run argument > these constants. The ONLY env var is `SEON_CLUSTER_URL` —
+or per-sample `metadata["timeout_ms"]`). Precedence is per-sample metadata then
+per-run argument; absence stays absent so the pod derives its database-owned
+run deadline. The ONLY env var is `SEON_CLUSTER_URL` —
 the cluster-INSTANCE selector (which cluster's pod door), never behavior
 config; it supplies the default endpoint when no `cluster_url` argument is
 passed, read at CALL time (never import time — a prior import-time read made
@@ -20,15 +21,11 @@ import os
 # mounts POST /agents/run works.
 DEFAULT_CLUSTER_URL = "http://127.0.0.1:7890/agents/run"
 
-# Per-sample wall-clock budget the pod may run its own multi-turn loop.
+# Optional calibrated wall-clock budget for explicitly bounded QA runs.
 # Calibration 2026-07-02 (gsm8k via acme, DeepSeek, n=14 completed):
 # median 40.7s, p90 ~70s, max 74s; a 6-turn multi-turn smoke ran 97s. QA-class
 # rows should pass run_timeout_s=QA_RUN_TIMEOUT_S (>3× p90 AND >3× max) —
 # nothing consumes it by default yet; QA rows opt in per-run.
-# The GENERAL default stays 300s because the surveyed agentic rows
-# (memory/planning) ranged 51→300s (flake taxonomy #1) and have no calibration
-# pass yet — re-derive per row as their generators land.
-DEFAULT_RUN_TIMEOUT_S = 300
 QA_RUN_TIMEOUT_S = 240
 
 # Host-side HTTP read budget = pod budget + margin (the POD owns the timeout
@@ -70,8 +67,7 @@ def cluster_url(override: str | None = None) -> str:
     return override or os.environ.get("SEON_CLUSTER_URL") or DEFAULT_CLUSTER_URL
 
 
-def total_run_bound_s(n_samples: int, epochs: int = 1,
-                      timeout_s: int = DEFAULT_RUN_TIMEOUT_S,
+def total_run_bound_s(n_samples: int, *, timeout_s: int, epochs: int = 1,
                       per_sample_cluster: bool = False) -> int:
     """Worst-case wall-clock bound for one serial (per-pod) row: every sample
     burns its full per-sample budget plus HTTP margin — plus, in per-sample-

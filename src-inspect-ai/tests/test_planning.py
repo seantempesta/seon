@@ -268,7 +268,7 @@ def test_live_driver_choreography_with_fakes(monkeypatch):
                                             or []))
 
     def fake_run(text, timeout_ms, url, agent_id=None):
-        order.append(("run", url, agent_id))
+        order.append(("run", url, agent_id, timeout_ms))
         return {"agent_id": agent_id or "a-9", "reply": f"ran: {text[:6]}"}
 
     monkeypatch.setattr(solver, "pod_run", fake_run)
@@ -281,6 +281,7 @@ def test_live_driver_choreography_with_fakes(monkeypatch):
     assert order[1][1].endswith(":40001/agents/run")  # phase 1: pre-restart port
     assert order[3][1].endswith(":40002/agents/run")  # phase 2: the NEW port
     assert order[3][2] == "a-9"                       # SAME agent resumed
+    assert order[1][3] is None and order[3][3] is None  # database-owned bound
     assert order[4] == ("snapshot", "plan-t", "a-9")
     assert out["plan_snapshot"] is snap
     assert out["cluster"] == "plan-t" and out["agent_id"] == "a-9"

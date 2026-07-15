@@ -228,6 +228,15 @@ falsification rejected concurrent changes in runtime source as intended. The
 focused gate is 83 tests. This cleanliness fence complements the operator
 artifact snapshot; it does not replace its output digests.
 
+The live timeout boundary now preserves database authority end to end. An
+explicit Inspect sample/run timeout is retained as exact request metadata and
+an HTTP transport bound. When it is absent, `seon_inspect.solver`, the native
+milestone driver, and the planning driver omit `timeout_ms`; the pod derives
+the effective duration from the same frozen database policy and optional agent
+override used by `open-run!`. The former Python 300-second and pod five-minute
+defaults are removed from this path. Focused Inspect coverage passes 78 tests,
+and the live ACME database resolves 1,800,000 ms for root.
+
 ### R3 — Honest provider and model identity
 
 Owners: `seon.ai`/provider adapter for facts known inside the pod, and the

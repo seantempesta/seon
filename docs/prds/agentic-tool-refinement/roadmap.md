@@ -373,8 +373,10 @@ sample is trustworthy.
 - The Inspect composition door no longer substitutes a hardcoded five-minute
   timeout for the database-owned run deadline. An absent `timeout_ms` follows
   the same global/agent precedence as `open-run!`; an explicit Inspect value
-  remains part of the experiment. Focused coverage passes 15 tests and 65
-  assertions, and the live ACME database resolves 1,800,000 ms.
+  remains part of the experiment. The common Python solver and its milestone
+  and planning callers now preserve that absence instead of injecting their
+  former 300-second fallback. Focused gates pass 15 CLJS tests/65 assertions
+  and 78 Inspect tests; the live ACME database resolves 1,800,000 ms.
 - Infrastructure timeouts and core errors invalidate a sample instead of
   becoming a model score. A no-forms close remains model/runtime evidence.
 - A fresh ordinary ACME agent renders 22,171 total estimated tokens, including
