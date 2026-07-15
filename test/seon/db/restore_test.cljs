@@ -16,6 +16,7 @@
     [seon.db.restore :as restore]))
 
 (def ^:private completion-id "restore00001")
+(def ^:private plan-digest (apply str (repeat 64 "a")))
 (def ^:private database-id
   #uuid "11111111-1111-4111-8111-111111111111")
 (def ^:private from-commit-id
@@ -25,8 +26,8 @@
 (def ^:private forced-commit-id
   #uuid "44444444-4444-4444-8444-444444444444")
 
-(def ^:private completion
-  {::restore/id completion-id
+(def ^:private completion-claim
+  {::restore/plan-digest plan-digest
    ::restore/db-name :default
    ::restore/database-id database-id
    ::restore/from-branch :db
@@ -39,8 +40,14 @@
    ::restore/undo-branch :seon.branch/undo-restore00001
    ::restore/target-branch :seon.branch/target-restore00001})
 
+(def ^:private legacy-completion
+  (-> completion-claim
+      (dissoc ::restore/plan-digest)
+      (assoc ::restore/id completion-id)))
+
 (def ^:private completion-attrs
   [::restore/id
+   ::restore/plan-digest
    ::restore/db-name
    ::restore/database-id
    ::restore/from-branch
@@ -59,16 +66,27 @@
   [body]
   (let [config {:store {:backend :memory :id (random-uuid)}
                 :schema-flexibility :write
-                :keep-history? true}]
+                :keep-history? true}
+        connect-config (db.id/allocation-connect-config config)]
     (-> (d/create-database config)
-        (.then (fn [_] (d/connect config {:sync? false})))
+        (.then (fn [_] (d/connect connect-config {:sync? false})))
         (.then
           (fn ^:async seed-provenance [conn]
             (await (db/ensure-provenance! {:seon.db/conn conn}))
             (await
               (d/transact!
                 conn
-                {:tx-data (db/malli->datahike-schema completion-attrs)}))
+                {:tx-data
+                 (db/malli->datahike-schema
+                  (into completion-attrs
+                        [:seon.schema/key :seon.db.id/generator]))}))
+            (await
+              (d/transact!
+                conn
+                {:tx-data
+                 [{:seon.schema/key ::restore/id
+                   :seon.db.id/generator
+                   :seon.db.id.generator/compact}]}))
             (let [prior db/*conn*]
               (set! db/*conn* conn)
               (-> (js/Promise.resolve (body conn))
@@ -78,32 +96,43 @@
                       (d/release conn))))))))))
 
 (defn- record-as-boot!
-  [value]
-  (db/with-tx-context
-    {:seon.db/user [:seon.agent/id "root"]
-     :seon.db/process (process/lookup-ref ::process/boot)}
-    (fn [] (restore/record! value))))
+  ([value]
+   (record-as-boot! value (db/head-coordinate @db/*conn*)))
+  ([value expected-coordinate]
+   (db/with-tx-context
+     {:seon.db/user [:seon.agent/id "root"]
+      :seon.db/process (process/lookup-ref ::process/boot)}
+     (fn []
+       (restore/record!
+        {::restore/completion-claim value
+         ::restore/expected-coordinate expected-coordinate})))))
 
 (defn- stored-completion
-  [database]
+  ([database]
+   (stored-completion database ::restore/plan-digest plan-digest))
+  ([database identity-attr identity]
   (-> (db/entity {:seon.db/db database
-                  :seon.db/ref [::restore/id completion-id]})
-      (select-keys (keys completion))))
+                  :seon.db/ref [identity-attr identity]})
+      (select-keys restore/completion-attrs))))
 
 (deftest completion-schema-is-the-architecture-fact
-  (is (m/validate ::restore/completion completion))
-  (is (m/validate ::restore/completion
-                  (assoc completion
+  (is (m/validate ::restore/completion-claim completion-claim))
+  (is (not (contains? completion-claim ::restore/id))
+      "operator claims never supply generated database identities")
+  (is (m/validate ::restore/legacy-completion legacy-completion))
+  (is (m/validate ::restore/completion-claim
+                  (assoc completion-claim
                          ::restore/core-overlay-digest "core-digest"
                          ::restore/config-overlay-digest "config-digest")))
-  (is (not (m/validate ::restore/completion
-                       (assoc completion ::restore/status :done)))
+  (is (not (m/validate ::restore/completion-claim
+                       (assoc completion-claim ::restore/status :done)))
       "the closed fact has no phase or status")
-  (is (not (m/validate ::restore/completion
-                       (assoc completion ::restore/blob-digest "digest")))
+  (is (not (m/validate ::restore/completion-claim
+                       (assoc completion-claim ::restore/blob-digest "digest")))
       "blob verification remains a transition precondition, not a fact")
   (let [facets (db/malli->datahike-schema
                  [::restore/id
+                  ::restore/plan-digest
                   ::restore/db-name
                   ::restore/database-id
                   ::restore/from-branch
@@ -117,9 +146,12 @@
                   ::restore/target-branch
                   ::restore/core-overlay-digest
                   ::restore/config-overlay-digest])]
-    (is (= 14 (count facets)) "identity plus thirteen architecture values")
+    (is (= 15 (count facets))
+        "two identities plus thirteen architecture values")
     (is (= :db.unique/identity
-           (:db/unique (first facets))))))
+           (:db/unique (first facets))))
+    (is (= :db.unique/identity
+           (:db/unique (second facets))))))
 
 (deftest completion-schema-precedes-its-generator-policy
   (async done
@@ -158,8 +190,9 @@
   (async done
     (-> (with-fresh-conn
           (fn ^:async prove-record [conn]
-            (let [result (await (record-as-boot! completion))
+            (let [result (await (record-as-boot! completion-claim))
                   coordinate (::restore/completion-coordinate result)
+                  stored (::restore/completion result)
                   database @conn
                   transaction (::coordinate/t coordinate)
                   transaction-entity
@@ -168,9 +201,25 @@
               (is (true? (::restore/ok? result)))
               (is (true? (::restore/recorded? result)))
               (is (false? (::restore/already-completed? result)))
-              (is (= completion (::restore/completion result)))
-              (is (= completion (stored-completion database)))
+              (is (= completion-claim (dissoc stored ::restore/id)))
+              (is (re-matches #"^[a-z][a-z0-9]{11}$"
+                              (::restore/id stored)))
+              (is (not= completion-id (::restore/id stored))
+                  "operator intent identity is not copied into completion")
+              (is (= stored (stored-completion database)))
               (is (= coordinate (db/head-coordinate database)))
+              (let [rows (db/query
+                          {:seon.db/db database
+                           :seon.db/query
+                           '[:find ?attribute ?tx
+                             :in $ ?plan
+                             :where
+                             [?e :seon.db.restore/plan-digest ?plan]
+                             [?e ?attribute _ ?tx]]
+                           :seon.db/args [plan-digest]})]
+                (is (= (set (keys stored)) (set (map first rows))))
+                (is (= #{transaction} (set (map second rows)))
+                    "id, plan, and every payload fact share C"))
               (is (= "root"
                      (get-in transaction-entity
                              [:seon.db/user :seon.agent/id])))
@@ -186,9 +235,9 @@
   (async done
     (-> (with-fresh-conn
           (fn ^:async prove-retry [conn]
-            (let [first-result (await (record-as-boot! completion))
+            (let [first-result (await (record-as-boot! completion-claim))
                   first-head (db/head-coordinate @conn)
-                  retry-result (await (record-as-boot! completion))
+                  retry-result (await (record-as-boot! completion-claim))
                   retry-head (db/head-coordinate @conn)]
               (is (true? (::restore/ok? first-result)))
               (is (true? (::restore/ok? retry-result)))
@@ -203,11 +252,127 @@
                   (is false (str "completion retry threw: " exception))
                   (done))))))
 
+(deftest first-completion-requires-the-exact-frozen-predecessor
+  (async done
+    (-> (with-fresh-conn
+          (fn ^:async prove-predecessor [_conn]
+            (let [head (db/head-coordinate @db/*conn*)
+                  stale (update head ::coordinate/t dec)
+                  result (await (record-as-boot! completion-claim stale))]
+              (is (false? (::restore/ok? result)))
+              (is (= head (db/head-coordinate @db/*conn*)))
+              (is (empty? (stored-completion @db/*conn*))
+                  "a stale predecessor cannot create completion C"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [exception]
+                  (is false (str "completion predecessor proof threw: " exception))
+                  (done))))))
+
+(deftest invalid-record-requests-fail-before-any-database-effect
+  (async done
+    (-> (with-fresh-conn
+          (fn ^:async reject-invalid [conn]
+            (let [head (db/head-coordinate @conn)
+                  missing
+                  (await
+                   (restore/record!
+                    {::restore/expected-coordinate head}))
+                  extra
+                  (await
+                   (restore/record!
+                    {::restore/completion-claim completion-claim
+                     ::restore/expected-coordinate head
+                     ::restore/unexpected true}))]
+              (is (false? (::restore/ok? missing)))
+              (is (false? (::restore/ok? extra)))
+              (is (= head (db/head-coordinate @conn)))
+              (is (empty? (stored-completion @conn))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [exception]
+                  (is false (str "invalid request proof threw: " exception))
+                  (done))))))
+
+(deftest readiness-requires-completion-origin-at-closed-current-head
+  (async done
+    (-> (with-fresh-conn
+          (fn ^:async prove-readiness [_conn]
+            (let [result (await (record-as-boot! completion-claim))
+                  coordinate (::restore/completion-coordinate result)
+                  completion (::restore/completion result)
+                  ready (restore/readiness
+                         {::restore/completion completion
+                          ::restore/completion-coordinate coordinate
+                          :seon.runtime.admission/state
+                          {:seon.runtime.admission/status :publishing}
+                          :seon.db/db @db/*conn*})]
+              (is (= {::restore/ready? true
+                      ::restore/executable? false
+                      ::restore/completion completion
+                      ::restore/completion-coordinate coordinate}
+                     ready))
+              (let [same-t-different-commit
+                    (assoc coordinate ::coordinate/commit-id (random-uuid))
+                    original-head-coordinate db/head-coordinate]
+                (set! db/head-coordinate
+                      (fn
+                        ([] same-t-different-commit)
+                        ([_database] same-t-different-commit)))
+                (try
+                  (is (= {::restore/ready? false
+                          ::restore/executable? false}
+                         (restore/readiness
+                          {::restore/completion completion
+                           ::restore/completion-coordinate coordinate
+                           :seon.runtime.admission/state
+                           {:seon.runtime.admission/status :publishing}
+                           :seon.db/db @db/*conn*}))
+                      "a repeated t on a force commit cannot admit readiness")
+                  (finally
+                    (set! db/head-coordinate original-head-coordinate))))
+              (let [invalid
+                    (restore/readiness
+                     {::restore/completion completion
+                      ::restore/completion-coordinate coordinate
+                      :seon.runtime.admission/state
+                      {:seon.runtime.admission/status :publishing}
+                      :seon.db/db @db/*conn*
+                      ::restore/unexpected true})]
+                (is (false? (::restore/ok? invalid)))
+                (is (false? (::restore/ready? invalid)))
+                (is (false? (::restore/executable? invalid))))
+              (await
+               (db/with-tx-context
+                 {:seon.db/user [:seon.agent/id "root"]
+                  :seon.db/process (process/lookup-ref ::process/boot)}
+                 (fn []
+                   (db/transact!
+                    {:seon.db/tx-data [{:seon.user/id "later-user"}]}))))
+              (is (= {::restore/ready? false
+                      ::restore/executable? false}
+                     (restore/readiness
+                      {::restore/completion completion
+                       ::restore/completion-coordinate coordinate
+                       :seon.runtime.admission/state
+                       {:seon.runtime.admission/status :publishing}
+                       :seon.db/db @db/*conn*})))
+              (is (= {::restore/ready? false
+                      ::restore/executable? true}
+                     (restore/readiness
+                      {::restore/completion completion
+                       ::restore/completion-coordinate coordinate
+                       :seon.runtime.admission/state
+                       {:seon.runtime.admission/status :available}
+                       :seon.db/db @db/*conn*}))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [exception]
+                  (is false (str "restore readiness proof threw: " exception))
+                  (done))))))
+
 (deftest later-head-retry-returns-the-original-completion-coordinate
   (async done
     (-> (with-fresh-conn
           (fn ^:async prove-later-head-gap [conn]
-            (let [first-result (await (record-as-boot! completion))
+            (let [first-result (await (record-as-boot! completion-claim))
                   completion-coordinate
                   (::restore/completion-coordinate first-result)
                   later-envelope
@@ -229,7 +394,7 @@
                         (swap! resolver-requests conj request)
                         {::protocol/success? true
                          ::protocol/coordinate completion-coordinate})]
-                     (record-as-boot! completion)))]
+                     (record-as-boot! completion-claim)))]
               (is (true? (::restore/ok? first-result)))
               (is (true? (:seon.db/ok? later-envelope)))
               (is (not= completion-coordinate later-head)
@@ -253,9 +418,9 @@
   (async done
     (-> (with-fresh-conn
           (fn ^:async prove-conflict [conn]
-            (let [first-result (await (record-as-boot! completion))
+            (let [first-result (await (record-as-boot! completion-claim))
                   first-head (db/head-coordinate @conn)
-                  conflicting (assoc completion
+                  conflicting (assoc completion-claim
                                      ::restore/core-overlay-digest
                                      "not-the-selected-overlay")
                   conflict-result (await (record-as-boot! conflicting))]
@@ -264,7 +429,8 @@
               (is (map? (:seon/error conflict-result)))
               (is (= first-head (db/head-coordinate @conn))
                   "a conflicting identity emits no transaction")
-              (is (= completion (stored-completion @conn))
+              (is (= completion-claim
+                     (dissoc (stored-completion @conn) ::restore/id))
                   "optional absence remains semantically load-bearing"))))
         (.then (fn [_] (done)))
         (.catch (fn [exception]

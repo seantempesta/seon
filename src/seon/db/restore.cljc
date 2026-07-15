@@ -2,6 +2,7 @@
   "Durable completion facts for one fully verified database restore."
   (:require
    [seon.db.coordinate :as coordinate]
+   [seon.db.id :as db.id]
    [seon.db.protocol :as protocol]
    [seon.db.restore.schema]
    [seon.launch :as launch]
@@ -16,9 +17,9 @@
                    [::launch/descriptor ::launch/descriptor]])
 
 (defn completion-from-launch
-  "Derive one preserve-only completion from validated startup evidence."
+  "Derive one preserve-only completion claim from startup evidence."
   {:malli/schema
-   [:=> [:cat ::completion-from-launch-request] ::completion]}
+   [:=> [:cat ::completion-from-launch-request] ::completion-claim]}
   [{descriptor ::launch/descriptor}]
   (let [descriptor (launch/validate-descriptor descriptor)
         startup (::launch/restore-startup descriptor)
@@ -34,7 +35,7 @@
         forced (:seon.db.restore-admin/forced-main-coordinate admin)
         undo (:seon.db.restore-admin/undo-coordinate admin)
         target (:seon.db.restore-admin/prepared-target-coordinate admin)]
-    {::id (:seon.dev.restore/intent-id identity)
+    {::plan-digest (:seon.dev.restore/plan-digest identity)
      ::db-name (keyword (::protocol/database-name database))
      ::database-id (::coordinate/database-id forced)
      ::from-branch (::coordinate/branch from)
@@ -53,6 +54,11 @@
 (schema/register! ::recorded? :boolean)
 (schema/register! ::already-completed? :boolean)
 (schema/register! ::completion-coordinate ::coordinate/coordinate)
+(schema/register! ::expected-coordinate ::coordinate/coordinate)
+(schema/register! ::record-request
+                  [:map {:closed true}
+                   [::completion-claim ::completion-claim]
+                   [::expected-coordinate ::expected-coordinate]])
 (schema/register! ::record-response
                   [:or
                    [:map {:closed true}
@@ -68,6 +74,7 @@
 (def completion-attrs
   "The complete Datahike attribute closure for restore completion facts."
   [::id
+   ::plan-digest
    ::db-name
    ::database-id
    ::from-branch
@@ -82,6 +89,45 @@
    ::core-overlay-digest
    ::config-overlay-digest])
 
+(def completion-claim-attrs
+  "The immutable plan key and payload accepted for new completion facts."
+  (vec (remove #{::id} completion-attrs)))
+
+(schema/register! ::publication-row
+                  [:tuple :qualified-keyword ::coordinate/t])
+(schema/register! ::publication-rows [:vector ::publication-row])
+(schema/register! ::publication-proof-request
+                  [:map {:closed true}
+                   [::completion ::completion]
+                   [::publication-rows ::publication-rows]])
+(schema/register! ::transaction ::coordinate/t)
+(schema/register! ::publication-proof
+                  [:or
+                   [:map {:closed true}
+                    [::ok? [:= true]]
+                    [::transaction ::transaction]]
+                   [:map {:closed true}
+                    [::ok? [:= false]]]])
+
+(defn publication-proof
+  "Prove every current completion fact originated in one transaction."
+  {:malli/schema
+   [:=> [:cat ::publication-proof-request] ::publication-proof]}
+  [{::keys [completion publication-rows]}]
+  (let [expected-attrs (set (keys completion))
+        observed-attrs (mapv first publication-rows)
+        transactions (set (map second publication-rows))
+        current? (contains? completion ::plan-digest)
+        valid-shape? (schema/valid-candidate-value?
+                      (if current? ::current-completion ::legacy-completion)
+                      completion)]
+    (if (and valid-shape?
+             (= expected-attrs (set observed-attrs))
+             (= (count expected-attrs) (count observed-attrs))
+             (= 1 (count transactions)))
+      {::ok? true ::transaction (first transactions)}
+      {::ok? false})))
+
 #?(:cljs
    (defn- failure
      [message data]
@@ -92,51 +138,63 @@
 
 #?(:cljs
    (defn- completion-value
-     [database id]
-     (when (contains? (db/installed-schema database) ::id)
+     [database identity-attr identity]
+     (when (contains? (db/installed-schema database) identity-attr)
        (some-> (db/entity {:seon.db/db database
-                           :seon.db/ref [::id id]})
+                           :seon.db/ref [identity-attr identity]})
                (select-keys completion-attrs)))))
 
 #?(:cljs
-   (defn- completion-transaction
-     [database id]
-     (when (contains? (db/installed-schema database) ::id)
-       (db/query
-        {:seon.db/db (db/history database)
-         :seon.db/query
-         '[:find ?transaction .
-           :in $ ?id
-           :where
-           [?completion :seon.db.restore/id ?id ?transaction true]]
-         :seon.db/args [id]}))))
+   (defn- publication-rows-for
+     [database identity-attr identity]
+     (if (contains? (db/installed-schema database) identity-attr)
+       (->> (db/query
+             {:seon.db/db database
+              :seon.db/query
+              '[:find ?attribute ?transaction
+                :in $ ?identity-attr ?identity
+                :where
+                [?completion ?identity-attr ?identity]
+                [?completion ?attribute _ ?transaction]]
+              :seon.db/args [identity-attr identity]})
+            (sort-by (comp str first))
+            vec)
+       [])))
 
 #?(:cljs
    (defn ^:async ^:private exact-existing-result
-     [database completion existing]
-     (if (not= completion existing)
+     [database claim existing recorded?]
+     (if (not= claim (dissoc existing ::id))
        (failure
-        "Restore completion id already names different facts."
-        {::expected completion ::actual existing})
-       (let [transaction (completion-transaction database (::id completion))
+        "Restore completion plan already names different facts."
+        {::expected claim ::actual existing})
+       (let [proof (publication-proof
+                    {::completion existing
+                     ::publication-rows
+                     (publication-rows-for database ::plan-digest
+                                           (::plan-digest claim))})
+             transaction (::transaction proof)
              head (db/head-coordinate database)
              completion-coordinate
-             (if (= transaction (::coordinate/t head))
-               head
-               (await
-                (db/resolve-transaction-coordinate!
-                 {:seon.db/head-coordinate head
-                  :seon.db/transaction-id transaction})))]
-         (if (schema/valid-candidate-value?
-              ::coordinate/coordinate completion-coordinate)
+             (when (::ok? proof)
+               (if (= transaction (::coordinate/t head))
+                 head
+                 (await
+                  (db/resolve-transaction-coordinate!
+                   {:seon.db/head-coordinate head
+                    :seon.db/transaction-id transaction}))))]
+         (if (and (::ok? proof)
+                  (schema/valid-candidate-value?
+                   ::coordinate/coordinate completion-coordinate))
            {::ok? true
-            ::recorded? false
-            ::already-completed? true
+            ::recorded? recorded?
+            ::already-completed? (not recorded?)
             ::completion existing
             ::completion-coordinate completion-coordinate}
            (failure
-            "Restore completion transaction coordinate could not be resolved."
-            {::completion completion
+            "Restore completion facts do not share one resolvable transaction."
+            {::completion existing
+             ::publication-proof proof
              ::transaction transaction
              ::completion-coordinate completion-coordinate
              ::head-coordinate head}))))))
@@ -154,24 +212,28 @@
 
 #?(:cljs
    (defn ^{:async true :seon.fn/agent-facing? false} record!
-     "Record or prove one exact restore completion at the current head.
+     "Record or prove one exact restore completion after its frozen head.
 
-      Retry first reads the identity from one frozen database value. An equal
-      fact returns its original transaction coordinate without transacting; the
-      same id with any different required or optional value fails closed. A new
-      fact commits through `seon.db/transact!` with a whole-head fence, then reads
-      back every completion attribute and the identity datom's transaction.
+      Retry first reads the unique plan digest from one frozen database value.
+      An equal claim returns its original transaction coordinate without a
+      write. A new claim allocates its compact completion id and commits every
+      fact atomically through `seon.db.id/allocate!` at the exact frozen head.
 
-      The caller owns root/boot transaction provenance. Admission remains outside
+     The caller owns root/boot transaction provenance. Admission remains outside
       this operation."
-     {:malli/schema [:=> [:cat ::completion] ::record-response]}
-     [completion]
-     (try
-       (let [database @db/*conn*
+     {:malli/schema [:=> [:cat ::record-request] ::record-response]}
+     [request]
+     (if-not (schema/valid-candidate-value? ::record-request request)
+       (failure "Restore completion request is invalid."
+                {::invalid-request-schema ::record-request})
+       (try
+        (let [{::keys [completion-claim expected-coordinate]} request
+              database @db/*conn*
              missing-schema
              (into [] (remove #(contains? (db/installed-schema database) %))
                    completion-attrs)
-             existing (completion-value database (::id completion))]
+             plan-digest (::plan-digest completion-claim)
+             existing (completion-value database ::plan-digest plan-digest)]
          (cond
            (seq missing-schema)
            (failure
@@ -179,38 +241,132 @@
             {::missing-schema missing-schema})
 
            existing
-           (await (exact-existing-result database completion existing))
+           (await
+            (exact-existing-result database completion-claim existing false))
+
+           (not= expected-coordinate (db/head-coordinate database))
+           (failure
+            "Restore completion predecessor is no longer the current head."
+            {::expected-coordinate expected-coordinate
+             ::actual-coordinate (db/head-coordinate database)})
 
            :else
-           (let [expected-coordinate (db/head-coordinate database)
-                 envelope
+           (let [envelope
                  (await
-                  (db/transact!
-                   {:seon.db/expected-coordinate expected-coordinate
-                    :seon.db/tx-data [completion]}))]
-             (if (false? (:seon.db/ok? envelope))
+                  (db.id/allocate!
+                   {::db.id/allocations
+                    [{::db.id/key ::completion
+                      ::db.id/identity-attr ::id}]
+                    ::db.id/transaction-builder
+                    (fn [ids]
+                      {:seon.db/expected-coordinate expected-coordinate
+                       :seon.db/tx-data
+                       [(assoc completion-claim ::id (get ids ::completion))]
+                       ::db.id/dependent-identities
+                       [{::db.id/candidate-key ::completion
+                         ::db.id/lookup-ref [::plan-digest plan-digest]}]})
+                    :seon.db/conn db/*conn*}))
+                 committed @db/*conn*
+                 readback
+                 (completion-value committed ::plan-digest plan-digest)
+                 allocated-id (get-in envelope [::db.id/ids ::completion])]
+             (cond
+               (and readback
+                    (:seon.db/ok? envelope)
+                    (= allocated-id (::id readback)))
+               (await
+                (exact-existing-result
+                 committed completion-claim readback true))
+
+               readback
+               ;; A concurrent publisher may win either the dependent unique
+               ;; claim or the whole-head fence. Adopt only its exact facts.
+               (await
+                (exact-existing-result
+                 committed completion-claim readback false))
+
+               (false? (:seon.db/ok? envelope))
                (transaction-failure envelope)
-               (let [coordinate (:seon.db/coordinate envelope)
-                     committed @db/*conn*
-                     readback (completion-value committed (::id completion))
-                     transaction
-                     (completion-transaction committed (::id completion))
-                     current-coordinate (db/head-coordinate committed)]
-                 (if (and (= completion readback)
-                          (= coordinate current-coordinate)
-                          (= transaction (::coordinate/t coordinate)))
-                   {::ok? true
-                    ::recorded? true
-                    ::already-completed? false
-                    ::completion readback
-                    ::completion-coordinate coordinate}
-                   (failure
-                    "Restore completion read-back did not prove its commit."
-                    {::expected completion
-                     ::actual readback
-                     ::transaction transaction
-                     ::completion-coordinate coordinate
-                     ::current-coordinate current-coordinate})))))))
-       (catch :default exception
-         (failure "Restore completion recording failed."
-                  {:seon.error/raw exception})))))
+
+               :else
+               (failure
+                "Restore completion allocation committed without exact read-back."
+                {::expected completion-claim
+                 ::transaction-envelope envelope
+                 ::actual readback})))))
+        (catch :default exception
+          (failure "Restore completion recording failed."
+                   {:seon.error/raw exception}))))))
+
+#?(:cljs
+   (do
+     (schema/register! ::ready? :boolean)
+     (schema/register! ::executable? :boolean)
+     (schema/register!
+     ::readiness-request
+      [:map {:closed true}
+       [::completion ::current-completion]
+       [::completion-coordinate ::completion-coordinate]
+       [:seon.runtime.admission/state
+        [:map {:closed true}
+         [:seon.runtime.admission/status
+          [:enum :starting :publishing :available :quiescing :unavailable]]
+         [:seon.runtime.admission/generation {:optional true} :int]
+         [:seon.runtime.admission/reason {:optional true} :string]]]
+       [:seon.db/db :seon.db/db-val]])
+     (schema/register!
+     ::readiness-response
+      [:or
+       [:map {:closed true}
+        [::ready? [:= true]]
+        [::executable? [:= false]]
+        [::completion ::current-completion]
+        [::completion-coordinate ::completion-coordinate]]
+       [:map {:closed true}
+        [::ready? [:= false]]
+        [::executable? ::executable?]]
+       [:map {:closed true}
+        [::ok? [:= false]]
+        [::ready? [:= false]]
+        [::executable? [:= false]]
+        [:seon/error :map]]])))
+
+#?(:cljs
+   (defn readiness
+     "Derive closed restore readiness from one immutable database value."
+     {:malli/schema [:=> [:cat ::readiness-request] ::readiness-response]}
+     [request]
+     (if-not (schema/valid-candidate-value? ::readiness-request request)
+       (assoc (failure "Restore readiness request is invalid."
+                       {::invalid-request-schema ::readiness-request})
+              ::ready? false
+              ::executable? false)
+       (let [{::keys [completion completion-coordinate]
+              admission-state :seon.runtime.admission/state
+              database :seon.db/db} request
+             current-coordinate (db/head-coordinate database)
+             plan-digest (::plan-digest completion)
+             existing (completion-value database ::plan-digest plan-digest)
+             proof (when existing
+                     (publication-proof
+                      {::completion existing
+                       ::publication-rows
+                       (publication-rows-for
+                        database ::plan-digest plan-digest)}))
+             transaction (::transaction proof)
+             executable? (= :available
+                            (:seon.runtime.admission/status admission-state))
+             ready? (and (= :publishing
+                            (:seon.runtime.admission/status admission-state))
+                         (= completion existing)
+                         (::ok? proof)
+                         (schema/valid-candidate-value?
+                          ::coordinate/coordinate current-coordinate)
+                         (= :db (::coordinate/branch current-coordinate))
+                         (= completion-coordinate current-coordinate)
+                         (= transaction
+                            (::coordinate/t completion-coordinate)))]
+         (cond-> {::ready? (boolean ready?)
+                  ::executable? executable?}
+           ready? (assoc ::completion completion
+                         ::completion-coordinate completion-coordinate))))))

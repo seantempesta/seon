@@ -128,6 +128,7 @@ value either satisfies its owning identity schema or is rejected.
 | `:seon.runtime.recovery/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | `:db.type/string` | compact crash-recovery anchor key |
 | `:seon.web.session/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | `:db.type/string` | compact browser-tab session key allocated by the writer |
 | `:seon.db.restore/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | `:db.type/string` | compact completed-restore fact key |
+| `:seon.db.restore/plan-digest` | `[:string {:min 64 :max 64 :seon.db/identity true}]` | `:db.type/string` | immutable operator-plan natural key; completion maps additionally validate the canonical hex digest shape |
 | `:seon.user/id` | `[:string {:seon.db/identity true}]` | `:db.type/string` | the one human |
 | `:seon.db.process/id` | `[:keyword {:seon.db/identity true}]` | `:db.type/keyword` | boot/config/REPL provenance path |
 | `:seon.fn/sym` | `[:string {:seon.db/identity true}]` | `:db.type/string` | fn qualified-sym key |
@@ -683,13 +684,17 @@ facts are owned here.
 
 ### 4.12 completed restore — `:seon.db.restore/*`
 
-A restore has no persisted phase/status checklist. After the guarded root move,
-selected overlays, and runtime reconstruction succeed—but before admission—one
-fact records what actually happened:
+A restore has no persisted phase/status checklist. The operator intent UUID
+identifies only the retained external operation. Its canonical plan digest is
+the natural key connecting that intent to durable completion; the intent UUID
+is never reused as a database identity. After the guarded root move, selected
+overlays, and runtime reconstruction succeed—but before admission—the writer
+allocates one compact completion id and records what actually happened:
 
 | attribute | malli | datahike facet | notes |
 |---|---|---|---|
 | `:seon.db.restore/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | string / one / identity | compact completion key |
+| `:seon.db.restore/plan-digest` | `[:string {:min 64 :max 64 :seon.db/identity true}]` | string / one / identity | exact immutable operator plan; completion claim/fact schemas additionally require canonical lowercase hex |
 | `:seon.db.restore/db-name` | `:keyword` | keyword / one | logical routing label |
 | `:seon.db.restore/database-id` | `:uuid` | uuid / one | stable database identity |
 | `:seon.db.restore/from-branch` | `:keyword` | keyword / one | source branch |
@@ -705,10 +710,20 @@ fact records what actually happened:
 | `:seon.db.restore/config-overlay-digest` | `:string` | string / one | optional; present only when committed |
 
 Attribute presence identifies the fact; there is no kind, phase, progress,
-generation, or status attr. The recording transaction supplies time,
-`:seon.db/user`, and `:seon.db/process`. Optional digest absence means that
+generation, or status attr. `seon.db.id/allocate!` commits the generated id,
+plan digest, every payload fact, and transaction provenance in one whole-head-
+fenced transaction. Readiness and lifecycle observation require every current
+fact to retain that same original transaction and require its exact completion
+coordinate—not merely the same transaction number—to remain the main head.
+An exact plan retry adopts that entity and original coordinate; a different
+payload at the same digest fails closed. Optional digest absence means that
 population was preserved. External lifecycle intent is deleted after this fact
 and admission; it is crash-recovery input, not a second history log.
+
+Historical completion rows without `:seon.db.restore/plan-digest` remain
+readable inputs for undo. They are never backfilled—the later digest datom
+would falsely split publication across transactions—and they cannot satisfy a
+new completion claim.
 
 ## 5. Domain schemas — `my.*` (the agent's data)
 

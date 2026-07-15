@@ -491,7 +491,19 @@
                 nil
                 (catch clojure.lang.ExceptionInfo exception exception)))]
         (is (= :seon.db.protocol.error/restore-divergence
-               (:seon.error/kind (ex-data ambiguous))))))))
+               (:seon.error/kind (ex-data ambiguous)))))
+      (d/transact (::registry/conn reopened)
+                  [[:db/add [::db.restore/id completion-id]
+                    ::db.restore/to-t (inc (::db.restore/to-t completion))]])
+      (let [mutated
+            (try
+              (registry/observe-database-lifecycle
+               {::registry/database-name database-name})
+              nil
+              (catch clojure.lang.ExceptionInfo exception exception))]
+        (is (= :seon.db.protocol.error/restore-divergence
+               (:seon.error/kind (ex-data mutated)))
+            "a later payload transaction invalidates the completion")))))
 
 (deftest lifecycle-observation-fails-closed-on-partial-or-moving-storage
   (let [database-name :registry/lifecycle-observation-failure

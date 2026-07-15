@@ -814,21 +814,53 @@
                  :seon.db.restore/completion completion}))
              completion))
          ids)
+        current-transactions
+        (into {}
+              (map
+               (fn [[completion-id completion]]
+                 (let [rows
+                       (->> (d/q '[:find ?attribute ?transaction
+                                   :in $ ?id
+                                   :where
+                                   [?completion :seon.db.restore/id ?id]
+                                   [?completion ?attribute _ ?transaction]]
+                                 main-db completion-id)
+                            (sort-by (comp str first))
+                            vec)
+                       proof
+                       (db.restore/publication-proof
+                        {::db.restore/completion completion
+                         ::db.restore/publication-rows rows})]
+                   (when-not (::db.restore/ok? proof)
+                     (lifecycle-fail!
+                      :seon.db.protocol.error/restore-divergence
+                      "A durable restore completion was not published atomically."
+                      {::database-name database-name
+                       ::main-coordinate main-coordinate
+                       :seon.db.restore/id completion-id
+                       :seon.db.restore/completion completion
+                       :seon.db.restore/publication-rows rows}))
+                   [completion-id (::db.restore/transaction proof)]))
+              (map vector ids completions)))
         transaction-ts
         (into {}
               (map
                (fn [completion-id]
                  (let [transactions (get transactions-by-id completion-id)]
-                   (when-not (= 1 (count transactions))
+                   (when-not (and (= 1 (count transactions))
+                                  (= (first transactions)
+                                     (get current-transactions completion-id)))
                      (lifecycle-fail!
                       :seon.db.protocol.error/restore-divergence
-                      "A durable restore completion has no unique publication transaction."
+                      "A durable restore completion no longer has its original publication transaction."
                       {::database-name database-name
                        ::main-coordinate main-coordinate
                        :seon.db.restore/id completion-id
-                       :seon.db.restore/transaction-ids transactions}))
-                   [completion-id (first transactions)])))
-              ids)
+                       :seon.db.restore/transaction-ids transactions
+                       :seon.db.restore/current-transaction
+                       (get current-transactions completion-id)}))
+                   [completion-id (first transactions)]))
+              ids))
         completion-coordinates
         (into {}
               (map
