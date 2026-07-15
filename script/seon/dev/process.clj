@@ -324,8 +324,15 @@
     :else :seon.dev.process.status/dead))
 
 (defn- group-command [signal pid]
-  (process/sh {:continue true :out :string :err :string
-               :cmd ["/bin/kill" signal "--" (str "-" pid)]}))
+  ;; Runtime shutdown has already terminated Babashka's future executor, so
+  ;; cleanup hooks cannot safely reach `babashka.process/sh`. The direct JDK
+  ;; boundary is synchronous, bounded, and needs no process-local executor.
+  (let [argv ["/bin/kill" signal "--" (str "-" pid)]
+        builder (doto (ProcessBuilder. ^java.util.List argv)
+                  (.redirectOutput java.lang.ProcessBuilder$Redirect/DISCARD)
+                  (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD))
+        child (.start builder)]
+    {:exit (.waitFor child)}))
 
 (defn- group-alive? [pid]
   (zero? (:exit (group-command "-0" pid))))
@@ -659,8 +666,9 @@
 
 (defn ensure!
   "Reconcile one process to its exact argv, environment, artifact, and health."
-  [config spec]
-  (let [id (:seon.dev.process/id spec)
+  ([config spec] (ensure! config spec (fn [_ spawn!] (spawn!))))
+  ([config spec start-owned!]
+   (let [id (:seon.dev.process/id spec)
         unavailable
         (->> (:seon.dev.process/external-dependencies spec)
              (remove #(external-dependency-ready? config %))
@@ -671,17 +679,96 @@
                       {:seon.dev.process/id id
                        :seon.dev.process/unavailable-external-processes
                        unavailable})))
-        record (read-process config id)]
-    (if (converged? config spec)
-      record
-      (do
-        (when record (stop! config id))
-        (when (accepting-unmanaged? config id)
-          (throw (ex-info "An unmanaged listener blocks the Seon process."
-                          {:seon.dev.process/id id})))
-        (clear-readiness! config id)
-        (let [started (spawn-detached! config spec)]
-          (wait-ready! config spec started))))))
+         record (read-process config id)]
+     (if (converged? config spec)
+       record
+       (do
+         (when record (stop! config id))
+         (when (accepting-unmanaged? config id)
+           (throw (ex-info "An unmanaged listener blocks the Seon process."
+                           {:seon.dev.process/id id})))
+         (clear-readiness! config id)
+         (let [started
+               (start-owned! id #(spawn-detached! config spec))]
+           (wait-ready! config spec started)))))))
+
+(defn- unwind-started! [config ids]
+  (let [failures
+        (reduce
+         (fn [acc id]
+           (try
+             (stop! config id)
+             acc
+             (catch Throwable error
+               (conj acc {:seon.dev.process/id id
+                          :seon.dev.process/message (ex-message error)
+                          :seon.dev.process/data (ex-data error)}))))
+         []
+         (reverse ids))]
+    (when (seq failures)
+      (throw
+       (ex-info "Failed to unwind every process started by this invocation."
+                {:seon.dev.process/unwind-failures failures})))
+    nil))
+
+(defn with-startup-ownership
+  "Run one startup transition with signal-safe ownership of new processes."
+  [config transition]
+  (let [monitor (Object.)
+        state (atom {:seon.dev.process/shutting-down? false
+                     :seon.dev.process/started []})
+        begin-shutdown!
+        #(locking monitor
+           (swap! state assoc :seon.dev.process/shutting-down? true)
+           (:seon.dev.process/started @state))
+        start-owned!
+        (fn [id spawn!]
+          (locking monitor
+            (when (:seon.dev.process/shutting-down? @state)
+              (throw
+               (ex-info "Seon startup was interrupted before process spawn."
+                        {:seon.dev.process/id id})))
+            ;; Publication and ownership are one synchronized phase. A shutdown
+            ;; hook either closes this phase before it begins, or waits until
+            ;; the exact managed record can be drained.
+            (swap! state update :seon.dev.process/started conj id)
+            (spawn!)))
+        unwind! #(unwind-started! config (begin-shutdown!))
+        runtime (Runtime/getRuntime)
+        shutdown-hook
+        (Thread.
+         (fn []
+           (try
+             (unwind!)
+             (catch Throwable error
+               (binding [*out* *err*]
+                 (println (str "Failed to unwind interrupted Seon startup: "
+                               (ex-message error)))
+                 (when-let [data (not-empty (ex-data error))]
+                   (prn data))))))
+         "seon-startup-process-unwind")]
+    (.addShutdownHook runtime shutdown-hook)
+    (try
+      (transition start-owned!)
+      (catch Throwable error
+        (try
+          (unwind!)
+          (catch Throwable cleanup
+            (let [combined
+                  (ex-info
+                   "Seon startup failed and cleanup was incomplete."
+                   {:seon.dev.process/startup-message (ex-message error)
+                    :seon.dev.process/startup-data (ex-data error)
+                    :seon.dev.process/unwind-message (ex-message cleanup)
+                    :seon.dev.process/unwind-data (ex-data cleanup)}
+                   error)]
+              (.addSuppressed combined cleanup)
+              (throw combined))))
+        (throw error))
+      (finally
+        (try
+          (.removeShutdownHook runtime shutdown-hook)
+          (catch IllegalStateException _))))))
 
 (defn status
   "Derive process and application health from live probes."

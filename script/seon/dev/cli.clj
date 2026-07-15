@@ -46,23 +46,26 @@
   ;; Quiesce both readers before building; the writer can safely keep running
   ;; from its already-loaded jar until its digest is known to have changed.
   (assert-current-database-layout! configuration)
-  (process/stop! configuration process/watcher-id)
-  (process/stop! configuration process/pod-id)
-  (let [manifest (artifact/build! configuration)
-        changed (:seon.dev.artifact/changed manifest)
-        spec-map (process/specs configuration manifest)]
-    (when (contains? changed :seon.dev.artifact/application)
-      (process/stop! configuration process/pod-id))
-    (when (contains? changed :seon.dev.artifact/writer)
-      (process/stop! configuration process/pod-id)
-      (process/stop! configuration process/writer-id))
-    (doseq [id (process/start-order spec-map)]
-      (println (str "▶ reconcile " (name id)))
-      (process/ensure! configuration (get spec-map id))
-      (println (str "  ● " (name id) " ready")))
-    (assoc (process/status configuration manifest)
-           :seon.dev.target/artifact-digest
-           (:seon.dev.artifact/application-digest manifest))))
+  (process/with-startup-ownership
+   configuration
+   (fn [start-owned!]
+     (process/stop! configuration process/watcher-id)
+     (process/stop! configuration process/pod-id)
+     (let [manifest (artifact/build! configuration)
+           changed (:seon.dev.artifact/changed manifest)
+           spec-map (process/specs configuration manifest)]
+       (when (contains? changed :seon.dev.artifact/application)
+         (process/stop! configuration process/pod-id))
+       (when (contains? changed :seon.dev.artifact/writer)
+         (process/stop! configuration process/pod-id)
+         (process/stop! configuration process/writer-id))
+       (doseq [id (process/start-order spec-map)]
+         (println (str "▶ reconcile " (name id)))
+         (process/ensure! configuration (get spec-map id) start-owned!)
+         (println (str "  ● " (name id) " ready")))
+       (assoc (process/status configuration manifest)
+              :seon.dev.target/artifact-digest
+              (:seon.dev.artifact/application-digest manifest))))))
 
 (defn- ordinary-agent-url [base-url]
   ;; The feed's first patch is immediate and contains the database-derived

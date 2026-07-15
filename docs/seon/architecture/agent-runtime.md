@@ -458,6 +458,13 @@ later reuse of the same PID fails closed and is never signalled. A managed
 launch owns a complete operating-system session: stop sends TERM and, when
 needed, KILL to the process group and does not return until the group is
 drained, so a child from a pre-exec build cannot become a duplicate orphan.
+During a multi-process startup, one invocation-scoped shutdown boundary owns
+only the processes that invocation actually starts. Shutdown admission is
+serialized with detached spawn plus managed-record publication; an interrupt
+therefore either prevents the spawn or waits until its exact identity can be
+drained in reverse dependency order. A converged process from an earlier
+invocation remains alive. A failed inverse retains its exact managed record and
+is reported rather than allowing startup or destructive cleanup to graduate.
 Atomic owner-PID locks serialize each process, while one lifecycle lock spans
 multi-process restart and named-cluster reset transitions from teardown through
 any durable database mutation and final readiness. A second invocation therefore

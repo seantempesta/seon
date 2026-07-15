@@ -108,12 +108,21 @@ publication-failure cleanup, and preservation of a pre-existing converged pod.
 The branch/process/config/CLI selector passes 30 tests/130 assertions. This is
 an internal boundary, not yet a public lifecycle command.
 
-The next dependency-ordered slice is the remaining interruption and public
-ownership boundary: inject real signals at watcher/writer/pod start and
-readiness cuts, prove only invocation-owned processes unwind, then expose the
-settled internal transition through CLI/status/MCP. A real default plus ACME
-create/write/restart/close checkpoint follows before the restart/crash matrix.
-An unproved process inverse continues to forbid branch deletion.
+Ordinary startup interruption ownership is complete. The one supervisor now
+installs an invocation-scoped shutdown hook, serializes shutdown admission with
+detached spawn plus managed-record publication, and drains only newly started
+groups in reverse order. Direct JDK process-group signals remain usable after
+Babashka's future executor has terminated. Real OS-SIGINT proof covers the
+pre-spawn publication race and watcher, writer, and pod readiness cuts; a
+converged writer survives while invocation-owned watcher/pod groups unwind.
+The branch/CLI/process selector passes 31 tests/153 assertions. Evidence is in
+[[research/ordinary-startup-sigint-ownership-2026-07-15]].
+
+The next dependency-ordered slice is public ownership: expose the settled
+internal branch transition through CLI/status/MCP without changing its inverse.
+A real default plus ACME create/write/restart/close checkpoint follows before
+the restart/crash matrix. An unproved branch process inverse continues to
+forbid branch deletion.
 
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in

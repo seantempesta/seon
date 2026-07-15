@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, flow, pod, architecture]
 ---
@@ -69,3 +69,27 @@ second supervisor or PID registry.
 - Branch create followed by an interrupted pod launch applies the same process
   unwind before exact target attachment release/delete; uncertain process
   cleanup prevents destructive branch deletion.
+
+## Resolution
+
+Resolved on 2026-07-15 by the one `seon.dev.process` startup transition. The
+ordinary reconcile installs one invocation-scoped JVM shutdown hook before any
+build or spawn. A synchronized phase makes ownership publication and the real
+detached spawn indivisible with respect to shutdown: the hook either closes
+admission before spawn, or waits until the managed record exists and drains it.
+Only specs that were not already converged enter the ordered owned set.
+
+Shutdown cleanup uses direct synchronous `ProcessBuilder` calls for process-
+group probes and signals. This is required because Babashka terminates the
+future executor used by `babashka.process/sh` before JVM shutdown hooks run; a
+real pre-spawn SIGINT probe first exposed that failure and retained the exact
+record rather than hiding it. Cleanup failures still retain their process
+records, are emitted by the hook, and become the reported transition failure on
+ordinary exception paths.
+
+Real OS-SIGINT tests cover the pre-spawn/post-admission race plus watcher,
+writer, and pod readiness cuts. Every newly started group and record is absent
+before owner exit `130`; a converged writer remains alive while the invocation-
+owned watcher and pod are drained. The focused branch/CLI/process selector
+passes 31 tests/153 assertions. Full evidence and the dependency ledger are in
+[[ordinary-startup-sigint-ownership-2026-07-15]].

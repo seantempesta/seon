@@ -10,7 +10,8 @@
             [seon.dev.state :as state]
             [seon.launch :as launch])
   (:import [java.io BufferedReader InputStreamReader]
-           [java.net ServerSocket SocketException]))
+           [java.net ServerSocket SocketException]
+           [java.util.concurrent TimeUnit]))
 
 (defn- test-config []
   (let [directory (fs/create-temp-dir {:prefix "seon-operator-test-"})]
@@ -91,6 +92,290 @@
   (doseq [id ids]
     (try (process/stop! configuration id) (catch Throwable _)))
   (fs/delete-tree (:seon.dev.test/directory configuration)))
+
+(def ^:private writer-fixture-source
+  (str "import os,socket,sys,time\n"
+       "req,port,delay=sys.argv[1],sys.argv[2],float(sys.argv[3])\n"
+       "time.sleep(delay)\n"
+       "try: os.unlink(req)\n"
+       "except FileNotFoundError: pass\n"
+       "s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)\n"
+       "s.bind(req); s.listen(16)\n"
+       "open(port,'w').write('1')\n"
+       "while True:\n"
+       " c,_=s.accept(); c.close()\n"))
+
+(def ^:private pod-fixture-source
+  (str "import http.server,sys,time\n"
+       "port_file,delay=sys.argv[1],float(sys.argv[2])\n"
+       "time.sleep(delay)\n"
+       "class H(http.server.BaseHTTPRequestHandler):\n"
+       " def do_GET(self):\n"
+       "  self.send_response(200); self.end_headers(); self.wfile.write(b'{}')\n"
+       " def log_message(self,*args): pass\n"
+       "server=http.server.HTTPServer(('127.0.0.1',0),H)\n"
+       "open(port_file,'w').write(str(server.server_port))\n"
+       "server.serve_forever()\n"))
+
+(defn- signal-fixture-config [directory]
+  (let [root (str (fs/normalize
+                   (fs/absolutize (System/getProperty "user.dir"))))
+        base (target-config
+              {:seon.dev.config/root root
+               :seon.dev.config/process-dir (str (fs/path directory "process"))
+               :seon.dev.config/log-dir (str (fs/path directory "logs"))
+               :seon.dev.config/environment (into {} (System/getenv))
+               :seon.dev.test/directory directory}
+              directory)
+        output (fs/path directory "client.js")
+        runtime (fs/path directory "shadow/builds/client/dev/out/cljs-runtime/a.js")]
+    (fs/create-dirs (fs/parent runtime))
+    (spit (str output) "client")
+    (spit (str runtime) "runtime")
+    base))
+
+(defn- signal-fixture-specs [configuration cut]
+  (let [delay #(if (= cut %) "300" "0")
+        watcher-digest (artifact/current-client-digest configuration)]
+    {process/watcher-id
+     {:seon.dev.process/id process/watcher-id
+      :seon.dev.process/argv
+      ["python3" "-c"
+       (str "import time\n"
+            "time.sleep(" (delay process/watcher-id) ")\n"
+            "print('[:client] Build completed.',flush=True)\n"
+            "print('[:test] Build completed.',flush=True)\n"
+            "time.sleep(300)\n")]
+      :seon.dev.process/environment (into {} (System/getenv))
+      :seon.dev.process/dependencies []
+      :seon.dev.process/readiness :seon.dev.process.readiness/watcher
+      :seon.dev.process/ready-timeout-ms 310000
+      :seon.dev.process/artifact-digest watcher-digest}
+     process/writer-id
+     {:seon.dev.process/id process/writer-id
+      :seon.dev.process/argv
+      ["python3" "-c" writer-fixture-source
+       (:seon.dev.config/request-socket configuration)
+       (:seon.dev.config/writer-repl-port-file configuration)
+       (delay process/writer-id)]
+      :seon.dev.process/environment (into {} (System/getenv))
+      :seon.dev.process/dependencies []
+      :seon.dev.process/readiness :seon.dev.process.readiness/writer
+      :seon.dev.process/ready-timeout-ms 310000
+      :seon.dev.process/artifact-digest "writer"}
+     process/pod-id
+     {:seon.dev.process/id process/pod-id
+      :seon.dev.process/argv
+      ["python3" "-c" pod-fixture-source
+       (:seon.dev.config/http-port-file configuration)
+       (delay process/pod-id)]
+      :seon.dev.process/environment (into {} (System/getenv))
+      :seon.dev.process/dependencies [process/watcher-id process/writer-id]
+      :seon.dev.process/readiness :seon.dev.process.readiness/pod
+      :seon.dev.process/ready-timeout-ms 310000
+      :seon.dev.process/artifact-digest "pod"}}))
+
+(defn run-signal-fixture!
+  "Run the real detached startup fixture until its owner is signalled."
+  [directory cut reuse-writer?]
+  (let [configuration (signal-fixture-config directory)
+        specs (signal-fixture-specs configuration cut)]
+    (when reuse-writer?
+      (process/ensure! configuration (get specs process/writer-id)))
+    (process/with-startup-ownership
+     configuration
+     (fn [start-owned!]
+       (doseq [id (process/start-order specs)]
+         (process/ensure! configuration (get specs id) start-owned!))))))
+
+(defn run-pre-spawn-signal-fixture!
+  "Hold the real spawn phase so SIGINT races managed-record publication."
+  [directory]
+  (let [configuration (signal-fixture-config directory)
+        marker (fs/path directory "spawn-entered")
+        pid-file (fs/path directory "spawned-pid")
+        spec (harmless-spec process/watcher-id ["sleep" "300"])
+        spawn @#'process/spawn-detached!]
+    (with-redefs-fn
+      {#'process/spawn-detached!
+       (fn [selected selected-spec]
+         (spit (str marker) "entered")
+         (Thread/sleep 500)
+         (let [record (spawn selected selected-spec)]
+           (spit (str pid-file) (str (:seon.dev.process/pid record)))
+           record))}
+      (fn []
+        (process/with-startup-ownership
+         configuration
+         #(process/ensure! configuration spec %))))))
+
+(defn- await-record [configuration id]
+  (loop [remaining 500]
+    (or (process/read-process configuration id)
+        (when (pos? remaining)
+          (Thread/sleep 20)
+          (recur (dec remaining))))))
+
+(defn- signal-owner! [root expression]
+  (shell/process
+   {:out :string :err :string
+    :cmd ["bb" "--config" (str (fs/path root "bb.edn"))
+          "--deps-root" root "-e" expression]}))
+
+(deftest real-sigint-cannot-cross-the-spawn-publication-phase
+  (let [directory (str (fs/create-temp-dir {:prefix "seon-sigint-spawn-"}))
+        configuration (signal-fixture-config directory)
+        root (:seon.dev.config/root configuration)
+        marker (fs/path directory "spawn-entered")
+        pid-file (fs/path directory "spawned-pid")
+        expression
+        (str "(require '[seon.dev.process-test :as t]) "
+             "(t/run-pre-spawn-signal-fixture! " (pr-str directory) ")")
+        owner (signal-owner! root expression)]
+    (try
+      (loop [remaining 500]
+        (when (and (pos? remaining) (not (fs/regular-file? marker)))
+          (Thread/sleep 10)
+          (recur (dec remaining))))
+      (is (fs/regular-file? marker) "the spawn phase was entered")
+      (shell/sh {:cmd ["/bin/kill" "-INT"
+                       (str (.pid ^java.lang.Process (:proc owner)))]})
+      (is (.waitFor ^java.lang.Process (:proc owner) 10 TimeUnit/SECONDS))
+      (let [result @owner
+            spawned-pid (some-> (slurp (str pid-file)) str/trim parse-long)]
+        (is (= 130 (:exit result)))
+        (is (pos-int? spawned-pid) "the main thread completed a real spawn")
+        (is (nil? (state/process-start-instant spawned-pid))
+            "the hook waited for publication and drained the process")
+        (is (nil? (process/read-process configuration process/watcher-id))))
+      (finally
+        (try (process/stop! configuration process/watcher-id)
+             (catch Throwable _))
+        (fs/delete-tree directory {:force true})))))
+
+(deftest real-sigint-unwinds-each-ordinary-readiness-cut
+  (doseq [cut [process/watcher-id process/writer-id process/pod-id]]
+    (let [directory (str (fs/create-temp-dir {:prefix "seon-sigint-ready-"}))
+          configuration (signal-fixture-config directory)
+          root (:seon.dev.config/root configuration)
+          expression
+          (str "(require '[seon.dev.process-test :as t]) "
+               "(t/run-signal-fixture! " (pr-str directory) " "
+               (pr-str cut) " false)")
+          owner (signal-owner! root expression)]
+      (try
+        (let [cut-record (await-record configuration cut)]
+          (is (some? cut-record) (str (name cut) " published its identity"))
+          (shell/sh {:cmd ["/bin/kill" "-INT"
+                           (str (.pid ^java.lang.Process (:proc owner)))]})
+          (is (.waitFor ^java.lang.Process (:proc owner) 10 TimeUnit/SECONDS))
+          (is (= 130 (:exit @owner)))
+          (doseq [id process/target-processes]
+            (is (nil? (process/read-process configuration id))
+                (str (name cut) " unwind clears " (name id))))
+          (is (not (state/process-identity-alive? cut-record))
+              (str (name cut) " cannot survive under PID 1")))
+        (finally
+          (doseq [id (reverse process/target-processes)]
+            (try (process/stop! configuration id) (catch Throwable _)))
+          (fs/delete-tree directory {:force true}))))))
+
+(deftest real-sigint-preserves-a-preexisting-converged-writer
+  (let [directory (str (fs/create-temp-dir {:prefix "seon-sigint-reuse-"}))
+        configuration (signal-fixture-config directory)
+        root (:seon.dev.config/root configuration)
+        expression
+        (str "(require '[seon.dev.process-test :as t]) "
+             "(t/run-signal-fixture! " (pr-str directory) " "
+             (pr-str process/pod-id) " true)")
+        owner (signal-owner! root expression)]
+    (try
+      (let [pod-record (await-record configuration process/pod-id)
+            writer-record (process/read-process configuration process/writer-id)]
+        (is (some? pod-record))
+        (is (state/process-identity-alive? writer-record))
+        (shell/sh {:cmd ["/bin/kill" "-INT"
+                         (str (.pid ^java.lang.Process (:proc owner)))]})
+        (is (.waitFor ^java.lang.Process (:proc owner) 10 TimeUnit/SECONDS))
+        (is (= 130 (:exit @owner)))
+        (is (nil? (process/read-process configuration process/watcher-id)))
+        (is (nil? (process/read-process configuration process/pod-id)))
+        (is (state/process-identity-alive?
+             (process/read-process configuration process/writer-id))
+            "the invocation never claims or drains the converged writer"))
+      (finally
+        (doseq [id (reverse process/target-processes)]
+          (try (process/stop! configuration id) (catch Throwable _)))
+        (fs/delete-tree directory {:force true})))))
+
+(deftest failed-unwind-reports-and-retains-exact-process-identity
+  (let [configuration (test-config)
+        id :seon.dev.process/interrupted-start
+        spec (harmless-spec id ["sleep" "300"])
+        fail-stop? (atom false)
+        stop @#'process/stop!]
+    (try
+      (let [failure
+            (try
+              (with-redefs-fn
+                {#'process/stop!
+                 (fn [selected id]
+                   (if @fail-stop?
+                     (throw (ex-info "injected inverse failure"
+                                     {:seon.dev.process/id id}))
+                     (stop selected id)))}
+                (fn []
+                  (process/with-startup-ownership
+                   configuration
+                   (fn [start-owned!]
+                     (process/ensure! configuration spec start-owned!)
+                     (reset! fail-stop? true)
+                     (throw (ex-info "injected startup failure" {}))))))
+              nil
+              (catch Throwable error error))
+            record (process/read-process configuration id)]
+        (is (= "Seon startup failed and cleanup was incomplete."
+               (ex-message failure)))
+        (is (= "injected startup failure"
+               (:seon.dev.process/startup-message (ex-data failure))))
+        (is (= id
+               (get-in (ex-data failure)
+                       [:seon.dev.process/unwind-data
+                        :seon.dev.process/unwind-failures 0
+                        :seon.dev.process/id])))
+        (is (= "injected startup failure"
+               (some-> failure ex-cause ex-message)))
+        (is (= "Failed to unwind every process started by this invocation."
+               (some-> failure .getSuppressed first ex-message)))
+        (is (state/process-identity-alive? record)
+            "failed cleanup retains the exact retryable managed record"))
+      (finally
+        (reset! fail-stop? false)
+        (try (stop configuration id) (catch Throwable _))
+        (fs/delete-tree (:seon.dev.test/directory configuration)
+                        {:force true})))))
+
+(deftest startup-failure-unwinds-new-processes-in-reverse-order
+  (let [configuration (test-config)
+        stopped (atom [])]
+    (try
+      (is (thrown-with-msg?
+           Exception #"injected transition failure"
+           (with-redefs-fn
+             {#'process/stop!
+              (fn [_ id]
+                (swap! stopped conj id))}
+             (fn []
+               (process/with-startup-ownership
+                configuration
+                (fn [start-owned!]
+                  (doseq [id process/target-processes]
+                    (start-owned! id (constantly id)))
+                  (throw (ex-info "injected transition failure" {}))))))))
+      (is (= (reverse process/target-processes) @stopped))
+      (finally
+        (fs/delete-tree (:seon.dev.test/directory configuration)
+                        {:force true})))))
 
 (deftest process-identity-and-idempotence
   (let [configuration (test-config)
