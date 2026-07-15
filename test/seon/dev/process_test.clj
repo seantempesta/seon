@@ -539,6 +539,56 @@
                  (some-> (:out result) str/trim parse-long)))))
       (finally (cleanup! configuration [id])))))
 
+(deftest ensure-refuses-to-replace-a-nonconverged-managed-process
+  (let [record {:seon.dev.process/id process/pod-id
+                :seon.dev.process/pid 41}
+        stopped (atom [])
+        started (atom [])
+        spec {:seon.dev.process/id process/pod-id
+              :seon.dev.process/external-dependencies []}]
+    (with-redefs [process/converged? (constantly false)
+                  process/read-process (fn [_ _] record)
+                  process/stop! (fn [& arguments]
+                                  (swap! stopped conj arguments))
+                  process/accepting-unmanaged? (constantly false)]
+      (try
+        (process/ensure! {} spec
+                         (fn [& arguments]
+                           (swap! started conj arguments)))
+        (is false "replacement without lifecycle evidence must fail")
+        (catch clojure.lang.ExceptionInfo error
+          (is (= "Refusing to replace a managed process without clean-or-force evidence."
+                 (ex-message error)))
+          (is (= :seon.dev.process.status/managed-process-present
+                 (:seon.dev.process/status (ex-data error))))))
+      (is (empty? @stopped)
+          "generic reconciliation never invokes the low-level inverse")
+      (is (empty? @started)
+          "replacement cannot start before the selected generation is absent"))))
+
+(deftest prepare-watcher-refuses-to-replace-a-managed-generation
+  (let [record {:seon.dev.process/id process/watcher-id
+                :seon.dev.process/pid 42}
+        stopped (atom [])
+        started (atom [])
+        spec (harmless-spec process/watcher-id ["sleep" "300"])]
+    (with-redefs [process/watcher-spec (fn [_ _] spec)
+                  process/read-process (fn [_ _] record)
+                  process/stop! (fn [& arguments]
+                                  (swap! stopped conj arguments))
+                  process/accepting-unmanaged? (constantly false)]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"without clean-or-force evidence"
+           (process/prepare-watcher!
+            {}
+            (fn [& arguments]
+              (swap! started conj arguments)))))
+      (is (empty? @stopped)
+          "watcher publication never bypasses lifecycle classification")
+      (is (empty? @started)
+          "a prepared watcher starts only after exact absence"))))
+
 (deftest publication-cuts-drain-the-unadopted-generation
   (doseq [cut [:before-record :after-record-before-adopt]]
     (let [configuration (test-config)
@@ -975,6 +1025,32 @@
               process/pod-id process/writer-id process/watcher-id]
              (mapv first @calls)))
       (is (= 1 (count (set (map second @calls))))))))
+
+(deftest coordinated-absence-rejects-a-newly-published-generation
+  (let [replacement {:seon.dev.process/id process/watcher-id
+                     :seon.dev.process/pid 43}
+        reads (atom [nil replacement])
+        drained (atom [])]
+    (with-redefs [process/read-process
+                  (fn [_ _]
+                    (let [value (first @reads)]
+                      (swap! reads next)
+                      value))
+                  process/drain-containment!
+                  (fn [& arguments]
+                    (swap! drained conj arguments))]
+      (try
+        (#'process/stop-selected!
+         {} Long/MAX_VALUE [process/watcher-id])
+        (is false "a new generation cannot satisfy selected absence")
+        (catch clojure.lang.ExceptionInfo error
+          (is (= "A managed process could not prove containment absence."
+                 (ex-message error)))
+          (is (= replacement
+                 (:seon.dev.process/current-record (ex-data error))))
+          (is (= [] (:seon.dev.process/results (ex-data error))))))
+      (is (empty? @drained)
+          "the unselected generation is retained without a drain request"))))
 
 (defn- serve-one-lifecycle-response! [server status body observed]
   (future

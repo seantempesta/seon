@@ -1148,13 +1148,17 @@
                  :seon.dev.process.status/containment-uncertain
                  :seon.dev.process/id (:seon.dev.process/id record)}))))))
 
+(def ^:private no-process-expectation
+  ::no-process-expectation)
+
 (defn stop!
   "Drain one exact containment generation and return its terminal evidence."
-  ([config id] (stop! config id nil nil))
+  ([config id] (stop! config id no-process-expectation nil))
   ([config id expected-record] (stop! config id expected-record nil))
   ([config id expected-record operation-deadline]
    (let [record (read-process config id)]
-     (when (and expected-record (not= expected-record record))
+     (when (and (not= no-process-expectation expected-record)
+                (not= expected-record record))
        (throw
         (ex-info "The selected process generation changed before drain."
                  {:seon.dev.process/status
@@ -1501,6 +1505,23 @@
      :seon.dev.process/elapsed-ms (- (monotonic-ms) started)
      :seon.dev.process/results results}))
 
+(defn- require-startable-absence! [config id record]
+  (when record
+    (throw
+     (ex-info
+      "Refusing to replace a managed process without clean-or-force evidence."
+      {:seon.dev.process/id id
+       :seon.dev.process/status
+       :seon.dev.process.status/managed-process-present
+       :seon.dev.process/recorded-status (process-status record)
+       :seon.dev.process/required-transition
+       :seon.dev.process.transition/clean-or-force})))
+  (when (accepting-unmanaged? config id)
+    (throw
+     (ex-info "An unmanaged listener blocks the Seon process."
+              {:seon.dev.process/id id})))
+  nil)
+
 (defn ensure!
   "Reconcile one process to its exact argv, environment, artifact, and health."
   ([config spec] (ensure! config spec (fn [_ spawn!] (spawn!))))
@@ -1520,10 +1541,7 @@
      (if (converged? config spec)
        record
        (do
-         (when record (stop! config id))
-         (when (accepting-unmanaged? config id)
-           (throw (ex-info "An unmanaged listener blocks the Seon process."
-                           {:seon.dev.process/id id})))
+         (require-startable-absence! config id record)
          (clear-readiness! config id)
          (prepare-readiness! config id)
          (let [started
@@ -1541,10 +1559,7 @@
               "The prepared watcher specification is invalid."
               :seon.dev.process/explanation)
         record (read-process config watcher-id)]
-    (when record (stop! config watcher-id))
-    (when (accepting-unmanaged? config watcher-id)
-      (throw (ex-info "An unmanaged Shadow watcher blocks client publication."
-                      {:seon.dev.process/id watcher-id})))
+    (require-startable-absence! config watcher-id record)
     (let [started (start-owned! watcher-id #(spawn-detached! config spec))]
       (wait-watcher-flush! config spec started))))
 
