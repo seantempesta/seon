@@ -27,6 +27,8 @@
 (def transact-operation :seon.db.protocol.operation/transact)
 (def replay-transactions-operation
   :seon.db.protocol.operation/replay-transactions)
+(def resolve-transaction-coordinate-operation
+  :seon.db.protocol.operation/resolve-transaction-coordinate)
 (def knn-search-operation :seon.db.protocol.operation/knn-search)
 
 (def transaction-event :seon.db.protocol.event/transaction)
@@ -59,6 +61,9 @@
   :seon.db.protocol.error/stale-branch-roster)
 (def restore-divergence-error
   :seon.db.protocol.error/restore-divergence)
+(def non-ancestor-error :seon.db.protocol.error/non-ancestor)
+(def ambiguous-history-error
+  :seon.db.protocol.error/ambiguous-history)
 
 (def lifecycle-error-kinds
   #{duplicate-route-error duplicate-attachment-error attachment-mismatch-error
@@ -66,7 +71,8 @@
     unsupported-history-error cut-not-branchable-error branch-exists-error
     branch-missing-error protected-main-branch-error active-branch-error
     initializer-error release-error cleanup-required-error
-    stale-branch-roster-error restore-divergence-error})
+    stale-branch-roster-error restore-divergence-error non-ancestor-error
+    ambiguous-history-error})
 
 (def committed-status :seon.db.protocol.status/committed)
 (def unknown-status :seon.db.protocol.status/unknown)
@@ -87,6 +93,7 @@
   delete-branch-operation
   transact-operation
   replay-transactions-operation
+  resolve-transaction-coordinate-operation
   knn-search-operation])
 (schema/register! ::success? :boolean)
 (schema/register! ::pong? :boolean)
@@ -97,6 +104,14 @@
 (schema/register! ::previous-coordinate ::coordinate/coordinate)
 (schema/register! ::since-coordinate ::coordinate/coordinate)
 (schema/register! ::through-coordinate ::coordinate/coordinate)
+(schema/register!
+ ::head-coordinate
+ [:map {:closed true}
+  [::coordinate/database-id ::coordinate/database-id]
+  [::coordinate/branch [:= :db]]
+  [::coordinate/commit-id ::coordinate/commit-id]
+  [::coordinate/t ::coordinate/t]])
+(schema/register! ::transaction-id ::coordinate/t)
 (schema/register! ::continuation-coordinate ::coordinate/coordinate)
 (schema/register! ::expected-coordinate ::coordinate/coordinate)
 (schema/register! ::current-coordinate ::coordinate/coordinate)
@@ -143,7 +158,8 @@
   unsupported-history-error cut-not-branchable-error branch-exists-error
   branch-missing-error protected-main-branch-error active-branch-error
   initializer-error release-error cleanup-required-error
-  stale-branch-roster-error restore-divergence-error])
+  stale-branch-roster-error restore-divergence-error non-ancestor-error
+  ambiguous-history-error])
 (schema/register! ::error [:string {:min 1}])
 (schema/register!
  ::status
@@ -272,6 +288,13 @@
   [::since-coordinate ::since-coordinate]
   [::through-coordinate {:optional true} ::through-coordinate]])
 (schema/register!
+ ::resolve-transaction-coordinate-request
+ [:map {:closed true}
+  [::operation [:= resolve-transaction-coordinate-operation]]
+  [::database-name ::database-name]
+  [::head-coordinate ::head-coordinate]
+  [::transaction-id ::transaction-id]])
+(schema/register!
   ::knn-search-request
   [:map
   [::operation [:= knn-search-operation]]
@@ -290,6 +313,8 @@
   [delete-branch-operation ::delete-branch-request]
   [transact-operation ::transaction-request]
   [replay-transactions-operation ::replay-transactions-request]
+  [resolve-transaction-coordinate-operation
+   ::resolve-transaction-coordinate-request]
   [knn-search-operation ::knn-search-request]])
 (schema/register!
  ::failed-response
@@ -365,6 +390,11 @@
   [::events ::events]
   [::replayed-count ::replayed-count]])
 (schema/register!
+ ::resolve-transaction-coordinate-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::coordinate ::coordinate]])
+(schema/register!
  ::knn-search-response
  [:map
   [::success? [:= true]]
@@ -380,6 +410,7 @@
   ::delete-branch-response
   ::transaction-response
   ::replay-transactions-response
+  ::resolve-transaction-coordinate-response
   ::knn-search-response])
 
 (schema/register! ::body :map)
@@ -432,6 +463,12 @@
   [::database-name ::database-name]
   [::since-coordinate ::since-coordinate]
   [::through-coordinate {:optional true} ::through-coordinate]])
+(schema/register!
+ ::resolve-transaction-coordinate-request-input
+ [:map {:closed true}
+  [::database-name ::database-name]
+  [::head-coordinate ::head-coordinate]
+  [::transaction-id ::transaction-id]])
 (schema/register!
   ::knn-request-input
   [:map
@@ -507,6 +544,14 @@
            ::since-coordinate since-coordinate}
     (some? through-coordinate)
     (assoc ::through-coordinate through-coordinate)))
+
+(defn resolve-transaction-coordinate-request
+  "Construct one frozen-head transaction-coordinate request."
+  {:malli/schema
+   [:=> [:cat ::resolve-transaction-coordinate-request-input]
+    ::resolve-transaction-coordinate-request]}
+  [input]
+  (assoc input ::operation resolve-transaction-coordinate-operation))
 
 (defn knn-search-request
   "Construct one bounded embedding-neighbor request."

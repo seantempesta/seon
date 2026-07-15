@@ -53,19 +53,21 @@ coordinate without a write while that transaction remains the current head;
 any required-value or optional-digest conflict fails closed. The operation
 neither reads nor changes admission.
 
-The remaining retry boundary is explicit. A completion identity can still be
-present after the branch head advances, but the public CLJS database surface
-does not yet resolve a transaction id to its containing immutable commit.
-Returning the later head would lie about the completion coordinate, so the
-operation fails closed and emits no transaction in that case. The ordered
-integration slice must add one canonical writer-backed coordinate resolver;
-the completion fact must not grow a shadow commit attribute to compensate.
+The later-head retry boundary is now implemented through the one database
+protocol. A closed main-lineage request gives the authoritative writer a frozen
+head and transaction id. It walks retained immutable commit maps, proves that
+head remains an ancestor, excludes branch/force metadata commits that repeat a
+parent's `t`, and requires exactly one ordinary transaction origin. The pod's
+existing replica RPC owner carries the request; `seon.db` preserves typed
+writer failures as a structured error value. An equal completion retry after a
+later transaction now returns the original completion coordinate without a
+write or a shadow commit attribute. Exact grounding is in
+[[../../prds/database-lifecycle-recovery/research/restore-completion-transaction-coordinate-2026-07-15]].
 
 The issue remains open because the restore-aware cold caller has not yet
 composed the closed forced-main result, exact completion transaction and
-read-back, reconstruction, and final admission. The transaction-to-containing-
-commit resolver is also required before a later-head completion retry can
-return the original full coordinate. Neither contract is inferred or
+read-back, reconstruction, and final admission. That caller must consume the
+settled resolver rather than reimplement commit-graph inference. No contract is
 represented by a new admission status here.
 
 ## Acceptance
@@ -84,3 +86,11 @@ represented by a new admission status here.
 - An exact retry after a later branch transaction resolves and returns the
   original completion coordinate without writing or inventing stored commit
   metadata.
+
+Focused writer proof passes four tests/12 assertions, including a real
+repeated-`t` force commit, abandoned non-ancestor head, missing transaction,
+wrong attachment, and branch-head alias rejection. Replay plus resolver proof
+passes six tests/33 assertions. The request and response production Transit
+gate passes ten tests/32 assertions, and the focused CLJS restore gate passes
+six tests/34 assertions for the pod wrapper, original-coordinate result,
+structured error kind, and zero-write retry.

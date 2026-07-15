@@ -105,25 +105,34 @@
          [?completion :seon.db.restore/id ?id ?transaction true]]
        :seon.db/args [id]})))
 
-(defn- exact-existing-result
+(defn ^:async ^:private exact-existing-result
   [database completion existing]
   (if (not= completion existing)
     (failure
       "Restore completion id already names different facts."
       {::expected completion ::actual existing})
     (let [transaction (completion-transaction database (::id completion))
-          head (db/head-coordinate database)]
-      (if (= transaction (::coordinate/t head))
+          head (db/head-coordinate database)
+          completion-coordinate
+          (if (= transaction (::coordinate/t head))
+            head
+            (await
+             (db/resolve-transaction-coordinate!
+              {:seon.db/head-coordinate head
+               :seon.db/transaction-id transaction})))]
+      (if (schema/valid-candidate-value?
+           ::coordinate/coordinate completion-coordinate)
         {::ok? true
          ::recorded? false
          ::already-completed? true
          ::completion existing
-         ::completion-coordinate head}
+         ::completion-coordinate completion-coordinate}
         (failure
-          "Restore completion transaction is no longer the current head."
+          "Restore completion transaction coordinate could not be resolved."
           {::completion completion
            ::transaction transaction
-           ::completion-coordinate head})))))
+           ::completion-coordinate completion-coordinate
+           ::head-coordinate head})))))
 
 (defn- transaction-failure
   [envelope]
@@ -139,7 +148,7 @@
   "Record or prove one exact restore completion at the current head.
 
    Retry first reads the identity from one frozen database value. An equal
-   fact returns its original current-head coordinate without transacting; the
+   fact returns its original transaction coordinate without transacting; the
    same id with any different required or optional value fails closed. A new
    fact commits through `seon.db/transact!` with a whole-head fence, then reads
    back every completion attribute and the identity datom's transaction.
@@ -161,7 +170,7 @@
           {::missing-schema missing-schema})
 
         existing
-        (exact-existing-result database completion existing)
+        (await (exact-existing-result database completion existing))
 
         :else
         (let [expected-coordinate (db/head-coordinate database)

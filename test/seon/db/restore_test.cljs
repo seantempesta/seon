@@ -8,7 +8,9 @@
     [seon.agent.message]
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
+    [seon.db.protocol :as protocol]
     [seon.db.process :as process]
+    [seon.db.replica :as replica]
     [seon.db.restore :as restore]))
 
 (def ^:private completion-id "restore00001")
@@ -166,7 +168,7 @@
                   (is false (str "completion retry threw: " exception))
                   (done))))))
 
-(deftest later-head-retry-fails-closed-until-transaction-coordinate-is-resolvable
+(deftest later-head-retry-returns-the-original-completion-coordinate
   (async done
     (-> (with-fresh-conn
           (fn ^:async prove-later-head-gap [conn]
@@ -183,16 +185,30 @@
                           {:seon.db/tx-data
                            [{:seon.user/id "later-user"}]}))))
                   later-head (db/head-coordinate @conn)
-                  retry-result (await (record-as-boot! completion))]
+                  resolver-requests (atom [])
+                  retry-result
+                  (await
+                   (with-redefs
+                     [replica/resolve-transaction-coordinate!
+                      (fn ^:async resolve-completion [request]
+                        (swap! resolver-requests conj request)
+                        {::protocol/success? true
+                         ::protocol/coordinate completion-coordinate})]
+                     (record-as-boot! completion)))]
               (is (true? (::restore/ok? first-result)))
               (is (true? (:seon.db/ok? later-envelope)))
               (is (not= completion-coordinate later-head)
                   "the completion transaction is no longer the branch head")
-              (is (false? (::restore/ok? retry-result))
-                  "retry must not substitute the later head for the original coordinate")
-              (is (map? (:seon/error retry-result)))
+              (is (true? (::restore/ok? retry-result)))
+              (is (true? (::restore/already-completed? retry-result)))
+              (is (= completion-coordinate
+                     (::restore/completion-coordinate retry-result)))
+              (is (= [{::protocol/head-coordinate later-head
+                       ::protocol/transaction-id
+                       (::coordinate/t completion-coordinate)}]
+                     @resolver-requests))
               (is (= later-head (db/head-coordinate @conn))
-                  "the unresolved retry emits no transaction"))))
+                  "the resolved retry emits no transaction"))))
         (.then (fn [_] (done)))
         (.catch (fn [exception]
                   (is false (str "later-head retry threw: " exception))
@@ -219,3 +235,31 @@
         (.catch (fn [exception]
                   (is false (str "completion conflict threw: " exception))
                   (done))))))
+
+(deftest coordinate-resolution-preserves-the-writer-error-kind
+  (async done
+    (let [head {::coordinate/database-id database-id
+                ::coordinate/branch :db
+                ::coordinate/commit-id forced-commit-id
+                ::coordinate/t 536870930}]
+      (-> (js/Promise.resolve
+           (with-redefs
+             [replica/resolve-transaction-coordinate!
+              (fn ^:async fail-resolution [_request]
+                {::protocol/success? false
+                 ::protocol/error-kind protocol/non-ancestor-error
+                 ::protocol/error "frozen head is not an ancestor"})]
+             (db/resolve-transaction-coordinate!
+              {:seon.db/head-coordinate head
+               :seon.db/transaction-id 536870929})))
+          (.then
+           (fn [result]
+             (is (= protocol/non-ancestor-error
+                    (get-in result
+                            [:seon.error/ex-data
+                             ::protocol/error-kind])))
+             (done)))
+          (.catch
+           (fn [exception]
+             (is false (str "coordinate failure mapping threw: " exception))
+             (done)))))))

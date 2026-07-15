@@ -70,6 +70,12 @@
   [::protocol/limit ::protocol/limit]
   [::protocol/entity-ids {:optional true} ::protocol/entity-ids]
   [::request-socket-path {:optional true} ::request-socket-path]])
+(schema/register!
+ ::resolve-transaction-coordinate-request
+ [:map {:closed true}
+  [::protocol/head-coordinate ::protocol/head-coordinate]
+  [::protocol/transaction-id ::protocol/transaction-id]
+  [::request-socket-path {:optional true} ::request-socket-path]])
 
 ;; ---------------------------------------------------------------------------
 ;; Cluster database identity and private Datahike config
@@ -211,6 +217,7 @@
 (def ^:private transaction-timeout-ms 30000)
 (def ^:private transaction-attempts 3)
 (def ^:private replay-timeout-ms 30000)
+(def ^:private coordinate-resolution-timeout-ms 30000)
 (def ^:private feed-reconnect-delay-ms 2000)
 
 (defn ^:async ^:private ping-once!
@@ -365,6 +372,32 @@
     (if (::protocol/success? response)
       (::protocol/hits response)
       response)))
+
+(defn ^:async resolve-transaction-coordinate!
+  "Resolve a transaction's original commit through the authoritative writer."
+  {:malli/schema
+   [:=> [:cat ::resolve-transaction-coordinate-request]
+    :seon.db.protocol/response]}
+  [{::protocol/keys [head-coordinate transaction-id]
+    ::keys [request-socket-path]}]
+  (let [attachment-state @!attachment
+        request-socket-path
+        (or request-socket-path
+            (::request-socket-path attachment-state)
+            default-request-socket-path)
+        routed-database-name
+        (or (get-in attachment-state
+                    [::database-coordinate ::database-name])
+            database-name)]
+    (await
+     (uds/rpc
+      {::uds/socket-path request-socket-path
+       ::uds/message
+       (protocol/resolve-transaction-coordinate-request
+        {::protocol/database-name routed-database-name
+         ::protocol/head-coordinate head-coordinate
+         ::protocol/transaction-id transaction-id})
+       ::uds/timeout-ms coordinate-resolution-timeout-ms}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocol datom decode — transaction data is the native 5-vector

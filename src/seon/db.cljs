@@ -70,8 +70,9 @@
     [seon.db.coordinate :as db.coordinate]
     [seon.db.id]
     [seon.db.internal :as internal]
-    [seon.db.protocol]
+    [seon.db.protocol :as protocol]
     [seon.db.process :as process]
+    [seon.db.replica :as replica]
     [seon.error :as error]
     [seon.schema :as schema]))
 
@@ -1586,6 +1587,53 @@
      result)))
 
 (schema/register! ::at-coordinate-response [:or ::db-val ::error])
+(schema/register! ::head-coordinate ::coordinate)
+(schema/register! ::transaction-id :seon.db.protocol/transaction-id)
+(schema/register!
+ ::resolve-transaction-coordinate-request
+ [:map {:closed true}
+  [::head-coordinate ::head-coordinate]
+  [::transaction-id ::transaction-id]])
+(schema/register!
+ ::resolve-transaction-coordinate-response
+ [:or ::coordinate ::error])
+
+(defn ^{:async true :seon.fn/agent-facing? false}
+  resolve-transaction-coordinate!
+  "Resolve a transaction's original immutable commit coordinate."
+  {:malli/schema
+   [:=> [:cat ::resolve-transaction-coordinate-request]
+    ::resolve-transaction-coordinate-response]}
+  [{::keys [head-coordinate transaction-id]}]
+  (try
+    (let [response
+          (await
+           (replica/resolve-transaction-coordinate!
+            {::protocol/head-coordinate head-coordinate
+             ::protocol/transaction-id transaction-id}))]
+      (if (::protocol/success? response)
+        (let [resolved (::protocol/coordinate response)]
+          (if (and (= (db.coordinate/attachment head-coordinate)
+                      (db.coordinate/attachment resolved))
+                   (= transaction-id (::db.coordinate/t resolved)))
+            resolved
+            (error/->map
+             (ex-info
+              "The writer returned an invalid transaction coordinate."
+              {::head-coordinate head-coordinate
+               ::transaction-id transaction-id
+               ::coordinate resolved
+               :seon.error/kind :core-bug}))))
+        (error/->map
+         (ex-info
+          (or (::protocol/error response)
+              "Transaction-coordinate resolution failed.")
+          {::head-coordinate head-coordinate
+           ::transaction-id transaction-id
+           ::protocol/error-kind (::protocol/error-kind response)
+           :seon.error/kind :core-bug}))))
+    (catch :default exception
+      (error/->map exception))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} at-coordinate
   "Resolve an exact immutable historical database value.

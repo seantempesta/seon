@@ -80,6 +80,30 @@
          ::coordinate/t 536870929}]
     (is (= point (uds/decode (uds/encode point))))))
 
+(deftest transaction-coordinate-request-and-response-are-transit-stable
+  (let [head
+        {::coordinate/database-id
+         #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
+         ::coordinate/branch :db
+         ::coordinate/commit-id
+         #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
+         ::coordinate/t 536870929}
+        original
+        (assoc head
+               ::coordinate/commit-id
+               #uuid "6a56b425-30e5-53b3-86c1-e31381023716"
+               ::coordinate/t 536870920)
+        request
+        (protocol/resolve-transaction-coordinate-request
+         {::protocol/database-name "default"
+          ::protocol/head-coordinate head
+          ::protocol/transaction-id (::coordinate/t original)})
+        response (protocol/success {::protocol/coordinate original})]
+    (is (protocol/valid-request? request))
+    (is (protocol/valid-response? response))
+    (is (= request (uds/decode (uds/encode request))))
+    (is (= response (uds/decode (uds/encode response))))))
+
 (deftest ensure-request-roundtrip-preserves-explicit-attachment
   (let [attachment
         {::coordinate/database-id
