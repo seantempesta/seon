@@ -78,12 +78,6 @@ def namespace_reachability(
         raise ValueError(f"unknown reachability row {row!r}; expected one of {ROWS}")
     if not cluster_url:
         raise ValueError("cluster_url is required for a live reachability row")
-    if row == "root_orchestration":
-        raise ValueError(
-            "root_orchestration requires the common pod solver to address the "
-            "existing root agent; the experimental task will not duplicate "
-            "that routing before its owner lands it"
-        )
     admission = _admission or source_admission.verify_sources(_identity(row))
     sample = Sample(
         id=f"namespace-reachability-{row}",
@@ -99,6 +93,7 @@ def namespace_reachability(
         solver=seon_pod_solver(
             cluster_url=cluster_url,
             timeout_s=timeout_s,
+            agent_id="root" if row == "root_orchestration" else None,
         ),
         scorer=reachability_scorer(),
         metadata={

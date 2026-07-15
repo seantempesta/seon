@@ -354,11 +354,14 @@ def seon_diagnostic_pod_solver(cluster_url: str | None = None,
 
 @solver
 def seon_pod_solver(cluster_url: str | None = None,
-                    timeout_s: int | None = None):
+                    timeout_s: int | None = None,
+                    agent_id: str | None = None):
     """Drive one long-lived cluster through the capability-scoring boundary.
 
     `cluster_url` (or SEON_CLUSTER_URL) selects the cluster's pod door —
-    e.g. acme. Every sample lands on the SAME cluster serially. Records the
+    e.g. acme. `agent_id` addresses one existing agent; absence preserves the
+    pod door's ordinary fresh-agent behavior. Every sample lands on the SAME
+    cluster serially. Records the
     pod-side metadata (turns / closed_reason / evals / timed_out / elapsed)
     so the eval log proves the multi-turn loop ran, then rejects timeout,
     ``:error``, and ``:quiesced`` before downstream parsing or scoring."""
@@ -368,7 +371,7 @@ def seon_pod_solver(cluster_url: str | None = None,
 
         result = await anyio.to_thread.run_sync(
             pod_run, _prompt_text(state),
-            _resolve_timeout_ms(state, timeout_s), cluster_url)
+            _resolve_timeout_ms(state, timeout_s), cluster_url, agent_id)
         return require_scorable_pod_state(_record_result(state, result))
 
     return solve

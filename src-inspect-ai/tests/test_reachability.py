@@ -438,12 +438,29 @@ def test_task_rejects_unknown_row_and_absent_live_endpoint():
             row="namespace_discovery", _admission=ADMISSION
         )
 
-    with pytest.raises(ValueError, match="existing root agent"):
-        task_module.namespace_reachability(
-            row="root_orchestration",
-            cluster_url="http://pod",
-            _admission=ADMISSION,
-        )
+
+
+def test_root_row_routes_existing_agent_and_ordinary_row_preserves_absence(
+    monkeypatch,
+):
+    calls = []
+
+    def capture_solver(**kwargs):
+        calls.append(kwargs)
+        return _golden_pod("root_orchestration")
+
+    monkeypatch.setattr(task_module, "seon_pod_solver", capture_solver)
+    task_module.namespace_reachability(
+        row="root_orchestration", cluster_url="http://pod",
+        _admission=ADMISSION,
+    )
+    task_module.namespace_reachability(
+        row="namespace_discovery", cluster_url="http://pod",
+        _admission=ADMISSION,
+    )
+
+    assert calls[0]["agent_id"] == "root"
+    assert calls[1]["agent_id"] is None
 
 
 @solver

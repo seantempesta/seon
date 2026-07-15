@@ -383,6 +383,43 @@ def test_static_capability_solver_completed_control_reaches_scorer(
     assert log.samples[0].scores["match"].value == "C"
 
 
+@pytest.mark.parametrize("selected_agent", [None, "root"])
+def test_static_capability_solver_forwards_exact_optional_agent_id(
+    monkeypatch, tmp_path, selected_agent
+):
+    calls = []
+
+    def fake_pod_run(*args):
+        calls.append(args)
+        return {
+            "agent_id": selected_agent or "fresh-agent",
+            "reply": "accepted",
+            "timed_out": False,
+            "closed_reason": ":completed",
+        }
+
+    monkeypatch.setattr(solver_module, "pod_run", fake_pod_run)
+    task = Task(
+        dataset=[Sample(id="routed", input="return accepted",
+                        target="accepted")],
+        solver=seon_pod_solver(
+            cluster_url="http://pod.test/agents/run",
+            agent_id=selected_agent,
+        ),
+        scorer=match(),
+    )
+    log = inspect_eval(
+        task, model="mockllm/model", display="none", log_dir=str(tmp_path)
+    )[0]
+
+    assert calls == [(
+        "return accepted", None, "http://pod.test/agents/run", selected_agent
+    )]
+    assert log.samples[0].metadata["pod_agent_id"] == (
+        selected_agent or "fresh-agent"
+    )
+
+
 def test_timeout_diagnostic_explicitly_uses_raw_solver(monkeypatch, tmp_path):
     monkeypatch.setattr(
         solver_module,
