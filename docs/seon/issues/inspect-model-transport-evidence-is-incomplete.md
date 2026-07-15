@@ -13,9 +13,11 @@ Ordered turn-owned attempt facts now flow losslessly through `POST /agents/run`
 and retained Inspect metadata. A completed log can prove which retained
 database value, resolved request configuration, endpoint, timeout layers,
 outcome, and present response identity governed every provider attempt. It
-still cannot prove which immutable model revision or weights the separately
-managed model server used, so formal cross-model comparison remains blocked.
-Final intent remains compatibility metadata, not per-call provenance.
+can now also admit which immutable MLX revision and weights the separately
+managed model server used. Formal cross-model comparison remains blocked until
+that source boundary participates in one live run and the resulting native
+`.eval` is finalized and reopened. Final intent remains compatibility metadata,
+not per-call provenance.
 
 ## Evidence
 
@@ -104,13 +106,14 @@ never inferred from final/current state or from `/v1/models` alone.
 
 The source-grounded owner and falsifiers are now fixed in
 [[../../prds/agentic-tool-refinement/research/model-server-identity-audit-2026-07-15]].
-Extend the existing native start/end admission with one model-server snapshot,
-then join that map to the existing ordered attempt endpoint, requested model,
-response model, and fingerprint in the common capability gate. MLX is the
-first formal path: one dedicated PID/start identity, one absolute Hugging Face
-snapshot in both launch and request, and one canonical content-manifest
-digest. Ollama tags remain insufficient without their manifest and loaded
-digests. This is not a new runner, supervisor, or Datahike attempt schema.
+The existing native start/end admission now requires one model-server snapshot
+and joins that map to the ordered attempt endpoint, requested model, response
+model, and fingerprint in the common capability gate. MLX is the first formal
+path: one dedicated PID/start identity, one absolute Hugging Face snapshot in
+both launch and request, and one canonical content-manifest digest. Ollama tags
+remain insufficient without their manifest and loaded digests. The remaining
+owner is the admitted live replay, not another runner, supervisor, or Datahike
+attempt schema.
 
 ## Acceptance
 

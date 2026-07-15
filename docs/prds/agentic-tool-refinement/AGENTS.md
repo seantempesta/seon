@@ -54,14 +54,18 @@ stream mode is re-derived from the linked turn's rendered coordinate. Its
 focused config/web/retry gate passes 40 tests and 218 assertions.
 
 P0 membership, native wrappers, source locks, request-scoped evidence,
-database-owned deadlines, effective-timeout evidence, and interrupted native-
-log retention are committed. P0b has not run. Shared runtime source is dirty
-under other owners and the live ACME target is degraded after hot reload; do
-not restart it or stage those paths. Finish and commit the focused evidence
-boundary, then wait for the runtime lane's explicit handoff of one coordinated
-Datahike checkout/gitlink/dependency/artifact-manifest coordinate. Restart only
-ACME after that handoff, require ready status, then run exactly
-`database_workflow-seed1-000` and read its finalized native log back.
+database-owned deadlines, effective-timeout evidence, interrupted native-log
+retention, and immutable MLX model-server admission are committed. The model
+server snapshot is taken before task construction and after terminal-log
+publication; formal scoring joins every request to its exact endpoint and
+absolute Hugging Face snapshot, then joins each successful response to its
+model and fingerprint. P0b has not run. Shared runtime source is dirty under
+other owners and the live ACME target is degraded after hot reload; do not
+restart it or stage those paths. Wait for the runtime lane's explicit handoff
+of one coordinated Datahike checkout/gitlink/dependency/artifact-manifest
+coordinate. Restart only ACME after that handoff, require ready status, then
+run exactly `database_workflow-seed1-000` through the admitted MLX callback and
+read its finalized native log back.
 
 The current handoff is withheld because a freshness audit rejected the interim
 Datahike candidate: upstream delete/GC fixes require Konserve 0.9.357 or newer,

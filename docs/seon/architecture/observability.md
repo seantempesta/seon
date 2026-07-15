@@ -290,13 +290,23 @@ Standard Inspect tasks measure the selected model and scorer. Pod-backed Inspect
 tasks measure Seon's production agent/runtime behavior through this door; the
 two claims are reported separately and no duplicate evaluator is created.
 Every admitted live run retains both its opening and closing source admission
-plus the operator-owned target identity in the native `.eval`. The closing
-observations are written before evidence finalization. A changed source or
-target makes the run rejected infrastructure evidence while preserving the
-terminal bytes; it never becomes a capability score. The target identity
-includes one canonical digest of the operator closure and runtime that started
-the processes, so a checkout that later converges cannot make transient launch
-bytes appear reproducible.
+plus the operator-owned target identity in the native `.eval`. A formal local-
+model run also retains a closed model-server identity: the exact request
+endpoint, stable process start, serving-module and package identity, absolute
+revision-pinned model path, canonical weights-manifest digest, quantization,
+and expected response identity. Every provider attempt joins to that exact
+endpoint and model path; a successful attempt also joins its response model
+and server fingerprint. The model-server snapshot is observed before task
+construction and again after the terminal log is published. Remotely managed
+weights and mutable local tags remain diagnostic until their serving boundary
+can prove the loaded content digest.
+
+All closing observations are written before evidence finalization. A changed
+source, target, or model-server identity makes the run rejected infrastructure
+evidence while preserving the terminal bytes; it never becomes a capability
+score. The target identity includes one canonical digest of the operator
+closure and runtime that started the processes, so a checkout that later
+converges cannot make transient launch bytes appear reproducible.
 An incorrect scored sample receives one explicit human-reviewed failure label
 from the frozen experiment taxonomy on that existing score. The edit preserves
 the scorer's value, explanation, metadata, and aggregate metrics, and Inspect's

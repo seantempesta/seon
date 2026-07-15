@@ -186,6 +186,27 @@ database model value. The prior local Qwen 3.5 2B quant has vanished and is
 replaced in the candidate matrix by the complete revision-pinned BF16 snapshot.
 Exact evidence and order remain in [[research/local-model-serving-inventory-2026-07-15]].
 
+The formal local-model boundary now admits one immutable MLX identity through
+the existing native-run start/end admission and retained-log finalizer. It
+hashes the complete revision-pinned Hugging Face snapshot, server module, exact
+argument vector, and serving package tuple while checking a stable PID/start;
+the common capability gate joins every attempt to the full request endpoint
+and absolute snapshot path, then joins each successful response model and
+fingerprint. Externally mutable services and Ollama tags remain diagnostic
+until they can prove loaded bytes. The focused cluster/catalog/solver/log gate
+passes 110 tests. The source design and falsifiers are in
+[[research/model-server-identity-audit-2026-07-15]]; the blocker remains open
+until the dedicated listener participates in one finalized and reopened native
+`.eval`.
+
+The pinned Inspect source audit also identifies seven reusable mechanisms for
+later tool work: database-native namespace exposure, frozen-coordinate
+reconstruction, durable multi-form positions, bounded typed recovery,
+addressable stream cancellation, real approval boundaries, and retained native
+scorer evidence. These are experimental inputs rather than permission to add a
+second harness or synthetic tool registry. The exact source examples and Seon
+translations are in [[research/inspect-tool-building-examples-2026-07-15]].
+
 The frozen database-workflow scorer no longer accepts a token-level sketch of
 the task. Its host-only oracle metadata now retains the five records and
 threshold while leaving sample id and prompt bytes unchanged. Correctness
@@ -601,41 +622,46 @@ readiness from this paragraph.
   P4 after the first accepted serial slice unless it directly invalidates the
   active sample.
 - Formal P0 evidence can now prove the database answer and exact per-attempt
-  transport configuration offline from persisted final-snapshot facts, but its
-  admitted live read-back is still pending. Immutable model-server
-  revision/weights identity remains required before a formal cross-model claim.
-  Neither consumer reconstructs an attempt from final config or rendered
-  transcript text.
+  transport configuration offline from persisted final-snapshot facts, and
+  the source boundary now admits an immutable revision-pinned MLX server at
+  run start and end. Its admitted live read-back is still pending: no formal
+  cross-model claim exists until the dedicated listener's exact server map and
+  attempt joins survive one finalized native `.eval`. Neither consumer
+  reconstructs an attempt from final config or rendered transcript text.
 
 ### Exact next order
 
 1. Read `git status --short` and `bin/acme status --edn`. If another owner still
    has dirty runtime inputs, do documentation or read-only source grounding
    only; do not restart, stage, or repair their files.
-2. Commit the green frozen-cap, adapter, stream-mode, and exact-origin source
-   checkpoint path-limited. Do not restart while either source owner or another
+2. Treat the green frozen-execution and immutable model-server commits as the
+   source checkpoint. Do not restart while either source owner or another
    admitted runtime owner remains dirty.
 3. Wait for the runtime lane's explicit maintained Datahike coordinate handoff.
    When dependency pins and shared runtime edits converge, restart only ACME
    and prove a ready, ownership-coherent artifact plus clean admitted source.
-4. Query the rebuilt immutable database projection and require the stored
+4. Start one owned dedicated MLX listener for the recorded Qwen2.5 Coder 0.5B
+   absolute snapshot. Build its start/end snapshot through the admitted
+   observer; transact that exact absolute path into ACME's model configuration
+   and read the resolved value back from the rebuilt immutable database.
+5. Query the rebuilt immutable database projection and require the stored
    `query` and `transact!` contracts to carry `:seon.db/request` with no `&` or
    private accumulator name. Require `my.canvas/button`, `input`, `select`, and
    `toggle` to expose exactly one callable alternative and no implementation
    body data. Require the model-attempt and operation-evidence attributes to be
    installed and queryable.
-5. Replay `database_workflow-seed1-000` through common source admission, exact
-   operator snapshot, and mandatory finalization. Read back the native log and
-   compare its prompt, reply, eval/database-operation evidence, attempt facts,
-   database coordinate, model identity, and classification with the admitted
-   baseline.
-6. Classify any narration repetition using the established raw-reply → parser
+6. Replay `database_workflow-seed1-000` through common source admission, exact
+   operator and MLX snapshots, and mandatory finalization. Read back the native
+   log and compare its prompt, reply, eval/database-operation evidence, attempt
+   facts, database coordinate, model identity, and classification with the
+   admitted baseline.
+7. Classify any narration repetition using the established raw-reply → parser
    → stored-eval → transcript trace; do not mutate prompt policy from one
    uncontrolled sample.
-7. With both live evidence contracts closed, run the remaining nine frozen
+8. With both live evidence contracts closed, run the remaining nine frozen
    members serially and inspect every `.eval`.
    Only after P0b is recorded may the model matrix or P3 comparison begin.
-8. After P0b, repair and prove durable multi-form order before the P4 batch /
+9. After P0b, repair and prove durable multi-form order before the P4 batch /
    stream comparison. Do not substitute timestamps, random ids, Python list
    position, or synthetic Inspect tool calls for a database event fact.
 
