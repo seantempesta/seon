@@ -121,6 +121,7 @@
   [::operation [:= ensure-database-operation]]
   [::database-name ::database-name]
   [::backend ::backend]
+  [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [::database-path {:optional true} ::database-path]])
 (schema/register!
   ::transaction-request
@@ -229,6 +230,7 @@
  [:map
   [::database-name ::database-name]
   [::backend ::backend]
+  [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [::database-path {:optional true} ::database-path]])
 (schema/register!
   ::transaction-request-input
@@ -265,10 +267,12 @@
   "Construct one idempotent database-open request."
   {:malli/schema [:=> [:cat ::ensure-request-input]
                   ::ensure-database-request]}
-  [{::keys [database-name backend database-path]}]
+  [{::keys [database-name backend database-path]
+    attachment ::coordinate/attachment}]
   (cond-> {::operation ensure-database-operation
            ::database-name database-name
            ::backend backend}
+    attachment (assoc ::coordinate/attachment attachment)
     database-path (assoc ::database-path database-path)))
 
 (defn transaction-request

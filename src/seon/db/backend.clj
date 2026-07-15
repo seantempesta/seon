@@ -5,8 +5,7 @@
    one of these maps. Two backends
    supported:
 
-   - `:memory` — testing only; no disk artifacts. Stable per-name UUID so the
-     same database name identifies the same in-memory backend across calls.
+   - `:memory` — testing only; no disk artifacts.
    - `:file`   — durable file-tree Konserve.
 
    Default path layout (per `integration-architecture-2026-05-26.md` §3):
@@ -16,6 +15,8 @@
    where `<short>` is the name portion of the database-name keyword. Caller may
    override via `::path`.
 
+   A request may carry an explicit `{database-id, branch}` attachment. Without
+   one, the adapter derives the historical per-name UUID and main `:db` branch.
    The returned map is Datahike's third-party config shape. Its literal
    unqualified `:store` key is intentionally confined to this adapter.
 
@@ -25,6 +26,7 @@
    it actually opens the database. The base path is currently relative
    (`data/clusters/`)."
   (:require [clojure.string :as str]
+            [seon.db.coordinate :as coordinate]
             [seon.schema :as schema])
   (:import [java.io File]
            [java.util UUID]))
@@ -41,17 +43,18 @@
                    [::database-name ::database-name]
                    [::backend ::backend]
                    [::path {:optional true} ::path]
+                   [::coordinate/attachment {:optional true}
+                    ::coordinate/attachment]
                    [::initial-tx {:optional true} ::initial-tx]])
 
 ;; The returned cfg is an opaque datahike config map. We don't constrain
 ;; its shape here — datahike's own schema validates it at connect time.
 (schema/register! ::datahike-config-response :map)
 
-(schema/register! ::database-id :uuid)
 (schema/register!
  ::backend-facts
  [:map
-  [::database-id ::database-id]
+  [::coordinate/attachment ::coordinate/attachment]
   [::path {:optional true} ::path]])
 
 (schema/register! ::ensure-parent-dir-request
@@ -96,19 +99,23 @@
     p))
 
 (defn database-id
-  "Deterministic backend UUID for one database name."
+  "Deterministic default UUID for one logical database name."
   {:malli/schema [:=> [:catn [::database-name ::database-name]] :uuid]}
   [database-name]
   (UUID/nameUUIDFromBytes (.getBytes (str database-name) "UTF-8")))
 
 (defn backend-facts
-  "Resolve the database ID and optional durable path from Seon options.
+  "Resolve the stable attachment and optional durable path from Seon options.
 
    This is the only public projection of backend identity. Callers never read
    Datahike's private `:store` map."
   {:malli/schema [:=> [:cat ::datahike-config-request] ::backend-facts]}
-  [{::keys [database-name backend path]}]
-  (cond-> {::database-id (database-id database-name)}
+  [{::keys [database-name backend path]
+    attachment ::coordinate/attachment}]
+  (cond-> {::coordinate/attachment
+           (or attachment
+               {::coordinate/database-id (database-id database-name)
+                ::coordinate/branch :db})}
     (= :file backend)
     (assoc ::path (harden-file-path (or path (default-path database-name))))))
 
@@ -128,17 +135,24 @@
      ::backend — :memory | :file.
 
    Optional:
-     ::path    — override the default on-disk path. Ignored for :memory."
+     ::path                  — override the on-disk path; ignored for :memory.
+     ::coordinate/attachment — explicit physical database and native branch."
   {:malli/schema [:=> [:cat ::datahike-config-request]
                   ::datahike-config-response]}
   [{::keys [database-name backend initial-tx] :as request}]
-  (let [{::keys [database-id path]} (backend-facts request)
+  (let [{attachment ::coordinate/attachment
+         path ::path} (backend-facts request)
+        database-id (::coordinate/database-id attachment)
+        branch (::coordinate/branch attachment)
         options (case backend
                   :memory {:backend :memory :id database-id}
                   :file   {:backend :file
                            :path path
                            :id database-id})]
-    (cond-> (assoc base-cfg :store options :name (str database-name))
+    (cond-> (assoc base-cfg
+                   :store options
+                   :branch branch
+                   :name (str database-name))
       (seq initial-tx) (assoc :initial-tx initial-tx))))
 
 (defn ensure-parent-dir!

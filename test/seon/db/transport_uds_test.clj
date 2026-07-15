@@ -80,6 +80,22 @@
          ::coordinate/t 536870929}]
     (is (= point (uds/decode (uds/encode point))))))
 
+(deftest ensure-request-roundtrip-preserves-explicit-attachment
+  (let [attachment
+        {::coordinate/database-id
+         #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
+         ::coordinate/branch :experiment/cold}
+        request
+        (protocol/ensure-database-request
+         {::protocol/database-name "experiment-cold"
+          ::protocol/backend :file
+          ::protocol/database-path "data/clusters/default/db"
+          ::coordinate/attachment attachment})
+        decoded (uds/decode (uds/encode request))]
+    (is (protocol/valid-request? decoded))
+    (is (= attachment (::coordinate/attachment decoded)))
+    (is (= request decoded))))
+
 (deftest request-server-delivers-maps-without-interpreting-them
   (let [path (socket-path "transport-request")
         seen (atom [])

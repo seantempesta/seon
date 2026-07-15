@@ -3,6 +3,7 @@
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [datahike.api :as d]
             [seon.db.backend :as backend]
+            [seon.db.coordinate :as coordinate]
             [seon.db.id :as id]
             [seon.db.registry :as registry])
   (:import [java.io File]))
@@ -137,6 +138,105 @@
                        ::registry/initialize-connection!
                        (fn [_ _]
                          (throw (ex-info "initializer reran" {})))}))))))
+
+(deftest native-branch-attachments-are-distinct-routes-to-one-database
+  (let [main-name :registry/native-main
+        branch-name :registry/native-branch
+        main (ensure-database!
+              {::registry/database-name main-name
+               ::registry/backend :memory})
+        main-attachment (::registry/attachment main)
+        branch-attachment
+        (assoc main-attachment ::coordinate/branch :experiment/one)]
+    (d/branch! (::registry/conn main) :db :experiment/one)
+    (let [branch (ensure-database!
+                  {::registry/database-name branch-name
+                   ::registry/backend :memory
+                   ::registry/attachment branch-attachment})
+          resolved (registry/resolve-connection
+                    {::registry/database-name branch-name})
+          summaries (::registry/databases (registry/list-databases {}))]
+      (is (= main-attachment
+             (coordinate/attachment (::registry/coordinate main))))
+      (is (= branch-attachment (::registry/attachment branch)))
+      (is (= branch-attachment
+             (coordinate/attachment (::registry/coordinate branch))))
+      (is (= branch-attachment (::registry/attachment resolved)))
+      (is (not (identical? (::registry/conn main)
+                            (::registry/conn branch))))
+      (is (= #{main-attachment branch-attachment}
+             (set (map ::registry/attachment summaries)))))))
+
+(deftest logical-routes-and-attachments-form-a-bijection
+  (let [main-name :registry/bijection-main
+        main (ensure-database!
+              {::registry/database-name main-name
+               ::registry/backend :memory})
+        attachment (::registry/attachment main)]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"already has a logical route"
+         (ensure-database!
+          {::registry/database-name :registry/duplicate-route
+           ::registry/backend :memory
+           ::registry/attachment attachment})))
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"cannot change its registered attachment"
+         (ensure-database!
+          {::registry/database-name main-name
+           ::registry/backend :memory
+           ::registry/attachment
+           (assoc attachment ::coordinate/branch :experiment/other)})))
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"disagree on backend configuration"
+         (ensure-database!
+          {::registry/database-name :registry/conflicting-physical-config
+           ::registry/backend :file
+           ::registry/path "tmp/registry-conflicting-physical-config/db"
+           ::registry/attachment
+           (assoc attachment ::coordinate/branch :experiment/config)})))))
+
+(deftest non-main-attachment-requires-current-durable-roster-membership
+  (let [main-name :registry/roster-main
+        branch-name :registry/roster-branch
+        main (ensure-database!
+              {::registry/database-name main-name
+               ::registry/backend :memory})
+        main-connection (::registry/conn main)
+        branch :experiment/deleted
+        attachment (assoc (::registry/attachment main)
+                          ::coordinate/branch branch)]
+    (d/branch! main-connection :db branch)
+    (let [opened (ensure-database!
+                  {::registry/database-name branch-name
+                   ::registry/backend :memory
+                   ::registry/attachment attachment})]
+      (is (= attachment (::registry/attachment opened))))
+    (registry/release-database! {::registry/database-name branch-name})
+    (d/delete-branch! main-connection branch)
+    (is (not (contains? (d/branches main-connection) branch)))
+    (let [cfg (backend/datahike-config
+               {::backend/database-name branch-name
+                ::backend/backend :memory
+                ::coordinate/attachment attachment})
+          stale (d/connect cfg)]
+      (try
+        (is (= attachment
+               (coordinate/attachment (coordinate/resolved (d/db stale))))
+            "raw Datahike can still open the deleted branch head")
+        (finally
+          (d/release stale))))
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"absent from Datahike's durable branch roster"
+         (ensure-database!
+          {::registry/database-name branch-name
+           ::registry/backend :memory
+           ::registry/attachment attachment})))
+    (is (empty? (registry/lookup-connection
+                 {::registry/database-name branch-name})))))
 
 (deftest file-fork-has-independent-identity-and-exact-fork-state
   (let [root (str (System/getProperty "java.io.tmpdir")

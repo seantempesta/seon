@@ -27,9 +27,8 @@ committed generation.
 The maintained Datahike SHA already contains same-store branch/delete,
 commit/branch root reads, historical-secondary-index correction, awaited
 connection release, and guarded/read-back-verified force. Seon still exposes a
-physical-copy fork with a new database identity; its registry, protocol, feed,
-replica, runtime admission, and operator do not carry the full
-`{database-id, branch, commit-id, t}` coordinate or native branch lifecycle.
+physical-copy fork with a new database identity. Its feed, replica, runtime
+admission, and operator do not yet implement native branch lifecycle.
 Quiesced clean restart, restore/undo, branch-local blobs, and ordered multi-form
 process-failure proof remain unimplemented.
 
@@ -166,6 +165,24 @@ executable probe had shown the old false success and discarded identity. The
 focused transport/registry/writer/server gate passes 17 tests/87 assertions,
 and the complete writer checkpoint passes 62/360. Clean agent-turn quiescence
 and operator coordination remain the next lifecycle boundary.
+
+The branch-qualified backend/registry attachment boundary is implemented in
+place. Backend configuration accepts one explicit `{database-id, branch}`
+attachment while preserving the deterministic main-branch default. The one
+writer registry retains that stable attachment and live resource, derives the
+current coordinate from `d/db`, and enforces a logical-name-to-attachment
+bijection plus agreement on physical id/backend/path. Main `:db` may create;
+non-main branches are open-only and must exist in Datahike's durable branch
+roster before connect. The registry validates the actual connected attachment
+before initialization and publication. Ensure requests carry the attachment
+through the existing Transit protocol, and subsequent routing resolves the
+same attachment and fresh coordinate. A pre-edit executable probe proved the
+guard is necessary: after `delete-branch!`, Datahike removed the branch from
+`d/branches` but a raw connect to its stale head key still succeeded. Focused
+backend/registry/transport/writer proof passes 24 tests/121 assertions, and the
+complete writer checkpoint passes 68/388. Native branch create/delete,
+branch-local feed/replica attachment, operator/runtime launch, forensic pods,
+blob-view injection, promotion, and restore remain later slices.
 
 The first branch-local blob prerequisite is implemented independently of
 native branch attachment. `my.blob` now consumes one validated process-local

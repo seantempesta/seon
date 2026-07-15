@@ -115,6 +115,52 @@
           (.delete (File. request-path))
           (.delete (File. publish-path)))))))
 
+(deftest writer-opens-and-routes-an-explicit-native-branch-attachment
+  (let [database-name (str "writer-branch-main-" (random-uuid))
+        branch-name (str "writer-branch-route-" (random-uuid))
+        request-path (socket-path "branch-request")
+        publish-path (socket-path "branch-publish")
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})
+        main
+        (registry/resolve-connection
+         {::registry/database-name (keyword database-name)})
+        attachment
+        (assoc (::registry/attachment main)
+               ::coordinate/branch :experiment/writer)]
+    (try
+      (d/branch! (::registry/conn main) :db :experiment/writer)
+      (with-open [channel (uds/connect! request-path)]
+        (let [ensure-response
+              (call! channel
+                     (protocol/ensure-database-request
+                      {::protocol/database-name branch-name
+                       ::protocol/backend :memory
+                       ::coordinate/attachment attachment}))
+              transaction-response
+              (call! channel
+                     (protocol/transaction-request
+                      {::protocol/database-name branch-name
+                       ::protocol/request-id "branch/routed"
+                       ::protocol/transaction-data []}))]
+          (is (::protocol/success? ensure-response))
+          (is (= attachment
+                 (coordinate/attachment
+                  (::coordinate/coordinate ensure-response))))
+          (is (::protocol/success? transaction-response))
+          (is (= attachment
+                 (coordinate/attachment
+                  (::protocol/coordinate transaction-response))))))
+      (finally
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
+
 (deftest canonical-writes-route-commit-and-publish-exactly-once
   (let [database-name (str "writer-integration-" (random-uuid))
         request-path (socket-path "request")

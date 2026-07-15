@@ -736,12 +736,13 @@
 ;;; Canonical operation handlers
 
 (defn- registry-request
-  [database-name backend-kind database-path connection-initializer]
+  [database-name backend-kind database-path attachment connection-initializer]
   (cond->
    {::registry/database-name (keyword database-name)
     ::registry/backend backend-kind
     ::registry/initial-tx protocol-native-schema
     ::registry/initialize-connection! connection-initializer}
+    attachment (assoc ::registry/attachment attachment)
     database-path (assoc ::registry/path database-path)))
 
 (defn- handle-ensure-database
@@ -753,18 +754,18 @@
           database-name
           (::protocol/backend request)
           (::protocol/database-path request)
+          (::coordinate/attachment request)
           (fn [connection _database-keyword]
             (initialize-connection!
              {::runtime runtime
               ::connection connection
               ::database-name database-name}))))
-        connection (::registry/conn entry)
         backend-kind (::registry/backend entry)
         database-path (::registry/path entry)]
     (protocol/success
      (cond->
        {::protocol/database-name database-name
-       ::coordinate/coordinate (coordinate/resolved (d/db connection))
+       ::coordinate/coordinate (::registry/coordinate entry)
        ::protocol/backend backend-kind}
        database-path
        (assoc ::protocol/database-path database-path)))))
@@ -772,11 +773,14 @@
 (defn- connection-for-request
   [request]
   (let [database-name (::protocol/database-name request)
-        {::registry/keys [conn]}
+        {::registry/keys [conn attachment coordinate]}
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)})]
     (when conn
-      {::connection conn ::database-name database-name})))
+      {::connection conn
+       ::database-name database-name
+       ::coordinate/attachment attachment
+       ::coordinate/coordinate coordinate})))
 
 (defn- generated-candidate-conflict
   [candidate]

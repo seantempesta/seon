@@ -2,19 +2,22 @@
   "The database server's live connection registry.
 
    The process-local atom maps `{database-name -> entry}`
-   where each entry is `{::conn <datahike-conn> ::backend kw ::path
-   str-or-nil}`.
+   where each entry retains the live connection, stable
+   `{database-id, branch}` attachment, backend, and optional path. The current
+   coordinate is always derived from the live Datahike value.
 
-   One database-server JVM hosts every cluster database: a database-name is a
-   cluster name (`:default`, `:acme`, an ephemeral bench cluster), and
-   the writer resolves each request's connection from this registry. The
-   writer resolves every database-scoped request explicitly from this map.
-   There is no ambient fallback or second open path.
+   One database-server JVM hosts every cluster database. A database-name is a
+   logical route (`:default`, `:acme`, or a branch route), not physical
+   identity. The writer resolves every database-scoped request explicitly from
+   this map. There is no ambient fallback or second open path.
 
    ## Idempotent semantics
 
-   `ensure-database!` on an existing database-name returns the same entry (identical?
-   conn). `release-database!` on an absent name is a no-op returning
+   Logical names and attachments form a bijection. `ensure-database!` on an
+   existing database-name returns the same connection, while a second name for
+   its attachment is rejected. Main `:db` may create a database. Non-main
+   branches are open-only and must be present in Datahike's durable branch
+   roster before connect. `release-database!` on an absent name is a no-op returning
    `{::released? false}`. A failed release retains the registered identity and
    its failure; the same process never reclassifies unproved exclusive release
    as success. `delete-database!` additionally deletes the durable database.
@@ -27,6 +30,7 @@
    and leaves no half-initialized registry entry."
   (:require [clojure.set :as set]
             [datahike.api :as d]
+            [seon.db.coordinate :as coordinate]
             [seon.db.id :as id]
             [seon.schema :as schema]
             [seon.db.backend :as backend]
@@ -38,6 +42,8 @@
 (schema/register! ::backend :seon.db.backend/backend)
 (schema/register! ::path :seon.db.backend/path)
 (schema/register! ::initial-tx :seon.db.backend/initial-tx)
+(schema/register! ::attachment ::coordinate/attachment)
+(schema/register! ::coordinate ::coordinate/coordinate)
 (schema/register! ::release-error :string)
 
 ;; A live conn is an opaque clojure.lang.IAtom2 (datahike connection
@@ -47,6 +53,7 @@
 (schema/register! ::entry
                   [:map
                    [::conn ::conn]
+                   [::attachment ::attachment]
                    [::backend ::backend]
                    [::path {:optional true} ::path]
                    [::release-error {:optional true} ::release-error]])
@@ -56,10 +63,21 @@
                    [::database-name ::database-name]
                    [::backend {:optional true} ::backend]
                    [::path {:optional true} ::path]
+                   [::attachment {:optional true} ::attachment]
                    [::initial-tx {:optional true} ::initial-tx]
                    [::initialize-connection! 'fn?]])
 
-(schema/register! ::ensure-database!-response ::entry)
+(schema/register! ::entry-view
+                  [:map
+                   [::database-name ::database-name]
+                   [::conn ::conn]
+                   [::attachment ::attachment]
+                   [::coordinate ::coordinate]
+                   [::backend ::backend]
+                   [::path {:optional true} ::path]
+                   [::release-error {:optional true} ::release-error]])
+
+(schema/register! ::ensure-database!-response ::entry-view)
 
 (schema/register! ::release-database!-response
                   [:map
@@ -96,6 +114,8 @@
 (schema/register! ::database-summary
                   [:map
                    [::database-name ::database-name]
+                   [::attachment ::attachment]
+                   [::coordinate ::coordinate]
                    [::backend ::backend]
                    [::path {:optional true} ::path]
                    [::release-error {:optional true} ::release-error]])
@@ -129,6 +149,8 @@
                   [:map
                    [::conn {:optional true} ::conn]
                    [::database-name {:optional true} ::database-name]
+                   [::attachment {:optional true} ::attachment]
+                   [::coordinate {:optional true} ::coordinate]
                    [::error-kind {:optional true}
                     [:enum :seon.db.registry.error/not-found]]
                    [::error {:optional true} :string]])
@@ -139,40 +161,160 @@
   ;; {database-name -> entry-map}
   (atom {}))
 
+(defn- current-coordinate
+  [{::keys [conn]}]
+  (coordinate/resolved (d/db conn)))
+
+(defn- entry-view
+  [database-name entry]
+  (assoc entry
+         ::database-name database-name
+         ::coordinate (current-coordinate entry)))
+
 (defn- summary
   "Public view of an entry, sans live conn."
-  [database-name {::keys [backend path release-error]}]
+  [database-name {::keys [attachment backend path release-error] :as entry}]
   (cond-> {::database-name database-name
+           ::attachment attachment
+           ::coordinate (current-coordinate entry)
            ::backend backend}
     path (assoc ::path path)
     release-error (assoc ::release-error release-error)))
 
-(defn- create-entry!
-  "Build a datahike cfg, ensure the db exists, connect, return the
-   new entry map. Side-effecting; called under the swap! winner's
-   thread only."
-  [database-name backend path initial-tx]
-  (let [cfg-req (cond-> {:seon.db.backend/database-name database-name
-                         :seon.db.backend/backend backend}
-                  path (assoc :seon.db.backend/path path)
-                  (seq initial-tx)
-                  (assoc :seon.db.backend/initial-tx initial-tx))
-        cfg (backend/datahike-config cfg-req)
-        backend-path (:seon.db.backend/path (backend/backend-facts cfg-req))]
-    (when backend-path
-      (backend/ensure-parent-dir! {:seon.db.backend/path backend-path}))
-    (when-not (d/database-exists? cfg)
-      (d/create-database cfg))
+(defn- backend-request
+  [{::keys [database-name backend path attachment initial-tx]}]
+  (cond-> {::backend/database-name database-name
+           ::backend/backend backend}
+    path (assoc ::backend/path path)
+    attachment (assoc ::coordinate/attachment attachment)
+    (seq initial-tx) (assoc ::backend/initial-tx initial-tx)))
+
+(defn- fail-attachment!
+  [message data]
+  (throw
+   (ex-info message
+            (assoc data :seon.error/kind
+                   :seon.db.registry.error/attachment-conflict))))
+
+(defn- validate-route-bijection!
+  [registry database-name attachment backend-kind path]
+  (when-let [[other-name _]
+             (some (fn [[registered-name entry]]
+                     (when (and (not= registered-name database-name)
+                                (= attachment (::attachment entry)))
+                       [registered-name entry]))
+                   registry)]
+    (fail-attachment!
+     "The requested database attachment already has a logical route."
+     {::database-name database-name
+      ::attachment attachment
+      ::existing-database-name other-name}))
+  (let [database-id (::coordinate/database-id attachment)]
+    (doseq [[registered-name entry] registry
+            :let [registered-attachment (::attachment entry)
+                  registered-id (::coordinate/database-id registered-attachment)
+                  registered-backend (::backend entry)
+                  registered-path (::path entry)]]
+      (when (and (= database-id registered-id)
+                 (or (not= backend-kind registered-backend)
+                     (not= path registered-path)))
+        (fail-attachment!
+         "Routes for one physical database disagree on backend configuration."
+         {::database-name database-name
+          ::attachment attachment
+          ::backend backend-kind
+          ::path path
+          ::existing-database-name registered-name
+          ::existing-backend registered-backend
+          ::existing-path registered-path}))
+      (when (and (= :file backend-kind)
+                 (= :file registered-backend)
+                 (= path registered-path)
+                 (not= database-id registered-id))
+        (fail-attachment!
+         "One durable backend path cannot name two physical databases."
+         {::database-name database-name
+          ::attachment attachment
+          ::path path
+          ::existing-database-name registered-name
+          ::existing-attachment registered-attachment})))))
+
+(defn- validate-existing-route!
+  [database-name entry attachment backend-kind path]
+  (when-not (= [attachment backend-kind path]
+               [(::attachment entry) (::backend entry) (::path entry)])
+    (fail-attachment!
+     "A logical database name cannot change its registered attachment."
+     {::database-name database-name
+      ::attachment attachment
+      ::backend backend-kind
+      ::path path
+      ::existing-attachment (::attachment entry)
+      ::existing-backend (::backend entry)
+      ::existing-path (::path entry)}))
+  (entry-view database-name entry))
+
+(defn- branch-source
+  [registry attachment]
+  (let [database-id (::coordinate/database-id attachment)]
+    (some (fn [[_ entry]]
+            (when (= database-id
+                     (::coordinate/database-id (::attachment entry)))
+              (::conn entry)))
+          registry)))
+
+(defn- open-entry!
+  "Open and validate one exact Datahike attachment."
+  [registry database-name backend-kind path attachment initial-tx]
+  (let [request (backend-request
+                 {::database-name database-name
+                  ::backend backend-kind
+                  ::path path
+                  ::attachment attachment
+                  ::initial-tx initial-tx})
+        cfg (backend/datahike-config request)
+        branch (::coordinate/branch attachment)]
+    (if (= :db branch)
+      (do
+        (when path
+          (backend/ensure-parent-dir! {::backend/path path}))
+        (when-not (d/database-exists? cfg)
+          (d/create-database cfg)))
+      (let [source (branch-source registry attachment)]
+        (when-not source
+          (fail-attachment!
+           "A non-main branch requires a registered physical database."
+           {::database-name database-name ::attachment attachment}))
+        (when-not (contains? (d/branches source) branch)
+          (fail-attachment!
+           "The requested branch is absent from Datahike's durable branch roster."
+           {::database-name database-name
+            ::attachment attachment
+            ::available-branches (d/branches source)}))))
     (let [conn (d/connect (id/allocation-connect-config cfg))]
-      (id/assert-allocation-writer! conn)
-      (cond-> {::conn conn
-               ::backend backend}
-        backend-path (assoc ::path backend-path)))))
+      (try
+        (id/assert-allocation-writer! conn)
+        (let [actual (coordinate/attachment (coordinate/resolved (d/db conn)))]
+          (when-not (= attachment actual)
+            (fail-attachment!
+             "Datahike connected a different database attachment."
+             {::database-name database-name
+              ::attachment attachment
+              ::actual-attachment actual})))
+        (cond-> {::conn conn
+                 ::attachment attachment
+                 ::backend backend-kind}
+          path (assoc ::path path))
+        (catch Throwable throwable
+          (try (d/release conn) (catch Throwable _))
+          (throw throwable))))))
 
 ;;; --- Public API ------------------------------------------------------------
 
 (defn ensure-database!
-  "Idempotent. If `database-name` is already registered, return its entry
+  "Ensure one logical database route.
+
+   If `database-name` is already registered, return its current view
    unchanged. Otherwise create the db on disk (if needed), connect,
    and register. Concurrent callers on the same database-name converge:
    exactly one create-and-connect runs; all callers receive the
@@ -185,30 +327,36 @@
    It runs exactly once for a newly opened connection, before publication. A
    failure releases the connection and is rethrown; no broken entry survives."
   {:malli/schema [:=> [:cat ::ensure-database!-request] ::ensure-database!-response]}
-  [{::keys [database-name backend path initial-tx initialize-connection!]
+  [{::keys [database-name backend path attachment initial-tx
+            initialize-connection!]
     :or {backend :file}}]
-  ;; First check without locking — fast path for the common "already
-  ;; registered" case. Avoids paying the create-entry! cost in the
-  ;; swap! retry closure.
-  (or (get @!registry database-name)
-      ;; Slow path. Serialize the create so concurrent callers don't
-      ;; both `d/connect` against the same database. swap!'s retry
-      ;; semantics would re-run create-entry! on contention, which is
-      ;; both wasteful and potentially unsafe (two concurrent
-      ;; create-database calls). Use `locking` instead — cheap because
-      ;; the fast-path check above means this only runs once per
-      ;; database-name's lifetime.
+  (let [request (backend-request
+                 {::database-name database-name
+                  ::backend backend
+                  ::path path
+                  ::attachment attachment
+                  ::initial-tx initial-tx})
+        facts (backend/backend-facts request)
+        attachment* (::coordinate/attachment facts)
+        backend-path (::backend/path facts)]
+    (if-let [entry (get @!registry database-name)]
+      (validate-existing-route! database-name entry attachment* backend backend-path)
       (locking !registry
-        (or (get @!registry database-name)
-            (let [entry (create-entry! database-name backend path initial-tx)
-                  conn  (::conn entry)]
+        (if-let [entry (get @!registry database-name)]
+          (validate-existing-route! database-name entry attachment* backend backend-path)
+          (let [registry @!registry]
+            (validate-route-bijection!
+             registry database-name attachment* backend backend-path)
+            (let [entry (open-entry! registry database-name backend backend-path
+                                     attachment* initial-tx)
+                  conn (::conn entry)]
               (try
                 (initialize-connection! conn database-name)
                 (swap! !registry assoc database-name entry)
-                entry
+                (entry-view database-name entry)
                 (catch Throwable throwable
                   (try (d/release conn) (catch Throwable _))
-                  (throw throwable))))))))
+                  (throw throwable))))))))))
 
 (defn release-database!
   "Release the registered conn for `database-name` and drop the entry.
@@ -256,24 +404,40 @@
                   ::delete-database!-response]}
   [{::keys [database-name]}]
   (locking !registry
-    (if-let [{::keys [backend path]} (get @!registry database-name)]
-      (let [{::keys [released? release-error]}
-            (release-database! {::database-name database-name})]
-        (if-not released?
-          {::released? false ::deleted? false
-           ::error (or release-error "database connection was not released")}
-          (let [cfg (backend/datahike-config
-                     (cond-> {:seon.db.backend/database-name database-name
-                              :seon.db.backend/backend backend}
-                       path (assoc :seon.db.backend/path path)))]
-            (try
-              (d/delete-database cfg)
-              {::released? true ::deleted? true}
-              (catch Throwable t
-                (log/warn t "delete-database!: delete-database failed after remove"
-                          {::database-name database-name ::path path})
-                {::released? true ::deleted? false
-                 ::error (str (.getMessage t))})))))
+    (if-let [{::keys [attachment backend path]}
+             (get @!registry database-name)]
+      (cond
+        (not= :db (::coordinate/branch attachment))
+        {::released? false ::deleted? false
+         ::error "delete-database! only accepts the physical database's :db route"}
+
+        (some (fn [[registered-name entry]]
+                (and (not= registered-name database-name)
+                     (= (::coordinate/database-id attachment)
+                        (::coordinate/database-id (::attachment entry)))))
+              @!registry)
+        {::released? false ::deleted? false
+         ::error "delete-database! requires every branch route to be released first"}
+
+        :else
+        (let [{::keys [released? release-error]}
+              (release-database! {::database-name database-name})]
+          (if-not released?
+            {::released? false ::deleted? false
+             ::error (or release-error "database connection was not released")}
+            (let [cfg (backend/datahike-config
+                       (cond-> {::backend/database-name database-name
+                                ::backend/backend backend
+                                ::coordinate/attachment attachment}
+                         path (assoc ::backend/path path)))]
+              (try
+                (d/delete-database cfg)
+                {::released? true ::deleted? true}
+                (catch Throwable t
+                  (log/warn t "delete-database!: delete-database failed after remove"
+                            {::database-name database-name ::path path})
+                  {::released? true ::deleted? false
+                   ::error (str (.getMessage t))}))))))
       {::released? false ::deleted? false})))
 
 (defn- fork-verify!
@@ -347,21 +511,21 @@
        ::error (str "fork-database-name already registered: " fork-database-name)}
 
       :else
-      (let [{::keys [backend] src-path ::path} entry
+      (let [{::keys [attachment backend] src-path ::path} entry
             src-cfg (backend/datahike-config
-                     (cond-> {:seon.db.backend/database-name database-name
-                              :seon.db.backend/backend backend}
-                       src-path (assoc :seon.db.backend/path src-path)))
+                     (cond-> {::backend/database-name database-name
+                              ::backend/backend backend
+                              ::coordinate/attachment attachment}
+                       src-path (assoc ::backend/path src-path)))
             tgt-cfg (backend/datahike-config
-                     (cond-> {:seon.db.backend/database-name fork-database-name
-                              :seon.db.backend/backend :file}
-                       path (assoc :seon.db.backend/path path)))
-            backend-path (:seon.db.backend/path
+                     (cond-> {::backend/database-name fork-database-name
+                              ::backend/backend :file}
+                       path (assoc ::backend/path path)))
+            backend-path (::backend/path
                           (backend/backend-facts
-                           (cond-> {:seon.db.backend/database-name
-                                    fork-database-name
-                                    :seon.db.backend/backend :file}
-                             path (assoc :seon.db.backend/path path))))
+                           (cond-> {::backend/database-name fork-database-name
+                                    ::backend/backend :file}
+                             path (assoc ::backend/path path))))
             fork-once! (fn []
                          (backend/ensure-parent-dir!
                           {:seon.db.backend/path backend-path})
@@ -411,12 +575,13 @@
 (defn resolve-connection
   "Resolve one explicitly named database connection.
 
-   A registered name returns `{::conn <conn> ::database-name <name>}`. An
-   unknown name returns a typed not-found value."
+   A registered name returns its stable attachment and freshly derived current
+   coordinate with the live connection. An unknown name returns a typed
+   not-found value."
   {:malli/schema [:=> [:cat ::resolve-connection-request] ::resolve-connection-response]}
   [{::keys [database-name]}]
-  (if-let [conn (some-> @!registry (get database-name) ::conn)]
-    {::conn conn ::database-name database-name}
+  (if-let [entry (get @!registry database-name)]
+    (entry-view database-name entry)
     {::error-kind :seon.db.registry.error/not-found
      ::error (str "unknown database-name: " database-name)}))
 

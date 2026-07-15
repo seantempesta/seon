@@ -1,7 +1,9 @@
 (ns seon.db.backend-test
   "Behavioral tests for the Datahike backend adapter."
   (:require [clojure.test :refer [deftest is testing]]
-            [seon.db.backend :as backend])
+            [datahike.store :as store]
+            [seon.db.backend :as backend]
+            [seon.db.coordinate :as coordinate])
   (:import [java.io File]))
 
 (defn- delete-tree!
@@ -19,8 +21,13 @@
     (is (= (backend/backend-facts memory-request)
            (backend/backend-facts memory-request))
         "one database name has one deterministic backend identity")
-    (is (uuid? (::backend/database-id
-                (backend/backend-facts memory-request))))
+    (is (uuid? (::coordinate/database-id
+                (::coordinate/attachment
+                 (backend/backend-facts memory-request)))))
+    (is (= :db
+           (::coordinate/branch
+            (::coordinate/attachment
+             (backend/backend-facts memory-request)))))
     (is (= "data/clusters/alpha/db"
            (::backend/path (backend/backend-facts file-request))))
     (is (= "data/clusters/bare/db"
@@ -48,8 +55,11 @@
     (try
       (is (= {:backend :file
               :path path
-              :id (::backend/database-id (backend/backend-facts request))}
+              :id (::coordinate/database-id
+                   (::coordinate/attachment
+                    (backend/backend-facts request)))}
              (:store config)))
+      (is (= :db (:branch config)))
       (is (= :write (:schema-flexibility config)))
       (is (true? (:keep-history? config)))
       (is (= initial-tx (:initial-tx config)))
@@ -73,6 +83,30 @@
                 {::backend/database-name :cluster/beta
                  ::backend/backend :file
                  ::backend/path path})]
-      (is (not= (::backend/database-id alpha)
-                (::backend/database-id beta)))
+      (is (not= (::coordinate/database-id (::coordinate/attachment alpha))
+                (::coordinate/database-id (::coordinate/attachment beta))))
       (is (= (::backend/path alpha) (::backend/path beta))))))
+
+(deftest explicit-attachment-separates-logical-route-from-database-identity
+  (let [database-id (random-uuid)
+        main-attachment {::coordinate/database-id database-id
+                         ::coordinate/branch :db}
+        branch-attachment {::coordinate/database-id database-id
+                           ::coordinate/branch :experiment/one}
+        main-config
+        (backend/datahike-config
+         {::backend/database-name :route/main
+          ::backend/backend :memory
+          ::coordinate/attachment main-attachment})
+        branch-config
+        (backend/datahike-config
+         {::backend/database-name :route/experiment
+          ::backend/backend :memory
+          ::coordinate/attachment branch-attachment})]
+    (is (= database-id (get-in main-config [:store :id])))
+    (is (= database-id (get-in branch-config [:store :id])))
+    (is (= [database-id :db] (store/connection-id main-config)))
+    (is (= [database-id :experiment/one]
+           (store/connection-id branch-config)))
+    (is (not= (store/connection-id main-config)
+              (store/connection-id branch-config)))))

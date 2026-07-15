@@ -38,6 +38,14 @@ which lineage produced a value or frame.
   database/branch attachment, validates the cut inside that container, and
   returns structured errors for partial, missing, mismatched, or out-of-range
   coordinates. The focused proof passes 2 tests/11 assertions.
+- Backend and writer ensure now accept an explicit stable attachment. The one
+  registry enforces logical-name/attachment bijection and physical backend
+  agreement, derives current coordinates from live database values, and
+  roster-checks non-main branches before connecting. A direct Datahike probe
+  demonstrated that this is a correctness boundary: `delete-branch!` removes
+  roster membership while raw `connect` can still open the stale branch key.
+  Focused backend/registry/Transit/writer proof passes 24 tests/121 assertions;
+  the complete writer checkpoint passes 68/388.
 
 The source and dependency evidence is in
 [[../../prds/database-lifecycle-recovery/research/database-lifecycle-source-audit-2026-07-14]].
@@ -79,8 +87,11 @@ gzip Datastar frame; a t-only selector returned structured 422 instead of live
 data. Public transaction and reconcile success envelopes now return the same
 complete point; the hot config-view cache keys its plain decoded projection by
 that point and retains no database value. Their focused proof passes 48/235 and
-replica proof remains green at 17/93. Native branch lifecycle and its same-t
-cross-branch acceptance case remain. Rebuilt live proof returned the exact
+replica proof remains green at 17/93. Branch-qualified backend, registry, and
+writer routing now preserve one exact attachment, reject duplicate logical
+routes, and refuse a non-rostered stale branch. Native branch create/delete,
+feed/replica attachment, operator/runtime launch, and the same-t cross-branch
+acceptance case remain. Rebuilt live proof returned the exact
 default head `54b5b7e7-51fb-3220-b079-81a81914d86f`/`:db`/
 `6a56e5fa-0caa-5574-b579-ba8be7a2ae85`/`536870971` from converged reconcile
 and stored that point—not a db value—as the config cache key. The issue stays
