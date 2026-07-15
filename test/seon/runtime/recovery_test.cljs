@@ -5,10 +5,15 @@
     [datahike.api :as d]
     [malli.core :as m]
     [seon.agent :as agent]
+    [seon.agent.home :as home]
     [seon.agent.run :as run]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.db.process :as db.process]
+    [seon.eval :as seval]
+    [seon.repl :as repl]
+    [seon.repl.internal :as repl.internal]
     [seon.runtime.recovery :as recovery]))
 
 (def ^:private agent-a "recovra-260713")
@@ -53,6 +58,29 @@
   [agent-id]
   (run/open-run! {:seon.agent/id agent-id
                   :seon.agent.run/trigger :message}))
+
+(defn- wait-for-running-eval
+  [turn-id attempts]
+  (let [eval-row (-> (db/pull
+                       {:seon.db/pull-pattern
+                        '[{:seon.agent.turn/evals [*]}]
+                        :seon.db/ref [:seon.agent.turn/id turn-id]})
+                     :seon.agent.turn/evals
+                     first)]
+    (cond
+      (= :running (:seon.eval/status eval-row))
+      (js/Promise.resolve eval-row)
+
+      (pos? attempts)
+      (js/Promise.
+        (fn [resolve _reject]
+          (js/setTimeout
+            #(resolve (wait-for-running-eval turn-id (dec attempts)))
+            10)))
+
+      :else
+      (js/Promise.reject
+        (js/Error. (str "running eval receipt did not appear for " turn-id))))))
 
 (defn- message-count
   [database]
@@ -315,3 +343,84 @@
         (.catch (fn [error]
                   (is false (str "threw — " error))
                   (done))))))
+
+(deftest real-eval-receipt-is-interrupted-before-late-completion
+  (async done
+    (-> (with-conn
+          (fn ^:async exercise [conn]
+            (let [agent-envelope
+                  (await
+                    (db.id/allocate!
+                      {::db.id/allocations
+                       [{::db.id/key ::fixture-agent
+                         ::db.id/identity-attr :seon.agent/id}]
+                       ::db.id/transaction-builder
+                       (fn [{agent-id ::fixture-agent}]
+                         {:seon.db/tx-data
+                          [{:seon.agent/id agent-id
+                            :seon.eval/home-requires []}]})
+                       :seon.db/conn conn}))
+                  _ (is (true? (:seon.db/ok? agent-envelope)))
+                  agent-id (get-in agent-envelope
+                                   [::db.id/ids ::fixture-agent])
+                  run-id (:seon.agent.run/id (await (open-run! agent-id)))
+                  turn-envelope
+                  (await
+                    (db.id/allocate!
+                      {::db.id/allocations
+                       [{::db.id/key ::fixture-turn
+                         ::db.id/identity-attr :seon.agent.turn/id}]
+                       ::db.id/transaction-builder
+                       (fn [{turn-id ::fixture-turn}]
+                         {:seon.db/tx-data
+                          [{:seon.agent.turn/id turn-id
+                            :seon.agent.turn/at (js/Date.)
+                            :seon.agent.turn/run [:seon.agent.run/id run-id]
+                            :seon.agent.turn/status :running}]})
+                       :seon.db/conn conn}))
+                  _ (is (true? (:seon.db/ok? turn-envelope)))
+                  turn-id (get-in turn-envelope [::db.id/ids ::fixture-turn])
+                  compile-state (await (repl/ensure-bootstrap!))
+                  agent-ns (home/home-ns agent-id)
+                  _ (await (seval/setup-agent-ns!
+                             compile-state agent-ns agent-id))
+                  ;; The form settles later, but its running receipt must be
+                  ;; visible before the Promise does. Recovery wins the one
+                  ;; terminal CAS while this eval-batch! invocation is alive.
+                  batch-promise
+                  (db/with-agent
+                    agent-id
+                    #(seval/eval-batch!
+                       compile-state
+                       (repl.internal/parse-forms
+                         (str "(seon.eval/budget 1000 "
+                              "(js/Promise. (fn [resolve _] "
+                              "(js/setTimeout #(resolve 42) 250))))"))
+                       agent-ns agent-id turn-id run-id))
+                  running (await (wait-for-running-eval turn-id 100))
+                  eval-id (:seon.eval/id running)
+                  recovered (await
+                              (recovery/recover!
+                                {:seon.runtime.recovery/detail
+                                 "focused late-completion falsifier"}))
+                  batch (await batch-promise)
+                  final-row (db/entity
+                              {:seon.db/ref [:seon.eval/id eval-id]})
+                  eval-ids (db/query
+                             {:seon.db/db @conn
+                              :seon.db/query
+                              '[:find [?id ...]
+                                :where [_ :seon.eval/id ?id]]})]
+              (is (= [eval-id] (::recovery/eval-ids recovered)))
+              (is (= :interrupted (:seon.eval/status final-row)))
+              (is (false? (:seon.eval/ok? final-row)))
+              (is (not (contains? final-row :seon.eval/result-edn)))
+              (is (= [eval-id] eval-ids)
+                  "late completion neither overwrites nor allocates another row")
+              (is (empty? (:seon.eval/ids batch))
+                  "the losing terminal CAS is returned as a database error"))))
+        (.then (fn [_] (done)))
+        (.catch
+          (fn [error]
+            (is false (str "threw — " error))
+            (done))))))

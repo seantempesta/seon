@@ -7,6 +7,7 @@
     [seon.agent]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.eval :as seval]
     [seon.eval.internal :as receipt]))
 
 (def ^:private start
@@ -160,6 +161,67 @@
                        (db/entity
                          {:seon.db/ref
                           [:seon.eval/id "EVLreceipt0001"]})))))))
+        (.then (fn [_] (done)))
+        (.catch
+          (fn [error]
+            (is false (str "threw — " error))
+            (done))))))
+
+(deftest interrupted-receipt-makes-late-recorder-settle-without-fallback
+  (async done
+    (-> (with-conn
+          (fn ^:async exercise [_conn]
+            (let [seeded
+                  (await
+                    (db/transact!
+                      {:seon.db/tx-data
+                       [{:seon.agent/id "AGTreceipt0001"}
+                        {:seon.agent.turn/id "TRNreceipt0001"
+                         :seon.agent.turn/at (js/Date.)
+                         :seon.agent.turn/status :running}]}))
+                  _ (is (true? (:seon.db/ok? seeded)))
+                  started
+                  (await
+                    (db/with-agent
+                      "AGTreceipt0001"
+                      #(seval/start-eval!
+                         {:seon.agent.turn/id-of-turn "TRNreceipt0001"
+                          ::seval/at (js/Date.)
+                          ::seval/narration "late completion"
+                          ::seval/source "42"
+                          ::seval/starting-ns 'my.agent.receipt})))
+                  eval-id (:seon.eval/id started)
+                  interrupted
+                  (await
+                    (db/transact!
+                      {:seon.db/tx-data
+                       (receipt/terminal-tx-data
+                         {:seon.eval/id eval-id
+                          :seon.eval/status :interrupted})}))
+                  _ (is (true? (:seon.db/ok? interrupted)))
+                  late
+                  (await
+                    (seval/record-eval!
+                      {:seon.agent.turn/id-of-turn "TRNreceipt0001"
+                       ::seval/eval-id eval-id
+                       ::seval/at (js/Date.)
+                       ::seval/duration-ms 1
+                       ::seval/narration "late completion"
+                       ::seval/source "42"
+                       ::seval/ending-ns 'my.agent.receipt
+                       ::seval/result {::seval/ok? true ::seval/value 42}
+                       ;; A nonempty tee would enter transcript fallback on an
+                       ;; ordinary write failure. A settled competing terminal
+                       ;; must short-circuit before that retry path.
+                       ::seval/tee [{:seon.agent/id "AGTreceipt0001"
+                                     :seon.eval/home-requires []}]}))
+                  row (db/entity
+                        {:seon.db/ref [:seon.eval/id eval-id]})]
+              (is (false? (:seon.db/ok? late)))
+              (is (true? (::seval/settled? late)))
+              (is (= :interrupted (:seon.eval/status late)))
+              (is (= :interrupted (:seon.eval/status row)))
+              (is (not (contains? row :seon.eval/result-edn))))))
         (.then (fn [_] (done)))
         (.catch
           (fn [error]

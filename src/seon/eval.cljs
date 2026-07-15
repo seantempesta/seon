@@ -3294,24 +3294,60 @@
       {::database-operations-error
        (str "database operation evidence was not persisted: " error)})))
 
-(defn ^:async record-eval!
-  "Allocate and transact one eval as a component child of its turn.
+(defn ^:async start-eval!
+  "Allocate and commit one running eval receipt before its form executes.
 
-   The caller supplies a committed turn id and a frozen eval outcome—never an
-   eval id. The allocator may retry only the pure transaction builder that
-   associates a candidate id into that frozen data. Accepted program-graph tee
-   operations ride in the same transaction as the eval identity and turn
-   component assertion.
+   Allocation may retry only the pure receipt transaction builder. The caller
+   must execute the form only after this function returns success, then pass
+   the returned `:seon.eval/id` to [[record-eval!]]."
+  {:malli/schema [:=> [:catn [::start-request :map]] :any]}
+  [{::keys [at narration source starting-ns]
+    turn-id :seon.agent.turn/id-of-turn}]
+  (let [conn db/*conn*
+        aid  (db/current-agent-id)
+        started
+        (await
+          (db.id/allocate!
+            {::db.id/allocations
+             [{::db.id/key ::eval-allocation
+               ::db.id/identity-attr :seon.eval/id}]
+             ::db.id/transaction-builder
+             (fn [{eval-id ::eval-allocation}]
+               {:seon.db/tx-data
+                (eval.internal/start-tx-data
+                  (cond->
+                    {:seon.agent.turn/id turn-id
+                     :seon.eval/id eval-id
+                     :seon.eval/at at
+                     :seon.eval/source (or source "")
+                     :seon.eval/narration (or narration "")
+                     :seon.eval/ns (if (keyword? starting-ns)
+                                     starting-ns
+                                     (keyword (str starting-ns)))}
+                    aid
+                    (assoc :seon.eval/agent [:seon.agent/id aid])))})
+             :seon.db/conn conn}))]
+    (if (:seon.db/ok? started)
+      {:seon.db/ok? true
+       :seon.eval/id (get-in started [::db.id/ids ::eval-allocation])}
+      started)))
+
+(defn ^:async record-eval!
+  "Commit one frozen eval outcome, terminalizing a running receipt when given.
+
+   Normal executable forms supply the id returned by [[start-eval!]]. Their
+   accepted program-graph tee and terminal outcome commit behind the receipt's
+   `:running` CAS fence, so recovery or a late completion can win exactly once.
+   Non-executing historical paths may omit the id and retain the allocator path.
 
    A non-allocator transaction failure with a nonempty tee gets one transcript-
-   first recovery allocation using the same frozen outcome and no tee. That
-   fallback may commit a different id and stamps it with
-   `:seon.eval/record-error`. Allocator/protocol failures never enter the
-   fallback. Returns an error envelope or a success carrying the one committed
-   `:seon.eval/id`; no result handle is bound here."
+   first retry using the same frozen outcome and no tee. A
+   prestarted receipt always retains its identity; the legacy allocator path
+   may commit a different fallback id. Allocator/protocol failures never enter
+   the fallback. No result handle is bound here."
   {:malli/schema [:=> [:catn [::record-request :map]] :any]}
   [{::keys [at narration source result duration-ms tee output pending?
-            database-operations]
+            database-operations eval-id]
     turn-id :seon.agent.turn/id-of-turn
     ns      ::ending-ns}]
   (let [operation-publication
@@ -3369,6 +3405,20 @@
         prepared-value
         (when (and (::ok? result) (not pending?))
           (value/prepare-ai {::value/value (::value result)}))
+        eval-row-for
+        (fn [eval-id]
+          (let [stored-value (if pending?
+                               (pending-placeholder eval-id)
+                               (::value result))]
+            (cond->
+              (assoc stable-eval-row :seon.eval/id eval-id)
+              (::ok? result)
+              (assoc :seon.eval/result-edn
+                     (cap-edn
+                       (if pending?
+                         (render-result-edn eval-id stored-value)
+                         (render-prepared-result-edn eval-id
+                                                     prepared-value)))))))
         allocate-record!
         (fn ^:async allocate-record! [accepted-tee]
           (await
@@ -3378,32 +3428,57 @@
                  ::db.id/identity-attr :seon.eval/id}]
                ::db.id/transaction-builder
                (fn [{eval-id ::eval-allocation}]
-                 (let [stored-value (if pending?
-                                      (pending-placeholder eval-id)
-                                      (::value result))
-                       eval-row (cond->
-                                  (assoc stable-eval-row :seon.eval/id eval-id)
-                                  (::ok? result)
-                                  (assoc :seon.eval/result-edn
-                                         (cap-edn
-                                           (if pending?
-                                             (render-result-edn eval-id
-                                                                stored-value)
-                                             (render-prepared-result-edn
-                                               eval-id prepared-value)))))]
+                 (let [eval-row (eval-row-for eval-id)]
                    {:seon.db/tx-data
                     (into [{:seon.agent.turn/id turn-id
                             :seon.agent.turn/evals [eval-row]}]
                           accepted-tee)}))
                :seon.db/conn conn})))
-        primary (await (allocate-record! (vec (or tee []))))]
-    (if (:seon.db/ok? primary)
+        terminalize-record!
+        (fn ^:async terminalize-record! [accepted-tee]
+          (let [status (if (::ok? result) :done :error)
+                [fence terminal-row]
+                (eval.internal/terminal-tx-data
+                  {:seon.eval/id eval-id
+                   :seon.eval/status status})]
+            (await
+              (db/transact!
+                (cond->
+                  {:seon.db/tx-data
+                   (into [fence (merge (eval-row-for eval-id) terminal-row)]
+                         accepted-tee)}
+                  conn (assoc :seon.db/conn conn))))))
+        transact-record! (if eval-id terminalize-record! allocate-record!)
+        primary (await (transact-record! (vec (or tee []))))
+        committed-id (or eval-id
+                         (get-in primary [::db.id/ids ::eval-allocation]))
+        settled-status
+        (when (and eval-id (not (:seon.db/ok? primary)))
+          (eval.internal/receipt-state
+            (db/entity
+              (cond-> {:seon.db/ref [:seon.eval/id eval-id]}
+                conn (assoc :seon.db/db @conn)))))]
+    (cond
+      (:seon.db/ok? primary)
       (cond->
         {:seon.db/ok? true
-         :seon.eval/id (get-in primary [::db.id/ids ::eval-allocation])
+         :seon.eval/id committed-id
          ::tee-recorded? true}
         (and (::ok? result) (not pending?))
         (assoc ::retained-value (::value result)))
+
+      (contains? #{:done :error :interrupted} settled-status)
+      ;; Recovery or another terminal writer won the exact receipt CAS. The
+      ;; durable row is authoritative: never retry the form, retry the CAS, or
+      ;; report transcript data loss. Return the competing terminal state as a
+      ;; bounded non-success value so callers cannot publish this late result.
+      {:seon.db/ok? false
+       :seon.eval/id eval-id
+       :seon.eval/status settled-status
+       ::settled? true
+       :seon.db/error (:seon.db/error primary)}
+
+      :else
       (do
         (js/console.error "[seon.eval/record-eval!] tx FAILED:"
                           (cap-edn
@@ -3412,10 +3487,11 @@
                           "— source:"
                           (cap-edn source (config/eval-render-cap)))
         (if (and (seq tee) (not (unsafe-to-reallocate? primary)))
-          (let [fallback (await (allocate-record! []))]
+          (let [fallback (await (transact-record! []))]
             (if (:seon.db/ok? fallback)
-              (let [eval-id (get-in fallback
-                                    [::db.id/ids ::eval-allocation])
+              (let [eval-id (or eval-id
+                                (get-in fallback
+                                        [::db.id/ids ::eval-allocation]))
                     reason (cap-edn
                              (str (count tee) " program-graph tee row(s) "
                                   "DROPPED (will not survive a restart) — "
@@ -4274,6 +4350,17 @@
                               (repair/fix-note
                                 {:seon.repair/fixes (:seon.repair/fixes pre)}))
                          narration)
+            ;; The receipt is the durable execution boundary. Commit it only
+            ;; after source repair has frozen the exact form, and do not run
+            ;; the form unless allocation succeeds.
+            started (await
+                      (start-eval!
+                        {:seon.agent.turn/id-of-turn turn-id
+                         ::at at
+                         ::narration narration
+                         ::source source
+                         ::starting-ns @current-ns}))
+            eval-id (:seon.eval/id started)
             ;; Snapshot analyzer + schema registry BEFORE eval
             ;; so detect-and-tee (v1.md §2.2 / Phase B item 10)
             ;; can diff after. Cheap reads — keyset extraction.
@@ -4295,20 +4382,30 @@
             ;; through eval + maybe-await-value; we await its result.
             out-bucket  (atom "")
             operation-capture
-            (await
-              (db.internal/capture-operations!
-                (when db/*conn* @db/*conn*)
-                (fn ^:async run-with-operation-capture! []
-                  (await
-                    (.run print-als out-bucket
-                      (fn ^:async run-with-print-capture! []
-                        (let [raw (await (eval compile-state source
-                                               {::starting-ns @current-ns
-                                                ::analyze-deps? false}))]
-                          {::raw raw
-                           ::awaited (when (::ok? raw)
-                                       (await (maybe-await-value
-                                                (::value raw))))})))))))
+            (if (:seon.db/ok? started)
+              (await
+                (db.internal/capture-operations!
+                  (when db/*conn* @db/*conn*)
+                  (fn ^:async run-with-operation-capture! []
+                    (await
+                      (.run print-als out-bucket
+                        (fn ^:async run-with-print-capture! []
+                          (let [raw (await (eval compile-state source
+                                                 {::starting-ns @current-ns
+                                                  ::analyze-deps? false}))]
+                            {::raw raw
+                             ::awaited (when (::ok? raw)
+                                         (await (maybe-await-value
+                                                  (::value raw))))})))))))
+              {::db/result
+               {::raw
+                {::ok? false
+                 :seon/error
+                 (or (:seon.db/error started)
+                     {:seon.error/kind :core
+                      :seon.error/message
+                      "Eval receipt could not be committed; form was not executed."})}}
+               ::db/read-observations []})
             captured    (::db/result operation-capture)
             database-operations (::db/read-observations operation-capture)
             raw-result  (::raw captured)
@@ -4532,22 +4629,25 @@
               tee (vec (concat tee-entities req-tx req-decl-tx read-attr-tx))
               ;; Durable record — always. Identity allocation and accepted tee
               ;; commit before a process-local result handle can exist.
-              recorded (await
-                         (record-eval!
-                           (cond->
-                             {:seon.agent.turn/id-of-turn turn-id
-                              ::at           at
-                              ::duration-ms  duration-ms
-                              ::narration    narration
-                              ::source       source
-                              ::ending-ns    @current-ns
-                              ::result       result
-                              ::pending?     pending?
-                              ::output       output
-                              ::tee          tee}
-                             (seq database-operations)
-                             (assoc ::database-operations
-                                    database-operations))))
+              recorded (if (:seon.db/ok? started)
+                         (await
+                           (record-eval!
+                             (cond->
+                               {:seon.agent.turn/id-of-turn turn-id
+                                ::eval-id      eval-id
+                                ::at           at
+                                ::duration-ms  duration-ms
+                                ::narration    narration
+                                ::source       source
+                                ::ending-ns    @current-ns
+                                ::result       result
+                                ::pending?     pending?
+                                ::output       output
+                                ::tee          tee}
+                               (seq database-operations)
+                               (assoc ::database-operations
+                                      database-operations))))
+                         started)
               eval-id (:seon.eval/id recorded)
               new-projection
               (when (and (::candidate-projection candidate-outcome)

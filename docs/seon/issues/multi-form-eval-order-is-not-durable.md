@@ -88,9 +88,12 @@ function rather than each retaining a timestamp sort. The concrete consumers
 are `seon.agent.ctx.transcript/eval-events`,
 `seon.agent.ctx/session-evals`, and the autocomplete turn export. Global recent
 and frequency views may keep their creation/recency order because they do not
-reconstruct one reply's authored sequence. The future running-eval receipt in
-`seon.eval.internal/start-tx-data` must accept the same position before that
-path becomes a production writer; it must not mint a second ordering scheme.
+reconstruct one reply's authored sequence. The production running-eval receipt
+now deliberately remains position-neutral: `eval-form-entry!` commits it before
+executing the repaired form and terminally CASes the same identity after
+settlement. When this issue adds the one canonical position, it must pass that
+field through the existing start receipt and terminal row; it must not mint a
+second ordering scheme.
 
 ## Focused proof
 
@@ -142,15 +145,13 @@ it does not cancel the HTTP request. The cancellation fixture is admissible
 only when one addressed request can close the canonical run fence and propagate
 to the provider's owned abort signal.
 
-A 2026-07-15 pod-death proof audit found a sharper persistence boundary.
-`seon.eval.internal/start-tx-data` and `terminal-tx-data` already describe a
-running receipt, and recovery can interrupt a durable running eval, but
-production `seon.eval/eval-form-entry!` still allocates and records only after
-execution and auto-await settle. A killed unresolved middle form therefore has
-no eval identity to mark interrupted. Current source can prove a committed
-prefix, logged middle start, absent middle/suffix eval and result rows, crashed
-run, interrupted turn, and one recovery anchor without fabrication. The
-stronger acceptance claim requires integrating the existing start receipt into
-the one per-form path before execution and terminal-CASing that same row after
-settlement, using the same future canonical position rather than another
-ordering scheme.
+A 2026-07-15 pod-death proof audit found and closed a sharper persistence
+boundary. Production `eval-form-entry!` now commits the existing
+`seon.eval.internal/start-tx-data` receipt after source repair and before form
+execution, then terminally CASes that same identity after sync/Promise
+settlement. Recovery can win that fence and mark the durable row interrupted;
+a late completion neither overwrites it nor allocates a replacement. Focused
+receipt/recovery proof passes 9 tests/82 assertions, including a real
+`eval-batch!` Promise held across recovery. The destructive three-form live
+proof and the canonical position work above remain separate acceptance gates:
+the receipt closes attempted-form addressability, not durable sequence order.
