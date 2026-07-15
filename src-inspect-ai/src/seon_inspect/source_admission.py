@@ -232,16 +232,19 @@ def finalize_native_logs(
     *,
     evidence_dir: Path | None = None,
     expected_admission: dict[str, Any] | None = None,
+    require_success: bool = True,
 ) -> list[dict[str, Any]]:
-    """Retain, reopen, and identity-check every successful native log."""
+    """Retain, reopen, and identity-check native logs."""
     rows = list(logs or [])
     if not rows:
         raise SourceAdmissionError(
             "evidence finalization: Inspect returned no native eval log")
     destination = evidence_dir / "inspect-logs" if evidence_dir else None
-    manifest: list[dict[str, str]] = []
+    manifest: list[dict[str, Any]] = []
     for log in rows:
-        location = str(getattr(log, "location", "") or "")
+        location = str(
+            log if isinstance(log, (str, Path))
+            else getattr(log, "location", "") or "")
         parsed = urlparse(location)
         source = Path(unquote(parsed.path if parsed.scheme == "file" else location))
         if not source.is_file():
@@ -261,7 +264,7 @@ def finalize_native_logs(
             raise SourceAdmissionError(
                 f"evidence finalization: retained log is unreadable: {retained}"
             ) from error
-        if native.status != "success":
+        if require_success and native.status != "success":
             raise SourceAdmissionError(
                 f"evidence finalization: retained log status is "
                 f"{native.status!r}, not 'success'")

@@ -290,6 +290,33 @@ def test_finalize_native_logs_rejects_non_success_status(
         source_admission.finalize_native_logs([_Log(source.as_uri())])
 
 
+def test_finalize_native_logs_retains_cancelled_evidence_when_requested(
+    monkeypatch, tmp_path
+):
+    source = tmp_path / "cancelled.eval"
+    source.write_bytes(b"cancelled-native")
+    evidence = tmp_path / "evidence"
+    admission = {"schema_version": 2, "bench": {"name": "native"}}
+    monkeypatch.setattr(
+        source_admission,
+        "read_eval_log",
+        lambda path: SimpleNamespace(
+            status="cancelled",
+            eval=SimpleNamespace(
+                metadata={"seon_source_admission": admission}),
+        ),
+    )
+    manifest = source_admission.finalize_native_logs(
+        [source.as_uri()],
+        evidence_dir=evidence,
+        expected_admission=admission,
+        require_success=False,
+    )
+    assert manifest[0]["status"] == "cancelled"
+    assert (evidence / "inspect-logs" / source.name).read_bytes() == (
+        source.read_bytes())
+
+
 def test_finalize_native_logs_rejects_wrong_admission(monkeypatch, tmp_path):
     source = tmp_path / "wrong.eval"
     source.write_bytes(b"native")

@@ -31,6 +31,7 @@ from typing import Any, Callable, Sequence
 
 from inspect_ai import Task, eval as inspect_eval
 from inspect_ai._util.registry import registry_log_name
+from inspect_ai.log import list_eval_logs
 from inspect_ai.solver import Generate, Solver, TaskState, solver
 
 from seon_inspect import cluster as cluster_mod
@@ -256,6 +257,10 @@ def _eval_admitted_task(
     **eval_kwargs: Any,
 ):
     """Execute and finalize one already-admitted Task through Inspect."""
+    def listed_logs(log_dir: str | None) -> set[str]:
+        infos = list_eval_logs(log_dir) if log_dir is not None else list_eval_logs()
+        return {str(info.name) for info in infos}
+
     md = dict(eval_kwargs.pop("metadata", None) or {})
     md["seon_source_admission"] = admission
     call_kwargs = {
@@ -265,9 +270,34 @@ def _eval_admitted_task(
     }
     if solver_override is not None:
         call_kwargs["solver"] = solver_override
-    logs = inspect_eval(task, **call_kwargs)
+    log_dir = call_kwargs.get("log_dir")
+    listed_before = listed_logs(log_dir)
+    try:
+        logs = inspect_eval(task, **call_kwargs)
+    except BaseException:
+        interrupted_logs = sorted(listed_logs(log_dir) - listed_before)
+        if interrupted_logs:
+            source_admission.finalize_native_logs(
+                interrupted_logs,
+                evidence_dir=evidence_dir,
+                expected_admission=admission,
+                require_success=False,
+            )
+        raise
     if before_finalize is not None:
         before_finalize()
+    if not logs:
+        terminal_logs = sorted(listed_logs(log_dir) - listed_before)
+        if terminal_logs:
+            source_admission.finalize_native_logs(
+                terminal_logs,
+                evidence_dir=evidence_dir,
+                expected_admission=admission,
+                require_success=False,
+            )
+            raise source_admission.SourceAdmissionError(
+                "evidence finalization: Inspect returned no accepted native "
+                "log; retained its published terminal evidence")
     source_admission.finalize_native_logs(
         logs,
         evidence_dir=evidence_dir,

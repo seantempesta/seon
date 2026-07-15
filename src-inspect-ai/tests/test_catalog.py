@@ -164,6 +164,72 @@ def test_run_native_task_rejects_target_drift(monkeypatch):
     assert finalized == []
 
 
+def test_admitted_run_retains_new_cancelled_log_then_reraises(
+    monkeypatch, tmp_path
+):
+    admitted = {"schema_version": 2, "bench": {"name": "native"}}
+    cancelled = tmp_path / "cancelled.eval"
+    listings = iter([[], [type("Info", (), {"name": str(cancelled)})()]])
+    finalized = []
+    monkeypatch.setattr(
+        catalog.source_admission, "verify_sources", lambda identity: admitted)
+    monkeypatch.setattr(catalog, "list_eval_logs", lambda *args: next(listings))
+    monkeypatch.setattr(
+        catalog, "inspect_eval",
+        lambda *args, **kwargs: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+    monkeypatch.setattr(
+        catalog.source_admission,
+        "finalize_native_logs",
+        lambda logs, **kwargs: finalized.append((logs, kwargs)),
+    )
+    with pytest.raises(KeyboardInterrupt):
+        catalog.run_native_task(
+            {"name": "native"},
+            lambda **kwargs: _FakeTask(),
+            evidence_dir=tmp_path / "evidence",
+            target_snapshot=lambda: {"artifact": "stable"},
+            log_dir=str(tmp_path),
+        )
+    assert finalized == [
+        ([str(cancelled)], {
+            "evidence_dir": tmp_path / "evidence",
+            "expected_admission": admitted,
+            "require_success": False,
+        })]
+
+
+def test_admitted_run_retains_terminal_log_when_inspect_returns_empty(
+    monkeypatch, tmp_path
+):
+    admitted = {"schema_version": 2, "bench": {"name": "native"}}
+    cancelled = tmp_path / "cancelled.eval"
+    listings = iter([[], [type("Info", (), {"name": str(cancelled)})()]])
+    finalized = []
+    monkeypatch.setattr(
+        catalog.source_admission, "verify_sources", lambda identity: admitted)
+    monkeypatch.setattr(catalog, "list_eval_logs", lambda *args: next(listings))
+    monkeypatch.setattr(catalog, "inspect_eval", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        catalog.source_admission,
+        "finalize_native_logs",
+        lambda logs, **kwargs: finalized.append((logs, kwargs)),
+    )
+    with pytest.raises(
+        catalog.source_admission.SourceAdmissionError,
+        match="retained its published terminal evidence",
+    ):
+        catalog.run_native_task(
+            {"name": "native"},
+            lambda **kwargs: _FakeTask(),
+            evidence_dir=tmp_path / "evidence",
+            target_snapshot=lambda: {"artifact": "stable"},
+            log_dir=str(tmp_path),
+        )
+    assert finalized[0][0] == [str(cancelled)]
+    assert finalized[0][1]["require_success"] is False
+
+
 def test_run_bench_max_samples_overridable(monkeypatch):
     # per-run override for cluster POOLS — the knob exists, the default stays 1
     captured = {}

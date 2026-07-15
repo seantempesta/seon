@@ -379,6 +379,12 @@ sample is trustworthy.
   and 78 Inspect tests; the live ACME database resolves 1,800,000 ms. The pod
   response and native sample metadata now retain that effective value and its
   `request` or `database` source as derived evidence.
+- Admitted execution now retains native terminal evidence when Inspect is
+  interrupted or returns no accepted logs. It diffs the selected log directory,
+  copies only newly published artifacts, reopens them with exact source
+  admission, preserves truthful non-success status, and rejects capability
+  scoring. Focused coverage passes 42 tests; a real OS-SIGINT probe retained
+  one cancelled `.eval` with its partial sample.
 - Infrastructure timeouts and core errors invalidate a sample instead of
   becoming a model score. A no-forms close remains model/runtime evidence.
 - A fresh ordinary ACME agent renders 22,171 total estimated tokens, including
