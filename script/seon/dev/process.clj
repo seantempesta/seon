@@ -311,11 +311,12 @@
                            (::launch/http-port-file descriptor-process))
                           runtime-root (assoc "SEON_RUNTIME_ROOT" runtime-root))
         java (get environment "JAVA_CMD" "java")
+        javascript-runtime (get environment "SEON_JS_RUNTIME" "node")
         pod-spec
         (cond->
           {:seon.dev.process/id pod-id
            :seon.dev.process/argv
-           ["node" (:seon.dev.config/client-output config)]
+           [javascript-runtime (:seon.dev.config/client-output config)]
            :seon.dev.process/environment pod-environment
            :seon.dev.process/dependencies
            (if autonomous? [watcher-id writer-id] [])

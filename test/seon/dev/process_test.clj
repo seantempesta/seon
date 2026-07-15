@@ -2054,6 +2054,24 @@
              (process/admit-watcher-artifact! configuration digest))))
       (finally (fs/delete-tree directory)))))
 
+(deftest pod-runtime-is-explicitly-selectable-without-changing-the-artifact
+  (let [base (test-config)
+        configuration
+        (target-config base (:seon.dev.test/directory base))
+        node-pod (get (process/specs configuration target-manifest)
+                      process/pod-id)
+        bun-configuration
+        (update configuration :seon.dev.config/environment
+                assoc "SEON_JS_RUNTIME" "bun")
+        bun-pod (get (process/specs bun-configuration target-manifest)
+                     process/pod-id)]
+    (is (= "node" (first (:seon.dev.process/argv node-pod))))
+    (is (= "bun" (first (:seon.dev.process/argv bun-pod))))
+    (is (= (rest (:seon.dev.process/argv node-pod))
+           (rest (:seon.dev.process/argv bun-pod))))
+    (is (= (:seon.dev.process/artifact-digest node-pod)
+           (:seon.dev.process/artifact-digest bun-pod)))))
+
 (deftest stale-port-file-does-not-advertise-a-url
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)

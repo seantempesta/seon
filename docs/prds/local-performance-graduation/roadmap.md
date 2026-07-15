@@ -33,6 +33,26 @@ than reopened as current findings. Unit 9 still lacks a retained operator
 measurement envelope for V8/JVM heap, event-loop delay, CPU/RSS, feed pressure,
 phase/payload/browser timings, and complete source/artifact/database identity.
 
+The Bun source audit
+[[research/bun-production-runtime-integration-audit-2026-07-15]] establishes a
+candidate full JavaScript-runtime migration after exact-artifact parity: Shadow
+remains the JVM compiler while Bun may run development pods, test/worker
+artifacts, and packaged pods. Shadow 3.4.10 already declares Bun support and its
+`:node-script` output needs no new compiler target. The first implementation
+boundary is one manifest/launch runtime coordinate replacing Seon's hard-coded
+Node execution doors. Bun-native HTTP is now a measured priority: direct
+`Bun.serve` improved sequential throughput by 24% and bounded-concurrency
+throughput by 62%, while plain idle SSE used 43.09 MiB at 100 feeds. Per-feed
+gzip is the dominant avoidable feed cost; shared encoding reduced isolated
+100-event by 100-feed fanout CPU from 269.4 ms to 0.99 ms, subject to browser
+and proxy proof. Native Bun UDS produced about 3 times compact-frame throughput;
+native spawn was neutral. A real isolated Bun pod reached database,
+instrumentation, HTTP, agent, and Datastar-feed readiness before an overlapping
+external Shadow owner caused its supervisor to drain it. JSC diagnostics,
+bounded execution cells, shared-writer families, and idle pods remain candidates
+rather than graduation evidence. The audit also records the independent UDS fragmentation cost in
+[[../../seon/issues/uds-fragment-accumulation-recopies-complete-prefix]].
+
 The audit defines cold/warm sample classes, provisional guardrails and their
 post-unit-8 freeze rule, a content-addressed raw evidence schema, the ordered
 fresh/grown/restart/crash/history/browser/agent/Inspect/downstream/soak matrix,

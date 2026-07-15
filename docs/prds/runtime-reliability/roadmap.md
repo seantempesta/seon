@@ -62,6 +62,17 @@ database, renderer, runtime, operator, or packaging mechanisms.
 | 8 | `independent-downstream-distribution` | **CARVED + AUDITED** | 0, stable runtime/package contracts from 1 and 6 | A clean ACME checkout builds, customizes, starts, MCP-evaluates, restarts, and reads back from released Seon SDK/runtime/writer artifacts while the Seon source checkout is unavailable. |
 | 9 | `local-performance-graduation` | **CARVED + GROUNDED; FINAL** | 1–8 | Destructive acceptance matrix and real-browser journey pass; explicit cold/warm latency, idle CPU, event-loop, heap/RSS, feed/render, and grown-database budgets are green; superseded worktrees/processes are safely retired. |
 
+Unit 9 now also owns the source-grounded Bun runtime candidate in
+[[../local-performance-graduation/research/bun-production-runtime-integration-audit-2026-07-15]].
+Shadow 3.4.10 already declares Bun support; no second CLJS target is planned.
+After units 1–8 and the no-source artifact contract settle, one exact artifact
+runs under Node and Bun for semantic parity, then Bun may replace Node across
+development execution and packaged operation if it wins the retained resource
+budgets. Native `Bun.serve`, stream/static delivery, child processes, sockets,
+JSC diagnostics, bounded execution cells, test artifact reuse, shared writer
+families, on-demand pods, and `--smol` are separate measured cuts, not assumed
+benefits or permission to create parallel runtime mechanisms.
+
 Parallel work is deliberately bounded:
 
 - while unit 1 implementation follows the database lifecycle dependency spine,
