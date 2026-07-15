@@ -19,6 +19,7 @@
 (schema/register! ::admitted? :boolean)
 (schema/register! ::published? :boolean)
 (schema/register! ::recovered? :boolean)
+(schema/register! ::detached? :boolean)
 (schema/register! ::state
   [:map
    [::status ::status]
@@ -35,7 +36,7 @@
    a second counter or durable program identity."
   {:malli/schema [:=> [:cat] ::state]}
   []
-  @!state)
+  (select-keys @!state [::status ::generation ::reason]))
 
 (defn available?
   "True only after the process has verified one committed generation."
@@ -79,8 +80,11 @@
           !state
           (fn [{::keys [status] :as current}]
             (if (#{:starting :available} status)
-              {::status :publishing
-               ::generation (::generation current)}
+              (cond->
+                {::status :publishing
+                 ::previous-projection (schema/current-projection)}
+                (some? (::generation current))
+                (assoc ::generation (::generation current)))
               current)))]
     (and (not= before after)
          (= :publishing (::status after)))))
@@ -196,7 +200,7 @@
                    (begin-publication!))]
     (if-not owned?
       (assoc (unavailable) ::published? false ::recovered? false)
-      (let [old-projection (schema/current-projection)]
+      (let [old-projection (::previous-projection @!state)]
         (try
           (let [{::keys [generation instrumentation]}
                 (reconcile-committed! @db/*conn* old-projection)]
@@ -232,3 +236,58 @@
                    ::generation generation
                    :seon/error
                    (:seon/error (unavailable))})))))))))
+
+(defn detach!
+  "Close admission and remove the detached database's live projection.
+
+   Reconciles every wrapper owned by the active projection to the empty
+   projection before publishing `:starting`. Repeated calls are idempotent.
+   A failed reconciliation leaves admission unavailable and returns an error;
+   the lifecycle owner must retain the database attachment for retry."
+  {:malli/schema
+   [:=> [:cat]
+    [:map {:closed true}
+     [::detached? :boolean]
+     [::instrumentation {:optional true} :map]
+     [:seon/error {:optional true} :map]]]}
+  []
+  (let [[before after]
+        (swap-vals!
+          !state
+          (fn [{::keys [status] :as current}]
+            (if (= :publishing status)
+              current
+              {::status :publishing
+               ::previous-projection (schema/current-projection)})))
+        acquired? (and (not= before after)
+                       (= :publishing (::status after)))]
+    (if-not acquired?
+      {::detached? false
+       :seon/error
+       (error/->map
+         (ex-info "Runtime publication is already in progress."
+                  {::status (::status before)}))}
+      (let [old-projection (::previous-projection after)
+            empty-projection (schema/build-projection {})]
+        (try
+          (let [instrumentation
+                (instrument/reconcile-projection!
+                  {::instrument/old-projection old-projection
+                   ::instrument/new-projection empty-projection})]
+            (when (false? (::instrument/ok? instrumentation))
+              (throw
+                (ex-info
+                  "Detached projection failed complete wrapper removal"
+                  {:seon.instrument/stats instrumentation})))
+            (schema/activate-projection! empty-projection)
+            (reset! !state {::status :starting})
+            {::detached? true
+             ::instrumentation instrumentation})
+          (catch :default detach-error
+            (mark-unavailable!
+              {:seon.error/raw detach-error
+               ::reason
+               (str "Runtime projection detach failed: "
+                    (or (.-message detach-error) (str detach-error)))})
+            {::detached? false
+             :seon/error (error/->map detach-error)}))))))

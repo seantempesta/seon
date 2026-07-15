@@ -9,26 +9,49 @@ tags: [issue, agent, database, schema]
 
 ## Problem
 
-The process-global activated Malli program projection can survive replacement
-of the ambient Datahike connection. A later eval against a fresh database then
-combines that database's declarations with schema state activated for an older
-connection and records `:malli.core/invalid-schema` as a core fault. This makes
-database attachment replacement and branch-local validation unsafe even when
-the new connection itself is valid.
+The process-global activated Malli program projection and wrappers survive
+release of their owning Datahike attachment. Cold replay activates attachment
+B's projection before publication reads the old projection, so reconciliation
+sees B→B and cannot remove wrappers owned only by A. Stop also releases the
+connection without first closing admission or emptying the active projection.
 
 ## Evidence
 
-The complete changed-test artifact repeatedly fails
-`seon.agent.turn-capture-test/current-ns-persists-across-turns` only after prior
-test namespaces have run in the same Node process. Turn two successfully
-records `(defn tmv ...)` in `:probe.tc.move`, proving the derived namespace
-cursor is correct, then records `SEON-CORE-FAULT :malli.core/invalid-schema`
-before `(tmv 2)` can produce an eval row. The retained logs are
-`tmp/test-cljs-20260715-001900-70617.log` and
-`tmp/test-changed/changed-pod-1784092522967-f4c12814-3e38-4895-9bcd-6c81c870fc35.log`.
-Both show the same fault immediately between the second turn's open and done
-events. The test passes in isolation, so its fresh in-memory database is not
-independently malformed.
+The original ordering inference was false. A fresh isolated selector also
+failed in `tmp/test-cljs-20260715-012630-98568.log`: turn two recorded the same
+`:malli.core/invalid-schema` fault and omitted the `(tmv 2)` eval row. That
+fixture persisted `my.*` function contracts but filtered out every canonical
+`:seon.schema` declaration, so its database was independently incomplete.
+Keeping the complete schema declaration population makes the isolated test
+pass and separates that fixture defect from the real attachment transition.
+`tmp/test-cljs-20260715-014326-55059.log` retains the corrected proof: admission
+detach/publication, the original current-namespace case, the contaminant-first
+A→B case, and a fresh database opened after detach ran as 14 tests with 77
+assertions and zero failures or errors. The client lifecycle integration gate
+`tmp/test-cljs-20260715-014121-48771.log` additionally proves detach ordering
+with runtime lifecycle and instrumentation coverage (36 tests, 312 assertions,
+zero failures or errors).
+
+The actual lifecycle loss is source-visible: `start-runtime!` begins
+publication, `replay-program-graph!` directly activates B, and only then
+`publish-committed!` reads `schema/current-projection`. `stop-runtime!` releases
+the Datahike connection while the admission generation, projection, and
+wrappers remain live. Exact maintained Datahike source in
+`reference-code/datahike/src/datahike/connections.cljc` and
+`connector.cljc` confirms `release` drains and invalidates the connection; it
+does not own Seon's process-local Malli state.
+
+## Dependency ledger
+
+- Datahike fork `6f90b339768b1a02066dce3b6fcc93a200758fcc`:
+  `connections.cljc`, `connector.cljc`, and `writing.cljc` define reference
+  release, connection invalidation, and the release-before-delete boundary.
+- Malli `0.20.0` at `4c054bd7d042e70d60b83b9f07fb765bc103037f`:
+  `reference-code/malli/src/malli/instrument.cljs` owns live wrapper surgery;
+  Seon's exact-data reconciliation completes its removal state.
+- First-party owners: `seon.runtime.admission` publishes verified projections,
+  `seon.schema` holds the one collector/projection state, `seon.instrument`
+  reconciles wrappers, and `seon.client` orders replay and attachment release.
 
 This contradicts the runtime-reliability roadmap's retained claim that the
 process-global projection contamination was fully repaired. It also blocks an
@@ -37,21 +60,23 @@ attachment without inheriting another attachment's activated schema state.
 
 ## Owner
 
-The one schema declaration collector and activated immutable program
-projection across `seon.schema`, `seon.instrument`, runtime publication, and
-database connection release/adoption. Connection replacement must either
-activate the complete projection derived for the new database or retain no
-projection; it must never reuse a projection owned by a different database
-coordinate.
+`seon.runtime.admission` owns projection publication/detachment and retains the
+pre-replay generation inside its existing state. `seon.client` must invoke that
+one detach operation before releasing the connection. The declaration fixture
+must persist dependency-complete canonical facts.
 
 ## Acceptance
 
-- A focused contaminant-first test activates an incompatible projection on
-  connection A, replaces the ambient connection with fresh connection B, and
-  successfully defines and calls a function on B without a schema fault.
-- Stop/start and failed-start cleanup remove or replace every projection and
-  wrapper owned by the released attachment; no second registry or connection
-  identity atom is introduced.
+- Publication captures A before replay activates B, then reconciles A→B rather
+  than B→B.
+- Detach reconciles active→empty, activates empty only after verification,
+  closes admission, and is idempotent. Failure returns data, leaves the old
+  projection retryable, and never claims successful detach.
+- The client stop boundary completes detach before Datahike release; failed
+  detach retains cleanup authority and the connection for retry.
+- A focused contaminant-first test activates an incompatible projection A,
+  attaches fresh dependency-complete B, and successfully defines and calls a
+  function on B without a schema fault.
 - The original `current-ns-persists-across-turns` test passes both alone and in
   its complete-suite order, and its two expected eval rows name
   `:probe.tc.move`.

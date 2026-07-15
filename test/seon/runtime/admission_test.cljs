@@ -1,6 +1,7 @@
 (ns seon.runtime.admission-test
   (:require
     [cljs.test :refer [async deftest is use-fixtures]]
+    [datahike.api :as d]
     [seon.agent :as agent]
     [seon.agent.lifecycle :as lifecycle]
     [seon.agent.loop :as loop]
@@ -8,6 +9,7 @@
     [seon.agent.run :as run]
     [seon.agent.runtime :as runtime]
     [seon.agent.schedule :as schedule]
+    [seon.client :as client]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.error :as error]
@@ -24,9 +26,16 @@
           {::admission/status :available
            ::admission/generation 0}))
 
+(defonce ^:private !schema-state-before (atom nil))
+
 (use-fixtures :each
-  {:before reset-admission!
-   :after restore-test-admission!})
+  {:before (fn []
+             (reset! !schema-state-before (schema/snapshot-state))
+             (reset-admission!))
+   :after (fn []
+            (schema/restore-state! @!schema-state-before)
+            (schema/relink-registry!)
+            (restore-test-admission!))})
 
 (deftest publication-state-has-one-owner-and-one-fault
   (let [!recorded (atom [])]
@@ -79,6 +88,106 @@
         (is (= 42 (::admission/generation (admission/state))))
         (is (admission/available?))
         (is (= 42 (:seon.schema.projection/fingerprint @!activated)))))))
+
+(deftest publication-reconciles-from-the-projection-captured-before-replay
+  (let [projection-a {:seon.schema.projection/fingerprint 1
+                      :seon.schema.projection/function-contracts {}}
+        projection-b {:seon.schema.projection/fingerprint 2
+                      :seon.schema.projection/function-contracts {}}
+        !active (atom projection-a)
+        !reconciliations (atom [])]
+    (with-redefs [db/*conn* (atom ::database-b)
+                  admission/committed-projection (constantly projection-b)
+                  schema/current-projection #(deref !active)
+                  schema/activate-projection! #(reset! !active %)
+                  instrument/reconcile-projection!
+                  (fn [request]
+                    (swap! !reconciliations conj request)
+                    {::instrument/ok? true})]
+      (is (true? (admission/begin-publication!))
+          "publication captures attachment A before replay")
+      (reset! !active projection-b)
+      (let [result (admission/publish-committed!)]
+        (is (true? (::admission/published? result)))
+        (is (= [{::instrument/old-projection projection-a
+                 ::instrument/new-projection projection-b}]
+               @!reconciliations)
+            "publication removes A wrappers after replay activates B")
+        (is (identical? projection-b @!active))
+        (is (= 2 (::admission/generation (admission/state))))))))
+
+(deftest detach-removes-the-active-projection-and-is-idempotent
+  (let [projection-a {:seon.schema.projection/fingerprint 1
+                      :seon.schema.projection/function-contracts {}}
+        !active (atom projection-a)
+        !reconciliations (atom [])]
+    (restore-test-admission!)
+    (with-redefs [schema/current-projection #(deref !active)
+                  schema/activate-projection! #(reset! !active %)
+                  instrument/reconcile-projection!
+                  (fn [request]
+                    (swap! !reconciliations conj request)
+                    {::instrument/ok? true})]
+      (let [first-result (admission/detach!)
+            second-result (admission/detach!)]
+        (is (true? (::admission/detached? first-result)))
+        (is (true? (::admission/detached? second-result)))
+        (let [[first-reconcile second-reconcile] @!reconciliations
+              first-empty (::instrument/new-projection first-reconcile)
+              second-empty (::instrument/new-projection second-reconcile)]
+          (is (identical? projection-a
+                          (::instrument/old-projection first-reconcile)))
+          (is (= {} (:seon.schema.projection/forms first-empty)))
+          (is (identical? first-empty
+                          (::instrument/old-projection second-reconcile))
+              "the repeated detach starts from the activated empty projection")
+          (is (= {} (:seon.schema.projection/forms second-empty)))
+          (is (identical? second-empty @!active)))
+        (is (= {::admission/status :starting} (admission/state)))))))
+
+(deftest failed-detach-keeps-the-old-projection-retryable
+  (let [projection-a {:seon.schema.projection/fingerprint 1
+                      :seon.schema.projection/function-contracts {}}
+        !active (atom projection-a)
+        !attempts (atom 0)
+        !accepted-empty (atom nil)
+        !recorded (atom [])]
+    (restore-test-admission!)
+    (with-redefs [schema/current-projection #(deref !active)
+                  schema/activate-projection! #(reset! !active %)
+                  instrument/reconcile-projection!
+                  (fn [request]
+                    (if (= 1 (swap! !attempts inc))
+                      {::instrument/ok? false
+                       ::instrument/verification-gaps
+                       [{::instrument/sym 'probe.attach/stale}]}
+                      (do
+                        (reset! !accepted-empty
+                                (::instrument/new-projection request))
+                        {::instrument/ok? true})))
+                  error/record! #(swap! !recorded conj %)]
+      (let [first-result (admission/detach!)]
+        (is (false? (::admission/detached? first-result)))
+        (is (map? (:seon/error first-result)))
+        (is (= :unavailable (::admission/status (admission/state))))
+        (is (identical? projection-a @!active)
+            "failed detach never activates the empty projection")
+        (let [retry-result (admission/detach!)]
+          (is (true? (::admission/detached? retry-result))
+              "the retained old projection can be detached on retry")
+          (is (identical? @!accepted-empty @!active))
+          (is (= :starting (::admission/status (admission/state)))))
+        (is (= 1 (count @!recorded))
+            "one failed detach occurrence records one core fault")))))
+
+(deftest fresh-database-opens-after-detach-regressions
+  (async done
+    (-> (client/open-agent-conn!)
+        (.then (fn [conn] (d/release conn)))
+        (.then (fn [_] (is true) (done)))
+        (.catch (fn [error]
+                  (is false (str "fresh database failed after detach: " error))
+                  (done))))))
 
 (deftest failed-publication-retries-once-and-records-once
   (let [!attempts (atom 0)

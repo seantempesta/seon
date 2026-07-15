@@ -50,6 +50,17 @@ compiler, self-host, Shadow bootstrap, and Malli accessor boundaries. Async
 implementation is complete in `seon.instrument`, including completion of
 Malli's stale in-place unstrument marker cleanup.
 
+Runtime publication now retains the pre-replay projection in the one admission
+state, so replay may activate attachment B without losing the A wrappers that
+must be removed during committed reconciliation. The same owner exposes one
+idempotent detach transition from active to empty; the client lifecycle must
+complete it before releasing the database connection. Hermetic agent fixtures
+persist the complete canonical schema declarations alongside stored function
+contracts instead of relying on module-load registry state.
+Focused admission plus original/contaminant-first turn proof is retained in
+`tmp/test-cljs-20260715-014326-55059.log` (14 tests, 77 assertions, zero
+failures or errors).
+
 ## Research evidence
 
 - [[research/agent-runtime-source-audit-2026-07-14]] — dependency ledger,

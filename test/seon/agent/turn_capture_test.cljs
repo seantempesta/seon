@@ -38,7 +38,9 @@
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
     [seon.eval :as seval]
+    [seon.instrument :as instrument]
     [seon.repl :as repl]
+    [seon.schema :as schema]
     [seon.test-seed :as test-seed]))
 
 ;; ---------------------------------------------------------------------------
@@ -337,43 +339,86 @@
 ;;    (evals/runs/2026-07-10-minimal-buildup, ds-r1-ns-probe-d1).
 ;; ---------------------------------------------------------------------------
 
+(defn- ^:async assert-current-ns-persists! []
+  (let [a   (await (fresh-agent!))
+        aid (:seon.agent/id a)
+        ;; a REAL run: ctx/current-ns derives over agent->runs->turns,
+        ;; so runless turns are invisible to it — the live loop always
+        ;; drives under a run, and this pin must too.
+        r   (await (run/open-run! {:seon.agent/id aid
+                                   :seon.agent.run/trigger :message}))
+        rid (:seon.agent.run/id r)
+        drive! (fn ^:async drive! [reply]
+                 (await (db/with-agent aid
+                          (fn []
+                            (turn/run-turn!
+                              {:seon.agent/id            aid
+                               :seon.agent/llm-fn
+                               (fn [_]
+                                 (js/Promise.resolve {:text reply}))
+                               :seon.agent/compile-state
+                               (:seon.agent/compile-state a)
+                               :seon.agent.run/id        rid})))))]
+    (await (drive! "(in-ns 'probe.tc.move)\n"))
+    (await (drive! "(defn tmv [x] (* x 3))\n(tmv 2)\n"))
+    (let [db*  @db/*conn*
+          rows (->> (db/query {:seon.db/db db*
+                               :seon.db/query
+                               '[:find ?e ?src ?ns ?ok
+                                 :where
+                                 [?e :seon.eval/source ?src]
+                                 [?e :seon.eval/ns ?ns]
+                                 [?e :seon.eval/ok? ?ok]]})
+                    (sort-by first))
+          defn-row (first (filter #(str/includes? (second %) "defn tmv") rows))
+          call-row (first (filter #(= "(tmv 2)" (second %)) rows))]
+      (is (some? defn-row) "the defn eval recorded")
+      (is (= :probe.tc.move (nth defn-row 2))
+          "turn N+1's defn ran in the ns turn N moved to — not home")
+      (is (true? (nth call-row 3)) "the same-ns call resolves")
+      (is (= :probe.tc.move (nth call-row 2))))))
+
 (deftest current-ns-persists-across-turns
   (async done
-    (run-test
-      (fn ^:async run []
-        (let [a   (await (fresh-agent!))
-              aid (:seon.agent/id a)
-              ;; a REAL run: ctx/current-ns derives over agent->runs->turns,
-              ;; so runless turns are invisible to it — the live loop always
-              ;; drives under a run, and this pin must too.
-              r   (await (run/open-run! {:seon.agent/id aid
-                                         :seon.agent.run/trigger :message}))
-              rid (:seon.agent.run/id r)
-              drive! (fn ^:async drive! [reply]
-                       (await (db/with-agent aid
-                                (fn []
-                                  (turn/run-turn!
-                                    {:seon.agent/id            aid
-                                     :seon.agent/llm-fn        (fn [_] (js/Promise.resolve {:text reply}))
-                                     :seon.agent/compile-state (:seon.agent/compile-state a)
-                                     :seon.agent.run/id        rid})))))]
-          (await (drive! "(in-ns 'probe.tc.move)\n"))
-          (await (drive! "(defn tmv [x] (* x 3))\n(tmv 2)\n"))
-          (let [db*  @db/*conn*
-                rows (->> (db/query {:seon.db/db db*
-                                     :seon.db/query
-                                     '[:find ?e ?src ?ns ?ok
-                                       :where
-                                       [?e :seon.eval/source ?src]
-                                       [?e :seon.eval/ns ?ns]
-                                       [?e :seon.eval/ok? ?ok]]})
-                          (sort-by first))
-                defn-row (first (filter #(str/includes? (second %) "defn tmv") rows))
-                call-row (first (filter #(= "(tmv 2)" (second %)) rows))]
-            (is (some? defn-row) "the defn eval recorded")
-            (is (= :probe.tc.move (nth defn-row 2))
-                "turn N+1's defn ran in the ns turn N moved to — not home")
-            (is (true? (nth call-row 3)) "the same-ns call resolves")
-            (is (= :probe.tc.move (nth call-row 2)))))
-        nil)
-      done)))
+    (run-test assert-current-ns-persists! done)))
+
+(deftest current-ns-survives-a-projection-from-an-older-attachment
+  (async done
+    (let [before-state (schema/snapshot-state)
+          before-projection (:seon.schema.state/projection before-state)
+          contaminant :probe.attachment/value
+          contracts (or (:seon.schema.projection/function-contracts
+                          (schema/current-projection))
+                        {})
+          projection-a
+          (schema/build-projection
+            (assoc (schema/snapshot) contaminant :int)
+            contracts)]
+      (schema/activate-projection! projection-a)
+      (-> (with-conn assert-current-ns-persists!)
+          (.then
+            (fn [_]
+              (is (not (contains?
+                         (:seon.schema.projection/forms
+                           (schema/current-projection))
+                         contaminant))
+                  "fresh attachment B replaces A's schema population")))
+          (.finally
+            (fn []
+              (let [restored-projection
+                    (or before-projection (schema/build-projection {}))
+                    stats
+                    (instrument/reconcile-projection!
+                      {::instrument/old-projection
+                       (schema/current-projection)
+                       ::instrument/new-projection restored-projection})]
+                (when (false? (::instrument/ok? stats))
+                  (throw
+                    (ex-info "Failed to restore prior test projection"
+                             {:seon.instrument/stats stats}))))
+              (schema/restore-state! before-state)
+              (schema/relink-registry!)))
+          (.then (fn [_] (done)))
+          (.catch (fn [e]
+                    (is false (str "contaminant-first run threw — " e))
+                    (done)))))))

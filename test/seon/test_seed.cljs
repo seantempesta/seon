@@ -11,21 +11,25 @@
    pod's boot indexer stores. [[my-core-rows]] is the `my.*` slice of
    `seon.client/index-core!` (the ONE indexer — no hand-written rows to
    drift), memoized once per test process (index-core! reads source
-   files; per-store recomputation would slow the suite)."
+   files; per-store recomputation would slow the suite). The slice retains the
+   complete canonical schema declaration population because persisted
+   function contracts are invalid without the schemas they reference."
   (:require
     [clojure.string :as str]
     [seon.client :as client]))
 
 (def ^:private !my-core-rows
   (delay
-    (filterv (fn [row]
-               (let [s (or (:seon.fn/sym row)
-                           (some-> (:seon.ns/name row) name))]
-                 (and s (str/starts-with? (str s) "my."))))
-             (client/index-core!))))
+    (into
+      (filterv (fn [row]
+                 (let [s (or (:seon.fn/sym row)
+                             (some-> (:seon.ns/name row) name))]
+                   (and s (str/starts-with? (str s) "my."))))
+               (client/index-core!))
+      (client/index-schemas))))
 
 (defn my-core-rows
-  "The boot indexer's `my.*` `:seon.ns`/`:seon.fn` rows (memoized)."
+  "The boot indexer's `my.*` rows and canonical schema facts."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   @!my-core-rows)
