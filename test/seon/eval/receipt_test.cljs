@@ -5,10 +5,14 @@
     [datahike.api :as d]
     [malli.core :as m]
     [seon.agent]
+    [seon.agent.home :as home]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.eval :as seval]
-    [seon.eval.internal :as receipt]))
+    [seon.eval.internal :as receipt]
+    [seon.repl :as repl]
+    [seon.repl.internal :as repl.internal]))
 
 (def ^:private start
   {:seon.agent.turn/id "TRNreceipt0001"
@@ -35,6 +39,16 @@
                     (-> (js/Promise.resolve (body conn))
                         (.finally
                           (fn [] (set! db/*conn* previous))))))))))))
+
+(defn- with-allocation-stub
+  [body]
+  (let [original db.id/allocate!]
+    (try
+      (-> (js/Promise.resolve (body original))
+          (.finally (fn [] (set! db.id/allocate! original))))
+      (catch :default error
+        (set! db.id/allocate! original)
+        (js/Promise.reject error)))))
 
 (deftest receipt-schemas-are-closed-and-terminal-states-are-bounded
   (is (m/validate ::receipt/start-request start))
@@ -222,6 +236,93 @@
               (is (= :interrupted (:seon.eval/status late)))
               (is (= :interrupted (:seon.eval/status row)))
               (is (not (contains? row :seon.eval/result-edn))))))
+        (.then (fn [_] (done)))
+        (.catch
+          (fn [error]
+            (is false (str "threw — " error))
+            (done))))))
+
+(deftest failed-start-allocation-never-executes-and-next-form-gets-a-receipt
+  (async done
+    (-> (with-conn
+          (fn ^:async exercise [conn]
+            (let [fixture
+                  (await
+                    (db.id/allocate!
+                      {::db.id/allocations
+                       [{::db.id/key ::fixture-agent
+                         ::db.id/identity-attr :seon.agent/id}
+                        {::db.id/key ::fixture-turn
+                         ::db.id/identity-attr :seon.agent.turn/id}]
+                       ::db.id/transaction-builder
+                       (fn [ids]
+                         {:seon.db/tx-data
+                          [{:seon.agent/id (::fixture-agent ids)}
+                           {:seon.agent.turn/id (::fixture-turn ids)
+                            :seon.agent.turn/at (js/Date.)
+                            :seon.agent.turn/status :running}]})
+                       :seon.db/conn conn}))
+                  agent-id (get-in fixture [::db.id/ids ::fixture-agent])
+                  turn-id (get-in fixture [::db.id/ids ::fixture-turn])
+                  compile-state (await (repl/ensure-bootstrap!))
+                  agent-ns (home/home-ns agent-id)
+                  _ (await (seval/setup-agent-ns!
+                             compile-state agent-ns agent-id))
+                  _ (set! (.-receiptStartFailed js/globalThis) false)
+                  _ (set! (.-receiptSecondRan js/globalThis) false)
+                  failure-count (atom 0)
+                  source
+                  (str "(set! (.-receiptStartFailed js/globalThis) true)\n"
+                       "(set! (.-receiptSecondRan js/globalThis) true)")
+                  batch
+                  (await
+                    (with-allocation-stub
+                      (fn [original]
+                        (let [stub
+                              (fn [request]
+                                (if (and (zero? @failure-count)
+                                         (= :seon.eval/eval-allocation
+                                            (get-in request
+                                                    [::db.id/allocations 0
+                                                     ::db.id/key])))
+                                  (do
+                                    (swap! failure-count inc)
+                                    (js/Promise.resolve
+                                      {:seon.db/ok? false
+                                       :seon.db/error
+                                       {:seon.error/kind :core-bug
+                                        :seon.error/message
+                                        "injected receipt allocation failure"}}))
+                                  (original request)))]
+                          (set! db.id/allocate! stub)
+                          (db/with-agent
+                            agent-id
+                            #(seval/eval-batch!
+                               compile-state
+                               (repl.internal/parse-forms source)
+                               agent-ns agent-id turn-id nil))))))
+                  eval-ids
+                  (db/query
+                    {:seon.db/db @conn
+                     :seon.db/query
+                     '[:find [?id ...] :where [_ :seon.eval/id ?id]]})
+                  eval-row (db/entity
+                             {:seon.db/ref
+                              [:seon.eval/id (first (:seon.eval/ids batch))]})]
+              (is (= 1 @failure-count)
+                  "the first receipt allocation failed exactly once")
+              (is (false? (.-receiptStartFailed js/globalThis))
+                  "the failed form's observable side effect never ran")
+              (is (true? (.-receiptSecondRan js/globalThis))
+                  "the independent later form executed normally")
+              (is (= 1 (:seon.eval/n-fail batch)))
+              (is (= 1 (:seon.eval/n-ok batch)))
+              (is (= 1 (count (:seon.eval/ids batch))))
+              (is (= (:seon.eval/ids batch) eval-ids)
+                  "no eval or result identity exists for the failed start")
+              (is (= :done (:seon.eval/status eval-row)))
+              (is (= "(set! (.-receiptSecondRan js/globalThis) true)"
+                     (:seon.eval/source eval-row))))))
         (.then (fn [_] (done)))
         (.catch
           (fn [error]
