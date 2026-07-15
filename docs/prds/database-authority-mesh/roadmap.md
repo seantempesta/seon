@@ -79,7 +79,8 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `9ada755087228e10cfb179fa5779ce227a6ed220`:
+- Datahike `999e26a2` (graduated Unit 1 atop
+  `9ada755087228e10cfb179fa5779ce227a6ed220`):
   `db.cljc`, `connections.cljc`, `connector.cljc`, `core.cljc`,
   `writing.cljc`, `writer.cljc`, `query.cljc`, `resource.cljc`,
   `pull_api.cljc`, and `api/specification.cljc`.
@@ -102,7 +103,7 @@ Detailed evidence and falsifiers live in
 
 ## Ordered implementation spine
 
-### Unit 1 — exact committed Datahike cache identity
+### Unit 1 — exact committed Datahike cache identity — graduated
 
 Add connection generation to the existing registry, process-local committed
 cache context to raw `DB`, committed identity lookup, and generation-scoped
@@ -117,6 +118,17 @@ Exit proof:
 - only attached committed raw values cache;
 - dependency invalidation and weighted bounds remain green; and
 - final release retains no cache/index/connection reference for its generation.
+
+Graduated evidence: Datahike `999e26a2` includes exact implementation and
+retained proofs. The focused CLJ gate passes 111 tests and 390 assertions across
+PSS, HHT, and spec configurations. It deterministically covers forced legacy
+identity collision, two stores, same-commit sibling branches, config mismatch,
+writer-batch attribute union and unknown-change fallback, speculative/temporal
+exclusion, stale close, reconnect, weighted bookkeeping, release drain/failure,
+and late-put resurrection. The maintained Node CLJS gate passes 107 tests and
+838 assertions, including a native Promise lifecycle fixture for committed
+identity, propagation behavior, release eviction, reconnect generation, and
+stale cleanup.
 
 ### Unit 2 — Datahike single-flight and cancellation
 
@@ -283,11 +295,13 @@ protocol and database APIs do not change.
 The implementation is ordered by semantic dependency, while independent proof
 and consumer inventory may run in parallel:
 
-- Spine: Unit 1 exact identity, then Unit 2 single-flight.
-- Slot 2 after Unit 1 contract: Unit 3 capability fixtures and protocol schemas.
-- Slot 3 now: classify remote read consumers and design execute-many batches
-  without editing the unsettled database mechanism.
-- Slot 4 now: retain transport fragmentation/backpressure and heavy-class
+- Spine: Unit 2 Datahike single-flight and cancellation.
+- Slot 2: Unit 3 capability fixture and protocol-schema design against the
+  settled exact-identity contract, without implementing the unsettled Unit 2
+  coordinator.
+- Slot 3: convert the completed remote-consumer classification into retained
+  execute-many request fixtures without editing the database mechanism.
+- Slot 4: retain transport fragmentation/backpressure and heavy-class
   adversarial fixtures against the settled data envelopes.
 
 After each unit, integrate its retained proof before refilling. A build/restart
@@ -295,12 +309,15 @@ checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
 
 ## Current boundary and final graduation gate
 
-Earliest unsettled implementation contract: Unit 1 exact committed Datahike
-identity and generation-scoped release.
+Earliest unsettled implementation contract: Unit 2 identical-query
+single-flight, waiter cancellation, bounded admission, and exact-generation
+cleanup inside Datahike.
 
 Integrated proof that closes it:
-[[research/exact-value-identity-proof-2026-07-15]] plus retained Datahike
-collision/store/branch/reconnect/release tests and cache measurements.
+[[research/single-flight-proof-2026-07-15]] plus retained identical/different
+key-value-database contention, waiter cancellation, failure/retry, reentrancy,
+overflow, propagation, release, and shutdown tests with zero retained in-flight
+state.
 
 Final graduation requires all ten units, deletion of the replica/feed/Node
 transport mechanisms, clean protocol conformance, real browser and agent
