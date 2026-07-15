@@ -148,6 +148,12 @@
                     (when (= effect value) index))
                   effects)))
 
+(defn- last-effect-index [effects effect]
+  (last
+    (keep-indexed (fn [index value]
+                    (when (= effect value) index))
+                  effects)))
+
 (defn- with-start-stubs
   "Run `body` while retaining async-safe runtime launch stubs."
   ([publication body]
@@ -182,6 +188,7 @@
         original-record db.restore/record!
         original-readiness db.restore/readiness
         original-replica-attach replica/attach!
+        original-replica-status replica/status
         original-resume agent/resume!
         original-web-start web.serve/start!
         original-ai-sync ai/sync!
@@ -279,8 +286,9 @@
             (swap! effects conj :publication-finish)
             publication))
     (set! admission/prepare-committed!
-          (fn []
+          (fn [request]
             (swap! effects conj :restore/prepare)
+            (swap! effects conj [:restore/prepare-request request])
             preparation))
     (set! admission/admit-prepared!
           (fn [actual]
@@ -302,6 +310,7 @@
                ::db.restore/completion-coordinate completion-coordinate})))
     (set! db.restore/readiness
           (fn [{::db.restore/keys [completion completion-coordinate]}]
+            (swap! effects conj :restore/readiness)
             {::db.restore/ready? true
              ::db.restore/executable? false
              ::db.restore/completion completion
@@ -310,6 +319,8 @@
           (fn [_]
             (swap! effects conj :replica)
             (promise-value {})))
+    (set! replica/status
+          (fn [] {::replica/connected? true}))
     (set! agent/resume!
           (fn [_]
             (swap! effects conj :forbidden/host)
@@ -366,6 +377,7 @@
            (set! db.restore/record! original-record)
            (set! db.restore/readiness original-readiness)
            (set! replica/attach! original-replica-attach)
+           (set! replica/status original-replica-status)
            (set! agent/resume! original-resume)
            (set! web.serve/start! original-web-start)
            (set! ai/sync! original-ai-sync)
@@ -543,6 +555,13 @@
                         (is (= :restore/prepare
                                (nth events
                                     (effect-index events :restore/prepare))))
+                        (is (= {::admission/record-failures? false}
+                               (->> events
+                                    (filter #(and (vector? %)
+                                                  (= :restore/prepare-request
+                                                     (first %))))
+                                    first second))
+                            "restore preparation never records disposable faults")
                         (is (< (effect-index events :publication-begin)
                                (effect-index events :restore/prepare)
                                (effect-index events completion-event)
@@ -582,11 +601,56 @@
                       (is (= 2 (count (filter #(and (vector? %)
                                                     (= :web (first %)))
                                              @effects)))
-                          "attached refresh reproves the same readiness door"))))))
+                          "attached refresh reproves the same readiness door")
+                      (is (< (last-effect-index @effects :replica)
+                             (last-effect-index @effects :restore/readiness))
+                          "attached refresh catches up before validating C"))))))
           (.then (fn [_] (done)))
           (.catch
             (fn [error]
               (is false (str "restore composition threw " error))
+              (done)))))))
+
+(deftest restore-attached-refresh-refuses-a-reconnecting-replica
+  (async done
+    (let [{descriptor :seon.client.test/descriptor}
+          (restore-launch-fixture)]
+      (-> (with-start-stubs
+            {::admission/published? true ::admission/instrumentation {}}
+            descriptor
+            (fn [effects]
+              (-> (client/start-runtime!
+                    {::client/launch-capability non-autonomous-capability})
+                  (.then
+                    (fn [_]
+                      (set! replica/status
+                            (fn [] {::replica/connected? false
+                                    ::replica/phase ::replica/reconnecting}))
+                      (client/start-runtime!
+                        {::client/launch-capability
+                         non-autonomous-capability})))
+                  (.then
+                    (fn [_]
+                      (throw (js/Error. "reconnecting restore refresh passed"))))
+                  (.catch
+                    (fn [error]
+                      (is (re-find #"caught-up transaction feed"
+                                   (or (.-message error) (str error))))
+                      (is (= 1 (count (filter #(and (vector? %)
+                                                    (= :restore/completion
+                                                       (first %)))
+                                             @effects)))
+                          "refresh never records another completion")
+                      (is (= 1 (count (filter #(and (vector? %)
+                                                    (= :web (first %)))
+                                             @effects)))
+                          "refresh refuses before reopening the readiness door")
+                      (is (= 1 (count (filter #{:restore/readiness} @effects)))
+                          "refresh refuses before canonical readiness"))))))
+          (.then (fn [_] (done)))
+          (.catch
+            (fn [error]
+              (is false (str "reconnecting replica proof threw " error))
               (done)))))))
 
 (deftest restore-startup-mismatches-fail-before-writes-or-autonomy
@@ -824,7 +888,8 @@
            {::client/launch-capability non-autonomous-capability})
           (.then
            (fn [result]
-             (is (= [:status :replica :web] @effects))
+             (is (= [:replica :status :web] @effects)
+                 "attached refresh catches up before reading resumable agents")
              (is (= [] (::client/resumed-ids result)))
              (is (= :seon.client.runtime/running
                     ((deref #'client/runtime-phase))))))

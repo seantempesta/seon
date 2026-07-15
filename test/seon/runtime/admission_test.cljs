@@ -123,7 +123,7 @@
                     projection)
                   instrument/reconcile-projection!
                   (constantly {::instrument/ok? true})]
-      (let [preparation (admission/prepare-committed!)]
+      (let [preparation (admission/prepare-committed! {})]
         (is (true? (::admission/prepared? preparation)))
         (is (= :publishing (::admission/status (admission/state))))
         (is (false? (admission/available?))
@@ -260,6 +260,24 @@
           (is (= 2 @!attempts))
           (is (= 1 (count @!recorded)))
           (is (admission/available?)))))))
+
+(deftest closed-preparation-can-retry-without-recording-a-fault
+  (let [!attempts (atom 0)
+        !recorded (atom [])]
+    (with-publication-seams
+      (fn [_]
+        (swap! !attempts inc)
+        (throw (js/Error. "restore preparation failure")))
+      #(swap! !recorded conj %)
+      (fn []
+        (let [result
+              (admission/prepare-committed!
+                {::admission/record-failures? false})]
+          (is (false? (::admission/prepared? result)))
+          (is (= 2 @!attempts) "the existing repair attempt remains intact")
+          (is (empty? @!recorded)
+              "a disposable restore projection failure writes no core fact")
+          (is (= :unavailable (::admission/status (admission/state)))))))))
 
 (deftest deterministic-repair-failure-stays-unavailable
   (let [!attempts (atom 0)

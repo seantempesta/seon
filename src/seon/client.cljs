@@ -2607,6 +2607,18 @@
             {::launch/descriptor descriptor}))]
     (if attached?
       (let [conn db/*conn*
+            _ (await (replica/attach!
+                       {::replica/conn conn
+                        ::launch/descriptor
+                        replica/process-launch-descriptor}))
+            _ (when (and restore-startup
+                         (not (true? (::replica/connected?
+                                       (replica/status)))))
+                (throw
+                  (ex-info
+                    "Restore refresh requires a caught-up transaction feed."
+                    {:seon.db.replica/status (replica/status)
+                     :seon.error/kind :core-bug})))
             restore-completion-result
             (when restore-startup
               (validate-restore-completion!
@@ -2618,9 +2630,6 @@
             primary (or (first (remove #{"root"} available-ids))
                         (first available-ids)
                         "root")
-            _ (await (replica/attach!
-                      {::replica/conn conn
-                       ::launch/descriptor replica/process-launch-descriptor}))
             {:seon.web/keys [port port-file]}
             (await
               (web.serve/start!
@@ -2741,7 +2750,8 @@
                         replay-stats)))
                 preparation
                 (when restore-startup
-                  (admission/prepare-committed!))
+                  (admission/prepare-committed!
+                    {::admission/record-failures? false}))
                 _ (when (and restore-startup
                              (not (::admission/prepared? preparation)))
                     (throw

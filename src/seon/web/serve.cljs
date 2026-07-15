@@ -38,6 +38,7 @@
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
+    [seon.db.replica :as replica]
     [seon.db.restore :as db.restore]
     [seon.derive :as derive]
     [seon.eval :as seval]
@@ -96,30 +97,40 @@
 
 (defn- handle-readiness!
   "Report current executable admission; this can turn false after startup."
-  [restore-completion-result _req res]
-  (let [restore-completion (::db.restore/completion
-                             restore-completion-result)
-        restore-coordinate (::db.restore/completion-coordinate
-                             restore-completion-result)
-        restore-readiness
-        (when (and restore-completion-result (db/attached?))
-          (db.restore/readiness
-           {::db.restore/completion restore-completion
-            ::db.restore/completion-coordinate restore-coordinate
-            :seon.runtime.admission/state (admission/state)
-            :seon.db/db @db/*conn*}))
-        ready? (if restore-readiness
-                 (::db.restore/ready? restore-readiness)
-                 (admission/available?))
-        body (or restore-readiness
-                 (assoc (admission/state)
-                        :seon.runtime.admission/available? ready?
-                        ::db.restore/executable? ready?))]
-    (write-status!
-      res
-      (if ready? 200 503)
-      "application/edn; charset=utf-8"
-      (pr-str body))))
+  ([_req res]
+   (handle-readiness! nil _req res))
+  ([restore-completion-result _req res]
+   (let [restore? (some? restore-completion-result)
+         restore-completion (::db.restore/completion
+                              restore-completion-result)
+         restore-coordinate (::db.restore/completion-coordinate
+                              restore-completion-result)
+         restore-readiness
+         (when (and restore?
+                    (db/attached?)
+                    (true? (::replica/connected? (replica/status))))
+           (db.restore/readiness
+             {::db.restore/completion restore-completion
+              ::db.restore/completion-coordinate restore-coordinate
+              :seon.runtime.admission/state (admission/state)
+              :seon.db/db @db/*conn*}))
+         ordinary-ready? (admission/available?)
+         body (cond
+                restore-readiness restore-readiness
+                restore? {::db.restore/ready? false
+                          ::db.restore/executable? false}
+                :else (assoc (admission/state)
+                             :seon.runtime.admission/available?
+                             ordinary-ready?
+                             ::db.restore/executable? ordinary-ready?))
+         ready? (if restore?
+                  (true? (::db.restore/ready? body))
+                  ordinary-ready?)]
+     (write-status!
+       res
+       (if ready? 200 503)
+       "application/edn; charset=utf-8"
+       (pr-str body)))))
 
 (defn- serve-static! [res url]
   (if-let [[prefix root] (some (fn [[p r]]

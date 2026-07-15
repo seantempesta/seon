@@ -21,6 +21,10 @@
 (schema/register! ::published? :boolean)
 (schema/register! ::recovered? :boolean)
 (schema/register! ::detached? :boolean)
+(schema/register! ::record-failures? :boolean)
+(schema/register! ::prepare-request
+                  [:map {:closed true}
+                   [::record-failures? {:optional true} ::record-failures?]])
 (schema/register! ::state
   [:map
    [::status ::status]
@@ -231,14 +235,14 @@
    verified projection remains hidden behind `:publishing` until
    [[admit-prepared!]] receives this function's exact generation."
   {:malli/schema
-   [:=> [:cat]
+   [:=> [:cat ::prepare-request]
     [:map
      [::prepared? :boolean]
      [::recovered? :boolean]
      [::generation {:optional true} ::generation]
      [::instrumentation {:optional true} :map]
      [:seon/error {:optional true} :map]]]}
-  []
+  [{::keys [record-failures?] :or {record-failures? true}}]
   (let [current @!state
         owned? (or (and (= :publishing (::status current))
                         (not (contains? current ::prepared-generation)))
@@ -263,8 +267,9 @@
             ;; The occurrence is one fault whether reconstruction repairs it
             ;; or the process remains unavailable. Boundary refusals never
             ;; write another row.
-            (error/record!
-              {:seon.error/raw original :seon.error/fault :core})
+            (when record-failures?
+              (error/record!
+                {:seon.error/raw original :seon.error/fault :core}))
             (try
               (let [{::keys [generation instrumentation]}
                     (reconcile-committed! @db/*conn* old-projection)]
@@ -340,7 +345,7 @@
      [::instrumentation {:optional true} :map]
      [:seon/error {:optional true} :map]]]}
   []
-  (admit-prepared! (prepare-committed!)))
+  (admit-prepared! (prepare-committed! {})))
 
 (defn detach!
   "Close admission and remove the detached database's live projection.

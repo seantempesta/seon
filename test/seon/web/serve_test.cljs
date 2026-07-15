@@ -19,9 +19,11 @@
     [seon.db.coordinate :as coordinate]
     [seon.db.id :as db.id]
     [seon.db.process :as process]
+    [seon.db.replica :as replica]
     [seon.db.restore :as restore]
     [seon.eval :as seval]
     [seon.runtime.admission :as admission]
+    [seon.web.router :as router]
     [seon.web.serve :as serve]))
 
 (deftest agent-run-timeout-uses-explicit-value-or-run-policy
@@ -497,10 +499,31 @@
       (finally
         (reset! @#'admission/!state prior)))))
 
+(deftest ordinary-readiness-dispatches-through-the-installed-router
+  (let [prior (admission/state)
+        !response (atom {})
+        request #js {:method "GET" :url "/_seon/ready" :headers #js {}}
+        response #js {:writeHead
+                      (fn [status _headers]
+                        (swap! !response assoc ::status status))
+                      :end
+                      (fn [body]
+                        (swap! !response assoc ::body body))}]
+    (try
+      (reset! @#'admission/!state {::admission/status :available})
+      (router/handle-request request response)
+      (is (= 200 (::status @!response)))
+      (is (true? (::restore/executable?
+                   (reader/read-string (::body @!response))))
+          "the public router calls the compatible two-argument handler")
+      (finally
+        (reset! @#'admission/!state prior)))))
+
 (deftest restore-readiness-serves-only-the-exact-closed-completion-head
   (async done
     (let [prior-admission (admission/state)
           prior-conn db/*conn*
+          prior-replica-status replica/status
           !fresh-conn (atom nil)
           completion-claim
           {::restore/plan-digest (apply str (repeat 64 "a"))
@@ -558,8 +581,20 @@
                    full-completion (::restore/completion recorded)]
                (is (true? (::restore/ok? recorded)) (pr-str recorded))
                (reset! @#'admission/!state {::admission/status :publishing})
+               (set! replica/status
+                     (fn [] {::replica/connected? false
+                             ::replica/phase ::replica/reconnecting}))
+               (let [response (readiness-response recorded)]
+                 (is (= 503 (::status response)))
+                 (is (= {::restore/ready? false
+                         ::restore/executable? false}
+                        (reader/read-string (::body response)))
+                     "reconnecting restore evidence cannot observe readiness"))
+               (set! replica/status
+                     (fn [] {::replica/connected? true
+                             ::replica/phase ::replica/live}))
                (let [response (readiness-response recorded)
-                       body (reader/read-string (::body response))]
+                     body (reader/read-string (::body response))]
                    (is (= 200 (::status response)))
                    (is (= {::restore/ready? true
                            ::restore/executable? false
@@ -567,6 +602,14 @@
                            ::restore/completion-coordinate c}
                           body)
                        "the public body is the exact closed readiness schema"))
+                 (set! db/*conn* nil)
+                 (let [response (readiness-response recorded)]
+                   (is (= 503 (::status response)))
+                   (is (= {::restore/ready? false
+                           ::restore/executable? false}
+                          (reader/read-string (::body response)))
+                       "detached restore evidence never falls through to ordinary readiness"))
+                 (set! db/*conn* conn)
                  (await
                   (db/with-tx-context
                    {:seon.db/user [:seon.agent/id "root"]
@@ -581,5 +624,6 @@
            (fn []
              (when-let [conn @!fresh-conn] (d/release conn))
              (set! db/*conn* prior-conn)
+             (set! replica/status prior-replica-status)
              (reset! @#'admission/!state prior-admission)))
           (.then (fn [_] (done)))))))
