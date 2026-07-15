@@ -28,10 +28,11 @@ before this transition graduates.
 
 The maintained Datahike SHA contains same-store branch/delete, commit/branch
 root reads, historical-secondary-index correction, awaited connection release,
-and guarded/read-back-verified force. Seon's writer now exposes typed native
-create/release/delete and has removed the physical-copy fork. Its feed, replica,
-runtime admission, and operator do not yet launch or own branch-qualified
-runtimes. Quiesced clean restart, restore/undo, branch-local blob launch,
+and guarded/read-back-verified force. Seon's writer exposes typed native
+create/release/delete and has removed the physical-copy fork. Its registry,
+feed, replica, launch descriptor, public operator, and CLJ/CLJS MCP discovery
+now own branch-qualified runtimes through the source writer without a second
+registry or writer. Quiesced clean restart, crash replacement, restore/undo,
 promotion, and ordered multi-form process-failure proof remain unimplemented.
 
 The branch-qualified replica/operator audit is complete at
@@ -92,7 +93,7 @@ advances. Attachment, physical database, durable roster, and fork-coordinate
 fences remain closed; the expected-source-head fence runs immediately before
 new mutation only. Focused writer proof passes 37 tests/259 assertions.
 
-The internal retained typed operator lifecycle is implemented at `74bfa7e2`.
+The retained typed operator lifecycle began at `74bfa7e2`.
 One finite, atomically published record owns the source descriptor, exact create
 request, target-private coordinates, response, launch descriptor, desired
 state, phase, and inverse evidence. Every read semantically re-derives those
@@ -105,8 +106,8 @@ private paths. The launch descriptor retains the immutable creation cut.
 The bounded real Transit UDS fixture covers response-loss retry, exact adopt,
 created-coordinate mismatch, target advancement before close, newly-started
 publication-failure cleanup, and preservation of a pre-existing converged pod.
-The branch/process/config/CLI selector passes 30 tests/130 assertions. This is
-an internal boundary, not yet a public lifecycle command.
+The original branch/process/config/CLI selector passed 30 tests/130 assertions;
+the public command, status, restart, and MCP boundary is recorded below.
 
 Ordinary startup interruption ownership is complete. The one supervisor now
 installs an invocation-scoped shutdown hook, serializes shutdown admission with
@@ -131,21 +132,30 @@ failure. The branch-only gate passes 4 tests/61 assertions. Evidence is in
 [[research/retained-branch-sigint-ownership-2026-07-15]]. The exact combined
 branch/CLI/process checkpoint passes 34 tests/190 assertions.
 
-The next dependency-ordered slice is public ownership. The source-grounded
-audit at
-[[research/branch-cli-status-mcp-live-gate-audit-2026-07-15]] fixes one runtime
-identity across retained branch state, external process health, the public
-operator, runtime advertisement, and CLJ/CLJS MCP discovery. Implementation is
-split across non-overlapping branch/process/CLI and client/MCP owners while the
-top level owns the combined source-frozen gate. It must not add a lifecycle or
-membership registry, guess a branch-local writer port, or label the immutable
-creation cut as the current head.
+Public branch ownership and its first live checkpoint are complete. Public
+request derivation, inventory, status, pod-only restart, external-owner health,
+and the four CLI commands landed at `50974ca4`; `60797eaa` holds the branch lock
+across stop/reopen; and `eab641c1` resolves branch-qualified CLJ MCP through the
+pod's immutable writer advertisement. Watcher-owned client publication at
+`d6eaffe2` removed the impossible one-shot/watch byte comparison, and
+descriptor-owned replica routing at `104586d4` preserves the logical writer
+route when a non-streaming Datahike connection dereferences to its durable
+configuration. `bb6f10f7` prepares descriptor-derived readiness parents in the
+one process owner; its branch/process/CLI gate passes 40 tests/244 assertions.
 
-The first live checkpoint is default-only create/write/branch-pod-restart/read/
-close while the source watcher and writer retain their identities. ACME remains
-untouched until this default proof and the later restart/crash gates settle;
-simultaneous default/ACME proof remains a final coordinated admission gate, not
-part of this public-boundary slice.
+The source-frozen default proof created `default-proof-1044` at database
+`54b5b7e7-51fb-3220-b079-81a81914d86f`, branch
+`:seon.branch/default-proof-1044`, commit
+`6a57647c-2f82-5603-b575-600b722c89ee`, and `t=536870988`. CLJS advertised the
+branch runtime and default writer; branch-qualified CLJ MCP resolved the same
+attachment. A branch-only claim advanced the target to commit
+`6a576618-c919-5945-aeab-6197aec099ed`, `t=536870990`, while default remained at
+its original head with no claim. Pod-only restart changed PID `18469` to
+`21145`; watcher PID `7266` and writer PID `7323` remained fixed, and both MCP
+runtimes read the claim after restart. Close removed lifecycle, process, port,
+blob, and log paths, the registry route, and the durable Datahike branch.
+Branch-qualified MCP then failed closed while default remained ready and
+unchanged. ACME was observed only in MCP inventory and was not operated.
 
 The pod-crash containment prerequisite is now source-grounded at
 [[research/dead-leader-process-subtree-containment-2026-07-15]]. A dead
@@ -155,8 +165,11 @@ existing detach boundary becomes one persistent containment owner outside the
 execution group plus one live anchor that self-signals its pinned group and
 publishes a generation-matched drained result. Missing owner, anchor, or result
 evidence remains `containment-uncertain`; replacement and destructive branch
-inverse stay closed. This implementation follows the public branch checkpoint
-and precedes the default crash-replacement proof and unit-6 child cutover.
+inverse stay closed. This is now one of two safe parallel implementation lanes.
+The other is clean quiescence: `:quiescing` admission, current-turn completion,
+CAS-closed `:quiesced` run, database-derived drain, loopback lifecycle action,
+and the same typed terminal-result owner. Both precede default crash replacement;
+containment also precedes unit-6 child cutover.
 
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in

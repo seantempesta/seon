@@ -123,26 +123,25 @@ contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Keep unit 1 as the ordered spine while integrating the public branch operator and descriptor-driven MCP lanes** | Retained-branch interruption is integrated through `c95f8e03`; diagnostic schema parity through `56bf7818` and `1e1f0f8e`; and the exact CLI/status/MCP/live-gate audit through `ca9ec25a`. The top level owns cross-lane review, source-frozen gates, live default proof, and full-ledger reconciliation | Review both implementation returns against the audit, run the combined operator and CLJS gates from one artifact, then execute the default create/write/pod-restart/read/close proof. Refill from default restart/crash only after that checkpoint settles |
-| Database lifecycle | **Public retained branch ownership is split across two non-overlapping implementations:** branch/process/CLI and client/MCP discovery | Typed UDS (`ce342572`), crash-safe adoption (`e7bd160c`), retained pod lifecycle (`74bfa7e2`), ordinary interruption (`fbb8c399`), and retained interruption (`c95f8e03`) settle the mutation and inverse owners. `ca9ec25a` fixes the required identity projection and acceptance matrix | Integrate the two public-boundary returns without adding a registry or lifecycle owner, then run live create/write/restart/close. Continue unit 1 through default restart/crash, restore/undo, and multi-form failure proof in that order |
+| Top-level integration | **Advance unit 1 from completed public branch proof into containment plus clean restart/quiescence** | The generic readiness repair landed at `bb6f10f7`; the exact public gate passes 40 tests/244 assertions. Live create/write/pod-restart/read/close preserved source watcher/writer identities, proved branch-only persistence through both MCP runtimes, and removed every retained, registry, filesystem, and durable-branch owner on close | Review and integrate the two non-overlapping containment/quiescence implementations, then run clean default restart and crash-replacement proof before restore/undo or multi-form work |
+| Database lifecycle | **Public retained branch ownership is complete; anchored containment and clean quiescence are the next parallel slices** | Typed UDS (`ce342572`), crash-safe adoption (`e7bd160c`), retained pod lifecycle (`74bfa7e2`), both interruption inverses (`fbb8c399`, `c95f8e03`), public commands, serialized restart, MCP discovery, watcher publication, descriptor-owned replica routing, readiness preparation, and the complete live inverse settle the public owner | Implement the grounded process containment and runtime quiescence contracts in separate owners, integrate their typed terminal-result boundary, then prove clean restart followed by unexpected crash replacement |
 | Reactive/database views | **Implementation and replay-all soundness oracle are complete; live browser/feed proof waits for the next source-frozen checkpoint** | `365052f0` lands candidate-only routing; `afc70d3f` proves six retained read shapes against every nonempty combination of seven actual transactions. The exact gate passes 1 test/10 assertions | Refill only after the unit-1 source checkpoint: prove gzip/SSE sharing, related/unrelated updates, and release in a real browser, then continue unit-2 consumer migration |
-| Agent runtime correctness | **The child-containment contract and dead-leader subtree audit are complete; production containment waits on unit 1** | Diagnostic schema parity is complete. Receipt/recovery Slice A remains complete at `defb8014`; `f2c1f1c8` defines one parent-owned child handle/capability. `f18d0282` proves a dead leader's numeric PGID is not signaling authority and specifies one persistent owner/live-anchor drain with a generation-matched terminal result | After the public branch checkpoint, implement the shared operator containment prerequisite before pod-crash replacement or unit-6 child cutover. The named planner/small-executor trial remains a later unit-7 gate |
+| Agent runtime correctness | **The child-containment and clean-quiescence contracts are grounded; their implementations are the next safe parallel refills** | Receipt/recovery Slice A remains complete at `defb8014`; `f2c1f1c8` defines one parent-owned child handle/capability. `f18d0282` rejects dead-leader numeric-PGID signaling and specifies a persistent owner/live anchor with a generation-matched terminal result. `acab6d24` derives clean restart from quiescing admission, current-turn completion, CAS-closed run, database-derived drain, and the same typed terminal-result owner | After the public branch checkpoint, implement anchored containment in the process owner and clean quiescence in the runtime/admission owner as non-overlapping lanes; integrate both before crash replacement or unit-6 child cutover |
 
 Current scheduling card:
 
-1. **Ordered spine:** public branch/process/CLI plus descriptor-driven MCP → live
-   create/write/restart/close → default restart/crash → restore/undo →
-   multi-form failure proof.
-2. **Parallel lane A:** implement only retained request derivation, inventory,
-   status, pod-only restart, external-dependency health, and the four public
-   CLI commands through the existing branch/process owners.
-3. **Parallel lane B:** implement only descriptor-owned runtime/writer
-   advertisement and advertisement-driven CLJS/CLJ MCP selection; do not infer
-   a branch-local writer or introduce a membership registry.
-4. **Parallel lane C:** the dead-leader subtree audit is complete at
-   `f18d0282`. Refill only after the public branch source checkpoint with the
-   one shared persistent-owner/live-anchor containment implementation; it is a
-   prerequisite for pod-crash replacement and the later unit-6 child cutover.
+1. **Ordered spine:** integrate anchored containment plus clean restart
+   quiescence → prove clean default restart → prove unexpected crash
+   replacement → restore/undo → multi-form failure proof.
+2. **Parallel lane A:** implement the grounded persistent-owner/live-
+   anchor containment contract in the process owner; this is shared by crash
+   replacement and later unit-6 child containment.
+3. **Parallel lane B:** implement clean quiescence through admission,
+   run closure, database-derived drain, and typed terminal results in the
+   existing runtime owners. It runs beside containment because their owned
+   paths do not overlap; the top level owns their shared integration contract.
+4. **Parallel lane C:** prepare only source-grounded proof fixtures for default
+   crash replacement and restore/undo without changing either unsettled owner.
 5. **Final admission:** unit 9 remains blocked on integrated units 1–8 and is
    the only place for destructive simultaneous-cluster, performance, and
    authorized legacy-worktree cleanup proof.
@@ -199,10 +198,11 @@ next safe decisions, not a second architecture:
 4. treat diagnostic schema parity as settled by `56bf7818` and `1e1f0f8e`;
    do not reopen speculative registry relinking unless new evidence falsifies
    the canonical-fact repair;
-5. integrate public branch lifecycle and descriptor-driven MCP discovery, run
-   the source-frozen operator/CLJS and real default branch gates, then continue
-   unit 1 through default
-   restart/crash, restore/undo, and multi-form failure proof in that order; and
+5. treat public branch lifecycle, descriptor-driven MCP discovery, watcher-
+   owned client publication, replica route retention, and the real default
+   create/write/restart/close proof as settled through `bb6f10f7`; continue
+   unit 1 through anchored containment, clean default restart/crash,
+   restore/undo, and multi-form failure proof in that order; and
 6. keep the remaining slots on reverse render-unit selection, Inspect task/
    scorer grounding, and downstream artifact work that consumes only settled
    contracts. Never turn a newly found smell into the spine unless it
