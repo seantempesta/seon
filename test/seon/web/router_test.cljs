@@ -101,6 +101,33 @@
         (finally
           (reset! @#'admission/!state prior))))))
 
+(deftest retained-blob-route-is-unadmitted-and-loopback-only
+  (let [!invocations (atom 0)
+        handler (fn [_request ^js response]
+                  (swap! !invocations inc)
+                  (.writeHead response 200 #js {"Content-Type" "application/edn"})
+                  (.end response "{:my.blob/ok? true}"))]
+    (router/install!
+      {:seon.web.router/operator-blobs handler
+       :seon.web.router/loopback-peer? (constantly false)})
+    (is (= 403 (::response-status
+                 (request! "POST" "/_seon/operator/blobs"))))
+    (is (zero? @!invocations))
+    (router/install!
+      {:seon.web.router/operator-blobs handler
+       :seon.web.router/loopback-peer? (constantly true)})
+    (let [prior (admission/state)]
+      (try
+        (reset! @#'admission/!state
+                {::admission/status :unavailable
+                 ::admission/reason "restore admission is closed"})
+        (let [response (request! "POST" "/_seon/operator/blobs")]
+          (is (= 200 (::response-status response)))
+          (is (= "{:my.blob/ok? true}" (::response-body response)))
+          (is (= 1 @!invocations)))
+        (finally
+          (reset! @#'admission/!state prior))))))
+
 (deftest closed-admission-refuses-post-before-the-domain-handler
   (let [!invocations (atom 0)
         prior (admission/state)]

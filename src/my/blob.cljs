@@ -34,6 +34,7 @@
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
+    [seon.dev.restore.schema]
     [my.blob.schema]
     [seon.platform :as platform]
     [seon.schema :as schema]))
@@ -93,6 +94,69 @@
 (schema/register!
   ::materialization-result
   [:or ::materialization-success ::materialization-failure])
+
+(schema/register!
+  ::operator-operation
+  [:enum
+   :my.blob.operator.operation/observe-retained
+   :my.blob.operator.operation/materialize-retained])
+
+(schema/register!
+  ::operator-observe-request
+  [:map {:closed true}
+   [::operator-operation
+    [:= :my.blob.operator.operation/observe-retained]]
+   [::target-coordinate ::target-coordinate]])
+
+(schema/register!
+  ::operator-materialize-request
+  [:map {:closed true}
+   [::operator-operation
+    [:= :my.blob.operator.operation/materialize-retained]]
+   [:seon.dev.restore/startup-identity
+    :seon.dev.restore/startup-identity]
+   [::target-coordinate ::target-coordinate]
+   [::source-storage-view ::source-storage-view]
+   [::destination-storage-view ::destination-storage-view]])
+
+(schema/register!
+  ::operator-request
+  [:or ::operator-observe-request ::operator-materialize-request])
+
+(schema/register!
+  ::retained-observation-request
+  [:map {:closed true}
+   [::target-database ::target-database]
+   [::target-coordinate ::target-coordinate]])
+
+(schema/register!
+  ::retained-observation-success
+  [:map {:closed true}
+   [::ok? [:= true]]
+   [::target-coordinate ::target-coordinate]
+   [::reachable-hash-digest ::reachable-hash-digest]
+   [::hash-count ::hash-count]])
+
+(schema/register!
+  ::retained-observation-failure
+  [:map {:closed true}
+   [::ok? [:= false]]
+   [::target-coordinate ::target-coordinate]
+   [::error ::error]])
+
+(schema/register!
+  ::retained-observation-result
+  [:or ::retained-observation-success ::retained-observation-failure])
+
+(schema/register!
+  ::intent-materialization-request
+  [:map {:closed true}
+   [::target-database ::target-database]
+   [:seon.dev.restore/startup-identity
+    :seon.dev.restore/startup-identity]
+   [::target-coordinate ::target-coordinate]
+   [::source-storage-view ::source-storage-view]
+   [::destination-storage-view ::destination-storage-view]])
 
 ;; text paging — 1-based line window + honest totals (the fs precedent).
 (schema/register! ::from-line      :int)
@@ -409,6 +473,37 @@
          vec)
     []))
 
+(defn ^:no-doc observe-retained
+  "Observe one exact retained coordinate and its bounded blob-set identity.
+
+   The caller resolves the database locally and passes that one immutable
+   value. The canonical hash vector remains inside the pod; only its digest
+   and count cross the operator boundary."
+  {:malli/schema
+   [:=> [:cat ::retained-observation-request]
+    ::retained-observation-result]
+   :seon.fn/agent-facing? false}
+  [{::keys [target-database target-coordinate]}]
+  (try
+    (if-not (= target-coordinate (db/head-coordinate target-database))
+      {::ok? false
+       ::target-coordinate target-coordinate
+       ::error "the retained database value does not resolve the requested coordinate"}
+      (let [hashes (retained-hashes target-database)
+            invalid-hash (first (remove valid-hash? hashes))]
+        (if invalid-hash
+          {::ok? false
+           ::target-coordinate target-coordinate
+           ::error "the retained database contains a malformed :my.blob/hash"}
+          {::ok? true
+           ::target-coordinate target-coordinate
+           ::reachable-hash-digest (sha256 (pr-str hashes))
+           ::hash-count (count hashes)})))
+    (catch :default error
+      {::ok? false
+       ::target-coordinate target-coordinate
+       ::error (or (some-> error .-message) (str error))})))
+
 (defn- materialize-hash!
   [effects source-view destination-dir target-coordinate frozen-digest
    hash-count counts hash]
@@ -575,6 +670,27 @@
    :seon.fn/agent-facing? false}
   [request]
   (materialize-retained-with-effects! request node-publication-effects))
+
+(defn ^:no-doc materialize-retained-intent!
+  "Materialize one validated portable restore identity against a frozen db.
+
+   This is the transport adapter for [[materialize-retained!]], not another
+   materializer. It requires the portable startup identity's frozen digest to
+   agree before delegating any filesystem effect."
+  {:malli/schema
+   [:=> [:cat ::intent-materialization-request] ::materialization-result]
+   :seon.fn/agent-facing? false}
+  [{::keys [target-database target-coordinate source-storage-view
+            destination-storage-view]
+    startup-identity :seon.dev.restore/startup-identity}]
+  (let [frozen-digest
+        (:seon.dev.restore/reachable-hash-digest startup-identity)]
+    (materialize-retained!
+      {::target-database target-database
+       ::target-coordinate target-coordinate
+       ::source-storage-view source-storage-view
+       ::destination-storage-view destination-storage-view
+       ::reachable-hash-digest frozen-digest})))
 
 (defn- text-content?
   "Whether `content` reads as text rather than binary — a COMPUTED sniff.

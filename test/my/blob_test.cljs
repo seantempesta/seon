@@ -171,6 +171,15 @@
     {::db/conn conn
      ::db/tx-data (mapv (fn [hash] {::blob/hash hash}) hashes)}))
 
+(defn- startup-identity
+  [reachable-hash-digest]
+  {:seon.dev.restore/intent-id "restoredoor1"
+   :seon.dev.restore/plan-digest (apply str (repeat 64 "1"))
+   :seon.dev.restore/reachable-hash-digest reachable-hash-digest
+   :seon.dev.restore/consumer-generations
+   {:seon.dev.process/pod
+    #uuid "00000000-0000-4000-8000-000000000001"}})
+
 ;; ---------------------------------------------------------------------------
 ;; 1. put → stat → text/get roundtrip.
 ;; ---------------------------------------------------------------------------
@@ -382,6 +391,121 @@
 ;; Restore reconstruction — exact B(T), frozen digest, overlay-first source,
 ;; one durable publisher, and verified idempotent destination readback.
 ;; ---------------------------------------------------------------------------
+
+(deftest retained-observation-is-bounded-and-frozen-to-one-database-value
+  (async done
+    (run-test
+      (fn [conn]
+        (let [first-hash (content-hash "first retained blob")
+              later-hash (content-hash "later retained blob")]
+          (-> (transact-hashes! conn [first-hash])
+              (.then
+                (pinned conn
+                  (fn [first-tx]
+                    (is (true? (::db/ok? first-tx)))
+                    (let [frozen @conn
+                          point (db/head-coordinate frozen)]
+                      (-> (transact-hashes! conn [later-hash])
+                          (.then
+                            (pinned conn
+                              (fn [later-tx]
+                                (is (true? (::db/ok? later-tx)))
+                                (let [result
+                                      (blob/observe-retained
+                                        {::blob/target-database frozen
+                                         ::blob/target-coordinate point})]
+                                  (is (= {::blob/ok? true
+                                          ::blob/target-coordinate point
+                                          ::blob/reachable-hash-digest
+                                          (retained-set-digest [first-hash])
+                                          ::blob/hash-count 1}
+                                         result))
+                                  (is (not-any? #(= first-hash %)
+                                                (vals result))
+                                      "the reachable hash vector never crosses the boundary")
+                                  (is (schema/valid-candidate-value?
+                                        ::blob/retained-observation-result
+                                        result))))))))))))))
+      done)))
+
+(deftest retained-observation-rejects-a-coordinate-other-than-its-db-value
+  (async done
+    (run-test
+      (fn [conn]
+        (let [target @conn
+              point (db/head-coordinate target)
+              result
+              (blob/observe-retained
+                {::blob/target-database target
+                 ::blob/target-coordinate
+                 (update point :seon.db.coordinate/t dec)})]
+          (is (false? (::blob/ok? result)))
+          (is (schema/valid-candidate-value?
+                ::blob/retained-observation-result result))))
+      done)))
+
+(deftest portable-intent-adapter-reuses-the-closed-materializer
+  (async done
+    (run-test
+      (fn [conn]
+        (let [{::keys [overlay main]} (materialization-dirs "portable-intent")
+              content "portable intent bytes"
+              hash (content-hash content)
+              _ (write-path! overlay hash content)]
+          (-> (transact-hashes! conn [hash])
+              (.then
+                (pinned conn
+                  (fn [tx]
+                    (is (true? (::db/ok? tx)))
+                    (let [target @conn
+                          point (db/head-coordinate target)
+                          digest (retained-set-digest [hash])
+                          request
+                          {::blob/target-database target
+                           :seon.dev.restore/startup-identity
+                           (startup-identity digest)
+                           ::blob/target-coordinate point
+                           ::blob/source-storage-view
+                           (storage-view overlay main)
+                           ::blob/destination-storage-view
+                           (storage-view main)}
+                          result (blob/materialize-retained-intent! request)]
+                      (is (schema/valid-candidate-value?
+                            ::blob/intent-materialization-request request))
+                      (is (true? (::blob/ok? result)))
+                      (is (= digest (::blob/reachable-hash-digest result)))
+                      (is (= content
+                             (.readFileSync
+                               nfs
+                               (.join npath main (subs hash 0 2) hash)
+                               "utf8")))
+                      result)))))))
+      done)))
+
+(deftest operator-materialize-request-requires-a-closed-startup-identity
+  (let [point {:seon.db.coordinate/database-id
+               #uuid "00000000-0000-4000-8000-000000000010"
+               :seon.db.coordinate/branch :retained
+               :seon.db.coordinate/commit-id
+               #uuid "00000000-0000-4000-8000-000000000011"
+               :seon.db.coordinate/t 42}
+        request
+        {::blob/operator-operation
+         :my.blob.operator.operation/materialize-retained
+         :seon.dev.restore/startup-identity (startup-identity absent-hash)
+         ::blob/target-coordinate point
+         ::blob/source-storage-view (storage-view "target" "main")
+         ::blob/destination-storage-view (storage-view "main")}]
+    (is (schema/valid-candidate-value? ::blob/operator-request request))
+    (is (false?
+          (schema/valid-candidate-value?
+            ::blob/operator-request
+            (assoc request :seon.dev.restore/unknown true))))
+    (is (false?
+          (schema/valid-candidate-value?
+            ::blob/operator-request
+            (update request :seon.dev.restore/startup-identity
+                    dissoc :seon.dev.restore/plan-digest))))))
 
 (deftest retained-set-is-empty-when-blob-schema-is-absent
   (async done

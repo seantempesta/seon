@@ -1523,6 +1523,61 @@
        :seon.client/quiesce-error
        "The runtime lifecycle owner is not loaded."}))))
 
+(defn- bounded-operator-error
+  "Bound one operator failure to a stable EDN value without stack data."
+  [request error]
+  (let [message (or (:seon.error/message error)
+                    (some-> error .-message)
+                    (str error))]
+    {:my.blob/ok? false
+     :my.blob/target-coordinate (:my.blob/target-coordinate request)
+     :my.blob/error (subs message 0 (min 1024 (count message)))}))
+
+(defn- execute-blob-operator!
+  "Resolve one local frozen database value and execute one blob request."
+  [request]
+  (let [target-coordinate (:my.blob/target-coordinate request)]
+    (-> (db/at-coordinate db/*conn* target-coordinate)
+        (.then
+          (fn [target-database]
+            (if (:seon.error/message target-database)
+              (bounded-operator-error request target-database)
+              (case (:my.blob/operator-operation request)
+                :my.blob.operator.operation/observe-retained
+                (blob/observe-retained
+                  {:my.blob/target-database target-database
+                   :my.blob/target-coordinate target-coordinate})
+
+                :my.blob.operator.operation/materialize-retained
+                (blob/materialize-retained-intent!
+                  (-> request
+                      (dissoc :my.blob/operator-operation)
+                      (assoc :my.blob/target-database target-database))))))))))
+
+(defn- handle-operator-blobs!
+  "Observe or materialize an exact retained blob set and return closed EDN."
+  [req res]
+  (-> (read-body req)
+      (.then
+        (fn [body]
+          (let [request (reader/read-string body)]
+            (if (schema/valid-candidate-value? :my.blob/operator-request request)
+              (execute-blob-operator! request)
+              (bounded-operator-error
+                request
+                (js/Error. "invalid retained-blob operator request"))))))
+      (.then
+        (fn [result]
+          (write-status! res
+                         (if (:my.blob/ok? result) 200 422)
+                         "application/edn; charset=utf-8"
+                         (pr-str result))))
+      (.catch
+        (fn [error]
+          (let [result (bounded-operator-error {} error)]
+            (write-status! res 422 "application/edn; charset=utf-8"
+                           (pr-str result)))))))
+
 (defn same-origin?
   "Whether the request passes the same-origin (CSRF) check.
 
@@ -1573,6 +1628,7 @@
    :seon.web.router/agent-run     handle-agent-run!
    :seon.web.router/config-apply  handle-config-apply!
    :seon.web.router/operator-quiesce handle-operator-quiesce!
+   :seon.web.router/operator-blobs handle-operator-blobs!
    :seon.web.router/same-origin?  same-origin?
    :seon.web.router/loopback-peer? loopback-peer?})
 

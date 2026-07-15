@@ -304,7 +304,8 @@
    (serve's handlers) + the directly-required `call` leaf handler."
   [h]
   (let [{::keys [static readiness chat stop resume clear log
-                 complete agent-run config-apply operator-quiesce]} h]
+                 complete agent-run config-apply operator-quiesce
+                 operator-blobs]} h]
     (cond->
      [["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/js/{*path}"  {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
@@ -342,7 +343,11 @@
       operator-quiesce
       (conj ["/_seon/operator/quiesce"
              {:post {:middleware [:seon.route/loopback-peer]
-                     :handler (post-handler operator-quiesce)}}]))))
+                     :handler (post-handler operator-quiesce)}}])
+      operator-blobs
+      (conj ["/_seon/operator/blobs"
+             {:post {:middleware [:seon.route/loopback-peer]
+                     :handler (post-handler operator-blobs)}}]))))
 
 ;; ============================================================
 ;; The no-match default-handler — a graceful redirect HOME (#28). reitit
@@ -440,7 +445,7 @@
    at load (re-runs on hot-reload, so the cached router tracks reloaded
    handlers + the latest route datoms). `config` keys:
    `:seon.web.router/{static chat stop resume clear log complete agent-run
-   config-apply operator-quiesce}` (the serve handler fns) +
+   config-apply operator-quiesce operator-blobs}` (the serve handler fns) +
    `:seon.web.router/same-origin?` and `:seon.web.router/loopback-peer?`
    (the predicates). The CORE routes are NOT in
    `config` — they project from the
