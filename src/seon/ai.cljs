@@ -669,12 +669,14 @@
 (defn config-evidence
   "Bounded non-secret evidence for one resolved provider request."
   {:malli/schema
-   [:=> [:catn [::config-resolution ::config-resolution]
-                 [::credential-source [:maybe ::credential-source]]]
-    ::config-evidence]}
-  [resolution credential-source]
-  (cond-> (select-keys resolution [::resolved-config ::provenance])
-    credential-source (assoc ::credential-source credential-source)))
+   [:function
+    [:=> [:cat ::config-resolution] ::config-evidence]
+    [:=> [:cat ::config-resolution ::credential-source] ::config-evidence]]}
+  ([resolution]
+   (select-keys resolution [::resolved-config ::provenance]))
+  ([resolution credential-source]
+   (assoc (config-evidence resolution)
+          ::credential-source credential-source)))
 
 (defn agent-max-retries
   "The per-agent LLM retry COUNT for agent `id`.

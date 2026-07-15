@@ -466,10 +466,11 @@
         url     (sdk-base-url (:seon.ai/base-url config))
         credential (resolved-credential resolution)
         key     (::api-key credential)
+        credential-source (:seon.ai/credential-source credential)
         evidence (when resolution
-                   (ai/config-evidence
-                     resolution
-                     (:seon.ai/credential-source credential)))]
+                   (if credential-source
+                     (ai/config-evidence resolution credential-source)
+                     (ai/config-evidence resolution)))]
     (cond
       (nil? resolution)
       (config-error
