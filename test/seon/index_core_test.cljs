@@ -232,7 +232,35 @@
              "seon.schema/schema-definition"
              "seon.schema/schemas-in-namespace"}
            (agent-facing-syms tx "seon.schema"))
-        "seon.schema excludes projection and eval-validation internals")))
+        "seon.schema excludes projection and eval-validation internals")
+    (is (= #{"my.kb/remember" "my.kb/recall"}
+           (agent-facing-syms tx "my.kb"))
+        "my.kb advertises only its general knowledge operations")))
+
+(deftest my-kb-sample-recipes-stay-indexed-and-inspectable
+  (let [tx          @core-tx
+        sample-syms ["my.kb/remember-sources!"
+                     "my.kb/retitle-source!"
+                     "my.kb/clear-rating!"
+                     "my.kb/replace-topics!"
+                     "my.kb/forget-source!"
+                     "my.kb/titles"
+                     "my.kb/title+rating"
+                     "my.kb/titles-by-author"
+                     "my.kb/source-stats"
+                     "my.kb/source-detail"
+                     "my.kb/source-entity"]
+        ns-source   (:seon.ns/source
+                      (first (filter #(= :my.kb (:seon.ns/name %)) tx)))]
+    (doseq [sym sample-syms]
+      (let [row (by-sym tx sym)]
+        (is (some? row) (str sym " remains in the program graph"))
+        (is (not (contains? row :seon.fn/agent-facing?))
+            (str sym " is not advertised as a standing tool"))
+        (is (str/includes? ns-source (str "(defn " (subs sym 6)))
+            (str sym " remains in full my.kb source for deliberate inspection"))))
+    (is (str/includes? ns-source ":my.kb.source/id")
+        "the colocated sample schema remains in the full namespace source")))
 
 (deftest real-arglists-not-mangled
   ;; The parser recovers arglists from the REAL source, not the
