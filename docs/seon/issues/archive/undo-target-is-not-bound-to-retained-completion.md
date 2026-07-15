@@ -57,17 +57,23 @@ must not gain a second undo meaning.
 
 ## Resolution
 
-Resolved by commit `6351790a`. The existing
-`seon.dev.restore/derive-intent` boundary now requires undo to consume one
-frozen current-main/branch-roster/completion observation and select exactly one
-completion by id or retained undo branch. It derives the target only from that
-completion's database id, undo branch, source commit, and source transaction,
-proves the live retained head, preserves the actual latest main as redo, and
-rejects arbitrary branches, crossed lineage, ambiguous or consumed
-completions, advanced heads, stale rosters, and occupied new reserved names.
+Commit `6351790a` closed the pure selection contract. The public operator now
+also exposes `cluster undo <completion-id>` and carries that same completion id
+through plan, confirmation, apply, retained retry, resume, and abort. Planning
+observes blobs through the main pod without publishing intent or stopping a
+process, derives an intent-local nonautonomous target descriptor for the exact
+recorded undo coordinate, and preserves the target-overlay then main-archive
+lookup order. Apply re-resolves exactly one durable completion before intent
+publication and before retained retry; it cannot substitute a branch name.
 
-Focused proof passes `seon.dev.restore-test` at 10 tests/71 assertions. The
-unchanged intent/admin consumer passes `seon.db.restore-admin-test` at 9 tests/
-53 assertions. The remaining Proximum/Datahike dependency cutover and
-destructive operator proof are lifecycle-roadmap work, not a residual bypass
-of this pure selector.
+The existing restore convergence machine remains the only effectful path. It
+idempotently opens the frozen source route before creating the next reserved
+branch, so undo gains no reverse-datom compiler, alternate state machine, or
+second writer transition. Missing or duplicate completion ids, mismatched or
+advanced retained heads, legacy rows with invalid authority, stale plans, and
+wrong confirmations fail closed.
+
+Focused proof passes `seon.dev.restore-test` plus `seon.dev.cli-test` at 63
+tests/266 assertions. The remaining source-frozen destructive restore/crash/
+undo matrix is lifecycle-roadmap evidence, not a residual completion-authority
+bypass.

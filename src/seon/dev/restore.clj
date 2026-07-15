@@ -245,7 +245,12 @@
    ::config-overlay-selection
    ::reachable-hash-digest])
 
-(defn- completion-undo-coordinate [completion]
+(defn completion-undo-coordinate
+  "Return the exact retained undo head recorded by one completion."
+  {:malli/schema [:=> [:cat ::db.restore/completion] ::coordinate/coordinate]}
+  [completion]
+  (validate! ::db.restore/completion completion
+             "The restore completion is invalid.")
   {::coordinate/database-id (:seon.db.restore/database-id completion)
    ::coordinate/branch (:seon.db.restore/undo-branch completion)
    ::coordinate/commit-id (:seon.db.restore/from-commit-id completion)

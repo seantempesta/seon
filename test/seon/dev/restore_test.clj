@@ -147,6 +147,23 @@
      (assoc target ::coordinate/branch prior-target-branch)}
     ::restore/completion-facts completions}))
 
+(defn- undo-lifecycle
+  ([] (undo-lifecycle [prior-completion]))
+  ([completions]
+   {::protocol/main-coordinate latest-source
+    ::protocol/main-parent-commit-ids #{latest-commit}
+    ::protocol/branch-roster
+    #{:db :seon.branch/target prior-undo-branch prior-target-branch}
+    ::protocol/branch-coordinates
+    (::restore/branch-heads (retained-observation completions))
+    ::protocol/restore-completions completions
+    ::protocol/completed-restore-ids
+    (set (map :seon.db.restore/id completions))
+    ::protocol/restore-completion-coordinates
+    (into {} (map (fn [completion]
+                    [(:seon.db.restore/id completion) latest-source]))
+          completions)}))
+
 (defn- intent-request []
   {::restore/intent-id intent-id
    ::restore/operation :seon.dev.restore.operation/restore
@@ -1037,6 +1054,146 @@
              :seon.dev.restore.confirmation/apply})
            (::restore/confirmation-text plan)))))
 
+(deftest undo-plan-is-pure-and-derives-the-recorded-head-from-one-completion
+  (let [configuration (config/load! (System/getProperty "user.dir"))
+        calls (atom [])
+        plan
+        (with-redefs-fn
+          {#'restore-state/retained-intent (constantly nil)
+           #'restore-state/require-manifest! (constantly artifact-identity)
+           #'artifact/current-output-digests (constantly artifact-identity)
+           #'restore-state/observe-lifecycle!
+           (fn [_]
+             (swap! calls conj :observe-lifecycle)
+             (undo-lifecycle))
+           #'restore-state/main-blob-url
+           (fn [& _] "http://127.0.0.1:7890/_seon/operator/blobs")
+           #'restore-state/observe-retained-blobs!
+           (fn [url point]
+             (swap! calls conj [:observe-blobs url point])
+             {:my.blob/ok? true
+              :my.blob/target-coordinate point
+              :my.blob/reachable-hash-digest digest
+              :my.blob/hash-count 0})
+           #'restore-state/publish-intent!
+           (fn [& _]
+             (throw (ex-info "undo plan attempted publication" {})))}
+          #(restore-state/plan-undo!
+            {::restore-state/configuration configuration
+             ::restore-state/completion-id prior-completion-id}))
+        intent (::restore/intent plan)
+        selected
+        (get-in intent [::restore/selected-target-descriptor
+                        ::launch/database ::coordinate/coordinate])]
+    (is (= :seon.dev.restore.operation/undo (::restore/operation intent)))
+    (is (= latest-source
+           (get-in intent [::restore/pre-restore-main-descriptor
+                           ::launch/database ::coordinate/coordinate])))
+    (is (= prior-undo-coordinate selected))
+    (is (= [:observe-lifecycle
+            [:observe-blobs
+             "http://127.0.0.1:7890/_seon/operator/blobs"
+             prior-undo-coordinate]]
+           @calls))
+    (is (= (restore/confirmation-text
+            {::restore/intent intent
+             ::restore/confirmation-action
+             :seon.dev.restore.confirmation/apply})
+           (::restore/confirmation-text plan)))))
+
+(deftest undo-plan-fails-closed-on-missing-duplicate-and-invalid-legacy-authority
+  (let [configuration (config/load! (System/getProperty "user.dir"))
+        base
+        {#'restore-state/retained-intent (constantly nil)
+         #'restore-state/require-manifest! (constantly artifact-identity)
+         #'artifact/current-output-digests (constantly artifact-identity)
+         #'restore-state/main-blob-url (constantly "http://main/blobs")
+         #'restore-state/observe-retained-blobs!
+         (fn [_ point]
+           {:my.blob/ok? true
+            :my.blob/target-coordinate point
+            :my.blob/reachable-hash-digest digest
+            :my.blob/hash-count 0})}
+        plan #(restore-state/plan-undo!
+               {::restore-state/configuration configuration
+                ::restore-state/completion-id prior-completion-id})]
+    (testing "missing and duplicate ids never choose a nearby completion"
+      (doseq [completions [[] [prior-completion prior-completion]]]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"does not resolve exactly one"
+             (with-redefs-fn
+               (assoc base #'restore-state/observe-lifecycle!
+                      (constantly (undo-lifecycle completions)))
+               plan)))))
+    (testing "an exact legacy row remains valid only while its retained head agrees"
+      (is (m/validate ::db.restore/legacy-completion prior-completion))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"exact retained head"
+           (with-redefs-fn
+             (assoc base #'restore-state/observe-lifecycle!
+                    (constantly
+                     (update-in (undo-lifecycle)
+                                [::protocol/branch-coordinates
+                                 prior-undo-branch ::coordinate/commit-id]
+                                (constantly (random-uuid)))))
+             plan))))))
+
+(deftest undo-apply-rechecks-completion-authority-and-resumes-without-a-branch-name
+  (let [configuration (config/load! (System/getProperty "user.dir"))
+        intent (restore/derive-intent (undo-intent-request))
+        plan {::restore/intent intent
+              ::restore/confirmation-text
+              (restore/confirmation-text
+               {::restore/intent intent
+                ::restore/confirmation-action
+                :seon.dev.restore.confirmation/apply})}
+        calls (atom [])
+        base
+        {#'restore-state/observe-lifecycle! (constantly (undo-lifecycle))
+         #'restore-state/retained-intent (constantly nil)
+         #'restore-state/require-manifest! (constantly artifact-identity)
+         #'artifact/current-output-digests (constantly artifact-identity)
+         #'restore-state/derive-undo-intent! (fn [& _] intent)
+         #'restore-state/publish-intent!
+         (fn [request]
+           (swap! calls conj [:publish (::restore/intent request)]))
+         #'restore-state/resume!
+         (fn [request]
+           (swap! calls conj [:resume request])
+           {::restore/intent-id intent-id
+            ::restore-state/restored-coordinate latest-source
+            ::restore-state/admin-outcome
+            :seon.db.restore-admin.outcome/applied
+            ::restore-state/transitions []})}
+        request
+        {::restore-state/configuration configuration
+         ::restore-state/completion-id prior-completion-id
+         ::restore/plan plan
+         ::restore/confirmation-text (::restore/confirmation-text plan)}]
+    (with-redefs-fn base #(restore-state/apply-undo! request))
+    (is (= [[:publish intent]
+            [:resume {::restore-state/configuration configuration
+                      ::restore-state/admin-timeout-ms 120000}]]
+           @calls))
+    (reset! calls [])
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"does not resolve exactly one"
+         (with-redefs-fn
+           (assoc base #'restore-state/observe-lifecycle!
+                  (constantly (undo-lifecycle [])))
+           #(restore-state/apply-undo! request))))
+    (is (empty? @calls))
+    (testing "an equal retained plan retries through the same completion authority"
+      (with-redefs-fn
+        (assoc base #'restore-state/retained-intent (constantly intent))
+        #(restore-state/apply-undo! request))
+      (is (= [[:resume {::restore-state/configuration configuration
+                        ::restore-state/admin-timeout-ms 120000}]]
+             @calls)))))
+
 (deftest apply-rejects-wrong-or-stale-authority-before-publication
   (let [configuration (config/load! (System/getProperty "user.dir"))
         intent (derived-intent)
@@ -1166,6 +1323,52 @@
               ::restore-state/branch-name "target"
               ::restore/confirmation-text confirmation}))))
     (is (not-any? #(and (vector? %) (= :delete (first %))) @calls))))
+
+(deftest undo-abort-requires-the-same-completion-and-exact-confirmation
+  (let [configuration (config/load! (System/getProperty "user.dir"))
+        intent (restore/derive-intent (undo-intent-request))
+        confirmation
+        (restore/confirmation-text
+         {::restore/intent intent
+          ::restore/confirmation-action
+          :seon.dev.restore.confirmation/abort})
+        observation
+        (observation intent latest-source {} #{} [prior-completion]
+                     {prior-completion-id latest-source})
+        calls (atom [])
+        redefs
+        {#'restore-state/retained-intent (constantly intent)
+         #'restore-state/observe-lifecycle! (constantly (undo-lifecycle))
+         #'restore-state/admin-invocation
+         (fn [& _] {::restore/admin-result-path "/admin.edn"})
+         #'restore-state/require-no-admin-result! (constantly true)
+         #'restore-state/require-admin-absent! (constantly true)
+         #'restore-state/matching-restore-pod-record (constantly nil)
+         #'restore-state/observe-restore! (fn [& _] observation)
+         #'state/delete-edn! (fn [path] (swap! calls conj path))}]
+    (is (true?
+         (::restore-state/aborted?
+          (with-redefs-fn
+            redefs
+            #(restore-state/abort-undo!
+              {::restore-state/configuration configuration
+               ::restore-state/completion-id prior-completion-id
+               ::restore/confirmation-text confirmation})))))
+    (is (= (restore/intent-path
+            (:seon.dev.config/cluster-dir configuration))
+           (last @calls)))
+    (reset! calls [])
+    (doseq [request
+            [{::restore-state/configuration configuration
+              ::restore-state/completion-id "missing00001"
+              ::restore/confirmation-text confirmation}
+             {::restore-state/configuration configuration
+              ::restore-state/completion-id prior-completion-id
+              ::restore/confirmation-text "wrong"}]]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (with-redefs-fn redefs
+                     #(restore-state/abort-undo! request)))))
+    (is (empty? @calls))))
 
 (deftest abort-associates-completion-only-through-the-plan-digest
   (let [intent (derived-intent)

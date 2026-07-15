@@ -74,12 +74,15 @@
           (get-in intent [:seon.dev.restore/selected-target-descriptor
                           :seon.launch/database
                           :seon.db.coordinate/coordinate
-                          :seon.db.coordinate/branch])]
+                          :seon.db.coordinate/branch])
+          request
+          (cond-> {::restore-state/configuration configuration}
+            (= :seon.dev.restore.operation/restore
+               (::restore/operation intent))
+            (assoc ::restore-state/branch-name (name target-branch)))]
       (println (str "▶ resume retained restore "
                     (:seon.dev.restore/intent-id intent)))
-      (restore-state/resume!
-       {::restore-state/configuration configuration
-        ::restore-state/branch-name (name target-branch)}))))
+      (restore-state/resume! request))))
 
 (defn- reconcile-development!
   ([configuration] (reconcile-development! configuration []))
@@ -679,6 +682,25 @@
       ::restore-state/branch-name branch-name
       ::restore/confirmation-text confirmation})))
 
+(defn- apply-undo-plan!
+  [configuration completion-id plan confirmation]
+  (state/with-lock
+   configuration :stack 1800000
+   #(restore-state/apply-undo!
+     {::restore-state/configuration configuration
+      ::restore-state/completion-id completion-id
+      ::restore/plan plan
+      ::restore/confirmation-text confirmation})))
+
+(defn- abort-undo!
+  [configuration completion-id confirmation]
+  (state/with-lock
+   configuration :stack 1800000
+   #(restore-state/abort-undo!
+     {::restore-state/configuration configuration
+      ::restore-state/completion-id completion-id
+      ::restore/confirmation-text confirmation})))
+
 (defn- retained-abort-confirmation [configuration]
   (let [intent
         (restore-state/read-intent!
@@ -750,11 +772,74 @@
         "Choose interactive restore, --plan --edn, --apply-plan PATH --confirm TEXT, or --abort --confirm TEXT."
         {:seon.dev.cli/arguments (vec arguments)})))))
 
+(defn- undo-cluster! [configuration arguments]
+  (let [completion-id (first arguments)
+        options (vec (rest arguments))]
+    (when-not completion-id
+      (throw (ex-info "`cluster undo` requires one completed restore id."
+                      {:seon.dev.cli/arguments (vec arguments)})))
+    (cond
+      (= ["--plan" "--edn"] options)
+      (prn
+       (state/with-lock
+        configuration :stack 1800000
+        #(restore-state/plan-undo!
+          {::restore-state/configuration configuration
+           ::restore-state/completion-id completion-id})))
+
+      (empty? options)
+      (let [plan
+            (state/with-lock
+             configuration :stack 1800000
+             #(restore-state/plan-undo!
+               {::restore-state/configuration configuration
+                ::restore-state/completion-id completion-id}))
+            confirmation (::restore/confirmation-text plan)]
+        (println (pr-str plan))
+        (read-console-confirmation! confirmation)
+        (print-restore-result!
+         completion-id
+         (apply-undo-plan!
+          configuration completion-id plan confirmation)))
+
+      (and (= 4 (count options))
+           (= "--apply-plan" (nth options 0))
+           (= "--confirm" (nth options 2)))
+      (let [plan (read-restore-plan! (nth options 1))
+            confirmation (nth options 3)]
+        (print-restore-result!
+         completion-id
+         (apply-undo-plan!
+          configuration completion-id plan confirmation)))
+
+      (= ["--abort"] options)
+      (let [confirmation
+            (state/with-lock
+             configuration :stack 1800000
+             #(retained-abort-confirmation configuration))]
+        (read-console-confirmation! confirmation)
+        (println
+         (pr-str (abort-undo!
+                  configuration completion-id confirmation))))
+
+      (and (= 3 (count options))
+           (= ["--abort" "--confirm"] (subvec options 0 2)))
+      (println
+       (pr-str (abort-undo!
+                configuration completion-id (nth options 2))))
+
+      :else
+      (throw
+       (ex-info
+        "Choose interactive undo, --plan --edn, --apply-plan PATH --confirm TEXT, or --abort --confirm TEXT."
+        {:seon.dev.cli/arguments (vec arguments)})))))
+
 (defn- cluster! [configuration arguments]
   (case (first arguments)
     "reset" (reset-cluster! configuration (rest arguments))
     "restore" (restore-cluster! configuration (rest arguments))
-    (throw (ex-info "Choose `cluster reset <name>` or `cluster restore <retained-branch>`."
+    "undo" (undo-cluster! configuration (rest arguments))
+    (throw (ex-info "Choose `cluster reset <name>`, `cluster restore <retained-branch>`, or `cluster undo <completion-id>`."
                     {:seon.dev.cli/arguments (vec arguments)}))))
 
 (defn- pod-test-arguments [arguments]
@@ -838,7 +923,8 @@
          "  test pod|database|operator|all [selector]\n"
          "  skills sync|check        generate or verify tool-facing skill adapters\n"
          "  cluster reset <name>     drain and reset one named database\n"
-         "  cluster restore <branch> restore one exact retained branch head\n")))
+         "  cluster restore <branch> restore one exact retained branch head\n"
+         "  cluster undo <completion-id> restore its exact retained undo head\n")))
 
 (defn -main
   "Run one Seon operator command."

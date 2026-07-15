@@ -28,6 +28,7 @@
 (schema/register! ::max-transitions [:int {:min 1 :max 32}])
 (schema/register! ::transition-number [:int {:min 1 :max 32}])
 (schema/register! ::branch-name ::branch/name)
+(schema/register! ::completion-id ::db.restore/id)
 (schema/register! ::admin-timeout-ms ::restore/admin-timeout-ms)
 (schema/register! ::intent-retained? :boolean)
 (schema/register! ::admin-outcome :keyword)
@@ -77,10 +78,23 @@
   [::restore/confirmation-text ::restore/confirmation-text]
   [::admin-timeout-ms {:optional true} ::admin-timeout-ms]])
 (schema/register!
+ ::undo-plan-request
+ [:map {:closed true}
+  [::configuration config/configuration-schema]
+  [::completion-id ::completion-id]])
+(schema/register!
+ ::undo-apply-request
+ [:map {:closed true}
+  [::configuration config/configuration-schema]
+  [::completion-id ::completion-id]
+  [::restore/plan ::restore/plan]
+  [::restore/confirmation-text ::restore/confirmation-text]
+  [::admin-timeout-ms {:optional true} ::admin-timeout-ms]])
+(schema/register!
  ::resume-request
  [:map {:closed true}
   [::configuration config/configuration-schema]
-  [::branch-name ::branch-name]
+  [::branch-name {:optional true} ::branch-name]
   [::admin-timeout-ms {:optional true} ::admin-timeout-ms]])
 (schema/register!
  ::restore-result
@@ -94,6 +108,12 @@
  [:map {:closed true}
   [::configuration config/configuration-schema]
   [::branch-name ::branch-name]
+  [::restore/confirmation-text ::restore/confirmation-text]])
+(schema/register!
+ ::undo-abort-request
+ [:map {:closed true}
+  [::configuration config/configuration-schema]
+  [::completion-id ::completion-id]
   [::restore/confirmation-text ::restore/confirmation-text]])
 (schema/register!
  ::abort-result
@@ -264,10 +284,30 @@
                        (:seon.dev.target/status status)})))
     (str url "/_seon/operator/blobs")))
 
-(defn- observe-retained-blobs! [configuration branch-name target-coordinate]
+(defn- main-blob-url [configuration manifest]
+  (let [status (process/status configuration manifest)
+        url (:seon.dev.target/url status)]
+    (when-not (and (= :seon.dev.target.status/ready
+                      (:seon.dev.target/status status))
+                   (string? url))
+      (throw (ex-info "The main pod is not ready for retained blob observation."
+                      {:seon.dev.target/status
+                       (:seon.dev.target/status status)})))
+    (str url "/_seon/operator/blobs")))
+
+(defn- blob-url
+  [configuration manifest branch-name intent]
+  (case (::restore/operation intent)
+    :seon.dev.restore.operation/restore
+    (retained-blob-url configuration branch-name)
+
+    :seon.dev.restore.operation/undo
+    (main-blob-url configuration manifest)))
+
+(defn- observe-retained-blobs! [url target-coordinate]
   (let [response
         (post-edn!
-         (retained-blob-url configuration branch-name)
+         url
          {:my.blob/operator-operation
           :my.blob.operator.operation/observe-retained
           :my.blob/target-coordinate target-coordinate}
@@ -298,7 +338,7 @@
                 [::launch/database ::coordinate/coordinate])
         blob-observation
         (observe-retained-blobs!
-         configuration branch-name target-coordinate)
+         (retained-blob-url configuration branch-name) target-coordinate)
         main-descriptor
         (launch/with-coordinate
          {::launch/descriptor ordinary
@@ -324,6 +364,76 @@
           ::restore/reachable-hash-digest
           (:my.blob/reachable-hash-digest blob-observation)})]
     intent))
+
+(defn- lifecycle->retained-head-observation [lifecycle]
+  {::restore/main-coordinate (::protocol/main-coordinate lifecycle)
+   ::restore/branch-heads (::protocol/branch-coordinates lifecycle)
+   ::restore/completion-facts (::protocol/restore-completions lifecycle)})
+
+(defn- completion-by-id! [lifecycle completion-id]
+  (let [matches
+        (filterv #(= completion-id (:seon.db.restore/id %))
+                 (::protocol/restore-completions lifecycle))]
+    (when-not (= 1 (count matches))
+      (throw
+       (ex-info "Undo completion id does not resolve exactly one durable fact."
+                {::completion-id completion-id
+                 :seon.dev.restore/matching-completion-ids
+                 (mapv :seon.db.restore/id matches)
+                 :seon.error/kind
+                 :seon.dev.restore.error/inconsistent-intent})))
+    (first matches)))
+
+(defn- derive-undo-intent!
+  [configuration manifest completion-id intent-id consumer-generations]
+  (let [ordinary (:seon.dev.config/launch-descriptor configuration)
+        lifecycle (observe-lifecycle! ordinary)
+        completion (completion-by-id! lifecycle completion-id)
+        target-coordinate (restore/completion-undo-coordinate completion)
+        main-coordinate (::protocol/main-coordinate lifecycle)
+        main-descriptor
+        (launch/with-coordinate
+         {::launch/descriptor ordinary
+          ::coordinate/coordinate main-coordinate})
+        target-private
+        (branch/request
+         {::branch/configuration configuration
+          ::branch/name (str "restore-source-" intent-id)})
+        target-descriptor
+        (launch/branch-descriptor
+         {::launch/source-descriptor main-descriptor
+          ::launch/runtime-cluster (::branch/runtime-cluster target-private)
+          ::launch/target-database-name
+          (::branch/target-database-name target-private)
+          ::launch/target-coordinate target-coordinate
+          ::launch/process-dir (::branch/process-dir target-private)
+          ::launch/log-dir (::branch/log-dir target-private)
+          ::launch/http-port (::branch/http-port target-private)
+          ::launch/http-port-file (::branch/http-port-file target-private)
+          ::launch/writable-blob-dir
+          (::branch/writable-blob-dir target-private)})
+        blob-observation
+        (observe-retained-blobs!
+         (main-blob-url configuration manifest) target-coordinate)]
+    (restore/derive-intent
+     {::restore/intent-id intent-id
+      ::restore/operation :seon.dev.restore.operation/undo
+      ::restore/pre-restore-main-descriptor main-descriptor
+      ::restore/selected-target-descriptor target-descriptor
+      ::restore/expected-branch-roster
+      (restore/reserved-branch-roster
+       intent-id (::protocol/branch-roster lifecycle))
+      ::restore/protocol-version protocol/current-version
+      ::restore/artifact-identity (manifest-artifact-identity manifest)
+      ::restore/consumer-generations consumer-generations
+      ::restore/core-overlay-selection :seon.dev.restore.overlay/preserve
+      ::restore/config-overlay-selection :seon.dev.restore.overlay/preserve
+      ::restore/reachable-hash-digest
+      (:my.blob/reachable-hash-digest blob-observation)
+      ::restore/retained-head-observation
+      (lifecycle->retained-head-observation lifecycle)
+      ::restore/completion-selector
+      {::restore/selected-completion-id completion-id}})))
 
 (defn plan!
   "Read current restore facts and return one effect-free immutable plan."
@@ -356,6 +466,37 @@
         ::restore/confirmation-action
         :seon.dev.restore.confirmation/apply})})))
 
+(defn plan-undo!
+  "Read one completion-selected inverse and return an effect-free plan."
+  {:malli/schema [:=> [:cat ::undo-plan-request] ::restore/plan]}
+  [{configuration ::configuration
+    completion-id ::completion-id
+    :as request}]
+  (when-not (m/validate ::undo-plan-request request)
+    (throw (ex-info "The retained undo plan request is invalid."
+                    {:seon.dev.restore-state/explanation
+                     (m/explain ::undo-plan-request request)})))
+  (when-let [intent (retained-intent configuration)]
+    (throw (ex-info "A retained restore intent already owns this cluster."
+                    {::restore/intent-id (::restore/intent-id intent)
+                     :seon.error/kind
+                     :seon.dev.restore.error/retained-intent})))
+  (let [manifest (require-manifest! configuration)
+        artifact-identity (manifest-artifact-identity manifest)
+        _ (require-artifact-identity!
+           configuration manifest artifact-identity)
+        intent
+        (derive-undo-intent!
+         configuration manifest completion-id (fresh-intent-id)
+         {process/pod-id (random-uuid)})]
+    (restore/validate-plan
+     {::restore/intent intent
+      ::restore/confirmation-text
+      (restore/confirmation-text
+       {::restore/intent intent
+        ::restore/confirmation-action
+        :seon.dev.restore.confirmation/apply})})))
+
 (defn- blob-result-path [cluster-dir intent]
   (str cluster-dir "/lifecycle/restore-blobs-"
        (::restore/intent-id intent) ".edn"))
@@ -377,7 +518,7 @@
     result))
 
 (defn- materialize-retained-blobs!
-  [configuration branch-name intent]
+  [configuration manifest branch-name intent]
   (let [cluster-dir (:seon.dev.config/cluster-dir configuration)]
     (or (read-materialization-result cluster-dir intent)
         (let [target (::restore/selected-target-descriptor intent)
@@ -386,7 +527,7 @@
               (get-in target [::launch/database ::coordinate/coordinate])
               result
               (post-edn!
-               (retained-blob-url configuration branch-name)
+               (blob-url configuration manifest branch-name intent)
                {:my.blob/operator-operation
                 :my.blob.operator.operation/materialize-retained
                 :seon.dev.restore/startup-identity
@@ -416,6 +557,33 @@
                        :seon.dev.restore-state/response response})))
     response))
 
+(defn- ensure-descriptor-route!
+  [descriptor]
+  (let [database (::launch/database descriptor)
+        expected-coordinate (::coordinate/coordinate database)
+        response
+        (writer-call!
+         descriptor
+         (protocol/ensure-database-request
+          (cond-> {::protocol/database-name
+                   (::protocol/database-name database)
+                   ::protocol/backend (::protocol/backend database)}
+            (::coordinate/attachment database)
+            (assoc ::coordinate/attachment
+                   (::coordinate/attachment database))
+            (::protocol/database-path database)
+            (assoc ::protocol/database-path
+                   (::protocol/database-path database))))
+         ::protocol/ensure-database-response)]
+    (when-not (= expected-coordinate (::coordinate/coordinate response))
+      (throw
+       (ex-info "The restore source route resolved another exact coordinate."
+                {:seon.dev.restore-state/expected-coordinate
+                 expected-coordinate
+                 :seon.dev.restore-state/actual-coordinate
+                 (::coordinate/coordinate response)})))
+    response))
+
 (defn- create-reserved-branch!
   [configuration intent role]
   (let [source-descriptor
@@ -433,6 +601,7 @@
         target-database-name
         (str (:seon.dev.config/cluster-name configuration)
              "-restore-" (name role) "-" (::restore/intent-id intent))
+        _ (ensure-descriptor-route! source-descriptor)
         response
         (writer-call!
          source-descriptor
@@ -685,6 +854,48 @@
                        selected-branch})))
     intent))
 
+(defn- require-undo-completion!
+  [configuration completion-id intent]
+  (when-not (= :seon.dev.restore.operation/undo (::restore/operation intent))
+    (throw
+     (ex-info "The retained intent is not a completion-selected undo."
+              {::completion-id completion-id
+               ::restore/intent-id (::restore/intent-id intent)})))
+  (let [lifecycle
+        (observe-lifecycle! (:seon.dev.config/launch-descriptor configuration))
+        completion (completion-by-id! lifecycle completion-id)
+        expected
+        (get-in intent [::restore/selected-target-descriptor
+                        ::launch/database ::coordinate/coordinate])
+        actual (restore/completion-undo-coordinate completion)]
+    (when-not (= expected actual)
+      (throw
+       (ex-info "The completion does not authorize this retained undo target."
+                {::completion-id completion-id
+                 :seon.dev.restore/expected-undo-coordinate expected
+                 :seon.dev.restore/actual-undo-coordinate actual
+                 :seon.error/kind
+                 :seon.dev.restore.error/inconsistent-intent})))
+    intent))
+
+(defn- require-resume-target!
+  [configuration branch-name intent]
+  (case (::restore/operation intent)
+    :seon.dev.restore.operation/restore
+    (if branch-name
+      (require-selected-branch! configuration branch-name intent)
+      (throw
+       (ex-info "Restore resume requires its retained public branch."
+                {::restore/intent-id (::restore/intent-id intent)})))
+
+    :seon.dev.restore.operation/undo
+    (if (nil? branch-name)
+      intent
+      (throw
+       (ex-info "Undo resume derives its retained target from completion facts."
+                {::restore/intent-id (::restore/intent-id intent)
+                 ::branch-name branch-name})))))
+
 (defn- prepare-observation-writer!
   [configuration manifest intent admin-result]
   (if admin-result
@@ -758,7 +969,7 @@
                  (throw (ex-info "Restore resume requires retained authority."
                                  {:seon.error/kind
                                   :seon.dev.restore.error/missing-intent})))
-             (require-selected-branch! configuration branch-name))
+             (require-resume-target! configuration branch-name))
         artifact-identity (::restore/artifact-identity intent)
         _ (require-artifact-identity!
            configuration manifest artifact-identity)
@@ -800,7 +1011,7 @@
                 ;; create U through its existing expected-head fence.
                 (reset! !blob-result
                         (materialize-retained-blobs!
-                         configuration branch-name intent))
+                         configuration manifest branch-name intent))
                 (stop-retained-pods! configuration)
                 (stop-main-consumers!
                  configuration
@@ -875,6 +1086,49 @@
      ::admin-outcome (::restore-admin/outcome @!admin-result)
      ::transitions (::transitions convergence)}))
 
+(defn- apply-transition!
+  [configuration plan supplied-confirmation timeout-ms require-authority!
+   derive-fresh! resume-request]
+  (let [{intent ::restore/intent
+         expected-confirmation ::restore/confirmation-text}
+        (restore/validate-plan plan)]
+    (when-not (= expected-confirmation supplied-confirmation)
+      (throw
+       (ex-info
+        "The supplied restore confirmation does not exactly authorize the plan."
+        {::restore/intent-id (::restore/intent-id intent)
+         :seon.error/kind
+         :seon.dev.restore.error/confirmation-mismatch})))
+    (require-authority! intent)
+    (if-let [retained (retained-intent configuration)]
+      (do
+        (when-not (= intent retained)
+          (throw
+           (ex-info
+            "Another immutable restore intent is already retained."
+            {::restore/intent-id (::restore/intent-id retained)
+             :seon.error/kind
+             :seon.dev.restore.error/retained-intent})))
+        (resume! (assoc resume-request ::admin-timeout-ms timeout-ms)))
+      (let [manifest (require-manifest! configuration)
+            artifact-identity (::restore/artifact-identity intent)
+            _ (require-artifact-identity!
+               configuration manifest artifact-identity)
+            fresh (derive-fresh! manifest intent)]
+        (when-not (= intent fresh)
+          (throw
+           (ex-info
+            "The confirmed restore plan became stale before publication."
+            {::restore/intent-id (::restore/intent-id intent)
+             :seon.dev.restore/confirmed-plan intent
+             :seon.dev.restore/current-plan fresh
+             :seon.error/kind
+             :seon.dev.restore.error/stale-confirmed-plan})))
+        (publish-intent!
+         {::cluster-dir (:seon.dev.config/cluster-dir configuration)
+          ::restore/intent intent})
+        (resume! (assoc resume-request ::admin-timeout-ms timeout-ms))))))
+
 (defn apply!
   "Publish one exactly confirmed fresh plan, then enter prompt-free resume."
   {:malli/schema [:=> [:cat ::apply-request] ::restore-result]}
@@ -889,53 +1143,39 @@
     (throw (ex-info "The retained restore apply request is invalid."
                     {:seon.dev.restore-state/explanation
                      (m/explain ::apply-request request)})))
-  (let [{intent ::restore/intent
-         expected-confirmation ::restore/confirmation-text}
-        (restore/validate-plan plan)]
-    (when-not (= expected-confirmation supplied-confirmation)
-      (throw
-       (ex-info
-        "The supplied restore confirmation does not exactly authorize the plan."
-        {::restore/intent-id (::restore/intent-id intent)
-         :seon.error/kind
-         :seon.dev.restore.error/confirmation-mismatch})))
-    (require-selected-branch! configuration branch-name intent)
-    (if-let [retained (retained-intent configuration)]
-      (do
-        (when-not (= intent retained)
-          (throw
-           (ex-info
-            "Another immutable restore intent is already retained."
-            {::restore/intent-id (::restore/intent-id retained)
-             :seon.error/kind
-             :seon.dev.restore.error/retained-intent})))
-        (resume! {::configuration configuration
-                  ::branch-name branch-name
-                  ::admin-timeout-ms timeout-ms}))
-      (let [manifest (require-manifest! configuration)
-            artifact-identity (::restore/artifact-identity intent)
-            _ (require-artifact-identity!
-               configuration manifest artifact-identity)
-            fresh
-            (derive-intent!
-             configuration branch-name manifest
-             (::restore/intent-id intent)
-             (::restore/consumer-generations intent))]
-        (when-not (= intent fresh)
-          (throw
-           (ex-info
-            "The confirmed restore plan became stale before publication."
-            {::restore/intent-id (::restore/intent-id intent)
-             :seon.dev.restore/confirmed-plan intent
-             :seon.dev.restore/current-plan fresh
-             :seon.error/kind
-             :seon.dev.restore.error/stale-confirmed-plan})))
-        (publish-intent!
-         {::cluster-dir (:seon.dev.config/cluster-dir configuration)
-          ::restore/intent intent})
-        (resume! {::configuration configuration
-                  ::branch-name branch-name
-                  ::admin-timeout-ms timeout-ms})))))
+  (apply-transition!
+   configuration plan supplied-confirmation timeout-ms
+   #(require-selected-branch! configuration branch-name %)
+   (fn [manifest intent]
+     (derive-intent!
+      configuration branch-name manifest
+      (::restore/intent-id intent)
+      (::restore/consumer-generations intent)))
+   {::configuration configuration ::branch-name branch-name}))
+
+(defn apply-undo!
+  "Publish one confirmed completion-selected inverse, then resume it."
+  {:malli/schema [:=> [:cat ::undo-apply-request] ::restore-result]}
+  [{configuration ::configuration
+    completion-id ::completion-id
+    plan ::restore/plan
+    supplied-confirmation ::restore/confirmation-text
+    timeout-ms ::admin-timeout-ms
+    :or {timeout-ms 120000}
+    :as request}]
+  (when-not (m/validate ::undo-apply-request request)
+    (throw (ex-info "The retained undo apply request is invalid."
+                    {:seon.dev.restore-state/explanation
+                     (m/explain ::undo-apply-request request)})))
+  (apply-transition!
+   configuration plan supplied-confirmation timeout-ms
+   #(require-undo-completion! configuration completion-id %)
+   (fn [manifest intent]
+     (derive-undo-intent!
+      configuration manifest completion-id
+      (::restore/intent-id intent)
+      (::restore/consumer-generations intent)))
+   {::configuration configuration}))
 
 (defn- matching-restore-pod-record [configuration intent]
   (let [expected-generation
@@ -1000,23 +1240,14 @@
          :seon.error/kind :seon.dev.restore.error/abort-unsafe})))
     observation))
 
-(defn abort!
-  "Delete only a proved pre-preparation retained intent with exact authority."
-  {:malli/schema [:=> [:cat ::abort-request] ::abort-result]}
-  [{configuration ::configuration
-    branch-name ::branch-name
-    supplied-confirmation ::restore/confirmation-text
-    :as request}]
-  (when-not (m/validate ::abort-request request)
-    (throw (ex-info "The retained restore abort request is invalid."
-                    {:seon.dev.restore-state/explanation
-                     (m/explain ::abort-request request)})))
+(defn- abort-transition!
+  [configuration supplied-confirmation require-authority!]
   (let [intent
-        (->> (or (retained-intent configuration)
-                 (throw (ex-info "Restore abort requires retained authority."
-                                 {:seon.error/kind
-                                  :seon.dev.restore.error/missing-intent})))
-             (require-selected-branch! configuration branch-name))
+        (or (retained-intent configuration)
+            (throw (ex-info "Restore abort requires retained authority."
+                            {:seon.error/kind
+                             :seon.dev.restore.error/missing-intent})))
+        _ (require-authority! intent)
         expected-confirmation
         (restore/confirmation-text
          {::restore/intent intent
@@ -1062,6 +1293,36 @@
         ::current-main-coordinate (::restore/main-coordinate observation)
         ::selected-target-coordinate selected-coordinate}
         current-target (assoc ::current-target-coordinate current-target)))))
+
+(defn abort!
+  "Delete only a proved pre-preparation retained intent with exact authority."
+  {:malli/schema [:=> [:cat ::abort-request] ::abort-result]}
+  [{configuration ::configuration
+    branch-name ::branch-name
+    supplied-confirmation ::restore/confirmation-text
+    :as request}]
+  (when-not (m/validate ::abort-request request)
+    (throw (ex-info "The retained restore abort request is invalid."
+                    {:seon.dev.restore-state/explanation
+                     (m/explain ::abort-request request)})))
+  (abort-transition!
+   configuration supplied-confirmation
+   #(require-selected-branch! configuration branch-name %)))
+
+(defn abort-undo!
+  "Abort one completion-selected undo before any preparation effect."
+  {:malli/schema [:=> [:cat ::undo-abort-request] ::abort-result]}
+  [{configuration ::configuration
+    completion-id ::completion-id
+    supplied-confirmation ::restore/confirmation-text
+    :as request}]
+  (when-not (m/validate ::undo-abort-request request)
+    (throw (ex-info "The retained undo abort request is invalid."
+                    {:seon.dev.restore-state/explanation
+                     (m/explain ::undo-abort-request request)})))
+  (abort-transition!
+   configuration supplied-confirmation
+   #(require-undo-completion! configuration completion-id %)))
 
 (defn converge!
   "Execute the one restore command derived from fresh durable facts.

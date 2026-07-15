@@ -405,6 +405,22 @@
       (fn [] (#'cli/restart! configuration [])))
     (is (= [[:resume configuration] [:reconcile configuration]] @calls))))
 
+(deftest retained-undo-auto-resume-carries-no-arbitrary-branch-selector
+  (let [configuration {:seon.dev.config/cluster-name "default"}
+        intent
+        {:seon.dev.restore/intent-id "retained01"
+         ::restore/operation :seon.dev.restore.operation/undo
+         ::restore/selected-target-descriptor
+         {:seon.launch/database
+          {:seon.db.coordinate/coordinate
+           {:seon.db.coordinate/branch :seon.restore.undo/r-prior}}}}
+        calls (atom [])]
+    (with-redefs-fn
+      {#'cli/retained-restore-intent (constantly intent)
+       #'restore-state/resume! (fn [request] (swap! calls conj request))}
+      #(#'cli/resume-retained-restore! configuration))
+    (is (= [{::restore-state/configuration configuration}] @calls))))
+
 (deftest branch-commands-call-only-the-retained-lifecycle-owner
   (let [configuration {:seon.dev.config/launch-descriptor :source}
         open-request {::branch/configuration configuration
@@ -781,6 +797,92 @@
                        ::restore/confirmation-text "ABORT"}]]
              @calls))
       (finally (fs/delete-tree root {:force true})))))
+
+(deftest undo-cli-binds-plan-apply-and-abort-to-one-completion-id
+  (let [root (fs/create-temp-dir {:prefix "seon-cli-undo-plan-"})
+        plan-path (str (fs/path root "undo-plan.edn"))
+        configuration {:seon.dev.config/cluster-name "default"}
+        completion-id "priorundo001"
+        plan {::restore/confirmation-text "EXACT UNDO"}
+        result
+        {:seon.dev.restore/intent-id "restoretest01"
+         ::restore-state/restored-coordinate
+         {:seon.db.coordinate/database-id (random-uuid)
+          :seon.db.coordinate/branch :db
+          :seon.db.coordinate/commit-id (random-uuid)
+          :seon.db.coordinate/t 42}
+         ::restore-state/admin-outcome
+         :seon.db.restore-admin.outcome/applied
+         ::restore-state/transitions []}
+        calls (atom [])]
+    (try
+      (spit plan-path (pr-str plan))
+      (with-redefs-fn
+        {#'state/with-lock (fn [_ _ _ transition] (transition))
+         #'restore-state/plan-undo!
+         (fn [request]
+           (swap! calls conj [:plan request])
+           plan)}
+        #(is (= (str (pr-str plan) "\n")
+                (with-out-str
+                  (#'cli/undo-cluster!
+                   configuration [completion-id "--plan" "--edn"])))))
+      (is (= [[:plan {::restore-state/configuration configuration
+                      ::restore-state/completion-id completion-id}]]
+             @calls))
+      (reset! calls [])
+      (with-redefs-fn
+        {#'state/with-lock (fn [_ _ _ transition] (transition))
+         #'restore-state/apply-undo!
+         (fn [request]
+           (swap! calls conj [:apply request])
+           result)}
+        #(#'cli/undo-cluster!
+          configuration
+          [completion-id "--apply-plan" plan-path
+           "--confirm" "EXACT UNDO"]))
+      (is (= [[:apply {::restore-state/configuration configuration
+                       ::restore-state/completion-id completion-id
+                       ::restore/plan plan
+                       ::restore/confirmation-text "EXACT UNDO"}]]
+             @calls))
+      (reset! calls [])
+      (with-redefs-fn
+        {#'state/with-lock (fn [_ _ _ transition] (transition))
+         #'restore-state/abort-undo!
+         (fn [request]
+           (swap! calls conj [:abort request])
+           {:seon.dev.restore/intent-id "restoretest01"
+            :seon.dev.restore/plan-digest (apply str (repeat 64 "a"))
+            ::restore-state/aborted? true
+            ::restore-state/prior-main-coordinate
+            (::restore-state/restored-coordinate result)
+            ::restore-state/current-main-coordinate
+            (::restore-state/restored-coordinate result)
+            ::restore-state/selected-target-coordinate
+            (assoc (::restore-state/restored-coordinate result)
+                   :seon.db.coordinate/branch :seon.restore.undo/r-prior)})}
+        #(#'cli/undo-cluster!
+          configuration [completion-id "--abort" "--confirm" "ABORT"]))
+      (is (= [[:abort {::restore-state/configuration configuration
+                       ::restore-state/completion-id completion-id
+                       ::restore/confirmation-text "ABORT"}]]
+             @calls))
+      (is (thrown? Exception (#'cli/undo-cluster! configuration [])))
+      (is (thrown? Exception
+                   (#'cli/undo-cluster! configuration
+                    [completion-id "unexpected"])))
+      (finally (fs/delete-tree root {:force true})))))
+
+(deftest cluster-undo-dispatches-only-to-the-completion-selected-owner
+  (let [configuration {:seon.dev.config/cluster-name "default"}
+        calls (atom [])]
+    (with-redefs-fn
+      {#'cli/undo-cluster!
+       (fn [selected arguments]
+         (swap! calls conj [selected (vec arguments)]))}
+      #(#'cli/cluster! configuration ["undo" "priorundo001" "--plan" "--edn"]))
+    (is (= [[configuration ["priorundo001" "--plan" "--edn"]]] @calls))))
 
 (deftest mutating-branch-commands-share-the-restore-stack-lock
   (let [configuration {:cluster :default}
