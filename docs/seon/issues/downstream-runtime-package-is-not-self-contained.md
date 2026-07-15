@@ -43,11 +43,18 @@ operator, compatibility manifest, or one-command release/downstream build.
   nREPL and CLJ eval requires the development writer `io-prepl`, while the
   production process boundary deliberately ships neither.
 - Root `LICENSE` is AGPL-3.0 while `package.json` declares ISC.
+- Selected ClojureScript is `1.12.145`, but the current
+  `reference-code/clojurescript` mirror identifies itself as `1.12.41`.
+  Exact source is also absent for Clojure, tools.build, superv.async, and
+  partial-cps, so the compatibility contract is not grounded in every selected
+  implementation.
 
 Full evidence and the proposed artifact boundary are in
 [[../../prds/independent-downstream-distribution/research/independent-acme-distribution-audit-2026-07-14]].
 Current-head reconciliation and parallel implementation order are in
 [[../../prds/independent-downstream-distribution/research/acme-artifact-boundary-reconciliation-2026-07-14]].
+The refreshed source ledger and next offline executable slice are in
+[[../../prds/independent-downstream-distribution/research/no-source-package-inventory-slice-2026-07-15]].
 
 ## Owner
 
@@ -72,3 +79,7 @@ no-source acceptance fixture.
   writer/pod/SDK/config protocol set before database mutation.
 - The no-source proof exercises consumer source, dependencies, config, routes,
   renderers, brand CSS, MCP CLJ/CLJS evaluation, restart, and database readback.
+- Every selected dependency has exact mirrored source, and one pure package
+  inventory test rejects absolute or escaping paths, symlinks, missing or
+  changed members, undeclared production npm dependencies, license mismatch,
+  and mixed writer/runtime/SDK compatibility identities.

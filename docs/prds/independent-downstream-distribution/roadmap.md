@@ -41,7 +41,13 @@ earlier boundary audit
 [[research/client-distribution-and-server-rendering-boundary-2026-07-13]]. The
 current-head dependency ledger, parity evidence, MCP mode distinction, and
 parallel carve-out are
-[[research/acme-artifact-boundary-reconciliation-2026-07-14]]. The
+[[research/acme-artifact-boundary-reconciliation-2026-07-14]]. The refreshed
+exact-source ledger and smallest offline manifest/inventory slice are
+[[research/no-source-package-inventory-slice-2026-07-15]]. That audit found
+that selected ClojureScript `1.12.145` is not mirrored: the current mirror is
+`1.12.41`. Exact source is also absent for Clojure, tools.build,
+superv.async, and partial-cps. Those gaps must close before freezing a release
+schema under the repository source policy. The
 verified defect is
 [[../../seon/issues/downstream-runtime-package-is-not-self-contained]].
 Implementation waits for the runtime/database contracts named by the
@@ -70,9 +76,12 @@ specification may proceed independently.
 
 ## Dependency order and parallel execution
 
-First freeze the compatibility-manifest schema and mirror every exact selected
-dependency source named in the reconciliation audit. After that, three bounded
-units can proceed in parallel:
+First mirror every exact selected dependency source named in the refreshed
+inventory and settle the database protocol plus config/public-SDK ABI version
+owners. Then implement the pure offline compatibility-manifest and package
+inventory contract described by the July 15 audit. Its focused test is the
+earliest executable slice and operates no pod, writer, watcher, or ACME
+process. After that, three bounded units can proceed in parallel:
 
 - publish the public CLJS SDK plus immutable maintained dependency coordinates;
 - build the relocatable runtime, bootstrap/source/assets/npm closure; and
