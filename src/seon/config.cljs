@@ -156,6 +156,7 @@
 (schema/register! :seon.config.watchdog/stale-ms    :seon.config/cap)
 (schema/register! :seon.config.breaker/crash-count  :seon.config/cap)
 (schema/register! :seon.config.breaker/window-ms    :seon.config/cap)
+(schema/register! :seon.config.root/recent-limit    :seon.config/cap)
 
 ;;; RENDER BOUNDS — the GLOBAL, cluster-wide render/value display caps (#46).
 ;;; These are NOT per-agent: they bound the value/eval/message renderers for
@@ -306,6 +307,10 @@
   [:map
    [:seon.config.breaker/crash-count {:optional true} :seon.config.breaker/crash-count]
    [:seon.config.breaker/window-ms   {:optional true} :seon.config.breaker/window-ms]])
+(schema/register! :seon.config/root
+  [:map
+   [:seon.config.root/recent-limit
+    {:optional true} :seon.config.root/recent-limit]])
 
 ;;; REPL MODE (repl-mode Phase 1) — how the agent's REPL turn resolves a
 ;;; form's result. The DEFAULT is per-MODEL ([[default-repl-mode]]); an
@@ -442,7 +447,8 @@
    [:seon.agent.web/allowed-domains {:optional true} :seon.agent.web/allowed-domains]
    [:seon.config.watchdog/stale-ms   {:optional true} :seon.config/cap]
    [:seon.config.breaker/crash-count {:optional true} :seon.config/cap]
-   [:seon.config.breaker/window-ms   {:optional true} :seon.config/cap]])
+   [:seon.config.breaker/window-ms   {:optional true} :seon.config/cap]
+   [:seon.config.root/recent-limit   {:optional true} :seon.config/cap]])
 
 ;; ── The db-read seam (config ← db injection) ──
 ;; `seon.config` CANNOT require `seon.db` (the require direction is
@@ -482,6 +488,7 @@
    [:seon.config/spawn-depth-cap   {:optional true} :seon.config/spawn-depth-cap]
    [:seon.config/watchdog          {:optional true} :seon.config/watchdog]
    [:seon.config/schedule-breaker  {:optional true} :seon.config/schedule-breaker]
+   [:seon.config/root              {:optional true} :seon.config/root]
    [:seon.config/agent-context {:optional true} :seon.config/agent-context]
    [:seon.config/root-context  {:optional true} :seon.config/root-context]])
 
@@ -519,19 +526,44 @@
 ;;; deliberately drops the base home-requires to fall back to the consumer
 ;;; default) is untouched. ONE merge rule, applied at the ONE composition seam.
 
+(defn- merge-home-requires
+  "Overlay additional home requires on the base vector by namespace identity.
+
+   A repeated namespace replaces its base require spec in place; a new
+   namespace appends. This keeps specialization additive while allowing a
+   deliberate alias/refer refinement without emitting duplicate requires."
+  [base additions]
+  (reduce
+    (fn [requires spec]
+      (let [target (first spec)]
+        (if-let [index (first (keep-indexed
+                               (fn [i current]
+                                 (when (= target (first current)) i))
+                               requires))]
+          (assoc requires index spec)
+          (conj requires spec))))
+    (vec (or base []))
+    (or additions [])))
+
 (defn- combine-agent-context
   "Combine a base `:seon.config/agent-context` map with an `override` map.
 
    An `override` that declares `:seon.agent/ctx` REPLACES the whole map (the
    documented replaces-wholesale contract the minimal.edn family relies on to
    also drop the base `:seon.eval/home-requires`). A SPARSE `override` (no
-   `:seon.agent/ctx`) is a PATCH: its keys win, every unstated key — the
-   `:seon.agent/ctx` block tree included — inherits from `base`. Matches
-   [[resolve-agent-context]]'s `explicit-ctx?` rule."
+   `:seon.agent/ctx`) is a PATCH: scalar keys win, home requirements merge by
+   namespace identity, and every unstated key — the block tree included —
+   inherits from `base`. Matches [[resolve-agent-context]]'s
+   `explicit-ctx?` rule."
   [base override]
   (if (contains? override :seon.agent/ctx)
     override
-    (merge base override)))
+    (cond-> (merge base override)
+      (contains? override :seon.eval/home-requires)
+      (assoc :seon.eval/home-requires
+             (merge-home-requires
+               (:seon.eval/home-requires base)
+               (:seon.eval/home-requires override))))))
 
 (defn- merge-manifest-pair
   "Shallow-merge `override` over `base`, then re-combine the nested
@@ -709,6 +741,7 @@
         transport (get manifest :seon.config/model-transport {})
         rep (get manifest :seon.config/repair {})
         web (get manifest :seon.config/web {})
+        root (get manifest :seon.config/root {})
         nsp (resolve-namespaces manifest)]
     (cond-> {:seon.config/id cluster-config-id
              :seon.config/repl-mode
@@ -762,7 +795,9 @@
              :seon.config.breaker/crash-count
              (get-in manifest [:seon.config/schedule-breaker :seon.config.breaker/crash-count] 3)
              :seon.config.breaker/window-ms
-             (get-in manifest [:seon.config/schedule-breaker :seon.config.breaker/window-ms] 1800000)}
+             (get-in manifest [:seon.config/schedule-breaker :seon.config.breaker/window-ms] 1800000)
+             :seon.config.root/recent-limit
+             (get root :seon.config.root/recent-limit 12)}
       (contains? manifest :seon.config/system-text)
       (assoc :seon.config/system-text (:seon.config/system-text manifest))
       (contains? transport :seon.config.model-transport/response-identity-cap)
@@ -955,7 +990,7 @@
   {:malli/schema
    [:function
     [:=> [:cat] :int]
-    [:=> [:cat :map] :int]]}
+    [:=> [:cat :seon.db/db-val] :int]]}
   ([]
    (get (render-config) :seon.config.render/database-edn-cap 16384))
   ([database]
@@ -1319,6 +1354,20 @@
   []
   (get (config-view) :seon.config.breaker/window-ms 1800000))
 
+(defn root-recent-limit
+  "Bound root's recent activity and failed-eval lookbacks.
+
+   The resolved value is a datom on the config singleton. Passing an immutable
+   database value keeps the fleet render exactly reproducible; the zero-arity
+   form is for interactive runtime callers."
+  {:malli/schema
+   [:function
+    [:=> [:cat] :int]
+    [:=> [:cat :seon.db/db-val] :int]]}
+  ([] (get (config-view) :seon.config.root/recent-limit 12))
+  ([database]
+   (get (config-view database) :seon.config.root/recent-limit 12)))
+
 (defn- upsert-by-name
   "Layer `additions` over `base` by `:seon.agent.ctx/name`, MERGING an
    addition's attrs OVER the matching base block IN PLACE — so a sparse
@@ -1392,13 +1441,20 @@
                        (get manifest :seon.config/agent-context {})
                        ctx-default-transformer)]
     (if (= id "root")
-      (let [override (get manifest :seon.config/root-context {})]
+      (let [override      (get manifest :seon.config/root-context {})
+            root-requires (:seon.eval/home-requires override)]
         (-> base
-            ;; merge root-context's SCALAR keys (e.g. `:seon.eval/home-requires`)
-            ;; over the base — everything except the `:seon.agent/ctx` block
-            ;; vector, which is merged-by-name below ([[upsert-by-name]]): a
-            ;; sparse per-block override keeps the default block's other attrs.
-            (merge (dissoc override :seon.agent/ctx))
+            ;; Root's home requires are an additive capability overlay. Every
+            ;; base/downstream namespace remains visible; a repeated namespace
+            ;; refines its require spec by identity. Other scalar keys still
+            ;; override normally. The block vector merges by name below.
+            (merge (dissoc override :seon.agent/ctx
+                           :seon.eval/home-requires))
+            (cond-> (contains? override :seon.eval/home-requires)
+              (assoc :seon.eval/home-requires
+                     (merge-home-requires
+                       (:seon.eval/home-requires base)
+                       root-requires)))
             (assoc :seon.agent/ctx
                    (upsert-by-name (:seon.agent/ctx base)
                                    (:seon.agent/ctx override)))))

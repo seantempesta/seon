@@ -101,6 +101,34 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw " e)) (done))))))
 
+(deftest subagents-completed-child-normalizes-result-reference
+  (async done
+    (-> (with-conn
+          (fn ^:async af [conn]
+            (await (add-child! conn ::child parent-id "compute with artifact"))
+            (await (d/transact! conn {:tx-data [{:my.kb.shared/id "result-note"}]}))
+            (let [result-eid (:db/id (db/entity {:seon.db/ref
+                                                 [:my.kb.shared/id "result-note"]}))
+                  snap (await (run/open-run!
+                                {:seon.agent/id child-id
+                                 :seon.agent.run/trigger :message}))
+                  rid (:seon.agent.run/id snap)]
+              (await (d/transact! conn
+                                  {:tx-data
+                                   [{:seon.agent.run/id rid
+                                     :seon.agent.run/result "artifact ready"
+                                     :seon.agent.run/result-ref result-eid}]}))
+              (await (run/close-run!
+                       {:seon.agent.run/id rid
+                        :seon.agent.run/closed-reason :completed}))
+              (let [out (render parent-id)]
+                (is (re-find (re-pattern (str "eid " result-eid)) out)
+                    "the shared closed-run projection emits the normalized eid")))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e]
+                  (is false (str "result-ref projection threw " e))
+                  (done))))))
+
 (deftest subagents-error-closed-child-shows-death
   (async done
     (-> (with-conn

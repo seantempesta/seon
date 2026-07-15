@@ -160,7 +160,11 @@
                 (is (= :running rs) "resume returns :running")
                 (is (= :running (derived "bbb-2606101200")) "paused-at cleared ⇒ :running")))
             (testing "terminate sets terminated-at → :terminated (the unwakeable state)"
-              (let [r (await (lifecycle/terminate "aaa-2606101200"))]
+              (let [r (await (db/with-agent
+                               "root"
+                               (fn ^:async terminate-agent []
+                                 (await (lifecycle/terminate
+                                          "aaa-2606101200")))))]
                 (is (= :terminated r))
                 (is (= :terminated (derived "aaa-2606101200")))))
             (testing "wait with no agent in scope → loud error envelope (errors are values)"
@@ -169,6 +173,144 @@
                 (is (string? (:seon.error/message (:seon.db/error env))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest root-and-ancestors-manage-targeted-run-lifecycle
+  (async done
+    (-> (with-conn
+          (fn ^:async run-targeted []
+            (await (seed-agents!))
+            (await (db/transact!
+                     {:seon.db/tx-data
+                      [{:seon.agent/id "root"}
+                       {:seon.agent/id "bbb-2606101200"
+                        :seon.agent/parent
+                        [:seon.agent/id "aaa-2606101200"]}]}))
+            (await (run/open-run! {:seon.agent/id "bbb-2606101200"
+                                   :seon.agent.run/trigger :message}))
+            (testing "root can correct a target's purpose"
+              (let [result
+                    (await
+                      (db/with-agent
+                        "root"
+                        (fn ^:async set-child-purpose []
+                          (await
+                            (agent/set-purpose!
+                              {:seon.agent/id "bbb-2606101200"
+                               :seon.agent/purpose "Own parser recovery"})))))]
+                (is (true? (:seon.agent/ok? result)))
+                (is (= "Own parser recovery"
+                       (:seon.agent/purpose
+                         (db/entity {:seon.db/ref
+                                     [:seon.agent/id "bbb-2606101200"]}))))))
+            (testing "root can pause and resume any ordinary agent"
+              (is (= :paused
+                     (await
+                       (db/with-agent
+                         "root"
+                         (fn ^:async root-pause []
+                           (await (lifecycle/pause
+                                    {:seon.agent/id "bbb-2606101200"})))))))
+              (is (= :running
+                     (await
+                       (db/with-agent
+                         "root"
+                         (fn ^:async root-resume []
+                           (await (lifecycle/resume
+                                    {:seon.agent/id "bbb-2606101200"}))))))))
+            (testing "an ordinary agent cannot manage an ancestor"
+              (let [purpose-result
+                    (await
+                      (db/with-agent
+                        "bbb-2606101200"
+                        (fn ^:async child-purpose-parent []
+                          (await
+                            (agent/set-purpose!
+                              {:seon.agent/id "aaa-2606101200"
+                               :seon.agent/purpose "wrong"})))))
+                    result
+                    (await
+                      (db/with-agent
+                        "bbb-2606101200"
+                        (fn ^:async child-pause-parent []
+                          (await (lifecycle/pause
+                                   {:seon.agent/id "aaa-2606101200"})))))]
+                (is (false? (:seon.agent/ok? purpose-result)))
+                (is (false? (:seon.db/ok? result)))
+                (is (= :idle (derived "aaa-2606101200")))))
+            (testing "an ancestor can manage its descendant"
+              (is (= :paused
+                     (await
+                       (db/with-agent
+                         "aaa-2606101200"
+                         (fn ^:async parent-pause []
+                           (await (lifecycle/pause
+                                    {:seon.agent/id "bbb-2606101200"}))))))))
+            (testing "root is a protected cluster identity"
+              (let [result
+                    (await
+                      (db/with-agent
+                        "root"
+                        (fn ^:async terminate-root []
+                          (await (lifecycle/terminate "root")))))]
+                (is (false? (:seon.db/ok? result)))
+                (is (= :idle (derived "root")))))
+            (testing "clearing agent scope grants no host management authority"
+              (let [purpose-result
+                    (await
+                      (db/with-agent
+                        "bbb-2606101200"
+                        (fn ^:async clear-purpose-scope []
+                          (await
+                            (db/without-agent
+                              (fn ^:async no-agent-purpose []
+                                (await
+                                  (agent/set-purpose!
+                                    {:seon.agent/id "aaa-2606101200"
+                                     :seon.agent/purpose "bypassed"}))))))))
+                    terminate-result
+                    (await
+                      (db/with-agent
+                        "bbb-2606101200"
+                        (fn ^:async clear-terminate-scope []
+                          (await
+                            (db/without-agent
+                              (fn ^:async no-agent-terminate []
+                                (await
+                                  (lifecycle/terminate
+                                    "aaa-2606101200"))))))))]
+                (is (false? (:seon.agent/ok? purpose-result)))
+                (is (false? (:seon.db/ok? terminate-result)))
+                (is (not= "bypassed"
+                          (:seon.agent/purpose
+                            (db/entity {:seon.db/ref
+                                        [:seon.agent/id "aaa-2606101200"]}))))
+                (is (= :idle (derived "aaa-2606101200")))))
+            (testing "root cannot mint a ghost by targeting an unknown id"
+              (let [unknown "ghost-agent"
+                    purpose-result
+                    (await
+                      (db/with-agent
+                        "root"
+                        (fn ^:async unknown-purpose []
+                          (await
+                            (agent/set-purpose!
+                              {:seon.agent/id unknown
+                               :seon.agent/purpose "should not exist"})))))
+                    terminate-result
+                    (await
+                      (db/with-agent
+                        "root"
+                        (fn ^:async unknown-terminate []
+                          (await (lifecycle/terminate unknown)))))]
+                (is (false? (:seon.agent/ok? purpose-result)))
+                (is (false? (:seon.db/ok? terminate-result)))
+                (is (nil? (:seon.agent/id
+                            (db/entity {:seon.db/ref
+                                        [:seon.agent/id unknown]}))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "targeted lifecycle threw: " error))
+                  (done))))))
 
 ;; ============================================================
 ;; complete-gate — a SUCCESS claim is refused while the agent's latest real
@@ -319,7 +461,11 @@
               (is (= ["aaa-2606101200" "bbb-2606101200"]
                      (agent/armable-agent-ids {:seon.db/db @db/*conn*}))))
             (testing "a terminated agent is excluded (history, not armable)"
-              (await (lifecycle/terminate "aaa-2606101200"))
+              (await
+                (db/with-agent
+                  "root"
+                  (fn ^:async terminate-agent []
+                    (await (lifecycle/terminate "aaa-2606101200")))))
               (is (= ["bbb-2606101200"]
                      (agent/armable-agent-ids {:seon.db/db @db/*conn*})))
               (is (= ["bbb-2606101200"]
@@ -482,7 +628,12 @@
                     "runtime addressing projects the durable agent query")
                 (is (= birth-t (db/basis-t))
                     "compiler/listener reconstruction adds no database facts")
-                (is (= :terminated (await (lifecycle/terminate id))))
+                (is (= :terminated
+                       (await
+                         (db/with-agent
+                           "root"
+                           (fn ^:async terminate-agent []
+                             (await (lifecycle/terminate id)))))))
                 (is (not (some #{id}
                                (:seon.dev.runtime-id/ids
                                 (client/runtime-advertisement))))

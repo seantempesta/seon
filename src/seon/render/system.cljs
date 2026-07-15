@@ -30,8 +30,10 @@
    rendering its surface on the next morph."
   (:require
     [clojure.string :as str]
+    [my.plan :as plan]
     [seon.agent.message :as message]
     [seon.ai.tokens :as tokens]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.eval :as seval]
@@ -80,9 +82,60 @@
          (sort-by (fn [id] [(if (= root-id id) 0 1) id]))
          vec)))
 
+(defn- latest-human-message
+  "Exact newest human-origin message addressed to `id`, or nil."
+  [db id]
+  (some->> (db/query
+             {:seon.db/db db
+              :seon.db/query
+              '[:find ?content ?at ?m
+                :in $ ?id
+                :where
+                [?a :seon.agent/id ?id]
+                [?m :seon.agent.message/to ?a]
+                [?m :seon.agent.message/origin :human]
+                [?m :seon.agent.message/content ?content]
+                [?m :seon.agent.message/at ?at]]
+              :seon.db/args [id]})
+           (sort-by (fn [[_ at eid]] [(.getTime ^js at) eid]))
+           last
+           first))
+
+(defn- latest-agent-message
+  "Exact newest message sent by agent `id`, or nil."
+  [db id]
+  (some->> (db/query
+             {:seon.db/db db
+              :seon.db/query
+              '[:find ?content ?at ?m
+                :in $ ?id
+                :where
+                [?a :seon.agent/id ?id]
+                [?m :seon.agent.message/from ?a]
+                [?m :seon.agent.message/content ?content]
+                [?m :seon.agent.message/at ?at]]
+              :seon.db/args [id]})
+           (sort-by (fn [[_ at eid]] [(.getTime ^js at) eid]))
+           last
+           first))
+
 ;; ============================================================
 ;; 1. Vitals / fleet summary — the derived pulse.
 ;; ============================================================
+
+(schema/register! ::run-turn :int)
+(schema/register! ::run-line
+  [:map
+   [:seon.agent.run/id :string]
+   [:seon.agent.run/started-at :inst]
+   [:seon.agent.run/trigger :keyword]
+   [:seon.agent.run/status :keyword]
+   [:seon.agent.run/turn-limit :int]
+   [:seon.agent.run/deadline :inst]
+   [:seon.agent.run/last-beat-at {:optional true} :inst]
+   [:seon.agent.run/paused-at {:optional true} :inst]
+   [:seon.agent.run/remaining-ms {:optional true} :int]
+   [::run-turn ::run-turn]])
 
 (schema/register! ::agent-line
   [:map
@@ -90,6 +143,14 @@
    [:seon.derive/state  :seon.derive/state]
    [::turns             :int]
    [:seon.agent/purpose {:optional true} :string]
+   [::parent             {:optional true} :seon.agent/id]
+   [::children           [:vector :seon.agent/id]]
+   [::plan               {:optional true} :my.plan/position]
+   [::latest-human       {:optional true} :string]
+   [::latest-output      {:optional true} :string]
+   [::run                {:optional true} ::run-line]
+   [::last-run           {:optional true} :seon.derive/closed-run]
+   [::latest-failure     {:optional true} :string]
    [::focus-selection   :seon.render.surface/selection]
    [::focus-label       :seon.render.surface/label]
    [::root?             :boolean]])
@@ -106,18 +167,48 @@
 (defn fleet-summary
   "DERIVE the fleet pulse from db `db`.
 
-   One [[agent-line]] per agent (id,
-   derived state, turn count, purpose, root?), the state-count breakdown,
+   One [[agent-line]] per agent (identity/relationships, derived state,
+   plan position, latest human instruction/output, open-run facts, newest
+   failed eval, focused surface, and purpose), the state-count breakdown,
    total turns + evals across the cluster, the last-activity instant, and
    whether semantic embeddings are on (`SEON_EMBED`). Pure read."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] ::fleet]}
   [db]
   (let [ids    (all-agent-ids db)
+        recent-limit (config/root-recent-limit db)
         agents (mapv
                  (fn [id]
                    (let [a       (db/entity {:seon.db/db db
                                              :seon.db/ref [:seon.agent/id id]})
                          purpose (:seon.agent/purpose a)
+                         parent  (:seon.agent/id (:seon.agent/parent a))
+                         children (->> (db/query
+                                         {:seon.db/db db
+                                          :seon.db/query
+                                          '[:find [?cid ...] :in $ ?pid
+                                            :where
+                                            [?p :seon.agent/id ?pid]
+                                            [?c :seon.agent/parent ?p]
+                                            [?c :seon.agent/id ?cid]]
+                                          :seon.db/args [id]})
+                                       sort vec)
+                         plan-position (::plan/position
+                                         (plan/position
+                                           {:seon.db/db db :seon.agent/id id}))
+                         latest-human (latest-human-message db id)
+                         latest-output (latest-agent-message db id)
+                         current-run (when-let [run (derive/current-run db id)]
+                                       (assoc run ::run-turn
+                                              (derive/run-turn-count
+                                                db (:seon.agent.run/id run))))
+                         last-run (derive/latest-closed-run db id)
+                         latest-failure (some->> (seval/recent
+                                                   {:seon.db/db db
+                                                    :seon.agent/id id
+                                                    :seon.eval/recent-limit recent-limit})
+                                                  (filter #(false? (:seon.eval/ok? %)))
+                                                  last
+                                                  :seon.eval/error)
                          catalog (surface/surface-catalog db id)
                          selection (surface/latest-focus-selection catalog)
                          focused (some #(when (= selection
@@ -127,10 +218,18 @@
                      (cond-> {:seon.agent/id     id
                               :seon.derive/state (derive/derive-state db id)
                               ::turns            (derive/agent-turn-count db id)
+                              ::children         children
                               ::focus-selection  selection
                               ::focus-label      (::surface/label focused)
                               ::root?            (= root-id id)}
-                       (string? purpose) (assoc :seon.agent/purpose purpose))))
+                       (string? purpose) (assoc :seon.agent/purpose purpose)
+                       (string? parent) (assoc ::parent parent)
+                       plan-position (assoc ::plan plan-position)
+                       (string? latest-human) (assoc ::latest-human latest-human)
+                       (string? latest-output) (assoc ::latest-output latest-output)
+                       current-run (assoc ::run current-run)
+                       last-run (assoc ::last-run last-run)
+                       (string? latest-failure) (assoc ::latest-failure latest-failure))))
                  ids)
         evals  (or (db/query {:seon.db/db db
                               :seon.db/query
@@ -214,14 +313,15 @@
   "The UNFILTERED cross-agent event stream over db `db`.
 
    Messages + evals
-   from EVERY agent UNIONed, newest-first, capped at `n` (default 12). The
+   from EVERY agent UNIONed, newest-first, capped at `n`. The one-argument
+   form reads the root recent limit from the same immutable database value. The
    reactive-context property made literal: a query that doesn't filter by
    `:seon.agent/id` sees the whole cluster. Each event links to its agent.
    Pure read."
   {:malli/schema [:function
                   [:=> [:catn [:seon.db/db :seon.db/db-val]] [:vector ::activity-event]]
                   [:=> [:catn [:seon.db/db :seon.db/db-val] [::n :int]] [:vector ::activity-event]]]}
-  ([db] (recent-activity db 12))
+  ([db] (recent-activity db (config/root-recent-limit db)))
   ([db n]
    (->> (concat (eval-activity db n) (message-activity db n))
         (filter #(instance? js/Date (::at %)))
@@ -400,11 +500,48 @@
                 "no activity yet")
             " · embeddings " (if embedding? "on" "off"))
        "; AGENTS"]
-      (for [{:keys [seon.agent/id seon.agent/purpose]
-             ::keys [turns root? focus-label] state :seon.derive/state} agents]
-        (str "; - " (when root? "★ ") id " [" (name state) "] " turns " turns"
-             " · focused " focus-label
-             (when purpose (str " — " (truncate purpose 15))))))))
+      (mapcat
+        (fn [{:keys [seon.agent/id seon.agent/purpose]
+              ::keys [turns root? focus-label parent children plan latest-human
+                      latest-output run last-run latest-failure]
+              state :seon.derive/state}]
+          (let [progress (:my.plan/progress plan)
+                run-id   (:seon.agent.run/id run)]
+            (remove
+              nil?
+              [(str "; - " (when root? "★ ") id " [" (name state) "] " turns " turns"
+                    " · focused " focus-label
+                    (when purpose (str " — " (truncate purpose 15)))
+                    (when parent (str " · parent " parent))
+                    (when (seq children)
+                      (str " · children "
+                           (truncate (str/join "," children) 20))))
+               (when plan
+                 (str ";   plan " (truncate (:my.plan/title plan) 20) " → "
+                      (if (:my.plan/active? plan) "active " "next ")
+                      (truncate (:my.plan/step-title plan) 20) " ("
+                      (:my.plan/done progress) "/" (:my.plan/total progress) ")"))
+               (when run
+                 (str ";   run " run-id " · turn "
+                      (::run-turn run) "/" (:seon.agent.run/turn-limit run)
+                      " · started " (short-time (:seon.agent.run/started-at run))
+                      " · deadline " (short-time (:seon.agent.run/deadline run))
+                      (when-let [beat (:seon.agent.run/last-beat-at run)]
+                        (str " · beat " (short-time beat)))
+                      (when (:seon.agent.run/paused-at run) " · PAUSED")))
+               (when (and (nil? run) last-run)
+                 (str ";   last run "
+                      (name (:seon.agent.run/closed-reason last-run))
+                      " · closed " (short-time (:seon.agent.run/closed-at last-run))
+                      (when-let [result (:seon.agent.run/result last-run)]
+                        (str " · result " (truncate result 30)))))
+               (when latest-human
+                 (str ";   human: " (truncate latest-human 30)))
+               (when latest-output
+                 (str ";   output: " (truncate latest-output 30)))
+               (when latest-failure
+                 (str ";   ⚠ newest eval: " (truncate latest-failure 30)))])))
+        agents))))
 
 (defn- activity-ai [events]
   (str/join

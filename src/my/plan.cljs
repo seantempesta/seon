@@ -266,6 +266,26 @@
    [::steps {:optional true} ::steps]
    [::error {:optional true} ::error]])
 
+(schema/register! ::active? :boolean)
+(schema/register! ::position-request
+  [:map
+   [:seon.db/db    {:optional true} :seon.db/db-val]
+   [:seon.agent/id {:optional true} :seon.agent/id]])
+(schema/register! ::position
+  [:map
+   [::root     ::id]
+   [::title    ::title]
+   [::goal     {:optional true} ::goal]
+   [::step     ::id]
+   [::step-title ::title]
+   [::active?  ::active?]
+   [::progress ::progress]])
+(schema/register! ::position-response
+  [:map
+   [::ok?      ::ok?]
+   [::position {:optional true} ::position]
+   [::error    {:optional true} ::error]])
+
 (defn- allocation-declarations
   [allocation-keys]
   (mapv (fn [allocation-key]
@@ -647,6 +667,36 @@
         (internal/ready-leaves db oe)
         []))
     []))
+
+(defn position
+  "Get one agent's current plan position and root progress.
+
+   The active step wins; otherwise the oldest ready step is next. The result
+   carries the root title/goal, focused step, whether it is active, and the
+   root subtree's derived done/total progress. Omit `:seon.agent/id` for your
+   own plan; root may pass another agent. No plan is a successful response
+   with `::position` absent."
+  {:malli/schema [:=> [:cat ::position-request] ::position-response]}
+  [{db-value :seon.db/db agent-id :seon.agent/id}]
+  (if-let [agent (internal/agent-ref agent-id)]
+    (let [database (or db-value @db/*conn*)]
+      (if-let [agent-eid (internal/agent-eid database agent)]
+        (if-let [{:my.plan/keys [step chain active? progress]}
+                 (internal/anchor database agent-eid)]
+          (let [root (first chain)]
+            {::ok? true
+             ::position
+             (cond-> {::root       (:my.plan/id root)
+                      ::title      (:my.plan/title root)
+                      ::step       (:my.plan/id step)
+                      ::step-title (:my.plan/title step)
+                      ::active?    active?
+                      ::progress   progress}
+               (:my.plan/goal root) (assoc ::goal (:my.plan/goal root)))})
+          {::ok? true})
+        (internal/fail (str "position: unknown agent " (pr-str agent-id) "."))))
+    (internal/fail (str "position: no :seon.agent/id resolved — pass one, or "
+                        "call from inside an agent turn."))))
 
 (defn ^:seon.fn/agent-facing? tree
   "Get the whole plan as nested EDN, the structural read for re-planning.

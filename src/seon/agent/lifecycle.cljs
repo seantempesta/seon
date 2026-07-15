@@ -18,10 +18,11 @@
    REASON a run closed lives on the run (`:seon.agent.run/closed-reason`), not
    a separate note. No function ever writes a self→self message.
 
-   `wait` / `complete` / `pause` / `resume` default to the calling agent, read
-   from the ALS scope via `(seon.db/current-agent-id)` — call them inside
-   `(seon.db/with-agent id …)`. `terminate` takes an explicit id (it is
-   orchestrator-only; an agent does not terminate itself).
+   `wait` and `complete` act on the calling agent. `pause` and `resume` default
+   to the caller but accept an explicit target: root manages the cluster and an
+   ordinary agent manages itself and descendants. `terminate` takes an explicit
+   target under the same rule and never permits terminating root. Caller identity
+   comes from the ALS scope via `(seon.db/current-agent-id)`.
 
    The run mutations live in [[seon.agent.run]]; the shared
    no-agent-in-scope envelope in [[seon.agent.internal]].
@@ -42,6 +43,8 @@
 
 (schema/register! ::note   :string)
 (schema/register! ::result :string)
+(schema/register! ::target-request
+  [:map [:seon.agent/id {:optional true} :seon.agent/id]])
 
 (defn- no-open-run-error
   "The error envelope a function returns when the agent has no OPEN run to act on
@@ -195,69 +198,122 @@
      (internal/no-agent-error "complete"))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} pause
-  "Hold the calling agent WITHOUT killing it; stamps its run `paused-at`.
+  "Hold a managed agent without killing it; stamp its run `paused-at`.
 
-   Derived `:paused`; banks the remaining wall-clock budget. `resume`
+   With no argument, target the caller. Root may target any ordinary agent; an
+   ordinary agent may target itself or a descendant. Derived `:paused`; banks
+   the remaining wall-clock budget. `resume`
    re-extends the deadline by it. Returns `:paused` on success, the error
    envelope on a failed transact, no agent in scope, or no open run."
-  {:malli/schema [:=> [:catn] [:or :seon.derive/state :seon.db/transact-response]]}
-  []
-  (if-let [id (db/current-agent-id)]
-    (if-let [r (run/current-run {:seon.agent/id id})]
-      (let [env (await (run/pause! {:seon.agent/id     id
-                                    :seon.agent.run/id (:seon.agent.run/id r)}))]
-        (if (:seon.db/ok? env) :paused env))
-      (no-open-run-error "pause" id))
-    (internal/no-agent-error "pause")))
+  {:malli/schema
+   [:function
+    [:=> [:catn] [:or :seon.derive/state :seon.db/transact-response]]
+    [:=> [:cat ::target-request]
+     [:or :seon.derive/state :seon.db/transact-response]]]}
+  ([] (await (pause {})))
+  ([{target-id :seon.agent/id}]
+   (let [caller-id (db/current-agent-id)
+         id        (or target-id caller-id)
+         database  @db/*conn*]
+     (cond
+       (nil? id)
+       (internal/no-agent-error "pause")
+
+       (nil? caller-id)
+       (internal/no-agent-error "pause")
+
+       (not (internal/manages? database caller-id id))
+       (internal/unauthorized-target-error "pause" caller-id id)
+
+       :else
+       (if-let [r (run/current-run {:seon.agent/id id})]
+         (let [env (await (run/pause! {:seon.agent/id     id
+                                       :seon.agent.run/id (:seon.agent.run/id r)}))]
+           (if (:seon.db/ok? env) :paused env))
+         (no-open-run-error "pause" id))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} resume
-  "Wake a paused run: clear `paused-at` and re-enter the drive loop.
+  "Wake a managed paused run: clear `paused-at` and re-enter the drive loop.
 
-   Derived `:running`; re-extend the
+   With no argument, target the caller. Root may target any ordinary agent; an
+   ordinary agent may target itself or a descendant. Derived `:running`; re-extend the
    deadline by the banked remaining-ms (a long pause never instantly blows the
    clock bound), and RE-ENTER the drive loop on the still-open run — the loop
    EXITED on :pause, so resume must re-drive or the run is derived `:running`
    with nothing folding turns. Returns `:running` on success, the error
    envelope on a failed transact (incl. a not-actually-paused run), no agent in
    scope, or no open run."
-  {:malli/schema [:=> [:catn] [:or :seon.derive/state :seon.db/transact-response]]}
-  []
-  (if-not (admission/available?)
-    {:seon.db/ok? false
-     :seon.db/error (:seon/error (admission/unavailable))}
-    (if-let [id (db/current-agent-id)]
-      (if-let [r (run/current-run {:seon.agent/id id})]
-        (let [env (await (run/resume! {:seon.agent/id     id
-                                       :seon.agent.run/id (:seon.agent.run/id r)}))]
-          (cond
-            (false? (:seon.db/ok? env)) env
-            (not (admission/available?))
-            {:seon.db/ok? false
-             :seon.db/error (:seon/error (admission/unavailable))}
-            :else
-            (do (loop/drive-run! {:seon.agent/id id})
-                :running)))
-        (no-open-run-error "resume" id))
-      (internal/no-agent-error "resume"))))
+  {:malli/schema
+   [:function
+    [:=> [:catn] [:or :seon.derive/state :seon.db/transact-response]]
+    [:=> [:cat ::target-request]
+     [:or :seon.derive/state :seon.db/transact-response]]]}
+  ([] (await (resume {})))
+  ([{target-id :seon.agent/id}]
+   (if-not (admission/available?)
+     {:seon.db/ok? false
+      :seon.db/error (:seon/error (admission/unavailable))}
+     (let [caller-id (db/current-agent-id)
+           id        (or target-id caller-id)
+           database  @db/*conn*]
+       (cond
+         (nil? id)
+         (internal/no-agent-error "resume")
+
+         (nil? caller-id)
+         (internal/no-agent-error "resume")
+
+         (not (internal/manages? database caller-id id))
+         (internal/unauthorized-target-error "resume" caller-id id)
+
+         :else
+         (if-let [r (run/current-run {:seon.agent/id id})]
+           (let [env (await (run/resume! {:seon.agent/id     id
+                                          :seon.agent.run/id (:seon.agent.run/id r)}))]
+             (cond
+               (false? (:seon.db/ok? env)) env
+               (not (admission/available?))
+               {:seon.db/ok? false
+                :seon.db/error (:seon/error (admission/unavailable))}
+               :else
+               (do (loop/drive-run! {:seon.agent/id id})
+                   :running)))
+           (no-open-run-error "resume" id)))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} terminate
-  "Kill an agent: set `:seon.agent/terminated-at`, close any open run.
+  "Remove a managed agent from the live fleet while preserving its history.
 
    Presence ⇒ derived `:terminated`, the one UNWAKEABLE state; the open run
-   closes `:terminated`. Orchestrator-only; an agent does not terminate itself.
+   closes `:terminated`. Root may target any ordinary agent; an ordinary agent
+   may target itself or a descendant. Root itself is protected.
    Returns `:terminated` on success, the error envelope on a failed transact."
   {:malli/schema [:=> [:catn [::id :seon.agent/id]]
                   [:or :seon.derive/state :seon.db/transact-response]]}
   [id]
-  (let [r   (run/current-run {:seon.agent/id id})
-        env (await (db/transact!
-                     {:seon.db/tx-data [{:seon.agent/id             id
-                                         :seon.agent/terminated-at (js/Date.)}]}))]
-    (if (:seon.db/ok? env)
-      (do (when r
-            (await (run/close-run!
-                     {:seon.agent.run/id            (:seon.agent.run/id r)
-                      :seon.agent.run/closed-reason :terminated})))
-          (runtime/unhost! {:seon.agent/id id})
-          :terminated)
-      env)))
+  (let [caller-id (db/current-agent-id)
+        database  @db/*conn*]
+    (cond
+      (nil? caller-id)
+      (internal/no-agent-error "terminate")
+
+      (= "root" id)
+      {:seon.db/ok? false
+       :seon.db/error
+       {:seon.error/message "terminate: the cluster root cannot be terminated."}}
+
+      (not (internal/manages? database caller-id id))
+      (internal/unauthorized-target-error "terminate" caller-id id)
+
+      :else
+      (let [r   (run/current-run {:seon.agent/id id})
+            env (await (db/transact!
+                         {:seon.db/tx-data [{:seon.agent/id             id
+                                             :seon.agent/terminated-at (js/Date.)}]}))]
+        (if (:seon.db/ok? env)
+          (do (when r
+                (await (run/close-run!
+                         {:seon.agent.run/id            (:seon.agent.run/id r)
+                          :seon.agent.run/closed-reason :terminated})))
+              (runtime/unhost! {:seon.agent/id id})
+              :terminated)
+          env)))))

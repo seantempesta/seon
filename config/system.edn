@@ -59,6 +59,13 @@
   :seon.config.run/deadline-ms
   #long #or [#env SEON_RUN_DEADLINE_MS 1800000]}
 
+ ;; ── ROOT FLEET PROJECTION — bounded activity and failed-eval lookbacks. This
+ ;; is a database dial, so a frozen db value reproduces exactly which recent
+ ;; rows root considered. It is a lookback count, not a display-character cap.
+ :seon.config/root
+ {:seon.config.root/recent-limit
+  #long #or [#env SEON_ROOT_RECENT_LIMIT 12]}
+
  ;; ── MODEL-TRANSPORT EVIDENCE BOUNDS — immutable cluster policy.
  ;; These cap non-secret provider identities and normalized endpoint evidence;
  ;; they do not limit model output or alter provider request bytes. Aero owns
@@ -254,6 +261,8 @@
    [my.ui :as ui]
    [my.canvas :as canvas]
    [my.blob :as blob]
+   [my.ns :as ns]
+   [my.skills :as skills]
    [seon.agent.search :as search]
    [seon.agent.fs :as fs]
    [seon.agent.shell :as shell]
@@ -298,29 +307,29 @@
  ;; block sets root's canvas = the system/fleet dashboard, the config-driven
  ;; replacement for the hardcoded client.cljs root branch.
  ;;
- ;; `:seon.eval/home-requires` — root's complete curated toolbelt replaces the
- ;; ordinary list and includes `[seon.agent :as agent]` (the orchestration
- ;; surface — start!/create!/delegate!/set-purpose!/armable-agent-ids).
- ;; `context-config-for` merges root-context's scalar keys over the base; the
+ ;; `:seon.eval/home-requires` — root's ADDITIONAL capability namespaces merge
+ ;; by namespace identity over the complete ordinary/downstream toolbelt. Root
+ ;; therefore inherits filesystem, shell, web, skills, blobs, and ACME product
+ ;; tools while referring the small orchestration surface directly into its
+ ;; safe `my.agent.root` home namespace. Root-authored definitions never land
+ ;; in framework namespaces.
+ ;; `context-config-for` merges this capability overlay over the base; the
  ;; `:seon.agent/ctx` block vector below
  ;; is upserted by name (not overwritten). Every entry must carry `:as`/`:refer`
  ;; (bare `[ns]` is rejected by `seon.agent.home/require-spec`).
  :seon.config/root-context
  {:seon.eval/home-requires
-  [[seon.agent.message :as message]
-   [my.plan :as plan]
-   [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
-   [seon.schema :as schema]
-   [seon.db :as db]
-   [my.kb :as kb]
-   [my.data :as data]
-   [my.ui :as ui]
-   [my.canvas :as canvas]
-   [seon.agent.search :as search]
-   [seon.agent.fs :as fs]
-   [seon.agent :as agent]]
+  [[seon.agent :refer [start! delegate! set-purpose!]]]
   :seon.agent/ctx
-  [{:seon.agent.ctx/name :canvas
+  [{:seon.agent.ctx/name :root-role
+    :seon.agent.ctx/priority 15
+    :seon.agent.ctx/token-cap 256
+    :seon.render/ai
+    "; root role
+; You manage the whole cluster. Keep the user's outcome and overall plan coherent across agents. Act on the fleet facts below: assign new independent work; guide active work instead of duplicating it; resume work when its dependency is ready; investigate the newest failure before retrying; reassign or terminate obsolete and orphaned work; and integrate completed results."}
+   {:seon.agent.ctx/name :canvas
+    :seon.agent.ctx/priority 90
+    :seon.agent.ctx/token-cap 4096
     :seon.render.canvas/content seon.render.system/system-view}
    ;; ROOT-ONLY (owner ruling, error-blame-strict-gate 2026-07-04): the
    ;; :core-fault block renders on the root agent only — other agents see
@@ -328,6 +337,7 @@
    ;; got its in-place :seon/error envelope). Derived; vanishes when the
    ;; last :core fault predates the latest user message.
    {:seon.agent.ctx/name :core-faults :seon.agent.ctx/priority 41
+    :seon.agent.ctx/token-cap 512
     :seon.render/ai seon.agent.ctx.warnings/core-faults-block}
    ;; ROOT-ONLY (C46): the derived instrumentation-coverage invariant —
    ;; specced fns whose live var lost its malli wrapper (structural async
@@ -335,11 +345,13 @@
    ;; vanishes when coverage is re-asserted. A gap is system-wide, so it
    ;; rides the root agent only, like :core-faults.
    {:seon.agent.ctx/name :instrumentation-gaps :seon.agent.ctx/priority 42
+    :seon.agent.ctx/token-cap 512
     :seon.render/ai seon.agent.ctx.warnings/instrumentation-gaps-block}
    ;; ROOT-ONLY (multiagent-context Piece 4): live agents whose parent is
    ;; TERMINATED. Derived; vanishes when there are no orphans. No action
    ;; machinery — root/human decides per case with the existing functions.
    {:seon.agent.ctx/name :orphaned-agents :seon.agent.ctx/priority 43
+    :seon.agent.ctx/token-cap 512
     :seon.render/ai seon.agent.ctx.subagents/orphaned-agents-block}]}
 
  ;; ── MULTI-AGENT dials (multiagent-context-spec) — all OPTIONAL; each absent

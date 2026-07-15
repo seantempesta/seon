@@ -194,6 +194,33 @@
         (is (contains? names :acme-extra) "the new block is seeded")
         (is (contains? names :canvas) "default blocks remain")))))
 
+(deftest root-home-requires-extend-the-complete-base-toolbelt
+  (let [manifest
+        {:seon.config/agent-context
+         {:seon.agent/ctx []
+          :seon.eval/home-requires
+          '[[seon.db :as db]
+            [seon.agent.message :as message]
+            [acme.brand :as brand]]}
+         :seon.config/root-context
+         {:seon.eval/home-requires
+          '[[seon.agent :as agent]
+            [seon.db :as database]]}}]
+    (with-redefs [config/config-view (fn ([] manifest) ([_] manifest))]
+      (is (= '[[seon.db :as db]
+               [seon.agent.message :as message]
+               [acme.brand :as brand]]
+             (:seon.eval/home-requires
+               (config/resolve-agent-context "worker-x" nil)))
+          "an ordinary agent keeps the exact configured toolbelt")
+      (is (= '[[seon.db :as database]
+               [seon.agent.message :as message]
+               [acme.brand :as brand]
+               [seon.agent :as agent]]
+             (:seon.eval/home-requires
+               (config/resolve-agent-context "root" nil)))
+          "root inherits downstream capabilities, refines by ns, and appends"))))
+
 ;;; The `#merge` COMPOSITION trap (config-merge, 2026-07-11) — a per-cluster
 ;;; manifest composes as `#merge [#include "base" {overrides}]`. Aero's shipped
 ;;; `#merge` is a SHALLOW map merge, so a sparse override that sets only
@@ -241,8 +268,8 @@
         (is (= (mapv :seon.agent.ctx/name base-blocks)
                (mapv :seon.agent.ctx/name (:seon.agent/ctx ac)))
             "the base :seon.agent/ctx block tree survives a sparse override")
-        (is (= '[[b :as b]] (:seon.eval/home-requires ac))
-            "the override's stated key still wins")))
+        (is (= '[[a :as a] [b :as b]] (:seon.eval/home-requires ac))
+            "the sparse manifest adds capabilities without copying the base")))
     (testing "an override that DECLARES :seon.agent/ctx replaces the tree WHOLESALE"
       (let [p  (write-tmp! "explicit.edn"
                            (str "#merge\n[#include \"base.edn\"\n"
@@ -262,6 +289,57 @@
   (let [env (.. js/globalThis -process -env) old (aget env k)]
     (try (if (nil? v) (js-delete env k) (aset env k v)) (f)
          (finally (if (nil? old) (js-delete env k) (aset env k old))))))
+
+(deftest root-context-resolves-one-ordered-block-tree
+  (with-env
+    "SEON_CONFIG" "config/system.edn"
+    (fn []
+      (binding [db/*conn* nil]
+        (let [ordinary (config/resolve-agent-context "worker-x" nil)
+              root (config/resolve-agent-context "root" nil)
+              order (fn [context]
+                      (->> (:seon.agent/ctx context)
+                           (sort-by (juxt :seon.agent.ctx/priority
+                                          (comp str :seon.agent.ctx/name)))
+                           (mapv (juxt :seon.agent.ctx/name
+                                       :seon.agent.ctx/priority))))]
+          (is (= [[:namespaces 20]
+                  [:canvas 35]
+                  [:plan 45]
+                  [:transcript 100]]
+                 (order ordinary))
+              "ordinary agents keep the shared context tree")
+          (is (= [[:root-role 15]
+                  [:namespaces 20]
+                  [:core-faults 41]
+                  [:instrumentation-gaps 42]
+                  [:orphaned-agents 43]
+                  [:plan 45]
+                  [:canvas 90]
+                  [:transcript 100]]
+                 (order root))
+              "root is one additive tree with its dynamic fleet canvas near the tail"))))))
+
+(deftest acme-manifest-inherits-context-and-adds-only-product-tools
+  (with-env
+    "SEON_CONFIG" "config/acme.edn"
+    (fn []
+      (binding [db/*conn* nil]
+        (let [ordinary (config/resolve-agent-context "acme-worker" nil)
+              root     (config/resolve-agent-context "root" nil)
+              targets  (fn [context]
+                         (into #{} (map first)
+                               (:seon.eval/home-requires context)))
+              blocks   (into #{} (map :seon.agent.ctx/name)
+                             (:seon.agent/ctx ordinary))]
+          (is (= #{:namespaces :canvas :plan :transcript} blocks)
+              "experimental function-menu/typeahead blocks stay off")
+          (is (every? (targets ordinary) '[acme.brand acme.widget my.ns my.skills]))
+          (is (not-any? (targets ordinary) '[acme.helpers acme.notes]))
+          (is (every? (targets root)
+                      '[acme.brand acme.widget my.ns my.skills
+                        seon.agent seon.agent.shell seon.agent.web])
+              "root inherits the complete ordinary/downstream capability set"))))))
 
 (deftest route-removes
   (testing "a route spec drops the named seeded routes"
@@ -355,6 +433,7 @@
       (is (= :public-only (:seon.agent.web/policy s)))
       (is (= 1         (:seon.config/spawn-depth-cap s)))
       (is (= 1200000   (:seon.config.watchdog/stale-ms s)))
+      (is (= 12        (:seon.config.root/recent-limit s)))
       (is (= {}        (:seon.config.repair/classes s)))
       (is (= []        (:seon.agent.web/allowed-domains s)))
       (is (= :full     (:seon.config/current-ns s)))
@@ -371,6 +450,7 @@
                :seon.config/run {:seon.config.run/batch-turn-limit 7
                                  :seon.config.run/stream-form-limit 19
                                  :seon.config.run/deadline-ms 123456}
+               :seon.config/root {:seon.config.root/recent-limit 9}
                :seon.config/model-transport
                {:seon.config.model-transport/response-identity-cap 17
                 :seon.config.model-transport/endpoint-cap 29}
@@ -383,6 +463,7 @@
       (is (= 7 (:seon.config.run/batch-turn-limit s)))
       (is (= 19 (:seon.config.run/stream-form-limit s)))
       (is (= 123456 (:seon.config.run/deadline-ms s)))
+      (is (= 9 (:seon.config.root/recent-limit s)))
       (is (= 17 (:seon.config.model-transport/response-identity-cap s)))
       (is (= 29 (:seon.config.model-transport/endpoint-cap s)))
       (is (= :log (:seon.config/on-core-error s)))
@@ -481,6 +562,7 @@
                             :seon.config/run {:seon.config.run/batch-turn-limit 17
                                               :seon.config.run/stream-form-limit 51
                                               :seon.config.run/deadline-ms 654321}
+                            :seon.config/root {:seon.config.root/recent-limit 7}
                             :seon.config/model-transport
                             {:seon.config.model-transport/response-identity-cap 23
                              :seon.config.model-transport/endpoint-cap 47}
@@ -516,6 +598,8 @@
                             "the frozen db value owns the effective run policy")
                         (is (= :log (config/on-core-error)))
                         (is (= 1 (config/spawn-depth-cap)))      ; default, seeded
+                        (is (= 7 (config/root-recent-limit @conn))
+                            "root's bounded evidence lookback is database data")
                         ;; collection knobs decoded off the EDN slot
                         (is (= #{:my.kb :my.plan} (:seon.config/always (config/namespaces-policy))))
                         (is (= :allowlist (:seon.agent.web/policy (config/web-policy))))

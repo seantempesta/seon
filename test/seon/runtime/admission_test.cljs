@@ -390,39 +390,59 @@
 
 (deftest drain-controls-remain-available-while-admission-is-closed
   (async done
-    (let [!effects (atom [])]
-      (with-redefs [run/current-run (constantly nil)
-                    db/current-agent-id (constantly "draining-agent")
-                    db/transact!
-                    (fn [& _]
-                      (swap! !effects conj :terminate-write)
-                      (js/Promise.resolve {:seon.db/ok? true}))
-                    runtime/unhost!
-                    (fn [_]
-                      (swap! !effects conj :unhost)
-                      {:seon.agent.runtime/unhosted? true})]
-        (-> (js/Promise.all
-              #js [(lifecycle/wait "drain")
-                   (lifecycle/complete "")
-                   (lifecycle/pause)
-                   (lifecycle/terminate "draining-agent")])
-            (.then
-              (fn [results]
-                (let [[wait-result complete-result pause-result terminate-result]
-                      (array-seq results)]
-                  (is (false? (:seon.db/ok? wait-result))
-                      "wait reached its ordinary no-open-run diagnosis")
-                  (is (false? (:seon.db/ok? complete-result))
-                      "complete reached its ordinary no-open-run diagnosis")
-                  (is (false? (:seon.db/ok? pause-result))
-                      "pause reached its ordinary no-open-run diagnosis")
-                  (is (= :terminated terminate-result))
-                  (is (= [:terminate-write] @!effects)
-                      "terminate reached its ordinary durable control write")
-                  (done))))
-            (.catch (fn [e]
-                      (is false (str "drain control threw — " e))
-                      (done))))))))
+    (let [!effects (atom [])
+          original-connection db/*conn*
+          original-entity db/entity
+          original-current-run run/current-run
+          original-current-agent-id db/current-agent-id
+          original-transact db/transact!
+          original-unhost runtime/unhost!]
+      (set! db/*conn* (atom ::database))
+      (set! db/entity
+            (fn
+              ([{:seon.db/keys [ref]}]
+               {:seon.agent/id (second ref)})
+              ([_database ref]
+               {:seon.agent/id (second ref)})))
+      (set! run/current-run (constantly nil))
+      (set! db/current-agent-id (constantly "draining-agent"))
+      (set! db/transact!
+            (fn [& _]
+              (swap! !effects conj :terminate-write)
+              (js/Promise.resolve {:seon.db/ok? true})))
+      (set! runtime/unhost!
+            (fn [_]
+              (swap! !effects conj :unhost)
+              {:seon.agent.runtime/unhosted? true}))
+      (-> (js/Promise.all
+            #js [(lifecycle/wait "drain")
+                 (lifecycle/complete "")
+                 (lifecycle/pause)
+                 (lifecycle/terminate "draining-agent")])
+          (.then
+            (fn [results]
+              (let [[wait-result complete-result pause-result terminate-result]
+                    (array-seq results)]
+                (is (false? (:seon.db/ok? wait-result))
+                    "wait reached its ordinary no-open-run diagnosis")
+                (is (false? (:seon.db/ok? complete-result))
+                    "complete reached its ordinary no-open-run diagnosis")
+                (is (false? (:seon.db/ok? pause-result))
+                    "pause reached its ordinary no-open-run diagnosis")
+                (is (= :terminated terminate-result))
+                (is (= [:terminate-write :unhost] @!effects)
+                    "terminate performs its durable write before unhosting"))))
+          (.catch (fn [error]
+                    (is false (str "drain control threw — " error))))
+          (.finally
+            (fn []
+              (set! db/*conn* original-connection)
+              (set! db/entity original-entity)
+              (set! run/current-run original-current-run)
+              (set! db/current-agent-id original-current-agent-id)
+              (set! db/transact! original-transact)
+              (set! runtime/unhost! original-unhost)))
+          (.then (fn [_] (done)))))))
 
 (deftest available-baseline-preserves-domain-validation-and-schedule-effects
   (async done

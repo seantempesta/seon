@@ -355,30 +355,61 @@
            (sort-by #(.getTime ^js %))
            last))))
 
-(defn last-closed-reason
-  "The `closed-reason` of the agent's latest closed run, or nil.
+(schema/register! :seon.derive/closed-run
+  [:map
+   [:seon.agent.run/id :string]
+   [:seon.agent.run/started-at :inst]
+   [:seon.agent.run/closed-reason :keyword]
+   [:seon.agent.run/closed-at {:optional true} :inst]
+   [:seon.agent.run/result {:optional true} :string]
+   [:seon.agent.run/result-ref {:optional true} :seon.db/ref]])
 
-   Its most-recently-STARTED closed run; nil when none. Gated on the attr being installed."
+(defn latest-closed-run
+  "The agent's most-recently-started closed run entity, or nil.
+
+   This is the one immutable run-outcome projection used by status, child
+   context, and root's fleet view. It is gated on the run schema being
+   installed so old/unseeded database values omit the fact cleanly."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/id :string]]
+                  [:or :nil :seon.derive/closed-run]]}
+  [db id]
+  (when (contains? (db/installed-schema db) :seon.agent.run/closed-reason)
+    (some->> (db/query {:seon.db/db db
+                        :seon.db/query
+                        '[:find ?r ?started :in $ ?aid
+                          :where
+                          [?a :seon.agent/id ?aid]
+                          [?r :seon.agent.run/agent ?a]
+                          [?r :seon.agent.run/closed-reason]
+                          [?r :seon.agent.run/started-at ?started]]
+                        :seon.db/args [id]})
+             (sort-by #(.getTime ^js (second %)))
+             last
+             first
+             (#(db/entity {:seon.db/db db :seon.db/ref %}))
+             ((fn [run]
+                (cond-> (select-keys run
+                                     [:seon.agent.run/id
+                                      :seon.agent.run/started-at
+                                      :seon.agent.run/closed-reason
+                                      :seon.agent.run/closed-at
+                                      :seon.agent.run/result
+                                      :seon.agent.run/result-ref])
+                  (:seon.agent.run/result-ref run)
+                  (update :seon.agent.run/result-ref :db/id)))))))
+
+(defn last-closed-reason
+  "The `closed-reason` of the agent's latest closed run, or nil."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
                              [:seon.agent/id :seon.agent/id]]
                   [:maybe :seon.agent.run/closed-reason]]}
   [db id]
-  (when (contains? (db/installed-schema db) :seon.agent.run/closed-reason)
-    (->> (db/query {:seon.db/db db
-                    :seon.db/query
-                    '[:find ?reason ?started :in $ ?aid
-                      :where
-                      [?a :seon.agent/id ?aid]
-                      [?r :seon.agent.run/agent ?a]
-                      [?r :seon.agent.run/closed-reason ?reason]
-                      [?r :seon.agent.run/started-at ?started]]
-                    :seon.db/args [id]})
-         (sort-by #(.getTime ^js (second %)))
-         last
-         first)))
+  (:seon.agent.run/closed-reason (latest-closed-run db id)))
 
 (schema/register! :seon.derive/status-request
   [:map
+   [:seon.db/db {:optional true} :seon.db/db-val]
    ;; Leaf-purity (see note below): this is a LOAD-TIME register! in a leaf ns
    ;; — seon.agent requires THIS, so `:seon.agent/id` is NOT registered yet at
    ;; cold boot and can't be referenced here. The base type `:string` still
@@ -418,12 +449,13 @@
    A pure
    DERIVED READ — no writes. State comes from [[state-from-primitives]] over
    the primitives; run/turn/step fields derive from cheap queries against ONE
-   threaded db value. Run-scoped fields are present only while there IS an open
-   run; `:seon.agent/now` (optional) fixes the clock for `ms-remaining`."
+   threaded db value. Pass `:seon.db/db` to freeze the read; omission uses the
+   current connection for interactive calls. Run-scoped fields are present only
+   while there IS an open run; `:seon.agent/now` fixes `ms-remaining`."
   {:malli/schema [:=> [:cat :seon.derive/status-request] :seon.derive/status]}
-  [{id :seon.agent/id now :seon.agent/now}]
+  [{database :seon.db/db id :seon.agent/id now :seon.agent/now}]
   (let [now           (or now (js/Date.))
-        db            @db/*conn*
+        db            (or database @db/*conn*)
         a             (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
         terminated-at (:seon.agent/terminated-at a)
         cur           (current-run db id)

@@ -60,6 +60,7 @@
   (:require
     [clojure.string :as str]
     [seon.agent.home :as home]
+    [seon.agent.internal :as internal]
     [seon.agent.message :as msg]
     [seon.agent.runtime :as runtime]
     [seon.agent.ctx :as ctx]
@@ -790,38 +791,55 @@
 (schema/register! ::ok?   :boolean)
 (schema/register! ::error :string)
 
-(schema/register! ::section-response
+(schema/register! ::purpose-request
+  [:map
+   [:seon.agent/purpose :seon.agent/purpose]
+   [:seon.agent/id {:optional true} :seon.agent/id]])
+(schema/register! ::purpose-response
   [:or
    [:map
-    [::ok?          [:= true]]
-    [:seon.agent.ctx/name :seon.agent.ctx/name]]
+    [::ok? [:= true]]
+    [:seon.agent/id :seon.agent/id]
+    [:seon.agent/purpose :seon.agent/purpose]]
    [:map
-    [::ok?   [:= false]]
-    [::error ::error]]])
+    [::ok? [:= false]]
+    [::error ::error]]
+   :seon.db/transact-response])
 
 (defn ^:async set-purpose!
-  "Pin or update why you exist.
+  "Set why an agent exists.
 
-   Sugar over a one-attr transact to
-   your own entity (`:seon.agent/purpose`, rendered every turn in your
-   entity section). Equivalent to the lookup-ref transact the creation
-   tutorial demonstrates."
-  {:malli/schema [:=> [:cat [:map
-                             [:seon.render/ai :string]
-                             [:seon.agent/id {:optional true} :seon.agent/id]]]
-                  ::section-response]}
-  [{text :seon.render/ai id :seon.agent/id}]
-  (let [id (or id (db/current-agent-id))]
-    (if (nil? id)
+   Omit `:seon.agent/id` to update yourself. Root may update any agent; an
+   ordinary agent may update itself or a descendant. Returns the persisted id
+   and purpose, or an error value."
+  {:malli/schema [:=> [:cat ::purpose-request] ::purpose-response]}
+  [{purpose :seon.agent/purpose target-id :seon.agent/id}]
+  (let [caller-id (db/current-agent-id)
+        id        (or target-id caller-id)
+        database  @db/*conn*]
+    (cond
+      (nil? id)
       {::ok? false
        ::error (str "set-purpose!: no agent in scope — pass "
                     ":seon.agent/id or call inside (seon.db/with-agent id …).")}
+
+      (nil? caller-id)
+      {::ok? false
+       ::error "set-purpose!: no agent in scope."}
+
+      (not (internal/manages? database caller-id id))
+      (let [error (internal/unauthorized-target-error
+                    "set-purpose!" caller-id id)]
+        {::ok? false
+         ::error (:seon.error/message (:seon.db/error error))})
+
+      :else
       (let [res (await (db/transact!
                          {:seon.db/tx-data
                           [{:seon.agent/id      id
-                            :seon.agent/purpose text}]}))]
+                            :seon.agent/purpose purpose}]}))]
         (if (false? (:seon.db/ok? res))
-          {::ok? false
-           ::error (str "set-purpose! transact failed: "
-                        (:seon.error/message (:seon.db/error res)))}
-          {::ok? true :seon.agent.ctx/name :purpose})))))
+          res
+          {::ok? true
+           :seon.agent/id id
+           :seon.agent/purpose purpose})))))

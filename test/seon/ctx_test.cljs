@@ -38,6 +38,7 @@
     [seon.db.id :as db.id]
     [seon.eval :as seval]
     [seon.render :as render]
+    [seon.render.system]
     [seon.schema :as schema]
     [seon.test-seed :as test-seed]))
 
@@ -316,6 +317,68 @@
   (some #(when (= nm (:seon.agent.ctx/name %)) (:seon.render/text %))
         (:seon.render/section-texts (assemble id))))
 
+(defn- rendered-ai-blocks
+  "Rendered AI blocks by name from one immutable database value."
+  [database id]
+  (let [blocks (ctx/rendered-context-blocks
+                 {:seon.db/db database :seon.agent/id id}
+                 #{:ai})]
+    {:seon.ctx-test/order (mapv :seon.agent.ctx/name blocks)
+     :seon.ctx-test/text
+     (into {} (map (juxt :seon.agent.ctx/name :seon.render/text)) blocks)}))
+
+(defn- root-fleet-volatility-proof!
+  []
+  (with-conn
+    (fn [_conn]
+      (-> (agent/create! {:seon.agent/id "root"})
+          (.then
+            (fn [_]
+              (agent/mint!
+                {:seon.agent/purpose "Initial fleet purpose"
+                 :seon.agent/parent [:seon.agent/id "root"]})))
+          (.then
+            (fn [created]
+              (let [worker-id (:seon.agent/id created)
+                    before (rendered-ai-blocks @db/*conn* "root")]
+                (-> (db/transact!
+                      {:seon.db/tx-data
+                       [{:seon.db/ref [:seon.agent/id worker-id]
+                         :seon.agent/purpose
+                         "Purpose changed after the snapshot"}]})
+                    (.then
+                      (fn [_]
+                        (let [after (rendered-ai-blocks @db/*conn* "root")
+                              names (set (concat
+                                           (keys (:seon.ctx-test/text before))
+                                           (keys (:seon.ctx-test/text after))))
+                              changed
+                              (into #{}
+                                    (filter
+                                      #(not= (get (:seon.ctx-test/text before) %)
+                                             (get (:seon.ctx-test/text after) %)))
+                                    names)]
+                          (is (= [:root-role
+                                  :namespaces
+                                  :core-faults
+                                  :instrumentation-gaps
+                                  :orphaned-agents
+                                  :plan
+                                  :canvas
+                                  :transcript]
+                                 (:seon.ctx-test/order before))
+                              "the stored root block tree resolves in priority order")
+                          (is (= #{:canvas} changed)
+                              "one fleet fact changes only the late shared canvas block")))))))))))
+
+(deftest root-fleet-change-invalidates-only-the-late-canvas-block
+  (async done
+    (-> (root-fleet-volatility-proof!)
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "root block volatility proof threw: " error))
+                  (done)))))))
+
 (deftest canvas-block-stable-on-composer-input
   ;; REGRESSION GUARD (canvas-nil-entity-render-failed): the composer
   ;; injects ONLY {:seon.db/db … :seon.agent/id …} — it does NOT pass
@@ -417,7 +480,7 @@
                          (db/with-agent "AGTctxtest00p1"
                            (fn []
                              (agent/set-purpose!
-                               {:seon.render/ai "guard the books"})))))
+                               {:seon.agent/purpose "guard the books"})))))
                 (.then
                   (fn [_]
                     (is (= "guard the books" (agent-purpose "AGTctxtest00p1"))

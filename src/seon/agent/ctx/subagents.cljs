@@ -61,23 +61,6 @@
                   :seon.db/args [parent-id]})
        sort vec))
 
-(defn- latest-closed-run
-  "The child's most-recently-STARTED CLOSED run entity in `db`, or nil."
-  [db child-id]
-  (some->> (db/query {:seon.db/db db
-                      :seon.db/query
-                      '[:find ?r ?started :in $ ?aid
-                        :where
-                        [?a :seon.agent/id ?aid]
-                        [?r :seon.agent.run/agent ?a]
-                        [?r :seon.agent.run/status :closed]
-                        [?r :seon.agent.run/started-at ?started]]
-                      :seon.db/args [child-id]})
-           (sort-by #(.getTime ^js (second %)))
-           last
-           first
-           (#(db/entity {:seon.db/db db :seon.db/ref %}))))
-
 (defn- age-str
   "Human `Ns`/`Nm`/`Nh` age of instant `t` before `now`, or nil."
   [now t]
@@ -111,10 +94,10 @@
                  (when beat (str " · beat " beat " ago"))))
           ;; IDLE / not-running — its latest run's outcome.
           :else
-          (when-let [lr (latest-closed-run db child-id)]
+          (when-let [lr (derive/latest-closed-run db child-id)]
             (let [reason (:seon.agent.run/closed-reason lr)
                   result (:seon.agent.run/result lr)
-                  rref   (:db/id (:seon.agent.run/result-ref lr))]
+                  rref   (:seon.agent.run/result-ref lr)]
               (if (= :completed reason)
                 (str "✓ completed"
                      (when (and (string? result) (seq result))

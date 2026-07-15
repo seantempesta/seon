@@ -355,9 +355,14 @@ run with no arguments the agent has to supply.
 Root receives one concise role-specific block: understand the fleet, start or
 select an ordinary agent, route/delegate work, and respond to recovery notices.
 It does not receive a broad root manual. Its capabilities appear as compact,
-fully specified home-required namespace cards from one complete curated root
-list. That scalar list replaces the ordinary agent workbench, allowing root to
-start smaller; there is no special union rule. When root moves into an
+fully specified home-required namespace cards. Root's require vector is an
+additive overlay by namespace identity on the complete ordinary/downstream
+workbench, so filesystem, shell, web, database, skills, canvas, and consumer
+product capabilities remain present while root refers its small orchestration
+surface directly into the safe `my.agent.root` home namespace. Root-authored
+definitions never land in framework code. The resolved vector is persisted
+with root's home namespace; there is no runtime role registry or renderer
+allowlist. When root moves into an
 orchestration, database, or UI-session namespace, that
 namespace becomes current and its full source plus colocated render fns enter
 context through the same auto-run rule above. The root canvas's bounded AI twin
