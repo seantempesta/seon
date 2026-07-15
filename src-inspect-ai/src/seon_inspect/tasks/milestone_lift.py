@@ -34,6 +34,7 @@ from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.scorer import pass_at
 from inspect_ai.solver import Generate, TaskState, solver
 
+from seon_inspect import source_admission
 from seon_inspect.milestone import (
     DB_MEMORY_CONTRACT, NS_MOVEMENT_CONTRACT, fabrication_metric,
     milestone_scorer)
@@ -104,14 +105,28 @@ WORKFLOW_ROWS = {"db": "database_workflow",
                  "namespaces": "namespace_workflow"}
 
 
-def _sample(milestone: str) -> Sample:
+def task_identity(milestone: str) -> dict[str, str]:
+    """Stable admitted-source identity for one native milestone task."""
+    return {
+        "name": WORKFLOW_ROWS[milestone],
+        "module": "seon_inspect.tasks.milestone_lift",
+        "attribute": "milestone_lift",
+        "kind": "seon-native",
+    }
+
+
+def _sample(milestone: str, admission: dict | None = None) -> Sample:
     row = ROWS[milestone]
+    metadata = {"milestone": milestone}
+    if admission is not None:
+        metadata["seon_source_admission"] = admission
     return Sample(id=milestone, input=row["contract"], target="correct",
-                  metadata={"milestone": milestone})
+                  metadata=metadata)
 
 
 def _generated_samples(milestone: str, seed: int | str,
-                       positions: list[int]) -> list[Sample]:
+                       positions: list[int],
+                       admission: dict | None = None) -> list[Sample]:
     from seon_inspect.generators import generate_rows
 
     if not positions or any(isinstance(p, bool) or not isinstance(p, int)
@@ -119,14 +134,21 @@ def _generated_samples(milestone: str, seed: int | str,
         raise ValueError("positions must be nonempty non-negative integers")
     positions = sorted(set(positions))
     rows = generate_rows(WORKFLOW_ROWS[milestone], seed, positions[-1] + 1)
-    return [Sample(id=rows[p]["id"], input=rows[p]["input"],
-                   target=rows[p]["target"], metadata=rows[p]["metadata"])
-            for p in positions]
+    samples = []
+    for position in positions:
+        row = rows[position]
+        metadata = dict(row["metadata"])
+        if admission is not None:
+            metadata["seon_source_admission"] = admission
+        samples.append(Sample(id=row["id"], input=row["input"],
+                              target=row["target"], metadata=metadata))
+    return samples
 
 
 @solver
 def milestone_solver(milestone: str, endpoint: str,
-                     cluster_url: str | None = None):
+                     cluster_url: str | None = None,
+                     admission: dict | None = None):
     """Drive the pod (endpoint="pod") or replay a frozen golden pair (mock:*)."""
 
     async def solve(state: TaskState, generate: Generate) -> TaskState:
@@ -153,6 +175,11 @@ def milestone_solver(milestone: str, endpoint: str,
             state.metadata["milestone_run"] = {
                 "cluster": res.get("cluster"), "agent_id": res.get("agent_id"),
                 "fabrication": res["fabrication"]}
+            if admission is not None:
+                end = source_admission.verify_sources(task_identity(milestone))
+                if end != admission:
+                    raise source_admission.SourceAdmissionError(
+                        "milestone source changed during the sample")
             return state
         raise ValueError(f"unknown endpoint {endpoint!r} "
                          "(mock:good | mock:bad | pod)")
@@ -167,6 +194,7 @@ def milestone_lift(milestone: str = "namespaces",
                    seed: int | str | None = None,
                    positions: list[int] | None = None,
                    cluster_url: str | None = None,
+                   _admission: dict | None = None,
                    ):
     """Capability milestone variants x pass^k (namespaces | db).
 
@@ -183,11 +211,16 @@ def milestone_lift(milestone: str = "namespaces",
             "static target")
     if seed is not None and endpoint.startswith("mock:"):
         raise ValueError("generated workflow variants require endpoint='pod'")
-    samples = ([_sample(milestone)] if seed is None else
-               _generated_samples(milestone, seed, positions or [0]))
+    admission = (_admission or source_admission.verify_sources(
+        task_identity(milestone))) if endpoint == "pod" else None
+    samples = ([_sample(milestone, admission)] if seed is None else
+               _generated_samples(
+                   milestone, seed, positions or [0], admission))
     return Task(
         dataset=MemoryDataset(samples),
-        solver=milestone_solver(milestone, endpoint, cluster_url),
+        solver=milestone_solver(milestone, endpoint, cluster_url, admission),
         scorer=[milestone_scorer(), fabrication_metric()],
         epochs=Epochs(epochs, ["mean", pass_at(epochs)]),
+        metadata=({"seon_source_admission": admission}
+                  if admission is not None else {}),
     )

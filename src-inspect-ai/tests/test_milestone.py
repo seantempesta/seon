@@ -277,9 +277,22 @@ def test_generated_milestone_task_requires_and_records_static_target():
 
     task = milestone_lift(
         milestone="db", endpoint="pod", seed=1, positions=[0], epochs=1,
-        cluster_url="http://127.0.0.1:7994/agents/run")
+        cluster_url="http://127.0.0.1:7994/agents/run",
+        _admission={"bench": {"name": "database_workflow"}})
     assert len(task.dataset) == 1
     sample = task.dataset[0]
     assert sample.id == "database_workflow-seed1-000"
     assert sample.metadata["milestone"] == "db"
     assert sample.metadata["oracle"]["measure_attr"].startswith(":my.")
+
+
+def test_generated_milestone_task_retains_admitted_identity():
+    from seon_inspect.tasks.milestone_lift import milestone_lift
+
+    admitted = {"bench": {"name": "database_workflow"}}
+    task = milestone_lift(
+        milestone="db", endpoint="pod", epochs=1, seed=1, positions=[0],
+        cluster_url="http://127.0.0.1:7994/agents/run",
+        _admission=admitted)
+    assert task.metadata["seon_source_admission"] == admitted
+    assert task.dataset[0].metadata["seon_source_admission"] == admitted

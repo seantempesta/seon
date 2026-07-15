@@ -51,17 +51,25 @@ ended through the configured no-forms policy rather than an exception.
 ## Interpretation
 
 This sample falsifies the idea that merely exposing complete contracts makes
-the current context usable by the smallest installed coder. It does not yet
-separate three causes:
+the current context usable by the smallest installed coder. A byte-level trace
+now separates the repetition mechanism:
 
-- the roughly 22k-token initial prompt and schema-heavy namespace block;
-- repetition or ghost narration re-entering later prompt context; and
-- the model's intrinsic ability to follow Seon's executable-form contract.
+- turn zero's prompt contained one legitimate live readline;
+- Qwen's raw 2,275-byte reply contained eighteen byte-identical copies plus
+  one truncated copy, before any parser or transcript stage ran;
+- the forgiving parser preserved those comment lines once as narration and
+  recorded one blank-source successful evaluation;
+- the transcript faithfully reinserted that stored narration and added one
+  newly derived live readline; and
+- Qwen copied ten more old lines on each later turn, so turn two contained
+  twenty-eight complete historical copies plus fragments.
 
-The increasing prompt and repeated runtime line make transcript provenance an
-immediate correctness question, not a cosmetic model failure. Diagnose the
-exact bytes and database refs that admitted the repeated narration before
-changing context prose. The open finding is tracked in
+The renderer did not manufacture the initial eighteen copies. The failure is
+a feedback loop between model suffix imitation, correct comment recovery, and
+durable narration reinsertion. The exact prompt/reply byte counts are
+88,650/2,275, 90,897/2,959, and 93,836/2,957. This still does not isolate how
+much the large schema-heavy prompt lowers the model's ability to escape the
+attractor. The open finding is tracked in
 [[../../../seon/issues/narration-ghost-echo-not-neutralized]].
 
 ## Exact next experiment
@@ -73,7 +81,10 @@ changing context prose. The open finding is tracked in
 3. Invoke this same native sample through run-level source admission and
    mandatory log finalization. Reject a dirty Seon source identity.
 4. Inspect the resulting prompt/reply/eval bytes before running another
-   sample. If repetition remains, localize its database-derived owner first.
+   sample. Then run a controlled arm changing only the existing transcript
+   `::readline?` policy from true to false. Zero status-line copies would
+   identify the readline as the attractor; copying another tail region would
+   demonstrate broader suffix imitation.
 5. After one admitted baseline, compare the exact sample across the measured
    shared-schema projection and the next model size. Record outcome and bytes;
    token reduction alone is not success.

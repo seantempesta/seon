@@ -246,6 +246,60 @@ def swap_generate(task_solver: Solver | Sequence[Solver],
     return out
 
 
+def _eval_admitted_task(
+    task: Task,
+    admission: dict[str, Any],
+    *,
+    solver_override: Solver | Sequence[Solver] | None = None,
+    evidence_dir: Path | None = None,
+    **eval_kwargs: Any,
+):
+    """Execute and finalize one already-admitted Task through Inspect."""
+    md = dict(eval_kwargs.pop("metadata", None) or {})
+    md["seon_source_admission"] = admission
+    call_kwargs = {
+        "model": eval_kwargs.pop("model", "mockllm/model"),
+        "metadata": md,
+        **eval_kwargs,
+    }
+    if solver_override is not None:
+        call_kwargs["solver"] = solver_override
+    logs = inspect_eval(task, **call_kwargs)
+    source_admission.finalize_native_logs(
+        logs,
+        evidence_dir=evidence_dir,
+        expected_admission=admission,
+    )
+    return logs
+
+
+def run_native_task(
+    identity: dict[str, str],
+    task_factory: Callable[..., Task],
+    *,
+    task_kwargs: dict[str, Any] | None = None,
+    evidence_dir: Path | None = None,
+    **eval_kwargs: Any,
+):
+    """Run one Seon-native Task with mandatory admission and finalization.
+
+    Native tasks own their existing dataset, solver, scorer, and static target.
+    This boundary only admits selected sources before task construction,
+    enforces the one-pod serial ceiling, stamps the exact run identity, and
+    reopens every retained native log. It is the native sibling of
+    ``run_bench`` rather than a second evaluation harness.
+    """
+    admission = source_admission.verify_sources(identity)
+    task = task_factory(_admission=admission, **(task_kwargs or {}))
+    return _eval_admitted_task(
+        task,
+        admission,
+        evidence_dir=evidence_dir,
+        max_samples=config.POD_MAX_SAMPLES,
+        **eval_kwargs,
+    )
+
+
 def run_bench(
     name: str,
     *,
@@ -341,22 +395,15 @@ def run_bench(
         # mode stays at the per-pod ceiling (1 by construction).
         max_samples = (parallelism if per_sample_cluster
                        else config.POD_MAX_SAMPLES)
-    md = dict(eval_kwargs.pop("metadata", None) or {})
-    md["seon_source_admission"] = admission
-    eval_kwargs["metadata"] = md
-    logs = inspect_eval(
+    logs = _eval_admitted_task(
         task,
-        solver=adapt_fn(task.solver, the_solver),
-        model=eval_kwargs.pop("model", "mockllm/model"),
+        admission,
+        solver_override=adapt_fn(task.solver, the_solver),
+        evidence_dir=evidence_dir,
         limit=limit,
         epochs=epochs,
         max_samples=max_samples,
         **eval_kwargs,
-    )
-    source_admission.finalize_native_logs(
-        logs,
-        evidence_dir=evidence_dir,
-        expected_admission=admission,
     )
     if per_sample_cluster:
         violation = cluster_mod.bundle_violation(bundle_start)

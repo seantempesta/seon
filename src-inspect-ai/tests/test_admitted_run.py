@@ -60,3 +60,34 @@ def test_run_bench_retains_native_log_with_source_identity(monkeypatch, tmp_path
     admitted = native.eval.metadata["seon_source_admission"]
     assert admitted["bench"]["name"] == "gsm8k"
     assert admitted["sources"]["inspect_ai"]["revision"] == "a" * 40
+
+
+def test_run_native_task_retains_log_with_exact_admission(monkeypatch, tmp_path):
+    identity = {
+        "schema_version": 2,
+        "bench": {"name": "database_workflow", "kind": "seon-native"},
+    }
+    monkeypatch.setattr(
+        catalog.source_admission, "verify_sources", lambda selected: identity)
+
+    def task_factory(_admission):
+        assert _admission == identity
+        return Task(
+            dataset=[Sample(id="native-1", input="return accepted",
+                            target="accepted")],
+            solver=[_fixed_reply()],
+            scorer=match(),
+        )
+
+    evidence = tmp_path / "evidence"
+    logs = catalog.run_native_task(
+        identity["bench"],
+        task_factory,
+        evidence_dir=evidence,
+        log_dir=str(tmp_path / "logs"),
+        display="none",
+    )
+    retained = evidence / "inspect-logs" / Path(logs[0].location).name
+    native = read_eval_log(str(retained))
+    assert native.status == "success"
+    assert native.eval.metadata["seon_source_admission"] == identity

@@ -354,6 +354,10 @@ sample is trustworthy.
   cleanliness. Native-log finalization reopens the retained `.eval`, requires
   success, and verifies the exact admission map. Pod `/agents/run` evidence is
   request-scoped and comes from the same final immutable database snapshot.
+- Standard benchmarks and Seon-native tasks now share the admitted evaluator.
+  The native path admits before task construction, preserves the task's own
+  solver/scorer, enforces serial execution, and makes finalized log read-back
+  mandatory. The 58-test focused gate includes a real native-log read-back.
 - Infrastructure timeouts and core errors invalidate a sample instead of
   becoming a model score. A no-forms close remains model/runtime evidence.
 - A fresh ordinary ACME agent renders 22,171 total estimated tokens, including
@@ -375,9 +379,10 @@ sample is trustworthy.
   lane. Restarting ACME now would build an uncommitted mixed artifact; staging
   those files here would cross ownership. Wait for that coherent commit, then
   restart ACME and require ready status.
-- The native milestone task can target static ACME and consumes request-scoped
-  evidence, but the next run must enter through catalog source admission and
-  mandatory finalization before it can satisfy P1a/P0b.
+- The native milestone task can now enter through common source admission and
+  mandatory finalization. The remaining P1a gap is an exact static operator
+  artifact/config snapshot checked before and after the sample; a ready URL
+  and clean source commit do not prove which published bytes the pod runs.
 - A planning restart on the static development target must be owned by the
   semantic ACME operator and preserve the same database/agent identity. The
   full parallel solution remains the P1b lease.
@@ -391,9 +396,11 @@ sample is trustworthy.
    staging any concurrent lane's files.
 2. When the shared context/transcript edits converge, restart only ACME and
    prove a ready, ownership-coherent artifact plus clean admitted source.
-3. Run `database_workflow-seed1-000` through catalog source admission and
-   mandatory finalization. Inspect its prompt, reply, eval evidence, database
-   coordinate, model identity, and classification.
+3. Bind the current operator artifact/config/model snapshot into the admitted
+   run and verify it after the sample. Then run `database_workflow-seed1-000`
+   through common source admission and mandatory finalization. Inspect its
+   prompt, reply, eval evidence, database coordinate, model identity, and
+   classification.
 4. If narration repeats, trace its exact database-derived provenance and fix
    that one owner. Rerun the same sample until the evidence is trustworthy.
 5. Run the remaining nine frozen members serially, inspecting every `.eval`.

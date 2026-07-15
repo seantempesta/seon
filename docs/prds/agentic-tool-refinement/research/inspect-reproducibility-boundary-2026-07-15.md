@@ -194,6 +194,18 @@ Acceptance evidence:
 - `scorecard.append_row` refuses a scored row without the finalized log digest
   and run identity.
 
+The first common execution boundary is now implemented. Standard upstream
+benchmarks and Seon-native tasks both call one admitted evaluator that stamps
+the exact run identity, invokes Inspect, requires successful native logs,
+reopens them, verifies identity equality, and optionally copies them into the
+declared evidence directory. `run_native_task` admits before invoking its task
+factory, preserves the task's own dataset/solver/scorer, and enforces the
+configured one-pod sample ceiling. `milestone_lift` carries the same admission
+on its task and samples and rechecks source identity after a live sample. The
+focused gate passes 58 tests, including a real native `.eval` read-back. Static
+operator artifact/config identity remains R1/P1a work; this change does not
+promote a URL or source commit into artifact proof.
+
 ### R3 — Honest provider and model identity
 
 Owners: `seon.ai`/provider adapter for facts known inside the pod, and the

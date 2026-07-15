@@ -111,6 +111,16 @@ replies are directly visible in the `.eval`. This does not close the issue:
 concurrent per-sample allocation, restart, and cleanup still require the
 ownership-fenced lease described below.
 
+The native-task admission gap is also closed at the execution boundary.
+Seon-native milestone/tool tasks no longer need a direct `inspect eval` call
+that can omit finalization or a fake upstream benchmark identity.
+`catalog.run_native_task` admits source before task construction, retains the
+task's existing dataset/solver/scorer, stamps the exact identity, keeps the
+static pod serial, and routes through the same mandatory native-log read-back
+as `run_bench`. A real native `.eval` proves the retained identity. Static
+artifact/config binding and the per-sample operator lease remain open parts of
+this issue.
+
 A generated-workflow probe exposed one remaining static-path contradiction.
 `planning.fetch_eval_rows` still sent a raw sentinel-printing form to the
 writer socket, but the writer now speaks io-prepl event maps. The query reached

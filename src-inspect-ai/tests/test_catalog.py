@@ -98,6 +98,51 @@ def test_run_bench_rejects_source_before_task_construction(monkeypatch):
     assert constructed == []
 
 
+def test_run_native_task_admits_before_construction_and_finalizes(monkeypatch):
+    captured = {}
+    admitted = {"schema_version": 2, "bench": {"name": "native"}}
+
+    def admit(identity):
+        captured["identity"] = identity
+        return admitted
+
+    def factory(**kwargs):
+        captured["factory_kwargs"] = kwargs
+        return _FakeTask()
+
+    def inspect(task, **kwargs):
+        captured["eval_kwargs"] = kwargs
+        return ["log"]
+
+    monkeypatch.setattr(catalog.source_admission, "verify_sources", admit)
+    monkeypatch.setattr(catalog, "inspect_eval", inspect)
+    catalog.run_native_task(
+        {"name": "native"}, factory,
+        task_kwargs={"cluster_url": "http://example.test/agents/run"},
+    )
+    assert captured["identity"] == {"name": "native"}
+    assert captured["factory_kwargs"]["_admission"] == admitted
+    assert captured["eval_kwargs"]["metadata"][
+        "seon_source_admission"] == admitted
+    assert captured["eval_kwargs"]["max_samples"] == 1
+    assert "solver" not in captured["eval_kwargs"]
+
+
+def test_run_native_task_rejects_before_construction(monkeypatch):
+    constructed = []
+    monkeypatch.setattr(
+        catalog.source_admission, "verify_sources",
+        lambda identity: (_ for _ in ()).throw(
+            catalog.source_admission.SourceAdmissionError("source mismatch")))
+    with pytest.raises(catalog.source_admission.SourceAdmissionError,
+                       match="source mismatch"):
+        catalog.run_native_task(
+            {"name": "native"},
+            lambda **kwargs: constructed.append(kwargs) or _FakeTask(),
+        )
+    assert constructed == []
+
+
 def test_run_bench_max_samples_overridable(monkeypatch):
     # per-run override for cluster POOLS — the knob exists, the default stays 1
     captured = {}
