@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, flow, database, pod]
 ---
@@ -45,3 +45,19 @@ fault was the new `db/head-coordinate` call made after detach.
   database coordinate; writer evidence reports every attachment released.
 - A following restart remains clean and preserves the same database
   attachment without replay or replacement.
+
+## Resolution
+
+Commit `09bd9c0f` resolves the final coordinate before activating the empty
+schema projection and adds a focused 1-test/13-assertion ordering regression.
+The maintained Malli source audit at `b0c69616` confirms active wrappers retain
+compiled validators, so this is the owning inverse-order fix rather than a
+workaround for a dynamic registry lookup.
+
+The default cluster then completed two consecutive contained `bin/seon
+restart` transitions as clean. The second replacement published watcher
+generation `92bc9b6a-0ccc-41a0-af1c-9404c505aed8`, writer generation
+`d4acbc73-1131-4507-a414-cb7d263ccb4f`, and pod generation
+`58c773a2-59d6-49af-ae77-7ef6e9568e8d`. The database retained attachment
+`54b5b7e7-51fb-3220-b079-81a81914d86f/:db` and advanced normally to
+transaction `536871003`; no replacement database or replay path appeared.

@@ -52,7 +52,8 @@ The one cursor and bounded index projection in `seon.db.browser`.
 
 ## Resolution
 
-`seon.db.browser` now reconstructs and re-encodes every cursor boundary scalar,
+Commit `1b329812` makes `seon.db.browser` reconstruct and re-encode every
+cursor boundary scalar,
 rejects noncanonical encodings, and compares the ordered boundary prefix with
 the sealed prefix before selecting the immutable projection or reading an
 index. The focused projection checkpoint passed four tests and 25 assertions
