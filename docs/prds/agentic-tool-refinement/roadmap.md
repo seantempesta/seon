@@ -376,7 +376,9 @@ sample is trustworthy.
   remains part of the experiment. The common Python solver and its milestone
   and planning callers now preserve that absence instead of injecting their
   former 300-second fallback. Focused gates pass 15 CLJS tests/65 assertions
-  and 78 Inspect tests; the live ACME database resolves 1,800,000 ms.
+  and 78 Inspect tests; the live ACME database resolves 1,800,000 ms. The pod
+  response and native sample metadata now retain that effective value and its
+  `request` or `database` source as derived evidence.
 - Infrastructure timeouts and core errors invalidate a sample instead of
   becoming a model score. A no-forms close remains model/runtime evidence.
 - A fresh ordinary ACME agent renders 22,171 total estimated tokens, including

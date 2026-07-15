@@ -255,7 +255,9 @@ An explicit `timeout_ms` is a caller-selected experiment bound. When it is
 absent, the door derives its wait duration from the same frozen database run
 policy and optional agent override that `open-run!` uses. The HTTP boundary
 never introduces a shorter literal deadline that can terminate an otherwise
-healthy database-owned run.
+healthy database-owned run. Its response projects the effective duration and
+whether its source was the request or database; Inspect retains both in the
+native sample metadata. These are derived evidence, not another config value.
 
 The eval projection is derived from the same final immutable database value
 and exact turn-entity set used for the response counts. It never contains eval

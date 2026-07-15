@@ -139,6 +139,11 @@ def _record_result(state: TaskState, result: dict) -> TaskState:
         state.metadata["pod_turn_evidence"] = result["turn_evidence"]
     if "eval_evidence" in result:
         state.metadata["pod_eval_evidence"] = result["eval_evidence"]
+    if "effective_timeout_ms" in result:
+        state.metadata["pod_effective_timeout_ms"] = result[
+            "effective_timeout_ms"]
+    if "timeout_source" in result:
+        state.metadata["pod_timeout_source"] = result["timeout_source"]
     if result.get("evidence_blobs") is not None:
         state.metadata["pod_evidence_blobs"] = result["evidence_blobs"]
     return state

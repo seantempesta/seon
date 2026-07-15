@@ -235,7 +235,10 @@ milestone driver, and the planning driver omit `timeout_ms`; the pod derives
 the effective duration from the same frozen database policy and optional agent
 override used by `open-run!`. The former Python 300-second and pod five-minute
 defaults are removed from this path. Focused Inspect coverage passes 78 tests,
-and the live ACME database resolves 1,800,000 ms for root.
+and the live ACME database resolves 1,800,000 ms for root. The composition-door
+response projects the effective milliseconds plus `request` or `database`
+source, and the common solver retains both in native sample metadata so the
+final `.eval` can prove which precedence arm actually ran.
 
 ### R3 — Honest provider and model identity
 

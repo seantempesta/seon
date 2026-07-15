@@ -43,6 +43,7 @@
     [seon.repl :as repl]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]
+    [seon.web.datastar :as datastar]
     [seon.web.router :as router]))
 
 ;; ============================================================
@@ -680,10 +681,19 @@
                (let [parsed     (js->clj (js/JSON.parse body))
                      input      (get parsed "input")
                      agent-id   (get parsed "agent_id")
+                     requested-timeout-ms (get parsed "timeout_ms")
                      timeout-ms (agent-run-timeout-ms
                                   @db/*conn* agent-id
-                                  (get parsed "timeout_ms"))]
-                 (run-agent-task! agent-id input timeout-ms))))
+                                  requested-timeout-ms)]
+                 (-> (run-agent-task! agent-id input timeout-ms)
+                     (.then
+                       (fn [result]
+                         (assoc result
+                                :effective_timeout_ms timeout-ms
+                                :timeout_source
+                                (if (some? requested-timeout-ms)
+                                  "request"
+                                  "database"))))))))
       (.then (fn [result]
                (if (:error result)
                  (do
@@ -1010,10 +1020,22 @@
                                    :seon.web/port-file port-file}))))))))))
 
 (defn stop!
-  "Close the HTTP server. Returns nil."
+  "Close every SSE feed and await HTTP server shutdown."
+  {:malli/schema [:=> [:cat] :any]}
   []
+  (datastar/close-all-feeds!)
   (router/detach!)
-  (when-let [server @!server]
-    (.close server)
-    (reset! !server nil))
-  nil)
+  (if-let [server @!server]
+    (js/Promise.
+     (fn [resolve reject]
+       (try
+         (.close server
+                 (fn [error]
+                   (if error
+                     (reject error)
+                     (do
+                       (reset! !server nil)
+                       (resolve nil)))))
+         (catch :default error
+           (reject error)))))
+    (js/Promise.resolve nil)))

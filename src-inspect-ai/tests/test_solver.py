@@ -97,12 +97,16 @@ def test_record_result_preserves_database_and_turn_evidence():
     _record_result(state, {"reply": "answer",
                            "database_coordinate": coordinate,
                            "turn_evidence": turns,
-                           "eval_evidence": evals})
+                           "eval_evidence": evals,
+                           "effective_timeout_ms": 1800000,
+                           "timeout_source": "database"})
 
     assert state.output.completion == "answer"
     assert state.metadata["pod_database_coordinate"] == coordinate
     assert state.metadata["pod_turn_evidence"] == turns
     assert state.metadata["pod_eval_evidence"] == evals
+    assert state.metadata["pod_effective_timeout_ms"] == 1800000
+    assert state.metadata["pod_timeout_source"] == "database"
 
     incomplete = SimpleNamespace(output=SimpleNamespace(completion=""),
                                  metadata={})
@@ -110,6 +114,8 @@ def test_record_result_preserves_database_and_turn_evidence():
     assert "pod_database_coordinate" not in incomplete.metadata
     assert "pod_turn_evidence" not in incomplete.metadata
     assert "pod_eval_evidence" not in incomplete.metadata
+    assert "pod_effective_timeout_ms" not in incomplete.metadata
+    assert "pod_timeout_source" not in incomplete.metadata
 
 
 @pytest.mark.parametrize(
