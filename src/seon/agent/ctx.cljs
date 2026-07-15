@@ -1743,7 +1743,7 @@
    bounded at [[referenced-schema-cap]]. Returns
    `{::closure-keys [<kw>…] ::capped? bool}`, keys sorted."
   [db seed own-keys]
-  (loop [queue (vec seed), seen #{}, out #{}, definitions {}]
+  (loop [queue (vec (sort seed)), seen #{}, out #{}, definitions {}]
     (if (or (empty? queue) (>= (count out) referenced-schema-cap))
       {::closure-keys (vec (sort out))
        ::capped?      (boolean (and (seq queue) (>= (count out) referenced-schema-cap)))
@@ -1758,7 +1758,7 @@
                 out'       (if (or (contains? own-keys k) (nil? definition))
                              out
                              (conj out k))]
-            (recur (into queue (remove seen) child)
+            (recur (into queue (remove seen) (sort child))
                    (conj seen k)
                    out'
                    definitions')))))))

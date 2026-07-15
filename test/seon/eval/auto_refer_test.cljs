@@ -29,6 +29,7 @@
     [clojure.string :as str]
     [seon.agent.home :as home]
     [seon.client :as client]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.eval :as seval]
@@ -95,6 +96,56 @@
 ;; LIVE self-host: a fn in a NEW agent ns referencing db/query.
 ;; BEFORE (bare ns, no augmentation) → fails. AFTER (eval-batch!) → resolves.
 ;; ---------------------------------------------------------------------------
+
+(deftest fresh-bootstrap-seeds-the-resolved-root-refers
+  (async done
+    (let [root-requires (:seon.eval/home-requires
+                          (config/resolve-agent-context "root" nil))
+          root-spec '[seon.agent :refer [start! delegate! set-purpose!]]
+          !cs (atom nil)]
+      (is (some #(= root-spec %) root-requires)
+          "the test exercises the exact configured root orchestration edge")
+      (-> (seval/init-bootstrap!)
+          (.then
+            (fn [cs]
+              (reset! !cs cs)
+              (with-redefs [home/home-requires-for (fn [_] root-requires)]
+                (seval/setup-agent-ns! cs 'my.agent.root "root"))))
+          (.then
+            (fn [_]
+              (let [cs @!cs
+                    uses (get-in @cs
+                                 [:cljs.analyzer/namespaces
+                                  'my.agent.root :uses])]
+                (is (= {'start! 'seon.agent
+                        'delegate! 'seon.agent
+                        'set-purpose! 'seon.agent}
+                       (select-keys uses
+                                    '[start! delegate! set-purpose!])))
+                (seval/eval
+                  cs
+                  "(every? fn? [start! delegate! set-purpose!])"
+                  {:seon.eval/starting-ns 'my.agent.root
+                   :seon.eval/analyze-deps? false}))))
+          (.then (fn [result]
+                   (is (true? (:seon.eval/ok? result)))
+                   (is (true? (:seon.eval/value result)))))
+          (.then
+            (fn [_]
+              (with-redefs
+                [home/home-requires-for
+                 (fn [_]
+                   '[[seon.agent :refer [not-a-real-seon-agent-var]]])]
+                (-> (seval/setup-agent-ns!
+                      @!cs 'my.agent.invalid-root "invalid-root")
+                    (.then (fn [_]
+                             (is false "a nonexistent referred var must fail")))
+                    (.catch
+                      (fn [error]
+                        (is (str/includes? (str error)
+                                           "setup-agent-ns! failed"))))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
 (deftest before-bare-agent-ns-cannot-resolve-db-alias
   ;; Reproduces the #73 bug on the real self-host: a bare `(ns …)` form (NO

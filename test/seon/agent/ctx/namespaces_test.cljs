@@ -42,7 +42,8 @@
      :seon.fn/source   (str "(defn " nm " [x] (" body-marker " x))")
      :seon.fn/fn-var?  true :seon.fn/private? false
      :seon.fn/agent-facing? true
-     :seon.fn/arglists "([x])"}))
+     :seon.fn/arglists "([x])"
+     :seon.fn/spec     "[:=> [:cat :int] :int]"}))
 
 (defn- seed-tx []
   [{:seon.agent/id agent-id}
@@ -50,24 +51,44 @@
    {:seon.ns/name     cur-ns
     :seon.ns/source   "(ns my.agent.tst-2606260000 (:require [my.helper :as h])) (defn plan [x] (CUR-BODY x))"
     :seon.ns/require-edges [{:seon.ns.require/target :my.helper
-                             :seon.ns.require/alias  'h}]}
+                             :seon.ns.require/refers #{'assist}}]}
    (fn-row "my.agent.tst-2606260000/plan" cur-ns "CUR-BODY")
    ;; REQUIRED by the current ns → COMPACT card.
    {:seon.ns/name :my.helper :seon.ns/source "(ns my.helper)"}
    (fn-row "my.helper/assist" :my.helper "HLP-BODY")
    ;; Public program data without positive eligibility stays out of the card.
    {:seon.fn/sym "my.helper/runtime-helper"
-    :seon.fn/ns [:seon.ns/name :my.helper]
+   :seon.fn/ns [:seon.ns/name :my.helper]
     :seon.fn/source "(defn runtime-helper [x] (RUNTIME-BODY x))"
     :seon.fn/fn-var? true :seon.fn/private? false
+    :seon.fn/arglists "([x])"
+    :seon.fn/spec "[:=> [:cat :int] :int]"}
+   {:seon.fn/sym "my.helper/unspecced"
+    :seon.fn/ns [:seon.ns/name :my.helper]
+    :seon.fn/source "(defn unspecced [x] x)"
+    :seon.fn/fn-var? true :seon.fn/private? false
     :seon.fn/arglists "([x])"}
+   {:seon.fn/sym "my.helper/not-a-function"
+    :seon.fn/ns [:seon.ns/name :my.helper]
+    :seon.fn/fn-var? false :seon.fn/private? false
+    :seon.fn/spec "[:=> [:cat :int] :int]"}
+   {:seon.fn/sym "my.helper/malformed-contract"
+    :seon.fn/ns [:seon.ns/name :my.helper]
+    :seon.fn/fn-var? true :seon.fn/private? false
+    :seon.fn/spec ":int"}
+   {:seon.fn/sym "my.helper/broken-contract"
+    :seon.fn/ns [:seon.ns/name :my.helper]
+    :seon.fn/fn-var? true :seon.fn/private? false
+    :seon.fn/spec "[:=> [:cat :int] :int]"
+    :seon.fn/schema-error "invalid function schema"}
    ;; NEITHER current, required, nor pinned → DROPPED.
    {:seon.ns/name :my.unrelated :seon.ns/source "(ns my.unrelated)"}
    (fn-row "my.unrelated/stray" :my.unrelated "UNR-BODY")
    ;; a PRIVATE fn on the helper — never exposed in a compact card.
    {:seon.fn/sym "my.helper/secret" :seon.fn/ns [:seon.ns/name :my.helper]
     :seon.fn/source "(defn- secret [x] x)" :seon.fn/fn-var? true
-    :seon.fn/private? true :seon.fn/arglists "([x])"}])
+    :seon.fn/private? true :seon.fn/arglists "([x])"
+    :seon.fn/spec "[:=> [:cat :int] :int]"}])
 
 (defn- with-seeded [extra-tx body]
   (-> (client/open-agent-conn!)
@@ -81,8 +102,11 @@
   [out]
   (set (map second (re-seq #";;; ┌─ namespace ([^\s]+) ─" out))))
 
+(defn- block-for [conn id]
+  (nss/namespaces-block {:seon.db/db @conn :seon.agent/id id}))
+
 (defn- block [conn]
-  (nss/namespaces-block {:seon.db/db @conn :seon.agent/id agent-id}))
+  (block-for conn agent-id))
 
 (deftest current-full-required-compact-else-dropped
   (async done
@@ -99,9 +123,55 @@
                 (is (not (str/includes? out "HLP-BODY")) "a required ns renders COMPACT — its body is elided"))
               (testing "private fns never enter a compact card"
                 (is (not (str/includes? out "secret"))))
-              (testing "unmarked public functions remain program data only"
-                (is (not (str/includes? out "runtime-helper")))))))
+              (testing "the persisted refer edge selects exactly one callable"
+                (is (str/includes? out "my.helper/assist"))
+                (is (not (str/includes? out "runtime-helper"))))
+              (testing "schema-incomplete public rows stay program data only"
+                (is (not (str/includes? out "unspecced")))))))
         (.then (fn [_] (done)) (fn [e] (is false (str "threw: " (.-message e))) (done))))))
+
+(deftest persisted-edge-shape-selects-one-canonical-card-surface
+  (async done
+    (let [alias-id "tst-2606260001"
+          union-id "tst-2606260002"
+          as-alias-id "tst-2606260003"]
+      (-> (with-seeded
+            [{:seon.agent/id alias-id}
+             {:seon.ns/name :my.agent.tst-2606260001
+              :seon.ns/require-edges
+              [{:seon.ns.require/target :my.helper
+                :seon.ns.require/alias 'h}]}
+             {:seon.agent/id union-id}
+             {:seon.ns/name :my.agent.tst-2606260002
+              :seon.ns/require-edges
+              [{:seon.ns.require/target :my.helper
+                :seon.ns.require/refers #{'assist}}
+               {:seon.ns.require/target :my.helper
+                :seon.ns.require/refers #{'runtime-helper}}]}
+             {:seon.agent/id as-alias-id}
+             {:seon.ns/name :my.agent.tst-2606260003
+              :seon.ns/require-edges
+              [{:seon.ns.require/target :my.helper
+                :seon.ns.require/alias 'h
+                :seon.ns.require/as-alias? true}]}]
+            (fn [conn]
+              (let [alias-card (block-for conn alias-id)
+                    union-card (block-for conn union-id)
+                    as-alias-card (block-for conn as-alias-id)]
+                (testing "a real alias exposes all valid public functions"
+                  (is (str/includes? alias-card "my.helper/assist"))
+                  (is (str/includes? alias-card "my.helper/runtime-helper"))
+                  (is (not (str/includes? alias-card "unspecced")))
+                  (is (not (str/includes? alias-card "not-a-function")))
+                  (is (not (str/includes? alias-card "malformed-contract")))
+                  (is (not (str/includes? alias-card "broken-contract"))))
+                (testing "several refer edges union deterministically"
+                  (is (str/includes? union-card "my.helper/assist"))
+                  (is (str/includes? union-card "my.helper/runtime-helper")))
+                (testing "as-alias is keyword resolution, not a callable edge"
+                  (is (not (contains? (section-nses as-alias-card) "my.helper")))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw: " (.-message e))) (done)))))))
 
 (deftest full-source-pins-an-otherwise-dropped-ns-to-full
   (async done
@@ -152,6 +222,9 @@
             :seon.schema/ns     [:seon.ns/name :my.helper]
             :seon.schema/form
             "(seon.schema/register! :my.helper/local-contract [:map [:my.helper/input :string]])"}
+           {:seon.schema/key    :my.helper/unrelated-contract
+            :seon.schema/ns     [:seon.ns/name :my.helper]
+            :seon.schema/form "[:map [:my.helper/unrelated :string]]"}
            ;; A raw boot-indexed form, a replayable register! call, then a
            ;; raw form closing a cycle. The map label has a real schema row so
            ;; the test catches a structural walker that mistakes labels for
@@ -192,6 +265,10 @@
                                   :seon.db/db dbv}))
                   compact    (nss/render-one-ns-compact
                                {:seon.ns/name :my.helper :seon.db/db dbv})
+                  narrow     (nss/render-one-ns-compact
+                               {:seon.ns/name :my.helper
+                                :seon.db/db dbv
+                                :seon.ns.require/refers #{'assist}})
                   registry-noise
                   (with-redefs [schema/schema-definition
                                 (fn [_] [:enum :runtime-only-definition])]
@@ -221,7 +298,10 @@
                 (is (str/includes? compact ":my.helper/local-contract"))
                 (is (str/includes? compact ":my.helper/input"))
                 (is (str/includes? compact ":my.helper/output"))
-                (is (not (re-find #"::(?:local-contract|input|output)" compact)))))))
+                (is (not (re-find #"::(?:local-contract|input|output)" compact))))
+              (testing "a narrow refer card emits only reachable owned schemas"
+                (is (str/includes? narrow ":my.helper/local-contract"))
+                (is (not (str/includes? narrow ":my.helper/unrelated-contract")))))))
         (.then (fn [_] (done))
                (fn [e] (is false (str "threw: " (.-message e))) (done))))))
 

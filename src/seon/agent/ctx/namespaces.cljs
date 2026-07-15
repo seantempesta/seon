@@ -197,20 +197,39 @@
   (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
     (str/starts-with? s "seon.")))
 
-(defn- required-ns-set
-  "The nses the CURRENT ns `:require`s — ALL of them (no full-source gate),
-   each rendered as a COMPACT CARD. Pure fn of the DB: a real
-   `(:require [x …])` on the current ns pulls `x` into context as a card; drop
-   the require → it leaves the set (self-healing on the
-   `:seon.ns/require-edges` rows, via `seon.eval/persisted-require-targets`).
-   `*.internal` / `*-test` are excluded ([[included-ns?]]). Empty when
-   `cur-ns` is nil."
+(defn- required-ns-selections
+  "The current ns's callable-card selection, keyed by required namespace.
+
+   Persisted require edges are the one dependency and presentation authority:
+   a real `:refer` selects exactly those symbols; `:as`, bare, and
+   `:refer :all` edges select the namespace's whole public callable surface.
+   Multiple refer edges union. Any whole-surface edge wins. `:as-alias` is a
+   keyword-resolution edge only and contributes no callable card. The absence
+   of `:seon.ns.require/refers` in a value means whole surface."
   [db cur-ns]
   (if-not cur-ns
-    #{}
-    (into #{}
-          (filter included-ns?)
-          (seval/persisted-require-targets db cur-ns))))
+    {}
+    (reduce
+      (fn [selections
+           {:seon.ns.require/keys
+            [target alias refers refer-all? as-alias?]}]
+        (if (or as-alias? (not (included-ns? target)))
+          selections
+          (let [whole? (or alias refer-all? (not (seq refers)))
+                present? (contains? selections target)
+                current (get selections target)]
+            (assoc selections target
+                   (cond
+                     whole? {}
+                     (and present?
+                          (not (contains? current :seon.ns.require/refers)))
+                     current
+                     :else
+                     {:seon.ns.require/refers
+                      (into (or (:seon.ns.require/refers current) #{})
+                            refers)})))))
+      {}
+      (seval/persisted-require-edges db cur-ns))))
 
 (defn- full?
   "True when an included ns `nm` renders FULL (its whole real source); false
@@ -374,8 +393,9 @@
    with nothing indexed adds noise, not signal, so it stays dropped rather than
    emit an empty card. The compact SIBLING of [[render-one]] (the full
    wrapper); delegates to [[render-one-ns-compact]]."
-  [db nm]
-  (let [card (render-one-ns-compact {:seon.ns/name nm :seon.db/db db})]
+  [db nm selection]
+  (let [card (render-one-ns-compact
+               (merge {:seon.ns/name nm :seon.db/db db} selection))]
     (when-not (or (str/includes? card "(nothing indexed)")
                   (str/includes? card "(not in db"))
       card)))
@@ -389,9 +409,11 @@
      - FULL — the agent's CURRENT ns + any ns in the per-agent `::full-source`
        presence-set. A `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─`
        bracketed block carrying its REAL FULL FILE SOURCE, unclipped.
-     - COMPACT CARD — every ns the CURRENT ns `:require`s ([[required-ns-set]])
-       that isn't already full ([[render-one-ns-compact]]): inert schema
-       records + every public fn's one-line signature, ~3–5× smaller than full.
+     - COMPACT CARD — every ns the CURRENT ns `:require`s
+       ([[required-ns-selections]]) that isn't already full
+       ([[render-one-ns-compact]]): inert selected schema records + every
+       selected public, schema-complete fn's one-line signature, ~3–5× smaller
+       than full.
        The whole card is reader-commented, so echoing it cannot enqueue evals.
        Self-healing on the `:seon.ns/require-edges` rows.
      - DROPPED — everything else, reachable via grep /
@@ -448,11 +470,12 @@
         ;; ::with-tests members ∪ (the current ns when ::current-tests? is on).
         tests-set      (cond-> with-tests-cfg
                          (and cur-ns current-tests?) (conj cur-ns))
-        ;; The nses the CURRENT ns :require's — each a COMPACT card.
-        required-set   (required-ns-set db cur-ns)
+        ;; The CURRENT ns's persisted require edges, retaining their callable
+        ;; selection semantics for each compact card.
+        required       (required-ns-selections db cur-ns)
         ;; The INCLUDE set — PURELY: the current ns ∪ its requires ∪ the
         ;; per-agent ::full-source pins. Everything else is DROPPED.
-        include-set    (cond-> (into required-set full-source-cfg)
+        include-set    (cond-> (into (set (keys required)) full-source-cfg)
                          cur-ns (conj cur-ns))
         ;; The included ns rows, recency-ordered. One :seon.ns/name datom per
         ;; ns carries its tx; filter to the include set.
@@ -481,22 +504,23 @@
                                             (seon-framework-ns? nm))]
                            [nm
                             (full? policy nm cur-ns full-source-cfg current-full?)
-                            (if prefix? :prefix :body)]))
+                            (if prefix? :prefix :body)
+                            (if (= nm cur-ns) {} (get required nm {}))]))
                        rows)
         ;; Render ONE row: full → render-one (omitted when empty); else a
         ;; COMPACT card (it is a required ns). A card is nil when nothing is
         ;; indexed. Append the ns's indexed test source when it is in tests-set.
-        render-row (fn [[nm full? _phase]]
+        render-row (fn [[nm full? _phase selection]]
                      (when-let [block-txt (if full?
                                             (render-one db nm cur-ns id)
-                                            (compact-block db nm))]
+                                            (compact-block db nm selection))]
                        (str block-txt
                             (when (contains? tests-set nm)
                               (ns-tests-block db nm)))))
         prefix-rows (->> selected
-                         (filter (fn [[_ _ phase]] (= phase :prefix)))
-                         (sort-by (fn [[nm _ _]] (name nm))))
-        body-rows   (filterv (fn [[_ _ phase]] (= phase :body)) selected)
+                         (filter (fn [[_ _ phase _]] (= phase :prefix)))
+                         (sort-by (fn [[nm _ _ _]] (name nm))))
+        body-rows   (filterv (fn [[_ _ phase _]] (= phase :body)) selected)
         prefix-blocks (keep render-row prefix-rows)
         body-blocks   (keep render-row body-rows)
         blocks        (concat prefix-blocks body-blocks)]
@@ -709,7 +733,21 @@
    [:seon.fn/sym      :string]
    [:seon.fn/arglists {:optional true} :string]
    [:seon.fn/doc      {:optional true} :string]
-   [:seon.fn/spec     {:optional true} :string]])
+   [:seon.fn/spec     {:optional true} :string]
+   [:seon.fn/schema-error {:optional true} :string]
+   [:seon.fn/fn-var?  {:optional true} :boolean]
+   [:seon.fn/private? {:optional true} :boolean]])
+
+(defn callable-fn-row?
+  "True for a public function row with a usable complete schema."
+  {:malli/schema [:=> [:cat ::fn-row] :boolean]}
+  [{:seon.fn/keys [spec schema-error fn-var? private?]}]
+  (boolean (and fn-var?
+                (not private?)
+                (string? spec)
+                (not (str/blank? spec))
+                (str/blank? schema-error)
+                (seq (arity-specs spec)))))
 
 (defn compact-fn-head
   "One fn condensed to an inert, readable callable-contract record.
@@ -734,13 +772,17 @@
 (schema/register! ::render-one-ns-compact-request
   [:map
    [:seon.ns/name :seon.ns/name]
-   [:seon.db/db   :seon.db/db]])
+   [:seon.db/db   :seon.db/db]
+   [:seon.ns.require/refers
+    {:optional true}
+    :seon.ns.require/refers]])
 
 (defn render-one-ns-compact
   "Render ONE namespace as a COMPACT CARD string.
 
-   The ns's schema definitions plus every PUBLIC fn condensed to inert comment
-   records, inside the standard `;;; ┌─/└─` demarcation
+   The selected schema definitions plus every public, schema-complete function
+   condensed to inert comment records, inside the standard `;;; ┌─/└─`
+   demarcation
    ([[seon.agent.ctx/ns-demarc]]). Compact output contains no executable
    pseudo-definitions and no serialized runtime objects.
 
@@ -753,7 +795,7 @@
    Map-in: `{:seon.ns/name <keyword> :seon.db/db <db-value>}`. Returns the
    card string."
   {:malli/schema [:=> [:cat ::render-one-ns-compact-request] :string]}
-  [{ns-kw :seon.ns/name db :seon.db/db}]
+  [{ns-kw :seon.ns/name db :seon.db/db refers :seon.ns.require/refers}]
   (let [ns-str (name ns-kw)]
     (if-not (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.ns/name ns-kw]})
       (ctx/ns-demarc ns-kw "; (not in db — not indexed)")
@@ -764,16 +806,25 @@
                        '[{:seon.fn/_ns     [:seon.fn/sym :seon.fn/arglists
                                             :seon.fn/doc :seon.fn/spec
                                             :seon.fn/private?
-                                            :seon.fn/agent-facing?]
+                                            :seon.fn/fn-var?
+                                            :seon.fn/schema-error]
                           :seon.schema/_ns [:seon.schema/key :seon.schema/form]}]})
-            schemas (->> (:seon.schema/_ns pull)
-                         (filter (fn [{:seon.schema/keys [key]}]
-                                   (= (namespace key) ns-str)))
-                         (sort-by (comp str :seon.schema/key)))
+            all-schemas (->> (:seon.schema/_ns pull)
+                             (filter (fn [{:seon.schema/keys [key]}]
+                                       (= (namespace key) ns-str)))
+                             (sort-by (comp str :seon.schema/key)))
             fns     (->> (:seon.fn/_ns pull)
-                         (filter :seon.fn/agent-facing?)
-                         (remove :seon.fn/private?)
+                         (filter callable-fn-row?)
+                         (filter (fn [{:seon.fn/keys [sym]}]
+                                   (or (nil? refers)
+                                       (contains?
+                                         refers
+                                         (symbol (name (symbol sym)))))))
                          (sort-by :seon.fn/sym))
+            ;; Narrow `:refer` cards let the shared closure emit only schemas
+            ;; reachable from the selected functions. Whole-surface cards keep
+            ;; every owned schema plus cross-namespace references.
+            schemas (if (nil? refers) all-schemas [])
             reg-lines (map compact-schema-line schemas)
             fn-lines  (map compact-fn-head fns)
             ;; The cross-ns schema DEFINITIONS these fns reference (transitive,
@@ -781,8 +832,14 @@
             ;; excluded). Shared closure lives in seon.agent.ctx (one mechanism).
             ref-blk   (some-> (ctx/referenced-schema-block
                                 {:seon.db/db          db
-                                 :seon.agent.ctx/seed-specs (into [] (keep :seon.fn/spec) fns)
-                                 :seon.agent.ctx/own-keys   (into #{} (map :seon.schema/key) schemas)})
+                                 :seon.agent.ctx/seed-specs
+                                 (cond-> (into [] (keep :seon.fn/spec) fns)
+                                   (nil? refers)
+                                   (into (keep :seon.schema/form) all-schemas))
+                                 :seon.agent.ctx/own-keys
+                                 (if (nil? refers)
+                                   (into #{} (map :seon.schema/key) all-schemas)
+                                   #{})})
                               omit-runtime-object-tags)
             ;; Schema records first, then referenced definitions, one blank line,
             ;; then fn signatures. The WHOLE body routes through quote-lines so

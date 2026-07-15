@@ -61,26 +61,39 @@
   (fn [x] (set! db/*conn* conn) (f x)))
 
 (defn- seed-demo-ns!
-  "One indexed ns with two tools, one implementation fn, and one private."
+  "One indexed ns with public, incomplete, and private function rows."
   []
   (db/transact!
     {:seon.db/tx-data
      [{:db/id "ns" :seon.ns/name :my.demo}
       {:seon.fn/sym "my.demo/twice" :seon.fn/ns "ns"
        :seon.fn/agent-facing? true
+       :seon.fn/fn-var? true
        :seon.fn/doc "Double a number.\n\nThe mechanism story lives below the fold."
        :seon.fn/arglists "([n])"
        :seon.fn/spec "[:=> [:cat :int] :int]"}
       {:seon.fn/sym "my.demo/add" :seon.fn/ns "ns"
        :seon.fn/agent-facing? true
+       :seon.fn/fn-var? true
        :seon.fn/doc "Add two numbers."
-       :seon.fn/arglists "([a b])"}
+       :seon.fn/arglists "([a b])"
+       :seon.fn/spec "[:=> [:cat :int :int] :int]"}
       {:seon.fn/sym "my.demo/runtime-helper" :seon.fn/ns "ns"
+       :seon.fn/fn-var? true
        :seon.fn/doc "Implementation detail."
+       :seon.fn/arglists "([x])"
+       :seon.fn/spec "[:=> [:cat :int] :int]"}
+      {:seon.fn/sym "my.demo/unspecced" :seon.fn/ns "ns"
+       :seon.fn/fn-var? true
        :seon.fn/arglists "([x])"}
       {:seon.fn/sym "my.demo/secret-helper" :seon.fn/ns "ns"
+       :seon.fn/fn-var? true
        :seon.fn/private? true
-       :seon.fn/arglists "([x])"}]}))
+       :seon.fn/arglists "([x])"
+       :seon.fn/spec "[:=> [:cat :int] :int]"}]}))
+
+(defn- functions [conn ns-name]
+  (my-ns/functions {:my.ns/ns ns-name :seon.db/db @conn}))
 
 (deftest functions-lists-public-fns-as-compact-cards
   (async done
@@ -91,15 +104,17 @@
                      (fn [{ok? :seon.db/ok?}]
                        (is (true? ok?) "the seed tx landed")
                        (let [{ok? :seon.result/ok? :as res}
-                             (my-ns/functions {:my.ns/ns 'my.demo})
+                             (functions conn 'my.demo)
                              cards (:my.ns/cards res)
-                             twice (second cards)]
+                             twice (nth cards 2)]
                          (is (true? ok?))
-                         (is (= 2 (:my.ns/count res))
-                             "only the two positively agent-facing fns appear")
-                         (is (= 2 (count cards)))
-                         (is (not-any? #(str/includes? % "runtime-helper") cards)
-                             "an unmarked public implementation fn is excluded")
+                         (is (= 3 (:my.ns/count res))
+                             "all public schema-complete function rows appear")
+                         (is (= 3 (count cards)))
+                         (is (some #(str/includes? % "runtime-helper") cards)
+                             "marker absence is not a presentation filter")
+                         (is (not-any? #(str/includes? % "unspecced") cards)
+                             "an incomplete public row stays out")
                          (is (str/includes? (first cards) "my.demo/add")
                              "cards sort by name")
                          (is (str/includes? twice "my.demo/twice"))
@@ -132,9 +147,9 @@
         (-> (seed-demo-ns!)
             (.then (pinned conn
                      (fn [_]
-                       (let [by-sym (my-ns/functions {:my.ns/ns 'my.demo})
-                             by-kw  (my-ns/functions {:my.ns/ns :my.demo})
-                             by-str (my-ns/functions {:my.ns/ns "my.demo"})]
+                       (let [by-sym (functions conn 'my.demo)
+                             by-kw  (functions conn :my.demo)
+                             by-str (functions conn "my.demo")]
                          (is (= by-sym by-kw by-str)
                              "the three spellings are one question")))))))
       done)))
@@ -146,7 +161,7 @@
         ((pinned conn
            (fn [_]
              (let [{ok? :seon.result/ok? :as res}
-                   (my-ns/functions {:my.ns/ns 'no.such.place})]
+                   (functions conn 'no.such.place)]
                (is (false? ok?))
                (is (str/includes? (:my.ns/error res) "not indexed"))
                (is (str/includes? (:my.ns/hint res) ":seon.ns/name")
@@ -162,7 +177,7 @@
             (.then (pinned conn
                      (fn [_]
                        (let [{ok? :seon.result/ok? :as res}
-                             (my-ns/functions {:my.ns/ns :my.hollow})]
+                             (functions conn :my.hollow)]
                          (is (true? ok?) "no fns is SUCCESS, not an error")
                          (is (= [] (:my.ns/cards res)))
                          (is (= 0 (:my.ns/count res)))

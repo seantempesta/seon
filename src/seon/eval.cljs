@@ -566,10 +566,6 @@
       (set! *print-err-fn* (print-dispatch err)))
     (reset! !print-dispatcher-version init-version)))
 
-;; Defined after `ns-fn-members` (it reads the live ns members); declared here
-;; so `init-bootstrap!` can call it.
-(declare seed-toolkit-refers!)
-
 (defn ^:async init-bootstrap!
   "Initialize a fresh compile-state from out/bootstrap/.
 
@@ -614,11 +610,6 @@
     ;; version-stamped contract — gives each eval's println/prn output its
     ;; own ALS bucket instead of a process-global `set!` straddling awaits.
     (install-print-dispatcher!)
-    ;; Seed the home-ns refer toolkit defs (see `seed-toolkit-refers!`) so
-    ;; `setup-agent-ns!`'s `(ns … (:refer [wait complete …]))` analyzes CLEANLY.
-    ;; init-bootstrap! is the ONE birthplace of a compile-state, so every
-    ;; fresh/rebuilt state carries the seed.
-    (seed-toolkit-refers! state)
     state))
 
 ;; ============================================================
@@ -719,7 +710,7 @@
       {})))
 
 ;; ============================================================
-;; Home-ns refer toolkit seed — declare the toolkit nses' analyzer `:defs` so
+;; Home-ns refer seed — declare the resolved require specs' analyzer `:defs` so
 ;; `setup-agent-ns!`'s `(ns <home> (:refer [wait complete …]))` analyzes
 ;; CLEANLY. The refer'd nses are HOST-bundled (emitted into the :client bundle,
 ;; live on globalThis) but are NOT `:bootstrap` analyzer entries, so a fresh
@@ -730,34 +721,35 @@
 ;; prime or a `(fn? complete)` probe.
 ;; ============================================================
 
-(def ^:private home-ns-refer-toolkit-nses
-  "Host-bundled nses whose vars the agent home ns `:refer`s UNQUALIFIED (see
-   `setup-agent-ns!`). Only `:refer`'d nses need seeded `:defs` — `:as` aliases
-   don't validate members at parse time. `seon.agent.lifecycle` is the sole
-   `:refer`; data so adding a refer'd toolkit ns is a one-line edit."
-  '[seon.agent.lifecycle])
+(declare ns-data-members)
 
 (defn- seed-toolkit-refers!
-  "Declare the LIVE fn members of each [[home-ns-refer-toolkit-nses]] ns to the
-   analyzer in `compile-state`, so a home-ns `:refer` of those vars analyzes
-   cleanly. Members are read from the live globalThis ns object via
-   [[ns-fn-members]] (code-as-data — no hardcoded var list to drift); the
-   seeded `:def` is the minimal `{:name fq-sym}` that satisfies the analyzer's
-   `missing-use?` check. Idempotent (merge). Called from [[init-bootstrap!]] so
-   every fresh/rebuilt compile-state carries it."
-  [compile-state]
-  (doseq [ns-sym home-ns-refer-toolkit-nses]
-    (let [members (ns-fn-members (name ns-sym))]
-      (when (seq members)
+  "Declare the resolved home requirements' LIVE referred vars to the analyzer.
+
+   Self-host validates each `:refer` member while analyzing the home `(ns …)`
+   form, but host-bundled namespaces are not bootstrap analyzer entries. Read
+   the exact per-agent require vector, project only its `:refer` symbols, and
+   seed only non-nil members that actually exist on globalThis. A missing compiled
+   member therefore remains absent and makes setup fail closed. `:as` aliases
+   need no member seed. Idempotent (merge)."
+  [compile-state require-specs]
+  (doseq [[ns-sym mode referred] require-specs
+          :when (= :refer mode)]
+    (let [members (merge (ns-data-members (name ns-sym))
+                         (ns-fn-members (name ns-sym)))
+          defs    (into {}
+                        (keep (fn [sym]
+                                (when (contains? members sym)
+                                  [sym {:name (symbol (name ns-sym)
+                                                      (name sym))}])))
+                        referred)]
+      (when (seq defs)
         (swap! compile-state update-in
                [:cljs.analyzer/namespaces ns-sym]
                (fn [m]
                  (-> (or m {})
                      (assoc :name ns-sym)
-                     (update :defs merge
-                             (into {} (for [sym (keys members)]
-                                        [sym {:name (symbol (name ns-sym)
-                                                            (name sym))}]))))))))))
+                     (update :defs merge defs))))))))
 
 (defn ns-data-members
   "The COMPILED NON-function members of namespace `ns-name`.
@@ -1911,9 +1903,9 @@
    and wires the implicit macro refers (defn, str, atom, …) for subsequent
    forms in the new ns.
 
-   The `:refer [wait complete …]` against host-bundled `seon.agent.lifecycle`
-   analyzes CLEANLY because [[seed-toolkit-refers!]] (run in [[init-bootstrap!]])
-   declared that ns's `:defs` into every compile-state. The clean emit also
+   Each `:refer` against a host-bundled namespace analyzes cleanly because
+   [[seed-toolkit-refers!]] projects the exact resolved home require vector's
+   live vars into this compile-state immediately before the ns form. The clean emit also
    materializes the home ns's runtime JS object, so a later `(defn …)` has a
    path to write into — hence NO bare-`(ns)` prime and NO `(fn? complete)`
    probe. A non-`::ok?` result now signals a REAL failure (the seed missing, or a
@@ -1925,16 +1917,16 @@
   {:malli/schema
    [:=> [:catn [::compile-state :any] [::agent-ns-sym :any] [::agent-id :any]] :any]}
   [compile-state agent-ns-sym agent-id]
-  (let [setup-src (home/home-ns-form agent-ns-sym
-                                     (home/home-requires-for agent-id))
+  (let [require-specs (home/home-requires-for agent-id)
+        _             (seed-toolkit-refers! compile-state require-specs)
+        setup-src     (home/home-ns-form agent-ns-sym require-specs)
         r (await (eval compile-state setup-src
                        {::starting-ns user-ns-sym ::analyze-deps? true}))]
     (when-not (::ok? r)
       (throw (ex-info
                (str "setup-agent-ns! failed — the home-ns require/refer did not "
-                    "analyze cleanly for " agent-ns-sym ". seed-toolkit-refers! "
-                    "(in init-bootstrap!) must declare the refer'd toolkit "
-                    "defs into the compile-state.")
+                    "analyze cleanly for " agent-ns-sym ". The resolved "
+                    "home require vector must name compiled :refer members.")
                {:agent-ns agent-ns-sym :result r})))
     agent-ns-sym))
 

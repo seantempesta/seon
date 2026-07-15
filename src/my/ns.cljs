@@ -23,7 +23,10 @@
 (schema/register! ::count :int)
 (schema/register! ::error :string)
 (schema/register! ::hint :string)
-(schema/register! ::functions-request [:map [::ns ::ns]])
+(schema/register! ::functions-request
+  [:map
+   [::ns ::ns]
+   [:seon.db/db {:optional true} :seon.db/db]])
 (schema/register!
   ::functions-response
   [:map
@@ -37,9 +40,9 @@
   "List the functions a namespace defines — name, doc, and args.
 
    Answers \"what can I call in X?\" for ANY indexed namespace (seon.*,
-   my.*, your own) from positive `:seon.fn/agent-facing?` facts.
-   Implementation and private fns remain indexed but are excluded;
-   cards sort by name. SYNC — reads only.
+   my.*, your own) from public, real function rows with complete schemas.
+   Private, non-function, and incomplete rows remain indexed but are excluded;
+   cards sort by name. SYNC — reads the injected frozen database only.
 
      (my.ns/functions {:my.ns/ns 'my.plan})
      ; ⟹ «map: :seon.result/ok? true, :my.ns/cards [\"fn my.plan/done! […]\" …],
@@ -51,34 +54,33 @@
    (seon.agent.ctx/render-namespace {:seon.ns/name :my.plan
                                      :seon.ns/member \"done!\"})."
   {:malli/schema [:=> [:cat ::functions-request] ::functions-response]}
-  [{ns-name ::ns}]
-  (let [db    @db/*conn*
-        ns-kw (if (keyword? ns-name) ns-name (keyword (str ns-name)))
+  [{ns-name ::ns dbv :seon.db/db}]
+  (let [ns-kw (if (keyword? ns-name) ns-name (keyword (str ns-name)))
         ;; resolve the eid by QUERY, not a lookup-ref pull — pulling an
         ;; unresolved lookup-ref THROWS (:entity-id/missing); a scalar
         ;; find returns nil (errors-as-values).
         eid   (db/query '[:find ?e . :in $ ?n :where [?e :seon.ns/name ?n]]
-                        db ns-kw)]
+                        dbv ns-kw)]
     (if (nil? eid)
       {:seon.result/ok? false
        ::error (str "namespace " (name ns-kw) " is not indexed — no :seon.ns row.")
        ::hint  (str "(seon.db/query '[:find [?n ...] :where [_ :seon.ns/name ?n]]) "
                     "lists every indexed namespace.")}
-      (let [pulled (db/pull db
+      (let [pulled (db/pull dbv
                             '[{:seon.fn/_ns [:seon.fn/sym :seon.fn/arglists
                                              :seon.fn/doc :seon.fn/spec
                                              :seon.fn/private?
-                                             :seon.fn/agent-facing?]}]
+                                             :seon.fn/fn-var?
+                                             :seon.fn/schema-error]}]
                             eid)
             cards  (->> (:seon.fn/_ns pulled)
-                        (filter :seon.fn/agent-facing?)
-                        (remove :seon.fn/private?)
+                        (filter ns-cards/callable-fn-row?)
                         (sort-by :seon.fn/sym)
                         (mapv ns-cards/compact-fn-head))]
         (cond-> {:seon.result/ok? true
                  ::cards cards
                  ::count (count cards)}
           (empty? cards)
-          (assoc ::hint (str "indexed, but no agent-facing fns — "
+          (assoc ::hint (str "indexed, but no public schema-complete fns — "
                              "(seon.agent.ctx/render-namespace {:seon.ns/name "
                              ns-kw "}) shows the whole namespace.")))))))
