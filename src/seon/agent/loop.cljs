@@ -681,6 +681,22 @@
   {:seon.agent/id id
    :seon.agent.loop/uninstalled? true})
 
+(schema/register! ::uninstalled-ids [:vector :seon.agent/id])
+(schema/register! ::uninstall-all-wake-triggers-response
+  [:map {:closed true}
+   [::uninstalled-ids ::uninstalled-ids]])
+
+(defn uninstall-all-wake-triggers!
+  "Remove every process-local agent wake listener and loop input."
+  {:malli/schema
+   [:=> [:cat] ::uninstall-all-wake-triggers-response]}
+  []
+  (let [ids (-> @!loop-input keys sort vec)]
+    (run! (fn [id]
+            (uninstall-wake-trigger! {:seon.agent/id id}))
+          ids)
+    {::uninstalled-ids ids}))
+
 ;; ============================================================
 ;; The ONE ticker — the only active machinery. The DB is passive about
 ;; wall-clock: a `deadline` is past or a cron is due in the cluster, but nothing

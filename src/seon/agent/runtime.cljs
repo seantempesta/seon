@@ -21,6 +21,7 @@
 (schema/register! ::compile-state :any)
 (schema/register! ::resumed? :boolean)
 (schema/register! ::unhosted? :boolean)
+(schema/register! ::unhosted-ids [:vector :seon.agent/id])
 (schema/register! ::error :string)
 
 (schema/register! ::resume-request
@@ -47,6 +48,9 @@
   [:map
    [:seon.agent/id :seon.agent/id]
    [::unhosted? [:= true]]])
+(schema/register! ::unhost-all-response
+  [:map {:closed true}
+   [::unhosted-ids ::unhosted-ids]])
 
 (defn wake-armed?
   "Whether `id` should install its automatic inbound-message listener.
@@ -71,6 +75,13 @@
   [{:seon.agent/keys [id]}]
   (loop/uninstall-wake-trigger! {:seon.agent/id id})
   {:seon.agent/id id ::unhosted? true})
+
+(defn unhost-all!
+  "Remove every agent runtime hosted by this process."
+  {:malli/schema [:=> [:cat] ::unhost-all-response]}
+  []
+  {::unhosted-ids
+   (::loop/uninstalled-ids (loop/uninstall-all-wake-triggers!))})
 
 (defn ^:async resume!
   "Reconstruct one existing, nonterminated agent in this process.

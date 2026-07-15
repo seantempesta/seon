@@ -30,6 +30,7 @@ existing one needs strengthening IN PLACE.
 | Token counts | `seon.ai.tokens/estimate` — sizes shown to anyone are TOKENS | printing char counts; a second estimator |
 | LLM calls + retry | providers in `seon.ai.*`; `seon.agent.turn/call-llm!` is the sole retry authority | a parallel retry/backoff path |
 | Code execution | `seon.eval` (self-host `cljs.js`), the one sandboxed exec service | a second eval path |
+| Pod process lifecycle | `seon.client/start-runtime!` + `stop-runtime!`; one retained closed launch capability and serialized phase order web/SSE → ticker/hosts → replica → admission/projection → awaited Datahike release | mode env flags, a second launcher, clearing `db/*conn*` before every inverse proves success |
 | Capability fns | `seon.agent.fs` is the template (gating, envelope, paging) | a tool with its own arg/result conventions |
 | Big text at rest | `my.blob` content-addressed disk tier — DB holds projections + refs | large text dumps as datoms; ad-hoc log-file trees |
 | Provenance (who/when wrote a datom) | tx-meta auto-stamp via `db/with-agent`/`with-tx-context` — join the datom's tx | `created-by`/`created-at`/`source-turn` attrs on domain entities |

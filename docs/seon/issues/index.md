@@ -22,7 +22,7 @@ See `README.md` for the convention.
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Scope the activated schema projection to one database attachment](activated-schema-projection-crosses-database-attachments.md) | blocker | agent |
 
-## Friction (31)
+## Friction (32)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -31,7 +31,6 @@ See `README.md` for the convention.
 | [AI and HTML render twins may run one derivation twice](render-twin-runs-function-twice.md) | friction | UI |
 | [AI context is not pure over its database value](ai-context-is-not-pure-over-database-value.md) | friction | agent |
 | [Address-message steps can displace authored plan work](plan-address-step-priority.md) | friction | agent |
-| [Async structural functions bypass contract validation](async-contract-instrumentation-gap.md) | friction | agent |
 | [Autocomplete datasets and scoring bypass canonical runtime projections](autocomplete-data-quality-pipeline-drift.md) | friction | agent |
 | [Autocomplete worktrees contain unclassified database and model evidence](autocomplete-worktree-evidence-preservation.md) | friction | Core |
 | [Canvas controls hide pending and handler failure](canvas-controls-hide-pending-and-failure.md) | friction | UI |
@@ -48,22 +47,25 @@ See `README.md` for the convention.
 | [Include new CLJS namespaces in changed-test runtime artifacts](changed-test-new-cljs-namespace-misses-runtime-file.md) | friction | Core |
 | [Keep Datahike system attributes out of the domain navigator](database-browser-misclassifies-datahike-system-attributes.md) | friction | UI |
 | [LoRA audit runner depends on a retired Shadow target and pinned checkout](lora-audit-runner-drift.md) | friction | general |
+| [Make multi-form eval order a durable database fact](multi-form-eval-order-is-not-durable.md) | friction | agent |
 | [Make schema hot reload atomic](hot-reload-schema-import-can-partially-fail.md) | friction | agent |
 | [Model can ghost-echo runtime scaffolding into the transcript spine](narration-ghost-echo-not-neutralized.md) | friction | agent |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |
 | [Remove undeclared-var warnings from the self-host bootstrap build](bootstrap-analyzer-api-emits-undeclared-var-warnings.md) | friction | agent |
+| [Render logical Malli arities for pure-variadic functions](compact-pure-variadic-contract-mislabels-logical-arities.md) | friction | agent |
 | [Self-host `cljs.test/is` throws inside a dynamically-evaled `:test` thunk](selfhost-cljs-test-is-thunk-resolution.md) | friction | agent |
 | [Shadow deps-mode declarations imply inactive build paths](shadow-deps-mode-declaration-drift.md) | friction | docs |
 | [Thread one database value through debug and data feeds](debug-feed-captures-foreign-database-reads.md) | friction | UI |
 | [Transcript decay does not bound total context](transcript-decay-does-not-bound-total-context.md) | friction | agent |
 
-## Cleanup (8)
+## Cleanup (9)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Agent tools may silently accept unknown request keys](agent-tool-unknown-key-acceptance.md) | cleanup | agent |
 | [Deprecated skills and context functions remain eligible for program indexing](deprecated-skill-render-functions-indexed.md) | cleanup | agent |
+| [Make the preflight repair test declare its schema dependencies](preflight-repair-focused-selector-relies-on-ambient-schemas.md) | cleanup | agent |
 | [Partially-Stale Reference Docs Need Updates](stale-reference-docs.md) | cleanup | docs |
 | [Subagents block is implemented but not installed](subagents-block-is-implemented-but-not-installed.md) | cleanup | agent |
 | [Surface recency may be recomputed globally](surface-recency-recomputed.md) | cleanup | UI |

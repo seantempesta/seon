@@ -244,6 +244,22 @@ Branch-qualified feed/replica launch, non-autonomous
 pod/operator ownership, forensic runtime, blob-view injection, promotion,
 restart/crash, restore, and undo remain ordered after this writer-local cut.
 
+The pod-local prerequisite for branch-qualified launch is now implemented.
+One retained closed capability selects ordinary autonomous launch or a
+non-autonomous attachment that reconstructs and publishes the committed
+program plus read surfaces without boot/config/recovery/genesis/hosting or
+other autonomous writes. Replay diagnostics are console-only in that mode and
+real broken-namespace proof leaves the database coordinate unchanged while a
+later namespace loads. Hot reload preserves the capability. One serialized,
+retryable inverse closes web/SSE, ticker and hosted agents, replica feed,
+runtime admission plus active wrappers, then awaits maintained Datahike
+release before clearing ambient ownership. The operator and replica protocol
+still need branch-qualified selection; this slice deliberately adds no
+branch-pod command or second supervisor.
+The retained combined lifecycle/admission/instrumentation checkpoint compiles
+506 files with zero warnings and passes 38 tests/316 assertions; the focused
+client lifecycle proof contributes 17/122.
+
 The first branch-local blob prerequisite is implemented independently of
 native branch attachment. `my.blob` now consumes one validated process-local
 storage view with one writable directory and ordered read-only bases. Writes
@@ -269,6 +285,9 @@ materialization, and retention remain later lifecycle slices.
   implementation slice, failure matrix, tests, and live acceptance proof.
 - [[research/branch-local-blobs-forensic-runtime-audit-2026-07-14]] — blob
   overlays, integrity, non-autonomous runtime, and promotion materialization.
+- [[research/non-autonomous-runtime-launch-reconciliation-2026-07-15]] — exact
+  pod launch capability, replay write suppression, hot-reload preservation,
+  ordered teardown, and the remaining branch-qualified operator boundary.
 - [[research/quiesced-restart-restore-undo-audit-2026-07-14]] — planned drain,
   unexpected recovery, immutable restore intent, promotion, and undo.
 - [[research/post-commit-program-admission-audit-2026-07-14]] — exact

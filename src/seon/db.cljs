@@ -369,6 +369,26 @@
     (and (connector/connection? conn)
          (not= :released @(:wrapped-atom conn)))))
 
+(schema/register! ::released? :boolean)
+(schema/register! ::release-connection-request
+  [:map {:closed true}
+   [::conn ::conn]])
+(schema/register! ::release-connection-response
+  [:map {:closed true}
+   [::released? [:= true]]])
+
+(defn ^:async release-connection!
+  "Await release of one explicit pod-local Datahike connection.
+
+   This lifecycle inverse is deliberately not agent-facing: it has no
+   `:seon.fn/agent-facing?` metadata, so whole-surface indexing may document
+   it while the agent toolkit cannot invoke it."
+  {:malli/schema [:=> [:cat ::release-connection-request]
+                  ::release-connection-response]}
+  [{::keys [conn]}]
+  (await (d/release conn))
+  {::released? true})
+
 (defn current-tx-context
   "The active tx-context map, or nil outside [[with-tx-context]].
 

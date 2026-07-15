@@ -49,6 +49,7 @@
     ;; schemas are registered before start-runtime! runs.
     [seon.agent :as agent]
     [seon.agent.home :as home]
+    [seon.agent.runtime :as agent-runtime]
     ;; Lifecycle functions (wait/complete/terminate) — host-bundled so the agent
     ;; home ns can `:refer` them; required here so the build includes the ns.
     [seon.agent.lifecycle]
@@ -239,10 +240,58 @@
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
 ;; ---------------------------------------------------------------------------
 
+(schema/register! ::autonomous? :boolean)
+(schema/register! ::launch-capability
+  [:map {:closed true}
+   [::autonomous? ::autonomous?]])
+(schema/register! ::runtime-phase
+  [:enum :seon.client.runtime/starting
+   :seon.client.runtime/running
+   :seon.client.runtime/stopping
+   :seon.client.runtime/cleanup-required])
+
+(def default-launch-capability
+  {::autonomous? true})
+
 (defonce !state
   (atom {:boot-at      (.toISOString (js/Date.))
          :reload-count 0
          :heartbeat-id nil}))
+
+(defn launch-capability
+  "The closed process-local capability retained across hot reload."
+  {:malli/schema [:=> [:cat] ::launch-capability]}
+  []
+  (or (::launch-capability @!state) default-launch-capability))
+
+(defn autonomous-runtime?
+  "True when this process may perform autonomous runtime effects."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (true? (::autonomous? (launch-capability))))
+
+(defn- runtime-phase
+  "Return the retained process-local launch phase, when present."
+  []
+  (::runtime-phase @!state))
+
+(defn- claim-launch-capability!
+  [capability]
+  (let [retained (::launch-capability @!state)]
+    (if (db/attached?)
+      (cond
+        (nil? retained)
+        (throw
+         (ex-info "The attached runtime has no retained launch capability."
+                  {::launch-capability capability}))
+
+        (not= capability retained)
+        (throw
+         (ex-info "The attached runtime has a different launch capability."
+                  {::launch-capability capability
+                   ::active-launch-capability retained})))
+      (swap! !state assoc ::launch-capability capability))
+    capability))
 
 (defn runtime-advertisement
   "Project this pod's MCP addressable agents directly from its database.
@@ -356,8 +405,13 @@
         (when (::admission/published? publication)
           ;; Reinstall listeners/ticker only after the reloaded program is one
           ;; verified generation. Web feeds re-arm their own lazy listeners.
-          (rehost-agent-runtimes!)
-          (agent-loop/install-ticker!)
+          (if (autonomous-runtime?)
+            (do
+              (rehost-agent-runtimes!)
+              (agent-loop/install-ticker!))
+            (do
+              (agent-loop/uninstall-ticker!)
+              (agent-runtime/unhost-all!)))
           (start-heartbeat!)))
 
       nil))
@@ -709,6 +763,11 @@
       (await (install-runtime-schema! conn true))
       conn)))
 
+(schema/register! ::prepare-writes? :boolean)
+(schema/register! ::open-database-connection-request
+  [:map {:closed true}
+   [::prepare-writes? ::prepare-writes?]])
+
 (defn ^:async open-database-connection!
   "Open the pod's local database replica and attach its transaction feed.
 
@@ -719,16 +778,14 @@
         return its writer-owned identity.
      3. `d/connect` — reads go local from here; writes dispatch to the
         remote writer, explicitly routed to this database.
-     4. provenance genesis/migration — ensure the minimal root/process attrs
-        and refs before any ordinary transaction can be submitted.
-     5. schema transact — the full Malli-derived attr schema goes OVER
-        the protocol to the JVM writer as root/boot; `:db/ident` upserts make
-        repeated installation safe. Exact no-write reconciliation is a
-        later boot-state step, not an implied property of upsert.
-     6. feed attachment — foreign writers' txs fire this conn's native
+     4. when `prepare-writes?`, provenance genesis/migration and full runtime
+        schema installation run before autonomous work. A non-autonomous
+        attachment validates inherited state without either write.
+     5. feed attachment — foreign writers' txs fire this conn's native
         listeners (wake triggers + web UI SSE)."
-  {:malli/schema [:=> [:cat] :any]}
-  []
+  {:malli/schema
+   [:=> [:cat ::open-database-connection-request] :any]}
+  [{::keys [prepare-writes?]}]
   (await (replica/ping!))
   (let [opened (await (replica/ensure-database!))
         resolved-coordinate (::db.coordinate/coordinate opened)
@@ -741,8 +798,9 @@
                        (str "database " replica/database-name
                             ": " replica/default-database-path
                             " (writer: " replica/default-request-socket-path ")"))
-    (await (db/ensure-provenance! {:seon.db/conn conn}))
-    (await (install-runtime-schema! conn false))
+    (when prepare-writes?
+      (await (db/ensure-provenance! {:seon.db/conn conn}))
+      (await (install-runtime-schema! conn false)))
     (await (replica/attach! {::replica/conn conn}))
     conn))
 
@@ -918,6 +976,49 @@
                            (some-> err .-stack)
                            "")})
 
+(defn- ^:async report-replay-failure!
+  [agent-id ns-kw replay-error record-failures?]
+  (if record-failures?
+    (try
+      (await (log-replay-failure!
+              agent-id ns-kw (load-error->log replay-error)))
+      (catch :default error
+        (error/record! {:seon.error/raw error :seon.error/fault :core})))
+    (log/error-console!
+     "seon.client/replay-program-graph!"
+     (str "non-autonomous replay failed for " ns-kw)
+     (load-error->log replay-error))))
+
+(defn- ^:async evaluate-replay-source!
+  [compile-state source record-failures?]
+  (try
+    (await (seval/eval compile-state source
+                       {:seon.eval/starting-ns 'cljs.user}))
+    (catch :default error
+      (when-not (error/recorded? error)
+        (if record-failures?
+          (error/record! {:seon.error/raw error :seon.error/fault :core})
+          (log/error-console!
+           "seon.client/replay-program-graph!"
+           "non-autonomous replay machinery failed"
+           error)))
+      {:seon.eval/ok? false :seon/error error})))
+
+(defn- ^:async replay-ordered-sources!
+  [compile-state ordered-sources agent-id record-failures?]
+  (let [!n-fail (volatile! 0)]
+    (doseq [[ns-kw source] ordered-sources]
+      (let [result
+            (await
+             (evaluate-replay-source!
+              compile-state source record-failures?))]
+        (when-not (:seon.eval/ok? result)
+          (vswap! !n-fail inc)
+          (await
+           (report-replay-failure!
+            agent-id ns-kw (:seon/error result) record-failures?)))))
+    @!n-fail))
+
 (defn ^:async replay-program-graph!
   "Load the DB layer (agent-authored code + overrides) on top of the
    compiled package — db-is-the-running-system PRD, the spine.
@@ -943,9 +1044,9 @@
         + load-once — we write no ordering beyond the topo kick.
 
    Per-ns try/catch: a failing ns (broken stored code, require cycle)
-   logs a `:seon.log` :warn and the load CONTINUES to the next ns — no
-   retry, no per-fn fallback (user directive: broken input just errors
-   that ns and moves on).
+   reports the failure and the load CONTINUES to the next ns — no retry, no
+   per-fn fallback. Autonomous boot records the existing database log;
+   non-autonomous reconstruction reports only to the process console.
 
    Returns a Promise of
      {:seon.client/replay-n-total <int>
@@ -958,15 +1059,20 @@
        research/resume-findings-2026-05-23.md §'Same-pod-session test'."
   {:malli/schema [:=> [:catn [::args [:map [::conn :any]
                                             [::compile-state :any]
-                                            [::agent-id :string]]]]
+                                            [::agent-id :string]
+                                            [::record-failures?
+                                             {:optional true} :boolean]]]]
                   :any]}
-  [{::keys [conn compile-state agent-id]}]
+  [{::keys [conn compile-state agent-id record-failures?] :as request}]
   (db/with-tx-context
     {:seon.db/user       [:seon.agent/id agent-id]
      :seon.db/process    (db.process/lookup-ref :seon.db.process/repl)
      :seon.eval/replay?  true}
     (fn ^:async run-replay! []
-      (let [db       @conn
+      (let [record-failures? (if (contains? request ::record-failures?)
+                               record-failures?
+                               true)
+            db       @conn
             ;; Schema facts are data, not replayable code. Validate and
             ;; activate the complete immutable projection before loading any
             ;; stored namespace/function source.
@@ -994,38 +1100,14 @@
                            agents)
             order    (->> (topo-sort-nses (agent-ns-requires db agents))
                           (filterv (fn [k] (not (str/blank? (get src-of k))))))
-            !n-fail  (volatile! 0)]
-        ;; Whole-namespace, dependency-ordered load (the spine).
-        (doseq [ns-kw order]
-          (let [r (try
-                    (let [src (get src-of ns-kw)]
-                      (await (seval/eval compile-state src
-                                         {:seon.eval/starting-ns 'cljs.user})))
-                    (catch :default e
-                      ;; bulk-load replay machinery (reconstitute-ns-source +
-                      ;; eval) throwing is NOT the normal broken-agent-ns path
-                      ;; (seval/eval returns ok?=false, never throws) — a throw
-                      ;; here is OUR machinery (:core); the row still degrades
-                      ;; to ok?=false and log-replay-failure! runs below.
-                      (when-not (error/recorded? e)
-                        (error/record! {:seon.error/raw e :seon.error/fault :core}))
-                      {:seon.eval/ok? false :seon/error e}))]
-            (when-not (:seon.eval/ok? r)
-              (vswap! !n-fail inc)
-              ;; Best-effort log; swallow log-write failure (a
-              ;; double-fault must not abort the rest of the load).
-              (try
-                (await (log-replay-failure!
-                         agent-id ns-kw (load-error->log (:seon/error r))))
-                (catch :default e
-                  ;; double-fault: OUR replay-failure LOG write itself
-                  ;; throwing is a core defect (:core); the load continues
-                  ;; (a double-fault must not abort the rest of the replay).
-                  (error/record! {:seon.error/raw e :seon.error/fault :core}))))))
+            ordered-sources (mapv (fn [ns-kw] [ns-kw (get src-of ns-kw)]) order)
+            n-fail (await
+                    (replay-ordered-sources!
+                     compile-state ordered-sources agent-id record-failures?))]
         (let [total (count order)]
           {:seon.client/replay-n-total total
-           :seon.client/replay-n-ok    (- total @!n-fail)
-           :seon.client/replay-n-fail  @!n-fail})))))
+           :seon.client/replay-n-ok    (- total n-fail)
+           :seon.client/replay-n-fail  n-fail})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Core boot seed (P2, 2026-05-27)
@@ -2298,164 +2380,314 @@
               (set! db/*conn* prev-conn))))))))
 
 (schema/register! ::start-runtime-request
-  [:map [::llm-fn {:optional true} ::llm-fn]])
+  [:map {:closed true}
+   [::llm-fn {:optional true} ::llm-fn]
+   [::launch-capability {:optional true} ::launch-capability]])
+(schema/register! ::resumed-ids [:vector :seon.agent/id])
+(schema/register! ::created-ids [:vector :seon.agent/id])
+(schema/register! ::start-runtime-response
+  [:map {:closed true}
+   [:seon.agent/id :seon.agent/id]
+   [:seon.agent/ns {:optional true} :symbol]
+   [::autonomous? ::autonomous?]
+   [::resumed-ids ::resumed-ids]
+   [::created-ids ::created-ids]
+   [:seon.web/port :int]
+   [:seon.web/port-file :string]])
 
-(defn ^:async start-runtime!
-  "Cold-start the cluster process exactly once.
+(defn- ^:async start-runtime-impl!
+  "Cold-start the cluster process or refresh attached read-surface readiness.
 
    The cold transition attaches the database, reconciles boot-managed facts,
    reconstructs the compiler/program graph, instruments the accepted graph,
    performs crash recovery, resumes every nonterminated durable agent, and
    starts shared HTTP/debug/ticker machinery. Agent birth is not a mode of this
-   function; warm callers use [[seon.agent/start!]]. A repeated call in the
-   same process is a cheap status read and never re-enters cold work."
+   function; warm callers use [[seon.agent/start!]]. A repeated attached call
+   validates the retained capability, reads resumable ids, and idempotently
+   reattaches the replica/web surfaces. It never re-enters replay, publication,
+   boot writes, or agent hosting."
   {:malli/schema [:=> [:cat ::start-runtime-request] :any]}
-  [{::keys [llm-fn]}]
-  (if (db/attached?)
-    (let [conn db/*conn*
-          ids (agent/resumable-agent-ids {:seon.db/db @conn})
-          primary (or (first (remove #{"root"} ids)) (first ids) "root")
-          _ (await (replica/attach! {::replica/conn conn}))
-          {:seon.web/keys [port port-file]} (await (web.serve/start!))]
-      {:seon.agent/id primary
-       :seon.client/resumed-ids ids
-       :seon.client/created-ids []
-       :seon.web/port port
-       :seon.web/port-file port-file})
-    (let [conn (await (open-database-connection!))
-          _ (set! db/*conn* conn)
-          _ (db/assert-preconditions! {:seon.db/conn conn})
-          ;; Bootstrap compilation can overlap the independent writer seed.
-          compile-promise (repl/ensure-bootstrap!)]
-      (await (boot-seed! {:seon.db/conn conn}))
-      (let [recovered
-            (await
-              (db/with-tx-context
-                {:seon.db/user [:seon.agent/id "root"]
-                 :seon.db/process
-                 (db.process/lookup-ref :seon.db.process/boot)}
-                (fn [] (recovery/recover! {}))))]
-        (when (false? (:seon.db/ok? recovered))
-          (throw (ex-info "start-runtime!: crash recovery failed" recovered)))
-        (when (::recovery/repaired? recovered)
-          (log/info-console! "seon.client/start-runtime!"
-                             (str "crash recovery: restored "
-                                  (count (::recovery/agent-ids recovered))
-                                  " agent(s) to idle")
-                             recovered)))
-      (let [root-home [:seon.ns/name (keyword (str (home/home-ns "root")))]
-            root-ready-before?
-            (string? (:seon.ns/source (db/entity {:seon.db/ref root-home})))
-            ;; Provenance genesis necessarily creates a bare root lookup
-            ;; target before normal attributed writes are legal. Complete that
-            ;; reserved stub through the ordinary atomic birth compiler; an
-            ;; already-born root is an exact no-op and keeps its edits.
-            root-result
-            (await
-              (db/with-tx-context
-                {:seon.db/user [:seon.agent/id "root"]
-                 :seon.db/process
-                 (db.process/lookup-ref :seon.db.process/boot)}
-                (fn [] (agent/create! {:seon.agent/id "root"}))))
-            _ (when (false? (:seon.db/ok? root-result))
-                (throw (ex-info "start-runtime!: root birth failed" root-result)))
-            initial-result
-            (await
-              (db/with-tx-context
-                {:seon.db/user [:seon.agent/id "root"]
-                 :seon.db/process
-                 (db.process/lookup-ref :seon.db.process/boot)}
-                (fn [] (agent/ensure-initial-agent! {}))))
-            _ (when (false? (:seon.db/ok? initial-result))
-                (throw (ex-info "start-runtime!: initial agent birth failed"
-                                initial-result)))
-            initial-id (when (::agent/initial-created? initial-result)
-                         (:seon.agent/id initial-result))
-            created-ids (cond-> []
-                          (not root-ready-before?) (conj "root")
-                          initial-id (conj initial-id))
-            compile-state (await compile-promise)
-            resumable-ids (agent/resumable-agent-ids {:seon.db/db @conn})
-            all-ids (->> (db/query
-                           {:seon.db/db @conn
-                            :seon.db/query
-                            '[:find [?id ...]
-                              :where [?a :seon.agent/id ?id]]})
-                         sort vec)
-            primary (or initial-id
-                        (first (remove #{"root"} resumable-ids))
-                        (first resumable-ids)
-                        (first all-ids)
-                        "root")]
-        (let [_
-              (when-not (admission/begin-publication!)
-                (throw
-                  (ex-info "start-runtime!: program publication is already closed"
-                           (admission/state))))
-              replay-stats
-              (await (replay-program-graph!
-                       {::conn conn
-                        ::compile-state compile-state
-                        ::agent-id primary}))
-              _ (log/info-console! "seon.client/start-runtime!"
-                                   (str "replay: " (pr-str replay-stats)))
-              publication (admission/publish-committed!)
-              _ (when-not (::admission/published? publication)
-                  (throw
-                    (ex-info
+  [{::keys [llm-fn launch-capability]}]
+  (let [capability (or launch-capability default-launch-capability)
+        _ (claim-launch-capability! capability)
+        autonomous? (true? (::autonomous? capability))]
+    (if (db/attached?)
+      (let [conn db/*conn*
+            available-ids (agent/resumable-agent-ids {:seon.db/db @conn})
+            resumed-ids (if autonomous? available-ids [])
+            primary (or (first (remove #{"root"} available-ids))
+                        (first available-ids)
+                        "root")
+            _ (await (replica/attach! {::replica/conn conn}))
+            {:seon.web/keys [port port-file]} (await (web.serve/start!))]
+        {:seon.agent/id primary
+         ::autonomous? autonomous?
+         :seon.client/resumed-ids resumed-ids
+         :seon.client/created-ids []
+         :seon.web/port port
+         :seon.web/port-file port-file})
+      (let [conn (await
+                   (open-database-connection!
+                    {::prepare-writes? autonomous?}))
+            _ (set! db/*conn* conn)
+            _ (db/assert-preconditions! {:seon.db/conn conn})
+            ;; Bootstrap compilation can overlap autonomous database work.
+            compile-promise (repl/ensure-bootstrap!)]
+        (when autonomous?
+          (await (boot-seed! {:seon.db/conn conn}))
+          (let [recovered
+                (await
+                 (db/with-tx-context
+                  {:seon.db/user [:seon.agent/id "root"]
+                   :seon.db/process
+                   (db.process/lookup-ref :seon.db.process/boot)}
+                  (fn [] (recovery/recover! {}))))]
+            (when (false? (:seon.db/ok? recovered))
+              (throw (ex-info "start-runtime!: crash recovery failed" recovered)))
+            (when (::recovery/repaired? recovered)
+              (log/info-console!
+               "seon.client/start-runtime!"
+               (str "crash recovery: restored "
+                    (count (::recovery/agent-ids recovered))
+                    " agent(s) to idle")
+               recovered))))
+        (let [root-home [:seon.ns/name (keyword (str (home/home-ns "root")))]
+              root-ready-before?
+              (and autonomous?
+                   (string?
+                    (:seon.ns/source (db/entity {:seon.db/ref root-home}))))
+              root-result
+              (when autonomous?
+                (await
+                 (db/with-tx-context
+                  {:seon.db/user [:seon.agent/id "root"]
+                   :seon.db/process
+                   (db.process/lookup-ref :seon.db.process/boot)}
+                  (fn [] (agent/create! {:seon.agent/id "root"})))))
+              _ (when (and autonomous?
+                           (false? (:seon.db/ok? root-result)))
+                  (throw (ex-info "start-runtime!: root birth failed"
+                                  root-result)))
+              initial-result
+              (when autonomous?
+                (await
+                 (db/with-tx-context
+                  {:seon.db/user [:seon.agent/id "root"]
+                   :seon.db/process
+                   (db.process/lookup-ref :seon.db.process/boot)}
+                  (fn [] (agent/ensure-initial-agent! {})))))
+              _ (when (and autonomous?
+                           (false? (:seon.db/ok? initial-result)))
+                  (throw (ex-info "start-runtime!: initial agent birth failed"
+                                  initial-result)))
+              initial-id (when (and autonomous?
+                                    (::agent/initial-created? initial-result))
+                           (:seon.agent/id initial-result))
+              created-ids (cond-> []
+                            (and autonomous? (not root-ready-before?))
+                            (conj "root")
+                            initial-id (conj initial-id))
+              compile-state (await compile-promise)
+              available-ids (agent/resumable-agent-ids {:seon.db/db @conn})
+              resumable-ids (if autonomous? available-ids [])
+              all-ids (->> (db/query
+                            {:seon.db/db @conn
+                             :seon.db/query
+                             '[:find [?id ...]
+                               :where [?a :seon.agent/id ?id]]})
+                           sort vec)
+              primary (or initial-id
+                          (first (remove #{"root"} available-ids))
+                          (first available-ids)
+                          (first all-ids)
+                          "root")]
+          (when-not (admission/begin-publication!)
+            (throw
+             (ex-info "start-runtime!: program publication is already closed"
+                      (admission/state))))
+          (let [replay-stats
+                (await
+                 (replay-program-graph!
+                  {::conn conn
+                   ::compile-state compile-state
+                   ::agent-id primary
+                   ::record-failures? autonomous?}))
+                _ (log/info-console! "seon.client/start-runtime!"
+                                     (str "replay: " (pr-str replay-stats)))
+                publication (admission/publish-committed!)
+                _ (when-not (::admission/published? publication)
+                    (throw
+                     (ex-info
                       "start-runtime!: committed program reconstruction failed"
                       publication)))
-              instrument-stats (::admission/instrumentation publication)
-              _ (log/info-console! "seon.client/start-runtime!"
-                                   (str "instrumentation: "
-                                        ;; The complete result carries Malli's
-                                        ;; per-function `::instrument/data` and
-                                        ;; every accepted symbol so callers can
-                                        ;; inspect the exact reconstruction.
-                                        ;; Printing that payload made one cold
-                                        ;; boot log hundreds of tokens of
-                                        ;; redundant program-graph detail. Boot
-                                        ;; status needs the counts and the few
-                                        ;; rejected rows; the database remains
-                                        ;; the detailed source of truth.
-                                        (pr-str
-                                          (instrumentation-summary
-                                            instrument-stats))))
-              results
-              (let [!results (volatile! [])]
-                (doseq [id resumable-ids]
-                  (vswap! !results conj
-                          (await
-                            (agent/resume!
-                              (cond->
-                                {:seon.agent/id id
-                                 :seon.agent.runtime/compile-state compile-state}
-                                (fn? llm-fn)
-                                (assoc :seon.agent.runtime/llm-fn llm-fn))))))
-                @!results)
-              _ (when-let [failed
-                           (some #(when (false?
-                                          (:seon.agent.runtime/resumed? %)) %)
-                                 results)]
-                  (throw (ex-info "start-runtime!: agent resume failed" failed)))
-              {:seon.agent/keys [id ns]}
-              (or (some #(when (= primary (:seon.agent/id %)) %) results)
-                  (first results))
-              {:seon.web/keys [port port-file]} (await (web.serve/start!))]
-          (await (ai/sync!))
-          (await (web.brand/sync!))
-          (agent-loop/install-ticker!)
-          (log/info-console! "seon.client" "runtime started"
-                             {:resumed resumable-ids
-                              :created created-ids
-                              :port port
-                              :port-file port-file})
-          {:seon.agent/id id
-           :seon.agent/ns ns
-           :seon.client/resumed-ids resumable-ids
-           :seon.client/created-ids created-ids
-           :seon.web/port port
-           :seon.web/port-file port-file})))))
+                instrument-stats (::admission/instrumentation publication)
+                _ (log/info-console!
+                   "seon.client/start-runtime!"
+                   (str "instrumentation: "
+                        (pr-str
+                         (instrumentation-summary instrument-stats))))
+                results
+                (if autonomous?
+                  (let [!results (volatile! [])]
+                    (doseq [id resumable-ids]
+                      (vswap! !results conj
+                              (await
+                               (agent/resume!
+                                (cond->
+                                  {:seon.agent/id id
+                                   :seon.agent.runtime/compile-state
+                                   compile-state}
+                                  (fn? llm-fn)
+                                  (assoc :seon.agent.runtime/llm-fn llm-fn))))))
+                    @!results)
+                  [])
+                _ (when-let [failed
+                             (some #(when (false?
+                                            (:seon.agent.runtime/resumed? %))
+                                      %)
+                                   results)]
+                    (throw (ex-info "start-runtime!: agent resume failed"
+                                    failed)))
+                hosted (or (some #(when (= primary (:seon.agent/id %)) %) results)
+                           (first results))
+                {:seon.web/keys [port port-file]}
+                (await (web.serve/start!))]
+            (when autonomous?
+              (await (ai/sync!))
+              (await (web.brand/sync!))
+              (agent-loop/install-ticker!))
+            (log/info-console! "seon.client" "runtime started"
+                               {:autonomous? autonomous?
+                                :resumed resumable-ids
+                                :created created-ids
+                                :port port
+                                :port-file port-file})
+            (cond-> {:seon.agent/id primary
+                     ::autonomous? autonomous?
+                     :seon.client/resumed-ids resumable-ids
+                     :seon.client/created-ids created-ids
+                     :seon.web/port port
+                     :seon.web/port-file port-file}
+              (:seon.agent/ns hosted)
+              (assoc :seon.agent/ns (:seon.agent/ns hosted)))))))))
+
+(defn ^:async start-runtime!
+  "Launch one runtime or refresh its proven running status.
+
+   The retained phase is the process-local serialization fence: both cold and
+   attached launches claim `starting` before their first await, so a concurrent
+   launch or stop cannot publish a second transition."
+  {:malli/schema [:=> [:cat ::start-runtime-request]
+                  ::start-runtime-response]}
+  [request]
+  (let [attached-before? (db/attached?)
+        phase (runtime-phase)]
+    (if (or (and attached-before?
+                 (= :seon.client.runtime/running phase))
+            (and (not attached-before?) (nil? phase)))
+      (do
+        (swap! !state assoc ::runtime-phase :seon.client.runtime/starting)
+        (try
+          (let [result (await (start-runtime-impl! request))]
+            (when-not (db/attached?)
+              (throw
+               (ex-info
+                "The runtime lost its database attachment during launch."
+                {::runtime-phase :seon.client.runtime/starting})))
+            (swap! !state assoc ::runtime-phase :seon.client.runtime/running)
+            result)
+          (catch :default error
+            (swap! !state
+                   (fn [state]
+                     (-> state
+                         (assoc ::runtime-phase
+                                :seon.client.runtime/cleanup-required)
+                         (dissoc ::cleanup-requires-connection?))))
+            (throw error))))
+      (throw
+       (ex-info
+        "The runtime launch state requires cleanup before it can start again."
+        {::runtime-phase (or phase :seon.client.runtime/cleanup-required)
+         ::database-attached? attached-before?})))))
+
+(schema/register! ::stopped? :boolean)
+(schema/register! ::stop-error :string)
+(schema/register! ::stop-runtime-response
+  [:or
+   [:map {:closed true}
+    [::stopped? [:= true]]
+    [::agent-runtime/unhosted-ids ::agent-runtime/unhosted-ids]]
+   [:map {:closed true}
+    [::stopped? [:= false]]
+    [::stop-error ::stop-error]]])
+
+(defn ^:async stop-runtime!
+  "Stop every runtime owner and release the local database connection.
+
+   A wholly absent runtime is already stopped. Every other transition is
+   serialized by `stopping`; web/SSE, ticker/hosts, replica, executable
+   admission/projection, and Datahike release are one ordered inverse. Failures
+   retain the capability, connection, and `cleanup-required` phase so the same
+   idempotent owners can be retried from the beginning."
+  {:malli/schema [:=> [:cat] ::stop-runtime-response]}
+  []
+  (let [state @!state
+        phase (::runtime-phase state)
+        capability (::launch-capability state)
+        conn db/*conn*
+        wholly-absent? (and (nil? phase) (nil? capability) (nil? conn))
+        transition-active? (contains? #{:seon.client.runtime/starting
+                                        :seon.client.runtime/stopping}
+                                      phase)
+        connection-required? (or (= :seon.client.runtime/running phase)
+                                 (::cleanup-requires-connection? state))]
+    (cond
+      wholly-absent?
+      {::stopped? true
+       ::agent-runtime/unhosted-ids []}
+
+      transition-active?
+      {::stopped? false
+       ::stop-error "A runtime lifecycle transition is already in progress."}
+
+      (and connection-required?
+           (or (nil? conn) (not (db/attached?))))
+      (do
+        (swap! !state assoc
+               ::runtime-phase :seon.client.runtime/cleanup-required
+               ::cleanup-requires-connection? true)
+        {::stopped? false
+         ::stop-error
+         "The running runtime has no releasable database connection."})
+
+      :else
+      (do
+        (swap! !state assoc ::runtime-phase :seon.client.runtime/stopping)
+        (try
+          (await (web.serve/stop!))
+          (agent-loop/uninstall-ticker!)
+          (let [{::agent-runtime/keys [unhosted-ids]}
+            (agent-runtime/unhost-all!)]
+            (replica/detach!)
+            (let [detached (admission/detach!)]
+              (when (false? (::admission/detached? detached))
+                (throw
+                 (ex-info "Runtime projection detach failed."
+                          detached))))
+            (when conn
+              (await (db/release-connection! {::db/conn conn})))
+            (set! db/*conn* nil)
+            (swap! !state dissoc
+                   ::launch-capability
+                   ::runtime-phase
+                   ::cleanup-requires-connection?)
+            {::stopped? true
+             ::agent-runtime/unhosted-ids unhosted-ids})
+          (catch :default error
+            (swap! !state assoc
+                   ::runtime-phase :seon.client.runtime/cleanup-required)
+            {::stopped? false
+             ::stop-error (or (.-message error) (str error))}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Entry point
