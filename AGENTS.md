@@ -310,6 +310,13 @@ Multiple agents share this working tree. Preserve unrelated edits and untracked
 files. Safe operations are read-only Git inspection and staging explicit owned
 paths. Do not use `git add -A`.
 
+The Git index is shared too: another lane can stage files after your cached
+name check and before a plain `git commit`. Every agent commit must therefore
+be path-limited (`git commit --only ... -- <explicit-owned-paths>`). Add a new
+untracked owned file explicitly first, then name it in the same path-limited
+commit. A clean `git diff --cached --name-only` is useful evidence but is not a
+locking mechanism and never makes an unbounded commit safe.
+
 The shared checkout is the normal collaboration model. Do not create or move
 work into a Git worktree unless extreme circumstances make shared-checkout work
 unsafe or impossible. Assume other agents are editing the same source tree;
