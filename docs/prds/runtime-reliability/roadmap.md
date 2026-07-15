@@ -310,6 +310,21 @@ JVM regression. Seon proof is query/pull clamp and recovery 1/7,
 database 50/346, read observation 8/76, eval memory 13/40, result slots 8/29,
 record/retry 28/130, writer 50/308, and operator 84/539.
 
+The 2026-07-15 deterministic follow-up closes the retained path-level proof
+gaps without changing production source or dependency aliases. Maintained
+Datahike proof now covers planner and legacy broad connected joins,
+disconnected Cartesian products, wide acyclic and cyclic recursive pull, and
+post-exhaustion recovery: focused CLJ passes 28 tests/76 assertions and the
+existing Node CLJS runner, now including the portable pull suite, passes
+105/825. Seon's public CLJS boundary passes 1/11 for broad/Cartesian work
+exhaustion plus normal query/pull recovery, and exact captured query/pull
+budget replay passes 1/6. Local test-only Datahike descendant `eb3e2239`
+contains the new dependency proof; the selected implementation remains
+`417649` and neither the parent gitlink nor dependency aliases move in this
+slice. Live pull recovery, repeated query/pull heap and RSS stabilization, and
+arbitrary JavaScript/native allocation containment remain unit-9/process-
+isolation evidence and are not claimed by these tests.
+
 The fresh default cluster rebuilt and returned ready with watcher, writer, and
 pod alive. Live MCP evaluation reached both CLJ and CLJS runtimes. A query with
 `:seon.db/max-results 1` failed as structured `:datahike/budget-exceeded` data

@@ -16,13 +16,15 @@ boundary, and Seon's one result-slot owner all remain present at the exact
 pinned source revision, and the retained live proof exercises the failure and
 recovery behavior through the running default pod.
 
-The original design audit's exhaustive falsification matrix is broader than
-the evidence retained for unit 0. Explicit path-level proofs for a broad join,
-disconnected Cartesian components, budgeted recursive pull, live pod pull
-exhaustion, and before/after heap/RSS stabilization are missing or indirect.
-Those gaps do not reveal a new implementation root cause and do not justify
-reopening the settled owners during lifecycle work. They are the shortest
-post-restart regression gate and final unit-9 performance evidence.
+The original design audit's deterministic matrix is now closed at the owning
+boundaries. Focused maintained-Datahike tests cover broad connected joins,
+disconnected Cartesian components, wide acyclic recursion, cyclic recursion,
+and post-exhaustion recovery; focused Seon tests cover the same public CLJS
+query boundary, query/pull recovery, and exact capture/replay of all three
+numeric bounds. Live pod pull exhaustion and before/after heap/RSS
+stabilization remain intentionally outside this source-frozen test slice.
+They are final unit-9 process evidence, not a reason to reopen the settled
+query and pull owners.
 
 The architecture's blob wording is also aspirational beyond the safety fix:
 an overweight arbitrary eval result becomes a compact recovery descriptor; it
@@ -42,15 +44,17 @@ hard arbitrary-allocation residual remains owned by
 
 | Dependency or owner | Selected identity | Exact source read | First-party consumer/evidence |
 |---|---|---|---|
-| Maintained Datahike | `417649383c65e13f15ea41d394fb1ed742477965`, selected by both root `:writer` and `:cljs` aliases | `reference-code/datahike/src/datahike/resource.cljc`, `query.cljc`, `query/execute.cljc`, and `pull_api.cljc` | `src/seon/db.cljs`; Datahike query, pull, and weighted-LRU tests |
+| Maintained Datahike | `417649383c65e13f15ea41d394fb1ed742477965`, selected by both root `:writer` and `:cljs` aliases; local test-only descendant `eb3e2239` adds proof without changing implementation source | `reference-code/datahike/src/datahike/resource.cljc`, `query.cljc`, `query/execute.cljc`, and `pull_api.cljc` | `src/seon/db.cljs`; Datahike query, pull, and weighted-LRU tests |
 | ClojureScript self-host/runtime | `1.12.145` | `reference-code/clojurescript/src/main/cljs/cljs/js.cljs` and async/compiler sources named by the `clojurescript` skill | `src/seon/eval.cljs`; eval memory/result tests |
 | Seon read boundary | current branch | `src/seon/db.cljs` and `src/seon/db/internal.cljs` | `test/seon/db_test.cljs`, `test/seon/db/read_observer_test.cljs` |
 | Seon retained-value owner | current branch | `src/seon/eval.cljs` and the shared opaque-value predicate in `src/seon/render/value.cljs` | `test/seon/eval/memory_safety_test.cljs`, `result_var_test.cljs`, `record_eval_tee_test.cljs`, and transcript tests |
 | Existing design/evidence | commits `9843e318` and `ddecf018`; Datahike commits included in pinned `417649` | [[docs/prds/agent-runtime-correctness/research/eval-query-memory-safety-audit-2026-07-14]] | [[docs/seon/issues/archive/eval-memory-safety]] and this PRD's unit-0 checkpoint |
 
-`git -C reference-code/datahike rev-parse HEAD` equals the SHA in both
-dependency aliases. The current checkout therefore supplies the actual code
-selected by the pod and writer rather than a nearby library version.
+The selected dependency remains `417649`; local `eb3e2239` is a test-only
+descendant whose implementation source is unchanged. No dependency alias or
+parent gitlink moves in this slice. The proof therefore exercises the
+maintained implementation selected by the pod and writer without casually
+changing their dependency coordinate.
 
 ## Requirement-to-evidence matrix
 
@@ -59,11 +63,11 @@ selected by the pod and writer rather than a nearby library version.
 | Concrete requirement | Current authoritative evidence | Verdict |
 |---|---|---|
 | Query execution has independent work, result-count, and shallow-weight ceilings; exhaustion is structured and never a silent prefix | `datahike.resource` owns the per-operation counters, O(1) scalar weights, bounded structural certification, and `:datahike/budget-exceeded` data. `datahike.query/raw-q*` binds that budget around the maintained executor and final certification. | **Implemented.** The gate is inside library execution, not after Seon has materialized the value. |
-| Query work is charged across planned and legacy execution, including scalar aggregates and find-pull | The pinned source threads the budget through the executor's existing cancellation checkpoints. `synchronous-resource-budgets` proves semantic `:limit` plus ordering cannot bypass work, relation and legacy collectors fail before returning a prefix, scalar aggregate work fails, find-pull inherits result weight, and a later query succeeds. | **Implemented and focused-proven.** Explicit disconnected-component and broad-join budget fixtures are not retained. |
-| Pull has one global budget across wildcard, attributes, components, recursion, and `:limit nil` | `pull_api.cljc` charges frame-loop work, wildcard datoms, values, and result nodes under one dynamically inherited budget; nested find-pull inherits the active query budget. `global-pull-budget` proves wildcard component exhaustion, unlimited-selector weight exhaustion, and later recovery. | **Implemented and focused-proven.** A wide recursive-pull exhaustion fixture is missing, although the same frame loop owns recursion. |
+| Query work is charged across planned and legacy execution, including scalar aggregates and find-pull | The pinned source threads the budget through the executor's existing cancellation checkpoints. `synchronous-resource-budgets` proves semantic `:limit` plus ordering cannot bypass work, relation and legacy collectors fail before returning a prefix, scalar aggregate work fails, broad connected joins and disconnected Cartesian products fail under the same work budget in planner and legacy modes, find-pull inherits result weight, and a later query succeeds. | **Implemented and focused-proven.** The maintained CLJ gate passes 28 tests/76 assertions; the Seon CLJS boundary probe passes 1/11. |
+| Pull has one global budget across wildcard, attributes, components, recursion, and `:limit nil` | `pull_api.cljc` charges frame-loop work, wildcard datoms, values, and result nodes under one dynamically inherited budget; nested find-pull inherits the active query budget. `global-pull-budget` proves wildcard component exhaustion, unlimited-selector weight exhaustion, wide acyclic and cyclic recursive exhaustion, and later recovery. | **Implemented and focused-proven in both hosts.** The maintained CLJS runner includes the portable pull suite and passes 105 tests/825 assertions. |
 | Datahike query-cache admission cannot pin a one-row huge or uncertifiable value | `query/result-cache-put!` calls one bounded `resource/shallow-weight-within`; nil skips admission. Weighted LRU stores the certified weight. Library tests prove lazy/non-certifiable inspection returns nil, a one-row huge string is not cached, scalar cache hits remain correct, and total cache weight stays bounded. | **Implemented and focused-proven.** |
 | Seon's public database surface always clamps hard defaults and lets callers lower but never raise them | `src/seon/db.cljs` registers positive request options, defines query ceilings `2,000,000 / 50,000 / 8 MiB` and pull ceilings `250,000 / 25,000 / 4 MiB`, clamps both namespaced and Datahike-shaped request keys, and routes every public query/pull arity through those helpers. | **Implemented.** `query-and-pull-resource-budgets-are-clamped-and-recover` covers lower/raise behavior and structured query/pull failures. |
-| Captured reads replay the identical normalized budgets without retaining a database handle or using an uncapped path | Query/pull observation schemas require all three normalized bounds. `execute-query`/`execute-pull` record the clamped request; `replay-read-result` calls private `raw-query`/`guarded-pull` with that request. Read-observer tests prove exact replay and no retained runtime handle. | **Implemented.** The tests prove the closed request shape indirectly; no focused assertion prints each captured numeric ceiling. |
+| Captured reads replay the identical normalized budgets without retaining a database handle or using an uncapped path | Query/pull observation schemas require all three normalized bounds. `execute-query`/`execute-pull` record the clamped request; `replay-read-result` calls private `raw-query`/`guarded-pull` with that request. `capture-and-replay-preserve-exact-resource-budgets` asserts the six captured numeric values and the exact raw Datahike options used by replay. | **Implemented and focused-proven.** The exact selector passes 1 test/6 assertions. |
 | Exhaustion leaves the running pod usable | The unit-0 roadmap and archived resolved issue retain the default-cluster MCP proof: `max-results 1` failed after observed two, 100 repeated exhausted queries returned control, a later normal query returned all three rows, and writer/pod stayed ready. | **Live-proven for query.** There is no corresponding retained live pull-exhaustion transcript or heap/RSS series. |
 
 ### Retained eval results and persisted projections
@@ -94,26 +98,23 @@ Current source still matches the resolved issue and the unit-0 claim:
 Later refactors did not reintroduce a second result atom, an uncapped replay
 helper, a post-materialization-only guard, or a raw settled-Promise write.
 
-### The original exhaustive matrix is not fully evidenced
+### Process-level evidence remains separate
 
-The 2026-07-14 audit named twenty exact probes. Current code/tests/live records
-directly cover the central owners, but these matrix rows remain indirect or
-missing:
+The 2026-07-14 audit named twenty exact probes. The deterministic database rows
+above now have direct owning tests. These rows remain process-level or separate
+owner evidence:
 
-- broad intermediate join under a tiny work budget;
-- disconnected-component Cartesian product under a tiny work budget;
-- wide acyclic and cyclic recursive pull under a global budget;
 - a live pod pull exhaustion followed by a normal pull;
-- an explicit read-observer assertion that the three exact clamped numeric
-  budgets survive capture and replay;
 - a direct opaque-handle admission assertion (rendering has an opaque test;
   admission is source-proven through the same predicate); and
 - repeated query **and pull** exhaustion with before/after heap and RSS showing
   return to a stable band.
 
-These are proof gaps, not evidence that the owners are absent. The first three
-are cheap dependency tests; the last is deliberately a source-frozen live or
-unit-9 performance checkpoint.
+These are proof gaps, not evidence that the owners are absent. They remain a
+source-frozen live or unit-9 performance checkpoint. Arbitrary JavaScript or
+native allocation remains owned by
+[[docs/seon/issues/eval-process-isolation-memory-containment]] and cannot be
+graduated by a database resource-budget test.
 
 ### Blob-addressability is a later target delta
 
@@ -132,18 +133,14 @@ recovery path.
 Do not interrupt unit 1's clean restart/crash/restore spine. At the first
 source-frozen post-restart checkpoint:
 
-1. run one focused maintained-Datahike gate that adds or selects tiny fixtures
-   for broad join, disconnected Cartesian, recursive pull, and exact cache
-   admission, on both CLJ and CLJS where the shared implementation runs;
-2. run the focused Seon database, read-observer, eval-memory, result-slot,
-   record/retry, and transcript namespaces, adding only an exact captured-
-   budget assertion if it is still absent;
-3. through cluster-qualified MCP, issue one bounded failing query and one
+1. Retain the green focused Datahike and Seon deterministic gates recorded
+   above.
+2. Through cluster-qualified MCP, issue one bounded failing query and one
    bounded failing pull, then one normal query/pull and `42`, proving the same
    pod and writer remain ready;
-4. during that bounded live loop, record pod heap/RSS before, peak, and after
+3. During that bounded live loop, record pod heap/RSS before, peak, and after
    explicit GC/settling in the unit-9 measurement format; and
-5. keep arbitrary hostile allocation/process death in the already-open
+4. Keep arbitrary hostile allocation/process death in the already-open
    execution-containment owner. Do not use a query-budget result to claim that
    arbitrary JavaScript allocation is contained.
 
@@ -170,9 +167,10 @@ of unit 9 rather than reopening unit 0.
   `test/seon/eval/result_var_test.cljs:158-252`, and
   `test/seon/eval/record_eval_tee_test.cljs:257-310` — result admission,
   eviction, late settlement, and retry proof.
-- `reference-code/datahike/test/datahike/test/query_cancel_test.clj:62-120`,
-  `pull_api_test.cljc:68-97`, and `lru_weighted_test.cljc:11-130` — maintained
-  library behavior.
+- `reference-code/datahike/test/datahike/test/query_cancel_test.clj:62-151`,
+  `pull_api_test.cljc:68-119`, `nodejs_test.cljs:24-34`, and
+  `lru_weighted_test.cljc:11-130` — maintained library behavior in CLJ and
+  CLJS.
 - `docs/prds/runtime-reliability/roadmap.md:254-304` and
   [[docs/seon/issues/archive/eval-memory-safety]] — complete/focused counts and
   bounded default-cluster live evidence.

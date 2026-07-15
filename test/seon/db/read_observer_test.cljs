@@ -325,6 +325,84 @@
                         (is (true? (changed? changed-db basis-event))))))))))
         (settle! done))))
 
+(deftest capture-and-replay-preserve-exact-resource-budgets
+  (async done
+    (-> (fresh-seeded)
+        (.then
+          (fn [{db-value :db}]
+            (let [query-budgets
+                  {::db/max-work 1234
+                   ::db/max-results 17
+                   ::db/max-result-weight 4096}
+                  pull-budgets
+                  {::db/max-work 567
+                   ::db/max-results 11
+                   ::db/max-result-weight 2048}
+                  query-form
+                  '[:find ?value
+                    :in $ ?id
+                    :where
+                    [?e :seon.db.read-observer-test/id ?id]
+                    [?e :seon.db.read-observer-test/value ?value]]
+                  query-result (db/query query-form db-value "child")
+                  pull-result (db/pull db-value [::id ::value] [::id "child"])
+                  query-event
+                  (capture-event
+                    db-value :seon.db.read.operation/query
+                    #(db/query
+                       (merge
+                         {::db/db db-value
+                          ::db/query query-form
+                          ::db/args ["child"]}
+                         query-budgets)))
+                  pull-event
+                  (capture-event
+                    db-value :seon.db.read.operation/pull
+                    #(db/pull
+                       (merge
+                         {::db/db db-value
+                          ::db/pull-pattern [::id ::value]
+                          ::db/ref [::id "child"]}
+                         pull-budgets)))
+                  replay-options (atom [])
+                  replay-result
+                  (with-redefs
+                    [d/q (fn [request]
+                           (swap! replay-options conj
+                                  [:query (select-keys request
+                                                       [:max-work
+                                                        :max-results
+                                                        :max-result-weight])])
+                           query-result)
+                     d/pull (fn [_ request]
+                              (swap! replay-options conj
+                                     [:pull (select-keys request
+                                                        [:max-work
+                                                         :max-results
+                                                         :max-result-weight])])
+                              pull-result)]
+                    [(changed? db-value query-event)
+                     (changed? db-value pull-event)])]
+              (is (= query-budgets
+                     (select-keys (:seon.db/read-request query-event)
+                                  (keys query-budgets)))
+                  "capture records the exact clamped query bounds")
+              (is (= pull-budgets
+                     (select-keys (:seon.db/read-request pull-event)
+                                  (keys pull-budgets)))
+                  "capture records the exact clamped pull bounds")
+              (is (= [false false] replay-result)
+                  "replay produces the same normalized query and pull results")
+              (is (= [[:query {:max-work 1234
+                               :max-results 17
+                               :max-result-weight 4096}]
+                      [:pull {:max-work 567
+                              :max-results 11
+                              :max-result-weight 2048}]]
+                     @replay-options)
+                  "replay passes every captured numeric bound to Datahike"))))
+        (settle! done))))
+
 (deftest tagged-request-values-round-trip-through-replay
   (async done
     (-> (fresh-seeded)

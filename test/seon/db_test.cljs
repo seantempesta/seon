@@ -829,9 +829,11 @@
   (async done
     (with-conn
       (fn [conn]
-        (.then (tx! conn [{::name "Alpha" ::rank 1}
-                          {::name "Beta" ::rank 2}
-                          {::name "Gamma" ::rank 3}])
+        (.then (tx! conn
+                    (mapv (fn [i]
+                            {::name (str "row-" i)
+                             ::rank (mod i 2)})
+                          (range 20)))
                (fn [_]
                  (testing "query output exhaustion is structured"
                    (let [error (try
@@ -845,10 +847,38 @@
                      (is (true? (:datahike/budget-exceeded (ex-data error))))
                      (is (= :query-results
                             (:datahike.budget/name (ex-data error))))))
+                 (testing "broad connected joins exhaust work before returning"
+                   (let [error (try
+                                 (db/query
+                                   {::db/query '[:find ?left ?right
+                                                 :where
+                                                 [?left :seon.db-test/rank ?rank]
+                                                 [?right :seon.db-test/rank ?rank]]
+                                    ::db/conn conn
+                                    ::db/max-work 1})
+                                 nil
+                                 (catch :default error error))]
+                     (is (true? (:datahike/budget-exceeded (ex-data error))))
+                     (is (= :query-work
+                            (:datahike.budget/name (ex-data error))))))
+                 (testing "disconnected Cartesian queries share the work budget"
+                   (let [error (try
+                                 (db/query
+                                   {::db/query '[:find ?named ?ranked
+                                                 :where
+                                                 [?named :seon.db-test/name]
+                                                 [?ranked :seon.db-test/rank]]
+                                    ::db/conn conn
+                                    ::db/max-work 1})
+                                 nil
+                                 (catch :default error error))]
+                     (is (true? (:datahike/budget-exceeded (ex-data error))))
+                     (is (= :query-work
+                            (:datahike.budget/name (ex-data error))))))
                  (testing "pull result-node exhaustion is structured"
                    (let [error (try
                                  (db/pull {::db/pull-pattern [::name ::rank]
-                                           ::db/ref [::name "Alpha"]
+                                           ::db/ref [::name "row-0"]
                                            ::db/conn conn
                                            ::db/max-results 1})
                                  nil
@@ -857,7 +887,7 @@
                      (is (= :query-results
                             (:datahike.budget/name (ex-data error))))))
                  (testing "a normal read succeeds after both exhausted calls"
-                   (is (= 3
+                   (is (= 20
                           (count
                             (db/query
                               {::db/query '[:find ?n
@@ -866,7 +896,7 @@
                    (is (= 1
                           (::rank
                             (db/pull {::db/pull-pattern [::name ::rank]
-                                      ::db/ref [::name "Alpha"]
+                                      ::db/ref [::name "row-1"]
                                       ::db/conn conn}))))))))
       done)))
 
