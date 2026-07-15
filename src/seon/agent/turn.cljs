@@ -599,7 +599,7 @@
        :seon.ai.attempt/outcome (attempt-outcome response outer-timeout?)}
       (:seon.ai/model config)
       (assoc :seon.ai.attempt/requested-model (:seon.ai/model config))
-      (:seon.ai/temperature config)
+      (contains? config :seon.ai/temperature)
       (assoc :seon.ai.attempt/temperature (:seon.ai/temperature config))
       (:seon.ai/max-tokens config)
       (assoc :seon.ai.attempt/max-tokens (:seon.ai/max-tokens config))

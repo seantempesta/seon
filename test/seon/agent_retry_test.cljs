@@ -240,6 +240,7 @@
                    [{:seon.ai/id "config"
                      :seon.ai/provider :openai-compat
                      :seon.ai/model "model-a"
+                     :seon.ai/temperature 0.0
                      :seon.ai/base-url "https://user:secret@a.example/v1?sig=hide#frag"
                      :seon.ai/timeout-ms 1111}]}))
               _ (is (true? (:seon.db/ok? seed)))
@@ -269,6 +270,9 @@
                  (mapv :seon.ai.attempt/requested-model attempts)))
           (is (= [1111 2222]
                  (mapv :seon.ai.attempt/adapter-timeout-ms attempts)))
+          (is (= [0.0 0.0]
+                 (mapv :seon.ai.attempt/temperature attempts))
+              "zero is retained as a real sampling value, not absence")
           (is (= ["https://a.example/v1/chat/completions"
                   "https://b.example/v1/chat/completions"]
                  (mapv :seon.ai.attempt/endpoint attempts)))

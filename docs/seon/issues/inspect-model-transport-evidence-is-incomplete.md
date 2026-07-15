@@ -34,7 +34,9 @@ fact connected to its turn, including outer timeouts that return no adapter
 response. The retained endpoint is reconstructed from parsed URL components,
 so userinfo, query, and fragment bytes never enter evidence. Invalid or
 oversized response identity becomes a bounded evidence error without echoing
-the rejected bytes.
+the rejected bytes. Integration review also corrected the zero-temperature
+edge: `0.0` is a present sampling value and remains explicit in attempt facts
+rather than disappearing through a truthiness check.
 
 The remaining dependency is the public projection: `seon.web.serve` does not
 yet query these attempt components into `/agents/run`, and Inspect therefore
@@ -85,8 +87,10 @@ consumer. Per-call evidence is never inferred from final or current state.
 - `/agents/run` reports ordered per-attempt coordinates, endpoints, adapter and
   outer timeouts, immutable model identity, outcomes, and present response
   identity; the Inspect solver retains them unchanged in `.eval` metadata.
-- A static admitted run rejects mid-run transport/configuration drift rather
-  than treating the final coordinate as proof for every earlier provider call.
+- Formal capability admission rejects mid-run transport/configuration drift
+  rather than treating the final coordinate as proof for every earlier
+  provider call. Runtime retries may capture a newer immutable value as long as
+  both attempts remain ordered facts.
 - Missing coordinate fields, wrong attachment, an unretained commit, or absent
   required OpenAI-compatible endpoint/timeout fail loudly as evidence errors.
 - Until this closes, the first controlled sample may remain diagnostic only
