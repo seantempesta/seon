@@ -123,10 +123,10 @@ contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Advance unit 1 from completed public branch proof into containment plus clean restart/quiescence** | The generic readiness repair landed at `bb6f10f7`; the exact public gate passes 40 tests/244 assertions. Live create/write/pod-restart/read/close preserved source watcher/writer identities, proved branch-only persistence through both MCP runtimes, and removed every retained, registry, filesystem, and durable-branch owner on close | Review and integrate the two non-overlapping containment/quiescence implementations, then run clean default restart and crash-replacement proof before restore/undo or multi-form work |
-| Database lifecycle | **Public retained branch ownership is complete; anchored containment and clean quiescence are the next parallel slices** | Typed UDS (`ce342572`), crash-safe adoption (`e7bd160c`), retained pod lifecycle (`74bfa7e2`), both interruption inverses (`fbb8c399`, `c95f8e03`), public commands, serialized restart, MCP discovery, watcher publication, descriptor-owned replica routing, readiness preparation, and the complete live inverse settle the public owner | Implement the grounded process containment and runtime quiescence contracts in separate owners, integrate their typed terminal-result boundary, then prove clean restart followed by unexpected crash replacement |
+| Top-level integration | **Join containment, pod quiescence, and writer release evidence into one clean-or-force restart path** | Public branch proof is complete. Admission/run/loop quiescence primitives landed at `b9c39ac1`; writer shutdown now returns every exact release coordinate at `272de2f3`. Neither local result alone proves process shutdown, so the top level owns their generation-matched integration and the live migration from the retained pre-containment processes | Integrate the two path-bounded implementations, add the one terminal-result bridge and operator sequence, then prove a clean default restart before crash replacement, restore/undo, or multi-form work |
+| Database lifecycle | **Anchored process containment and the loopback pod quiescence endpoint are active non-overlapping implementation lanes** | Typed UDS (`ce342572`), crash-safe adoption (`e7bd160c`), retained pod lifecycle (`74bfa7e2`), both interruption inverses (`fbb8c399`, `c95f8e03`), public commands, serialized restart, MCP discovery, watcher publication, descriptor-owned replica routing, readiness preparation, the complete live branch inverse, turn-boundary quiescence, and writer release responses settle every prerequisite below the shared terminal-result seam | Review publication/adoption failure cuts and retryable pod cleanup, then connect both results through the existing supervisor without logs, a second shutdown registry, or unowned signals |
 | Reactive/database views | **Implementation and replay-all soundness oracle are complete; live browser/feed proof waits for the next source-frozen checkpoint** | `365052f0` lands candidate-only routing; `afc70d3f` proves six retained read shapes against every nonempty combination of seven actual transactions. The exact gate passes 1 test/10 assertions | Refill only after the unit-1 source checkpoint: prove gzip/SSE sharing, related/unrelated updates, and release in a real browser, then continue unit-2 consumer migration |
-| Agent runtime correctness | **The child-containment and clean-quiescence contracts are grounded; their implementations are the next safe parallel refills** | Receipt/recovery Slice A remains complete at `defb8014`; `f2c1f1c8` defines one parent-owned child handle/capability. `f18d0282` rejects dead-leader numeric-PGID signaling and specifies a persistent owner/live anchor with a generation-matched terminal result. `acab6d24` derives clean restart from quiescing admission, current-turn completion, CAS-closed run, database-derived drain, and the same typed terminal-result owner | After the public branch checkpoint, implement anchored containment in the process owner and clean quiescence in the runtime/admission owner as non-overlapping lanes; integrate both before crash replacement or unit-6 child cutover |
+| Agent runtime correctness | **Turn-boundary quiescence is integrated; endpoint/drain and process containment are under focused proof** | Receipt/recovery Slice A remains complete at `defb8014`; `f2c1f1c8` defines one parent-owned child handle/capability. `f18d0282` rejects dead-leader numeric-PGID signaling. `b9c39ac1` atomically changes admission from available to quiescing, closes an owned run as `:quiesced` only at a turn boundary, and derives remaining runs/running turns from one database value. `272de2f3` surfaces writer releases rather than hiding them in a shutdown log | Finish the loopback endpoint's idempotent retry contract and the containment owner's publication/terminal cuts, then let the top level integrate their one clean-or-force lifecycle before unit-6 child cutover |
 
 Current scheduling card:
 
@@ -136,12 +136,15 @@ Current scheduling card:
 2. **Parallel lane A:** implement the grounded persistent-owner/live-
    anchor containment contract in the process owner; this is shared by crash
    replacement and later unit-6 child containment.
-3. **Parallel lane B:** implement clean quiescence through admission,
-   run closure, database-derived drain, and typed terminal results in the
-   existing runtime owners. It runs beside containment because their owned
-   paths do not overlap; the top level owns their shared integration contract.
-4. **Parallel lane C:** prepare only source-grounded proof fixtures for default
-   crash replacement and restore/undo without changing either unsettled owner.
+3. **Parallel lane B:** finish the loopback-only pod lifecycle endpoint over
+   the integrated admission, run closure, database-derived drain, replica
+   release, and retained cleanup capability. It runs beside containment
+   because their owned paths do not overlap; the top level owns their shared
+   integration contract.
+4. **Parallel lane C:** audit eval/query materialization and retained-result
+   memory against the already pinned dependency source and live evidence. Its
+   current finding does not block unit 1; retain the remaining explicit
+   join/pull/heap falsifiers for the ordered post-restart or unit-9 gates.
 5. **Final admission:** unit 9 remains blocked on integrated units 1–8 and is
    the only place for destructive simultaneous-cluster, performance, and
    authorized legacy-worktree cleanup proof.

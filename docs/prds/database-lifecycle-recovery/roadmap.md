@@ -171,6 +171,21 @@ CAS-closed `:quiesced` run, database-derived drain, loopback lifecycle action,
 and the same typed terminal-result owner. Both precede default crash replacement;
 containment also precedes unit-6 child cutover.
 
+The first two clean-shutdown primitives are integrated but do not yet form an
+operator guarantee. `b9c39ac1` adds one atomic
+`:available` -> `:quiescing` admission transition, closes an already admitted
+run as `:quiesced` only at a turn recurrence boundary, and derives both
+pointer-owned open runs and every running turn bracket from one database
+value. `272de2f3` makes `seon.db.server/stop!` return whether shutdown completed
+plus every exact registry attachment, final coordinate, release outcome, and
+release error after the UDS transport has closed and joined. Focused runtime
+proof passes 44 tests/228 assertions across admission, run, and loop; focused
+writer proof passes 19 tests/112 assertions across transport, integration, and
+server. The remaining seam is generation-bound process evidence: the pod's
+loopback lifecycle response and the JVM application result must reach the one
+persistent containment owner, then the Babashka operator must reject missing,
+stale, malformed, or incomplete results before it starts a replacement.
+
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in
 [[research/database-lifecycle-source-audit-2026-07-14]]. Implementation began
