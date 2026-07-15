@@ -28,12 +28,26 @@ base config, and dependency overrides all come from the Seon repository.
 The audit found that a later ACME build replaced the shared `out/bootstrap`
 after the default manifest was published. The bounded implementation now
 publishes bootstrap bytes beneath a content-addressed runtime root, records
-that root in artifact manifest version 3, injects it only into the owning pod,
+that root in artifact manifest version 4, injects it only into the owning pod,
 and makes readiness re-hash the exact manifest-bound bytes. Deterministic
 sequential default/ACME tests prove the second publication cannot mutate the
 first. A coordinated live rebuild was deliberately not run in this unit, so
 the remaining live gate stays in
 [[../../seon/issues/shared-bootstrap-output-mutates-running-artifact]].
+
+Development artifact manifest version 4 is now the current publication
+contract. It deterministically projects the exact direct public Git URL and
+full SHA for Datahike, Konserve, Proximum, Shadow CLJS, superv.async, and
+partial-cps from the root `deps.edn`; requires the writer/CLJS Datahike and
+Konserve selections to agree; and binds that identity set plus the normalized
+writer digest into application identity. Version 2 and 3 manifests remain
+readable. Publication deliberately fails closed while any required selection
+is Maven/local, has a short SHA or non-HTTPS URL, or differs across aliases.
+Consequently the current Maven Proximum pin cannot produce a version 4
+manifest until the coordinated public-Git dependency cutover lands. This is a
+development artifact identity boundary, not the still-unbuilt relocatable
+release compatibility manifest with protocol, SDK, npm, license, and SBOM
+metadata.
 
 The completed evidence and exact source map are
 [[research/independent-acme-distribution-audit-2026-07-14]], grounded by the

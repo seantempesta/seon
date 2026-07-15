@@ -295,31 +295,154 @@
               "an identical bootstrap reuses its verified content address")))
       (finally (fs/delete-tree directory)))))
 
-(deftest manifest-v3-binds-runtime-root-and-v2-remains-readable
-  (let [directory (fs/create-temp-dir {:prefix "seon-manifest-v3-test-"})
+(defn- git-coordinate [suffix]
+  {:git/url (str "https://github.com/example/" suffix)
+   :git/sha (apply str (repeat 40 suffix))})
+
+(defn- maintained-deps
+  ([] (maintained-deps {}))
+  ([overrides]
+   (let [datahike (git-coordinate "a")
+         konserve (git-coordinate "b")]
+     (merge-with
+       merge
+       {:aliases
+        {:writer
+         {:replace-deps
+          {'org.replikativ/datahike datahike
+           'org.replikativ/konserve konserve
+           'org.replikativ/proximum (git-coordinate "c")}}
+         :cljs
+         {:extra-deps
+          {'thheller/shadow-cljs (git-coordinate "d")}
+          :override-deps
+          {'org.replikativ/datahike datahike
+           'org.replikativ/konserve konserve
+           'org.replikativ/superv.async (git-coordinate "e")
+           'is.simm/partial-cps (git-coordinate "f")}}}}
+       overrides))))
+
+(deftest maintained-dependencies-are-exact-deterministic-alias-selections
+  (let [coordinates (#'artifact/maintained-dependencies-from
+                      (maintained-deps))]
+    (is (= ['org.replikativ/datahike
+            'org.replikativ/konserve
+            'org.replikativ/proximum
+            'thheller/shadow-cljs
+            'org.replikativ/superv.async
+            'is.simm/partial-cps]
+           (mapv :seon.dev.dependency/library coordinates)))
+    (is (every? #(re-matches #"[0-9a-f]{40}"
+                             (:seon.dev.dependency/git-sha %))
+                coordinates))
+    (is (= coordinates
+           (#'artifact/maintained-dependencies-from (maintained-deps))))))
+
+(deftest maintained-dependencies-reject-inexact-or-divergent-selections
+  (is (thrown-with-msg?
+        Exception #"lacks an exact public Git coordinate"
+        (#'artifact/maintained-dependencies-from
+         (assoc-in (maintained-deps)
+                   [:aliases :writer :replace-deps
+                    'org.replikativ/proximum]
+                   {:mvn/version "0.1.26"}))))
+  (is (thrown-with-msg?
+        Exception #"lacks an exact public Git coordinate"
+        (#'artifact/maintained-dependencies-from
+         (assoc-in (maintained-deps)
+                   [:aliases :cljs :extra-deps 'thheller/shadow-cljs]
+                   {:git/url "git@github.com:example/shadow-cljs"
+                    :git/sha "abc123"}))))
+  (is (thrown-with-msg?
+        Exception #"select different commits"
+        (#'artifact/maintained-dependencies-from
+         (assoc-in (maintained-deps)
+                   [:aliases :cljs :override-deps
+                   'org.replikativ/datahike :git/sha]
+                   (apply str (repeat 40 "9")))))))
+
+(deftest application-identity-binds-writer-and-maintained-dependencies
+  (let [directory (fs/create-temp-dir {:prefix "seon-v4-identity-test-"})
+        writer (fs/path directory "target/writer.jar")
+        client (fs/path directory "out/client/main.js")
+        runtime (fs/path directory
+                         ".shadow-cljs/builds/client/dev/out/cljs-runtime/a.js")
+        bootstrap (fs/path directory "out/bootstrap/a.js")
+        css (fs/path directory "resources/public/css/output.css")
+        dependencies (atom (#'artifact/maintained-dependencies-from
+                            (maintained-deps)))
+        config {:seon.dev.config/root (str directory)
+                :seon.dev.config/writer-output (str writer)
+                :seon.dev.config/client-output (str client)
+                :seon.dev.config/shadow-cache-root
+                (str (fs/path directory ".shadow-cljs"))
+                :seon.dev.config/client-build-id "client"
+                :seon.dev.config/artifact-flavor
+                :seon.dev.artifact.flavor/default}]
+    (try
+      (write-test-jar! writer "writer-a")
+      (doseq [[path value] [[client "client"] [runtime "runtime"]
+                            [bootstrap "bootstrap"] [css "css"]]]
+        (fs/create-dirs (fs/parent path))
+        (spit (str path) value))
+      (with-redefs [artifact/maintained-dependencies (fn [_] @dependencies)
+                    artifact/publish-runtime-root!
+                    (fn [_ digest] (str "/runtime/" digest))]
+        (let [initial (#'artifact/output-manifest config)]
+          (swap! dependencies assoc-in
+                 [0 :seon.dev.dependency/git-sha]
+                 (apply str (repeat 40 "9")))
+          (let [dependency-change (#'artifact/output-manifest config)]
+            (is (not= (:seon.dev.artifact/application-digest initial)
+                      (:seon.dev.artifact/application-digest
+                       dependency-change))))
+          (reset! dependencies
+                  (#'artifact/maintained-dependencies-from (maintained-deps)))
+          (write-test-jar! writer "writer-b")
+          (let [writer-change (#'artifact/output-manifest config)]
+            (is (not= (:seon.dev.artifact/application-digest initial)
+                      (:seon.dev.artifact/application-digest writer-change))))))
+      (finally (fs/delete-tree directory)))))
+
+(deftest manifest-v4-binds-dependencies-and-v2-v3-remain-readable
+  (let [directory (fs/create-temp-dir {:prefix "seon-manifest-v4-test-"})
         path (str (fs/path directory "artifact.edn"))
         digest (apply str (repeat 64 "a"))
         config {:seon.dev.config/artifact-manifest path
                 :seon.dev.config/artifact-flavor
                 :seon.dev.artifact.flavor/default}
-        v3 {:seon.dev.artifact/version 3
+        v4 {:seon.dev.artifact/version 4
             :seon.dev.artifact/published-at "2026-07-14T00:00:00Z"
             :seon.dev.artifact/flavor :seon.dev.artifact.flavor/default
             :seon.dev.artifact/client-build-id "client"
             :seon.dev.artifact/shadow-cache-root "/checkout/.shadow-cljs"
             :seon.dev.artifact/client-output "/checkout/out/client/main.js"
             :seon.dev.artifact/runtime-root "/checkout/runtime/content"
+            :seon.dev.artifact/maintained-dependencies
+            (#'artifact/maintained-dependencies-from (maintained-deps))
             :seon.dev.artifact/writer-digest digest
             :seon.dev.artifact/client-digest digest
             :seon.dev.artifact/bootstrap-digest digest
             :seon.dev.artifact/css-digest digest
             :seon.dev.artifact/application-digest digest}]
     (try
-      (spit path (pr-str v3))
-      (is (= v3 (artifact/read-manifest config)))
-      (let [v2 (-> v3
+      (spit path (pr-str v4))
+      (is (= v4 (artifact/read-manifest config)))
+      (spit path (pr-str (assoc-in v4
+                                   [:seon.dev.artifact/maintained-dependencies
+                                    0 :seon.dev.dependency/library]
+                                   'wrong/library)))
+      (is (thrown-with-msg? Exception #"identity set is invalid"
+                            (artifact/read-manifest config)))
+      (let [v3 (-> v4
+                   (assoc :seon.dev.artifact/version 3)
+                   (dissoc :seon.dev.artifact/maintained-dependencies))]
+        (spit path (pr-str v3))
+        (is (= v3 (artifact/read-manifest config))))
+      (let [v2 (-> v4
                    (assoc :seon.dev.artifact/version 2)
-                   (dissoc :seon.dev.artifact/runtime-root))]
+                   (dissoc :seon.dev.artifact/runtime-root
+                           :seon.dev.artifact/maintained-dependencies))]
         (spit path (pr-str v2))
         (is (= v2 (artifact/read-manifest config))))
       (finally (fs/delete-tree directory)))))

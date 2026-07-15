@@ -30,8 +30,13 @@ operator, compatibility manifest, or one-command release/downstream build.
   current Shadow server identity.
 - `seon.dev.process/specs` always emits the `clj -M:cljs watch` process even
   when `:seon.dev.config/source-checkout?` is false.
-- The development artifact manifest contains absolute client/cache paths and
-  omits release/protocol/SDK/runtime/dependency/license compatibility data.
+- Development artifact manifest version 4 still contains absolute
+  client/cache paths and omits release/protocol/SDK/runtime/license
+  compatibility data. It now binds the exact six maintained public-Git
+  dependency coordinates and normalized writer digest into application
+  identity, while retaining version 2/3 read compatibility. Its fail-closed
+  selector intentionally prevents publication until Proximum moves from the
+  current Maven coordinate to the final public Git SHA.
 - Default and ACME previously published different bootstrap digests while
   replacing the same live `out/bootstrap` path. The development operator now
   publishes content-addressed manifest-bound runtime roots; coordinated live

@@ -29,6 +29,31 @@
    [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
 
+(def ^:private maintained-dependency-schema
+  [:map
+   [:seon.dev.dependency/library :symbol]
+   [:seon.dev.dependency/git-url [:re #"https://\S+"]]
+   [:seon.dev.dependency/git-sha [:re #"[0-9a-f]{40}"]]])
+
+(def ^:private artifact-manifest-v4-schema
+  [:map
+   [:seon.dev.artifact/version [:= 4]]
+   [:seon.dev.artifact/published-at :string]
+   [:seon.dev.artifact/flavor
+    [:enum :seon.dev.artifact.flavor/default
+     :seon.dev.artifact.flavor/acme]]
+   [:seon.dev.artifact/client-build-id :string]
+   [:seon.dev.artifact/shadow-cache-root :string]
+   [:seon.dev.artifact/client-output :string]
+   [:seon.dev.artifact/runtime-root :string]
+   [:seon.dev.artifact/maintained-dependencies
+    [:vector {:min 6 :max 6} maintained-dependency-schema]]
+   [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/bootstrap-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
+
 (def ^:private artifact-manifest-v2-schema
   [:map
    [:seon.dev.artifact/version [:= 2]]
@@ -46,7 +71,9 @@
    [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
 
 (def artifact-manifest-schema
-  [:or artifact-manifest-v3-schema artifact-manifest-v2-schema])
+  [:or artifact-manifest-v4-schema
+   artifact-manifest-v3-schema
+   artifact-manifest-v2-schema])
 
 (def ^:private artifact-manifest-v1-schema
   [:map
@@ -64,6 +91,8 @@
    [:seon.dev.writer-cache/input-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.writer-cache/writer-digest [:re #"[0-9a-f]{64}"]]])
 
+(declare validate-maintained-dependencies!)
+
 (defn- validate-manifest! [manifest]
   (when-not (m/validate artifact-manifest-schema manifest)
     (throw (ex-info "The canonical artifact manifest is invalid."
@@ -71,6 +100,9 @@
                      (mapv #(select-keys % [:path :in :type])
                            (:errors (m/explain artifact-manifest-schema
                                                manifest)))})))
+  (when (= 4 (:seon.dev.artifact/version manifest))
+    (validate-maintained-dependencies!
+      (:seon.dev.artifact/maintained-dependencies manifest)))
   manifest)
 
 (defn- bytes->hex [byte-values]
@@ -92,6 +124,71 @@
   (let [digest (MessageDigest/getInstance "SHA-256")]
     (doseq [value values] (update-text! digest value))
     (bytes->hex (.digest digest))))
+
+(def ^:private maintained-dependency-selections
+  [['org.replikativ/datahike
+    [[:writer :replace-deps] [:cljs :override-deps]]]
+   ['org.replikativ/konserve
+    [[:writer :replace-deps] [:cljs :override-deps]]]
+   ['org.replikativ/proximum
+    [[:writer :replace-deps]]]
+   ['thheller/shadow-cljs
+    [[:cljs :extra-deps]]]
+   ['org.replikativ/superv.async
+    [[:cljs :override-deps]]]
+   ['is.simm/partial-cps
+    [[:cljs :override-deps]]]])
+
+(defn- validate-maintained-dependencies! [coordinates]
+  (let [expected (mapv first maintained-dependency-selections)
+        actual (mapv :seon.dev.dependency/library coordinates)]
+    (when-not (= expected actual)
+      (throw
+        (ex-info "The maintained dependency identity set is invalid."
+                 {:seon.dev.dependency/expected expected
+                  :seon.dev.dependency/actual actual})))
+    coordinates))
+
+(defn- git-coordinate! [dependencies library alias dependency-section]
+  (let [coordinate (get-in dependencies
+                           [:aliases alias dependency-section library])
+        git-url (:git/url coordinate)
+        git-sha (:git/sha coordinate)]
+    (when-not (and (map? coordinate)
+                   (string? git-url)
+                   (re-matches #"https://\S+" git-url)
+                   (string? git-sha)
+                   (re-matches #"[0-9a-f]{40}" git-sha))
+      (throw
+        (ex-info "A maintained dependency lacks an exact public Git coordinate."
+                 {:seon.dev.dependency/library library
+                  :seon.dev.dependency/alias alias
+                  :seon.dev.dependency/section dependency-section
+                  :seon.dev.dependency/coordinate coordinate})))
+    {:seon.dev.dependency/library library
+     :seon.dev.dependency/git-url git-url
+     :seon.dev.dependency/git-sha git-sha}))
+
+(defn- maintained-dependencies-from [dependencies]
+  (mapv
+    (fn [[library selections]]
+      (let [coordinates
+            (mapv (fn [[alias dependency-section]]
+                    (git-coordinate! dependencies library alias
+                                     dependency-section))
+                  selections)
+            selected (first coordinates)]
+        (when-not (apply = coordinates)
+          (throw
+            (ex-info "Maintained dependency aliases select different commits."
+                     {:seon.dev.dependency/library library
+                      :seon.dev.dependency/coordinates coordinates})))
+        selected))
+    maintained-dependency-selections))
+
+(defn- maintained-dependencies [root]
+  (maintained-dependencies-from
+    (edn/read-string (slurp (str (fs/path root "deps.edn"))))))
 
 (defn- regular-files [path]
   (let [path (fs/path path)]
@@ -392,6 +489,7 @@
       (throw (ex-info "Canonical build did not publish every required output."
                       {:seon.dev.artifact/missing (mapv str missing)})))
     (let [writer-digest (digest-jar writer)
+          maintained-dependencies (maintained-dependencies root)
           client-digest (current-client-digest config)
           bootstrap-digest (digest-paths root [bootstrap])
           css-digest (digest-paths root [css])
@@ -404,11 +502,14 @@
                           (:seon.dev.config/client-output config)
                           "shadow-cache-root"
                           (:seon.dev.config/shadow-cache-root config)
+                          "writer" writer-digest
+                          "maintained-dependencies"
+                          (pr-str maintained-dependencies)
                           "client" client-digest
                           "bootstrap" bootstrap-digest
                           "css" css-digest])]
       (validate-manifest!
-        {:seon.dev.artifact/version 3
+        {:seon.dev.artifact/version 4
          :seon.dev.artifact/published-at (str (Instant/now))
          :seon.dev.artifact/flavor
          (:seon.dev.config/artifact-flavor config)
@@ -419,6 +520,7 @@
          :seon.dev.artifact/client-output
          (:seon.dev.config/client-output config)
          :seon.dev.artifact/runtime-root runtime-root
+         :seon.dev.artifact/maintained-dependencies maintained-dependencies
          :seon.dev.artifact/writer-digest writer-digest
          :seon.dev.artifact/client-digest client-digest
          :seon.dev.artifact/bootstrap-digest bootstrap-digest
