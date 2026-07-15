@@ -16,8 +16,10 @@ harness for Seon-native tasks and established benchmarks.
 
 ## Invariants
 
-- Work only in `codex/acme-agentic-tool-refinement` and the lane's isolated
-  ACME cluster. Never restart, reset, or benchmark the default cluster.
+- Work in the shared checkout and use the lane's isolated named ACME cluster.
+  Never restart, reset, or benchmark another agent's cluster. The historical
+  `codex/acme-agentic-tool-refinement` worktree exists only until its committed
+  changes are reconciled into the shared checkout; do not create a successor.
 - Use `src-inspect-ai/` plus the pinned `reference-code/inspect-ai/` source.
   Do not create a drive script, gym, scorer stack, or simulation harness.
 - The ordinary agent's dynamic context is the experimental surface. Prefer

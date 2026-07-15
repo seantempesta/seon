@@ -273,6 +273,15 @@ Multiple agents share this working tree. Preserve unrelated edits and untracked
 files. Safe operations are read-only Git inspection and staging explicit owned
 paths. Do not use `git add -A`.
 
+The shared checkout is the normal collaboration model. Do not create or move
+work into a Git worktree unless extreme circumstances make shared-checkout work
+unsafe or impossible. Assume other agents are editing the same source tree;
+coordinate through narrow ownership, inspect overlapping diffs, and preserve
+their changes. Agents normally isolate live verification with their own named
+pod/cluster and process coordinates, not another source checkout. If concurrent
+work creates a real concern that these rules do not cover, ask the owner before
+introducing a worktree; otherwise roll with the shared system.
+
 Branch switches, history changes, file discards, resets, and other destructive
 Git operations require user coordination. Never run `git reset --hard` or
 `git checkout --` to clean a shared tree. Commit coherent gains frequently

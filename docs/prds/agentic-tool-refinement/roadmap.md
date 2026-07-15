@@ -16,11 +16,13 @@ restart/read-back evidence.
 
 ## Current position — 2026-07-14
 
-The dedicated branch and worktree are established. Prior worktree and patch
-audits found no safe missing source commit to cherry-pick: the stable planning,
-Inspect, toolkit, and function-surface gains are integrated or superseded.
-Display-v3's valid findings remain requirements for one database-derived,
-versioned export; its renderer and synthetic-card implementations are rejected.
+The lane began on a dedicated branch/worktree, but shared-checkout work is now
+the repository default and its committed gains are reconciled into the main
+checkout before further experimentation. Prior worktree and patch audits found
+no safe missing source commit to cherry-pick: the stable planning, Inspect,
+toolkit, and function-surface gains are integrated or superseded. Display-v3's
+valid findings remain requirements for one database-derived, versioned export;
+its renderer and synthetic-card implementations are rejected.
 
 The isolated ACME checkout initially failed because pinned submodules and the
 locked npm closure were absent. After initializing the selected dependency
