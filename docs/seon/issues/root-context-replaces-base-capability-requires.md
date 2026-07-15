@@ -61,3 +61,19 @@ current/required namespace context plus ordinary public/private semantics. Do
 not add markers to patch individual functions. Focused proof must resolve the
 root context and show all explicitly referred public functions, including
 `set-purpose!`, through the one namespace-context mechanism.
+
+The persisted require edge already carries the required selection data through
+`:seon.ns.require/alias` and `:seon.ns.require/refers`. The globally consistent
+compact rule is therefore:
+
+- a `:refer [f g]` edge renders exactly those public, schema-complete functions
+  plus their referenced-schema closure;
+- an `:as alias` edge renders every public, schema-complete function and schema
+  in that required namespace; and
+- the current namespace compact view renders all public definitions.
+
+Implementation should replace the required-namespace set with a target-to-edge
+projection and thread the optional refers set into `render-one-ns-compact`.
+After every consumer uses that derivation, marker persistence can be removed
+mechanically. This keeps namespace requirements as the sole capability and
+presentation selection mechanism while reducing referred cards globally.
