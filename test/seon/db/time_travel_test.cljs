@@ -64,13 +64,28 @@
                    second-report
                    (await (d/transact! conn [{value-attr "second"}]))
                    container (:db-after second-report)
+                   head-point
+                   (coordinate/at
+                    {::coordinate/db-value container
+                     ::coordinate/target-t (db/basis-t container)})
                    point
                    (coordinate/at
                     {::coordinate/db-value container
                      ::coordinate/target-t first-t})
+                   exact-head (await (db/at-coordinate conn head-point))
                    historical (await (db/at-coordinate conn point))]
+               (is (= head-point (db/head-coordinate exact-head))
+                   "an exact-head cut remains a coordinate-resolvable committed db")
+               (is (= #{["first"] ["second"]}
+                      (d/q [:find '?v :where ['_ value-attr '?v]] exact-head))
+                   "an exact-head cut reads the containing commit without a wrapper")
                (is (not (:seon.error/message historical)))
                (is (= first-t (db/basis-t historical)))
+               (is (try
+                     (db/head-coordinate historical)
+                     false
+                     (catch :default _ true))
+                   "a strict historical cut remains a temporal, non-container value")
                (is (= #{["first"]}
                       (d/q [:find '?v :where ['_ value-attr '?v]] historical)))
                (let [wrong-branch
@@ -101,4 +116,50 @@
         (.catch
          (fn [error]
            (is false (str "coordinate resolver proof rejected: " error))))
+        (.then (fn [_] (done))))))
+
+(deftest fork-coordinate-reattaches-a-shared-commit-to-the-requested-branch
+  (async done
+    (-> (fresh-history-conn)
+        (.then
+          (fn ^:async verify [conn]
+            (try
+              (let [first-report
+                    (await (d/transact! conn [{value-attr "fork-first"}]))
+                    first-t (-> first-report :db-after :max-tx)
+                    _ (await (d/transact! conn [{value-attr "fork-head"}]))
+                    source-head @conn
+                    shared-cid (d/commit-id source-head)
+                    branch :seon.db.time-travel-test/fork
+                    _ (await (d/branch! conn shared-cid branch))
+                    fork-conn
+                    (await (d/connect (assoc (:config source-head)
+                                            :branch branch)))]
+                (try
+                  (let [point (coordinate/resolved @fork-conn)
+                        exact-head (await (db/at-coordinate fork-conn point))
+                        historical
+                        (await (db/at-coordinate
+                                 fork-conn
+                                 (assoc point ::coordinate/t first-t)))
+                        _ (await (d/transact! fork-conn
+                                             [{value-attr "fork-later"}]))]
+                    (is (= branch (::coordinate/branch point)))
+                    (is (= point (db/head-coordinate exact-head))
+                        "a shared commit is reattached to the requested fork")
+                    (is (= #{["fork-first"] ["fork-head"]}
+                           (d/q [:find '?v :where ['_ value-attr '?v]]
+                                exact-head))
+                        "the exact retained value stays frozen after the fork advances")
+                    (is (= first-t (db/basis-t historical)))
+                    (is (= branch
+                           (get-in historical [:origin-db :config :branch]))
+                        "a strict historical wrapper retains the requested attachment"))
+                  (finally
+                    (await (d/release fork-conn)))))
+              (finally
+                (await (d/release conn))))))
+        (.catch
+          (fn [error]
+            (is false (str "fork coordinate proof rejected: " error))))
         (.then (fn [_] (done))))))

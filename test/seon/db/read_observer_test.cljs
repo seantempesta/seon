@@ -807,8 +807,25 @@
   (async done
     (-> (fresh-seeded)
         (.then
-          (fn [{db-value :db}]
-            (let [historical (db/as-of db-value (dec (db/basis-t db-value)))
+          (fn ^:async verify [{conn :conn db-value :db}]
+            (let [point (db/head-coordinate db-value)
+                  exact-head (await (db/at-coordinate conn point))
+                  historical
+                  (await (db/at-coordinate
+                           conn
+                           (update point :seon.db.coordinate/t dec)))
+                  exact-capture
+                  (db/capture-reads
+                    {:seon.db/db db-value
+                     :seon.db/thunk
+                     #(db/query
+                        {:seon.db/db exact-head
+                         :seon.db/query
+                         '[:find (count ?e) .
+                           :where
+                           [?e :seon.db.read-observer-test/id]]})})
+                  exact-operation
+                  (first (:seon.db/read-observations exact-capture))
                   capture
                   (db/capture-reads
                     {:seon.db/db db-value
@@ -820,6 +837,11 @@
                            :where
                            [?e :seon.db.read-observer-test/id]]})})
                   operation (first (:seon.db/read-observations capture))]
+              (is (= :seon.db.read.source/captured
+                     (:seon.db/read-source exact-operation)))
+              (is (true? (:seon.db/read-replayable? exact-operation))
+                  "an exact-head retained value stays coordinate-bearing")
+              (is (= point (:seon.db/operation-coordinate exact-operation)))
               (is (= :seon.db.read.source/foreign
                      (:seon.db/read-source operation)))
               (is (false? (:seon.db/read-replayable? operation)))

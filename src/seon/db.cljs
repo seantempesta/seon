@@ -1641,6 +1641,9 @@
    A complete coordinate pins both the containing Datahike commit and the
    temporal cut inside it. `commit-as-db` touches storage and is asynchronous
    on CLJS, so this function is honestly `^:async`; agent eval awaits it.
+   A cut at the container's exact head returns the committed container with the
+   validated requested branch reattached; only a strict historical cut returns
+   Datahike's temporal wrapper.
 
    Omit `conn` to use `*conn*`. The selected coordinate must name that
    connection's database and branch. A missing retained commit, wrong
@@ -1675,16 +1678,19 @@
                    {::coordinate coordinate
                     ::current-coordinate current-coordinate
                     :seon.error/kind :user-input})))
-       (let [container
+       (let [stored-container
              (await
               (d/commit-as-db
                connection (::db.coordinate/commit-id coordinate)))]
-         (when-not container
+         (when-not stored-container
            (throw
             (ex-info "The coordinate's retained commit was not found."
                      {::coordinate coordinate
                       :seon.error/kind :user-input})))
-         (let [resolved
+         (let [container
+               (assoc-in stored-container [:config :branch]
+                         (::db.coordinate/branch coordinate))
+               resolved
                (db.coordinate/at
                 {::db.coordinate/db-value container
                  ::db.coordinate/attachment
@@ -1696,7 +1702,10 @@
                        {::coordinate coordinate
                         ::resolved-coordinate resolved
                         :seon.error/kind :user-input})))
-           (d/as-of container (::db.coordinate/t coordinate)))))
+           (if (= (::db.coordinate/t coordinate)
+                  (dbi/-max-tx container))
+             container
+             (d/as-of container (::db.coordinate/t coordinate))))))
      (catch :default e
        (error/->map e)))))
 

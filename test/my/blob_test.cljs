@@ -411,22 +411,27 @@
                             (pinned conn
                               (fn [later-tx]
                                 (is (true? (::db/ok? later-tx)))
-                                (let [result
-                                      (blob/observe-retained
-                                        {::blob/target-database frozen
-                                         ::blob/target-coordinate point})]
-                                  (is (= {::blob/ok? true
-                                          ::blob/target-coordinate point
-                                          ::blob/reachable-hash-digest
-                                          (retained-set-digest [first-hash])
-                                          ::blob/hash-count 1}
-                                         result))
-                                  (is (not-any? #(= first-hash %)
-                                                (vals result))
-                                      "the reachable hash vector never crosses the boundary")
-                                  (is (schema/valid-candidate-value?
-                                        ::blob/retained-observation-result
-                                        result))))))))))))))
+                                (-> (db/at-coordinate conn point)
+                                    (.then
+                                      (fn [resolved]
+                                        (let [result
+                                              (blob/observe-retained
+                                                {::blob/target-database resolved
+                                                 ::blob/target-coordinate point})]
+                                          (is (= point (db/head-coordinate resolved))
+                                              "exact-head resolution preserves the retained container")
+                                          (is (= {::blob/ok? true
+                                                  ::blob/target-coordinate point
+                                                  ::blob/reachable-hash-digest
+                                                  (retained-set-digest [first-hash])
+                                                  ::blob/hash-count 1}
+                                                 result))
+                                          (is (not-any? #(= first-hash %)
+                                                        (vals result))
+                                              "the reachable hash vector never crosses the boundary")
+                                          (is (schema/valid-candidate-value?
+                                                ::blob/retained-observation-result
+                                                result)))))))))))))))))
       done)))
 
 (deftest retained-observation-rejects-a-coordinate-other-than-its-db-value
