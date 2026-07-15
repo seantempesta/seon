@@ -14,6 +14,7 @@
     [seon.agent.run :as run]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.runtime.recovery :as recovery]))
 
 (def ^:private a-id "runtest-260625")   ; exactly 14 chars (:seon.db/id)
@@ -127,6 +128,61 @@
                            (:seon.agent.run/closed-reason
                              (agent/derive-status {:seon.agent/id a-id})))
                         "last closed-reason surfaces in the snapshot"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest quiescence-work-retains-pointer-lost-running-turns
+  (async done
+    (-> (with-conn
+          (fn ^:async project [conn]
+            (let [run-id
+                  (:seon.agent.run/id
+                    (await
+                      (run/open-run!
+                        {:seon.agent/id a-id
+                         :seon.agent.run/trigger :message})))
+                  allocation
+                  (await
+                    (db.id/allocate!
+                      {::db.id/allocations
+                       [{::db.id/key ::turn
+                         ::db.id/identity-attr :seon.agent.turn/id}]
+                       ::db.id/transaction-builder
+                       (fn [ids]
+                         {:seon.db/tx-data
+                          [{:seon.agent.turn/id (get ids ::turn)
+                            :seon.agent.turn/at (js/Date.)
+                            :seon.agent.turn/status :running
+                            :seon.agent.turn/run
+                            [:seon.agent.run/id run-id]}]})
+                       :seon.db/conn db/*conn*}))
+                  turn-id (get-in allocation [::db.id/ids ::turn])]
+              (is (= {::run/current-runs
+                      [{:seon.agent/id a-id :seon.agent.run/id run-id}]
+                      ::run/running-turns
+                      [{:seon.agent.run/id run-id
+                        :seon.agent.turn/id turn-id}]}
+                     (run/quiescence-work @conn)))
+              (await
+                (d/transact!
+                  conn
+                  {:tx-data
+                   [[:db/retract a-ref :seon.agent/run]]}))
+              (is (= {::run/current-runs []
+                      ::run/running-turns
+                      [{:seon.agent.run/id run-id
+                        :seon.agent.turn/id turn-id}]}
+                     (run/quiescence-work @conn))
+                  "a pointer loss does not hide the accepted turn bracket")
+              (await
+                (d/transact!
+                  conn
+                  {:tx-data
+                   [{:seon.agent.turn/id turn-id
+                     :seon.agent.turn/status :done}]}))
+              (is (= {::run/current-runs [] ::run/running-turns []}
+                     (run/quiescence-work @conn))
+                  "drain is derived from the next immutable database value"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

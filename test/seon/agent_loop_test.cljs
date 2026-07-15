@@ -34,6 +34,7 @@
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.repl.internal :as repl-internal]
+    [seon.runtime.admission :as admission]
     [seon.test-seed :as test-seed]
     [seon.warn :as warn]))
 
@@ -290,6 +291,81 @@
                                        (run/snapshot {:seon.agent.run/id run-id})))))
                 (testing "the agent ends derived :idle"
                   (is (= :idle (derived agent-id))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest planned-quiesce-waits-for-the-running-turn-boundary
+  (async done
+    (reset! @#'admission/!state
+            {::admission/status :available ::admission/generation 0})
+    (-> (with-conn
+          (fn ^:async run []
+            (let [cs (await (boot-agent!))
+                  opened (await
+                           (run/open-run!
+                             {:seon.agent/id agent-id
+                              :seon.agent.run/trigger :message}))
+                  run-id (:seon.agent.run/id opened)
+                  !release (atom nil)
+                  blocked-llm
+                  (fn [_]
+                    (js/Promise.
+                      (fn [resolve! _reject]
+                        (reset! !release resolve!))))
+                  loop-result
+                  (db/with-agent
+                    agent-id
+                    (fn ^:async drive []
+                      (await
+                        (loop/run-loop!
+                          {:seon.agent/id agent-id
+                           :seon.agent/llm-fn blocked-llm
+                           :seon.agent/compile-state cs}
+                          run-id))))
+                  running?
+                  (await
+                    (wait-until
+                      #(seq (::run/running-turns
+                               (run/quiescence-work @db/*conn*)))
+                      5000 10))]
+              (is (true? running?) "the turn bracket commits before the body blocks")
+              (is (true? (admission/begin-quiesce!)))
+              (is (= :open
+                     (:seon.agent.run/status
+                       (run/snapshot {:seon.agent.run/id run-id})))
+                  "quiesce never closes a body that is still running")
+              (is (= 1 (count (::run/running-turns
+                                (run/quiescence-work @db/*conn*)))))
+              (@!release {:text "(+ 1 1)"})
+              (is (= :idle (await loop-result)))
+              (let [snapshot (run/snapshot {:seon.agent.run/id run-id})
+                    turn-statuses
+                    (db/query
+                      {:seon.db/query
+                       '[:find [?status ...]
+                         :in $ ?run-id
+                         :where
+                         [?run :seon.agent.run/id ?run-id]
+                         [?turn :seon.agent.turn/run ?run]
+                         [?turn :seon.agent.turn/status ?status]]
+                       :seon.db/args [run-id]})]
+                (is (= [:done] (vec turn-statuses))
+                    "the real turn close commits before the run close")
+                (is (= :quiesced (:seon.agent.run/closed-reason snapshot)))
+                (is (nil? (run/current-run {:seon.agent/id agent-id})))
+                (is (= {::run/current-runs [] ::run/running-turns []}
+                       (run/quiescence-work @db/*conn*)))
+                (is (empty?
+                      (db/query
+                        {:seon.db/query
+                         '[:find [?message ...]
+                           :where [?message :seon.agent.message/id _]]}))
+                    "planned maintenance emits no task-outcome message")))))
+        (.finally
+          (fn []
+            (reset! @#'admission/!state
+                    {::admission/status :available
+                     ::admission/generation 0})))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

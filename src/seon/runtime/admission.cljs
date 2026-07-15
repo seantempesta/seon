@@ -13,7 +13,7 @@
     [seon.schema :as schema]))
 
 (schema/register! ::status
-  [:enum :starting :publishing :available :unavailable])
+  [:enum :starting :publishing :available :quiescing :unavailable])
 (schema/register! ::generation :int)
 (schema/register! ::reason :string)
 (schema/register! ::admitted? :boolean)
@@ -44,6 +44,30 @@
   []
   (= :available (::status @!state)))
 
+(defn quiescing?
+  "True while planned shutdown is draining already-admitted work."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (= :quiescing (::status @!state)))
+
+(defn begin-quiesce!
+  "Synchronously refuse new work for one planned drain.
+
+   Returns true only to the caller that changes `:available` to
+   `:quiescing`. Repeated callers observe the same closed transition without
+   acquiring a second lifecycle owner."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (let [[before after]
+        (swap-vals!
+          !state
+          (fn [{::keys [status] :as current}]
+            (if (= :available status)
+              (assoc current ::status :quiescing)
+              current)))]
+    (and (= :available (::status before))
+         (= :quiescing (::status after)))))
+
 (defn unavailable
   "Typed refusal returned by executable boundaries while admission is closed.
 
@@ -60,7 +84,9 @@
      (cond->
        {:seon.error/kind :seon.runtime/unavailable
         :seon.error/message
-        "Runtime program generation is unavailable; inspect the recorded core fault and restart after repairing canonical program facts."
+        (if (= :quiescing status)
+          "Runtime is quiescing for planned maintenance; no new executable work is admitted."
+          "Runtime program generation is unavailable; inspect the recorded core fault and restart after repairing canonical program facts.")
         :seon.error/data {::status status}}
        generation
        (assoc-in [:seon.error/data ::generation] generation)

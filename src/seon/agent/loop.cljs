@@ -79,7 +79,7 @@
 
 (schema/register! :seon.agent.loop/event
   [:enum :trigger :turn-ok :wait :complete :turn-limit :deadline
-         :superseded :error :no-forms :pause :terminate :resume])
+         :superseded :error :no-forms :pause :terminate :resume :quiesce])
 
 (def transitions
   "The whole FSM as data — `{state {event → next-state}}`. A wake (`:trigger`)
@@ -91,7 +91,7 @@
    :running    {:turn-ok    :running :wait     :idle :complete   :idle
                 :turn-limit :idle    :deadline :idle :superseded :idle
                 :error      :idle    :no-forms :idle :pause      :paused
-                :terminate  :terminated}
+                :terminate  :terminated :quiesce :idle}
    :paused     {:resume :running :terminate :terminated}
    :terminated {}})
 
@@ -216,6 +216,26 @@
         {:seon.error/message msg})
       v)))
 
+(defn- admission-event
+  "Admission event at a turn recurrence boundary."
+  []
+  (case (::admission/status (admission/state))
+    :quiescing :quiesce
+    :available :available
+    :unavailable))
+
+(defn ^:async ^:private close-quiescing-run!
+  "Close this loop's still-owned run at a planned drain boundary."
+  [agent-id run-id state]
+  (log agent-id "halt" "planned runtime quiesce → close run :quiesced")
+  (await
+    (await-bounded
+      "run/close-run!"
+      (run/close-run!
+        {:seon.agent.run/id run-id
+         :seon.agent.run/closed-reason :quiesced})))
+  (transition state :quiesce))
+
 (defn ^:async run-loop!
   "Drive agentic turns for `run-id` until the FSM leaves :running.
 
@@ -241,8 +261,10 @@
   [{:seon.agent/keys [id] :as input} run-id]
   (await
     (loop [state :running streak 0]
-      (if-not (admission/available?)
-        (admission/unavailable)
+      (case (admission-event)
+        :quiesce (await (close-quiescing-run! id run-id state))
+        :unavailable (admission/unavailable)
+        :available
         (let [db    @db/*conn*               ; §8a — ONE frozen basis-t per turn
               event (next-event db id run-id streak)]
         (cond
@@ -272,8 +294,10 @@
                   (transition state :superseded))
 
               :else
-              (if-not (admission/available?)
-                (admission/unavailable)
+              (case (admission-event)
+                :quiesce (await (close-quiescing-run! id run-id state))
+                :unavailable (admission/unavailable)
+                :available
                 (let [r (await (await-bounded
                                     "turn/run-turn!"
                                     (turn/run-turn!
@@ -290,8 +314,10 @@
                     errored? (or (= :error (:seon.agent.turn/status r))
                                  (false? (:seon.db/ok? r))
                                  (nil? (:seon.agent.turn/id r)))]
-                (if-not (admission/available?)
-                  (admission/unavailable)
+                (case (admission-event)
+                  :quiesce (await (close-quiescing-run! id run-id state))
+                  :unavailable (admission/unavailable)
+                  :available
                   (if errored?
                   ;; §8c — distinguish LOST AUTHORITY (the turn's leading CAS
                   ;; aborted: open-turn! rejected because the run was

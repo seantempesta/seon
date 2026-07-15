@@ -75,7 +75,8 @@
 ;; clean reasons.
 (schema/register! :seon.agent.run/closed-reason
                   [:enum :completed :waited :turn-limit :deadline-exceeded
-                         :terminated :superseded :error :no-forms :crashed])
+                         :terminated :superseded :error :no-forms :crashed
+                         :quiesced])
 
 ;; DURABLE RETURN VALUE (multi-agent-context Piece 1). `complete` writes these
 ;; onto the run when it closes it `:completed`: `result` is the short answer or
@@ -231,6 +232,62 @@
   {:malli/schema [:=> [:cat ::current-run-request] [:maybe :map]]}
   [{id :seon.agent/id}]
   (derive/current-run @db/*conn* id))
+
+(schema/register! ::current-runs
+  [:vector
+   [:map
+    [:seon.agent/id :string]
+    [:seon.agent.run/id :seon.agent.run/id]]])
+(schema/register! ::running-turns
+  [:vector
+   [:map
+    [:seon.agent.run/id :seon.agent.run/id]
+    [:seon.agent.turn/id :string]]])
+(schema/register! ::quiescence-work
+  [:map
+   [::current-runs ::current-runs]
+   [::running-turns ::running-turns]])
+
+(defn quiescence-work
+  "Current run ownership and running turn brackets in one database value.
+
+   The current-run projection includes only open runs still pointed to by an
+   agent. The running-turn projection deliberately includes every running
+   turn, even when a concurrent lifecycle close has already removed its run
+   pointer. Planned drain callers close pointer-owned runs without a running
+   turn, then re-read this projection until both vectors are empty."
+  {:malli/schema [:=> [:catn [:database :seon.db/db]] ::quiescence-work]}
+  [database]
+  {::current-runs
+   (->> (db/query
+          {:seon.db/db database
+           :seon.db/query
+           '[:find ?agent-id ?run-id
+             :where
+             [?agent :seon.agent/id ?agent-id]
+             [?agent :seon.agent/run ?run]
+             [?run :seon.agent.run/id ?run-id]
+             [?run :seon.agent.run/status :open]]})
+        (map (fn [[agent-id run-id]]
+               {:seon.agent/id agent-id
+                :seon.agent.run/id run-id}))
+        (sort-by (juxt :seon.agent/id :seon.agent.run/id))
+        vec)
+   ::running-turns
+   (->> (db/query
+          {:seon.db/db database
+           :seon.db/query
+           '[:find ?run-id ?turn-id
+             :where
+             [?run :seon.agent.run/id ?run-id]
+             [?turn :seon.agent.turn/run ?run]
+             [?turn :seon.agent.turn/id ?turn-id]
+             [?turn :seon.agent.turn/status :running]]})
+        (map (fn [[run-id turn-id]]
+               {:seon.agent.run/id run-id
+                :seon.agent.turn/id turn-id}))
+        (sort-by (juxt :seon.agent.run/id :seon.agent.turn/id))
+        vec)})
 
 (defn turn-limit-reached?
   "Work bound: has `turn-count` reached `turn-limit`?

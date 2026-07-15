@@ -58,6 +58,26 @@
              (get-in (admission/unavailable)
                      [:seon/error :seon.error/kind]))))))
 
+(deftest planned-quiesce-has-one-owner-and-preserves-generation
+  (restore-test-admission!)
+  (is (true? (admission/begin-quiesce!)))
+  (is (false? (admission/available?))
+      "new executable work is refused immediately")
+  (is (true? (admission/quiescing?))
+      "already-owned loops can distinguish planned drain from a core fault")
+  (is (= {::admission/status :quiescing
+          ::admission/generation 0}
+         (admission/state))
+      "the accepted program generation remains observable during drain")
+  (is (re-find #"planned maintenance"
+               (get-in (admission/unavailable)
+                       [:seon/error :seon.error/message]))
+      "planned refusal never claims that a core publication fault occurred")
+  (is (false? (admission/begin-quiesce!))
+      "a repeated caller cannot acquire a second lifecycle transition")
+  (is (false? (admission/begin-publication!))
+      "publication cannot steal a quiescing runtime"))
+
 (defn- with-publication-seams [reconcile! record! body]
   (with-redefs [db/*conn* (atom ::database)
                 admission/committed-projection
