@@ -465,6 +465,16 @@ therefore either prevents the spawn or waits until its exact identity can be
 drained in reverse dependency order. A converged process from an earlier
 invocation remains alive. A failed inverse retains its exact managed record and
 is reported rather than allowing startup or destructive cleanup to graduate.
+For a planned multi-process transition, the supervisor selects each exact
+managed generation once. Application quiescence evidence carries that same
+generation and is joined to its containment terminal before classification;
+neither a mutable port file nor a later process-record read can cross the cut.
+One nonrenewed monotonic deadline bounds the complete dependency-safe sequence:
+pod application quiescence and containment, then database-server terminal
+release, then watcher containment. Each component is reported as clean, forced,
+or absent; an accepting door without an exact managed record is containment
+uncertainty and stops the transition. Destructive reset may proceed after
+explicitly reported forced absence, but never after uncertainty.
 Managed-record schema evolution derives historical control defaults only while
 reading an attribute whose absence names the older shape; current publications
 remain strict. Historical terminal evidence is never backfilled: a newly added

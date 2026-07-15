@@ -7,6 +7,7 @@
             [clojure.string :as str]
             [malli.core :as m]
             [seon.dev.artifact :as artifact]
+            [seon.dev.config :as config]
             [seon.dev.state :as state]
             [seon.db.protocol :as db.protocol]
             [seon.launch :as launch]
@@ -660,10 +661,10 @@
         (when (= writer-id id)
           (str (fs/path containment-dir "application.edn")))
         launch-environment
-        (cond-> (:seon.dev.process/environment spec)
+        (cond-> (assoc (:seon.dev.process/environment spec)
+                       "SEON_PROCESS_GENERATION" (str generation))
           application-result-path
-          (assoc "SEON_PROCESS_GENERATION" (str generation)
-                 "SEON_APPLICATION_RESULT_PATH" application-result-path))
+          (assoc "SEON_APPLICATION_RESULT_PATH" application-result-path))
         helper (str (fs/path (:seon.dev.config/root config)
                              "script/seon/dev/detach.py"))
         _ (do (fs/create-dirs containment-dir)
@@ -840,43 +841,56 @@
              :seon.dev.process/recorded-artifact-digest
              (:seon.dev.process/artifact-digest record)))))
 
-(defn- socket-line! [path request]
-  (let [deadline (+ (System/currentTimeMillis) 2000)
-        address (UnixDomainSocketAddress/of path)]
-    (with-open [channel (SocketChannel/open StandardProtocolFamily/UNIX)]
-      (.configureBlocking channel false)
-      (.connect channel address)
-      (loop []
-        (when-not (.finishConnect channel)
-          (when (>= (System/currentTimeMillis) deadline)
-            (throw (ex-info "Timed out connecting to containment owner."
-                            {:seon.dev.process.containment/control-socket path})))
-          (Thread/sleep 10)
-          (recur)))
-      (let [output (ByteBuffer/wrap
-                    (.getBytes (str request "\n") StandardCharsets/UTF_8))]
+(defn- monotonic-ms [] (quot (System/nanoTime) 1000000))
+
+(defn- phase-deadline [operation-deadline phase-budget-ms]
+  (min (or operation-deadline Long/MAX_VALUE)
+       (+ (monotonic-ms) phase-budget-ms)))
+
+(defn- socket-line!
+  ([path request] (socket-line! path request nil))
+  ([path request operation-deadline]
+   (let [deadline (phase-deadline operation-deadline 2000)
+         address (UnixDomainSocketAddress/of path)]
+     (when-not (pos? (- deadline (monotonic-ms)))
+       (throw (ex-info "The containment control deadline expired."
+                       {:seon.dev.process/deadline-ms deadline})))
+     (with-open [channel (SocketChannel/open StandardProtocolFamily/UNIX)]
+       (.configureBlocking channel false)
+       (.connect channel address)
+       (loop []
+         (when-not (.finishConnect channel)
+           (when (>= (monotonic-ms) deadline)
+             (throw
+              (ex-info
+               "Timed out connecting to containment owner."
+               {:seon.dev.process.containment/control-socket path})))
+           (Thread/sleep 10)
+           (recur)))
+       (let [output (ByteBuffer/wrap
+                     (.getBytes (str request "\n") StandardCharsets/UTF_8))]
         (loop []
           (when (.hasRemaining output)
             (.write channel output)
-            (when (>= (System/currentTimeMillis) deadline)
+            (when (>= (monotonic-ms) deadline)
               (throw (ex-info "Timed out writing to containment owner."
                               {:seon.dev.process.containment/control-socket path})))
             (recur))))
       (let [input (ByteBuffer/allocate 512)]
         (loop []
-          (let [read (.read channel input)]
+          (let [read-count (.read channel input)]
             (cond
-              (pos? read)
+              (pos? read-count)
               (let [text (String. (.array input) 0 (.position input)
                                   StandardCharsets/UTF_8)]
                 (if (str/includes? text "\n")
                   (first (str/split-lines text))
                   (recur)))
-              (neg? read) nil
-              (>= (System/currentTimeMillis) deadline)
+              (neg? read-count) nil
+              (>= (monotonic-ms) deadline)
               (throw (ex-info "Timed out awaiting containment acknowledgement."
                               {:seon.dev.process.containment/control-socket path}))
-              :else (do (Thread/sleep 10) (recur)))))))))
+              :else (do (Thread/sleep 10) (recur))))))))))
 
 (defn- terminal-result [containment]
   (let [path (:seon.dev.process.containment/result-path containment)]
@@ -926,17 +940,49 @@
 (defn- writer-application-evidence [containment terminal]
   (when (:seon.dev.process.containment/application-result-path containment)
     (let [capture (:application_result terminal)
-          capture-status (:status capture)]
+          capture-status (:status capture)
+          capture-status-keyword
+          (case capture-status
+            "captured" :seon.dev.process.application-capture/captured
+            "missing" :seon.dev.process.application-capture/missing
+            "read-error" :seon.dev.process.application-capture/read-error
+            "oversized" :seon.dev.process.application-capture/oversized
+            "invalid-utf8" :seon.dev.process.application-capture/invalid-utf8
+            :seon.dev.process.application-capture/missing-capture)
+          capture-error
+          (case capture-status
+            "missing" :seon.dev.process.application-error/missing
+            "read-error" :seon.dev.process.application-error/read-error
+            "oversized" :seon.dev.process.application-error/oversized
+            "invalid-utf8" :seon.dev.process.application-error/invalid-utf8
+            :seon.dev.process.application-error/missing-capture)
+          capture-metadata
+          (cond->
+            {:seon.dev.process.application-capture/status
+             capture-status-keyword}
+            (and (string? (:sha256 capture))
+                 (re-matches #"[0-9a-f]{64}" (:sha256 capture)))
+            (assoc :seon.dev.process.application-capture/sha256
+                   (:sha256 capture))
+            (string? (:edn capture))
+            (assoc :seon.dev.process.application-capture/bytes
+                   (alength (.getBytes ^String (:edn capture)
+                                      StandardCharsets/UTF_8)))
+            (string? (:error capture))
+            (assoc :seon.dev.process.application-capture/error
+                   (subs (:error capture)
+                         0 (min 4096 (count (:error capture))))))
+          failure
+          (fn [reason]
+            {:seon.dev.process/application-error reason
+             :seon.dev.process/application-capture capture-metadata})]
       (if-not (= "captured" capture-status)
-        {:seon.dev.process/application-error
-         (keyword "seon.dev.process.application-error"
-                  (or capture-status "missing-capture"))}
+        (failure capture-error)
         (let [text (:edn capture)
               digest (:sha256 capture)]
           (cond
             (not= digest (sha256-text text))
-            {:seon.dev.process/application-error
-             :seon.dev.process.application-error/digest-mismatch}
+            (failure :seon.dev.process.application-error/digest-mismatch)
 
             :else
             (try
@@ -945,40 +991,46 @@
                     (str (:seon.dev.process.containment/generation containment))]
                 (cond
                   (not (db.protocol/valid-writer-terminal-result? value))
-                  {:seon.dev.process/application-error
-                   :seon.dev.process.application-error/invalid-schema}
+                  (failure :seon.dev.process.application-error/invalid-schema)
 
                   (not= generation (:seon.db.terminal/generation value))
-                  {:seon.dev.process/application-error
-                   :seon.dev.process.application-error/generation-mismatch}
+                  (failure
+                   :seon.dev.process.application-error/generation-mismatch)
 
                   :else
                   {:seon.dev.process/application-result value}))
               (catch Throwable _
-                {:seon.dev.process/application-error
-                 :seon.dev.process.application-error/malformed-edn}))))))))
+                (failure
+                 :seon.dev.process.application-error/malformed-edn)))))))))
 
-(defn- await-terminal! [record]
-  (let [containment (:seon.dev.process/containment record)
-        deadline (+ (System/currentTimeMillis)
-                    (:seon.dev.process.containment/shutdown-grace-ms
-                     containment)
-                    10000)]
-    (loop []
-      (let [result (terminal-result containment)
-            owner-alive? (state/process-identity-alive?
-                          (containment-identity containment :owner))]
-        (cond
-          (and (matching-terminal? containment result) (not owner-alive?)) result
-          (>= (System/currentTimeMillis) deadline)
-          (throw
-           (ex-info "Containment drain did not produce a matching terminal result."
-                    {:seon.dev.process/status
-                     :seon.dev.process.status/containment-uncertain
-                     :seon.dev.process/id (:seon.dev.process/id record)
-                     :seon.dev.process/containment containment
-                     :seon.dev.process/terminal-result result}))
-          :else (do (Thread/sleep 25) (recur)))))))
+(defn- await-terminal!
+  ([record] (await-terminal! record nil))
+  ([record operation-deadline]
+   (let [containment (:seon.dev.process/containment record)
+         deadline
+         (phase-deadline
+          operation-deadline
+          (+ (:seon.dev.process.containment/shutdown-grace-ms containment)
+             10000))]
+     (loop []
+       (let [result (terminal-result containment)
+             owner-alive? (state/process-identity-alive?
+                           (containment-identity containment :owner))]
+         (cond
+           (and (matching-terminal? containment result) (not owner-alive?))
+           result
+
+           (>= (monotonic-ms) deadline)
+           (throw
+            (ex-info
+             "Containment drain did not produce a matching terminal result."
+             {:seon.dev.process/status
+              :seon.dev.process.status/containment-uncertain
+              :seon.dev.process/id (:seon.dev.process/id record)
+              :seon.dev.process/containment containment
+              :seon.dev.process/terminal-result result}))
+
+           :else (do (Thread/sleep 25) (recur))))))))
 
 (defn- adopt-containment! [record]
   (let [containment (:seon.dev.process/containment record)
@@ -1022,44 +1074,49 @@
         (catch Throwable _)))
     (await-terminal! record)))
 
-(defn- drain-containment! [record]
-  (let [containment (:seon.dev.process/containment record)
-        existing (terminal-result containment)]
-    (when-not containment
-      (throw
-       (ex-info "Managed process has no generation-bound containment owner."
-                {:seon.dev.process/status
-                 :seon.dev.process.status/containment-uncertain
-                 :seon.dev.process/id (:seon.dev.process/id record)})))
-    (if (matching-terminal? containment existing)
-      (await-terminal! record)
-      (do
-        (when-not (state/process-identity-alive?
-                   (containment-identity containment :owner))
-          (throw
-           (ex-info "Containment owner disappeared without a terminal result."
-                    {:seon.dev.process/status
-                     :seon.dev.process.status/containment-uncertain
-                     :seon.dev.process/id (:seon.dev.process/id record)
-                     :seon.dev.process/containment containment})))
-        (let [generation
-              (str (:seon.dev.process.containment/generation containment))
-              response
-              (socket-line!
-               (:seon.dev.process.containment/control-socket containment)
-               (str "drain " generation))]
-          (when-not (= (str "accepted " generation) response)
-            (throw
-             (ex-info "Containment owner rejected the drain generation."
-                      {:seon.dev.process/status
-                       :seon.dev.process.status/containment-uncertain
-                       :seon.dev.process/id (:seon.dev.process/id record)
-                       :seon.dev.process/response response}))))
-        (await-terminal! record)))))
+(defn- drain-containment!
+  ([record] (drain-containment! record nil))
+  ([record operation-deadline]
+   (let [containment (:seon.dev.process/containment record)
+         existing (terminal-result containment)]
+     (when-not containment
+       (throw
+        (ex-info "Managed process has no generation-bound containment owner."
+                 {:seon.dev.process/status
+                  :seon.dev.process.status/containment-uncertain
+                  :seon.dev.process/id (:seon.dev.process/id record)})))
+     (if (matching-terminal? containment existing)
+       (await-terminal! record operation-deadline)
+       (do
+         (when-not (state/process-identity-alive?
+                    (containment-identity containment :owner))
+           (throw
+            (ex-info "Containment owner disappeared without a terminal result."
+                     {:seon.dev.process/status
+                      :seon.dev.process.status/containment-uncertain
+                      :seon.dev.process/id (:seon.dev.process/id record)
+                      :seon.dev.process/containment containment})))
+         (let [generation
+               (str (:seon.dev.process.containment/generation containment))
+               response
+               (socket-line!
+                (:seon.dev.process.containment/control-socket containment)
+                (str "drain " generation)
+                operation-deadline)]
+           (when-not (= (str "accepted " generation) response)
+             (throw
+              (ex-info "Containment owner rejected the drain generation."
+                       {:seon.dev.process/status
+                        :seon.dev.process.status/containment-uncertain
+                        :seon.dev.process/id (:seon.dev.process/id record)
+                        :seon.dev.process/response response}))))
+         (await-terminal! record operation-deadline))))))
 
-(defn- retire-live-legacy! [record]
-  (let [pid (:seon.dev.process/pid record)
-        group (:seon.dev.process/process-group record)]
+(defn- retire-live-legacy!
+  ([record] (retire-live-legacy! record nil))
+  ([record operation-deadline]
+   (let [pid (:seon.dev.process/pid record)
+         group (:seon.dev.process/process-group record)]
     (when-not (and (= pid group)
                    (state/process-identity-alive? record))
       (throw
@@ -1079,32 +1136,49 @@
                  :seon.dev.process.status/containment-uncertain
                  :seon.dev.process/id (:seon.dev.process/id record)
                  :seon.dev.process/process-group group})))
-    (loop [remaining 500]
-      (when (and (group-present? group) (pos? remaining))
-        (Thread/sleep 10)
-        (recur (dec remaining))))
+    (let [deadline (phase-deadline operation-deadline 5000)]
+      (loop []
+        (when (and (group-present? group) (< (monotonic-ms) deadline))
+          (Thread/sleep 10)
+          (recur))))
     (when (group-present? group)
       (throw
        (ex-info "The legacy process group did not become absent after retirement."
                 {:seon.dev.process/status
                  :seon.dev.process.status/containment-uncertain
-                 :seon.dev.process/id (:seon.dev.process/id record)})))))
+                 :seon.dev.process/id (:seon.dev.process/id record)}))))))
 
 (defn stop!
   "Drain one exact containment generation and return its terminal evidence."
-  [config id]
-  (let [record (read-process config id)]
-    (let [result
+  ([config id] (stop! config id nil nil))
+  ([config id expected-record] (stop! config id expected-record nil))
+  ([config id expected-record operation-deadline]
+   (let [record (read-process config id)]
+     (when (and expected-record (not= expected-record record))
+       (throw
+        (ex-info "The selected process generation changed before drain."
+                 {:seon.dev.process/status
+                  :seon.dev.process.status/containment-uncertain
+                  :seon.dev.process/id id
+                  :seon.dev.process/expected-record expected-record
+                  :seon.dev.process/current-record record})))
+     (when (and (nil? record) (accepting-unmanaged? config id))
+       (throw
+        (ex-info "A process door is accepting without a managed record."
+                 {:seon.dev.process/status
+                  :seon.dev.process.status/containment-uncertain
+                  :seon.dev.process/id id})))
+     (let [result
           (when record
             (if-let [containment (:seon.dev.process/containment record)]
-              (let [terminal (drain-containment! record)]
+              (let [terminal (drain-containment! record operation-deadline)]
                 (merge
                  {:seon.dev.process/id id
                   :seon.dev.process/terminal
                   (normalized-terminal containment terminal)}
                  (writer-application-evidence containment terminal)))
               (do
-                (retire-live-legacy! record)
+                (retire-live-legacy! record operation-deadline)
                 {:seon.dev.process/id id
                  :seon.dev.process/legacy-retired? true})))]
       (when record
@@ -1118,14 +1192,83 @@
       ;; ownership conflict instead of unlinking evidence it does not own.
       (when-not (accepting-unmanaged? config id)
         (clear-readiness! config id))
-      result)))
+       result))))
 
 (def ^:private quiesce-path "/_seon/operator/quiesce")
 (def ^:private lifecycle-response-limit (* 1024 1024))
 (def ^:private default-turn-timeout-ms 900000)
 (def ^:private lifecycle-reserve-ms 120000)
+(def ^:private operations
+  #{:seon.dev.process.operation/down
+    :seon.dev.process.operation/restart
+    :seon.dev.process.operation/rebuild-readers
+    :seon.dev.process.operation/rebuild-writer
+    :seon.dev.process.operation/reset
+    :seon.dev.process.operation/retained-close
+    :seon.dev.process.operation/retained-restart})
 
-(defn- monotonic-ms [] (quot (System/nanoTime) 1000000))
+(def clean-or-force-request-schema
+  [:map {:closed true}
+   [:seon.dev.process/configuration config/configuration-schema]
+   [:seon.dev.process/operation (into [:enum] operations)]
+   [:seon.dev.process/targets
+    [:set {:min 1} (into [:enum] target-processes)]]])
+
+(def ^:private containment-terminal-schema
+  [:map {:closed true}
+   [:seon.dev.process.containment/generation uuid?]
+   [:seon.dev.process.containment/status
+    [:= :seon.dev.process.containment.status/drained]]
+   [:seon.dev.process.containment/trigger {:optional true}
+    [:enum :seon.dev.process.containment.trigger/requested
+     :seon.dev.process.containment.trigger/workload-exit]]
+   [:seon.dev.process.containment/anchor-exit :int]])
+
+(def ^:private application-capture-schema
+  [:map {:closed true}
+   [:seon.dev.process.application-capture/status
+    [:enum :seon.dev.process.application-capture/captured
+     :seon.dev.process.application-capture/missing
+     :seon.dev.process.application-capture/read-error
+     :seon.dev.process.application-capture/oversized
+     :seon.dev.process.application-capture/invalid-utf8
+     :seon.dev.process.application-capture/missing-capture]]
+   [:seon.dev.process.application-capture/sha256 {:optional true}
+    [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.process.application-capture/bytes {:optional true}
+    [:int {:min 0 :max 1048576}]]
+   [:seon.dev.process.application-capture/error {:optional true}
+    [:string {:max 4096}]]])
+
+(def ^:private stop-result-schema
+  [:map {:closed true}
+   [:seon.dev.process/id (into [:enum] target-processes)]
+   [:seon.dev.process/classification
+    [:enum :seon.dev.process.classification/clean
+     :seon.dev.process.classification/forced
+     :seon.dev.process.classification/absent]]
+   [:seon.dev.process/terminal {:optional true} containment-terminal-schema]
+   [:seon.dev.process/application-result {:optional true}
+    [:or ::runtime.lifecycle/quiesce-response
+     ::db.protocol/writer-terminal-result]]
+   [:seon.dev.process/application-error {:optional true} qualified-keyword?]
+   [:seon.dev.process/application-capture {:optional true}
+    application-capture-schema]
+   [:seon.dev.process/application-error-message {:optional true}
+    [:string {:max 4096}]]
+   [:seon.dev.process/legacy-retired? {:optional true} :boolean]
+   [:seon.dev.process/reason {:optional true} qualified-keyword?]])
+
+(def clean-or-force-result-schema
+  [:map {:closed true}
+   [:seon.dev.process/operation (into [:enum] operations)]
+   [:seon.dev.process/classification
+    [:enum :seon.dev.process.classification/clean
+     :seon.dev.process.classification/forced
+     :seon.dev.process.classification/absent]]
+   [:seon.dev.process/budget-ms [:int {:min 1}]]
+   [:seon.dev.process/elapsed-ms [:int {:min 0}]]
+   [:seon.dev.process/results [:vector {:min 1} stop-result-schema]]])
 
 (defn- selected-turn-timeout-ms [config]
   (let [configured
@@ -1145,14 +1288,14 @@
                 output (ByteArrayOutputStream.)]
       (let [buffer (byte-array 8192)]
         (loop [total 0]
-          (let [read (.read input buffer)]
-            (when (pos? read)
-              (let [next-total (+ total read)]
+          (let [read-count (.read input buffer)]
+            (when (pos? read-count)
+              (let [next-total (+ total read-count)]
                 (when (> next-total lifecycle-response-limit)
                   (throw (ex-info "The lifecycle response exceeded its bound."
                                   {:seon.dev.process/response-bytes
                                    next-total})))
-                (.write output buffer 0 read)
+                (.write output buffer 0 read-count)
                 (recur next-total)))))
         (.toString output StandardCharsets/UTF_8)))))
 
@@ -1161,10 +1304,21 @@
                       ::launch/process ::launch/http-port-file])
       (:seon.dev.config/http-port-file config)))
 
+(defn- read-port [path]
+  (when (and path (fs/regular-file? path))
+    (with-open [file (RandomAccessFile. (str path) "r")]
+      (let [length (.length file)]
+        (when (> length 32)
+          (throw (ex-info "The managed pod port file is oversized."
+                          {:seon.dev.process/http-port-file path
+                           :seon.dev.process/port-file-bytes length})))
+        (let [content (byte-array (int length))]
+          (.readFully file content)
+          (String. content StandardCharsets/UTF_8))))))
+
 (defn- bounded-quiesce-post! [config deadline]
   (let [port-file (pod-port-file config)
-        port (when (and port-file (fs/regular-file? port-file))
-               (some-> (slurp port-file) str/trim parse-long))]
+        port (some-> (read-port port-file) str/trim parse-long)]
     (when-not (pos-int? port)
       (throw (ex-info "The managed pod has no descriptor-owned HTTP port."
                       {:seon.dev.process/http-port-file port-file})))
@@ -1186,7 +1340,13 @@
                                "application/edn; charset=utf-8")
           (.setRequestProperty connection "Accept" "application/edn")
           (with-open [output (.getOutputStream connection)] (.flush output))
-          (let [status (.getResponseCode connection)
+          (let [read-budget (remaining-ms deadline)
+                _ (when-not (pos? read-budget)
+                    (throw (ex-info "The lifecycle read deadline expired."
+                                    {:seon.dev.process/deadline-ms deadline})))
+                _ (.setReadTimeout
+                   connection (int (min Integer/MAX_VALUE read-budget)))
+                status (.getResponseCode connection)
                 stream (if (< status 400)
                          (.getInputStream connection)
                          (.getErrorStream connection))
@@ -1199,6 +1359,12 @@
               (throw (ex-info "The lifecycle endpoint returned invalid data."
                               {:seon.dev.process/http-status status
                                :seon.dev.process/response value})))
+            (when-not (= (= 200 status)
+                         (true? (:seon.client/quiesced? value)))
+              (throw
+               (ex-info "The lifecycle status contradicts its typed result."
+                        {:seon.dev.process/http-status status
+                         :seon.dev.process/response value})))
             value)
           (finally (.disconnect connection)))))))
 
@@ -1207,13 +1373,31 @@
     {:seon.dev.process/application-error
      :seon.dev.process.application-error/ownership-changed}
     (try
-      (let [first-response (bounded-quiesce-post! config deadline)
+      (let [expected-generation
+            (str (get-in record [:seon.dev.process/containment
+                                 :seon.dev.process.containment/generation]))
+            first-response (bounded-quiesce-post! config deadline)
+            _ (when-not (= expected-generation
+                           (::runtime.lifecycle/process-generation
+                            first-response))
+                (throw
+                 (ex-info "The pod lifecycle result crossed generations."
+                          {:seon.dev.process/expected-generation
+                           expected-generation
+                           :seon.dev.process/response first-response})))
             response
             (if (and (false? (:seon.client/quiesced? first-response))
                      (containment-live? record)
                      (pos? (remaining-ms deadline)))
               (bounded-quiesce-post! config deadline)
-              first-response)]
+              first-response)
+            _ (when-not (= expected-generation
+                           (::runtime.lifecycle/process-generation response))
+                (throw
+                 (ex-info "The retried pod result crossed generations."
+                          {:seon.dev.process/expected-generation
+                           expected-generation
+                           :seon.dev.process/response response})))]
         {:seon.dev.process/application-result response})
       (catch Throwable error
         {:seon.dev.process/application-error
@@ -1272,7 +1456,7 @@
                     application-evidence
                     (when (and (= pod-id id) record)
                       (pod-application-evidence configuration record deadline))
-                    stop-result (stop! configuration id)]
+                    stop-result (stop! configuration id record deadline)]
                 (classify-stop-result id stop-result application-evidence))
               (catch Throwable error
                 (throw
@@ -1289,10 +1473,17 @@
 
 (defn clean-or-force!
   "Stop selected processes in dependency-safe order with honest evidence."
-  [{:seon.dev.process/keys [configuration operation targets]}]
-  (let [deadline (+ (monotonic-ms)
-                    (selected-turn-timeout-ms configuration)
-                    lifecycle-reserve-ms)
+  {:malli/schema [:=> [:cat clean-or-force-request-schema]
+                  clean-or-force-result-schema]}
+  [request]
+  (validate! clean-or-force-request-schema request
+             "The clean-or-force request is invalid."
+             :seon.dev.process/explanation)
+  (let [{:seon.dev.process/keys [configuration operation targets]} request
+        started (monotonic-ms)
+        budget (+ (selected-turn-timeout-ms configuration)
+                  lifecycle-reserve-ms)
+        deadline (+ started budget)
         selected (set targets)
         ordered (filterv selected [pod-id writer-id watcher-id])
         results (stop-selected! configuration deadline ordered)
@@ -1306,7 +1497,8 @@
           :else :seon.dev.process.classification/clean)]
     {:seon.dev.process/operation operation
      :seon.dev.process/classification classification
-     :seon.dev.process/deadline-ms deadline
+     :seon.dev.process/budget-ms budget
+     :seon.dev.process/elapsed-ms (- (monotonic-ms) started)
      :seon.dev.process/results results}))
 
 (defn ensure!

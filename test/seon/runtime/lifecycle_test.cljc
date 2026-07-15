@@ -27,6 +27,10 @@
     (is (m/validate ::lifecycle/quiesce-response success))
     (is (m/validate
          ::lifecycle/quiesce-response
+         (assoc success ::lifecycle/process-generation
+                "6d295410-5883-4d9f-a532-8f7b71b9812a")))
+    (is (m/validate
+         ::lifecycle/quiesce-response
          {:seon.client/quiesced? false
           :seon.client/quiesce-error "cleanup remains retryable"})))
   (testing "the discriminator, complete coordinate, and closed shape are exact"

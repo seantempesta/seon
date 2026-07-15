@@ -5,6 +5,7 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is run-tests testing]]
+            [malli.core :as m]
             [seon.dev.artifact :as artifact]
             [seon.dev.config :as dev-config]
             [seon.dev.process :as process]
@@ -22,6 +23,9 @@
      :seon.dev.config/log-dir (str (fs/path directory "logs"))
      :seon.dev.config/environment (into {} (System/getenv))
      :seon.dev.test/directory (str directory)}))
+
+(defn- operator-config []
+  (dev-config/load! (System/getProperty "user.dir")))
 
 (defn- harmless-spec [id argv]
   {:seon.dev.process/id id
@@ -851,8 +855,14 @@
     :seon.dev.process.containment/anchor-exit -9}})
 
 (deftest clean-or-force-orders-and-classifies-complete-evidence
-  (let [configuration {:seon.dev.config/environment
-                       {"SEON_TURN_TIMEOUT_MS" "10"}}
+  (let [database-id (random-uuid)
+        coordinate {:seon.db.coordinate/database-id database-id
+                    :seon.db.coordinate/branch :db
+                    :seon.db.coordinate/commit-id (random-uuid)
+                    :seon.db.coordinate/t 42}
+        configuration
+        (assoc (operator-config) :seon.dev.config/environment
+               {"SEON_TURN_TIMEOUT_MS" "10"})
         calls (atom [])
         writer-result
         (assoc (requested-stop-result process/writer-id)
@@ -863,18 +873,29 @@
                 :seon.db.terminal/stop-response
                 {:seon.db.server/stopped? true
                  :seon.db.server/release-results
-                 [{:seon.db.registry/released? true}]}})]
+                 [{:seon.db.registry/database-name :db
+                   :seon.db.registry/attachment
+                   {:seon.db.coordinate/database-id database-id
+                    :seon.db.coordinate/branch :db}
+                   :seon.db.registry/coordinate coordinate
+                   :seon.db.registry/released? true}]}})
+        pod-result
+        {:seon.client/quiesced? true
+         :seon.db.coordinate/coordinate coordinate
+         :seon.client/quiesced-run-ids []
+         :seon.client/completed-turn-ids []
+         :seon.client/errored-turn-ids []
+         :seon.agent.runtime/unhosted-ids []}]
     (with-redefs [process/read-process (fn [_ _] {:record true})
                   process/stop!
-                  (fn [_ id]
+                  (fn [_ id & _]
                     (swap! calls conj id)
                     (if (= process/writer-id id)
                       writer-result
                       (requested-stop-result id)))
                   process/pod-application-evidence
                   (fn [_ _ _]
-                    {:seon.dev.process/application-result
-                     {:seon.client/quiesced? true}})]
+                    {:seon.dev.process/application-result pod-result})]
       (let [result
             (process/clean-or-force!
              {:seon.dev.process/configuration configuration
@@ -886,16 +907,21 @@
                @calls))
         (is (= :seon.dev.process.classification/clean
                (:seon.dev.process/classification result)))
+        (is (m/validate process/clean-or-force-result-schema result))
         (is (every? #(= :seon.dev.process.classification/clean
                         (:seon.dev.process/classification %))
                     (:seon.dev.process/results result)))))))
 
 (deftest clean-or-force-retains-the-completed-prefix-on-uncertainty
-  (let [configuration {:seon.dev.config/environment {}}
+  (let [coordinate {:seon.db.coordinate/database-id (random-uuid)
+                    :seon.db.coordinate/branch :db
+                    :seon.db.coordinate/commit-id (random-uuid)
+                    :seon.db.coordinate/t 42}
+        configuration (operator-config)
         calls (atom [])]
     (with-redefs [process/read-process (fn [_ _] {:record true})
                   process/stop!
-                  (fn [_ id]
+                  (fn [_ id & _]
                     (swap! calls conj id)
                     (if (= process/writer-id id)
                       (throw (ex-info "uncertain" {:original true}))
@@ -903,7 +929,12 @@
                   process/pod-application-evidence
                   (fn [_ _ _]
                     {:seon.dev.process/application-result
-                     {:seon.client/quiesced? true}})]
+                     {:seon.client/quiesced? true
+                      :seon.db.coordinate/coordinate coordinate
+                      :seon.client/quiesced-run-ids []
+                      :seon.client/completed-turn-ids []
+                      :seon.client/errored-turn-ids []
+                      :seon.agent.runtime/unhosted-ids []}})]
       (try
         (process/clean-or-force!
          {:seon.dev.process/configuration configuration
@@ -918,6 +949,185 @@
           (is (= [process/pod-id]
                  (mapv :seon.dev.process/id
                        (:seon.dev.process/results (ex-data error))))))))))
+
+(deftest clean-or-force-shares-one-deadline-across-every-selected-phase
+  (let [record {:seon.dev.process/record true}
+        calls (atom [])]
+    (with-redefs [process/read-process (fn [_ _] record)
+                  process/pod-application-evidence
+                  (fn [_ _ deadline]
+                    (swap! calls conj [:pod-application deadline])
+                    {:seon.dev.process/application-error
+                     :seon.dev.process.application-error/quiesce-failed})
+                  process/stop!
+                  (fn [_ id selected deadline]
+                    (is (= record selected))
+                    (swap! calls conj [id deadline])
+                    nil)]
+      (process/clean-or-force!
+       {:seon.dev.process/configuration
+        (assoc (operator-config) :seon.dev.config/environment
+               {"SEON_TURN_TIMEOUT_MS" "10"})
+        :seon.dev.process/operation :seon.dev.process.operation/restart
+        :seon.dev.process/targets
+        #{process/watcher-id process/writer-id process/pod-id}})
+      (is (= [:pod-application
+              process/pod-id process/writer-id process/watcher-id]
+             (mapv first @calls)))
+      (is (= 1 (count (set (map second @calls))))))))
+
+(defn- serve-one-lifecycle-response! [server status body observed]
+  (future
+    (with-open [socket (.accept server)
+                reader (BufferedReader.
+                        (InputStreamReader. (.getInputStream socket)))]
+      (let [request-line (.readLine reader)
+            headers
+            (loop [values []]
+              (let [line (.readLine reader)]
+                (if (str/blank? line)
+                  values
+                  (recur (conj values line)))))]
+        (reset! observed {:request-line request-line :headers headers})
+        (let [content (.getBytes body java.nio.charset.StandardCharsets/UTF_8)
+              response
+              (str "HTTP/1.1 " status " Test\r\n"
+                   "Content-Type: application/edn\r\n"
+                   "Content-Length: " (alength content) "\r\n"
+                   "Connection: close\r\n\r\n")
+              output (.getOutputStream socket)]
+          (.write output (.getBytes response
+                                    java.nio.charset.StandardCharsets/UTF_8))
+          (.write output content)
+          (.flush output))))))
+
+(deftest bounded-quiesce-client-uses-one-closed-loopback-edn-response
+  (let [directory (fs/create-temp-dir {:prefix "seon-quiesce-http-"})
+        port-file (str (fs/path directory "pod-port"))
+        coordinate
+        {:seon.db.coordinate/database-id (random-uuid)
+         :seon.db.coordinate/branch :db
+         :seon.db.coordinate/commit-id (random-uuid)
+         :seon.db.coordinate/t 42}
+        response
+        {:seon.client/quiesced? true
+         :seon.db.coordinate/coordinate coordinate
+         :seon.client/quiesced-run-ids []
+         :seon.client/completed-turn-ids []
+         :seon.client/errored-turn-ids []
+         :seon.agent.runtime/unhosted-ids []}
+        configuration {:seon.dev.config/http-port-file port-file}]
+    (try
+      (with-open [server (ServerSocket. 0)]
+        (spit port-file (str (.getLocalPort server)))
+        (let [observed (atom nil)
+              served (serve-one-lifecycle-response!
+                      server 200 (str (pr-str response) "\n") observed)
+              value (#'process/bounded-quiesce-post!
+                     configuration (+ (#'process/monotonic-ms) 5000))]
+          @served
+          (is (= response value))
+          (is (= "POST /_seon/operator/quiesce HTTP/1.1"
+                 (:request-line @observed)))
+          (is (some #(= "Accept: application/edn" %)
+                    (:headers @observed)))))
+      (with-open [server (ServerSocket. 0)]
+        (spit port-file (str (.getLocalPort server)))
+        (let [served (serve-one-lifecycle-response!
+                      server 200 (str (pr-str response) " {}") (atom nil))]
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo
+               #"trailing data"
+               (#'process/bounded-quiesce-post!
+                configuration (+ (#'process/monotonic-ms) 5000))))
+          @served))
+      (with-open [server (ServerSocket. 0)]
+        (spit port-file (str (.getLocalPort server)))
+        (let [served (serve-one-lifecycle-response!
+                      server 409 (pr-str response) (atom nil))]
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo
+               #"status contradicts"
+               (#'process/bounded-quiesce-post!
+                configuration (+ (#'process/monotonic-ms) 5000))))
+          @served))
+      (finally (fs/delete-tree directory {:force true})))))
+
+(deftest pod-quiesce-retries-only-one-typed-retryable-result
+  (let [calls (atom 0)
+        generation (random-uuid)
+        record {:seon.dev.process/id process/pod-id
+                :seon.dev.process/containment
+                {:seon.dev.process.containment/generation generation}}]
+    (with-redefs [process/containment-live? (constantly true)
+                  process/bounded-quiesce-post!
+                  (fn [_ _]
+                    (if (= 1 (swap! calls inc))
+                      {:seon.client/quiesced? false
+                       :seon.client/quiesce-error "retry"
+                       :seon.runtime.lifecycle/process-generation
+                       (str generation)}
+                      {:seon.client/quiesced? true
+                       :seon.runtime.lifecycle/process-generation
+                       (str generation)}))]
+      (is (= {:seon.dev.process/application-result
+              {:seon.client/quiesced? true
+               :seon.runtime.lifecycle/process-generation (str generation)}}
+             (#'process/pod-application-evidence
+              {} record (+ (#'process/monotonic-ms) 5000))))
+      (is (= 2 @calls)))))
+
+(deftest clean-or-force-rejects-empty-and-unknown-targets
+  (doseq [request
+          [{:seon.dev.process/configuration {}
+            :seon.dev.process/operation :seon.dev.process.operation/down
+            :seon.dev.process/targets #{}}
+           {:seon.dev.process/configuration {}
+            :seon.dev.process/operation :seon.dev.process.operation/down
+            :seon.dev.process/targets #{:seon.dev.process/typo}}
+           {:seon.dev.process/configuration {}
+            :seon.dev.process/operation :seon.dev.process.operation/typo
+            :seon.dev.process/targets #{process/pod-id}}
+           {}]]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"request is invalid"
+                          (process/clean-or-force! request)))))
+
+(deftest stop-refuses-absence-when-an-unmanaged-door-is-accepting
+  (with-redefs [process/read-process (constantly nil)
+                process/accepting-unmanaged? (constantly true)]
+    (doseq [id process/target-processes]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"accepting without a managed record"
+           (process/stop! {} id))))))
+
+(deftest stop-refuses-a-generation-swap-before-drain
+  (let [expected {:seon.dev.process/id process/pod-id}
+        replacement {:seon.dev.process/id process/pod-id
+                     :seon.dev.process/pid 999}]
+    (with-redefs [process/read-process (constantly replacement)]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"generation changed"
+           (process/stop! {} process/pod-id expected))))))
+
+(deftest pod-quiesce-rejects-a-crossed-generation
+  (let [generation (random-uuid)
+        record
+        {:seon.dev.process/id process/pod-id
+         :seon.dev.process/containment
+         {:seon.dev.process.containment/generation generation}}]
+    (with-redefs [process/containment-live? (constantly true)
+                  process/bounded-quiesce-post!
+                  (fn [_ _]
+                    {:seon.client/quiesced? true
+                     :seon.runtime.lifecycle/process-generation
+                     (str (random-uuid))})]
+      (is (= :seon.dev.process.application-error/quiesce-failed
+             (:seon.dev.process/application-error
+              (#'process/pod-application-evidence
+               {} record (+ (#'process/monotonic-ms) 5000))))))))
 
 (deftest dead-workload-drains-a-term-ignoring-descendant-before-replacement
   (let [configuration (test-config)
@@ -1161,7 +1371,10 @@
       (spit port-file (str port))
       (is (thrown? Exception (process/ensure! configuration spec)))
       (is (fs/regular-file? port-file))
-      (process/stop! configuration process/pod-id)
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"accepting without a managed record"
+           (process/stop! configuration process/pod-id)))
       (is (fs/regular-file? port-file))
       (finally
         (.destroyForcibly ^java.lang.Process (:proc server))

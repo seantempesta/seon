@@ -10,10 +10,16 @@
    [seon.schema :as schema]))
 
 (schema/register!
+ ::process-generation
+ [:and :string
+  [:re "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"]])
+
+(schema/register!
  ::quiesce-response
  [:or
   [:map {:closed true}
    [:seon.client/quiesced? [:= true]]
+   [::process-generation {:optional true} ::process-generation]
    [::coordinate/coordinate ::coordinate/coordinate]
    [:seon.client/quiesced-run-ids [:vector :string]]
    [:seon.client/completed-turn-ids [:vector :string]]
@@ -21,4 +27,5 @@
    [:seon.agent.runtime/unhosted-ids [:vector :string]]]
   [:map {:closed true}
    [:seon.client/quiesced? [:= false]]
+   [::process-generation {:optional true} ::process-generation]
    [:seon.client/quiesce-error :string]]])

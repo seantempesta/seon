@@ -662,6 +662,9 @@
     (let [previous-state @client/!state
           previous-admission @(deref #'admission/!state)
           previous-connection db/*conn*
+          previous-generation
+          (aget (.-env js/process) "SEON_PROCESS_GENERATION")
+          process-generation "6d295410-5883-4d9f-a532-8f7b71b9812a"
           connection (atom {})
           effects (atom [])
           work-call (atom 0)
@@ -682,6 +685,7 @@
           original-entity db/entity
           original-head db/head-coordinate
           original-release db/release-connection!]
+      (aset (.-env js/process) "SEON_PROCESS_GENERATION" process-generation)
       (set! db/*conn* connection)
       (reset! client/!state
               (assoc previous-state
@@ -770,7 +774,9 @@
                        ::client/quiesced-run-ids ["run-1"]
                        ::client/completed-turn-ids ["turn-1"]
                        ::client/errored-turn-ids []
-                       ::agent-runtime/unhosted-ids ["root"]}
+                       ::agent-runtime/unhosted-ids ["root"]
+                       :seon.runtime.lifecycle/process-generation
+                       process-generation}
                       result))
                (is (= :seon.client.runtime/quiesced
                       ((deref #'client/runtime-phase))))
@@ -798,6 +804,10 @@
                (set! db/entity original-entity)
                (set! db/head-coordinate original-head)
                (set! db/release-connection! original-release)
+               (if previous-generation
+                 (aset (.-env js/process) "SEON_PROCESS_GENERATION"
+                       previous-generation)
+                 (js-delete (.-env js/process) "SEON_PROCESS_GENERATION"))
                (set! db/*conn* previous-connection)
                (reset! client/!state previous-state)
                (reset! (deref #'admission/!state) previous-admission)

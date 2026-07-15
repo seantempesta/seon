@@ -10,15 +10,17 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (12)
+## Blocker (15)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Arbitrary eval allocation lacks hard process memory containment](eval-process-isolation-memory-containment.md) | blocker | agent |
+| [Bind clean-or-force evidence to one exact managed generation](clean-or-force-evidence-can-cross-or-falsely-report-absence.md) | blocker | Core |
 | [Capture dependencies when a lazy view unit activates](lazy-view-unit-activation-drops-read-observations.md) | blocker | UI |
 | [Carry one complete database coordinate through the protocol](database-protocol-coordinate-is-incomplete.md) | blocker | Core |
 | [Changed-test hooks can queue stale runs behind an active owner](changed-test-hooks-queue-stale-runs-behind-active-owner.md) | blocker | Core |
 | [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | blocker | agent |
+| [Enforce the eval render cap for failed diagnostics](failed-eval-diagnostics-bypass-render-cap.md) | blocker | agent |
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
 | [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
 | [Keep a stable owner until the pod execution subtree drains](dead-process-group-leader-blocks-safe-subtree-drain.md) | blocker | Core |
@@ -26,8 +28,9 @@ See `README.md` for the convention.
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
 | [Prove database workflow answers from retained query evidence](database-workflow-scorer-lacks-query-result-evidence.md) | blocker | agent |
 | [Reject infrastructure closes in every Inspect capability task](inspect-capability-solvers-score-infrastructure-closes.md) | blocker | agent |
+| [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
 
-## Friction (34)
+## Friction (33)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -39,7 +42,6 @@ See `README.md` for the convention.
 | [Autocomplete datasets and scoring bypass canonical runtime projections](autocomplete-data-quality-pipeline-drift.md) | friction | agent |
 | [Autocomplete worktrees contain unclassified database and model evidence](autocomplete-worktree-evidence-preservation.md) | friction | Core |
 | [Canvas controls hide pending and handler failure](canvas-controls-hide-pending-and-failure.md) | friction | UI |
-| [Coalesce superseded changed-test hook requests](changed-test-hook-backlog-is-not-coalesced.md) | friction | agent |
 | [Config apply rebuilds an unchanged runtime](config-apply-rebuilds-unchanged-runtime.md) | friction | general |
 | [Context block order is static](context-block-order-is-static.md) | friction | agent |
 | [Cross-agent planners can reopen worker-completed steps](plan-reopen-cross-agent-authority.md) | friction | agent |

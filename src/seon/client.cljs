@@ -2802,6 +2802,9 @@
                (set (::agent-runtime/unhosted-ids left))
                (set (::agent-runtime/unhosted-ids right)))))})
 
+(defn- process-generation []
+  (some-> js/process .-env (aget "SEON_PROCESS_GENERATION")))
+
 (defn ^:async ^:private drain-runtime-owners!
   "Drain every runtime owner below the optional HTTP listener inverse."
   [conn capability capture-coordinate?]
@@ -2841,11 +2844,17 @@
              ::quiesce-progress)
       (cond->
        (assoc progress ::quiesced? true)
-        coordinate (assoc ::db.coordinate/coordinate coordinate)))))
+        coordinate (assoc ::db.coordinate/coordinate coordinate)
+        (process-generation)
+        (assoc ::runtime.lifecycle/process-generation
+               (process-generation))))))
 
 (defn- quiesce-failure
   [message]
-  {::quiesced? false ::quiesce-error message})
+  (cond-> {::quiesced? false ::quiesce-error message}
+    (process-generation)
+    (assoc ::runtime.lifecycle/process-generation
+           (process-generation))))
 
 (defn ^:async quiesce-runtime!
   "Drain this pod and return its final complete database coordinate.
