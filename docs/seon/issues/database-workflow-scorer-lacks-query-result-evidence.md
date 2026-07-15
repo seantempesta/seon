@@ -74,3 +74,33 @@ canonical observation vector, attach its blob lookup ref in the same accepted
 eval transaction, and preserve attribute absence for an eval with no database
 operations. No downstream door or scorer may consume this process-local value
 until that link exists.
+
+## Persistence checkpoint — 2026-07-15
+
+`record-eval!` now publishes every nonempty ordered operation vector as
+byte-stable, round-trippable EDN through the one `my.blob` authority and stores
+`:seon.eval/database-operations-blob` as a lookup ref in the same accepted
+allocation transaction as the eval identity. Canonical serialization orders
+maps and sets by type-tagged canonical bytes without rebuilding them through a
+comparator collection, so distinct entries cannot be collapsed. Lists,
+vectors, sets, mixed map keys, and normalized scalar tags retain their EDN
+types on read-back.
+
+An eval with no database operations has no evidence attribute. A blob
+publication failure records the eval as failed with a bounded core error and no
+evidence ref; it cannot masquerade as a successful query. A captured
+`:seon.db/operation-ok? false` transaction remains false in the full retained
+vector even when the database function call itself returned normally.
+
+Focused proof reads the blob hash from an immutable database value, verifies
+that the eval identity datom and evidence-ref datom share one transaction,
+round-trips the complete ordered vector, preserves failed transaction evidence,
+and proves absence for an ordinary arithmetic eval. Composition-door
+projection and Inspect scoring remain the next clean boundary; this issue stays
+open until their offline discrimination fixtures and admitted live sample are
+green.
+
+The exact persistence gate is green: three focused tests, ten assertions. It
+also proves that a publication failure records an eval failure without a blob
+ref and that two equivalent mixed-key/set values constructed in different
+orders produce identical bytes before round-trip.

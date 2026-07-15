@@ -54,6 +54,7 @@
             [clojure.string :as str]
             [goog.object :as gobj]
             [malli.core :as m]
+            [my.blob :as blob]
             [shadow.cljs.bootstrap.node :as boot]
             [seon.agent.home :as home]
             [seon.ai.tokens :as tokens]
@@ -110,6 +111,9 @@
 (schema/register! :seon.eval/ns :keyword)
 ;; Optional direct ref to the agent whose scope produced the eval.
 (schema/register! :seon.eval/agent :seon.db/ref)
+;; Full ordered database-operation evidence lives in the content-addressed
+;; blob tier. Absence means this eval observed no database operations.
+(schema/register! :seon.eval/database-operations-blob :seon.db/ref)
 
 
 ;; ============================================================
@@ -3228,6 +3232,68 @@
                      db.protocol/committed-status}
                    transaction-status))))
 
+(declare canonical-edn)
+
+(defn- canonical-order-key
+  "Injective sort key for normalized EDN values."
+  [value]
+  [(cond
+     (nil? value) "00-nil"
+     (boolean? value) "01-boolean"
+     (number? value) "02-number"
+     (string? value) "03-string"
+     (keyword? value) "04-keyword"
+     (symbol? value) "05-symbol"
+     (vector? value) "06-vector"
+     (list? value) "07-list"
+     (set? value) "08-set"
+     (map? value) "09-map"
+     :else "10-tagged-scalar")
+   (canonical-edn value)])
+
+(defn- canonical-edn
+  "Serialize normalized data to byte-stable, round-trippable EDN."
+  [value]
+  (cond
+    (map? value)
+    (str "{"
+         (str/join " "
+                   (map (fn [[k v]]
+                          (str (canonical-edn k) " " (canonical-edn v)))
+                        (sort-by (fn [[k v]]
+                                   [(canonical-order-key k)
+                                    (canonical-order-key v)])
+                                 value)))
+         "}")
+
+    (set? value)
+    (str "#{"
+         (str/join " "
+                   (map canonical-edn
+                        (sort-by canonical-order-key value)))
+         "}")
+
+    (vector? value)
+    (str "[" (str/join " " (map canonical-edn value)) "]")
+
+    (list? value)
+    (str "(" (str/join " " (map canonical-edn value)) ")")
+
+    :else (pr-str value)))
+
+(defn- ^:async persist-database-operations!
+  "Persist one nonempty ordered operation vector as canonical EDN bytes."
+  [operations]
+  (let [{ok? :my.blob/ok? hash :my.blob/hash error :my.blob/error}
+        (await
+          (blob/put! {:my.blob/content
+                      (canonical-edn (vec operations))
+                      :my.blob/media :edn}))]
+    (if ok?
+      {::database-operations-blob [:my.blob/hash hash]}
+      {::database-operations-error
+       (str "database operation evidence was not persisted: " error)})))
+
 (defn ^:async record-eval!
   "Allocate and transact one eval as a component child of its turn.
 
@@ -3248,7 +3314,20 @@
             database-operations]
     turn-id :seon.agent.turn/id-of-turn
     ns      ::ending-ns}]
-  (let [result (if (and (::ok? result) (not pending?))
+  (let [operation-publication
+        (when (seq database-operations)
+          (await (persist-database-operations! database-operations)))
+        operation-publication-error (::database-operations-error
+                                      operation-publication)
+        result (if operation-publication-error
+                 {::ok? false
+                  :seon/error
+                  {:seon.error/kind :core
+                   :seon.error/message operation-publication-error
+                   :seon.error/data
+                   {:seon.eval/database-operation-evidence? true}}}
+                 result)
+        result (if (and (::ok? result) (not pending?))
                  (update result ::value admit-result-value)
                  result)
         conn db/*conn*
@@ -3264,6 +3343,10 @@
                                           (keyword (str ns)))}
           aid
           (assoc :seon.eval/agent [:seon.agent/id aid])
+
+          (::database-operations-blob operation-publication)
+          (assoc :seon.eval/database-operations-blob
+                 (::database-operations-blob operation-publication))
 
           (and (string? output) (not (str/blank? output)))
           (assoc :seon.eval/output (cap-edn output))
@@ -3319,9 +3402,6 @@
         {:seon.db/ok? true
          :seon.eval/id (get-in primary [::db.id/ids ::eval-allocation])
          ::tee-recorded? true}
-        (seq database-operations)
-        (assoc ::database-operations database-operations)
-
         (and (::ok? result) (not pending?))
         (assoc ::retained-value (::value result)))
       (do
@@ -3361,9 +3441,6 @@
                   {:seon.db/ok? true
                    :seon.eval/id eval-id
                    ::tee-recorded? false}
-                  (seq database-operations)
-                  (assoc ::database-operations database-operations)
-
                   (and (::ok? result) (not pending?))
                   (assoc ::retained-value (::value result))))
               (do

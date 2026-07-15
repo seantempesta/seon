@@ -26,9 +26,13 @@
      (require 'seon.eval.record-eval-tee-test :reload)
      (cljs.test/run-tests 'seon.eval.record-eval-tee-test)"
   (:require
+    ["node:fs" :as nfs]
+    ["node:path" :as npath]
+    [cljs.reader :as reader]
     [cljs.test :as t :refer [deftest is testing async]]
     [clojure.string :as str]
     [datahike.api :as d]
+    [my.blob :as blob]
     [seon.agent]                          ; :seon.eval/:seon.agent.turn/:seon.ns/:seon.schema registrations
     [seon.agent.turn :as turn]
     [seon.analyzer-info :as analyzer-info]
@@ -138,6 +142,149 @@
               (seval/record-eval!
                 (assoc args :seon.agent.turn/id-of-turn turn-id)))))
         (.finally (fn [] (set! db/*conn* previous))))))
+
+(defn- with-operation-blob-view
+  "Run an async fixture against one isolated writable blob directory."
+  [body]
+  (let [directory (.resolve npath
+                            (str "tmp/eval-operation-evidence-"
+                                 (.-pid js/process) "-" (random-uuid)))
+        previous @blob/!storage-view]
+    (.mkdirSync nfs directory #js {:recursive true})
+    (reset! blob/!storage-view
+            {:my.blob/writable-dir directory
+             :my.blob/read-only-dirs []})
+    (-> (js/Promise.resolve (body))
+        (.finally
+          (fn []
+            (reset! blob/!storage-view previous)
+            (.rmSync nfs directory #js {:recursive true :force true}))))))
+
+(def operation-evidence-fixture
+  [{:seon.db/read-operation :seon.db.read.operation/transact
+    :seon.db/operation-position 0
+    :seon.db/operation-ok? false
+    :seon.db/read-source :seon.db.read.source/captured
+    :seon.db/read-request
+    {:seon.db/tx-data [{:fixture.measure/id "one"
+                        :fixture.measure/value 7}]}
+    :seon.db/read-result
+    {:seon.db/ok? false
+     :seon.db/error {:seon.error/message "fixture rejection"}}
+    :seon.db/read-replayable? false}
+   {:seon.db/read-operation :seon.db.read.operation/query
+    :seon.db/operation-position 1
+    :seon.db/operation-ok? true
+    :seon.db/read-source :seon.db.read.source/captured
+    :seon.db/read-request
+    {:seon.db/query '[:find (sum ?value) .
+                      :where [_ :fixture.measure/value ?value]]
+     :seon.db/args []}
+    :seon.db/read-result 7
+    :seon.db/read-replayable? true}])
+
+(declare eval-args)
+
+(defn- assert-persisted-operation-evidence! [conn recorded]
+  (let [eval-id (:seon.eval/id recorded)
+        frozen-db @conn
+        [hash eval-t ref-t]
+        (d/q
+          '[:find [?hash ?eval-t ?ref-t]
+            :in $ ?id
+            :where
+            [?eval :seon.eval/id ?id ?eval-t]
+            [?eval :seon.eval/database-operations-blob ?blob ?ref-t]
+            [?blob :my.blob/hash ?hash]]
+          frozen-db eval-id)
+        readback (blob/get {:my.blob/hash hash})
+        operations (reader/read-string (:my.blob/content readback))]
+    (is (= eval-t ref-t) "eval identity and evidence ref commit atomically")
+    (is (true? (:my.blob/ok? readback)))
+    (is (= operation-evidence-fixture operations)
+        "the immutable DB ref resolves full ordered bytes")
+    (is (false? (:seon.db/operation-ok? (first operations)))
+        "a failed transaction remains failed evidence")))
+
+(defn- persisted-operation-evidence-flow! []
+  (-> (open-agent-conn!)
+      (.then
+        (fn [conn]
+          (-> (record!
+                conn
+                (assoc (eval-args "(fixture-operation)" [])
+                       :seon.eval/database-operations
+                       operation-evidence-fixture))
+              (.then
+                (fn [recorded]
+                  (assert-persisted-operation-evidence! conn recorded)
+                  (record! conn (eval-args "(+ 1 1)" []))))
+              (.then
+                (fn [absence]
+                  (is (nil?
+                        (d/q
+                          '[:find ?hash .
+                            :in $ ?id
+                            :where
+                            [?eval :seon.eval/id ?id]
+                            [?eval :seon.eval/database-operations-blob ?blob]
+                            [?blob :my.blob/hash ?hash]]
+                          @conn (:seon.eval/id absence)))
+                      "no operation preserves attribute absence"))))))))
+
+(deftest record-eval-persists-ordered-database-operation-evidence
+  (async done
+    (-> (with-operation-blob-view persisted-operation-evidence-flow!)
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest canonical-operation-edn-is-byte-stable-and-round-trippable
+  (let [canonical-edn @#'seval/canonical-edn
+        left [{:mixed/map (array-map :keyword #{3 1 2}
+                                     "string" '(b a)
+                                     9 [:v])}]
+        right [{:mixed/map (array-map 9 [:v]
+                                      "string" '(b a)
+                                      :keyword #{2 3 1})}]
+        left-bytes (canonical-edn left)
+        right-bytes (canonical-edn right)]
+    (is (= left-bytes right-bytes))
+    (is (= left (reader/read-string left-bytes))
+        "mixed keys, sets, lists, and vectors preserve exact EDN types")))
+
+(deftest operation-evidence-publication-failure-cannot-record-eval-success
+  (async done
+    (let [original blob/put!]
+      (set! blob/put!
+            (fn [_]
+              (js/Promise.resolve
+                {:my.blob/ok? false :my.blob/error "fixture disk failure"})))
+      (-> (open-agent-conn!)
+          (.then
+            (fn [conn]
+              (-> (record!
+                    conn
+                    (assoc (eval-args "(fixture-operation)" [])
+                           :seon.eval/database-operations
+                           operation-evidence-fixture))
+                  (.then
+                    (fn [recorded]
+                      (let [frozen-db @conn
+                            row (d/pull frozen-db
+                                        '[:seon.eval/ok?
+                                          :seon.eval/error
+                                          {:seon.eval/database-operations-blob
+                                           [:my.blob/hash]}]
+                                        [:seon.eval/id
+                                         (:seon.eval/id recorded)])]
+                        (is (false? (:seon.eval/ok? row)))
+                        (is (str/includes? (:seon.eval/error row)
+                                           "database operation evidence was not persisted"))
+                        (is (nil? (:seon.eval/database-operations-blob row))
+                            "failed publication cannot create query proof")))))))
+          (.finally (fn [] (set! blob/put! original)))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
 (defn- candidate-conflict
   "The writer envelope for an exact allocator-owned candidate conflict."
