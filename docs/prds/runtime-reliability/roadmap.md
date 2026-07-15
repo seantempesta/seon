@@ -123,26 +123,25 @@ contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Keep unit 1 as the ordered spine while reviewing two implementation returns and one next-consumer audit:** retained-branch interruption, isolated-diagnostic schema parity, and branch CLI/status/MCP plus live proof | Ordinary startup interruption is integrated through `fbb8c399`; reverse-routing soundness through `afc70d3f`; Inspect evidence through `1d6f12c8`; and the unit-6 parent capability/child lifecycle contract through `f2c1f1c8`. These completed lanes are evidence, not still-active work | Integrate or reject each live return, update its owning PRD/issue, and immediately refill from the earliest dependency-ready boundary. After retained-branch proof, consume the source-grounded CLI/status/MCP audit and run the first live create/write/restart/close transition |
-| Database lifecycle | **Retained branch open is consuming the settled signal-safe startup inverse:** prove interruption before/through pod publication and during readiness without claiming a converged pod or branch | Typed UDS (`ce342572`), crash-safe adoption (`e7bd160c`), retained pod lifecycle (`74bfa7e2`), and ordinary interruption (`fbb8c399`) are integrated. The active lane is restricted to branch/process ownership and its real signal gate | Expose the settled branch lifecycle through CLI/status/MCP, then run live create/write/restart/close. Continue unit 1 through default restart/crash, restore/undo, and multi-form failure proof in that order |
+| Top-level integration | **Keep unit 1 as the ordered spine while integrating the public branch operator and descriptor-driven MCP lanes** | Retained-branch interruption is integrated through `c95f8e03`; diagnostic schema parity through `56bf7818` and `1e1f0f8e`; and the exact CLI/status/MCP/live-gate audit through `ca9ec25a`. The top level owns cross-lane review, source-frozen gates, live default proof, and full-ledger reconciliation | Review both implementation returns against the audit, run the combined operator and CLJS gates from one artifact, then execute the default create/write/pod-restart/read/close proof. Refill from default restart/crash only after that checkpoint settles |
+| Database lifecycle | **Public retained branch ownership is split across two non-overlapping implementations:** branch/process/CLI and client/MCP discovery | Typed UDS (`ce342572`), crash-safe adoption (`e7bd160c`), retained pod lifecycle (`74bfa7e2`), ordinary interruption (`fbb8c399`), and retained interruption (`c95f8e03`) settle the mutation and inverse owners. `ca9ec25a` fixes the required identity projection and acceptance matrix | Integrate the two public-boundary returns without adding a registry or lifecycle owner, then run live create/write/restart/close. Continue unit 1 through default restart/crash, restore/undo, and multi-form failure proof in that order |
 | Reactive/database views | **Implementation and replay-all soundness oracle are complete; live browser/feed proof waits for the next source-frozen checkpoint** | `365052f0` lands candidate-only routing; `afc70d3f` proves six retained read shapes against every nonempty combination of seven actual transactions. The exact gate passes 1 test/10 assertions | Refill only after the unit-1 source checkpoint: prove gzip/SSE sharing, related/unrelated updates, and release in a real browser, then continue unit-2 consumer migration |
-| Agent runtime correctness | **Isolated diagnostic schema parity is complete; the child-containment contract is complete but production implementation waits on unit 1** | `open-agent-conn!` now persists canonical schema facts under boot provenance, all diagnostic/speculative relinks were removed, and the exact replay→auto-refer order passes two tests/nine assertions. Receipt/recovery Slice A remains complete at `defb8014`; `f2c1f1c8` defines one parent-owned child handle/capability and the dead-leader subtree prerequisite | Production child work waits for unit-1 backend descriptor plus old-subtree absence; the named planner/small-executor trial remains a later unit-7 gate |
+| Agent runtime correctness | **The child-containment contract is integrated and its dead-leader subtree prerequisite is under source-grounded audit; production implementation still waits on unit 1** | Diagnostic schema parity is complete. Receipt/recovery Slice A remains complete at `defb8014`; `f2c1f1c8` defines one parent-owned child handle/capability. The active audit is restricted to proving safe old-subtree absence without trusting a recycled leader PID/PGID | Integrate the audit as evidence or an explicit prerequisite. Production child work waits for unit-1 backend descriptor plus a settled subtree proof; the named planner/small-executor trial remains a later unit-7 gate |
 
 Current scheduling card:
 
-1. **Ordered spine:** retained-branch interruption → CLI/status/MCP → live
+1. **Ordered spine:** public branch/process/CLI plus descriptor-driven MCP → live
    create/write/restart/close → default restart/crash → restore/undo →
    multi-form failure proof.
-2. **Parallel lane A:** isolated diagnostic database/schema-fact parity is
-   complete; refill after integration with the next dependency-ready unit-1
-   proof rather than reopening the resolved projection investigation.
-3. **Parallel lane B:** the parent capability/child launch/deadline/kill/reap
-   contract is integrated at `f2c1f1c8`; production code waits for unit 1's
-   stable backend descriptor and dead-leader subtree proof.
-4. **Parallel lane C:** audit branch CLI/status/MCP and the first live branch
-   journey while retained-branch signal ownership finishes. Reverse routing
-   and Inspect evidence remain complete; their next implementations wait for
-   source freeze and unit 6 respectively.
+2. **Parallel lane A:** implement only retained request derivation, inventory,
+   status, pod-only restart, external-dependency health, and the four public
+   CLI commands through the existing branch/process owners.
+3. **Parallel lane B:** implement only descriptor-owned runtime/writer
+   advertisement and advertisement-driven CLJS/CLJ MCP selection; do not infer
+   a branch-local writer or introduce a membership registry.
+4. **Parallel lane C:** finish the dead-leader subtree audit needed by the
+   already-integrated parent capability/child launch/deadline/kill/reap
+   contract. Production containment waits for unit 1 and this proof.
 5. **Final admission:** unit 9 remains blocked on integrated units 1–8 and is
    the only place for destructive simultaneous-cluster, performance, and
    authorized legacy-worktree cleanup proof.
@@ -155,11 +154,10 @@ The ordered top-level sequence is therefore:
 3. **Complete:** non-autonomous runtime stop/start plus closed launch, replica,
    client, blob consumption, and retained pod-only branch ownership are
    integrated through `74bfa7e2`;
-4. **In progress:** ordinary SIGINT ownership is complete in `fbb8c399`; wire
-   the same inverse into retained branch open, expose the settled lifecycle
-   through CLI/status/MCP, run the first live create/write/restart/close
-   transition, and continue through restart/crash, restore/undo, and
-   multi-form proof;
+4. **In progress:** ordinary and retained SIGINT ownership are complete in
+   `fbb8c399` and `c95f8e03`; integrate the two public CLI/status/MCP ownership
+   slices, run the first live create/write/restart/close transition, and
+   continue through restart/crash, restore/undo, and multi-form proof;
 5. graduate units 2 and 6 from bounded consumers into their complete acceptance
    matrices while starting unit 3/4 only from their settled contracts;
 6. complete canvas, Inspect/autocomplete, and independent artifact consumption
@@ -193,13 +191,16 @@ next safe decisions, not a second architecture:
 2. treat `c60e698e`, `defb8014`, and `8d938d56` as the settled descriptor,
    receipt/recovery, and runner boundaries; do not reopen them to house the
    next lifecycle or render work;
-3. make the existing typed UDS call boundary Babashka-callable, then retain
-   source descriptor/create intent before implementing pod-owned native branch
-   create/close. Close from a freshly ensured target head, never the creation
-   coordinate, and never infer the source logical route from writer cluster;
-4. repair the exact activated-projection contaminant recorded by `10b7ac4f`
-   independently so later integrated/full gates carry valid schema authority;
-5. after real create/close proof, continue unit 1 through default
+3. treat typed UDS, exact retained source/create intent, pod-owned native
+   branch create/close, and both interruption inverses as settled. Close from a
+   freshly ensured target head, never the creation coordinate, and never infer
+   the source logical route from writer cluster;
+4. treat diagnostic schema parity as settled by `56bf7818` and `1e1f0f8e`;
+   do not reopen speculative registry relinking unless new evidence falsifies
+   the canonical-fact repair;
+5. integrate public branch lifecycle and descriptor-driven MCP discovery, run
+   the source-frozen operator/CLJS and real default branch gates, then continue
+   unit 1 through default
    restart/crash, restore/undo, and multi-form failure proof in that order; and
 6. keep the remaining slots on reverse render-unit selection, Inspect task/
    scorer grounding, and downstream artifact work that consumes only settled

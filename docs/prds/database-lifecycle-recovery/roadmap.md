@@ -131,10 +131,21 @@ failure. The branch-only gate passes 4 tests/61 assertions. Evidence is in
 [[research/retained-branch-sigint-ownership-2026-07-15]]. The exact combined
 branch/CLI/process checkpoint passes 34 tests/190 assertions.
 
-The next dependency-ordered slice is public ownership: expose the settled
-internal branch transition through CLI/status/MCP without changing its inverse.
-A real default plus ACME create/write/restart/close checkpoint follows before
-the restart/crash matrix.
+The next dependency-ordered slice is public ownership. The source-grounded
+audit at
+[[research/branch-cli-status-mcp-live-gate-audit-2026-07-15]] fixes one runtime
+identity across retained branch state, external process health, the public
+operator, runtime advertisement, and CLJ/CLJS MCP discovery. Implementation is
+split across non-overlapping branch/process/CLI and client/MCP owners while the
+top level owns the combined source-frozen gate. It must not add a lifecycle or
+membership registry, guess a branch-local writer port, or label the immutable
+creation cut as the current head.
+
+The first live checkpoint is default-only create/write/branch-pod-restart/read/
+close while the source watcher and writer retain their identities. ACME remains
+untouched until this default proof and the later restart/crash gates settle;
+simultaneous default/ACME proof remains a final coordinated admission gate, not
+part of this public-boundary slice.
 
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in
