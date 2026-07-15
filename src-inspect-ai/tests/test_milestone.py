@@ -15,7 +15,9 @@ import pytest
 from seon_inspect.milestone import (DB_MEMORY_CONTRACT, NS_MOVEMENT_CONTRACT,
                                     check_milestone, check_ns_movement,
                                     check_store_recall, count_fabrication,
-                                    fabrication_summary, run_milestone_sample)
+                                    fabrication_summary,
+                                    pod_milestone_driver,
+                                    run_milestone_sample)
 
 
 def _ev(*sources_ok):
@@ -128,6 +130,50 @@ def test_store_recall_answer_absent_fails():
         _DB_GOOD_ROWS, "I stored the caches.")["failures"]
 
 
+def test_generated_database_workflow_uses_structured_oracle():
+    from seon_inspect.generators import generate_rows
+
+    sample = generate_rows("database_workflow", 1, 1)[0]
+    oracle = sample["metadata"]["oracle"]
+    identity = oracle["identity_attr"]
+    measure = oracle["measure_attr"]
+    rows = _ev(
+        (f"(schema/register! {identity} [:string {{:seon.db/identity true}}])", True),
+        (f"(schema/register! {measure} :int)", True),
+        (f"(db/transact! [{{{identity} \"a\" {measure} 12}}])", True),
+        (f"(db/query '[:find (sum ?v) . :where [?e {measure} ?v]])", True),
+    )
+    result = check_milestone("db", rows, oracle["answer"], oracle)
+    assert result["ok"], result["failures"]
+    assert all(result["checks"].values())
+    assert "schema_register" in result["checks"]
+
+
+def test_generated_namespace_workflow_uses_structured_oracle():
+    from seon_inspect.generators import generate_rows
+
+    sample = generate_rows("namespace_workflow", 2, 1)[0]
+    oracle = sample["metadata"]["oracle"]
+    schema_ns = oracle["schema_namespace"]
+    function_ns = oracle["function_namespace"]
+    function_name = oracle["function_name"]
+    rows = _ev(
+        (f"(in-ns '{schema_ns})", True),
+        (f"(schema/register! {oracle['schema_attr']} "
+         "[:string {:seon.db/identity true}])", True),
+        (f"(in-ns '{function_ns})", True),
+        (f"(defn {function_name} [x] (* x 2.20))", True),
+        ("(require '[clojure.string :as str])", True),
+        (f"(defn {function_name} [x] (* x {oracle['precise_literal']}))", True),
+    )
+    reply = f"{oracle['source_total']} and {oracle['converted_total']}"
+    result = check_milestone("namespaces", rows, reply, oracle)
+    assert result["ok"], result["failures"]
+    forked = rows + _ev((f"(defn {function_name}-v2 [x] x)", True))
+    assert "no_parallel_fork" in check_milestone(
+        "namespaces", forked, reply, oracle)["failures"]
+
+
 def test_check_milestone_dispatch_and_unknown():
     assert check_milestone("db", _DB_GOOD_ROWS, _DB_GOOD_REPLY)["ok"]
     assert check_milestone("namespaces", _NS_GOOD_ROWS, _NS_GOOD_REPLY)["ok"]
@@ -190,3 +236,47 @@ def test_run_milestone_sample_wires_effects():
     assert res["eval_rows"] == _DB_GOOD_ROWS
     assert not res["fabrication"]["fabricated"]
     assert check_store_recall(res["eval_rows"], res["reply"])["ok"]
+
+
+def test_pod_driver_uses_explicit_static_coordinates(monkeypatch):
+    calls = {}
+
+    def fake_run(text, timeout_ms, url):
+        calls["run"] = (text, timeout_ms, url)
+        return {"reply": _DB_GOOD_REPLY, "agent_id": "a-static"}
+
+    def fake_fetch(cluster, agent_id, *, port=None):
+        calls["fetch"] = (cluster, agent_id, port)
+        return _DB_GOOD_ROWS
+
+    monkeypatch.setattr("seon_inspect.solver.pod_run", fake_run)
+    monkeypatch.setattr("seon_inspect.planning.fetch_eval_rows", fake_fetch)
+    monkeypatch.setattr("seon_inspect.cluster.assert_llm_live",
+                        lambda cluster: calls.setdefault("live", cluster))
+    result = pod_milestone_driver(
+        DB_MEMORY_CONTRACT, "db",
+        cluster_url="http://127.0.0.1:7994/agents/run",
+        cluster_name="acme", writer_port=7991, timeout_ms=1234)
+
+    assert calls["run"] == (DB_MEMORY_CONTRACT, 1234,
+                            "http://127.0.0.1:7994/agents/run")
+    assert calls["fetch"] == ("acme", "a-static", 7991)
+    assert calls["live"] == "acme"
+    assert result["cluster"] == "acme"
+
+
+def test_generated_milestone_task_requires_and_records_static_target():
+    from seon_inspect.tasks.milestone_lift import milestone_lift
+
+    with pytest.raises(ValueError, match="explicit cluster_url"):
+        milestone_lift(milestone="db", endpoint="pod", seed=1)
+
+    task = milestone_lift(
+        milestone="db", endpoint="pod", seed=1, positions=[0], epochs=1,
+        cluster_url="http://127.0.0.1:7994/agents/run",
+        cluster_name="acme", writer_port=7991)
+    assert len(task.dataset) == 1
+    sample = task.dataset[0]
+    assert sample.id == "database_workflow-seed1-000"
+    assert sample.metadata["milestone"] == "db"
+    assert sample.metadata["oracle"]["measure_attr"].startswith(":my.")

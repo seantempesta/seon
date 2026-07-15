@@ -206,6 +206,8 @@ EXTERNAL_SOURCES: dict[str, dict[str, Any]] = {
 # reserves its canary GUID so the CI guard covers them from day one. Sizes
 # from eval-design "Capability rows".
 BESPOKE_ROWS: dict[str, dict[str, Any]] = {
+    "database_workflow": {"dev_n": 1, "epochs": 1},
+    "namespace_workflow": {"dev_n": 1, "epochs": 1},
     "memory_store_recall": {"dev_n": 10, "epochs": 4},
     "long_term_planning": {"dev_n": 10, "epochs": 4},
     "clojure_codegen_specs": {"dev_n": 10, "epochs": 4},
@@ -624,8 +626,8 @@ class DevSplit:
     def __repr__(self) -> str:
         return f"<DevSplit {self.source} n={self.n} ids={self.sample_ids!r}>"
 
-    def _eval_sample_ids(self) -> list[Any]:
-        return list(self.sample_ids)
+    def _eval_sample_ids(self, positions: list[int] | None = None) -> list[Any]:
+        return _position_subset(self.sample_ids, positions)
 
 
 class MilestoneSplit:
@@ -649,9 +651,9 @@ class MilestoneSplit:
     def __repr__(self) -> str:
         return f"<MilestoneSplit {self.source} n={self.n} aggregate-only>"
 
-    def _eval_sample_ids(self) -> list[Any]:
+    def _eval_sample_ids(self, positions: list[int] | None = None) -> list[Any]:
         # For the harness runner only — per-sample RESULTS stay uninspected.
-        return list(self.__sample_ids)
+        return _position_subset(self.__sample_ids, positions)
 
 
 class TestSplit:
@@ -673,8 +675,30 @@ class TestSplit:
     def __repr__(self) -> str:
         return f"<TestSplit {self.source} n={self.n} blind>"
 
-    def _eval_sample_ids(self) -> list[Any]:
-        return list(self.__sample_ids)
+    def _eval_sample_ids(self, positions: list[int] | None = None) -> list[Any]:
+        return _position_subset(self.__sample_ids, positions)
+
+
+def _position_subset(values: list[Any],
+                     positions: list[int] | None) -> list[Any]:
+    """Runner-private positional projection with no held-out representation.
+
+    Positions are canonicalized so membership is stable independent of caller
+    ordering. The containing split still controls whether IDs are iterable or
+    visible; milestone and test representations remain aggregate-only/blind.
+    """
+    if positions is None:
+        return list(values)
+    if not positions:
+        raise ValueError("positions must select at least one sample")
+    if any(isinstance(p, bool) or not isinstance(p, int) or p < 0
+           for p in positions):
+        raise ValueError("positions must be non-negative integers")
+    ordered = sorted(set(positions))
+    if ordered[-1] >= len(values):
+        raise ValueError(
+            f"position {ordered[-1]} outside split of {len(values)} samples")
+    return [values[p] for p in ordered]
 
 
 def load_split(
@@ -726,21 +750,27 @@ def run_split(
     *,
     lock_path: Path = DEFAULT_LOCK_PATH,
     formal_eval: bool = False,
+    positions: list[int] | None = None,
     task_kwargs: dict[str, Any] | None = None,
     **run_kwargs: Any,
 ):
-    """Run one frozen tier through run_bench (sample_id-filtered, limit off).
+    """Run one frozen tier through run_bench (sample-id filtered, limit off).
 
     test tier: injects the canary GUID into each test sample's METADATA
     (never the agent-visible input) before the run — a canary escaping into
     repo/context/config then trips the CI grep.
+
+    `positions` selects a deterministic subset inside this runner. Held-out
+    split objects remain non-iterable and redact IDs from their representation;
+    callers never need to reach into the private ID projection.
     """
     from seon_inspect.catalog import load_bench_task, run_bench
 
     split = load_split(source, tier, lock_path=lock_path, formal_eval=formal_eval)
     task = load_bench_task(source, **(task_kwargs or {}))
+    selected_ids = split._eval_sample_ids(positions)
     if tier == "test":
-        wanted = {str(i) for i in split._eval_sample_ids()}
+        wanted = {str(i) for i in selected_ids}
         for s in task.dataset:
             if str(s.id) in wanted:
                 if s.metadata is None:
@@ -750,7 +780,7 @@ def run_split(
         source,
         task=task,
         limit=None,
-        sample_id=split._eval_sample_ids(),
+        sample_id=selected_ids,
         **run_kwargs,
     )
 

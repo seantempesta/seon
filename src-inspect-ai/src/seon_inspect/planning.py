@@ -581,7 +581,8 @@ _EVALS_FORM = (
     " (println (str \"WIRE-JSON<\" (json/generate-string rows) \">WIRE-JSON\"))))")
 
 
-def fetch_eval_rows(cluster_name: str, agent_id: str) -> list[dict[str, Any]]:
+def fetch_eval_rows(cluster_name: str, agent_id: str, *,
+                    port: int | None = None) -> list[dict[str, Any]]:
     """The agent's eval rows `{source, ok, at_ms}` in eval (eid) order.
 
     Read over the wire-server socket REPL like the plan snapshot — the
@@ -589,7 +590,7 @@ def fetch_eval_rows(cluster_name: str, agent_id: str) -> list[dict[str, Any]]:
     from seon_inspect.cluster import wire_repl_json
 
     form = _EVALS_FORM % (cluster_name, json.dumps(agent_id))
-    rows = wire_repl_json(form)
+    rows = wire_repl_json(form, port=port)
     if not isinstance(rows, list):
         raise RuntimeError(f"eval-rows read-back returned non-list: {rows!r}")
     return rows

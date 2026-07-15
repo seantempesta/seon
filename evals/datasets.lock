@@ -9,6 +9,19 @@
       "status": "pending-generator",
       "test_seed": "fresh-per-draw"
     },
+    "database_workflow": {
+      "artifact": "evals/database_workflow.dev.jsonl",
+      "canary_guid": "SEON-CANARY-782255ca-10da-4731-b411-83a25f610f6f",
+      "dev_n": 1,
+      "dev_seed": 1,
+      "dev_sha256": "5b8b7d1573ad1f6f8d377635efa87900ea667cde1cfee323d5b76ff6754cee8e",
+      "epochs": 1,
+      "generator": "seon_inspect.generators:database_workflow",
+      "milestone_seed": 2,
+      "milestone_sha256": "03e76adf9b8864562fd7767648283c07ed55696b5bdb12d63f302c3ec74780f5",
+      "status": "generated",
+      "test_seed": "fresh-per-draw"
+    },
     "file_edit": {
       "artifact": "evals/file_edit.dev.jsonl",
       "canary_guid": "SEON-CANARY-1e699ae3-aaec-41fc-b3de-93275b26f334",
@@ -42,6 +55,19 @@
       "epochs": 4,
       "milestone_seed": 2,
       "status": "pending-generator",
+      "test_seed": "fresh-per-draw"
+    },
+    "namespace_workflow": {
+      "artifact": "evals/namespace_workflow.dev.jsonl",
+      "canary_guid": "SEON-CANARY-7af6cce7-d223-4cb5-9687-66c15bd80df3",
+      "dev_n": 1,
+      "dev_seed": 1,
+      "dev_sha256": "24340d31f4c80ff30fdcfa9dd72433f9424046f1ab5729b4b3271d0bfbd26742",
+      "epochs": 1,
+      "generator": "seon_inspect.generators:namespace_workflow",
+      "milestone_seed": 2,
+      "milestone_sha256": "44d0c98d3add18dbf5acba845acf7e752f9f43482d8526a84efa6fd0a61a0c23",
+      "status": "generated",
       "test_seed": "fresh-per-draw"
     },
     "shell_use": {

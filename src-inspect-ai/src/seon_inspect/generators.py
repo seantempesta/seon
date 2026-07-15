@@ -1,5 +1,4 @@
-"""Bespoke-row generators — seeded datasets for shell_use / web_fetch /
-file_edit / long_term_planning.
+"""Bespoke-row generators — seeded Seon workflow and tool datasets.
 
 Implements the eval-design bespoke rule: the GENERATOR + seeds are what's
 frozen (dev = seed 1, milestone = seed 2, test = fresh seed per draw), so the
@@ -17,6 +16,12 @@ load-bearing finding: otherwise the bench measures prompt-omission, not
 capability).
 
 Row shapes:
+  database_workflow — schema registration, one transaction, a later query and
+               aggregate, then a final report; scored by the existing
+               structured database milestone oracle.
+  namespace_workflow — namespace movement, dependency loading, in-place
+               function refinement, cross-namespace composition, and report;
+               scored by the existing structured namespace milestone oracle.
   shell_use  — filesystem outcomes under a per-run workspace; the oracle
                re-reads files (`tool_scorers.check_workspace`), never
                string-matches agent output.
@@ -594,6 +599,109 @@ _FILE_EDIT_TEMPLATES = [
 
 
 # ---------------------------------------------------------------------------
+# Seon workflows — generated variants of the structured milestone contracts
+# ---------------------------------------------------------------------------
+
+
+def _database_workflow(rng: random.Random) -> dict[str, Any]:
+    domain = rng.choice(_WORDS)
+    entity_word = rng.choice(["station", "depot", "survey", "shipment"])
+    namespace = f"my.{domain}-{entity_word}"
+    identity_attr = f":{namespace}/name"
+    measure_attr = f":{namespace}/amount"
+    labels = rng.sample(_NAMES, 5)
+    values = rng.sample(range(12, 180), 5)
+    threshold = sorted(values)[2]
+    answer = sum(v for v in values if v > threshold)
+    facts = "; ".join(f"{label} has amount {value}"
+                      for label, value in zip(labels, values))
+    task = (
+        "Build a durable database record for a small " + domain + " "
+        + entity_word + " ledger. Work in ordered phases and use separate "
+        "evaluations for storage and recall. First register " + identity_attr
+        + " as a unique string identity and " + measure_attr
+        + " as an integer. Then store all five records in one transaction: "
+        + facts + ". Only after that transaction has completed, query the "
+        "database in a later evaluation for the stored records and compute "
+        "the sum of " + measure_attr + " values strictly greater than "
+        + str(threshold) + " from that query result. Report the computed sum "
+        "to the human and complete the task, stating the same decimal integer "
+        "in both reports."
+    )
+    return {
+        "input": task,
+        "setup": {},
+        "milestone": "db",
+        "oracle": {
+            "identity_attr": identity_attr,
+            "measure_attr": measure_attr,
+            "answer": str(answer),
+        },
+        "target": str(answer),
+    }
+
+
+_CONVERSIONS = [
+    ("meters", "feet", "3.28", "3.28084"),
+    ("kilograms", "pounds", "2.20", "2.20462"),
+    ("liters", "gallons", "0.26", "0.264172"),
+    ("kilometers", "miles", "0.62", "0.621371"),
+]
+
+
+def _namespace_workflow(rng: random.Random) -> dict[str, Any]:
+    source, target, draft_factor, precise_factor = rng.choice(_CONVERSIONS)
+    stem = rng.choice(_WORDS)
+    schema_namespace = f"my.{stem}-units"
+    function_namespace = f"my.{stem}-convert"
+    identity_attr = f":{schema_namespace}/name"
+    amount_attr = f":{schema_namespace}/{source}"
+    function_name = f"to-{target}"
+    amounts = [round(rng.uniform(4.0, 40.0), 2) for _ in range(3)]
+    labels = rng.sample(_WORDS, 3)
+    source_total = round(sum(amounts), 2)
+    converted = round(source_total * float(precise_factor), 2)
+    facts = "; ".join(f"{label} has {amount} {source}"
+                      for label, amount in zip(labels, amounts))
+    task = (
+        "Organize a small conversion library across namespaces, then use it "
+        "from your home namespace. Work through these phases in order. "
+        "First move into a new schema namespace named " + schema_namespace
+        + ". There register " + identity_attr + " as a unique string identity "
+        "and " + amount_attr + " as a double. Next move into a new function "
+        "namespace named " + function_namespace + ". Define " + function_name
+        + " there with one numeric argument and the draft multiplication "
+        "factor " + draft_factor + ". While still there, load clojure.string "
+        "as a runtime dependency and define a helper that upper-cases a unit "
+        "label. Return home and store these three records in one transaction: "
+        + facts + ". Query the stored " + amount_attr + " values and sum the "
+        "query result. Then go back to " + function_namespace + " and redefine "
+        + function_name + " in place with the precise factor " + precise_factor
+        + "; do not create a second version of the function or namespace. "
+        "Return home, call the refined function from " + function_namespace
+        + " on the queried sum, and report both the total " + source + " and "
+        "the converted " + target + " rounded to two decimal places. Complete "
+        "the task with both numbers again."
+    )
+    return {
+        "input": task,
+        "setup": {},
+        "milestone": "namespaces",
+        "oracle": {
+            "schema_namespace": schema_namespace,
+            "function_namespace": function_namespace,
+            "schema_attr": identity_attr,
+            "function_name": function_name,
+            "dependency_namespace": "clojure.string",
+            "precise_literal": precise_factor,
+            "source_total": f"{source_total:.2f}",
+            "converted_total": f"{converted:.2f}",
+        },
+        "target": f"{source_total:.2f} {converted:.2f}",
+    }
+
+
+# ---------------------------------------------------------------------------
 # long_term_planning — two-phase continuity tasks (plan → restart → resume)
 # ---------------------------------------------------------------------------
 
@@ -799,6 +907,8 @@ _PLANNING_TEMPLATES = [
 # ---------------------------------------------------------------------------
 
 GENERATORS: dict[str, list[Callable[[random.Random], dict[str, Any]]]] = {
+    "database_workflow": [_database_workflow],
+    "namespace_workflow": [_namespace_workflow],
     "shell_use": _SHELL_TEMPLATES,
     "web_fetch": _WEB_TEMPLATES,
     "file_edit": _FILE_EDIT_TEMPLATES,
@@ -853,7 +963,10 @@ def fresh_test_rows(row: str, n: int,
     construction). Returns (seed, rows) so a formal eval can record the seed;
     seeds 1/2 (dev/milestone) are never drawn."""
     while seed is None or seed in (1, 2):
-        seed = random.SystemRandom().randrange(3, 10**9)
+        # Formal blind identity is a full 256-bit value, minted only at open.
+        # The caller persists it in native Inspect metadata; it never lives in
+        # source, config, or the pre-open lock.
+        seed = random.SystemRandom().randrange(2**255, 2**256)
     return seed, generate_rows(row, seed, n)
 
 

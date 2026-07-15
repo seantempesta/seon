@@ -28,8 +28,9 @@ REPORTED METRIC / attribution signal, never a correctness gate: a milestone is
 CORRECT iff its capability oracle holds; the fab count rides in metadata.
 
 Every check is pure data-in/data-out and offline-testable; the live driver
-(`pod_milestone_driver`) binds the effects to a real cluster, reusing the
-existing `pod_run` + `fetch_eval_rows` machinery (no new mechanism).
+(`pod_milestone_driver`) binds the effects to one explicitly provisioned
+static cluster, reusing the existing `pod_run` + `fetch_eval_rows` machinery
+(no cluster lifecycle side path).
 """
 
 from __future__ import annotations
@@ -121,8 +122,19 @@ def _ok_indices(rows: list[dict[str, Any]], pat: str) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
+def _reply_has_number(reply: str, expected: str) -> bool:
+    """Whether reply contains a numeric token equal to `expected`."""
+    try:
+        value = float(expected)
+    except (TypeError, ValueError):
+        return str(expected) in (reply or "")
+    return any(abs(float(token) - value) < 1e-9
+               for token in re.findall(r"(?<![\w.])-?\d+(?:\.\d+)?", reply or ""))
+
+
 def check_ns_movement(eval_rows: list[dict[str, Any]],
-                      reply: str) -> dict[str, Any]:
+                      reply: str,
+                      oracle: dict[str, Any] | None = None) -> dict[str, Any]:
     """The `namespaces` milestone oracle: move / register / require / redefine.
 
     OK iff ALL checks hold (each returned for per-part attribution):
@@ -138,11 +150,25 @@ def check_ns_movement(eval_rows: list[dict[str, Any]],
       - report_values      the delivered reply states 42.5 m and 139.4x ft
                            (runtime-computed, never model-typed).
     """
-    units_moves = _ok_indices(eval_rows, r"\(in-ns\s+'my\.units\)|\(ns\s+my\.units[\s)]")
-    convert_moves = _ok_indices(eval_rows, r"\(in-ns\s+'my\.convert\)|\(ns\s+my\.convert[\s)]")
+    oracle = oracle or {}
+    schema_ns = oracle.get("schema_namespace", "my.units")
+    function_ns = oracle.get("function_namespace", "my.convert")
+    schema_attr = oracle.get("schema_attr", ":my.units/name")
+    function_name = oracle.get("function_name", "to-feet")
+    dependency_ns = oracle.get("dependency_namespace", "clojure.string")
+    precise = oracle.get("precise_literal", "3.28084")
+    source_total = oracle.get("source_total", "42.5")
+    converted_total = oracle.get("converted_total", "139.44")
 
-    regs = _ok_indices(eval_rows, r"register!\s+:my\.units/name")
-    defs = _ok_indices(eval_rows, r"\(defn\s+to-feet")
+    schema_move = re.escape(schema_ns)
+    function_move = re.escape(function_ns)
+    units_moves = _ok_indices(
+        eval_rows, rf"\(in-ns\s+'{schema_move}\)|\(ns\s+{schema_move}[\s)]")
+    convert_moves = _ok_indices(
+        eval_rows, rf"\(in-ns\s+'{function_move}\)|\(ns\s+{function_move}[\s)]")
+
+    regs = _ok_indices(eval_rows, rf"register!\s+{re.escape(schema_attr)}")
+    defs = _ok_indices(eval_rows, rf"\(defn\s+{re.escape(function_name)}(?:\s|\[)")
     last_def_src = eval_rows[defs[-1]]["source"] if defs else ""
 
     all_src = "\n".join(r.get("source") or "" for r in eval_rows)
@@ -152,12 +178,14 @@ def check_ns_movement(eval_rows: list[dict[str, Any]],
         "movement": bool(units_moves) and bool(convert_moves),
         "schema_after_move": (bool(regs) and bool(units_moves)
                               and regs[0] >= units_moves[0]),
-        "bare_require": bool(_ok_indices(eval_rows, r"\(require\s+'\[clojure\.string")),
-        "redefine_in_place": len(defs) >= 2 and "3.28084" in last_def_src,
+        "bare_require": bool(_ok_indices(
+            eval_rows, rf"\(require\s+'\[{re.escape(dependency_ns)}")),
+        "redefine_in_place": len(defs) >= 2 and precise in last_def_src,
         "no_parallel_fork": not re.search(
-            r"to-feet-v2|to-feet2|my\.convert-v2|my\.convert2", all_src),
-        "report_values": ("42.5" in reply
-                          and re.search(r"139\.4[34]?", reply) is not None),
+            rf"{re.escape(function_name)}(?:-v?2|2)|"
+            rf"{re.escape(function_ns)}(?:-v?2|2)", all_src),
+        "report_values": (_reply_has_number(reply, source_total)
+                          and _reply_has_number(reply, converted_total)),
     }
     failures = [k for k, v in checks.items() if not v]
     return {"ok": not failures, "checks": checks, "failures": failures}
@@ -167,11 +195,9 @@ def check_ns_movement(eval_rows: list[dict[str, Any]],
 # db milestone — ported from tools/db-memory-oracle.py
 # ---------------------------------------------------------------------------
 
-_ANSWER_59_5 = re.compile(r"59\.5")
-
-
 def check_store_recall(eval_rows: list[dict[str, Any]],
-                       reply: str) -> dict[str, Any]:
+                       reply: str,
+                       oracle: dict[str, Any] | None = None) -> dict[str, Any]:
     """The `db` milestone oracle: store, then RECALL it in a later eval.
 
     OK iff store-then-recall actually happened:
@@ -184,16 +210,30 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
     The reply IS the agent's delivered message/complete content (pod_run
     surfaces it), so the answer check is over the reply text directly.
     """
-    tx = _ok_indices(eval_rows, r"db/transact!|seon\.db/transact!")
+    oracle = oracle or {}
+    identity_attr = oracle.get("identity_attr", ":my.cache/name")
+    measure_attr = oracle.get("measure_attr", ":my.cache/weight-kg")
+    expected = oracle.get("answer", "59.5")
+    regs = _ok_indices(
+        eval_rows,
+        rf"register!\s+(?:{re.escape(identity_attr)}|{re.escape(measure_attr)})")
+    tx = [i for i in _ok_indices(
+        eval_rows, r"db/transact!|seon\.db/transact!")
+          if measure_attr in (eval_rows[i].get("source") or "")]
     transact_idx = tx[0] if tx else None
     query_idx = None
     if transact_idx is not None:
         later = [i for i in _ok_indices(eval_rows, r"db/query|seon\.db/query")
-                 if i > transact_idx]
+                 if (i > transact_idx
+                     and measure_attr in (eval_rows[i].get("source") or ""))]
         query_idx = later[0] if later else None
-    answer = bool(_ANSWER_59_5.search(reply or ""))
+    schema_idx = regs[0] if regs else None
+    answer = _reply_has_number(reply, expected)
 
-    checks = {"transact": transact_idx is not None,
+    checks = {"schema_register": (schema_idx is not None
+                                  and (transact_idx is None
+                                       or schema_idx < transact_idx)),
+              "transact": transact_idx is not None,
               "query_later": query_idx is not None,
               "answer": answer}
     failures = [k for k, v in checks.items() if not v]
@@ -202,23 +242,26 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
 
 
 # One capability oracle per milestone id — the driver/scorer dispatch table.
-MILESTONE_ORACLES: dict[str, Callable[[list[dict[str, Any]], str], dict[str, Any]]] = {
+MILESTONE_ORACLES: dict[
+    str, Callable[..., dict[str, Any]]
+] = {
     "namespaces": check_ns_movement,
     "db": check_store_recall,
 }
 
 
 def check_milestone(milestone: str, eval_rows: list[dict[str, Any]],
-                    reply: str) -> dict[str, Any]:
+                    reply: str,
+                    oracle: dict[str, Any] | None = None) -> dict[str, Any]:
     """Score a milestone by id; raises on an unknown id (never a silent pass)."""
     try:
-        oracle = MILESTONE_ORACLES[milestone]
+        oracle_fn = MILESTONE_ORACLES[milestone]
     except KeyError:
         raise ValueError(
             f"unknown milestone {milestone!r} (known: "
             f"{sorted(MILESTONE_ORACLES)}; the `plan` milestone is "
             "seon_inspect.planning)")
-    return oracle(eval_rows, reply)
+    return oracle_fn(eval_rows, reply, oracle=oracle)
 
 
 # ---------------------------------------------------------------------------
@@ -308,53 +351,37 @@ def pod_milestone_driver(
     contract: str,
     milestone: str,
     *,
+    cluster_url: str,
+    cluster_name: str,
+    writer_port: int,
     timeout_ms: int | None = None,
-    cluster_name: str | None = None,
-    evidence_root: Any = None,
-    seon_config: str | None = None,
     require_live_llm: bool = True,
 ) -> dict[str, Any]:
-    """The LIVE single-phase milestone driver on its own ephemeral cluster.
+    """Drive one milestone on an explicitly provisioned static cluster.
 
-    Reuses the planning row's machinery — no new mechanism: create an
-    ephemeral cluster (STUB-LLM-guarded so a keyless boot never scores
-    garbage — the min-drive.sh trap), drive one contract via `pod_run`, read
-    the agent's eval rows back over the wire REPL (`planning.fetch_eval_rows`),
-    destroy the cluster. Feed the result to `check_milestone` + the row oracle."""
+    P0 is serial. The caller supplies the pod and writer coordinates from the
+    current operator status; this function never creates, restarts, or releases
+    a cluster. The explicit boundary keeps the useful static ACME path live
+    while the ownership-fenced per-sample lease remains unavailable."""
     from seon_inspect import cluster as cl
     from seon_inspect.config import DEFAULT_RUN_TIMEOUT_S
     from seon_inspect.planning import fetch_eval_rows
     from seon_inspect.solver import pod_run
 
     budget_ms = timeout_ms or DEFAULT_RUN_TIMEOUT_S * 1000
-    env = {"SEON_CONFIG": seon_config} if seon_config else None
-    holder: dict[str, Any] = {
-        "cluster": cl.create_cluster(
-            cluster_name or cl.bench_cluster_name(milestone),
-            ephemeral=True, extra_env=env)}
-    try:
-        if require_live_llm:
-            cl.assert_llm_live(holder["cluster"].name)
+    if require_live_llm:
+        cl.assert_llm_live(cluster_name)
 
-        def run(text: str) -> dict[str, Any]:
-            return pod_run(text, budget_ms, holder["cluster"].url)
+    def run(text: str) -> dict[str, Any]:
+        return pod_run(text, budget_ms, cluster_url)
 
-        def fetch(r: dict[str, Any]) -> list[dict[str, Any]]:
-            return fetch_eval_rows(holder["cluster"].name, r["agent_id"])
+    def fetch(r: dict[str, Any]) -> list[dict[str, Any]]:
+        return fetch_eval_rows(cluster_name, r["agent_id"], port=writer_port)
 
-        result = run_milestone_sample(contract, milestone,
-                                      run=run, fetch_evals=fetch)
-        result["cluster"] = holder["cluster"].name
-        return result
-    finally:
-        if evidence_root is not None:
-            from pathlib import Path
-
-            from seon_inspect.tool_rows import preserve_cluster_evidence
-            preserve_cluster_evidence(
-                holder["cluster"].name,
-                Path(evidence_root) / holder["cluster"].name)
-        cl.destroy_cluster(holder["cluster"].name)
+    result = run_milestone_sample(contract, milestone,
+                                  run=run, fetch_evals=fetch)
+    result["cluster"] = cluster_name
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +405,7 @@ def milestone_scorer() -> Scorer:
         import json
         meta = state.metadata or {}
         res = check_milestone(meta["milestone"], meta["eval_rows"],
-                              state.output.completion)
+                              state.output.completion, meta.get("oracle"))
         fab = count_fabrication(state.output.completion)
         return Score(
             value=CORRECT if res["ok"] else INCORRECT,

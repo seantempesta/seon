@@ -16,10 +16,13 @@ from seon_inspect.freeze import (
     DEFAULT_LOCK_PATH,
     EXTERNAL_SOURCES,
     GLOBAL_SEED,
+    MilestoneSplit,
     TierDisciplineError,
+    _position_subset,
     load_split,
     ordered_draw,
     read_lock,
+    run_split,
     split_ids,
 )
 
@@ -182,3 +185,37 @@ def test_test_split_is_blind_by_default():
 def test_unknown_tier_rejected():
     with pytest.raises(KeyError):
         load_split("gsm8k", "validation")
+
+
+def test_position_subset_is_canonical_and_validated():
+    assert _position_subset(["a", "b", "c"], [2, 0, 2]) == ["a", "c"]
+    assert _position_subset(["a", "b"], None) == ["a", "b"]
+    with pytest.raises(ValueError, match="at least one"):
+        _position_subset(["a"], [])
+    with pytest.raises(ValueError, match="non-negative integers"):
+        _position_subset(["a"], [True])
+    with pytest.raises(ValueError, match="outside split"):
+        _position_subset(["a"], [1])
+
+
+def test_run_split_selects_milestone_positions_without_public_ids(monkeypatch):
+    split = MilestoneSplit("synthetic", ["held-0", "held-1", "held-2"])
+    captured = {}
+
+    monkeypatch.setattr(freeze, "load_split", lambda *args, **kwargs: split)
+    monkeypatch.setattr("seon_inspect.catalog.load_bench_task",
+                        lambda *args, **kwargs: object())
+
+    def fake_run_bench(source, **kwargs):
+        captured.update(source=source, **kwargs)
+        return "aggregate-result"
+
+    monkeypatch.setattr("seon_inspect.catalog.run_bench", fake_run_bench)
+    result = run_split("synthetic", "milestone", positions=[2, 0, 2])
+
+    assert result == "aggregate-result"
+    assert captured["sample_id"] == ["held-0", "held-2"]
+    assert captured["limit"] is None
+    assert "held-" not in repr(split)
+    with pytest.raises(TierDisciplineError):
+        list(split)

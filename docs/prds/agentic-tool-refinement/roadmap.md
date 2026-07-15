@@ -325,6 +325,13 @@ evidence and return to the ledger unless it blocks the active gate.
 Read this short operational handoff before logs, broad tests, or source
 archaeology.
 
+The generated database/namespace workflow unit has a finer-grained live ledger
+in [[research/generated-workflow-freeze-2026-07-15]]. Its source implementation
+and dataset-lock artifacts are present in the shared working tree, and 115
+focused offline tests pass. Commit and a native static-ACME `.eval` remain
+open. Treat its live P0 ready status as **no** until the integrated native
+development slice runs.
+
 ### Proven and committed
 
 - The proposed development slice has ten exact members and fixed category
@@ -332,10 +339,11 @@ archaeology.
   frozen; its native execution path is not yet complete.
 - Inspect, Inspect Evals, dataset, Python-lock, pod-client, model, and operator
   identity gaps are localized in
-  [[research/inspect-reproducibility-boundary-2026-07-15]]. The selected
-  Inspect checkout is recursively mismatched because `ts-mono` is at
-  `f3588038` while its parent records `eccde6b7`; do not silently reset or bless
-  either commit.
+  [[research/inspect-reproducibility-boundary-2026-07-15]]. The Inspect view
+  uses an intentional nested overlay: `ts-mono` is at `f3588038` while its
+  parent records `eccde6b7`. The source lock verifies both coordinates, the
+  nested tree, and cleanliness; do not reset either commit or replace this
+  with an excluded pathspec.
 - Local serving inventory is recorded in
   [[research/local-model-serving-inventory-2026-07-15]]. No preferred small
   model has been selected. The live candidates are evidence inputs, not a
@@ -370,8 +378,9 @@ archaeology.
 1. Finish and review the three narrow in-flight units: native shell/file/web
    tasks, generated database/namespace tier variants plus safe subset
    selection, and the exact schema-weight audit.
-2. Finish P1a source admission and native-log finalization, resolving the
-   selected `ts-mono` identity explicitly rather than mutating it implicitly.
+2. Finish the remaining P1a static ACME artifact/config/model identity and
+   bounded scorer evidence. Source admission, the explicit `ts-mono` overlay,
+   and native-log finalization are mechanically covered.
 3. Add explicit static-ACME execution and bounded scorer evidence through the
    existing Inspect solver and `/agents/run` owners.
 4. Run one sample at a time and inspect every native `.eval`; first run the

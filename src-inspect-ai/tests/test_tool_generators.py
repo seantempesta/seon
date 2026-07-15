@@ -31,7 +31,8 @@ DEV_N = {row: freeze.BESPOKE_ROWS[row]["dev_n"] for row in ROWS}
 COACHING_MARKERS = [
     "my.plan", "my.kb", "my.blob", "my.ui", "my.canvas", "my.data",
     "seon.", "shell/exec", "web/fetch", "edit-file", "fs/", "(exec",
-    "clojure fn", "capability", "toolkit",
+    "clojure fn", "capability", "toolkit", "(in-ns", "schema/register!",
+    "db/transact!", "db/query", "(require", "message/user", "(complete",
 ]
 
 
@@ -62,7 +63,8 @@ def test_dev_milestone_ids_disjoint(row):
 
 
 def test_fresh_test_draw_never_reuses_frozen_seeds():
-    seed, rows = fresh_test_rows("shell_use", 4)
+    # A synthetic non-formal seed proves replay without opening the blind tier.
+    seed, rows = fresh_test_rows("shell_use", 4, seed=3)
     assert seed not in (1, 2)
     assert len(rows) == 4
     # replayable given the recorded seed
