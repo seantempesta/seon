@@ -28,7 +28,9 @@ evidence and cannot reach a capability scorer.
 The paired comparison is blocked on durable multi-form execution positions.
 The current process-local batch vector is ordered, but the database connection
 from a turn to its evals is cardinality-many and the external projection sorts
-by time and random identity. That cannot prove authored or execution order.
+by the transaction that asserted each eval identity. That is exact committed
+transaction order under today's one-eval-per-transaction writer, but it is not
+a contiguous per-turn fact and cannot expose a missing attempted row.
 
 ## Dependency ledger
 
@@ -93,11 +95,45 @@ coordinate, and selected eval rows. The Python solver preserves those values
 in native sample metadata.
 
 `eval-batch!` returns ordered eval ids in process memory, but persisted
-`:seon.agent.turn/evals` membership has no order. `/agents/run` currently sorts
-rows by `[:seon.eval/at :seon.eval/id]` and omits the originating turn id and
-execution position. Equal timestamps and random ids make that presentation
-order, not execution truth. No multi-form outcome claim is admissible until
+`:seon.agent.turn/evals` membership has no order. `/agents/run` now emits the
+originating turn id and sorts by the transaction that asserted
+`:seon.eval/id`. The serialized writer makes that exact order for committed
+rows, but there is no explicit contiguous per-turn position with which to
+detect a missing record or validate the contract independently of the current
+write topology. No multi-form outcome claim is admissible until
 [[../../../seon/issues/multi-form-eval-order-is-not-durable]] is closed.
+
+### Implementation-ready durable-order boundary
+
+The existing mechanism is sufficient; no new execution or evidence path is
+needed. `seon.eval/eval-batch!` owns the sequential fold and assigns one
+zero-based position immediately before each record attempt. `record-eval!`
+freezes that position alongside the outcome and reuses it across allocator
+collision retries and the no-tee fallback. The canonical turn connection stays
+`:seon.agent.turn/evals`; adding a reverse `:seon.eval/turn` would duplicate a
+derivable relationship.
+
+Positions count eval events, not parser entries. The repair sub-loop can expand
+one malformed span into multiple entries, and comment, read-failure, parity,
+movement, prose-demotion, success, and failure paths all create eval rows. Each
+must consume the next position. A record failure still advances the fold, so a
+later committed row exposes a gap and formal admission rejects it.
+
+The attribute is optional for historical rows and is never backfilled. The pod
+projects all selected rows, including one missing the new attribute, then
+orders valid new rows by ordered turn membership and position. The Inspect
+solver validates unique eval ids, exact turn membership, vector order, and
+per-turn positions `0..n-1`; it raises infrastructure failure before scoring
+on absence, duplication, a foreign turn, a gap, or reordering. Transcript and
+autocomplete consumers use the same position-first helper, with their existing
+stable historical fallback only when the attribute is absent.
+
+A read-only ACME probe at coordinate
+`6813d1c2-4feb-3272-9b74-4c6769142514/db/6a57c6e2-46f6-5ed8-bbfb-95952847b8c1@536872999`
+found turn `a0e6yobirv1b` with two eval identity transactions,
+`536872727` and `536872728`, while neither `:seon.eval/position` nor a
+separate reverse turn attribute is installed. This falsifies durable position
+without denying the exact transaction provenance already present.
 
 ## What may be cut off without rewriting output
 
