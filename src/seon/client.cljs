@@ -785,6 +785,23 @@
       ;; Isolated diagnostic databases carry the same authoritative identity
       ;; policies as a cold-started cluster.
       (await (install-runtime-schema! conn true))
+      ;; Program admission is reconstructed exclusively from database facts.
+      ;; A diagnostic connection therefore needs the canonical Malli
+      ;; declarations as well as Datahike's transaction schema; otherwise the
+      ;; first accepted function-contract change would publish an empty schema
+      ;; generation into this process.
+      (await
+       (db/with-tx-context
+        {:seon.db/user [:seon.agent/id "root"]
+         :seon.db/process (db.process/lookup-ref :seon.db.process/boot)}
+        (fn ^:async install-program-schemas! []
+          (let [result
+                (await
+                 (db/transact! {:seon.db/conn conn
+                                :seon.db/tx-data (index-schemas)}))]
+            (when (false? (:seon.db/ok? result))
+              (throw (ex-info "Program schema installation failed."
+                              result)))))))
       conn)))
 
 (schema/register! ::prepare-writes? :boolean)

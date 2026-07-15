@@ -967,6 +967,20 @@
                (.then
                 (fn [conn]
                   (reset! !conn conn)
+                  (is (= (pr-str
+                           (schema/schema-definition
+                            :seon.db.coordinate/coordinate))
+                         (db/query
+                          {::db/query
+                           '[:find ?form .
+                             :in $ ?key
+                             :where
+                             [?schema :seon.schema/key ?key]
+                             [?schema :seon.schema/form ?form]]
+                           ::db/args
+                           [:seon.db.coordinate/coordinate]
+                           ::db/conn conn}))
+                      "isolated diagnostic boot persists canonical schema facts")
                   (-> (apply db/transact!
                              [{::db/conn conn
                                ::db/tx-data (client/index-schemas)}])
