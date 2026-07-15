@@ -27,11 +27,12 @@ note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
   are `:seon.route/*` datom seeds, so a
   `bin/seon cluster reset default` is required for a new/renamed route to land.
 - **`datastar.cljs`** — the live channel: one tx-listener on the replica
-  derives the WHOLE element (`view = f(db-as-of t)`) and pushes one gzip
+  derives the WHOLE element (`view = f(db)`) and pushes one gzip
   datastar **morph**; idiomorph diffs client-side; a coalescing throttle
   collapses tx bursts. There is NO server-side tree diff (`!last-tree` is
-  dead — don't rebuild it). The time-travel bar here is the worked example
-  of as-of rendering.
+  dead — don't rebuild it). Historical agent feeds require the complete
+  canonical `database-id`/`branch`/`commit-id`/`t` coordinate, resolve it
+  through `seon.db/at-coordinate`, and remain frozen outside live broadcasts.
 - **`view_unit.cljs`** — one bounded render-unit cache/invalidation owner for
   shared database-derived HTML. Extend it rather than adding a page-specific
   memoizer, feed registry, or dependency graph.

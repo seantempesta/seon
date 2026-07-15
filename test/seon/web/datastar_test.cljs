@@ -21,6 +21,7 @@
     [seon.client :as client]
     [seon.agent.debug :as agent-debug]
     [seon.db :as db]
+    [seon.db.coordinate :as db.coordinate]
     [seon.render.surface :as surface]
     [seon.ui.agent-view :as agent-view]
     [seon.ui.html :as html]
@@ -37,6 +38,12 @@
 ;; Valid 14-char ids (`:seon.db/id` is [:string {:min 14 :max 14}]).
 (def ^:private agent-a "view-aaaa00001")
 (def ^:private agent-b "view-bbbb00002")
+
+(def ^:private historical-point
+  {::db.coordinate/database-id #uuid "11111111-1111-4111-8111-111111111111"
+   ::db.coordinate/branch :db
+   ::db.coordinate/commit-id #uuid "22222222-2222-4222-8222-222222222222"
+   ::db.coordinate/t 536870913})
 
 (def ^:private coordinate-gen
   (gen/fmap
@@ -649,7 +656,7 @@
                       [(test-feed
                          "frozen-view"
                          {:seon.web.feed/key [:seon.web.feed/agent agent-a
-                                              :seon.web.feed/as-of 1]
+                                              :seon.web.feed/at historical-point]
                           :seon.web.feed/live? false
                           :seon.web.feed/render-change
                           (fn [_subscription _change]
@@ -658,6 +665,56 @@
       (@#'datastar/broadcast!
         {:seon.db/db nil :seon.db/changed-attrs #{:example/value}})
       (is (zero? @renders) "as-of feeds never rerender on current commits"))))
+
+(deftest historical-feed-selector-is-complete-or-absent
+  (testing "no coordinate fields selects the live feed"
+    (is (nil? (@#'datastar/parse-historical-coordinate
+                #js {:url "/agent/root/feed?view=stable"}))))
+  (testing "a complete canonical selector preserves every identity field"
+    (is (= historical-point
+           (@#'datastar/parse-historical-coordinate
+             #js {:url (str "/agent/root/feed?database-id="
+                            (::db.coordinate/database-id historical-point)
+                            "&branch=db&commit-id="
+                            (::db.coordinate/commit-id historical-point)
+                            "&t=" (::db.coordinate/t historical-point))}))))
+  (testing "partial and malformed selectors are errors, never live fallbacks"
+    (doseq [url ["/agent/root/feed?t=536870913"
+                 "/agent/root/feed?database-id=bad&branch=db&commit-id=bad&t=nope"]]
+      (is (= :invalid-database-coordinate
+             (:seon.error/kind
+               (@#'datastar/parse-historical-coordinate #js {:url url})))))))
+
+(deftest historical-feed-key-and-response-retain-complete-coordinate
+  (let [EventEmitter (.-EventEmitter (js/require "node:events"))
+        PassThrough (.-PassThrough (js/require "node:stream"))
+        req (new EventEmitter)
+        res (new PassThrough)
+        response (atom nil)
+        _write-head (aset res "writeHead"
+                          (fn [status headers]
+                            (reset! response
+                                    {:status status
+                                     :headers (js->clj headers)})))
+        feed (test-feed
+               "historical-response"
+               {:seon.web.feed/key [:seon.web.feed/agent agent-a
+                                    :seon.web.feed/at historical-point]
+                :seon.web.feed/live? false
+                :seon.web.feed/coordinate historical-point})]
+    (with-redefs [datastar/!feeds (atom @#'datastar/empty-feed-registry)
+                  datastar/install! (fn [] nil)
+                  datastar/uninstall! (fn [] nil)
+                  datastar/push-full! (fn [_] nil)]
+      (@#'datastar/open-feed! req res feed)
+      (is (= 200 (:status @response)))
+      (is (= (pr-str historical-point)
+             (get-in @response [:headers "Seon-Database-Coordinate"])))
+      (is (contains?
+            (::datastar/subscriptions @datastar/!feeds)
+            [[:seon.web.feed/agent agent-a :seon.web.feed/at historical-point]
+             "W10"]))
+      (.emit res "close"))))
 
 (deftest shared-subscription-keeps-new-dependencies-after-first-socket-closes
   (let [EventEmitter (.-EventEmitter (js/require "node:events"))

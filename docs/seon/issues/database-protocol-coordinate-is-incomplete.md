@@ -67,11 +67,15 @@ progress, replay, bookmark, error, or cache identity.
 
 ## Remaining
 
-Turn capture, autocomplete exports, and error capture/reproduction now carry
-and resolve the complete coordinate. Turn proof passed 11 tests/73 assertions;
-error proof passed 17 tests/116 assertions. Rebuilt live turn `ep2np287dio2`
-and error eid `3097` each stored all four facts, and resolving either point
-returned its pre-record value while excluding the later capture datom. Frozen
-web caches/bookmarks and native branch lifecycle still need the same
-coordinate; the issue remains open until those downstream identity copies are
-removed.
+Turn capture, autocomplete exports, error capture/reproduction, and historical
+web feeds now carry and resolve the complete coordinate. Turn proof passed 11
+tests/73 assertions; error proof passed 17/116; web proof passed 36/180; and the
+combined downstream proof passed 64/369. Rebuilt live turn `ep2np287dio2` and
+error eid `3097` each stored all four facts, and resolving either point returned
+its pre-record value while excluding the later capture datom. A rebuilt exact
+historical feed echoed default point `54b5b7e7-51fb-3220-b079-81a81914d86f`/
+`:db`/`6a56e443-1025-554f-80b6-e81e9793e0ca`/`536870968` and returned a frozen
+gzip Datastar frame; a t-only selector returned structured 422 instead of live
+data. The reconcile result, config-view cache, and native branch lifecycle still
+need the same coordinate; the issue remains open until those identity copies
+are removed.

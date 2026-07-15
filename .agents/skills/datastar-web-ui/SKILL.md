@@ -47,14 +47,16 @@ the morph engine must be crash-proof. Source: `src/seon/web/datastar.cljs`
 (`patch-elements`, `open-feed!`, `serve-root!`, `serve-agent-page!`,
 `open-agent-feed!`).
 
-### Time-travel falls out for free
+### Historical feeds carry complete identity
 
-`view = f(db)` rendered against `(db/as-of @*conn* t)` is a PAST snapshot that
-is naturally FROZEN (re-rendering it on a later tx yields identical bytes). The
-`/agent/{id}/feed?t=<tx-id>` stream binds `view-fn` to the as-of db; the
-time-travel bar drives it with ONE `data-effect` `@get` that auto-cancels the
-prior stream so exactly one feed targets `#app-view`. (`open-agent-feed!`,
-`time-travel-bar-html`.)
+`view = f(db)` rendered against an exact immutable database point is naturally
+FROZEN. A historical `/agent/{id}/feed` request supplies all four canonical
+query fields: `database-id`, `branch`, `commit-id`, and `t`. The server resolves
+that point through `seon.db/at-coordinate`, keys the frozen subscription by the
+complete coordinate, and echoes it in `Seon-Database-Coordinate`. Supplying
+only `t`, a partial coordinate, or a malformed coordinate returns 422; it never
+silently opens the live feed. With none of the four fields, the feed is live.
+(`open-agent-feed!`.)
 
 ## CRITICAL: verify the stream SERVER-SIDE, not in the browser agent
 

@@ -35,6 +35,7 @@
     [clojure.set :as set]
     [clojure.string :as str]
     [seon.db :as db]
+    [seon.db.coordinate :as db.coordinate]
     [seon.log :as log]
     [seon.schema :as schema]
     [seon.ui.header :as header]
@@ -134,7 +135,7 @@
   [:or
    [:tuple [:= :seon.web.feed/agent] :seon.agent/id]
    [:tuple [:= :seon.web.feed/agent] :seon.agent/id
-    [:= :seon.web.feed/as-of] :int]
+    [:= :seon.web.feed/at] ::db.coordinate/coordinate]
    [:tuple [:= :seon.web.feed/data]
     [:maybe :string] [:maybe :string] [:maybe :string] :boolean]
    [:tuple [:= :seon.web.feed/debug] :seon.agent/id ::view-id]])
@@ -145,6 +146,7 @@
   [:map
    [:seon.web.feed/key ::feed-key]
    [:seon.web.feed/live? ::live?]
+   [:seon.web.feed/coordinate {:optional true} ::db.coordinate/coordinate]
    [:seon.web.feed/render-full ::render-full]
    [:seon.web.feed/render-change ::render-change]
    [::dependencies {:optional true} ::dependencies]
@@ -1007,11 +1009,17 @@
   ;; Datahike owns listener membership. The stable key makes this idempotent
   ;; and replaces a pre-reload callback with the current definition.
   (install!)
-  (.writeHead res 200 #js {"Content-Type"      "text/event-stream; charset=utf-8"
-                           "Content-Encoding"  "gzip"
-                           "Cache-Control"     "no-store"
-                           "Connection"        "keep-alive"
-                           "X-Accel-Buffering" "no"})
+  (.writeHead
+    res 200
+    (clj->js
+      (cond-> {"Content-Type"      "text/event-stream; charset=utf-8"
+               "Content-Encoding"  "gzip"
+               "Cache-Control"     "no-store"
+               "Connection"        "keep-alive"
+               "X-Accel-Buffering" "no"}
+        (:seon.web.feed/coordinate feed)
+        (assoc "Seon-Database-Coordinate"
+               (pr-str (:seon.web.feed/coordinate feed))))))
   (let [gz (.createGzip zlib)
         feed-id (random-uuid)
         supplied-view-id (::view-id feed)
@@ -1237,20 +1245,74 @@
                     :seon.db/query '[:find ?e :in $ ?id :where [?e :seon.agent/id ?id]]
                     :seon.db/args  [id]}))))
 
-(defn- parse-t
-  "Parse the optional `?t=<tx-id>` from a node req URL into a datahike
-   time-point (a tx-id number). Returns nil for an absent/blank/non-numeric
-   `t` → the live feed. Never throws (a bad `t` falls back to live)."
+(def ^:private canonical-uuid-re
+  #"(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+(def ^:private branch-param-re #"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)?")
+
+(def ^:private historical-query-keys
+  ["database-id" "branch" "commit-id" "t"])
+
+(defn- selector-error
+  [message supplied]
+  {:seon.error/message message
+   :seon.error/kind :invalid-database-coordinate
+   :seon.error/data {:seon.web.historical/supplied supplied
+                     :seon.web.historical/required historical-query-keys}})
+
+(defn- parse-historical-coordinate
+  "Parse one all-or-none historical selector from a node request URL.
+
+   No coordinate fields means the live feed. Any partial, blank, malformed,
+   or noncanonical selector is an error value; history never falls back live."
   [^js req]
   (try
     (let [url  (or (.-url ^js req) "")
           qidx (str/index-of url "?")]
       (when qidx
-        (let [t (.get (js/URLSearchParams. (subs url (inc qidx))) "t")]
-          (when (and t (not= "" t))
-            (let [n (js/parseInt t 10)]
-              (when (js/Number.isFinite n) n))))))
-    (catch :default _ nil)))
+        (let [params (js/URLSearchParams. (subs url (inc qidx)))
+              supplied (into {}
+                             (map (fn [key] [key (.get params key)]))
+                             historical-query-keys)
+              present (filterv #(.has params %) historical-query-keys)]
+          (cond
+            (empty? present) nil
+
+            (not= (count historical-query-keys) (count present))
+            (selector-error "historical feed coordinate is incomplete" supplied)
+
+            :else
+            (let [database-id (get supplied "database-id")
+                  branch (get supplied "branch")
+                  commit-id (get supplied "commit-id")
+                  t-value (get supplied "t")]
+              (if-not (and (re-matches canonical-uuid-re database-id)
+                           (re-matches branch-param-re branch)
+                           (re-matches canonical-uuid-re commit-id)
+                           (re-matches #"[0-9]+" t-value))
+                (selector-error "historical feed coordinate is malformed" supplied)
+                (let [t-number (js/Number t-value)
+                      point {::db.coordinate/database-id (uuid database-id)
+                             ::db.coordinate/branch (keyword branch)
+                             ::db.coordinate/commit-id (uuid commit-id)
+                             ::db.coordinate/t t-number}]
+                  (if (and (js/Number.isSafeInteger t-number)
+                           (schema/valid-candidate-value?
+                             ::db.coordinate/coordinate point))
+                    point
+                    (selector-error
+                      "historical feed coordinate is outside the supported value domain"
+                      supplied)))))))))
+    (catch :default e
+      (selector-error "historical feed coordinate could not be parsed"
+                      {:seon.error/message (.-message e)}))))
+
+(defn- write-historical-error!
+  [^js res error]
+  (.writeHead res 422 #js {"Content-Type" "application/edn; charset=utf-8"
+                           "Cache-Control" "no-store"})
+  (.end res (pr-str error))
+  nil)
 
 (defn- agent-page-html
   "The per-agent (/agent/{id}) view shim page (brand-aware head — see
@@ -1310,7 +1372,7 @@
   [r]
   (write-agent-page! (:seon.http/node-res r) "root"))
 
-(defn open-agent-feed!
+(defn ^:async open-agent-feed!
   "Open the per-agent view gzip feed.
 
    The seeded :seon.route/agent-feed handler. A Ring handler: takes the
@@ -1318,32 +1380,40 @@
    Lazily installs the tx-listener (idempotent). Invalid or stale ids 404. Public —
    db->routes resolves its symbol.
 
-   #18 — historical time-travel: an optional `?t=<tx-id>` binds the view to
-   `db-as-of-t` instead of the live db. With `t`, the feed is the SAME
-   `agent-view` rendered against `(db/as-of @*conn* t)` — a PAST snapshot that
-   is naturally FROZEN (re-rendering it on a later tx yields identical bytes, so
-   the broadcast harmlessly re-pushes the same #app-view). With NO `t` it is the
-   current auto-morphing feed, UNCHANGED. A bad/absent `t` falls back to live."
+   A historical request supplies all four `database-id`, `branch`, `commit-id`,
+   and `t` query fields. The point is resolved exactly through
+   `seon.db/at-coordinate`, echoed in the response header, and used as the
+   frozen subscription key. Partial/malformed/wrong-attachment coordinates
+   return a structured 422; only an entirely absent coordinate opens live."
   [r]
   (let [^js req (:seon.http/node-req r)
         ^js res (:seon.http/node-res r)
         id      (get-in r [:path-params :id])
         view-id (requested-view-id req)]
     (if (and (safe-id? id) (agent-exists? id))
-      (let [t (parse-t req)]
-        (if t
-          (let [frozen (db/as-of @db/*conn* t)]
-            (open-feed!
-              req res
-              (cond->
-                {:seon.web.feed/key [:seon.web.feed/agent id
-                                     :seon.web.feed/as-of t]
-                 :seon.web.feed/live? false
-                 :seon.web.feed/render-full
-                 #(agent-view/agent-view frozen id)
-                 :seon.web.feed/render-change
-                 (fn [_subscription _change] {::elements []})}
-                view-id (assoc ::view-id view-id))))
+      (let [selector (parse-historical-coordinate req)]
+        (cond
+          (:seon.error/message selector)
+          (write-historical-error! res selector)
+
+          selector
+          (let [frozen (await (db/at-coordinate db/*conn* selector))]
+            (if (:seon.error/message frozen)
+              (write-historical-error! res frozen)
+              (open-feed!
+                req res
+                (cond->
+                  {:seon.web.feed/key [:seon.web.feed/agent id
+                                       :seon.web.feed/at selector]
+                   :seon.web.feed/live? false
+                   :seon.web.feed/coordinate selector
+                   :seon.web.feed/render-full
+                   #(agent-view/agent-view frozen id)
+                   :seon.web.feed/render-change
+                   (fn [_subscription _change] {::elements []})}
+                  view-id (assoc ::view-id view-id)))))
+
+          :else
           (open-feed!
             req res
             (cond->
