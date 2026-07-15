@@ -481,6 +481,42 @@
           (assoc :capture_error (:seon.agent.debug/error bundle)))))
     turn-ids))
 
+(defn- project-eval-evidence
+  "Stable external projection of selected eval rows."
+  [rows turn-eids pull-row]
+  (->> rows
+       (filter (fn [[_ turn-eid]] (contains? turn-eids turn-eid)))
+       (sort-by (fn [[_ _ id ^js at]] [(.getTime at) id]))
+       (mapv
+         (fn [[eval-eid _ id ^js at]]
+           (let [row (pull-row eval-eid)]
+             (cond-> {:eval_id id
+                      :at (.toISOString at)
+                      :ok (boolean (:seon.eval/ok? row))}
+               (contains? row :seon.eval/source)
+               (assoc :source (:seon.eval/source row))
+               (contains? row :seon.eval/narration)
+               (assoc :narration (:seon.eval/narration row))))))))
+
+(defn- eval-evidence
+  "Stable external projection of one request window's evaluated forms."
+  [dbv agent-eid turn-eids]
+  (let [rows (db/query {:seon.db/db dbv
+                        :seon.db/query '[:find ?e ?t ?id ?at :in $ ?ag :where
+                                         [?r :seon.agent.run/agent ?ag]
+                                         [?t :seon.agent.turn/run ?r]
+                                         [?t :seon.agent.turn/evals ?e]
+                                         [?e :seon.eval/id ?id]
+                                         [?e :seon.eval/at ?at]]
+                        :seon.db/args [agent-eid]})]
+    (project-eval-evidence
+      rows turn-eids
+      (fn [eval-eid]
+        (db/pull {:seon.db/db dbv
+                  :seon.db/pull-pattern
+                  '[:seon.eval/source :seon.eval/ok? :seon.eval/narration]
+                  :seon.db/ref eval-eid})))))
+
 (defn- ^:async run-agent-task!
   "Drive ONE task through an agent in the pod's own cluster to completion.
 
@@ -580,14 +616,7 @@
                                                     [(.getTime at) id])))
                           turn-eids (into #{} (map first) turn-rows)
                           turn-ids  (mapv second turn-rows)
-                          evals     (->> (db/query {:seon.db/db db
-                                                    :seon.db/query '[:find ?e ?t :in $ ?ag :where
-                                                                     [?r :seon.agent.run/agent ?ag]
-                                                                     [?t :seon.agent.turn/run ?r]
-                                                                     [?t :seon.agent.turn/evals ?e]]
-                                                    :seon.db/args [agent-eid]})
-                                         (filter (fn [[_ t]] (contains? turn-eids t)))
-                                         count)
+                          eval-rows (eval-evidence db agent-eid turn-eids)
                           ;; Model config — COMPUTED at response time by the
                           ;; ONE resolver (seon.ai/resolved-config), a pure fn
                           ;; of this poll's db snapshot: the agent's own
@@ -622,11 +651,13 @@
                                          (map (fn [[_ _ _ c]] c)) last)]
                       ;; On timeout report the HONEST reason — never a stale
                       ;; derived last-closed-reason from an earlier close.
-                      (cond-> {:agent_id aid :turns (count turn-eids) :evals evals
+                      (cond-> {:agent_id aid :turns (count turn-eids)
+                               :evals (count eval-rows)
                                :reply (or reply "") :elapsed_ms elapsed
                                :database_coordinate
                                (coordinate-json (db/head-coordinate db))
                                :turn_evidence (turn-evidence turn-ids)
+                               :eval_evidence eval-rows
                                ;; always present — the resolver always resolves
                                ;; (worst case: all shipped defaults).
                                :model_config model-cfg

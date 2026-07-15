@@ -12,6 +12,33 @@
     [seon.runtime.admission :as admission]
     [seon.web.serve :as serve]))
 
+(deftest eval-evidence-is-request-scoped-and-stably-ordered
+  (let [first-at (js/Date. 1000)
+        second-at (js/Date. 2000)
+        outside-at (js/Date. 3000)
+        pulls {100 {:seon.eval/source "(first)"
+                    :seon.eval/ok? true}
+               101 {:seon.eval/source "(second)"
+                    :seon.eval/ok? false
+                    :seon.eval/narration "kept as bounded data"}
+               102 {:seon.eval/source "(outside)"
+                    :seon.eval/ok? true}}]
+    (is (= [{:eval_id "eval-a"
+             :at "1970-01-01T00:00:01.000Z"
+             :ok true
+             :source "(first)"}
+            {:eval_id "eval-b"
+             :at "1970-01-01T00:00:02.000Z"
+             :ok false
+             :source "(second)"
+             :narration "kept as bounded data"}]
+           ((deref #'serve/project-eval-evidence)
+             [[102 12 "eval-c" outside-at]
+              [101 11 "eval-b" second-at]
+              [100 10 "eval-a" first-at]]
+             #{10 11}
+             #(get pulls %))))))
+
 (defn- req-with-origin
   ([origin] (req-with-origin origin nil))
   ([origin host]
