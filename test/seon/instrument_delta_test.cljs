@@ -17,11 +17,16 @@
 (defn probe-variadic
   ([x] [x])
   ([x y & more] (into [x y] more)))
+(defn probe-pure-variadic
+  [& args]
+  (if (= 1 (count args)) (first args) (vec args)))
 
 (def ^:private a-sym 'seon.instrument-delta-test/probe-a)
 (def ^:private b-sym 'seon.instrument-delta-test/probe-b)
 (def ^:private multi-sym 'seon.instrument-delta-test/probe-multi)
 (def ^:private variadic-sym 'seon.instrument-delta-test/probe-variadic)
+(def ^:private pure-variadic-sym
+  'seon.instrument-delta-test/probe-pure-variadic)
 (def ^:private target-syms #{a-sym b-sym})
 (def ^:private multi-target-syms #{multi-sym variadic-sym})
 
@@ -33,6 +38,11 @@
 (def ^:private variadic-form
   [:function
    [:=> [:cat :int] [:vector :int]]
+   [:=> [:cat :int :int [:* :int]] [:vector :int]]])
+
+(def ^:private pure-variadic-form
+  [:function
+   [:=> [:cat :int] :int]
    [:=> [:cat :int :int [:* :int]] [:vector :int]]])
 
 (defn- target [sym schema-form]
@@ -261,6 +271,23 @@
             (instrument/instrument-delta!
               {::instrument/changed-syms multi-target-syms
                ::instrument/targets []})))))))
+
+(deftest pure-variadic-implementation-may-have-a-stricter-public-contract
+  (when (instrument/enabled?)
+    (let [result
+          (instrument/instrument-targets!
+            [(target pure-variadic-sym pure-variadic-form)])]
+      (try
+        (is (true? (::instrument/ok? result)))
+        (is (= 1 (::instrument/n-instrumented result)))
+        (is (= 7 (probe-pure-variadic 7)))
+        (is (= [1 2 3] (probe-pure-variadic 1 2 3)))
+        (is (trapped? #(probe-pure-variadic)))
+        (is (trapped? #(probe-pure-variadic "wrong")))
+        (finally
+          (instrument/instrument-delta!
+            {::instrument/changed-syms #{pure-variadic-sym}
+             ::instrument/targets []}))))))
 
 (deftest schema-change-refreshes-only-transitive-function-dependents
   (let [a-form [:=> [:cat :instrumenttest.contract/root]

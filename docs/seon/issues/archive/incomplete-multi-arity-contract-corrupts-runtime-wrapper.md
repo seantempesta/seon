@@ -44,8 +44,11 @@ unvalidated. `unstrument!` then replaced
 probe function was immediately redefined to restore it.
 
 The implemented fix derives fixed accessors and the optional variadic minimum
-from the original live function, derives the compiled contract profile through
-Malli's function-schema protocol, and rejects unequal profiles as
+from the original live function, then derives the compiled contract profile
+through Malli's function-schema protocol. Accessor-mutating multi-arity shapes
+require exact profiles. A pure variadic implementation is different: Malli
+wraps the whole function, so a stricter public schema is safe when every schema
+arity is callable by the implementation. Unsafe profiles return
 `:seon.instrument/arity-mismatch`. Both cold reconstruction and delta
 replacement stop before invoking Malli when any fatal preparation rejection is
 present.
@@ -61,6 +64,13 @@ incomplete contract for an isolated two-arity function: preparation returned
 profiles, performed zero instrumentation, preserved the function and both
 arity accessors by identity, and left both calls usable.
 
+A later ACME reload exposed the necessary pure-variadic distinction:
+`seon.db/query` is implemented as `[& args]` but deliberately contracts one
+argument and two-or-more arguments. Exact profile equality rejected this safe
+whole-function case and degraded readiness. The compatibility regression pins
+that a pure variadic implementation accepts a stricter schema, validates its
+allowed calls, and rejects zero or ill-typed arguments.
+
 ## Owner
 
 `seon.instrument/prepare-target` and the one exact-data Malli wrapper
@@ -69,7 +79,8 @@ publication path.
 ## Acceptance
 
 - Candidate preparation derives the complete live fixed and variadic arity set
-  and compares it with the compiled contract's exact `m/-function-info` rows.
+  and compares it with the compiled contract's `m/-function-info` rows using
+  the same accessor-mutating versus whole-function distinction as Malli.
 - A missing, extra, or incompatible arity returns one structured fatal
   rejection before `mi/unstrument!` or `mi/instrument!` runs.
 - Complete multi-arity and variadic contracts survive repeated exact

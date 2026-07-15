@@ -454,12 +454,31 @@
                   (assoc ::max (:max variadic-info))))))))
 
 #?(:cljs
+   (defn- pure-variadic-profile?
+     "True when Malli instruments the whole variadic function, not accessors."
+     [live-profile]
+     (and (empty? (::fixed-arities live-profile))
+          (some? (::variadic live-profile)))))
+
+#?(:cljs
+   (defn- pure-variadic-schema-compatible?
+     "True when every contract arity is callable by a pure variadic function."
+     [live-profile schema-profile]
+     (let [live-min (get-in live-profile [::variadic ::min])
+           schema-min (get-in schema-profile [::variadic ::min])]
+       (and (every? #(<= live-min %) (::fixed-arities schema-profile))
+            (or (nil? schema-min) (<= live-min schema-min))))))
+
+#?(:cljs
    (defn- arity-mismatch
-     "A structured live/schema arity mismatch, or nil when they are exact."
+     "A structured unsafe live/schema arity mismatch, or nil when compatible."
      [sym the-fn function-schema]
      (let [live-profile (live-arity-profile the-fn)
            schema-profile (schema-arity-profile function-schema)]
-       (when-not (= live-profile schema-profile)
+       (when-not (if (pure-variadic-profile? live-profile)
+                   (pure-variadic-schema-compatible?
+                     live-profile schema-profile)
+                   (= live-profile schema-profile))
          {::sym sym
           ::reason ::arity-mismatch
           ::live-arities live-profile
@@ -493,7 +512,7 @@
                              ;; on the `:function` FORM (`-arity->schema`), so
                              ;; this entry must remain the raw form. The
                              ;; compiled object above proves both resolution
-                             ;; and exact live/schema arity parity first.
+                             ;; and a profile safe for Malli's accessor surgery.
                              schema-form)]
                        {::sym sym
                         ::ns ns-sym
