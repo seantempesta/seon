@@ -402,6 +402,13 @@ pod/cluster and process coordinates, not another source checkout. If concurrent
 work creates a real concern that these rules do not cover, ask the owner before
 introducing a worktree; otherwise roll with the shared system.
 
+Separately launched Codex tasks are still directly coordinateable: use the app
+thread list/read/message tools to identify the task by checkout and purpose,
+then request a coherent commit or explicit path handoff before editing overlap.
+Do not infer anonymous ownership indefinitely from `git status`, and do not add
+a `COORDINATION.md` status diary; the active PRD roadmap remains the durable
+ledger while thread messages handle ephemeral ownership.
+
 Branch switches, history changes, file discards, resets, and other destructive
 Git operations require user coordination. Never run `git reset --hard` or
 `git checkout --` to clean a shared tree. Commit coherent gains frequently
