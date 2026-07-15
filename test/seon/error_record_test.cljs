@@ -248,8 +248,9 @@
     {:seon.error/transact! (fn [tx-data]
                              (when db/*conn*
                                (db/transact! {:seon.db/tx-data tx-data})))
-     :seon.error/basis-t   (fn []
-                             (when db/*conn* (db/basis-t)))})
+     :seon.error/coordinate (fn []
+                              (when db/*conn*
+                                (db/head-coordinate @db/*conn*)))})
   nil)
 
 (defn- with-fresh-conn
@@ -263,30 +264,37 @@
         (.catch (fn [e] (is false (str "test chain threw/rejected — " e))))
         (.then finish))))
 
-(defn- assert-persisted-row!
+(defn ^:async ^:private assert-persisted-row!
   "Assertions over the row `record-persists…` wrote — split out to keep
    the async chain shallow."
   [env]
   (let [row (first (db/query {:seon.db/query
-                              '[:find ?e ?at
+                              '[:find ?e ?database-id ?branch ?commit-id ?t
                                 :where
                                 [?e :seon.error/message "persisted one"]
                                 [?e :seon.error/fault :agent]
-                                [?e :seon.error/at ?at]]}))
+                                [?e :seon.error/database-id ?database-id]
+                                [?e :seon.error/branch ?branch]
+                                [?e :seon.error/commit-id ?commit-id]
+                                [?e :seon.error/t ?t]]}))
         eid (first row)
-        at  (second row)]
+        point {:seon.db.coordinate/database-id (nth row 1)
+               :seon.db.coordinate/branch (nth row 2)
+               :seon.db.coordinate/commit-id (nth row 3)
+               :seon.db.coordinate/t (nth row 4)}]
     (is (some? row) "the datom projection landed")
-    (is (= at (:seon.error/at env)))
+    (is (= point (error/recorded-coordinate env)))
     (testing "frames are reified component entities"
       (is (pos? (count (db/query {:seon.db/query
                                   '[:find ?f
                                     :in $ ?e
                                     :where [?e :seon.error/frames ?f]]
                                   :seon.db/args [eid]})))))
-    (testing "as-of the stored :seon.error/at = the db the failing code saw"
-      (is (nil? (db/pull {:seon.db/db (db/as-of at)
+    (testing "the complete coordinate resolves the db the failing code saw"
+      (let [historical-db (await (db/at-coordinate db/*conn* point))]
+        (is (nil? (db/pull {:seon.db/db historical-db
                           :seon.db/pull-pattern '[:seon.error/message]
-                          :seon.db/ref eid}))))
+                          :seon.db/ref eid})))))
     (testing "the earlier no-conn record! was buffered and FLUSHED here"
       (is (some? (db/query {:seon.db/query
                             '[:find ?e .
@@ -321,7 +329,8 @@
         (let [env (error/record! {:seon.error/raw (js/Error. "persisted one")
                                   :seon.error/fault :agent})]
           (is (= :agent (:seon.error/fault env)))
-          (is (int? (:seon.error/at env)) "basis-t stamped when a conn is live")
+          (is (nil? (:seon.error/message (error/recorded-coordinate env)))
+              "a complete coordinate is stamped when a conn is live")
           (-> (tick 100)
               (.then (fn [] (assert-persisted-row! env))))))
       done)))
@@ -417,6 +426,23 @@
 ;; these deliberately injected hooks cannot consume that fixture's pending row.
 ;; ---------------------------------------------------------------------------
 
+(deftest partial-coordinate-hook-is-omitted-as-a-unit
+  (try
+    (error/set-db-hooks!
+      {:seon.error/transact! (fn [_]
+                               (js/Promise.resolve {:seon.db/ok? true}))
+       :seon.error/coordinate
+       (constantly {:seon.db.coordinate/database-id (random-uuid)
+                    :seon.db.coordinate/t 536870912})})
+    (let [env (error/record! {:seon.error/raw (js/Error. "partial point")
+                              :seon.error/fault :agent})]
+      (is (= {}
+             (select-keys env [:seon.error/database-id :seon.error/branch
+                               :seon.error/commit-id :seon.error/t]))
+          "a malformed hook cannot create a partial persisted identity"))
+    (finally
+      (install-default-error-hooks!))))
+
 (deftest persist-recursion-fence-is-local-to-the-persist-fiber
   ;; A contract failure caused by the error-persistence write itself must not
   ;; recursively call the same write forever. Capture the deliberate marker so
@@ -435,7 +461,7 @@
                        {:seon.error.malli/fn-sym 'seon.db/transact!})
               :seon.error/fault :agent})
            (js/Promise.resolve {:seon.db/ok? true}))
-         :seon.error/basis-t (constantly nil)})
+         :seon.error/coordinate (constantly nil)})
       (error/record! {:seon.error/raw (js/Error. "outer error")
                       :seon.error/fault :agent})
       (is (= 1 @calls)
@@ -459,7 +485,7 @@
            (if (= 1 (swap! calls inc))
              first-p
              (js/Promise.resolve {:seon.db/ok? true})))
-         :seon.error/basis-t (constantly nil)})
+         :seon.error/coordinate (constantly nil)})
       (error/record! {:seon.error/raw (js/Error. "first pending write")
                       :seon.error/fault :agent})
       (error/record!

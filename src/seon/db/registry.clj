@@ -64,9 +64,9 @@
                    [::deleted? :boolean]
                    [::error {:optional true} :string]])
 
-;; Fork point: a transaction id (basis-t / tx eid — datahike's :max-tx).
-;; `:seon.error/at` carries exactly this value, so an error row's `at`
-;; plugs straight into a fork request.
+;; Legacy physical-copy fork point: a transaction id inside the selected
+;; source database. Public historical identities must be resolved complete
+;; coordinates before this third-party boundary is reached.
 (schema/register! ::at :int)
 
 (schema/register! ::fork-database!-request
@@ -280,11 +280,9 @@
    identity across that boundary; callers must resolve and carry a complete
    database coordinate before selecting or reconstructing history.
 
-   Semantics of `::at` for error forensics: `:seon.error/at` is the
-   basis-t at the CATCH site — the db value the failing code SAW. The
-   error datom itself was recorded in a LATER tx, so it does NOT exist
-   inside its own fork; the fork is the snapshot the failure arose from,
-   not the later snapshot that already contains its record.
+   The selected point predates any later forensic/error-record datom; the
+   fork is the snapshot the failure arose from, not the later snapshot that
+   already contains its record.
 
    The fork is NOT registered here — the fork pod's own boot database ensure
    registers/connects it, the same one creation path `cluster create`

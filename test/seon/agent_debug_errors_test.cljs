@@ -17,8 +17,7 @@
     [seon.agent.debug :as agent-debug]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.error :as error]
-    [seon.db.replica :as replica]))
+    [seon.error :as error]))
 
 ;; ---------------------------------------------------------------------------
 ;; Pure piece — the deepest-message helper (moved from seon.eval).
@@ -120,11 +119,13 @@
       (is (fixture? "malli boom"))
       (is (fixture? "core fixture boom"))
       (is (not-any? #(= "ERROR" (:seon.error/message %)) rows)))
-    (testing "the fixture rows carry fault + at"
+    (testing "the fixture rows carry fault + complete coordinate"
       (let [mine (filter #(#{"wrapped real cause" "malli boom" "core fixture boom"}
                             (:seon.error/message %)) rows)]
         (is (= #{:agent :core} (set (map :seon.error/fault mine))))
-        (is (every? (comp int? :seon.error/at) mine))))
+        (is (every? #(nil? (:seon.error/message
+                             (error/recorded-coordinate %)))
+                    mine))))
     (testing "fault filter + limit"
       (let [core-rows (:seon.agent.debug/errors
                         (agent-debug/errors {:seon.error/fault :core}))]
@@ -143,7 +144,7 @@
     (is (true? (:seon.agent.debug/ok? e)))
     (is (= :agent (:seon.error/fault e)))
     (is (= "wrapped real cause" (:seon.error/message e)))
-    (is (int? (:seon.error/at e)))
+    (is (nil? (:seon.error/message (error/recorded-coordinate e))))
     (is (string? (:seon.error/stack e)))
     (is (vector? (:seon.agent.debug/frames e)) "frames table pulled")
     (is (= 0 (:seon.error.frame/index (first (:seon.agent.debug/frames e))))
@@ -153,45 +154,46 @@
       (is (false? (:seon.agent.debug/ok? miss)))
       (is (str/includes? (:seon.agent.debug/error miss) "no persisted error")))))
 
-(defn- assert-repro-bundle! []
+(defn ^:async ^:private assert-repro-bundle! []
   (testing "malli-shaped error → fn-sym + args + apply expression"
     (let [eid (eid-of "malli boom")
-          r   (agent-debug/repro {:seon.agent.debug/eid eid})]
+          r   (await (agent-debug/repro {:seon.agent.debug/eid eid}))
+          point (error/recorded-coordinate r)]
       (is (true? (:seon.agent.debug/ok? r)))
-      (is (some? (:seon.db/db r)) "the frozen as-of db VALUE is in the bundle")
-      (is (= (:seon.error/at r) (db/basis-t (:seon.db/db r)))
+      (is (some? (:seon.db/db r)) "the frozen exact db VALUE is in the bundle")
+      (is (= (:seon.db.coordinate/t point) (db/basis-t (:seon.db/db r)))
           "the frozen database reports the error's selected coordinate")
       (is (= 'my.probe/f (:seon.agent.debug/fn-sym r)))
       (is (= "[{:my.probe/arg 42}]" (:seon.error/args-edn r)))
       (is (str/includes? (:seon.agent.debug/repro-expr r)
                          "(apply (resolve 'my.probe/f)"))
-      (testing "the error→fork bridge: the exact supervisor command for this at"
-        (is (= (str "bin/seon cluster fork " replica/database-name " "
-                    (:seon.error/at r))
-               (:seon.agent.debug/fork-hint r))))
-      (is (not (contains? r :seon.agent.debug/note)))
-      (testing "the as-of db PRE-DATES the error datom (differs from head)"
+      (is (str/includes? (:seon.agent.debug/note r)
+                         "coordinate-aware writable fork is pending"))
+      (testing "the exact db PRE-DATES the error datom (differs from head)"
         (is (nil? (db/query '[:find ?e . :in $ ?m
                               :where [?e :seon.error/message ?m]]
                             (:seon.db/db r) "malli boom"))))))
   (testing "non-malli error → honest note, freeze-only expression"
     (let [eid (eid-of "wrapped real cause")
-          r   (agent-debug/repro {:seon.agent.debug/eid eid})]
+          r   (await (agent-debug/repro {:seon.agent.debug/eid eid}))]
       (is (true? (:seon.agent.debug/ok? r)))
       (is (nil? (:seon.agent.debug/fn-sym r)))
       (is (str/includes? (:seon.agent.debug/note r) "no captured fn/args"))
-      (is (str/includes? (:seon.agent.debug/repro-expr r) "seon.db/as-of"))))
+      (is (str/includes? (:seon.agent.debug/repro-expr r)
+                         "seon.db/at-coordinate"))))
   (testing "unknown eid"
     (is (false? (:seon.agent.debug/ok?
-                  (agent-debug/repro {:seon.agent.debug/eid 999999999}))))))
+                  (await
+                    (agent-debug/repro
+                      {:seon.agent.debug/eid 999999999})))))))
 
 (deftest error-triage-functions-over-seeded-datoms
   (async done
     (with-fresh-conn
       (fn [_conn]
         (-> (seed-errors!)
-            (.then (fn []
+            (.then (fn ^:async verify []
                      (assert-errors-list!)
                      (assert-error-detail!)
-                     (assert-repro-bundle!)))))
+                     (await (assert-repro-bundle!))))))
       done)))

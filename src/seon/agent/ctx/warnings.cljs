@@ -38,7 +38,7 @@
         (some? scope) (assoc :seon.warn/ns scope)))))
 
 (defn- core-fault-rows
-  "[eid msg at tx-inst frame0] rows for `:core`-fault errors since the
+  "[eid msg t tx-inst frame0] rows for `:core`-fault errors since the
    latest user message (every one when no user message exists yet).
    `frame0` is the top parsed stack frame's fn name, \"\" when none."
   [db]
@@ -54,19 +54,19 @@
         rows   (db/query
                  {:seon.db/db db
                   :seon.db/query
-                  '[:find ?e ?msg ?at ?inst
+                  '[:find ?e ?msg ?t ?inst
                     :where
                     [?e :seon.error/fault :core ?tx]
                     [?e :seon.error/message ?msg]
-                    [(get-else $ ?e :seon.error/at 0) ?at]
+                    [(get-else $ ?e :seon.error/t 0) ?t]
                     [?tx :db/txInstant ?inst]]})]
     (->> rows
          (filter (fn [[_ _ _ inst]]
                    (or (nil? cutoff)
                        (> (.getTime ^js inst) (.getTime ^js cutoff)))))
-         (sort-by (fn [[_ _ at]] at))
-         (mapv (fn [[e msg at inst]]
-                 [e msg at inst (get frame0 e "")])))))
+         (sort-by (fn [[_ _ t]] t))
+         (mapv (fn [[e msg t inst]]
+                 [e msg t inst (get frame0 e "")])))))
 
 (defn core-faults-block
   "`:core`-fault errors since the last user message — root cluster only.
@@ -91,8 +91,8 @@
            "; Under :seon.config/on-core-error :gate they FAIL dev runs until fixed.\n"
            (str/join
              "\n"
-             (map (fn [[e msg at _inst frame]]
-                    (str "; t=" at "  " msg
+             (map (fn [[e msg t _inst frame]]
+                    (str "; t=" t "  " msg
                          (when (seq frame) (str "  @ " frame))
                          "  [eid " e "]"))
                   rows))

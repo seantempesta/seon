@@ -40,9 +40,8 @@
     [seon.agent.turn :as turn]
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
-    [seon.error]
-    [seon.schema :as schema]
-    [seon.db.replica :as replica]))
+    [seon.error :as error]
+    [seon.schema :as schema]))
 
 ;; Shared success/error envelope keys — registered ONCE up front; every
 ;; response schema in this ns references them (errors are values: an
@@ -342,7 +341,10 @@
    [::eid                ::eid]
    [:seon.error/fault    :seon.error/fault]
    [:seon.error/message  :seon.error/message]
-   [:seon.error/at       {:optional true} :seon.error/at]
+   [:seon.error/database-id {:optional true} :seon.error/database-id]
+   [:seon.error/branch      {:optional true} :seon.error/branch]
+   [:seon.error/commit-id   {:optional true} :seon.error/commit-id]
+   [:seon.error/t           {:optional true} :seon.error/t]
    [::top-frame          {:optional true} ::top-frame]
    [:seon.agent/id       {:optional true} :seon.agent/id]])
 
@@ -374,7 +376,9 @@
              (when base (str " (" base (when line (str ":" line)) ")")))))))
 
 (def ^:private error-pull-pattern
-  [:seon.error/fault :seon.error/message :seon.error/at
+  [:seon.error/fault :seon.error/message
+   :seon.error/database-id :seon.error/branch
+   :seon.error/commit-id :seon.error/t
    :seon.error/stack :seon.error/args-edn :seon.error/data-edn
    {:seon.error/frames [:seon.error.frame/index :seon.error.frame/fn
                         :seon.error.frame/file :seon.error.frame/line
@@ -394,7 +398,7 @@
    Map-in/map-out (0-arity = defaults): optional `:seon.error/fault`
    filter (`:agent` | `:core`) and `::limit` (default 20). Each row:
    the error's entity id (feed it to [[error]] / [[repro]]), fault,
-   `:seon.error/at` (basis-t at failure), the DEEPEST-cause short
+   the complete catch-site database coordinate, the DEEPEST-cause short
    message, the top stack frame, and the recording agent's id when the
    tx carried one. Token-bounded by construction — stored messages are
    already clipped; rows clip further for the list."
@@ -413,13 +417,19 @@
                    (take (or limit default-errors-limit)))]
      {::errors
       (mapv (fn [eid]
-              (let [{:seon.error/keys [fault message at frames]} (pull-error db eid)
+              (let [{:seon.error/keys [fault message frames] :as persisted}
+                    (pull-error db eid)
                     top (top-frame-str frames)
                     aid (tx-agent-id db eid)]
-                (cond-> {::eid eid
-                         :seon.error/fault fault
-                         :seon.error/message (tokens/clip-str message 25)}
-                  at  (assoc :seon.error/at at)
+                (cond-> (merge
+                          {::eid eid
+                           :seon.error/fault fault
+                           :seon.error/message (tokens/clip-str message 25)}
+                          (select-keys persisted
+                                       [:seon.error/database-id
+                                        :seon.error/branch
+                                        :seon.error/commit-id
+                                        :seon.error/t]))
                   top (assoc ::top-frame top)
                   aid (assoc :seon.agent/id aid))))
             eids)})))
@@ -437,7 +447,10 @@
    [::error {:optional true} ::error]
    [:seon.error/fault    {:optional true} :seon.error/fault]
    [:seon.error/message  {:optional true} :seon.error/message]
-   [:seon.error/at       {:optional true} :seon.error/at]
+   [:seon.error/database-id {:optional true} :seon.error/database-id]
+   [:seon.error/branch      {:optional true} :seon.error/branch]
+   [:seon.error/commit-id   {:optional true} :seon.error/commit-id]
+   [:seon.error/t           {:optional true} :seon.error/t]
    [:seon.error/stack    {:optional true} :seon.error/stack]
    [:seon.error/args-edn {:optional true} :seon.error/args-edn]
    [:seon.error/data-edn {:optional true} :seon.error/data-edn]
@@ -446,29 +459,61 @@
    [::turn-eid           {:optional true} ::eid]
    [:seon.agent.turn/id  {:optional true} :seon.agent.turn/id]])
 
+(defn- turn-active-at-coordinate
+  "Latest turn in the same immutable containing commit at or before `point`."
+  [db aid point]
+  (when (and aid (nil? (:seon.error/message point)))
+    (->> (db/query
+           '[:find ?turn ?turn-id ?turn-t
+             :in $ ?aid ?database-id ?branch ?commit-id ?error-t
+             :where
+             [?agent :seon.agent/id ?aid]
+             [?run :seon.agent.run/agent ?agent]
+             [?turn :seon.agent.turn/run ?run]
+             [?turn :seon.agent.turn/id ?turn-id]
+             [?turn :seon.agent.turn/rendered-database-id ?database-id]
+             [?turn :seon.agent.turn/rendered-branch ?branch]
+             [?turn :seon.agent.turn/rendered-commit-id ?commit-id]
+             [?turn :seon.agent.turn/rendered-t ?turn-t]
+             [(<= ?turn-t ?error-t)]]
+           db aid
+           (::coordinate/database-id point)
+           (::coordinate/branch point)
+           (::coordinate/commit-id point)
+           (::coordinate/t point))
+         (sort-by #(nth % 2) >)
+         first)))
+
 (defn error
   "Full detail for one persisted error: envelope + turn/agent joins.
 
    Map-in/map-out — `{::eid eid}` (from [[errors]]) returns the whole
-   persisted projection (message, fault, `at`, frames table sorted by
+   persisted projection (message, fault, complete coordinate, frames sorted by
    index, args-edn, data-edn, stack) plus the JOINS: the recording
-   agent's id and the turn active at that basis-t — `::turn-eid` plus
+   agent's id and a turn proven active inside the same containing commit —
+   `::turn-eid` plus
    `:seon.agent.turn/id` so [[turn]] composes.
    An unknown eid returns `::ok? false` with a guiding `::error`."
   {:malli/schema [:=> [:cat ::error-request] ::error-response]}
   [{eid ::eid}]
   (let [db @db/*conn*]
     (if-let [e (pull-error db eid)]
-      (let [aid (tx-agent-id db eid)]
+      (let [aid (tx-agent-id db eid)
+            point (error/recorded-coordinate e)
+            [teid tid] (turn-active-at-coordinate db aid point)]
         (cond-> (merge {::ok? true ::eid eid}
                        (select-keys e [:seon.error/fault :seon.error/message
-                                       :seon.error/at :seon.error/stack
+                                       :seon.error/database-id
+                                       :seon.error/branch
+                                       :seon.error/commit-id
+                                       :seon.error/t :seon.error/stack
                                        :seon.error/args-edn :seon.error/data-edn]))
           (seq (:seon.error/frames e))
           (assoc ::frames (->> (:seon.error/frames e)
                                (sort-by :seon.error.frame/index)
                                (mapv #(dissoc % :db/id))))
-          aid     (assoc :seon.agent/id aid)))
+          aid     (assoc :seon.agent/id aid)
+          teid    (assoc ::turn-eid teid :seon.agent.turn/id tid)))
       {::ok? false ::eid eid
        ::error (str "no persisted error under eid " eid
                     " — list them: (seon.agent.debug/errors)")})))
@@ -476,12 +521,6 @@
 (schema/register! ::fn-sym     :symbol)
 (schema/register! ::repro-expr :string)
 (schema/register! ::note       :string)
-;; The exact supervisor command that boots this error's database snapshot as a live,
-;; writable, disposable cluster: `bin/seon cluster fork <cluster> <at>`.
-;; `:seon.error/at` is the basis-t at the CATCH site — the db the failing
-;; code SAW — so the fork holds everything up to the failure but NOT the
-;; error datom itself (recorded in a later tx).
-(schema/register! ::fork-hint  :string)
 
 (schema/register! ::repro-request [:map [::eid ::eid]])
 
@@ -490,17 +529,19 @@
    [::ok?  ::ok?]
    [::eid  ::eid]
    [::error {:optional true} ::error]
-   ;; The LIVE as-of db VALUE frozen at :seon.error/at — REPL use only.
+   ;; The LIVE exact db VALUE frozen at the complete coordinate — REPL use only.
    ;; NEVER pr-str it into agent context (it prints the whole index);
-   ;; render its basis-t (:seon.error/at) instead.
+   ;; render its t and abbreviated commit instead.
    [:seon.db/db          {:optional true} :seon.db/db]
-   [:seon.error/at       {:optional true} :seon.error/at]
+   [:seon.error/database-id {:optional true} :seon.error/database-id]
+   [:seon.error/branch      {:optional true} :seon.error/branch]
+   [:seon.error/commit-id   {:optional true} :seon.error/commit-id]
+   [:seon.error/t           {:optional true} :seon.error/t]
    [::fn-sym             {:optional true} ::fn-sym]
    [:seon.error/args-edn {:optional true} :seon.error/args-edn]
    [::turn-eid           {:optional true} ::eid]
    [:seon.agent.turn/id  {:optional true} :seon.agent.turn/id]
    [::repro-expr         {:optional true} ::repro-expr]
-   [::fork-hint          {:optional true} ::fork-hint]
    [::note               {:optional true} ::note]])
 
 (defn- fn-sym-from-data-edn
@@ -523,56 +564,64 @@
 
 (defn- repro-expr-str
   "The ready-to-eval reproduction expression for what's ACTUALLY stored."
-  [at fn-sym args-edn]
-  (if (and fn-sym args-edn)
-    (str "(let [db (seon.db/as-of " at ")]\n"
-         "  (apply (resolve '" fn-sym ") (cljs.reader/read-string "
-         (pr-str args-edn) ")))")
-    (str "(seon.db/as-of " at ")")))
+  [point fn-sym args-edn]
+  (let [resolve-expr
+        (str "(seon.db/at-coordinate seon.db/*conn* " (pr-str point) ")")]
+    (if (and fn-sym args-edn)
+      (str "(.then " resolve-expr "\n"
+           "  (fn [db] (apply (resolve '" fn-sym ") (cljs.reader/read-string "
+           (pr-str args-edn) "))))")
+      resolve-expr)))
 
-(defn repro
+(defn ^:async repro
   "The work-backwards bundle for one persisted error — freeze + re-run.
 
-   Map-in/map-out — `{::eid eid}` returns `:seon.db/db` (the LIVE as-of
-   db VALUE frozen at `:seon.error/at` — REPL material; never print it,
-   render the basis-t), the failing `::fn-sym` + `:seon.error/args-edn`
+   Map-in/map-out — `{::eid eid}` returns `:seon.db/db` (the exact immutable
+   db VALUE frozen at the recorded coordinate — REPL material; never print
+   it), the failing `::fn-sym` + `:seon.error/args-edn`
    when the malli envelope captured them (a `::note` says so honestly
    when absent — nothing is fabricated), the linked turn
    (`::turn-eid` + complete rendered coordinate, composes with [[turn]]), and
    `::repro-expr` — a ready-to-eval expression string built from what's
-   actually stored. `::fork-hint` is the supervisor command that boots
-   this cluster as a live writable cluster (`bin/seon cluster fork
-   <cluster> <at>`) — `at` is the basis-t the failing code SAW, so the
-   fork holds everything up to the failure but not this error datom
-   itself. `::ok? false` + guiding `::error` for an unknown
-   eid or an error persisted before a conn was live (no `at`)."
+   actually stored. Writable forensic branching is omitted until the operator
+   accepts complete coordinates; the legacy t-only fork command is ambiguous.
+   `::ok? false` + guiding `::error` for an unknown eid or an old error with no
+   complete point."
   {:malli/schema [:=> [:cat ::repro-request] ::repro-response]}
   [{eid ::eid}]
   (let [db @db/*conn*]
     (if-let [e (pull-error db eid)]
-      (let [{:seon.error/keys [at args-edn data-edn]} e
+      (let [{:seon.error/keys [args-edn data-edn]} e
             aid      (tx-agent-id db eid)
             fn-sym   (fn-sym-from-data-edn data-edn)
-            args-edn (readable-args-edn args-edn)]
-        (if-not at
+            args-edn (readable-args-edn args-edn)
+            point    (error/recorded-coordinate e)]
+        (if-let [coordinate-error (:seon.error/message point)]
           {::ok? false ::eid eid
-           ::error (str "error " eid " has no :seon.error/at (recorded before "
-                        "a conn was live) — no db value to freeze; read the "
-                        "envelope via (seon.agent.debug/error {::eid " eid "})")}
-          (cond-> {::ok? true ::eid eid
-                   :seon.db/db (db/as-of db at)
-                   :seon.error/at at
-                   ::repro-expr (repro-expr-str at fn-sym args-edn)
-                   ::fork-hint (str "bin/seon cluster fork "
-                                    replica/database-name " " at)}
-            fn-sym   (assoc ::fn-sym fn-sym)
-            args-edn (assoc :seon.error/args-edn args-edn)
-            (not (and fn-sym args-edn))
-            (assoc ::note (str "no captured fn/args on this error (non-malli "
-                               "path or clipped args) — re-invocation is not "
-                               "possible from the datom; work from the frozen "
-                               "db + the linked turn's eval forms "
-                               "(seon.agent.debug/turn)")))))
+           ::error (str "error " eid " " coordinate-error
+                        " — no db value can be reconstructed")}
+          (let [historical-db (await (db/at-coordinate db/*conn* point))]
+            (if-let [resolution-error (:seon.error/message historical-db)]
+              {::ok? false ::eid eid ::error resolution-error}
+              (let [[teid tid] (turn-active-at-coordinate db aid point)]
+                (cond-> (merge
+                          {::ok? true ::eid eid
+                           :seon.db/db historical-db
+                           ::repro-expr (repro-expr-str point fn-sym args-edn)}
+                          (select-keys e [:seon.error/database-id
+                                          :seon.error/branch
+                                          :seon.error/commit-id
+                                          :seon.error/t]))
+                  fn-sym   (assoc ::fn-sym fn-sym)
+                  args-edn (assoc :seon.error/args-edn args-edn)
+                  teid     (assoc ::turn-eid teid :seon.agent.turn/id tid)
+                  true     (assoc ::note
+                                  (if (and fn-sym args-edn)
+                                    (str "exact read-only reproduction is ready; "
+                                         "coordinate-aware writable fork is pending")
+                                    (str "no captured fn/args on this error (non-malli "
+                                         "path or clipped args); use the exact frozen "
+                                         "db. Coordinate-aware writable fork is pending")))))))))
       {::ok? false ::eid eid
        ::error (str "no persisted error under eid " eid
                     " — list them: (seon.agent.debug/errors)")})))

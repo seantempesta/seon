@@ -2012,9 +2012,9 @@
   {:seon.error/transact! (fn [tx-data]
                            (when *conn*
                              (transact! {::tx-data tx-data})))
-   :seon.error/basis-t   (fn []
-                           (when *conn*
-                             (basis-t)))})
+   :seon.error/coordinate (fn []
+                            (when *conn*
+                              (head-coordinate @*conn*)))})
 
 ;; ---------------------------------------------------------------------------
 ;; Config-view seam — `seon.config`'s accessors read the `:seon.config`

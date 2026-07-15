@@ -26,9 +26,10 @@
                                     the discriminator is \"what were we
                                     calling\" — our machinery throwing
                                     while PREPARING agent code is :core.
-     :seon.error/at        int    — basis-t (tx eid) at the catch site;
-                                    `(seon.db/as-of at)` freezes the db
-                                    the failing code saw.
+     :seon.error/database-id uuid — catch-site physical database
+     :seon.error/branch      kw   — catch-site branch attachment
+     :seon.error/commit-id   uuid — immutable containing commit
+     :seon.error/t           int  — temporal cut inside that commit
      :seon.error/frames    vector — EDN stack frames (component entities)
      :seon.error/args-edn  string — bounded full-args print (malli path)
 
@@ -42,6 +43,7 @@
     [goog.object :as gobj]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
+    [seon.db.coordinate :as coordinate]
     [seon.error.instrument :as ei]
     [seon.schema :as schema]))
 
@@ -57,9 +59,10 @@
 ;; any mode. :core = our bug (loud per the :seon.config/on-core-error
 ;; dial).
 (schema/register! ::fault [:enum :agent :core])
-;; basis-t (tx eid) of the db value live at the catch site — plugs
-;; straight into `seon.db/as-of` (datahike's :max-tx IS the tx eid).
-(schema/register! ::at :int)
+(schema/register! ::database-id ::coordinate/database-id)
+(schema/register! ::branch ::coordinate/branch)
+(schema/register! ::commit-id ::coordinate/commit-id)
+(schema/register! ::t ::coordinate/t)
 (schema/register! ::message :string)
 (schema/register! ::stack :string)
 ;; Bounded, fn-stubbed pr-str of the FULL args vector (malli reports
@@ -264,13 +267,14 @@
 ;; ============================================================
 ;; DB hooks — the late-bound persistence seam. seon.db.internal requires
 ;; seon.error (this ns must stay below seon.db), so seon.db INJECTS its
-;; transact!/basis-t here at ITS load (see the bottom of seon.db). Before
+;; transact!/coordinate projection here at ITS load (see the bottom of
+;; seon.db). Before
 ;; the hooks land (very early boot) record! buffers in memory.
 ;; ============================================================
 
 (defonce ^:private !db-hooks
   ;; {:seon.error/transact! (fn [tx-data] Promise|nil)
-  ;;  :seon.error/basis-t   (fn [] int|nil)}
+  ;;  :seon.error/coordinate (fn [] ::coordinate/coordinate|nil)}
   (atom nil))
 
 (defn set-db-hooks!
@@ -344,17 +348,58 @@
           (.catch (fn [_] (run! buffer! entities))))
       (do (run! buffer! entities) nil))))
 
-(defn- basis-t-now
-  "basis-t via the injected hook, nil when no conn is live yet."
+(defn- coordinate-now
+  "Complete point via the injected hook, nil when no conn is live yet."
   []
-  (when-let [f (:seon.error/basis-t @!db-hooks)]
-    (try (f) (catch :default _ nil))))
+  (when-let [f (:seon.error/coordinate @!db-hooks)]
+    (try
+      (let [point (f)]
+        (when (schema/valid-candidate-value? ::coordinate/coordinate point)
+          point))
+      (catch :default _ nil))))
+
+(def ^:private coordinate->error-attr
+  {::coordinate/database-id ::database-id
+   ::coordinate/branch ::branch
+   ::coordinate/commit-id ::commit-id
+   ::coordinate/t ::t})
+
+(defn- coordinate-error-attrs
+  [point]
+  (into {}
+        (map (fn [[point-attr error-attr]]
+               [error-attr (get point point-attr)]))
+        coordinate->error-attr))
+
+(schema/register!
+  ::recorded-coordinate-response
+  [:or
+   ::coordinate/coordinate
+   [:map [::message ::message]
+    [::kind :keyword]]])
+
+(defn recorded-coordinate
+  "Canonical complete coordinate from one persisted/in-memory error envelope.
+
+   Old or partial rows return a guiding error value; no current attachment or
+   commit is guessed from a bare t."
+  {:malli/schema [:=> [:cat :map] ::recorded-coordinate-response]}
+  [error]
+  (let [point (into {}
+                    (map (fn [[point-attr error-attr]]
+                           [point-attr (get error error-attr)]))
+                    coordinate->error-attr)]
+    (if (schema/valid-candidate-value? ::coordinate/coordinate point)
+      point
+      {::message "error has no complete recorded database coordinate"
+       ::kind :missing-database-coordinate})))
 
 (defn- datom-projection
   "The EDN-safe datom entity for an envelope — bounded strings, reified
    frames, NO live objects (`:seon.error/raw`, malli Schema leafs)."
   [envelope]
-  (let [{:seon.error/keys [fault at stack frames args-edn data kind]} envelope
+  (let [{:seon.error/keys [fault database-id branch commit-id t
+                           stack frames args-edn data kind]} envelope
         ;; The DEEPEST real cause, not cljs.js's top wrapper ("ERROR") —
         ;; this string is what the SEON-CORE-FAULT marker prints and what
         ;; seon.agent.debug/errors lists.
@@ -370,7 +415,10 @@
     (cond-> {:seon.error/fault   fault
              :seon.error/message (tokens/clip-str (str message) 100)}
       kind           (assoc :seon.error/kind kind)
-      at             (assoc :seon.error/at at)
+      database-id    (assoc ::database-id database-id)
+      branch         (assoc ::branch branch)
+      commit-id      (assoc ::commit-id commit-id)
+      t              (assoc ::t t)
       stack          (assoc :seon.error/stack stack)
       (seq frames)   (assoc :seon.error/frames frames)
       args-edn       (assoc :seon.error/args-edn args-edn)
@@ -444,7 +492,7 @@
     (js/console.error
       (str (if expected? "SEON-EXPECTED-CORE-FAULT" "SEON-CORE-FAULT") " "
            (:seon.error/message projection)
-           (when-let [at (:seon.error/at projection)] (str " @t=" at))))
+           (when-let [t (::t projection)] (str " @t=" t))))
     (when (and (not expected?) (= :crash (config/on-core-error)))
       (let [exit! (fn [& _]
                     (js/console.error
@@ -488,7 +536,8 @@
    The iron rule as a fn: nothing is caught without becoming data.
    Builds the [[->map]] envelope from `::raw`, stamps `::fault` (from
    the caller — the catch site is the only place that knows what was
-   being called), `::at` (basis-t when a conn is live), parsed
+   being called), the complete catch-site database coordinate when a conn is
+   live, parsed
    `::frames`, and `::args-edn` (lifted from the malli envelope when
    present). Persists the EDN-safe projection without awaiting — a
    failed/impossible write buffers in memory (bounded, drop-oldest) and
@@ -512,8 +561,8 @@
                   (get-in envelope [:seon.error/data :seon.error.malli/fn-sym])))
           args-edn (get-in envelope [:seon.error/data :seon.error/args-edn])
           envelope (cond-> (assoc envelope :seon.error/fault fault)
-                     :always  (as-> m (if-let [t (basis-t-now)]
-                                        (assoc m :seon.error/at t) m))
+                     :always  (as-> m (if-let [point (coordinate-now)]
+                                        (merge m (coordinate-error-attrs point)) m))
                      args-edn (assoc :seon.error/args-edn args-edn)
                      :always  (as-> m (if-let [fs (some-> (:seon.error/stack m)
                                                           parse-frames)]

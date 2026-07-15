@@ -102,9 +102,21 @@ rebuild/restart, live turn `ep2np287dio2` stored database
 `6a56dd4d-4110-5bc4-8c4d-6235b75796bc`, and t `536870956`; resolving that
 point returned t `536870956` and excluded the turn's later creation datom.
 
-Slice 1 remains open at the downstream boundary: error capture and frozen web
-caches/bookmarks still carry bare numeric basis values. Registry and native
-branch lifecycle also remain later ordered slices.
+Error capture and reproduction now use the same full point. The injected
+database seam returns one canonical coordinate; `seon.error/record!` projects
+its four facts together, and `seon.agent.debug/repro` asynchronously resolves
+the retained containing commit and cut. Old/partial rows return a typed
+non-reconstructable value. The unsafe t-only writable-fork hint is omitted
+until native coordinate-aware branch creation replaces physical copying. The
+focused gate passed 17 tests/116 assertions. After a public rebuild/restart,
+live error eid `3097` stored database
+`54b5b7e7-51fb-3220-b079-81a81914d86f`, branch `:db`, commit
+`6a56e16e-47c6-5d2e-82c5-907822251e3a`, and t `536870963`; repro resolved t
+`536870963` and proved that the later error datom was absent from that value.
+
+Slice 1 remains open at the downstream boundary: frozen web caches/bookmarks
+still carry bare numeric basis values. Registry and native branch lifecycle
+also remain later ordered slices.
 
 ## Research evidence
 
