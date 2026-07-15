@@ -205,21 +205,64 @@ three-form crash proof records the committed prefix and absent suffix without
 fabrication; general durable per-form position remains a later
 agentic-refinement contract.
 
-The read-only Slice-3 writer-admin grounding is complete at
+The Slice-3 writer-admin boundary is partially implemented from the grounding at
 [[research/restore-writer-admin-transition-audit-2026-07-15]]. The smallest
 root-move owner is one no-listener invocation of the existing writer artifact:
 an invocation-local observational registry open proves the exact main,
 prepared-target, undo, and full-roster fences; guarded `force-branch!` moves
-main at most once; full coordinate/parent/value/secondary/roster read-back plus
-awaited release produces one closed result. Retry derives old, exact desired,
-or divergent state from storage, so response loss never repeats force. A
-provisional Slice-2 owner now names intent identity, main/target and derived
-prepared coordinates, artifact flavor, consumer generations, blob view, and
-digests. Its exact backend locator, full expected roster, writer/protocol
-binding, and result transport remain intentionally unsettled rather than being
-guessed in the writer lane.
+main at most once; fresh coordinate, parent, EAVT, declared-secondary Merkle
+root, roster, and release evidence is required for one closed portable result. Retry
+derives old, exact desired, or divergent state from storage, so response loss
+never repeats force. The final Slice-2 intent supplies the exact backend
+locator, full expected roster, writer/protocol binding, and one retained
+intent-specific atomic result path. Publication replaces that same path on
+retry; absence remains unknown until a later storage observation proves the
+durable head. The scaffold fails closed on a newly discovered dependency
+blocker: selected Datahike force flushes the prepared Proximum instance while
+labeling its key map as destination branch `:db`; a file-backed one-vector
+fixture reopens with equal EAVT and KNN results but unequal secondary roots.
+Focused admin proof passes 9 tests and 53 assertions; the combined writer-admin
+gate passes 22 tests and 131 assertions, including the real dependency
+falsifier and injected connect, operation, first/second release, post-force
+read-back, invalid-result, and result-loss failures. No public
+restore command may invoke this boundary until the Datahike force-secondary
+fix makes the real fixture converge. That operator must independently hash the
+exact writer artifact before launch; the intent's plan digest only commits the
+expected artifact claim.
 The concrete missing source boundary is tracked in
 [[../../seon/issues/restore-writer-admin-transition-is-unimplemented]].
+
+Slice 4 retained-blob materialization is complete in the one existing
+`my.blob` owner. Its closed non-agent-facing boundary fences the exact retained
+target coordinate, derives the canonical distinct/sorted `B(T)` through
+`seon.db` only, and requires SHA-256 of the UTF-8 `(pr-str B(T))` bytes to equal
+the frozen intent digest before any filesystem effect. An absent blob
+attribute means the empty set. Lookup is overlay-first and stops at the first
+existing path, so corrupt target bytes never fall through to a valid lower
+base. Missing and corrupt main destinations are published only from
+independently verified source bytes through the directory-durable publisher;
+valid destinations are re-synced, every destination is read and hashed again,
+and retry reports converged counts without a database write. Focused proof
+passes 21 tests and 148 assertions with a warning-free 510-file CLJS compile,
+including target-coordinate, frozen-digest, missing-source, corrupt-overlay,
+orphan, repair, publication-failure, final-readback, and retry falsifiers.
+
+The independent Slice-5 completion-fact owner is complete in
+`seon.db.restore`. Its closed schema is exactly the compact identity plus the
+thirteen architecture payload attributes, with only the core/config overlay
+digests optional. After schemas are preinstalled, one root/boot-provenanced,
+whole-head-fenced `seon.db/transact!` records the fact and proves the exact
+entity plus identity-datom transaction on read-back. An equal retry while that
+transaction remains head performs no write; a same-id value conflict fails
+closed. Focused fresh-Datahike proof passes 5 tests and 31 assertions. A later-
+head retry also fails closed for now: the public CLJS database surface cannot
+yet resolve the completion transaction to its original containing commit, and
+substituting the later head would be false evidence. The ordered integration
+slice must add one canonical writer-backed transaction-coordinate resolver,
+fix the Datahike secondary force blocker, then compose forced-main result,
+blob proof, cold reconstruction, completion, exact admission, readiness, and
+intent deletion. It must not add shadow completion metadata or another restore
+state machine.
 
 The first operator-only restore slice now owns one closed immutable intent and
 derives its next command from the current main coordinate, an explicitly
