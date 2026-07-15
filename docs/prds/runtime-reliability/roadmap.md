@@ -118,50 +118,49 @@ than expanding the current implementation into unrelated files.
 
 ### Current working portfolio and refill queue
 
-The 2026-07-15 integrated portfolio is deliberately split between ordered
-contract work and independent consumers:
+The current 2026-07-15 portfolio is deliberately split between the restore
+dependency spine and independent evidence consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Clean restart and unexpected pod crash replacement are proven; restore/undo is next** | `09bd9c0f` fixes pod quiesce ordering; `d65b74ec` exposes bounded component evidence. Two clean restarts retained attachment `54b5b7e7-51fb-3220-b079-81a81914d86f/:db`. Killing exact workload generation `58c773a2-59d6-49af-ae77-7ef6e9568e8d` then reported pod forced/unexpected-exit with writer/watcher clean; cold boot repaired one open run and running turn, created one anchor, fabricated no eval, and the immediate restart remained clean/idempotent | Implement the retained-head restore/undo contract from `ac81c0bd`, then run the ordered multi-form partial-commit failure proof before downstream unit-1 graduation |
-| Database lifecycle | **Caller cutover is complete; live migration/restart evidence is the ordered spine** | `48d1fbcc` prevents replacement before lifecycle proof, `bb279aba` routes CLI down/restart/rebuild/reset through the coordinator, and `27292551` routes retained close/restart/open through the same mechanism. The audit at `ac81c0bd` proves initial writable restores must select exact retained branch heads rather than arbitrary interior `as-of` cuts | Prove forced legacy retirement followed by a clean contained restart; then run unexpected crash replacement and implement retained-head restore/undo |
-| Reactive/database views | **Bounded transition metrics are integrated; the last debug/raw consumer migration is active in parallel** | `365052f0` lands candidate-only routing; `afc70d3f` proves six retained read shapes; `6760f632` adds bounded unit metrics; `cdc28ac6` defines the exact gzip/feed/browser proof. The remaining debug projection still reaches ambient database state through `ctx-preview*` | Finish the one explicit-database unit-engine path and delete the ambient legacy projection, but execute live browser/feed proof only after the source-frozen two-restart lifecycle proof |
-| Agent runtime correctness | **Turn-boundary quiescence and exact process containment are settled inputs; production child cutover waits for clean restart** | Receipt/recovery Slice A remains complete at `defb8014`; parent-owned launch capability is defined at `f2c1f1c8`; admission closes at turn boundaries; generation-bound coordinator evidence now prevents crossed pod/process results | After caller and clean-restart proof, start the synthetic disposable-child and hostile hard-containment gate in parallel with crash/restore work; do not production-cut eval sooner |
+| Top-level integration | **Restore primitives are strong; end-to-end cold composition is next** | Immutable intent, exact writer-admin results, retained blob materialization, completion facts, and split admission are complete. `b2461d64` resolves the original completion coordinate after later writes; `c2b4013d` carries one closed authoritative startup value through the existing launch descriptor without changing ordinary launch bytes | Correct bootstrap schema-before-policy order after the current `client.cljs` owner commits, then compose fresh attach, reconstruction, completion, exact admission, readiness, and external intent deletion in place |
+| Native secondary force | **Proximum guarded existing-destination replacement is active in an isolated dependency worktree** | The real file-backed falsifier proved Datahike's primary root can agree while the destination Proximum root differs. Generation-addressed immutable mmap publication gives the required one-head-switch retry model, but partial-file, collision, reopen, and write-isolation crash cuts must all pass before a dependency commit is accepted | Integrate the accepted primitive through Datahike's one `force-branch!`, run the real Datahike vector/KNN/root fixture, then select and publish exact dependency artifacts before Seon changes its pins |
+| Restore inverse/planner | **Exact restore/undo semantics are grounded; production selection waits for cold composition** | `e58f9b94` proves two guarded directions and records that undo must derive its retained target from one prior completion, while preserving the actual latest head as redo. Arbitrary structurally valid branches cannot be accepted as undo | Implement the ordinary retained-head planner after cold composition, then the stricter completion-derived undo selector through the same intent and transition |
+| Inspect/agent evidence | **The external AI/Inspect lane continues on its own owned files** | Attempt evidence and scorer work can consume settled database/runtime contracts without changing restore semantics. Its current dirty files remain externally owned and are not integration evidence until committed and reviewed | Review and integrate the returned evidence through canonical `my.*`/Inspect owners, then continue unit 6/7 acceptance after lifecycle prerequisites settle |
 
 Current scheduling card:
 
-1. **Ordered spine:** source freeze → first restart that honestly retires the
-   legacy uncontained generation as forced → verify new contained records →
-   second generation-matched clean restart → unexpected crash replacement →
-   restore/undo → multi-form failure proof.
-2. **Parallel lane A:** migrate remaining root/agent/debug/data consumers onto
-   the one reactive unit engine without operating the default cluster.
-3. **Parallel lane B:** strengthen the offline Inspect/autocomplete frozen
-   battery, native-run correlation, and replay scoring without inventing a
-   lifecycle or touching ACME.
-4. **Parallel lane C:** specify and test the downstream compatibility manifest,
-   SDK/runtime inventory, and no-source package boundary without editing the
-   shared process or CLI owners. If dependency assumptions block it, refill
-   with pure database-browser entity/ref projections.
+1. **Ordered spine:** crash-safe Proximum generation publication and guarded
+   destination switch → maintained Datahike integration and exact artifact pin
+   → schema-before-policy correction → in-place cold reconstruction/completion/
+   admission → isolated destructive restore → completion-derived undo → ordered
+   multi-form partial-commit proof.
+2. **Parallel lane A:** refine the exact cold runtime composition and its crash
+   matrix without editing externally owned `client.cljs`; implement only after
+   that ownership clears.
+3. **Parallel lane B:** keep the external Inspect/attempt-evidence work isolated,
+   then review its committed return against canonical schemas and offline
+   scorers.
+4. **Parallel lane C:** use source-grounded audits for the earliest dependency-
+   ready planner, runtime, render, or distribution boundary; do not create a
+   second lifecycle mechanism merely to fill a slot.
 5. **Final admission:** unit 9 remains blocked on integrated units 1–8 and is
    the only place for destructive simultaneous-cluster, performance, and
    authorized legacy-worktree cleanup proof.
 
 The ordered top-level sequence is therefore:
 
-1. **Complete:** integrate and falsify validation-only non-main open;
-2. **Complete:** implement the one typed native create/release/delete lifecycle,
-   prove exact fork coordinates, and remove physical directory copying;
-3. **Complete:** non-autonomous runtime stop/start plus closed launch, replica,
-   client, blob consumption, and retained pod-only branch ownership are
-   integrated through `74bfa7e2`;
-4. **In progress:** ordinary and retained SIGINT ownership, public branch
-   lifecycle, anchored containment, generation-matched application evidence,
-   per-generation grace/trigger capture, the closed clean-or-force coordinator,
-   and every public CLI/retained caller are complete at their focused and
-   combined gates. Retire the legacy default exactly once, prove the next
-   contained restart clean, and continue through crash, restore/undo, and
-   multi-form proof;
+1. **Complete:** branch-qualified open/create/release/delete, retained pod-only
+   lifecycle, quiesced restart/crash replacement, and generation-bound process
+   evidence;
+2. **Complete:** immutable restore intent, exact prepare/admit split, blob
+   materialization, completion publication, later-head coordinate resolution,
+   and closed launch transport for restore evidence;
+3. **In progress:** close generation-addressed Proximum publication and consume
+   it through maintained Datahike, then compose the existing cold runtime owners
+   without opening admission early;
+4. implement exact retained-head restore and completion-derived undo through the
+   same transition, then pass crash cuts and multi-form partial-commit proof;
 5. graduate units 2 and 6 from bounded consumers into their complete acceptance
    matrices while starting unit 3/4 only from their settled contracts;
 6. complete canvas, Inspect/autocomplete, and independent artifact consumption
@@ -182,12 +181,11 @@ boundary before the agentic-tool sample resumes.
 On every lane return, the top-level agent first reviews source and proof,
 updates the owning roadmap, and integrates or rejects the result. It then fills
 the free slot with the earliest dependency-ready row above. The immediate
-refills are branch-qualified replica/operator ownership after the launch audit,
-the existing `/data` adapter after opaque cursor Slice A, the coordinated
-Datahike projection API before reverse unit selection, and provider cancellation
-before plan authority and hard process-death containment. Findings that do not
-block those exits are recorded with evidence and acceptance criteria instead of
-becoming an unplanned detour.
+refills are Proximum-to-Datahike integration after dependency proof, bootstrap
+schema and cold composition after `client.cljs` ownership clears, retained-head
+planning after cold composition, and then the earliest unit 2/6 consumer of the
+settled lifecycle contract. Findings that do not block those exits are recorded
+with evidence and acceptance criteria instead of becoming an unplanned detour.
 
 The portfolio is a rolling queue, not a batch barrier. A lane may begin its
 documented refill as soon as its owned paths are committed and the top-level
