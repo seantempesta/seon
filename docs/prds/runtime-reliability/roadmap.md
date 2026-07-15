@@ -541,16 +541,20 @@ implementation:
   protocol. Focused MCP/writer gates pass 9 tests/39 assertions and 1 test/4
   assertions; live JSON-RPC proved rejected multi-form input preserves CLJ
   state and a thrown CLJS form is a tool error.
-- Dated diagnostic evidence from earlier on 2026-07-14 found a process-global
-  Malli projection leak, duplicate async completion, and incomplete-run
-  misclassification. The repair preserved the distinction between the live
-  declaration candidate and activated immutable projection, validated first
-  writes against that candidate, and classified a cold bundle load only when
-  zero test namespaces started. The focused schema/database gate passed 56
-  tests/391 assertions and the original contaminating order passed 52
-  tests/361 assertions. This is retained repair evidence, not a current gap:
-  the latest complete CLJS checkpoint is green at 1,305 tests/6,175
-  assertions.
+- Dated diagnostic evidence from 2026-07-14 found a process-global Malli
+  projection leak, duplicate async completion, and incomplete-run
+  misclassification. The candidate-validation repair preserved the distinction
+  between the live declaration candidate and activated immutable projection,
+  validated first writes against that candidate, and classified a cold bundle
+  load only when zero test namespaces started. The focused schema/database gate
+  passed 56 tests/391 assertions and the original contaminating order passed 52
+  tests/361 assertions. A later complete-process order re-exposed attachment-
+  crossing activated projection state: the namespace cursor is correct, but a
+  fresh connection records `:malli.core/invalid-schema` after its first defn
+  and omits the following call eval. The current blocker and falsifiable exit
+  are [[docs/seon/issues/activated-schema-projection-crosses-database-attachments]];
+  the earlier 1,305-test/6,175-assertion checkpoint remains historical evidence,
+  not a current complete-green claim.
 
 The completed autosuggest lane is now integrated as five bounded commits. The
 active Inspect SWE-bench arm derives restricted egress from the selected model
