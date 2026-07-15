@@ -311,6 +311,18 @@ focused transport/registry/writer/server gate passes 17 tests/87 assertions,
 and the complete writer checkpoint passes 62/360. Clean agent-turn quiescence
 and operator coordination remain the next lifecycle boundary.
 
+The clean planned-restart boundary is refreshed against current source at
+[[research/clean-planned-restart-quiescence-refresh-2026-07-15]]. The old
+audit's UDS, registry, and writer-release gaps are closed; the dependency-ready
+work is now one `:quiescing` extension of runtime admission, turn-boundary
+`:quiesced` run close, database-derived drain, loopback-only pod lifecycle
+action, remote-writer drain, and exact coordinate response. One newly isolated
+cross-process blocker remains: writer/server stop results are typed in-process,
+but the operator cannot consume their release failures or final coordinate.
+That proof must reuse the generation-matched managed-process terminal result
+from the containment slice; process disappearance and log text are not clean
+writer-drain evidence.
+
 The branch-qualified backend/registry attachment boundary is implemented in
 place. Backend configuration accepts one explicit `{database-id, branch}`
 attachment while preserving the deterministic main-branch default. The one
@@ -418,6 +430,9 @@ materialization, and retention remain later lifecycle slices.
   the smallest path-bounded implementation slice.
 - [[research/quiesced-restart-restore-undo-audit-2026-07-14]] — planned drain,
   unexpected recovery, immutable restore intent, promotion, and undo.
+- [[research/clean-planned-restart-quiescence-refresh-2026-07-15]] — current
+  planned-restart-only admission, turn drain, pod action, writer proof gap,
+  failure matrix, tests, and live default gate.
 - [[research/post-commit-program-admission-audit-2026-07-14]] — exact
   publication failure paths, runtime admission gates, partial Malli mutation,
   committed-generation reconstruction, readiness, and ordered proof.
