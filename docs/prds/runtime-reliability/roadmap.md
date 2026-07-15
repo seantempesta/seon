@@ -126,16 +126,16 @@ contract work and independent consumers:
 | Top-level integration | **Keep unit 1 as the ordered spine while reviewing two implementation returns and one next-consumer audit:** retained-branch interruption, isolated-diagnostic schema parity, and branch CLI/status/MCP plus live proof | Ordinary startup interruption is integrated through `fbb8c399`; reverse-routing soundness through `afc70d3f`; Inspect evidence through `1d6f12c8`; and the unit-6 parent capability/child lifecycle contract through `f2c1f1c8`. These completed lanes are evidence, not still-active work | Integrate or reject each live return, update its owning PRD/issue, and immediately refill from the earliest dependency-ready boundary. After retained-branch proof, consume the source-grounded CLI/status/MCP audit and run the first live create/write/restart/close transition |
 | Database lifecycle | **Retained branch open is consuming the settled signal-safe startup inverse:** prove interruption before/through pod publication and during readiness without claiming a converged pod or branch | Typed UDS (`ce342572`), crash-safe adoption (`e7bd160c`), retained pod lifecycle (`74bfa7e2`), and ordinary interruption (`fbb8c399`) are integrated. The active lane is restricted to branch/process ownership and its real signal gate | Expose the settled branch lifecycle through CLI/status/MCP, then run live create/write/restart/close. Continue unit 1 through default restart/crash, restore/undo, and multi-form failure proof in that order |
 | Reactive/database views | **Implementation and replay-all soundness oracle are complete; live browser/feed proof waits for the next source-frozen checkpoint** | `365052f0` lands candidate-only routing; `afc70d3f` proves six retained read shapes against every nonempty combination of seven actual transactions. The exact gate passes 1 test/10 assertions | Refill only after the unit-1 source checkpoint: prove gzip/SSE sharing, related/unrelated updates, and release in a real browser, then continue unit-2 consumer migration |
-| Agent runtime correctness | **The ordered schema contaminant is narrowed to isolated-diagnostic database parity; the child-containment contract is complete but production implementation waits on unit 1** | Receipt/recovery Slice A remains complete at `defb8014`. Exact probes show `setup-agent-ns!` succeeds and candidate/active schemas are complete before `eval-batch!`; the later function-contract publication reconstructs from the fresh diagnostic database's missing canonical schema facts and activates an empty projection. `f2c1f1c8` separately defines one parent-owned child handle/capability and the dead-leader subtree prerequisite | Make `open-agent-conn!` fulfill its full-bootstrap promise by installing canonical schema facts idempotently, remove diagnostics/speculative relinks, and pass the exact ordered gate. Production child work then waits for unit-1 backend descriptor plus old-subtree absence; the named planner/small-executor trial remains a later unit-7 gate |
+| Agent runtime correctness | **Isolated diagnostic schema parity is complete; the child-containment contract is complete but production implementation waits on unit 1** | `open-agent-conn!` now persists canonical schema facts under boot provenance, all diagnostic/speculative relinks were removed, and the exact replay→auto-refer order passes two tests/nine assertions. Receipt/recovery Slice A remains complete at `defb8014`; `f2c1f1c8` defines one parent-owned child handle/capability and the dead-leader subtree prerequisite | Production child work waits for unit-1 backend descriptor plus old-subtree absence; the named planner/small-executor trial remains a later unit-7 gate |
 
 Current scheduling card:
 
 1. **Ordered spine:** retained-branch interruption → CLI/status/MCP → live
    create/write/restart/close → default restart/crash → restore/undo →
    multi-form failure proof.
-2. **Parallel lane A:** repair isolated diagnostic database/schema-fact parity
-   at `open-agent-conn!`, then remove every probe and speculative relink before
-   the exact ordered regression integrates.
+2. **Parallel lane A:** isolated diagnostic database/schema-fact parity is
+   complete; refill after integration with the next dependency-ready unit-1
+   proof rather than reopening the resolved projection investigation.
 3. **Parallel lane B:** the parent capability/child launch/deadline/kill/reap
    contract is integrated at `f2c1f1c8`; production code waits for unit 1's
    stable backend descriptor and dead-leader subtree proof.
@@ -597,11 +597,15 @@ implementation:
   passed 56 tests/391 assertions and the original contaminating order passed 52
   tests/361 assertions. A later complete-process order re-exposed attachment-
   crossing activated projection state: the namespace cursor is correct, but a
-  fresh connection records `:malli.core/invalid-schema` after its first defn
-  and omits the following call eval. The current blocker and falsifiable exit
-  are [[docs/seon/issues/activated-schema-projection-crosses-database-attachments]];
-  the earlier 1,305-test/6,175-assertion checkpoint remains historical evidence,
-  not a current complete-green claim.
+  fresh connection recorded `:malli.core/invalid-schema` after its first defn
+  and omitted the following call eval. Exact tracing showed the attachment
+  projection was sound: the isolated diagnostic bootstrap lacked canonical
+  schema facts, so function-contract publication correctly reconstructed an
+  empty committed generation. `open-agent-conn!` now persists those facts;
+  `tmp/test-cljs-20260715-054657-19889.log` passes the exact ordered falsifier
+  (two tests/nine assertions), and the corrected issue is archived. The earlier
+  1,305-test/6,175-assertion checkpoint remains historical evidence, not a
+  current complete-green claim.
 
 The completed autosuggest lane is now integrated as five bounded commits. The
 active Inspect SWE-bench arm derives restricted egress from the selected model
