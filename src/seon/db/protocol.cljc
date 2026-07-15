@@ -10,7 +10,7 @@
    The durable request receipt deliberately shares `::request-id` with the
    transaction request. One logical write therefore has one identity from
    delivery through recovery."
-  (:require [hasch.core :as hasch]
+  (:require #?@(:bb [] :default [[hasch.core :as hasch]])
             [malli.core :as m]
             [seon.db.coordinate :as coordinate]
             [seon.schema :as schema]))
@@ -507,16 +507,18 @@
 (def reserved-attributes
   (into receipt-attributes #{::request-id ::request-hash ::version}))
 
-(defn logical-transaction-hash
-  "Map-order-independent fingerprint of one logical transaction request."
-  {:malli/schema [:=> [:cat ::transaction-request] :uuid]}
-  [request]
-  (hasch/uuid
-   {::version current-version
-    ::transaction-data (::transaction-data request)
-    ::expected-coordinate (::expected-coordinate request)
-    ::transaction-meta (or (::transaction-meta request) {})
-    ::generated-candidates (or (::generated-candidates request) [])}))
+#?(:bb nil
+   :default
+   (defn logical-transaction-hash
+     "Map-order-independent fingerprint of one logical transaction request."
+     {:malli/schema [:=> [:cat ::transaction-request] :uuid]}
+     [request]
+     (hasch/uuid
+      {::version current-version
+       ::transaction-data (::transaction-data request)
+       ::expected-coordinate (::expected-coordinate request)
+       ::transaction-meta (or (::transaction-meta request) {})
+       ::generated-candidates (or (::generated-candidates request) [])})))
 
 (defn tempid-receipts
   "Build collision-free same-transaction markers for caller tempids."

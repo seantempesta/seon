@@ -4,7 +4,8 @@
             [babashka.process :as process]
             [clojure.edn :as edn]
             [clojure.string :as str]
-            [malli.core :as m]))
+            [malli.core :as m]
+            [seon.launch :as launch]))
 
 (def configuration-schema
   [:map
@@ -28,7 +29,8 @@
    [:seon.dev.config/shadow-cache-root :string]
    [:seon.dev.config/client-output :string]
    [:seon.dev.config/writer-output :string]
-   [:seon.dev.config/artifact-manifest :string]])
+   [:seon.dev.config/artifact-manifest :string]
+   [:seon.dev.config/launch-descriptor :seon.launch/descriptor]])
 
 (defn- validate-configuration! [configuration]
   (when-not (m/validate configuration-schema configuration)
@@ -38,6 +40,33 @@
                            (:errors (m/explain configuration-schema
                                                configuration)))})))
   configuration)
+
+(defn select-launch-descriptor
+  "Select one validated launch descriptor without changing artifact identity."
+  {:malli/schema
+   [:=>
+    [:catn
+     [:seon.dev.config/configuration configuration-schema]
+     [:seon.dev.config/launch-descriptor :seon.launch/descriptor]]
+    configuration-schema]}
+  [configuration descriptor]
+  (when-not (m/validate :seon.launch/descriptor descriptor)
+    (throw
+     (ex-info "The selected launch descriptor is invalid."
+              {:seon.dev.config/launch-descriptor descriptor})))
+  (let [configured
+        [(:seon.dev.config/artifact-flavor configuration)
+         (:seon.dev.config/client-build-id configuration)]
+        selected
+        [(get-in descriptor [::launch/runtime ::launch/artifact-flavor])
+         (get-in descriptor [::launch/runtime ::launch/client-build-id])]]
+    (when-not (= configured selected)
+      (throw
+       (ex-info "The launch descriptor selects another artifact."
+                {:seon.dev.config/configured-artifact configured
+                 :seon.dev.config/selected-artifact selected})))
+    (validate-configuration!
+     (assoc configuration :seon.dev.config/launch-descriptor descriptor))))
 
 (defn- unquote-value [value]
   (let [value (str/trim value)]
@@ -241,7 +270,22 @@
                       "SEON_PORT_FILE" port-file
                       "SEON_WRITER_REPL_PORT_FILE" writer-port-file
                       "SEON_FS_ROOT" root
-                      "SEON_FS_READ_ONLY" "1")]
+                      "SEON_FS_READ_ONLY" "1")
+        http-port (parse-long (get environment "SEON_PORT" "7890"))
+        launch-descriptor
+        (launch/default-descriptor
+         {::launch/cluster-dir cluster-dir
+          ::launch/artifact-flavor
+          (:seon.dev.config/artifact-flavor artifact)
+          ::launch/client-build-id
+          (:seon.dev.config/client-build-id artifact)
+          ::launch/request-socket-path req-sock
+          ::launch/publish-socket-path pub-sock
+          ::launch/writer-repl-port-file writer-port-file
+          ::launch/process-dir proc-dir
+          ::launch/log-dir log-dir
+          ::launch/http-port http-port
+          ::launch/http-port-file port-file})]
     (validate-configuration!
       (merge
         (dissoc artifact :seon.dev.config/artifact-manifest-name)
@@ -256,8 +300,7 @@
          :seon.dev.config/cluster-name cluster-name
          :seon.dev.config/request-socket req-sock
          :seon.dev.config/publish-socket pub-sock
-         :seon.dev.config/http-port
-         (parse-long (get environment "SEON_PORT" "7890"))
+         :seon.dev.config/http-port http-port
          :seon.dev.config/http-port-file port-file
          :seon.dev.config/writer-repl-port
          (parse-long (get environment "SEON_WRITER_REPL_PORT" "0"))
@@ -266,4 +309,5 @@
          (str (fs/path root "target/seon-database-server-standalone.jar"))
          :seon.dev.config/artifact-manifest
          (str (fs/path proc-dir
-                       (:seon.dev.config/artifact-manifest-name artifact)))}))))
+                       (:seon.dev.config/artifact-manifest-name artifact)))
+         :seon.dev.config/launch-descriptor launch-descriptor}))))

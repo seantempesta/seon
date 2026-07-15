@@ -59,9 +59,41 @@ moved from the agent-facing blob namespace to its correct private process owner.
 The smallest post-move client/blob selector passes 29 tests/197 assertions with
 zero failures or errors at `tmp/test-cljs-20260715-030704-86367.log`; the next
 integrated source-frozen checkpoint must rerun the complete descriptor/replica/
-client/blob set. Operator descriptor publication, pod-only process ownership,
-MCP writer-owner resolution, and the restart/crash matrix remain the next
-ordered slice; branch create/delete CLI remains later.
+client/blob set.
+
+Operator descriptor publication and pod-only process ownership are now at a
+source-frozen checkpoint. The Babashka operator loads the real portable
+coordinate/protocol/launch owners, derives the ordinary descriptor from the
+existing target configuration, and publishes its exact CLJ value in the pod's
+immutable environment. The pod reads and validates that closed value before
+database, blob, or runtime effects. A non-autonomous descriptor owns only its
+pod: watcher and writer remain external dependencies identified by their real
+source owner process directory, live process records, readiness, and exact
+artifact digests; watcher admission also proves the current client bytes.
+Ordinary watcher/writer/pod derivation and start order remain
+unchanged. Focused configuration/process proof passes 20 tests/83 assertions
+with zero failures or errors; the coordinated CLJS checkpoint still must run
+the new exact CLJ-print/CLJS-read UUID regression and the full overlapping
+descriptor/replica/client/blob selector.
+
+The next dependency-ordered slice is the typed operator lifecycle described in
+[[research/operator-descriptor-publication-pod-only-plan-2026-07-15]]. First,
+make the real synchronous Transit UDS call boundary Babashka-loadable; the
+current exact load fails on the JVM-only `AsynchronousCloseException` class.
+Then atomically retain the source descriptor, exact create request, and
+target-private coordinates before asking the writer to create or exactly adopt
+the branch. Validate and retain the returned descriptor before pod publication.
+The descriptor's coordinate is the immutable creation cut, not the current
+target head used by close after branch writes. Close must stop and prove the pod
+absent, read the exact current target head, release and delete with that fence,
+and use the retained source logical route—never infer it from writer cluster
+identity.
+
+Interruption-safe process unwind is a prerequisite for this destructive
+transition: only processes newly started by the invocation are drained, and an
+unproved process inverse prevents branch deletion. Status and MCP exposure of
+the external watcher/writer owner, then the restart/crash matrix, follow that
+lifecycle boundary; branch create/delete CLI remains later.
 
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in

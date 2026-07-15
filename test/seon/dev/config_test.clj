@@ -1,7 +1,25 @@
 (ns seon.dev.config-test
   (:require [babashka.fs :as fs]
             [clojure.test :refer [deftest is testing]]
-            [seon.dev.config :as config]))
+            [seon.dev.config :as config]
+            [seon.launch :as launch]))
+
+(deftest explicit-launch-selection-is-validated-and-artifact-bound
+  (let [configuration (config/load! ".")
+        descriptor (:seon.dev.config/launch-descriptor configuration)]
+    (is (= descriptor
+           (:seon.dev.config/launch-descriptor
+            (config/select-launch-descriptor configuration descriptor))))
+    (is (thrown-with-msg?
+         Exception #"another artifact"
+         (config/select-launch-descriptor
+          configuration
+          (assoc-in descriptor
+                    [::launch/runtime ::launch/artifact-flavor]
+                    :seon.dev.artifact.flavor/acme))))
+    (is (thrown-with-msg?
+         Exception #"descriptor is invalid"
+         (config/select-launch-descriptor configuration {})))))
 
 (deftest artifact-flavors-own-cache-build-output-and-manifest-identities
   (let [root (str (fs/normalize (fs/absolutize ".")))

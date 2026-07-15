@@ -5,7 +5,8 @@
             [clojure.string :as str]
             [malli.core :as m]
             [seon.dev.artifact :as artifact]
-            [seon.dev.state :as state])
+            [seon.dev.state :as state]
+            [seon.launch :as launch])
   (:import [java.io RandomAccessFile]
            [java.net HttpURLConnection StandardProtocolFamily URL
             UnixDomainSocketAddress]
@@ -19,12 +20,22 @@
 (def pod-id :seon.dev.process/pod)
 (def target-processes [watcher-id writer-id pod-id])
 
+(def external-dependency-schema
+  [:map {:closed true}
+   [:seon.dev.process/id qualified-keyword?]
+   [:seon.dev.process/owner-process-dir :string]
+   [:seon.dev.process/readiness qualified-keyword?]
+   [:seon.dev.process/artifact-digest :string]])
+
 (def process-spec-schema
   [:map
    [:seon.dev.process/id qualified-keyword?]
    [:seon.dev.process/argv [:vector {:min 1} :string]]
    [:seon.dev.process/environment [:map-of :string :string]]
    [:seon.dev.process/dependencies [:vector qualified-keyword?]]
+   [:seon.dev.process/external-dependencies {:optional true}
+    [:vector external-dependency-schema]]
+   [:seon.dev.process/http-port-file {:optional true} :string]
    [:seon.dev.process/readiness qualified-keyword?]
    [:seon.dev.process/ready-timeout-ms [:int {:min 1}]]
    [:seon.dev.process/bootstrap-digest {:optional true}
@@ -82,8 +93,17 @@
   (sha256-text (managed-environment environment)))
 
 (defn- state-file [config id]
-  (str (fs/path (:seon.dev.config/process-dir config)
-                "processes" (str (id-name id) ".edn"))))
+  (let [descriptor (:seon.dev.config/launch-descriptor config)
+        autonomous?
+        (true? (get-in descriptor
+                       [::launch/runtime :seon.client/launch-capability
+                        :seon.client/autonomous?]))
+        process-dir
+        (if (and (= pod-id id) (not autonomous?))
+          (get-in descriptor [::launch/process ::launch/process-dir])
+          (:seon.dev.config/process-dir config))]
+    (str (fs/path process-dir
+                  "processes" (str (id-name id) ".edn")))))
 
 (defn read-process
   "Read one atomically published managed-process record."
@@ -104,7 +124,10 @@
   (fs/delete-if-exists (state-file config id)))
 
 (defn- log-directory [config id]
-  (fs/path (:seon.dev.config/log-dir config) (id-name id)))
+  (let [descriptor (:seon.dev.config/launch-descriptor config)
+        log-dir (or (get-in descriptor [::launch/process ::launch/log-dir])
+                    (:seon.dev.config/log-dir config))]
+    (fs/path log-dir (id-name id))))
 
 (defn- log-file [config id instance]
   (let [directory (log-directory config id)
@@ -158,8 +181,44 @@
   "Derive the complete development process graph from one manifest."
   [config manifest]
   (let [environment (:seon.dev.config/environment config)
+        descriptor (:seon.dev.config/launch-descriptor config)
+        descriptor-runtime (::launch/runtime descriptor)
+        descriptor-writer (::launch/writer-owner descriptor)
+        descriptor-process (::launch/process descriptor)
+        selected-artifact
+        [(::launch/artifact-flavor descriptor-runtime)
+         (::launch/client-build-id descriptor-runtime)]
+        configured-artifact
+        [(:seon.dev.config/artifact-flavor config)
+         (:seon.dev.config/client-build-id config)]
+        _ (when-not (= configured-artifact selected-artifact)
+            (throw
+             (ex-info "The launch descriptor selects another artifact."
+                      {:seon.dev.process/configured-artifact configured-artifact
+                       :seon.dev.process/selected-artifact selected-artifact})))
+        autonomous?
+        (true? (get-in descriptor
+                       [::launch/runtime :seon.client/launch-capability
+                        :seon.client/autonomous?]))
         runtime-root (:seon.dev.artifact/runtime-root manifest)
-        pod-environment (cond-> environment
+        pod-environment (cond->
+                          (assoc
+                           environment
+                           "SEON_LAUNCH_DESCRIPTOR" (pr-str descriptor)
+                           "SEON_REQ_SOCK"
+                           (::launch/request-socket-path descriptor-writer)
+                           "SEON_PUB_SOCK"
+                           (::launch/publish-socket-path descriptor-writer)
+                           "SEON_WRITER_REPL_PORT_FILE"
+                           (::launch/writer-repl-port-file descriptor-writer)
+                           "SEON_PROC_DIR"
+                           (::launch/process-dir descriptor-process)
+                           "SEON_LOG_DIR"
+                           (::launch/log-dir descriptor-process)
+                           "SEON_PORT"
+                           (str (::launch/http-port descriptor-process))
+                           "SEON_PORT_FILE"
+                           (::launch/http-port-file descriptor-process))
                           runtime-root (assoc "SEON_RUNTIME_ROOT" runtime-root))
         java (get environment "JAVA_CMD" "java")
         pod-spec
@@ -168,14 +227,34 @@
            :seon.dev.process/argv
            ["node" (:seon.dev.config/client-output config)]
            :seon.dev.process/environment pod-environment
-           :seon.dev.process/dependencies [watcher-id writer-id]
+           :seon.dev.process/dependencies
+           (if autonomous? [watcher-id writer-id] [])
+           :seon.dev.process/http-port-file
+           (::launch/http-port-file descriptor-process)
            :seon.dev.process/readiness :seon.dev.process.readiness/pod
            :seon.dev.process/ready-timeout-ms 120000
            :seon.dev.process/artifact-digest
            (:seon.dev.artifact/application-digest manifest)}
           runtime-root
           (assoc :seon.dev.process/bootstrap-digest
-                 (:seon.dev.artifact/bootstrap-digest manifest)))
+                 (:seon.dev.artifact/bootstrap-digest manifest))
+
+          (not autonomous?)
+          (assoc :seon.dev.process/external-dependencies
+                  [{:seon.dev.process/id watcher-id
+                   :seon.dev.process/owner-process-dir
+                   (::launch/writer-process-dir descriptor-writer)
+                   :seon.dev.process/readiness
+                   :seon.dev.process.readiness/watcher
+                   :seon.dev.process/artifact-digest
+                   (:seon.dev.artifact/client-digest manifest)}
+                  {:seon.dev.process/id writer-id
+                   :seon.dev.process/owner-process-dir
+                   (::launch/writer-process-dir descriptor-writer)
+                   :seon.dev.process/readiness
+                   :seon.dev.process.readiness/writer
+                   :seon.dev.process/artifact-digest
+                   (:seon.dev.artifact/writer-digest manifest)}]))
         spec-map
         {watcher-id
      {:seon.dev.process/id watcher-id
@@ -207,7 +286,8 @@
       :seon.dev.process/artifact-digest
       (:seon.dev.artifact/writer-digest manifest)}
 
-     pod-id pod-spec}]
+     pod-id pod-spec}
+        spec-map (if autonomous? spec-map {pod-id pod-spec})]
     (doseq [spec (vals spec-map)]
       (validate! process-spec-schema spec
                  "The derived process specification is invalid."
@@ -328,7 +408,8 @@
     true))
 
 (defn- pod-ready? [config spec record]
-  (let [port-file (:seon.dev.config/http-port-file config)]
+  (let [port-file (or (:seon.dev.process/http-port-file spec)
+                      (:seon.dev.config/http-port-file config))]
     (and (runtime-bootstrap-ready? spec)
          (fs/regular-file? port-file)
          (some-> (slurp port-file) str/trim parse-long http-ready?))))
@@ -407,22 +488,26 @@
         (tcp-ready? (or published
                         (:seon.dev.config/writer-repl-port config))))))
     :seon.dev.process/pod
-    (boolean (when-let [port (:seon.dev.config/http-port config)]
+    (boolean (when-let [port (or (get-in config
+                                         [:seon.dev.config/launch-descriptor
+                                          ::launch/process ::launch/http-port])
+                                 (:seon.dev.config/http-port config))]
                (tcp-ready? port)))
     false))
 
 (defn ownership-conflicts
   "Process doors held without a matching live operator record."
-  [config]
-  (if-not (:seon.dev.config/process-dir config)
-    []
-    (->> target-processes
-         (filter (fn [id]
-                   (let [record (read-process config id)]
-                     (and (not= :seon.dev.process.status/alive
-                                (process-status record))
-                          (accepting-unmanaged? config id)))))
-         vec)))
+  ([config] (ownership-conflicts config target-processes))
+  ([config owned-processes]
+   (if-not (:seon.dev.config/process-dir config)
+     []
+     (->> owned-processes
+          (filter (fn [id]
+                    (let [record (read-process config id)]
+                      (and (not= :seon.dev.process.status/alive
+                                 (process-status record))
+                           (accepting-unmanaged? config id)))))
+          vec))))
 
 (defn- clear-readiness! [config id]
   (case id
@@ -432,7 +517,10 @@
                   (:seon.dev.config/writer-repl-port-file config)]]
       (fs/delete-if-exists path))
     :seon.dev.process/pod
-    (fs/delete-if-exists (:seon.dev.config/http-port-file config))
+    (fs/delete-if-exists
+     (or (get-in config [:seon.dev.config/launch-descriptor
+                         ::launch/process ::launch/http-port-file])
+         (:seon.dev.config/http-port-file config)))
     nil))
 
 (defn- spawn-detached! [config spec]
@@ -484,6 +572,37 @@
        (= (environment-digest (:seon.dev.process/environment spec))
           (:seon.dev.process/environment-digest record))))
 
+(defn- external-dependency-ready?
+  [config dependency]
+  (let [owner-config
+        (assoc config :seon.dev.config/process-dir
+               (:seon.dev.process/owner-process-dir dependency))
+        id (:seon.dev.process/id dependency)
+        record (read-process owner-config id)
+        descriptor (:seon.dev.config/launch-descriptor config)
+        writer-owner (::launch/writer-owner descriptor)
+        probe-config
+        (assoc config
+               :seon.dev.config/request-socket
+               (::launch/request-socket-path writer-owner)
+               :seon.dev.config/publish-socket
+               (::launch/publish-socket-path writer-owner)
+               :seon.dev.config/writer-repl-port-file
+               (::launch/writer-repl-port-file writer-owner))]
+    (and (= :seon.dev.process.status/alive (process-status record))
+         (= (:seon.dev.process/artifact-digest dependency)
+            (:seon.dev.process/artifact-digest record))
+         (case (:seon.dev.process/readiness dependency)
+           :seon.dev.process.readiness/watcher
+           (and (watcher-ready? probe-config record)
+                (current-client-ready?
+                 probe-config
+                 {:seon.dev.process/artifact-digest
+                  (:seon.dev.process/artifact-digest dependency)}))
+           :seon.dev.process.readiness/writer
+           (writer-ready? probe-config)
+           false))))
+
 (defn- drain-group! [id pid]
   (when (and pid (group-alive? pid))
     (group-command "-TERM" pid)
@@ -533,6 +652,16 @@
   "Reconcile one process to its exact argv, environment, artifact, and health."
   [config spec]
   (let [id (:seon.dev.process/id spec)
+        unavailable
+        (->> (:seon.dev.process/external-dependencies spec)
+             (remove #(external-dependency-ready? config %))
+             (mapv :seon.dev.process/id))
+        _ (when (seq unavailable)
+            (throw
+             (ex-info "A required external process owner is unavailable."
+                      {:seon.dev.process/id id
+                       :seon.dev.process/unavailable-external-processes
+                       unavailable})))
         record (read-process config id)]
     (if (and (= :seon.dev.process.status/alive (process-status record))
              (same-process-spec? spec record)
@@ -552,6 +681,10 @@
   [config manifest]
   (let [spec-map (specs config manifest)
         ordered (start-order spec-map)
+        descriptor (:seon.dev.config/launch-descriptor config)
+        descriptor-runtime (::launch/runtime descriptor)
+        descriptor-database (::launch/database descriptor)
+        descriptor-process (::launch/process descriptor)
         processes
         (into {}
               (map (fn [id]
@@ -583,7 +716,7 @@
                                :seon.dev.process/log
                                (:seon.dev.process/log record)))])))
               ordered)
-        foreign? (seq (ownership-conflicts config))
+        foreign? (seq (ownership-conflicts config ordered))
         all-ready? (every? (fn [[_ value]]
                              (and (= :seon.dev.process.status/alive
                                      (:seon.dev.process/status value))
@@ -591,8 +724,9 @@
                            processes)
         pod-ready (get-in processes [pod-id :seon.dev.process/ready?])
         port (when (and pod-ready
-                        (fs/regular-file? (:seon.dev.config/http-port-file config)))
-               (some-> (slurp (:seon.dev.config/http-port-file config))
+                        (fs/regular-file?
+                         (::launch/http-port-file descriptor-process)))
+               (some-> (slurp (::launch/http-port-file descriptor-process))
                        str/trim parse-long))
         writer-ready (get-in processes [writer-id :seon.dev.process/ready?])
         writer-port (when (and writer-ready
@@ -623,14 +757,15 @@
                                :seon.dev.target.status/degraded
                                :else :seon.dev.target.status/down)
      :seon.dev.target/name :seon.dev.target/development
-     :seon.dev.target/cluster-name (:seon.dev.config/cluster-name config)
+     :seon.dev.target/cluster-name
+     (::launch/runtime-cluster descriptor-runtime)
      :seon.dev.target/database-path
-     (str (fs/path (:seon.dev.config/cluster-dir config) "db"))
+     (:seon.db.protocol/database-path descriptor-database)
      :seon.dev.target/artifact artifact
      :seon.dev.target/processes processes
      :seon.dev.target/endpoints
      (cond-> {:seon.dev.endpoint/cljs-build-id
-              (:seon.dev.config/client-build-id config)}
+              (::launch/client-build-id descriptor-runtime)}
        port (assoc :seon.dev.endpoint/web
                    (str "http://127.0.0.1:" port))
        writer-port (assoc :seon.dev.endpoint/clj

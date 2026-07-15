@@ -10,6 +10,7 @@
    invent protocol maps or transport framing."
   (:require
    [cljs.core.async :refer [promise-chan put! <! go]]
+   [cljs.reader :as reader]
    [clojure.string :as str]
    [datahike.api :as d]
    [datahike.connector :as connector]
@@ -114,6 +115,35 @@
       (js/parseInt (or (platform/env-val "SEON_PORT") "7890") 10)
       ::launch/http-port-file
       (or (platform/env-val "SEON_PORT_FILE") "tmp/seon-port")})))
+
+(schema/register! ::encoded-launch-descriptor [:string {:min 1}])
+
+(defn decode-launch-descriptor
+  "Read and validate one operator-published Clojure launch value."
+  {:malli/schema
+   [:=>
+    [:catn [::encoded-launch-descriptor ::encoded-launch-descriptor]]
+    ::launch/descriptor]}
+  [encoded]
+  (let [descriptor
+        (try
+          (reader/read-string encoded)
+          (catch :default error
+            (throw
+             (ex-info "SEON_LAUNCH_DESCRIPTOR is invalid."
+                      {::encoded-launch-descriptor encoded
+                       :seon.error/kind :core-bug}
+                      error))))]
+    (when-not (schema/valid-candidate-value? ::launch/descriptor descriptor)
+      (throw (ex-info "SEON_LAUNCH_DESCRIPTOR is invalid."
+                      {::launch/descriptor descriptor
+                       :seon.error/kind :core-bug})))
+    descriptor))
+
+(def process-launch-descriptor
+  (if-let [encoded (platform/env-val "SEON_LAUNCH_DESCRIPTOR")]
+    (decode-launch-descriptor encoded)
+    default-launch-descriptor))
 
 (defn database-config
   "Build the private Datahike config for this read replica.

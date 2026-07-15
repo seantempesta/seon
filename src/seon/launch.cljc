@@ -11,6 +11,7 @@
 (schema/register! ::socket-path ::path)
 (schema/register! ::runtime-cluster [:string {:min 1}])
 (schema/register! ::writer-cluster [:string {:min 1}])
+(schema/register! ::writer-process-dir ::path)
 (schema/register! ::artifact-flavor
                   [:enum :seon.dev.artifact.flavor/default
                    :seon.dev.artifact.flavor/acme])
@@ -43,6 +44,7 @@
  ::writer-owner
  [:map {:closed true}
   [::writer-cluster ::writer-cluster]
+  [::writer-process-dir ::writer-process-dir]
   [::request-socket-path ::request-socket-path]
   [::publish-socket-path ::publish-socket-path]
   [::writer-repl-port-file ::writer-repl-port-file]])
@@ -153,6 +155,7 @@
       ::protocol/database-path (str cluster-dir "/db")}
      ::writer-owner
      {::writer-cluster cluster
+      ::writer-process-dir (normalize-path process-dir)
       ::request-socket-path request-socket-path
       ::publish-socket-path publish-socket-path
       ::writer-repl-port-file writer-repl-port-file}

@@ -810,7 +810,7 @@
   {:malli/schema
    [:=> [:cat ::open-database-connection-request] :any]}
   [{::keys [prepare-writes?]}]
-  (let [descriptor replica/default-launch-descriptor
+  (let [descriptor replica/process-launch-descriptor
         writer-owner (::launch/writer-owner descriptor)
         database-selection (::launch/database descriptor)]
     (await (replica/ping! {::launch/descriptor descriptor}))
@@ -2795,7 +2795,7 @@
   ;; opens the store.
   (log/quiet-library-logs!)
   (claim-blob-storage-view!
-   (::launch/blob-storage-view replica/default-launch-descriptor))
+   (::launch/blob-storage-view replica/process-launch-descriptor))
   (install-process-safety-net!)
   (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
   ;; Malli instrumentation is installed from the validated PROGRAM projection
@@ -2828,7 +2828,7 @@
       (-> (start-runtime!
            {::llm-fn llm-fn
             ::launch-capability
-            (get-in replica/default-launch-descriptor
+            (get-in replica/process-launch-descriptor
                     [::launch/runtime :seon.client/launch-capability])})
           (.then (fn [{:seon.agent/keys [id ns]
                        :seon.client/keys [resumed-ids created-ids]

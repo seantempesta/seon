@@ -1,11 +1,14 @@
 (ns seon.dev.process-test
   (:require [babashka.fs :as fs]
             [babashka.process :as shell]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is run-tests testing]]
             [seon.dev.artifact :as artifact]
+            [seon.dev.config :as dev-config]
             [seon.dev.process :as process]
-            [seon.dev.state :as state])
+            [seon.dev.state :as state]
+            [seon.launch :as launch])
   (:import [java.io BufferedReader InputStreamReader]
            [java.net ServerSocket SocketException]))
 
@@ -27,25 +30,55 @@
    :seon.dev.process/ready-timeout-ms 5000
    :seon.dev.process/artifact-digest "test-artifact"})
 
+(defn- with-default-launch-descriptor [target]
+  (dev-config/select-launch-descriptor
+   target
+   (launch/default-descriptor
+    {::launch/cluster-dir (:seon.dev.config/cluster-dir target)
+     ::launch/artifact-flavor
+     (:seon.dev.config/artifact-flavor target)
+     ::launch/client-build-id
+     (:seon.dev.config/client-build-id target)
+     ::launch/request-socket-path
+     (:seon.dev.config/request-socket target)
+     ::launch/publish-socket-path
+     (:seon.dev.config/publish-socket target)
+     ::launch/writer-repl-port-file
+     (:seon.dev.config/writer-repl-port-file target)
+     ::launch/process-dir (:seon.dev.config/process-dir target)
+     ::launch/log-dir (:seon.dev.config/log-dir target)
+     ::launch/http-port (:seon.dev.config/http-port target)
+     ::launch/http-port-file
+     (:seon.dev.config/http-port-file target)})))
+
 (defn- target-config [configuration directory]
-  (merge configuration
-         {:seon.dev.config/client-build-id "client"
-          :seon.dev.config/artifact-flavor
-          :seon.dev.artifact.flavor/default
-          :seon.dev.config/shadow-cache-root
-          (str (fs/path directory "shadow"))
-          :seon.dev.config/client-output (str (fs/path directory "client.js"))
-          :seon.dev.config/writer-output (str (fs/path directory "writer.jar"))
-          :seon.dev.config/cluster-dir (str (fs/path directory "cluster"))
-          :seon.dev.config/cluster-name "test"
-          :seon.dev.config/request-socket (str (fs/path directory "req.sock"))
-          :seon.dev.config/publish-socket (str (fs/path directory "pub.sock"))
-          :seon.dev.config/writer-repl-port 0
-          :seon.dev.config/writer-repl-port-file
-          (str (fs/path directory "writer-port"))
-          :seon.dev.config/http-port 0
-          :seon.dev.config/http-port-file
-          (str (fs/path directory "pod-port"))}))
+  (with-default-launch-descriptor
+    (merge configuration
+               {:seon.dev.config/client-build-id "client"
+                :seon.dev.config/artifact-flavor
+                :seon.dev.artifact.flavor/default
+                :seon.dev.config/source-checkout? true
+                :seon.dev.config/shadow-cache-root
+                (str (fs/path directory "shadow"))
+                :seon.dev.config/client-output
+                (str (fs/path directory "client.js"))
+                :seon.dev.config/writer-output
+                (str (fs/path directory "writer.jar"))
+                :seon.dev.config/artifact-manifest
+                (str (fs/path directory "artifact.edn"))
+                :seon.dev.config/cluster-dir
+                (str (fs/path directory "test"))
+                :seon.dev.config/cluster-name "test"
+                :seon.dev.config/request-socket
+                (str (fs/path directory "req.sock"))
+                :seon.dev.config/publish-socket
+                (str (fs/path directory "pub.sock"))
+                :seon.dev.config/writer-repl-port 0
+                :seon.dev.config/writer-repl-port-file
+                (str (fs/path directory "writer-port"))
+                :seon.dev.config/http-port 0
+                :seon.dev.config/http-port-file
+                (str (fs/path directory "pod-port"))})))
 
 (def target-manifest
   {:seon.dev.artifact/flavor :seon.dev.artifact.flavor/default
@@ -346,8 +379,10 @@
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)
         port-file (str (fs/path directory "stale-pod-port"))
-        configuration (assoc (target-config configuration directory)
-                             :seon.dev.config/http-port-file port-file)
+        configuration
+        (with-default-launch-descriptor
+          (assoc (target-config configuration directory)
+                 :seon.dev.config/http-port-file port-file))
         manifest {:seon.dev.artifact/client-digest "client"
                   :seon.dev.artifact/writer-digest "writer"
                   :seon.dev.artifact/application-digest "application"}]
@@ -409,7 +444,8 @@
                  (assoc-in [:seon.dev.config/environment "SEON_EXTRA_SRC"]
                            (str (fs/path directory "acme")) )
                  (assoc-in [:seon.dev.config/environment "SEON_EXTRA_PRELOAD"]
-                           "acme.pod"))
+                           "acme.pod")
+                 with-default-launch-descriptor)
         acme-argv (get-in (process/specs
                             acme
                             (assoc target-manifest
@@ -469,8 +505,10 @@
         server (shell/process {:out :discard :err :discard
                                :cmd ["python3" "-m" "http.server" (str port)
                                      "--bind" "127.0.0.1"]})
-        configuration (assoc (target-config configuration directory)
-                              :seon.dev.config/http-port port)]
+        configuration
+        (with-default-launch-descriptor
+          (assoc (target-config configuration directory)
+                 :seon.dev.config/http-port port))]
     (try
       (loop [remaining 50]
         (let [probe (shell/sh {:continue true :out :string :err :string
@@ -513,6 +551,68 @@
                     {:seon.dev.process/dependencies [:seon.dev.process/b]}
                     :seon.dev.process/b
                     {:seon.dev.process/dependencies [:seon.dev.process/a]}})))))
+
+(deftest branch-descriptor-publishes-one-pod-with-real-external-owners
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        source-config (target-config configuration directory)
+        database-id #uuid "9dcfa740-5f7f-4ff5-ac08-a9c8b605a8aa"
+        source-descriptor
+        (assoc-in (:seon.dev.config/launch-descriptor source-config)
+                  [::launch/database :seon.db.coordinate/attachment]
+                  {:seon.db.coordinate/database-id database-id
+                   :seon.db.coordinate/branch :db})
+        branch-descriptor
+        (launch/branch-descriptor
+         {::launch/source-descriptor source-descriptor
+          ::launch/runtime-cluster "trial"
+          ::launch/target-database-name "trial-route"
+          ::launch/target-coordinate
+          {:seon.db.coordinate/database-id database-id
+           :seon.db.coordinate/branch :trial
+           :seon.db.coordinate/commit-id
+           #uuid "a2bd215f-7ec6-47dc-a627-f8e4948df581"
+           :seon.db.coordinate/t 42}
+          ::launch/process-dir (str (fs/path directory "trial-process"))
+          ::launch/log-dir (str (fs/path directory "trial-logs"))
+          ::launch/http-port 0
+          ::launch/http-port-file (str (fs/path directory "trial-http.port"))
+          ::launch/writable-blob-dir
+          (str (fs/path directory "trial-blobs"))})
+        branch-config
+        (dev-config/select-launch-descriptor source-config branch-descriptor)
+        ordinary-specs (process/specs source-config target-manifest)
+        branch-specs (process/specs branch-config target-manifest)
+        pod (get branch-specs process/pod-id)
+        published
+        (edn/read-string
+         (get-in pod [:seon.dev.process/environment
+                      "SEON_LAUNCH_DESCRIPTOR"]))]
+    (try
+      (is (= process/target-processes
+             (process/start-order ordinary-specs)))
+      (is (= [process/pod-id] (process/start-order branch-specs)))
+      (is (= #{process/pod-id} (set (keys branch-specs))))
+      (is (= [] (:seon.dev.process/dependencies pod)))
+      (is (= [process/watcher-id process/writer-id]
+             (mapv :seon.dev.process/id
+                   (:seon.dev.process/external-dependencies pod))))
+      (is (every? #(= (:seon.dev.config/process-dir source-config)
+                      (:seon.dev.process/owner-process-dir %))
+                  (:seon.dev.process/external-dependencies pod)))
+      (is (= branch-descriptor published))
+      (is (not= (#'process/environment-digest
+                  (get-in ordinary-specs
+                          [process/pod-id :seon.dev.process/environment]))
+                (#'process/environment-digest
+                  (:seon.dev.process/environment pod))))
+      (is (thrown-with-msg?
+           Exception #"external process owner is unavailable"
+           (process/ensure! branch-config pod)))
+      (is (nil? (process/read-process branch-config process/pod-id))
+          "dependency rejection occurs before pod publication")
+      (finally
+        (fs/delete-tree directory)))))
 
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.dev.process-test)]

@@ -87,6 +87,44 @@
 (def ^:private fake-commit-id
   #uuid "cfd65c4c-c4f5-4f2b-afef-117b9fd6779a")
 
+(def ^:private clj-printed-branch-descriptor
+  "#:seon.launch{:runtime {:seon.launch/runtime-cluster \"trial\", :seon.launch/artifact-flavor :seon.dev.artifact.flavor/default, :seon.launch/client-build-id \"client\", :seon.client/launch-capability #:seon.client{:autonomous? false}}, :database {:seon.db.protocol/database-name \"trial-route\", :seon.db.coordinate/attachment #:seon.db.coordinate{:database-id #uuid \"9dcfa740-5f7f-4ff5-ac08-a9c8b605a8aa\", :branch :trial}, :seon.db.coordinate/coordinate #:seon.db.coordinate{:database-id #uuid \"9dcfa740-5f7f-4ff5-ac08-a9c8b605a8aa\", :branch :trial, :commit-id #uuid \"a2bd215f-7ec6-47dc-a627-f8e4948df581\", :t 42}, :seon.db.protocol/backend :file, :seon.db.protocol/database-path \"data/clusters/default/db\"}, :writer-owner #:seon.launch{:writer-cluster \"default\", :writer-process-dir \"tmp/source-process\", :request-socket-path \"tmp/req.sock\", :publish-socket-path \"tmp/pub.sock\", :writer-repl-port-file \"tmp/writer.port\"}, :process #:seon.launch{:process-dir \"tmp/trial\", :log-dir \"logs/trial\", :http-port 0, :http-port-file \"tmp/trial/http.port\"}, :blob-storage-view #:my.blob{:writable-dir \"data/branches/trial/blobs\", :read-only-dirs [\"data/clusters/default/blobs\"]}}")
+
+(deftest clj-printed-descriptor-round-trips-through-the-cljs-reader
+  (let [descriptor
+        (replica/decode-launch-descriptor clj-printed-branch-descriptor)]
+    (is (= fake-database-id
+           (get-in descriptor
+                   [::launch/database ::coordinate/coordinate
+                    ::coordinate/database-id])))
+    (is (= #uuid "a2bd215f-7ec6-47dc-a627-f8e4948df581"
+           (get-in descriptor
+                   [::launch/database ::coordinate/coordinate
+                    ::coordinate/commit-id])))
+    (is (= :trial
+           (get-in descriptor
+                   [::launch/database ::coordinate/coordinate
+                    ::coordinate/branch])))
+    (is (= 42
+           (get-in descriptor
+                   [::launch/database ::coordinate/coordinate
+                    ::coordinate/t])))
+    (is (= "tmp/source-process"
+           (get-in descriptor
+                   [::launch/writer-owner ::launch/writer-process-dir])))
+    (is (false?
+         (get-in descriptor
+                 [::launch/runtime :seon.client/launch-capability
+                  :seon.client/autonomous?])))))
+
+(deftest invalid-published-descriptor-fails-before-consumption
+  (doseq [encoded ["{}" "{:unclosed"]]
+    (try
+      (replica/decode-launch-descriptor encoded)
+      (is false (str "accepted invalid descriptor " encoded))
+      (catch :default error
+        (is (= :core-bug (:seon.error/kind (ex-data error))))))))
+
 (defn- point
   ([t] (point t :db))
   ([t branch]
