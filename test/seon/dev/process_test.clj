@@ -259,6 +259,182 @@
     (spit (str runtime) "runtime")
     base))
 
+(defn- contained-one-shot-request
+  [configuration argv application-result-path timeout-ms artifact-digest]
+  {:seon.dev.process/configuration configuration
+   :seon.dev.process/argv argv
+   :seon.dev.process/environment (into {} (System/getenv))
+   :seon.dev.process/artifact-digest artifact-digest
+   :seon.dev.process/application-result-path application-result-path
+   :seon.dev.process/timeout-ms timeout-ms
+   :seon.dev.process/shutdown-grace-ms 100})
+
+(defn- containment-identities [record]
+  (let [containment (:seon.dev.process/containment record)]
+    (mapv #(hash-map
+            :seon.dev.process/pid
+            (get containment
+                 (keyword "seon.dev.process.containment"
+                          (str (name %) "-pid")))
+            :seon.dev.process/start-instant
+            (get containment
+                 (keyword "seon.dev.process.containment"
+                          (str (name %) "-start-instant"))))
+          [:owner :anchor :workload])))
+
+(deftest contained-one-shot-publishes-identity-before-workload-admission
+  (let [directory (str (fs/create-temp-dir {:prefix "seon-one-shot-gate-"}))
+        configuration (signal-fixture-config directory)
+        marker (str (fs/path directory "executed"))
+        application-result (str (fs/path directory "application.edn"))
+        request
+        (contained-one-shot-request
+         configuration
+         ["python3" "-c"
+          "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text('ran'); pathlib.Path(sys.argv[2]).write_text('{:ok true}')"
+          marker application-result]
+         application-result 5000 "gate-proof")
+        adopt @#'process/adopt-containment!
+        observed-record (atom nil)]
+    (try
+      (let [result
+            (with-redefs-fn
+              {#'process/adopt-containment!
+               (fn [record]
+                 (reset! observed-record
+                         (process/read-process configuration
+                                               process/restore-admin-id))
+                 (is (= record @observed-record)
+                     "the exact identity record is durable before admission")
+                 (is (not (fs/exists? marker))
+                     "the gated workload has not executed before adoption")
+                 (adopt record))}
+              #(process/contained-one-shot! request))]
+        (is (m/validate process/contained-one-shot-result-schema result))
+        (is (false? (:seon.dev.process/timed-out? result)))
+        (is (= :seon.dev.process.containment.trigger/workload-exit
+               (get-in result [:seon.dev.process/terminal
+                               :seon.dev.process.containment/trigger])))
+        (is (fs/regular-file? marker))
+        (is (= "{:ok true}" (slurp application-result)))
+        (is (nil? (process/read-process configuration process/restore-admin-id)))
+        (is (not-any? state/process-identity-alive?
+                      (containment-identities @observed-record))))
+      (finally
+        (when-let [record (or (process/read-process configuration
+                                                    process/restore-admin-id)
+                              @observed-record)]
+          (hard-clean-containment-fixture! record))
+        (fs/delete-tree directory {:force true})))))
+
+(deftest contained-one-shot-resumes-the-exact-adopted-generation
+  (let [directory (str (fs/create-temp-dir {:prefix "seon-one-shot-resume-"}))
+        configuration (signal-fixture-config directory)
+        executions (str (fs/path directory "executions"))
+        application-result (str (fs/path directory "application.edn"))
+        request
+        (contained-one-shot-request
+         configuration
+         ["python3" "-c"
+          (str "import pathlib,sys,time\n"
+               "p=pathlib.Path(sys.argv[1]); p.write_text((p.read_text() if p.exists() else '')+'x')\n"
+               "time.sleep(.2)\n"
+               "pathlib.Path(sys.argv[2]).write_text('{:ok true}')\n")
+          executions application-result]
+         application-result 5000 "resume-proof")
+        spec (#'process/contained-one-shot-spec request)
+        record (atom nil)]
+    (try
+      (reset! record
+              (#'process/spawn-detached!
+               configuration spec
+               {:seon.dev.process/gated? true
+                :seon.dev.process/application-result-path application-result}))
+      (let [result (process/contained-one-shot! request)]
+        (is (false? (:seon.dev.process/timed-out? result)))
+        (is (= "x" (slurp executions))
+            "resumption adopts the retained generation instead of spawning again")
+        (is (nil? (process/read-process configuration process/restore-admin-id)))
+        (is (not-any? state/process-identity-alive?
+                      (containment-identities @record))))
+      (finally
+        (when-let [retained (process/read-process configuration
+                                                  process/restore-admin-id)]
+          (hard-clean-containment-fixture! retained))
+        (when @record (hard-clean-containment-fixture! @record))
+        (fs/delete-tree directory {:force true})))))
+
+(deftest contained-one-shot-timeout-hard-drains-before-cleanup
+  (let [directory (str (fs/create-temp-dir {:prefix "seon-one-shot-timeout-"}))
+        configuration (signal-fixture-config directory)
+        application-result (str (fs/path directory "application.edn"))
+        request
+        (contained-one-shot-request
+         configuration
+         ["python3" "-c"
+          "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(300)"]
+         application-result 100 "timeout-proof")
+        cleanup @#'process/cleanup-contained-one-shot!
+        cleaned-record (atom nil)]
+    (try
+      (let [result
+            (with-redefs-fn
+              {#'process/cleanup-contained-one-shot!
+               (fn [selected record]
+                 (reset! cleaned-record record)
+                 (is (not-any? state/process-identity-alive?
+                               (containment-identities record))
+                     "cleanup runs only after the complete subtree is absent")
+                 (cleanup selected record))}
+              #(process/contained-one-shot! request))]
+        (is (true? (:seon.dev.process/timed-out? result)))
+        (is (= :seon.dev.process.containment.trigger/requested
+               (get-in result [:seon.dev.process/terminal
+                               :seon.dev.process.containment/trigger])))
+        (is (some? @cleaned-record))
+        (is (nil? (process/read-process configuration process/restore-admin-id))))
+      (finally
+        (when-let [record (process/read-process configuration
+                                                process/restore-admin-id)]
+          (hard-clean-containment-fixture! record))
+        (fs/delete-tree directory {:force true})))))
+
+(deftest contained-one-shot-drains-a-foreign-generation-without-overlap
+  (let [directory (str (fs/create-temp-dir {:prefix "seon-one-shot-foreign-"}))
+        configuration (signal-fixture-config directory)
+        application-result (str (fs/path directory "application.edn"))
+        foreign-request
+        (contained-one-shot-request
+         configuration ["sleep" "300"] application-result 5000 "foreign")
+        requested
+        (contained-one-shot-request
+         configuration ["python3" "-c" "raise SystemExit(0)"]
+         application-result 5000 "requested")
+        foreign (atom nil)]
+    (try
+      (reset! foreign
+              (#'process/spawn-detached!
+               configuration (#'process/contained-one-shot-spec foreign-request)
+               {:seon.dev.process/gated? true
+                :seon.dev.process/application-result-path application-result}))
+      (let [error
+            (try
+              (process/contained-one-shot! requested)
+              nil
+              (catch clojure.lang.ExceptionInfo failure failure))]
+        (is (some? error))
+        (is (= :seon.dev.process.status/foreign-one-shot
+               (:seon.dev.process/status (ex-data error))))
+        (is (nil? (process/read-process configuration process/restore-admin-id)))
+        (is (not-any? state/process-identity-alive?
+                      (containment-identities @foreign))))
+      (finally
+        (when-let [record (process/read-process configuration
+                                                process/restore-admin-id)]
+          (hard-clean-containment-fixture! record))
+        (when @foreign (hard-clean-containment-fixture! @foreign))
+        (fs/delete-tree directory {:force true})))))
+
 (defn- signal-fixture-specs [configuration cut]
   (let [delay #(if (= cut %) "300" "0")
         watcher-digest (artifact/current-client-digest configuration)]

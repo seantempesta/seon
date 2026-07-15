@@ -25,6 +25,7 @@
 (def watcher-id :seon.dev.process/watcher)
 (def writer-id :seon.dev.process/writer)
 (def pod-id :seon.dev.process/pod)
+(def restore-admin-id :seon.dev.process/restore-admin)
 (def target-processes [watcher-id writer-id pod-id])
 
 (def ^:private legacy-containment-shutdown-grace-ms 2500)
@@ -428,17 +429,20 @@
    (get containment (keyword "seon.dev.process.containment"
                              (str (name role) "-start-instant")))})
 
+(defn- matching-adoption? [containment]
+  (let [adoption
+        (try
+          (json/parse-string
+           (slurp (:seon.dev.process.containment/adoption-path containment))
+           true)
+          (catch Throwable _ nil))]
+    (and (= (str (:seon.dev.process.containment/generation containment))
+            (:generation adoption))
+         (= "adopted" (:status adoption)))))
+
 (defn- containment-live? [record]
   (when-let [containment (:seon.dev.process/containment record)]
-    (let [adoption
-          (try
-            (json/parse-string
-             (slurp (:seon.dev.process.containment/adoption-path containment))
-             true)
-            (catch Throwable _ nil))]
-      (and (= (str (:seon.dev.process.containment/generation containment))
-              (:generation adoption))
-           (= "adopted" (:status adoption))
+    (and (matching-adoption? containment)
            (= (:seon.dev.process/pid record)
               (:seon.dev.process.containment/owner-pid containment))
            (= (:seon.dev.process/start-instant record)
@@ -449,7 +453,7 @@
                    (map #(containment-identity containment %)
                         [:owner :anchor :workload]))
            (not (fs/exists?
-                 (:seon.dev.process.containment/result-path containment)))))))
+                 (:seon.dev.process.containment/result-path containment))))))
 
 (defn- writer-ready? [config]
   (let [socket (:seon.dev.config/request-socket config)]
@@ -695,7 +699,9 @@
                  pod-id]))
       (random-uuid)))
 
-(defn- spawn-detached! [config spec]
+(defn- spawn-detached!
+  ([config spec] (spawn-detached! config spec {}))
+  ([config spec {:seon.dev.process/keys [gated? application-result-path]}]
   (let [id (:seon.dev.process/id spec)
         instance (str (random-uuid))
         generation (selected-process-generation config id)
@@ -709,8 +715,9 @@
                       (str generation ".sock")))
         result-path (str (fs/path containment-dir "result.json"))
         application-result-path
-        (when (= writer-id id)
-          (str (fs/path containment-dir "application.edn")))
+        (or application-result-path
+            (when (= writer-id id)
+              (str (fs/path containment-dir "application.edn"))))
         launch-environment
         (cond-> (assoc (:seon.dev.process/environment spec)
                        "SEON_PROCESS_GENERATION" (str generation))
@@ -720,7 +727,7 @@
                              "script/seon/dev/detach.py"))
         _ (do (fs/create-dirs containment-dir)
               (fs/create-dirs (fs/parent control-socket)))
-        argv (into ["python3" helper "launch"
+        argv (into ["python3" helper (if gated? "launch-gated" "launch")
                     (:seon.dev.config/root config) (str log) (str generation)
                     descriptor-path control-socket result-path
                     (str (:seon.dev.process/shutdown-grace-ms spec))]
@@ -819,7 +826,7 @@
                            :seon.dev.process.containment/generation str))
             (clear-process! config id))
           (fs/delete-tree containment-dir {:force true}))
-        (throw error)))))
+        (throw error))))))
 
 (defn- same-process-spec? [spec record]
   (and (= (:seon.dev.process/argv spec) (:seon.dev.process/argv record))
@@ -1261,6 +1268,8 @@
     :seon.dev.process.operation/rebuild-readers
     :seon.dev.process.operation/rebuild-writer
     :seon.dev.process.operation/reset
+    :seon.dev.process.operation/restore
+    :seon.dev.process.operation/restore-admin
     :seon.dev.process.operation/retained-close
     :seon.dev.process.operation/retained-restart})
 
@@ -1296,6 +1305,25 @@
     [:int {:min 0 :max 1048576}]]
    [:seon.dev.process.application-capture/error {:optional true}
     [:string {:max 4096}]]])
+
+(def contained-one-shot-request-schema
+  [:map {:closed true}
+   [:seon.dev.process/configuration config/configuration-schema]
+   [:seon.dev.process/argv [:vector {:min 1} :string]]
+   [:seon.dev.process/environment [:map-of :string :string]]
+   [:seon.dev.process/artifact-digest :string]
+   [:seon.dev.process/application-result-path [:string {:min 1}]]
+   [:seon.dev.process/timeout-ms [:int {:min 1 :max 600000}]]
+   [:seon.dev.process/shutdown-grace-ms [:int {:min 1 :max 60000}]]])
+
+(def contained-one-shot-result-schema
+  [:map {:closed true}
+   [:seon.dev.process/id [:= restore-admin-id]]
+   [:seon.dev.process/operation
+    [:= :seon.dev.process.operation/restore-admin]]
+   [:seon.dev.process/timed-out? :boolean]
+   [:seon.dev.process/application-result-path :string]
+   [:seon.dev.process/terminal containment-terminal-schema]])
 
 (def ^:private stop-result-schema
   [:map {:closed true}
@@ -1557,6 +1585,156 @@
      :seon.dev.process/budget-ms budget
      :seon.dev.process/elapsed-ms (- (monotonic-ms) started)
      :seon.dev.process/results results}))
+
+(defn- contained-one-shot-spec
+  [{:seon.dev.process/keys
+    [argv environment artifact-digest timeout-ms shutdown-grace-ms]}]
+  {:seon.dev.process/id restore-admin-id
+   :seon.dev.process/argv argv
+   :seon.dev.process/environment environment
+   :seon.dev.process/dependencies []
+   :seon.dev.process/readiness :seon.dev.process.readiness/process
+   :seon.dev.process/ready-timeout-ms timeout-ms
+   :seon.dev.process/shutdown-grace-ms shutdown-grace-ms
+   :seon.dev.process/artifact-digest artifact-digest})
+
+(defn- exact-contained-one-shot?
+  [spec application-result-path record]
+  (and (= restore-admin-id (:seon.dev.process/id record))
+       (same-process-spec? spec record)
+       (= application-result-path
+          (get-in record
+                  [:seon.dev.process/containment
+                   :seon.dev.process.containment/application-result-path]))))
+
+(defn- require-contained-one-shot-admission!
+  [record]
+  (let [containment (:seon.dev.process/containment record)
+        terminal (terminal-result containment)
+        owner (containment-identity containment :owner)]
+    (cond
+      (matching-terminal? containment terminal) record
+      (matching-adoption? containment) record
+      (state/process-identity-alive? owner) (adopt-containment! record)
+      :else
+      (throw
+       (ex-info "A contained one-shot lost its owner before admission."
+                {:seon.dev.process/status
+                 :seon.dev.process.status/containment-uncertain
+                 :seon.dev.process/id restore-admin-id
+                 :seon.dev.process/containment containment
+                 :seon.dev.process/terminal-result terminal})))))
+
+(defn- await-contained-one-shot!
+  [record timeout-ms]
+  (let [containment (:seon.dev.process/containment record)
+        runtime-deadline (+ (monotonic-ms) timeout-ms)]
+    (loop []
+      (let [terminal (terminal-result containment)
+            owner-alive?
+            (state/process-identity-alive?
+             (containment-identity containment :owner))]
+        (cond
+          (and (matching-terminal? containment terminal)
+               (not owner-alive?))
+          {:seon.dev.process/terminal terminal
+           :seon.dev.process/timed-out? false}
+
+          (not owner-alive?)
+          (throw
+           (ex-info "A contained one-shot owner disappeared without terminal evidence."
+                    {:seon.dev.process/status
+                     :seon.dev.process.status/containment-uncertain
+                     :seon.dev.process/id restore-admin-id
+                     :seon.dev.process/containment containment
+                     :seon.dev.process/terminal-result terminal}))
+
+          (>= (monotonic-ms) runtime-deadline)
+          (let [drain-deadline
+                (+ (monotonic-ms)
+                   (:seon.dev.process.containment/shutdown-grace-ms containment)
+                   10000)]
+            {:seon.dev.process/terminal
+             (drain-containment! record drain-deadline)
+             :seon.dev.process/timed-out? true})
+
+          :else (do (Thread/sleep 25) (recur)))))))
+
+(defn- cleanup-contained-one-shot!
+  [configuration record]
+  (when-not (= record (read-process configuration restore-admin-id))
+    (throw
+     (ex-info "The contained one-shot generation changed before cleanup."
+              {:seon.dev.process/status
+               :seon.dev.process.status/containment-uncertain
+               :seon.dev.process/id restore-admin-id})))
+  (state/delete-edn! (state-file configuration restore-admin-id))
+  (when-let [result-path
+             (get-in record
+                     [:seon.dev.process/containment
+                      :seon.dev.process.containment/result-path])]
+    (fs/delete-tree (fs/parent result-path) {:force true}))
+  nil)
+
+(defn- drain-foreign-contained-one-shot!
+  [configuration record timeout-ms]
+  (let [containment (:seon.dev.process/containment record)
+        deadline (+ (monotonic-ms) timeout-ms
+                    (:seon.dev.process.containment/shutdown-grace-ms containment)
+                    10000)]
+    (drain-containment! record deadline)
+    (cleanup-contained-one-shot! configuration record)
+    (throw
+     (ex-info "A foreign restore-admin one-shot was drained before refusing overlap."
+              {:seon.dev.process/status
+               :seon.dev.process.status/foreign-one-shot
+               :seon.dev.process/id restore-admin-id}))))
+
+(defn contained-one-shot!
+  "Run or resume the one generation-bound restore-admin process."
+  {:malli/schema
+   [:=> [:cat contained-one-shot-request-schema]
+    contained-one-shot-result-schema]}
+  [{:seon.dev.process/keys
+    [configuration application-result-path timeout-ms]
+    :as request}]
+  (validate! contained-one-shot-request-schema request
+             "The contained one-shot request is invalid."
+             :seon.dev.process/explanation)
+  (state/with-lock
+   configuration :restore-admin (+ timeout-ms 30000)
+   (fn []
+     (let [spec (contained-one-shot-spec request)
+           retained (read-process configuration restore-admin-id)
+           record
+           (cond
+             (nil? retained)
+             (spawn-detached!
+              configuration spec
+              {:seon.dev.process/gated? true
+               :seon.dev.process/application-result-path
+               application-result-path})
+
+             (exact-contained-one-shot?
+              spec application-result-path retained)
+             (require-contained-one-shot-admission! retained)
+
+             :else
+             (drain-foreign-contained-one-shot!
+              configuration retained timeout-ms))
+           {:seon.dev.process/keys [terminal timed-out?]}
+           (await-contained-one-shot! record timeout-ms)
+           result
+           {:seon.dev.process/id restore-admin-id
+            :seon.dev.process/operation
+            :seon.dev.process.operation/restore-admin
+            :seon.dev.process/timed-out? timed-out?
+            :seon.dev.process/application-result-path application-result-path
+            :seon.dev.process/terminal
+            (normalized-terminal
+             (:seon.dev.process/containment record) terminal)}]
+       (cleanup-contained-one-shot! configuration record)
+       result))))
 
 (defn- require-startable-absence! [config id record]
   (when record

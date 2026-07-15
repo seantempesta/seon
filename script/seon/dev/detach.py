@@ -31,6 +31,11 @@ def atomic_json(path: str, value: dict[str, object]) -> None:
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, target)
+        directory = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         try:
             os.unlink(temporary)
@@ -93,7 +98,7 @@ def wait_json(path: str, result: str, generation: str,
     raise TimeoutError(f"timed out awaiting containment descriptor: {path}")
 
 
-def launch(args: list[str]) -> None:
+def launch(args: list[str], gated: bool = False) -> None:
     if len(args) < 8:
         raise SystemExit(
             "usage: detach.py launch <cwd> <log> <generation> "
@@ -104,7 +109,9 @@ def launch(args: list[str]) -> None:
     shutdown_grace = positive_grace_seconds(grace_ms)
     with open(log_path, "ab", buffering=0) as log:
         owner = subprocess.Popen(
-            [sys.executable, __file__, "owner", cwd, log_path, generation,
+            [sys.executable, __file__,
+             "owner-gated" if gated else "owner",
+             cwd, log_path, generation,
              descriptor, control, result, grace_ms, *argv],
             cwd=cwd,
             env=os.environ.copy(),
@@ -166,7 +173,17 @@ def positive_grace_seconds(value: str) -> float:
     return milliseconds / 1000.0
 
 
-def anchor(args: list[str]) -> None:
+def gate(args: list[str]) -> None:
+    if len(args) < 2:
+        raise SystemExit("usage: detach.py gate <read-fd> <program> [args ...]")
+    read_fd, *argv = args
+    with os.fdopen(int(read_fd), "rb", closefd=True) as admission:
+        if admission.read(1) != b"1":
+            raise RuntimeError("workload admission gate closed without release")
+    os.execvpe(argv[0], argv, os.environ.copy())
+
+
+def anchor(args: list[str], gated: bool = False) -> None:
     if len(args) < 4:
         raise SystemExit(
             "usage: detach.py anchor <cwd> <log> <shutdown-grace-ms> "
@@ -177,30 +194,51 @@ def anchor(args: list[str]) -> None:
     # The owner ignores TERM only across its Popen→cleanup-registration cut.
     # Reset that inherited disposition before the workload inherits signals.
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    gate_read = None
+    gate_write = None
+    workload_argv = argv
+    pass_fds: tuple[int, ...] = ()
+    if gated:
+        gate_read, gate_write = os.pipe()
+        workload_argv = [sys.executable, __file__, "gate", str(gate_read), *argv]
+        pass_fds = (gate_read,)
     with open(log_path, "ab", buffering=0) as log:
         workload = subprocess.Popen(
-            argv,
+            workload_argv,
             cwd=cwd,
             env=os.environ.copy(),
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
             close_fds=True,
+            pass_fds=pass_fds,
         )
+        if gate_read is not None:
+            os.close(gate_read)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         print(json.dumps({"anchor_pid": os.getpid(),
                           "process_group": os.getpgrp(),
                           "workload_pid": workload.pid}, separators=(",", ":")),
               flush=True)
+        admitted = not gated
         trigger = "workload-exit"
         while True:
             if workload.poll() is not None:
                 break
             ready, _, _ = select_with_timeout(sys.stdin, 0.05)
             if ready:
-                sys.stdin.readline()
-                trigger = "requested"
-                break
+                command = sys.stdin.readline().strip()
+                if command == "admit" and not admitted:
+                    assert gate_write is not None
+                    os.write(gate_write, b"1")
+                    os.close(gate_write)
+                    gate_write = None
+                    admitted = True
+                elif command == "drain":
+                    trigger = "requested"
+                    break
+        if gate_write is not None:
+            os.close(gate_write)
         os.killpg(os.getpgrp(), signal.SIGTERM)
         deadline = time.monotonic() + shutdown_grace
         if trigger == "requested":
@@ -221,7 +259,7 @@ def select_with_timeout(stream: object, timeout: float) -> tuple[list[object], l
     return select.select([stream], [], [], timeout)
 
 
-def owner(args: list[str]) -> None:
+def owner(args: list[str], gated: bool = False) -> None:
     if len(args) < 8:
         raise SystemExit(
             "usage: detach.py owner <cwd> <log> <generation> "
@@ -240,7 +278,9 @@ def owner(args: list[str]) -> None:
 
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     anchor_process = subprocess.Popen(
-        [sys.executable, __file__, "anchor", cwd, log_path, grace_ms, *argv],
+        [sys.executable, __file__,
+         "anchor-gated" if gated else "anchor",
+         cwd, log_path, grace_ms, *argv],
         cwd=cwd,
         env=os.environ.copy(),
         stdin=subprocess.PIPE,
@@ -290,6 +330,9 @@ def owner(args: list[str]) -> None:
                             {"generation": generation, "status": "adopted"})
                 adopted = True
                 connection.sendall(f"adopted {generation}\n".encode())
+                if gated:
+                    anchor_process.stdin.write("admit\n")
+                    anchor_process.stdin.flush()
             elif request == f"drain {generation}":
                 anchor_process.stdin.write("drain\n")
                 anchor_process.stdin.flush()
@@ -406,9 +449,18 @@ def wait_group_absent(process_group: int) -> bool:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        raise SystemExit("usage: detach.py <launch|owner|anchor> ...")
+        raise SystemExit(
+            "usage: detach.py <launch|launch-gated|owner|owner-gated|"
+            "anchor|anchor-gated|gate> ..."
+        )
     mode, *args = sys.argv[1:]
-    {"launch": launch, "owner": owner, "anchor": anchor}[mode](args)
+    {"launch": lambda values: launch(values, False),
+     "launch-gated": lambda values: launch(values, True),
+     "owner": lambda values: owner(values, False),
+     "owner-gated": lambda values: owner(values, True),
+     "anchor": lambda values: anchor(values, False),
+     "anchor-gated": lambda values: anchor(values, True),
+     "gate": gate}[mode](args)
 
 
 if __name__ == "__main__":
