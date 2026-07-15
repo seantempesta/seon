@@ -72,6 +72,10 @@ failures or errors).
 - [[research/async-contract-exact-source-implementation-audit-2026-07-15]] —
   exact ClojureScript, Shadow, and Malli identities; executable function-shape
   probes; one-owner implementation plan; and deterministic transition matrix.
+- [[research/provider-attempt-cancellation-exact-source-audit-2026-07-15]] —
+  exact SDK/Node cancellation semantics, complete dispatch-provider ownership,
+  retry/cancel race matrix, deletion boundary, and two non-overlapping source
+  slices.
 
 ## Ordered work
 
@@ -85,8 +89,12 @@ failures or errors).
    failures record once, and generation/reconciliation/removal preserve exact
    callable state. Focused proof: `tmp/test-cljs-20260715-012122-80190.log`
    (77 assertions, zero failures or errors).
-3. Thread cancellation through the existing provider attempt and adapters while
-   retaining one retry owner.
+3. **Exact-source audit complete; implementation pending:** actively cancel the
+   existing provider attempt on its cap and thread one signal through every
+   dispatch adapter while retaining `seon.agent.turn/call-llm!` as the sole
+   retry owner. Preserve OpenAI first-form `.abort()` as a successful local
+   stream-consumer stop. Add run-lifecycle cancellation only after the dirty
+   loop/client owners land; do not invent a registry or second retry path.
 4. Give plan completion schema'd verification evidence and settle authority for
    authored, addressed, cross-agent, retry, and resume transitions through the
    one `my.plan` mechanism.
