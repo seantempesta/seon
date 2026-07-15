@@ -303,8 +303,8 @@ success. Relational validation derives agreement on intent, plan, reachable
 blobs, selected target, the required pod generation member, and the descriptor's
 actual forced-main coordinate; ordinary descriptor bytes remain unchanged.
 Focused proof passes launch 7 tests/47 assertions, blob 21/148, admin 9/53, and
-operator restore 9/57. The second in-place unit is being corrected in the
-existing cold entry. A fresh main attach validates the exact startup
+operator restore 9/57. The second in-place unit is frozen in the existing cold
+entry at `1ec29778` plus corrective commit `0968a240`. A fresh main attach validates the exact startup
 generation/head and preinstalled completion schema, reconstructs the program
 without recovery or seed writes, prepares instrumentation under closed
 admission, records and reads back the generated completion under root/boot
@@ -313,8 +313,11 @@ pod remains nonautonomous and reports `executable? false`; no agent hosting,
 provider/brand sync, ticker, or Shadow admission may advance `C`. The operator
 now parses the portable response and compares the exact returned completion
 plus `C` before it removes external intent evidence, stops restore consumers,
-and starts one fresh ordinary autonomous runtime. The caller implementation is
-the remaining source-freeze gate. The
+and starts one fresh ordinary autonomous runtime. Routed ordinary readiness,
+detached/reconnecting restore readiness, attached refresh ordering, and
+disposable preparation failure are covered by the combined 62-test/396-assertion
+launch/client/web/database restore gate. The remaining gate is destructive
+lifecycle proof, not more caller implementation. The
 transaction-coordinate resolver is complete at `b2461d64`, and the fresh
 schema owner now installs the complete restore closure before generator-policy
 publication. The dependency repair is now published as exact public HTTPS Git

@@ -41,13 +41,18 @@ completion coordinate maps remain keyed by generated completion id. Exact
 legacy 14-character hexadecimal intents remain read-only inputs; the former
 compact-id overlap is no longer accepted for new planning.
 
-The public readiness response schema is now portable, and the operator parses
-the existing `/_seon/ready` response and requires the exact returned completion
-plus coordinate before intent deletion. The issue remains open only until the
-cold-runtime caller supplies that exact response from the generated completion
-result. Focused operator proof passes 29 tests/169 assertions; the complete
-operator gate passes 219/1,258 and focused restore-admin plus registry proof
-passes 25/152.
+The public readiness response schema is portable, and the operator parses the
+existing `/_seon/ready` response and requires the exact returned completion
+plus coordinate before intent deletion. The cold-runtime caller at `1ec29778`
+supplies that exact response from the generated completion result while
+remaining nonautonomous; `0968a240` additionally refuses detached or
+reconnecting replicas, catches up before attached refresh validation, and
+suppresses disposable preparation fault writes. The combined
+launch/client/web/database restore gate passes 62 tests/396 assertions;
+focused operator proof passes 29/171, the complete operator gate passes
+220/1,263, and focused restore-admin plus registry proof passes 25/152. The
+issue remains open only for source-frozen destructive restore/undo and
+readiness read-back proof.
 
 ## Acceptance
 

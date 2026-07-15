@@ -123,20 +123,20 @@ dependency spine and independent evidence consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Retained-head operator identity and readiness read-back are integrated; source freeze waits on the closed caller** | `2e58e8d1` allocates the database completion id atomically and makes plan digest the unique adoption key; `1b08597e` migrates fresh operator intent to UUID and keys completion coordinates by the generated id. The public portable readiness schema and operator now parse `GET /_seon/ready` and require the exact generated completion plus `C` with `ready? true` and `executable? false`. Focused restore proof passes 29 tests/169 assertions; full operator passes 219/1,258 and focused writer restore-admin plus registry passes 25/152 | Review and commit the closed launch/client/web caller, run the source-frozen checkpoint, then execute crash-cut restore/undo and three-form pod-death proof |
+| Top-level integration | **Retained-head source is frozen through closed caller/readiness; destructive lifecycle proof is next** | `2e58e8d1` allocates the database completion id atomically and makes plan digest the unique adoption key; `1b08597e` migrates fresh operator intent to UUID and keys completion coordinates by the generated id. `1ec29778` keeps restore startup nonautonomous, and `0968a240` closes routed readiness, replica drift, attached refresh ordering, and disposable fault writes. Launch/client/web/database restore proof passes 62 tests/396 assertions; focused operator passes 29/171, full operator 220/1,263, and focused writer restore-admin plus registry 25/152 | Execute the source-frozen crash-cut restore/undo and three-form pod-death proof; do not reopen the caller absent a falsifier |
 | Native secondary force | **COMPLETE through the selected Seon artifacts** | Both manifests bind Datahike `9ada755087228e10cfb179fa5779ce227a6ed220`, Konserve `b5c99bc02a7175652a610324215288b78551801f`, Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6`, Shadow CLJS `4e72595f57618f5c43388ad13d5136cd3bede566`, superv.async `3e6ed755f83634c9e9bbb58707f9446420d32ce9`, and partial-cps `1e119b03ea908ad925b98f9ba0a26371c65441e3` | Consume the frozen closure in destructive restore; do not reopen dependency publication absent a new falsifier |
 | Restore inverse/planner | **Completion-derived undo planning and canonical schema ownership are complete** | `6351790a` derives the exact retained undo head and `9a60761f` closes the intervening pure-data config/schema source collision. The same immutable transition is ready to consume the destructive restore result | Run completion-derived undo immediately after retained-head restore passes |
 | Inspect/agent evidence | **PATH identity and P0b evidence are closed; namespace/tool refinement is active** | `74530d90` makes process identity depend on the selected executable, and `901be2a9` records the admitted local-model P0b result. The external lane owns only its declared config/agent/Inspect paths and keeps ACME lifecycle untouched until the next source freeze | Review the bounded namespace/tool return after the retained-head source freeze; ACME rebuild remains downstream of default proof |
 
 Current scheduling card:
 
-1. **Ordered spine:** integrate nonautonomous restore preparation against the
-   completed generated identity and readiness read-back → freeze and
-   checkpoint the confirmed/abortable retained-head coordinator → destructive
+1. **Ordered spine:** use the frozen nonautonomous restore preparation,
+   generated identity, and exact readiness read-back → destructive
    crash-convergent restore → completion-derived undo → real three-form
    pod-death proof with committed prefix and absent suffix.
-2. **Parallel lane A:** finish the declared launch/client/web caller against
-   `2e58e8d1`; it may not edit the now-settled operator or lifecycle files.
+2. **Parallel lane A:** independently review the frozen caller and prepare the
+   exact default-cluster evidence collection; it may not edit source or run
+   lifecycle commands during the destructive spine.
 3. **Parallel lane B:** keep the external namespace/tool and Inspect evidence
    paths isolated, then review their committed return against canonical schemas
    and offline scorers after source freeze.
@@ -154,7 +154,7 @@ The ordered top-level sequence is therefore:
 2. **Complete:** immutable restore intent, exact prepare/admit split, blob
    materialization, completion publication, later-head coordinate resolution,
    and closed launch transport for restore evidence;
-3. **Reopened P0, caller implementing:** schema-before-policy ordering and the
+3. **Source complete; live proof pending:** schema-before-policy ordering and the
    allocator-owned completion contract are complete. The replacement keeps the
    disposable restore pod nonautonomous and admission closed, serves exact
    non-executable readiness containing the returned completion and `C`, then
@@ -162,11 +162,10 @@ The ordered top-level sequence is therefore:
 4. **Complete:** `be30f420` removes checkout-local dependency inputs and both
    manifest-v4 flavors prove the exact six-coordinate maintained closure plus
    normalized writer digest `3cbacfc0852807f0726c2b82ff7d2b673f68343c3affaaf126aa621453e45ceb`;
-5. **In progress:** exact completion-coordinate, allocator-owned identity,
+5. **Source complete; destructive proof next:** exact completion-coordinate, allocator-owned identity,
    contained-admin, confirmation, artifact-freeze, abort, and UUID/plan-digest
-   contracts are integrated in the operator path; finish nonautonomous caller
-   readiness, then freeze and pass restore/undo crash
-   cuts and multi-form partial-commit proof;
+   contracts and nonautonomous caller readiness are integrated; pass
+   restore/undo crash cuts and multi-form partial-commit proof;
 6. graduate units 2 and 6 from bounded consumers into their complete acceptance
    matrices while starting unit 3/4 only from their settled contracts;
 7. complete canvas, Inspect/autocomplete, and independent artifact consumption

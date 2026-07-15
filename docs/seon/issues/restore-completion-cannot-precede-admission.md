@@ -137,6 +137,20 @@ readiness, and rejection after a later head `D`. The issue remains open only
 until the external coordinator consumes that endpoint through a complete
 restore lifecycle proof.
 
+Independent review then found four integration seams hidden by those focused
+helpers: the ordinary router still invoked readiness at its original arity,
+restore preparation could record a disposable projection fault, retained
+evidence could fall through to an ordinary body while detached, and attached
+refresh validated before proving its replica feed live. Corrective commit
+`0968a240` strengthens the same owners in place. Restore readiness now requires
+an attached, connected replica; detached or reconnecting evidence returns the
+closed false response, attached refresh catches up before validating exact
+`C`, and ordinary publication retains default-on fault recording. The combined
+launch/client/web/database restore gate passes 62 tests/396 assertions with
+zero failures, errors, or compile warnings. The broader admission-inclusive
+gate passes every restore assertion; its one remaining failure belongs to the
+separate uncommitted targeted-lifecycle lane's drain-control fixture.
+
 ## Fresh schema integration fixed
 
 The full CLJS gate exposed a separate cold-bootstrap ordering defect. Requiring
