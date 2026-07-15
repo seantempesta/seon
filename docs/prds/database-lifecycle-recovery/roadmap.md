@@ -225,10 +225,15 @@ Focused admin proof passes 9 tests and 53 assertions; the combined writer-admin
 gate passes 22 tests and 131 assertions, including the real dependency
 falsifier and injected connect, operation, first/second release, post-force
 read-back, invalid-result, and result-loss failures. No public
-restore command may invoke this boundary until the Datahike force-secondary
-fix makes the real fixture converge. That operator must independently hash the
-exact writer artifact before launch; the intent's plan digest only commits the
-expected artifact claim.
+restore command may invoke this boundary until Proximum has a guarded,
+idempotent existing-destination force/replace primitive and Datahike consumes
+it through its one `force-branch!` path. Ordinary Proximum `branch!` rejects the
+already-existing live `:db`, and key-map relabeling cannot change the source
+branch recorded in a committed snapshot; the rejected Datahike-only prototype
+and exact dependency contract are retained at
+[[research/datahike-force-secondary-falsifier-2026-07-15]]. That operator must
+independently hash the exact writer artifact before launch; the intent's plan
+digest only commits the expected artifact claim.
 The concrete missing source boundary is tracked in
 [[../../seon/issues/restore-writer-admin-transition-is-unimplemented]].
 
@@ -259,7 +264,8 @@ head retry also fails closed for now: the public CLJS database surface cannot
 yet resolve the completion transaction to its original containing commit, and
 substituting the later head would be false evidence. The ordered integration
 slice must add one canonical writer-backed transaction-coordinate resolver,
-fix the Datahike secondary force blocker, then compose forced-main result,
+complete the Proximum-then-Datahike secondary force contract, then compose
+forced-main result,
 blob proof, cold reconstruction, completion, exact admission, readiness, and
 intent deletion. It must not add shadow completion metadata or another restore
 state machine.
