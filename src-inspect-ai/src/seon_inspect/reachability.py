@@ -169,11 +169,14 @@ def _root(
 ) -> dict[str, bool]:
     first = _prompt(turns, 0)
     home = _current_home_source(first)
-    forbidden = ("mint!", "ensure-initial-agent!", "spawn-depth", "unhost!")
+    agent_rows = set(re.findall(
+        r"(?m)^\s*;+\s*fn\s+seon\.agent/([^\s]+)\s+—", first
+    ))
     surface = (
         "seon.agent" in home
         and _card(first, "seon.agent/start!")
-        and not any(_card(first, f"seon.agent/{name}") for name in forbidden)
+        and _card(first, "seon.agent/delegate!")
+        and agent_rows == {"start!", "delegate!"}
     )
     starts = _successful(rows, "agent/start!", "seon.agent/start!")
     queries = _successful(rows, "db/query", "seon.db/query")

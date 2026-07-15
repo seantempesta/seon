@@ -107,7 +107,7 @@ def _eval(turn_id, tx, source, *, operations=None):
 def _root_fixture():
     child = "quiet-crows-count"
     first = _home("my.agent.root", ["seon.agent", "seon.db"])
-    first += _card("seon.agent/start!")
+    first += _card("seon.agent/start!") + _card("seon.agent/delegate!")
     turns = [
         _turn("root-1", first, 10),
         _turn("root-2", f"; result {{:seon.agent/id \"{child}\"}}", 20),
@@ -284,6 +284,41 @@ def test_first_prompt_card_cannot_be_absent_or_delayed(row):
     )
     delayed[-1]["prompt"] += "\n" + fn_lines
     result = check_reachability(row, delayed, eval_rows, reply, FINAL)
+    assert not result["checks"]["surface"]
+
+
+def test_root_surface_requires_delegate_alongside_start():
+    turns, eval_rows, reply = _root_fixture()
+    turns[0]["prompt"] = "\n".join(
+        line for line in turns[0]["prompt"].splitlines()
+        if "fn seon.agent/delegate!" not in line
+    )
+    result = check_reachability(
+        "root_orchestration", turns, eval_rows, reply, FINAL
+    )
+    assert not result["checks"]["surface"]
+
+
+@pytest.mark.parametrize(
+    "excluded",
+    [
+        "armable-agent-ids",
+        "resumable-agent-ids",
+        "create!",
+        "mint!",
+        "ensure-initial-agent!",
+        "spawn-depth",
+        "resume!",
+        "unhost!",
+        "set-purpose!",
+    ],
+)
+def test_root_surface_rejects_every_other_public_agent_row(excluded):
+    turns, eval_rows, reply = _root_fixture()
+    turns[0]["prompt"] += _card(f"seon.agent/{excluded}")
+    result = check_reachability(
+        "root_orchestration", turns, eval_rows, reply, FINAL
+    )
     assert not result["checks"]["surface"]
 
 
