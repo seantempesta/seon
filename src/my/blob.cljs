@@ -34,7 +34,6 @@
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
-    [seon.db.coordinate :as db.coordinate]
     [my.blob.schema]
     [seon.platform :as platform]
     [seon.schema :as schema]))
@@ -49,19 +48,11 @@
 (schema/register! ::at     :inst)                              ; when the blob was recorded
 
 (schema/register! ::content :string)
-(schema/register! ::ok?     :boolean)
 (schema/register! ::error   :string)
 (schema/register! ::exists? :boolean)
-(schema/register! ::digest [:re "[0-9a-f]{64}"])
 (schema/register! ::target-database :seon.db/db)
-(schema/register! ::target-coordinate ::db.coordinate/coordinate)
 (schema/register! ::source-storage-view ::storage-view)
 (schema/register! ::destination-storage-view ::storage-view)
-(schema/register! ::reachable-hash-digest ::digest)
-(schema/register! ::hash-count [:int {:min 0}])
-(schema/register! ::verified-count [:int {:min 0}])
-(schema/register! ::newly-materialized-count [:int {:min 0}])
-(schema/register! ::repaired-count [:int {:min 0}])
 (schema/register! ::searched-source-paths [:vector :string])
 (schema/register! ::destination-path :string)
 (schema/register! ::expected-digest ::digest)
@@ -83,17 +74,6 @@
    [::source-storage-view ::source-storage-view]
    [::destination-storage-view ::destination-storage-view]
    [::reachable-hash-digest ::reachable-hash-digest]])
-
-(schema/register!
-  ::materialization-success
-  [:map {:closed true}
-   [::ok? [:= true]]
-   [::target-coordinate ::target-coordinate]
-   [::reachable-hash-digest ::reachable-hash-digest]
-   [::hash-count ::hash-count]
-   [::verified-count ::verified-count]
-   [::newly-materialized-count ::newly-materialized-count]
-   [::repaired-count ::repaired-count]])
 
 (schema/register!
   ::materialization-failure

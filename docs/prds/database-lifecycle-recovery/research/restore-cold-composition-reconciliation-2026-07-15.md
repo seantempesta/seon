@@ -200,3 +200,44 @@ commits before the first `:available`, a crash at that boundary creates no
 second force or completion fact, and config-free restart returns the same
 database facts and exact original completion coordinate. Only after that proof
 may the operator delete the intent and expose restore/undo publicly.
+
+## Inert startup value implemented
+
+The launch descriptor now accepts one optional, closed
+`:seon.launch/restore-startup` value composed solely from three authoritative
+portable values: the frozen intent identity/digests and consumer-generation
+map, one exact successful no-listener writer-admin result, and one exact blob
+materialization success. Cross-owner validation proves intent id, plan digest,
+reachable-hash digest, selected target coordinate, and the required frozen
+`:seon.dev.process/pod` member agree. The descriptor's actual database
+coordinate must equal the admin result's forced-main coordinate.
+
+No expected-coordinate or expected-generation duplicate is stored. The future
+cold caller derives the required pod generation from the frozen intent member,
+and compares its actual fresh attachment with the admin result. No path,
+callback, status, ambient reread, or boot behavior was added. Ordinary
+descriptors remain the same EDN bytes when the optional value is absent.
+
+`seon.dev.process/specs` already publishes the complete launch descriptor as
+`SEON_LAUNCH_DESCRIPTOR` with `pr-str`; its retained branch-publication test
+round-trips that exact value. Therefore the optional restore value crosses the
+existing managed-process publication boundary without a second environment
+variable or process implementation change. Focused proof is:
+
+- `seon.launch-test`: seven tests/47 assertions, including closed-schema,
+  EDN round-trip, six independent relational mutations, exact forced-main and
+  consumer-generation binding, and unchanged ordinary descriptor bytes;
+- `my.blob-test`: 21 tests/148 assertions after moving the materialization
+  success contract to its portable schema owner;
+- `seon.db.restore-admin-test`: nine tests/53 assertions after moving its
+  result contracts to the portable schema owner; and
+- `seon.dev.restore-test`: nine tests/57 assertions, including exact immutable
+  startup-identity projection.
+
+The broader CLJS gate remains independently blocked by the documented fresh
+schema ordering defect in
+[[../../seon/issues/restore-completion-cannot-precede-admission]]: the globally
+registered restore identity contributes a generator policy before
+`seon.client/agent-bootstrap-attrs` installs the completion schema. That owner
+is intentionally untouched in this slice because another lane owns the dirty
+`seon.client` bootstrap list.

@@ -103,6 +103,20 @@
 (defn- derived-intent []
   (restore/derive-intent (intent-request)))
 
+(deftest startup-identity-is-the-exact-frozen-intent-projection
+  (let [intent (derived-intent)
+        identity (restore/startup-identity intent)]
+    (is (= (select-keys intent
+                        [::restore/intent-id
+                         ::restore/plan-digest
+                         ::restore/reachable-hash-digest
+                         ::restore/consumer-generations])
+           identity))
+    (is (= (get-in intent [::restore/consumer-generations
+                           :seon.dev.process/pod])
+           (get-in identity [::restore/consumer-generations
+                             :seon.dev.process/pod])))))
+
 (defn- observation
   ([intent main heads ancestors completed]
    (observation intent main nil heads ancestors completed))

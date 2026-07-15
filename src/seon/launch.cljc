@@ -5,6 +5,8 @@
             [seon.client.schema]
             [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
+            [seon.db.restore-admin.schema]
+            [seon.dev.restore.schema]
             [seon.schema :as schema]))
 
 (schema/register! ::path [:string {:min 1}])
@@ -57,6 +59,39 @@
   [::http-port-file ::http-port-file]])
 
 (schema/register! ::blob-storage-view :my.blob/storage-view)
+(defn- restore-startup-consistent?
+  [startup]
+  (let [identity (:seon.dev.restore/startup-identity startup)
+        admin (:seon.db.restore-admin/result startup)
+        blobs (:my.blob/materialization-result startup)
+        consumers (:seon.dev.restore/consumer-generations identity)]
+    (and (= (:seon.dev.restore/intent-id identity)
+            (:seon.db.restore-admin/intent-id admin))
+         (= (:seon.dev.restore/plan-digest identity)
+            (:seon.db.restore-admin/plan-digest admin))
+         (= (:seon.dev.restore/reachable-hash-digest identity)
+            (:my.blob/reachable-hash-digest blobs))
+         (= (:seon.db.restore-admin/selected-target-coordinate admin)
+            (:my.blob/target-coordinate blobs))
+         (contains? consumers :seon.dev.process/pod))))
+
+(schema/register!
+ ::restore-startup
+ [:map {:closed true}
+  [:seon.dev.restore/startup-identity
+   :seon.dev.restore/startup-identity]
+  [:seon.db.restore-admin/result
+   :seon.db.restore-admin/success-result]
+  [:my.blob/materialization-result :my.blob/materialization-success]])
+
+(defn- descriptor-consistent?
+  [descriptor]
+  (if-let [startup (::restore-startup descriptor)]
+    (= (get-in startup [:seon.db.restore-admin/result
+                        :seon.db.restore-admin/forced-main-coordinate])
+       (get-in descriptor [::database ::coordinate/coordinate]))
+    true))
+
 (schema/register!
  ::descriptor
  [:map {:closed true}
@@ -64,7 +99,8 @@
   [::database ::database]
   [::writer-owner ::writer-owner]
   [::process ::process]
-  [::blob-storage-view ::blob-storage-view]])
+  [::blob-storage-view ::blob-storage-view]
+  [::restore-startup {:optional true} ::restore-startup]])
 
 (schema/register!
  ::default-descriptor-request
@@ -133,6 +169,49 @@
                     (assoc data :seon.error/kind
                            :seon.launch.error/invariant)))))
 
+(defn validate-restore-startup
+  "Validate one restore startup value and its cross-owner evidence."
+  {:malli/schema [:=> [:cat :map] ::restore-startup]}
+  [startup]
+  (invariant!
+   (schema/valid-candidate-value? ::restore-startup startup)
+   "The restore startup value is not a closed portable value."
+   {::restore-startup startup})
+  (invariant!
+   (restore-startup-consistent? startup)
+   "Restore startup evidence does not describe one frozen transition."
+   {::restore-startup startup})
+  startup)
+
+(defn validate-descriptor
+  "Validate one launch descriptor and optional restore startup evidence."
+  {:malli/schema [:=> [:cat :map] ::descriptor]}
+  [descriptor]
+  (invariant!
+   (schema/valid-candidate-value? ::descriptor descriptor)
+   "The process launch descriptor is invalid."
+   {::descriptor descriptor})
+  (when-let [startup (::restore-startup descriptor)]
+    (validate-restore-startup startup))
+  (invariant!
+   (descriptor-consistent? descriptor)
+   "Restore startup expects another fresh main coordinate."
+   {::descriptor descriptor})
+  descriptor)
+
+(schema/register!
+ ::with-restore-startup-request
+ [:map {:closed true}
+  [::descriptor ::descriptor]
+  [::restore-startup ::restore-startup]])
+
+(defn with-restore-startup
+  "Attach one validated inert restore startup value to a pinned launch."
+  {:malli/schema [:=> [:cat ::with-restore-startup-request] ::descriptor]}
+  [{descriptor ::descriptor startup ::restore-startup}]
+  (validate-descriptor (assoc descriptor ::restore-startup
+                              (validate-restore-startup startup))))
+
 (defn default-descriptor
   "Derive one ordinary autonomous-cluster launch descriptor."
   {:malli/schema [:=> [:cat ::default-descriptor-request] ::descriptor]}
@@ -144,30 +223,31 @@
     (invariant! (not (str/blank? cluster))
                 "A cluster directory must have a basename."
                 {::cluster-dir cluster-dir})
-    {::runtime
-     {::runtime-cluster cluster
-      ::artifact-flavor artifact-flavor
-      ::client-build-id client-build-id
-      :seon.client/launch-capability {:seon.client/autonomous? true}}
-     ::database
-     {::protocol/database-name cluster
-      ::protocol/backend :file
-      ::protocol/database-path (str cluster-dir "/db")}
-     ::writer-owner
-     {::writer-cluster cluster
-      ::writer-process-dir (normalize-path process-dir)
-      ::request-socket-path request-socket-path
-      ::publish-socket-path publish-socket-path
-      ::writer-repl-port-file writer-repl-port-file}
-     ::process
-     {::process-dir (normalize-path process-dir)
-      ::log-dir (normalize-path log-dir)
-      ::http-port http-port
-      ::http-port-file (normalize-path http-port-file)}
-     ::blob-storage-view
-     {:my.blob/writable-dir
-      (str cluster-dir "/blobs")
-      :my.blob/read-only-dirs []}}))
+    (validate-descriptor
+     {::runtime
+      {::runtime-cluster cluster
+       ::artifact-flavor artifact-flavor
+       ::client-build-id client-build-id
+       :seon.client/launch-capability {:seon.client/autonomous? true}}
+      ::database
+      {::protocol/database-name cluster
+       ::protocol/backend :file
+       ::protocol/database-path (str cluster-dir "/db")}
+      ::writer-owner
+      {::writer-cluster cluster
+       ::writer-process-dir (normalize-path process-dir)
+       ::request-socket-path request-socket-path
+       ::publish-socket-path publish-socket-path
+       ::writer-repl-port-file writer-repl-port-file}
+      ::process
+      {::process-dir (normalize-path process-dir)
+       ::log-dir (normalize-path log-dir)
+       ::http-port http-port
+       ::http-port-file (normalize-path http-port-file)}
+      ::blob-storage-view
+      {:my.blob/writable-dir
+       (str cluster-dir "/blobs")
+       :my.blob/read-only-dirs []}})))
 
 (schema/register!
  ::with-coordinate-request
@@ -187,10 +267,11 @@
                 "The writer coordinate does not match the launch attachment."
                 {::coordinate/attachment retained-attachment
                  ::coordinate/coordinate point})
-    (assoc descriptor ::database
-           (assoc database
-                  ::coordinate/attachment attachment
-                  ::coordinate/coordinate point))))
+    (validate-descriptor
+     (assoc descriptor ::database
+            (assoc database
+                   ::coordinate/attachment attachment
+                   ::coordinate/coordinate point)))))
 
 (defn branch-descriptor
   "Derive one non-autonomous branch descriptor from its source launch."
@@ -233,23 +314,24 @@
                 "Branch-private paths must not overlap source database or blob bases."
                 {::target-private-paths target-private
                  ::source-paths source-bases})
-    {::runtime
-     {::runtime-cluster runtime-cluster
-      ::artifact-flavor (::artifact-flavor source-runtime)
-      ::client-build-id (::client-build-id source-runtime)
-      :seon.client/launch-capability {:seon.client/autonomous? false}}
-     ::database
-     {::protocol/database-name target-database-name
-      ::coordinate/attachment target-attachment
-      ::coordinate/coordinate target-coordinate
-      ::protocol/backend (::protocol/backend source-database)
-      ::protocol/database-path (::protocol/database-path source-database)}
-     ::writer-owner (::writer-owner source-descriptor)
-     ::process
-     {::process-dir (normalize-path process-dir)
-      ::log-dir (normalize-path log-dir)
-      ::http-port http-port
-      ::http-port-file (normalize-path http-port-file)}
-     ::blob-storage-view
-     {:my.blob/writable-dir (normalize-path writable-blob-dir)
-      :my.blob/read-only-dirs read-only-dirs}}))
+    (validate-descriptor
+     {::runtime
+      {::runtime-cluster runtime-cluster
+       ::artifact-flavor (::artifact-flavor source-runtime)
+       ::client-build-id (::client-build-id source-runtime)
+       :seon.client/launch-capability {:seon.client/autonomous? false}}
+      ::database
+      {::protocol/database-name target-database-name
+       ::coordinate/attachment target-attachment
+       ::coordinate/coordinate target-coordinate
+       ::protocol/backend (::protocol/backend source-database)
+       ::protocol/database-path (::protocol/database-path source-database)}
+      ::writer-owner (::writer-owner source-descriptor)
+      ::process
+      {::process-dir (normalize-path process-dir)
+       ::log-dir (normalize-path log-dir)
+       ::http-port http-port
+       ::http-port-file (normalize-path http-port-file)}
+      ::blob-storage-view
+      {:my.blob/writable-dir (normalize-path writable-blob-dir)
+       :my.blob/read-only-dirs read-only-dirs}})))

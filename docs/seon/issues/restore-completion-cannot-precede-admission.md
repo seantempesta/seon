@@ -94,3 +94,23 @@ passes six tests/33 assertions. The request and response production Transit
 gate passes ten tests/32 assertions, and the focused CLJS restore gate passes
 six tests/34 assertions for the pod wrapper, original-coordinate result,
 structured error kind, and zero-write retry.
+
+## Fresh-schema integration defect
+
+The full CLJS gate exposed a separate cold-bootstrap ordering defect. Requiring
+`seon.db.restore` registers the generated identity
+`:seon.db.restore/id` globally, so `seon.client/generator-policy-facts`
+correctly includes its generator policy. Fresh fixture databases still install
+only `seon.client/agent-bootstrap-attrs`; because that vector omits the restore
+completion attributes, policy installation rejects the identity as
+`:seon.db.id.error/invalid-generator-policy` before runtime startup.
+
+The canonical fix belongs at the existing initial-schema owner:
+`seon.client/agent-bootstrap-attrs` feeds `pod-full-schema`, which
+`install-runtime-schema!` commits before generator policies. Add the complete
+restore-completion attribute set there so schema precedes policy and later
+completion publication. Do not weaken generator-policy validation, filter the
+globally registered candidate opportunistically, or patch individual fixtures.
+Acceptance is a fresh isolated connection whose installed schema contains
+`:seon.db.restore/id` before its policy transaction, followed by the complete
+CLJS gate without `invalid-generator-policy` failures.

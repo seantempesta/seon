@@ -3,18 +3,13 @@
   (:require [malli.core :as m]
             [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
+            [seon.dev.restore.schema]
             [seon.launch :as launch]
             [seon.schema :as schema])
   (:import [java.nio.charset StandardCharsets]
            [java.security MessageDigest]))
 
 (schema/register! ::intent-version [:= 1])
-;; Keep this portable BB owner aligned with `:seon.db.restore/id`'s
-;; `:seon.db.id/compact-value`. Requiring `seon.db.id` would pull Datahike into
-;; the operator process, so the exact durable compatibility grammar lives here.
-(schema/register! ::intent-id
-                  [:or [:string {:min 14 :max 14}]
-                   [:and :string [:re "^[a-z][a-z0-9]{11}$"]]])
 (schema/register! ::operation [:enum :seon.dev.restore.operation/restore
                                 :seon.dev.restore.operation/undo])
 (schema/register! ::pre-restore-main-descriptor ::launch/descriptor)
@@ -25,14 +20,9 @@
 (schema/register! ::prepared-target-coordinate ::coordinate/coordinate)
 (schema/register! ::expected-branch-roster [:set :keyword])
 (schema/register! ::protocol-version [:= protocol/current-version])
-(schema/register! ::consumer-generations
-                  [:map-of {:min 1} :qualified-keyword :uuid])
 (schema/register! ::overlay-selection [:= :seon.dev.restore.overlay/preserve])
 (schema/register! ::core-overlay-selection ::overlay-selection)
 (schema/register! ::config-overlay-selection ::overlay-selection)
-(schema/register! ::digest [:re "[0-9a-f]{64}"])
-(schema/register! ::reachable-hash-digest ::digest)
-(schema/register! ::plan-digest ::digest)
 (schema/register! ::writer-artifact-digest ::digest)
 (schema/register! ::cluster-dir ::launch/cluster-dir)
 (schema/register! ::intent-path ::launch/path)
@@ -267,6 +257,14 @@
      "The retained restore intent has inconsistent derived coordinates."
      {::intent-id (::intent-id intent)}))
   intent)
+
+(defn startup-identity
+  "Project the immutable intent fields required by a fresh restore pod."
+  {:malli/schema [:=> [:cat ::intent] ::startup-identity]}
+  [intent]
+  (select-keys (validate-intent intent)
+               [::intent-id ::plan-digest ::reachable-hash-digest
+                ::consumer-generations]))
 
 (defn intent-path
   "Canonical fsync-published intent path for one cluster directory."
