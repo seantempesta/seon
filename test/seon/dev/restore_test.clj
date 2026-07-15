@@ -973,6 +973,11 @@
                   ::db.restore/completion-coordinate current}
         response (atom expected)
         calls (atom [])]
+    (is (m/validate ::db.restore/readiness-response expected))
+    (is (= {::db.restore/completion completion
+            ::db.restore/completion-coordinate current}
+           (restore/completion-evidence
+            {::restore/intent intent ::restore/observation observation})))
     (with-redefs-fn
       {#'restore-state/restore-startup-descriptor (fn [& _] target-descriptor)
        #'restore-state/selected-configuration (fn [value _] value)
