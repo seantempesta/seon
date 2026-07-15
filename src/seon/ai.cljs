@@ -260,8 +260,9 @@
 ;; under. NEVER stored (owner correction 2026-07-04, derive-don't-store:
 ;; the per-turn `llm-*` stamping this shape once fed is deleted);
 ;; [[resolved-config]] derives it from ANY db value on demand — the live
-;; db for current intent, `db/as-of` a past turn's `rendered-as-of`
-;; basis for historical exactness. `::thinking` is the row-shape STRING
+;; db for current intent, or the immutable value returned by
+;; `seon.db/at-coordinate` for a past turn's complete rendered coordinate.
+;; `::thinking` is the row-shape STRING
 ;; ("false"/"true"/effort — the [[thinking-mode]] vocabulary). Keys with
 ;; no value at any resolution tier (anthropic never sends temperature;
 ;; the diffusiongemma worker owns its own model + caps) are ABSENT.
@@ -569,11 +570,12 @@
    global-only view. (A section fn surfacing this per agent is the
    natural UI follow-on.)
 
-   Time travel — datahike is bitemporal, so the config a PAST turn ran
-   under is this same fn over that turn's frozen basis:
+   Time travel — resolve a past turn's complete rendered coordinate with
+   `seon.db/at-coordinate`, then pass that returned immutable db value to
+   this same pure function:
 
      (resolved-config
-       {:seon.db/db    (db/as-of db (:seon.agent.turn/rendered-as-of turn))
+       {:seon.db/db    historical-db
         :seon.agent/id agent-id})"
   {:malli/schema [:=> [:cat ::resolved-config-request] ::resolved-config-response]}
   [{db :seon.db/db id :seon.agent/id}]

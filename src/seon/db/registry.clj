@@ -276,8 +276,9 @@
    deterministic database identity (`backend/datahike-config` on
    `::fork-database-name`).
    The fork is fully writable and byte-faithful as of the fork point —
-   eids/tx-eids identical, so every stored basis-t (`:seon.error/at`,
-   `rendered-as-of`) means the same thing inside it.
+   eids/tx-eids are identical. A bare stored basis-t is not a portable
+   identity across that boundary; callers must resolve and carry a complete
+   database coordinate before selecting or reconstructing history.
 
    Semantics of `::at` for error forensics: `:seon.error/at` is the
    basis-t at the CATCH site — the db value the failing code SAW. The

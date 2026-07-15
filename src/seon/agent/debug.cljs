@@ -19,8 +19,8 @@
      - `handlers` — the live handler registry visible to the agent
        (core + per-agent).
      - `turn` / `turn-diff` — turn replay: reconstruct any persisted
-       turn from its `:seon.agent.turn/rendered-as-of` basis-t + prompt
-       and reply blobs; diff two turns (tokens + basis-t delta).
+       turn from its complete rendered database coordinate + prompt
+       and reply blobs; diff two turns.
      - `errors` / `error` / `repro` — error triage over the persisted
        `seon.error/record!` datoms: compact recent list → one full
        envelope with the turn/agent joins → the work-backwards bundle
@@ -37,8 +37,9 @@
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
-    [seon.agent.turn]
+    [seon.agent.turn :as turn]
     [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
     [seon.error]
     [seon.schema :as schema]
     [seon.db.replica :as replica]))
@@ -163,7 +164,10 @@
    [::error                          {:optional true} ::error]
    [:seon.agent.turn/status         {:optional true} :seon.agent.turn/status]
    [:seon.agent.turn/at             {:optional true} :seon.agent.turn/at]
-   [:seon.agent.turn/rendered-as-of {:optional true} :seon.agent.turn/rendered-as-of]
+   [:seon.agent.turn/rendered-database-id {:optional true} :seon.agent.turn/rendered-database-id]
+   [:seon.agent.turn/rendered-branch      {:optional true} :seon.agent.turn/rendered-branch]
+   [:seon.agent.turn/rendered-commit-id   {:optional true} :seon.agent.turn/rendered-commit-id]
+   [:seon.agent.turn/rendered-t           {:optional true} :seon.agent.turn/rendered-t]
    [:seon.agent.turn/error          {:optional true} :seon.agent.turn/error]
    [::prompt        {:optional true} ::prompt]
    [::prompt-tokens {:optional true} ::prompt-tokens]
@@ -191,11 +195,10 @@
     {}))
 
 (defn turn
-  "Reconstruct one persisted turn: basis-t, verbatim prompt, raw reply.
+  "Reconstruct one persisted turn and its captured model bytes.
 
    Map-in/map-out — `{:seon.agent.turn/id id}` returns the turn's
-   `:seon.agent.turn/rendered-as-of` (re-derive its whole structured
-   context with `(db/as-of conn t)`), the VERBATIM prompt and raw reply
+   complete rendered database coordinate, the VERBATIM prompt and raw reply
    read back from their blobs (with token estimates), and the turn's stored
    error when present. The durable turn/eval graph is the record; this does not
    claim that arbitrary database or external effects can be replayed. An
@@ -206,17 +209,27 @@
   (if-let [eid (turn-eid turn-id)]
     (let [t (db/pull {:seon.db/pull-pattern
                       [:seon.agent.turn/id :seon.agent.turn/at
-                       :seon.agent.turn/status :seon.agent.turn/rendered-as-of
+                       :seon.agent.turn/status
+                       :seon.agent.turn/rendered-database-id
+                       :seon.agent.turn/rendered-branch
+                       :seon.agent.turn/rendered-commit-id
+                       :seon.agent.turn/rendered-t
                        :seon.agent.turn/error
                        {:seon.agent.turn/prompt-blob [:my.blob/hash]}
                        {:seon.agent.turn/reply-blob  [:my.blob/hash]}]
                       :seon.db/ref eid})
           p (blob-text t :seon.agent.turn/prompt-blob ::prompt ::prompt-tokens)
           r (blob-text t :seon.agent.turn/reply-blob  ::reply  ::reply-tokens)
-          errs (keep ::error [p r])]
+          point (turn/rendered-coordinate t)
+          coordinate-error (:seon.error/message point)
+          errs (cond-> (vec (keep ::error [p r]))
+                 coordinate-error (conj coordinate-error))]
       (cond-> (merge (select-keys t [:seon.agent.turn/id :seon.agent.turn/at
                                      :seon.agent.turn/status
-                                     :seon.agent.turn/rendered-as-of
+                                     :seon.agent.turn/rendered-database-id
+                                     :seon.agent.turn/rendered-branch
+                                     :seon.agent.turn/rendered-commit-id
+                                     :seon.agent.turn/rendered-t
                                      :seon.agent.turn/error])
                      (dissoc p ::error)
                      (dissoc r ::error)
@@ -227,8 +240,8 @@
      ::error (str "no turn stored under " (pr-str turn-id))}))
 
 ;;; turn-diff — what changed between two turns, as a summary an agent can
-;;; budget on: basis-t delta (how many txs advanced the db between the
-;;; two renders) + a token/line summary of the prompt drift + both replies.
+;;; budget on: a lineage-safe t delta when both cuts share one containing
+;;; commit, plus a token/line summary of prompt drift + both replies.
 
 (schema/register! ::from :seon.agent.turn/id)
 (schema/register! ::to   :seon.agent.turn/id)
@@ -267,8 +280,8 @@
   "What changed between two persisted turns — a budgetable summary.
 
    Map-in/map-out — `{::from id ::to id}` returns both [[turn]] bundles
-   plus: `::basis-t-delta` (txs the db advanced between the two
-   renders — `rendered-as-of` distance), `::prompt-token-delta` (tokens,
+   plus: `::basis-t-delta` only when both cuts share one immutable containing
+   commit, `::prompt-token-delta` (tokens,
    the ONE estimator), and a multiset line summary of the prompt drift
    (`::prompt-lines-added` / `-removed` — cache-stability instrument:
    frozen bytes that moved show up here). `::ok? false` with a guiding
@@ -282,15 +295,23 @@
       {::ok? false
        ::error (str/join "; " (keep ::error [ft tt]))}
       (let [[added removed] (line-delta (::prompt ft) (::prompt tt))
-            f-as-of (:seon.agent.turn/rendered-as-of ft)
-            t-as-of (:seon.agent.turn/rendered-as-of tt)]
+            fp (turn/rendered-coordinate ft)
+            tp (turn/rendered-coordinate tt)
+            same-container? (and (nil? (:seon.error/message fp))
+                                 (nil? (:seon.error/message tp))
+                                 (= (select-keys fp [::coordinate/database-id
+                                                     ::coordinate/branch
+                                                     ::coordinate/commit-id])
+                                    (select-keys tp [::coordinate/database-id
+                                                     ::coordinate/branch
+                                                     ::coordinate/commit-id])))]
         (cond-> {::ok? (and (::ok? ft) (::ok? tt))
                  ::from-turn ft
                  ::to-turn   tt
                  ::prompt-lines-added   added
                  ::prompt-lines-removed removed}
-          (and f-as-of t-as-of)
-          (assoc ::basis-t-delta (- t-as-of f-as-of))
+          same-container?
+          (assoc ::basis-t-delta (- (::coordinate/t tp) (::coordinate/t fp)))
           (and (::prompt-tokens ft) (::prompt-tokens tt))
           (assoc ::prompt-token-delta (- (::prompt-tokens tt)
                                          (::prompt-tokens ft)))
@@ -423,47 +444,7 @@
    [::frames             {:optional true} ::frames]
    [:seon.agent/id       {:optional true} :seon.agent/id]
    [::turn-eid           {:optional true} ::eid]
-   [:seon.agent.turn/id  {:optional true} :seon.agent.turn/id]
-   [:seon.agent.turn/rendered-as-of
-    {:optional true} :seon.agent.turn/rendered-as-of]])
-
-(defn- turn-by-id
-  "`[turn-eid turn-id rendered-as-of|nil]` for a turn id, or nil."
-  [db tid]
-  (when tid
-    (when-let [te (db/query '[:find ?t . :in $ ?tid
-                              :where [?t :seon.agent.turn/id ?tid]]
-                            db tid)]
-      [te tid (:seon.agent.turn/rendered-as-of
-                (db/pull {:seon.db/db db
-                          :seon.db/pull-pattern [:seon.agent.turn/rendered-as-of]
-                          :seon.db/ref te}))])))
-
-(defn- turn-active-at
-  "The agent's turn ACTIVE at basis-t `at` — greatest rendered-as-of ≤ at.
-
-   Returns `[turn-eid turn-id rendered-as-of]` or nil. The join is the
-   turns' `rendered-as-of` window (agent → runs → turns); this covers
-   errors recorded outside a turn-scoped tx (listeners, wrappers)."
-  [db aid at]
-  (when (and aid at)
-    (->> (db/query '[:find ?t ?tid ?as
-                     :in $ ?aid ?at
-                     :where
-                     [?a :seon.agent/id ?aid]
-                     [?r :seon.agent.run/agent ?a]
-                     [?t :seon.agent.turn/run ?r]
-                     [?t :seon.agent.turn/id ?tid]
-                     [?t :seon.agent.turn/rendered-as-of ?as]
-                     [(<= ?as ?at)]]
-                   db aid at)
-         (sort-by #(nth % 2) >)
-         first)))
-
-(defn- error-turn
-  "The turn active for agent `aid` at the error's persisted coordinate."
-  [db aid at]
-  (turn-active-at db aid at))
+   [:seon.agent.turn/id  {:optional true} :seon.agent.turn/id]])
 
 (defn error
   "Full detail for one persisted error: envelope + turn/agent joins.
@@ -478,8 +459,7 @@
   [{eid ::eid}]
   (let [db @db/*conn*]
     (if-let [e (pull-error db eid)]
-      (let [aid (tx-agent-id db eid)
-            [teid tid t-as-of] (error-turn db aid (:seon.error/at e))]
+      (let [aid (tx-agent-id db eid)]
         (cond-> (merge {::ok? true ::eid eid}
                        (select-keys e [:seon.error/fault :seon.error/message
                                        :seon.error/at :seon.error/stack
@@ -488,9 +468,7 @@
           (assoc ::frames (->> (:seon.error/frames e)
                                (sort-by :seon.error.frame/index)
                                (mapv #(dissoc % :db/id))))
-          aid     (assoc :seon.agent/id aid)
-          teid    (assoc ::turn-eid teid :seon.agent.turn/id tid)
-          t-as-of (assoc :seon.agent.turn/rendered-as-of t-as-of)))
+          aid     (assoc :seon.agent/id aid)))
       {::ok? false ::eid eid
        ::error (str "no persisted error under eid " eid
                     " — list them: (seon.agent.debug/errors)")})))
@@ -521,8 +499,6 @@
    [:seon.error/args-edn {:optional true} :seon.error/args-edn]
    [::turn-eid           {:optional true} ::eid]
    [:seon.agent.turn/id  {:optional true} :seon.agent.turn/id]
-   [:seon.agent.turn/rendered-as-of
-    {:optional true} :seon.agent.turn/rendered-as-of]
    [::repro-expr         {:optional true} ::repro-expr]
    [::fork-hint          {:optional true} ::fork-hint]
    [::note               {:optional true} ::note]])
@@ -562,7 +538,7 @@
    render the basis-t), the failing `::fn-sym` + `:seon.error/args-edn`
    when the malli envelope captured them (a `::note` says so honestly
    when absent — nothing is fabricated), the linked turn
-   (`::turn-eid` + `rendered-as-of`, composes with [[turn]]), and
+   (`::turn-eid` + complete rendered coordinate, composes with [[turn]]), and
    `::repro-expr` — a ready-to-eval expression string built from what's
    actually stored. `::fork-hint` is the supervisor command that boots
    this cluster as a live writable cluster (`bin/seon cluster fork
@@ -577,8 +553,7 @@
       (let [{:seon.error/keys [at args-edn data-edn]} e
             aid      (tx-agent-id db eid)
             fn-sym   (fn-sym-from-data-edn data-edn)
-            args-edn (readable-args-edn args-edn)
-            [teid tid t-as-of] (error-turn db aid at)]
+            args-edn (readable-args-edn args-edn)]
         (if-not at
           {::ok? false ::eid eid
            ::error (str "error " eid " has no :seon.error/at (recorded before "
@@ -592,8 +567,6 @@
                                     replica/database-name " " at)}
             fn-sym   (assoc ::fn-sym fn-sym)
             args-edn (assoc :seon.error/args-edn args-edn)
-            teid     (assoc ::turn-eid teid :seon.agent.turn/id tid)
-            t-as-of  (assoc :seon.agent.turn/rendered-as-of t-as-of)
             (not (and fn-sym args-edn))
             (assoc ::note (str "no captured fn/args on this error (non-malli "
                                "path or clipped args) — re-invocation is not "

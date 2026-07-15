@@ -76,7 +76,8 @@ imperative reflexes, guessed library semantics). Ground first:
   survives resume, #73/#56 CLOSED). NOT auto-aliased: the `my.*` toolkit
   (`my.ui/…`, `my.data/…`, `my.canvas/…`, `my.kb/…`), the `agent/` alias, and
   the lifecycle refers (`wait`/`complete`/…) — full-qualify those.
-- Turn capture is live (`:seon.agent.turn/rendered-as-of` + prompt/reply
-  blob refs, `seon.agent.debug/turn`/`turn-diff`) and is the ONE capture
+- Turn capture is live (the all-or-none `rendered-database-id`,
+  `rendered-branch`, `rendered-commit-id`, and `rendered-t` attrs plus
+  prompt/reply blob refs, `seon.agent.debug/turn`/`turn-diff`) and is the ONE capture
   path — the gated `seon.debug` file tree is deleted; Inspect AI and debug
   projections read prompts by blob hash (see `observability.md`).

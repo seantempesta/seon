@@ -11,12 +11,12 @@
        render PROFILE (db-stored `:seon.config/context-profiles`, code
        default [[context-blocks]]) — the existing :plan / :transcript
        section fns under tight per-block token caps. Pure over a db VALUE:
-       the live db at inference, `(db/as-of db t)` at export — same
+       the live db at inference, an exact resolved coordinate at export — same
        function, same bytes, by construction.
      - [[rate!]] + the `::rating`/`::tag` curation attrs — mark turns
        gold/good/excluded for the training corpus.
      - [[export!]] — walk every agent's turns (`seon.agent.ctx/agent-turns`),
-       render [[context]] at each turn's `:seon.agent.turn/rendered-as-of`,
+       render [[context]] at each turn's complete rendered coordinate,
        pair it with the turn's ok `:seon.eval/source` forms, and write one
        JSONL row per turn under `data/tune/`.
 
@@ -35,9 +35,11 @@
     [seon.agent.ctx.namespaces :as ns-cards]
     [seon.agent.ctx.transcript]
     [seon.agent.home :as home]
+    [seon.agent.turn :as turn]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -168,8 +170,8 @@
    and the web UI) invoked with the `:autocomplete` render profile — the
    db-stored `:seon.config/context-profiles` entry when the passed db
    carries one (the profile in force at that t), else [[context-blocks]].
-   Pure over the db VALUE: pass the live db at inference,
-   `(db/as-of db rendered-as-of)` at export — identical bytes for
+   Pure over the db VALUE: pass the live db at inference, or the immutable
+   value returned by `db/at-coordinate` at export — identical bytes for
    identical inputs (readline, `result/<id>` handles, and resume markers —
    the wall-clock / process-identity bytes — are off in this profile).
    Deterministic: no wall clock, no randomness."
@@ -320,11 +322,16 @@
 (defn- row-json
   "ONE JSONL line for a mined turn — the design.md row shape
    (`context`/`cards`/`target`/`meta`), JSON-stringified."
-  [{::keys [context-text cards target turn-id agent-id basis-t database sha
+  [{::keys [context-text cards target turn-id agent-id point database sha
             rating coverage]}]
-  (let [meta (js-obj "turn-id" turn-id
+  (let [coordinate-json
+        (js-obj "database-id" (str (::coordinate/database-id point))
+                "branch" (name (::coordinate/branch point))
+                "commit-id" (str (::coordinate/commit-id point))
+                "t" (::coordinate/t point))
+        meta (js-obj "turn-id" turn-id
                      "agent" agent-id
-                     "basis-t" basis-t
+                     "coordinate" coordinate-json
                      "database" database
                      "projection-sha" sha
                      "coverage" coverage)]
@@ -364,7 +371,7 @@
    [::turns-walked     {:optional true} ::count]
    [::rows             {:optional true} ::count]
    [::skipped-no-evals {:optional true} ::count]
-   [::skipped-no-basis {:optional true} ::count]
+   [::skipped-no-coordinate {:optional true} ::count]
    [::skipped-excluded {:optional true} ::count]
    [::cards-missed     {:optional true} ::count]
    ;; Byte-exactness self-check: every row's context is rendered TWICE
@@ -374,22 +381,22 @@
    [::target-tokens    {:optional true} ::token-summary]
    [::error            {:optional true} ::error]])
 
-(defn export!
+(defn ^:async export!
   "Export every agent's ok-eval turns as autocomplete JSONL training rows.
 
    Walks agent → runs → turns (`seon.agent.ctx/agent-turns`) over db value
    `:seon.db/db` (default: the live db). A turn contributes one row when it
-   has ok `:seon.eval/source` forms AND a `:seon.agent.turn/rendered-as-of`
-   basis; turns rated `:excluded` are dropped. Per row:
+   has ok `:seon.eval/source` forms AND a complete rendered database
+   coordinate; turns rated `:excluded` are dropped. Per row:
 
-     context — [[context]] rendered against `(db/as-of db rendered-as-of)`
+     context — [[context]] rendered against the exact retained coordinate
                (the pre-turn database snapshot the model actually saw)
      target  — the turn's ok eval sources, in order, newline-joined
      cards   — compact fn cards for the fns the target CALLS (direct +
                home-alias + refer resolution) plus `::distractors`
                (default 3) deterministic distractor cards
-     meta    — turn-id, agent, basis-t, database, projection-sha (git HEAD
-               unless `::projection-sha` is passed), rating when present
+     meta    — turn-id, agent, complete coordinate, database, projection-sha
+               (git HEAD unless passed), and rating when present
 
    Writes `::out-path` (default `data/tune/<database>-<yyyy-mm-dd>.jsonl`,
    one JSON object per line) via node fs and returns honest counters —
@@ -409,41 +416,50 @@
                                     '[:find ?id :where [_ :seon.agent/id ?id]]})
                          (map first)
                          sort)
-          ;; Attr-presence guards (the installed-schema pattern): an OLD
-          ;; database may predate ::rating / rendered-as-of — reading a
-          ;; never-installed attr must degrade to absent, never throw.
+          ;; Attr-presence guard: an old database may predate rating. Complete
+          ;; turn-coordinate absence is handled by `turn/rendered-coordinate`.
           installed  (db/installed-schema db)
           rating-ok? (contains? installed ::rating)
-          basis-ok?  (contains? installed :seon.agent.turn/rendered-as-of)
-          acc   (reduce
-                  (fn [acc agent-id]
+          candidates
+          (mapcat (fn [agent-id]
                     (let [[aliases refers] (home-alias-maps agent-id)]
-                      (reduce
-                        (fn [acc turn]
-                          (let [evals   (sort-by :seon.eval/at
-                                                 (:seon.agent.turn/evals turn))
-                                sources (->> evals
-                                             (filter #(true? (:seon.eval/ok? %)))
-                                             (map :seon.eval/source)
-                                             (remove str/blank?)
-                                             vec)
-                                basis   (when basis-ok?
-                                          (:seon.agent.turn/rendered-as-of turn))
-                                rating  (when rating-ok? (::rating turn))
-                                acc     (update acc ::turns-walked inc)]
-                            (cond
-                              (= :excluded rating)
-                              (update acc ::skipped-excluded inc)
+                      (map (fn [turn]
+                             {::agent-id agent-id
+                              ::aliases aliases
+                              ::refers refers
+                              ::turn turn})
+                           (ctx/agent-turns agent-id db))))
+                  agent-ids)
+          contributions
+          (await
+            (js/Promise.all
+              (into-array
+                (map
+                  (fn ^:async export-turn [{::keys [agent-id aliases refers turn]}]
+                    (let [evals   (sort-by :seon.eval/at
+                                           (:seon.agent.turn/evals turn))
+                          sources (->> evals
+                                       (filter #(true? (:seon.eval/ok? %)))
+                                       (map :seon.eval/source)
+                                       (remove str/blank?)
+                                       vec)
+                          point   (turn/rendered-coordinate turn)
+                          rating  (when rating-ok? (::rating turn))]
+                      (cond
+                        (= :excluded rating)
+                        {::turns-walked 1 ::skipped-excluded 1}
 
-                              (empty? sources)
-                              (update acc ::skipped-no-evals inc)
+                        (empty? sources)
+                        {::turns-walked 1 ::skipped-no-evals 1}
 
-                              (nil? basis)
-                              (update acc ::skipped-no-basis inc)
+                        (:seon.error/message point)
+                        {::turns-walked 1 ::skipped-no-coordinate 1}
 
-                              :else
-                              (let [aodb    (db/as-of db basis)
-                                    ctext   (context {:seon.agent/id agent-id
+                        :else
+                        (let [aodb (await (db/at-coordinate db/*conn* point))]
+                          (if (:seon.error/message aodb)
+                            {::turns-walked 1 ::skipped-no-coordinate 1}
+                            (let [ctext   (context {:seon.agent/id agent-id
                                                       :seon.db/db aodb})
                                     ;; determinism self-check: the SAME as-of
                                     ;; db value must render the SAME bytes.
@@ -462,37 +478,42 @@
                                     ;; context-GAP evidence (never "fixed"
                                     ;; here): how much of the target the
                                     ;; situation actually showed the model.
-                                    coverage (ingredients-coverage
-                                               target
-                                               (str ctext "\n"
-                                                    (str/join "\n" cards)))]
-                                (-> acc
-                                    (update ::rows inc)
-                                    (update ::cards-missed + missed)
-                                    (update ::determinism-mismatches
-                                            + (if (= ctext ctext2) 0 1))
-                                    (update ::ctx-tokens conj
-                                            (tokens/estimate ctext))
-                                    (update ::target-tokens conj
-                                            (tokens/estimate target))
-                                    (update ::lines conj
-                                            (row-json {::context-text ctext
-                                                       ::cards        cards
-                                                       ::target       target
-                                                       ::turn-id      turn-id
-                                                       ::agent-id     agent-id
-                                                       ::basis-t      basis
-                                                       ::database     database
-                                                       ::sha          sha
-                                                       ::rating       rating
-                                                       ::coverage     coverage})))))))
-                        acc
-                        (ctx/agent-turns agent-id db))))
-                  {::turns-walked 0 ::rows 0 ::skipped-no-evals 0
-                   ::skipped-no-basis 0 ::skipped-excluded 0
-                   ::cards-missed 0 ::determinism-mismatches 0
-                   ::ctx-tokens [] ::target-tokens [] ::lines []}
-                  agent-ids)
+                                  coverage (ingredients-coverage
+                                             target
+                                             (str ctext "\n"
+                                                  (str/join "\n" cards)))]
+                              {::turns-walked 1
+                               ::rows 1
+                               ::cards-missed missed
+                               ::determinism-mismatches
+                               (if (= ctext ctext2) 0 1)
+                               ::ctx-tokens [(tokens/estimate ctext)]
+                               ::target-tokens [(tokens/estimate target)]
+                               ::lines [(row-json {::context-text ctext
+                                                   ::cards cards
+                                                   ::target target
+                                                   ::turn-id turn-id
+                                                   ::agent-id agent-id
+                                                   ::point point
+                                                   ::database database
+                                                   ::sha sha
+                                                   ::rating rating
+                                                   ::coverage coverage})]}))))))
+                  candidates))))
+          acc (reduce
+                (fn [acc contribution]
+                  (reduce-kv
+                    (fn [acc k v]
+                      (if (vector? v)
+                        (update acc k into v)
+                        (update acc k + v)))
+                    acc
+                    contribution))
+                {::turns-walked 0 ::rows 0 ::skipped-no-evals 0
+                 ::skipped-no-coordinate 0 ::skipped-excluded 0
+                 ::cards-missed 0 ::determinism-mismatches 0
+                 ::ctx-tokens [] ::target-tokens [] ::lines []}
+                (js->clj contributions))
           summary (fn [xs]
                     (if (empty? xs)
                       [0 0 0]
@@ -507,7 +528,7 @@
        ::turns-walked     (::turns-walked acc)
        ::rows             (::rows acc)
        ::skipped-no-evals (::skipped-no-evals acc)
-       ::skipped-no-basis (::skipped-no-basis acc)
+       ::skipped-no-coordinate (::skipped-no-coordinate acc)
        ::skipped-excluded (::skipped-excluded acc)
        ::cards-missed     (::cards-missed acc)
        ::determinism-mismatches (::determinism-mismatches acc)

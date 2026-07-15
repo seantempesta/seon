@@ -90,9 +90,21 @@ reported the same t and queried root successfully. Changing only the branch to
 migrating turn, error, autocomplete, and frozen-web consumers without retaining
 a bare-t path.
 
-Slice 1 remains open at the downstream boundary: turn/error capture, frozen
-caches, and bookmarks still carry bare numeric basis values. Registry and
-native branch lifecycle also remain later ordered slices.
+Turn capture and autocomplete export now use the same complete coordinate.
+The turn open transaction writes database id, branch, containing commit id,
+and t as an all-or-none group; old partial rows remain honestly
+unreconstructable. Debug projection returns those facts and reports a numeric
+t delta only inside one proven containing commit. Autocomplete export resolves
+each point through `seon.db/at-coordinate` and emits the complete coordinate in
+JSONL metadata. The focused gate passed 11 tests/73 assertions. After a public
+rebuild/restart, live turn `ep2np287dio2` stored database
+`54b5b7e7-51fb-3220-b079-81a81914d86f`, branch `:db`, commit
+`6a56dd4d-4110-5bc4-8c4d-6235b75796bc`, and t `536870956`; resolving that
+point returned t `536870956` and excluded the turn's later creation datom.
+
+Slice 1 remains open at the downstream boundary: error capture and frozen web
+caches/bookmarks still carry bare numeric basis values. Registry and native
+branch lifecycle also remain later ordered slices.
 
 ## Research evidence
 

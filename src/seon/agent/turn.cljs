@@ -31,6 +31,7 @@
     [seon.agent.home :as home]
     [my.blob :as blob]
     [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
     [seon.db.id :as db.id]
     [seon.error :as error]
     [seon.eval :as seval]
@@ -81,12 +82,14 @@
 ;; blob store via `:seon.agent.turn/prompt-blob` below.
 (schema/register! :seon.agent.turn/prompt-chars :int)
 ;; Observability capture — ALWAYS ON, no debug flag (observability.md).
-;; `rendered-as-of` is the ONE coordinate tx-meta cannot provide: the
-;; PRE-turn basis-t of the frozen db the prompt rendered from (other
-;; agents' txs interleave on the shared conn, so the turn's own
-;; creation-tx is NOT what the model saw). `(db/as-of conn t)` at this t
-;; reproduces the structured context exactly.
-(schema/register! :seon.agent.turn/rendered-as-of :int)
+;; The complete PRE-turn coordinate is the ONE fact tx-meta cannot provide:
+;; other agents' commits interleave, so the turn's own creation tx is not the
+;; database value the model saw. Commit identifies the immutable container; t
+;; selects the temporal cut inside it. These four attrs are all-or-none.
+(schema/register! :seon.agent.turn/rendered-database-id ::coordinate/database-id)
+(schema/register! :seon.agent.turn/rendered-branch      ::coordinate/branch)
+(schema/register! :seon.agent.turn/rendered-commit-id   ::coordinate/commit-id)
+(schema/register! :seon.agent.turn/rendered-t           ::coordinate/t)
 ;; Blob REFS to the byte ground truth (three-tier rule): the prompt blob
 ;; is what the model actually SAW (survives render-code changes); the
 ;; reply blob is the raw LLM reply (not derivable from anything). Refs to
@@ -126,7 +129,10 @@
    [:seon.agent.turn/run          {:optional true} :seon.agent.turn/run]
    [:seon.agent.turn/scheduled?   {:optional true} :seon.agent.turn/scheduled?]
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
-   [:seon.agent.turn/rendered-as-of {:optional true} :seon.agent.turn/rendered-as-of]
+   [:seon.agent.turn/rendered-database-id {:optional true} :seon.agent.turn/rendered-database-id]
+   [:seon.agent.turn/rendered-branch      {:optional true} :seon.agent.turn/rendered-branch]
+   [:seon.agent.turn/rendered-commit-id   {:optional true} :seon.agent.turn/rendered-commit-id]
+   [:seon.agent.turn/rendered-t           {:optional true} :seon.agent.turn/rendered-t]
    [:seon.agent.turn/prompt-blob  {:optional true} :seon.agent.turn/prompt-blob]
    [:seon.agent.turn/reply-blob   {:optional true} :seon.agent.turn/reply-blob]
    [:seon.agent.turn/error        {:optional true} :seon.agent.turn/error]
@@ -136,6 +142,36 @@
    [:seon.agent.turn/results-stripped {:optional true} :seon.agent.turn/results-stripped]
    [:seon.agent.turn/usage-estimated? {:optional true} :seon.agent.turn/usage-estimated?]
    [:seon.agent.turn/evals        {:optional true} :seon.agent.turn/evals]])
+
+(def ^:private coordinate->turn-attr
+  {::coordinate/database-id :seon.agent.turn/rendered-database-id
+   ::coordinate/branch      :seon.agent.turn/rendered-branch
+   ::coordinate/commit-id   :seon.agent.turn/rendered-commit-id
+   ::coordinate/t           :seon.agent.turn/rendered-t})
+
+(defn- coordinate-turn-attrs [point]
+  (reduce-kv (fn [attrs coordinate-key turn-attr]
+               (assoc attrs turn-attr (get point coordinate-key)))
+             {}
+             coordinate->turn-attr))
+
+(defn rendered-coordinate
+  "Return a turn's complete frozen database coordinate."
+  {:malli/schema [:=> [:cat :map]
+                  [:or ::coordinate/coordinate :seon.db/error]]}
+  [turn]
+  (let [point (reduce-kv (fn [coordinate coordinate-key turn-attr]
+                           (cond-> coordinate
+                             (contains? turn turn-attr)
+                             (assoc coordinate-key (get turn turn-attr))))
+                         {}
+                         coordinate->turn-attr)]
+    (if (schema/valid-candidate-value? ::coordinate/coordinate point)
+      point
+      (error/->map
+        (ex-info "The turn has no complete rendered database coordinate."
+                 {::coordinate/coordinate point
+                  :seon.error/kind :user-input})))))
 
 ;; ============================================================
 ;; Turn-level logging + render-input shaping.
@@ -264,8 +300,8 @@
   {:malli/schema [:=> [:catn [:turn-input :map] [:body-fn :any]] :any]}
   [{:seon.agent/keys [id]
     :seon.agent.run/keys [id-of-run]
-    :seon.agent.turn/keys [prompt-text scheduled?
-                           rendered-as-of prompt-blob]}
+    :seon.agent.turn/keys [prompt-text scheduled? prompt-blob]
+    rendered-coordinate ::coordinate/coordinate}
    body-fn]
   (let [conn db/*conn*
         turn-row
@@ -273,7 +309,7 @@
           {:seon.agent.turn/at           (js/Date.)
            :seon.agent.turn/status       :running
            :seon.agent.turn/prompt-chars (count (str prompt-text))}
-          rendered-as-of (assoc :seon.agent.turn/rendered-as-of rendered-as-of)
+          rendered-coordinate (merge (coordinate-turn-attrs rendered-coordinate))
           prompt-blob    (assoc :seon.agent.turn/prompt-blob prompt-blob)
           scheduled?  (assoc :seon.agent.turn/scheduled? true)
           id-of-run  (assoc :seon.agent.turn/run [:seon.agent.run/id id-of-run]))
@@ -606,11 +642,11 @@
         turn-idx   (turn-index id)
         prompt     (render-prompt id db)
         full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt})
-        ;; Always-on observability capture: the frozen db's basis-t (the
-        ;; coordinate that makes the context re-derivable via as-of) + the
-        ;; assembled prompt verbatim as a blob. Both land on the turn's
+        ;; Always-on observability capture: the frozen db's complete coordinate
+        ;; (resolved through `db/at-coordinate`) + the assembled prompt verbatim
+        ;; as a blob. Both land on the turn's
         ;; open-tx; a failed blob write yields nil and the turn proceeds.
-        rendered-as-of (db/basis-t db)
+        rendered-coordinate (db/head-coordinate db)
         ;; Where the batch STARTS: the agent's derived current-ns over the
         ;; SAME frozen db the prompt rendered from — so the ns the cursor
         ;; showed the agent is the ns its forms run in (an in-ns in a prior
@@ -636,7 +672,7 @@
                                  {:seon.agent/id           id
                                   :seon.agent.run/id-of-run run-id
                                   :seon.agent.turn/prompt-text   full-prompt
-                                  :seon.agent.turn/rendered-as-of rendered-as-of}
+                                  ::coordinate/coordinate rendered-coordinate}
                                  prompt-blob
                                  (assoc :seon.agent.turn/prompt-blob prompt-blob))
                                (fn ^:async run-allocated-turn! [turn-id]

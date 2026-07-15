@@ -2,12 +2,12 @@
   "The repl-autosuggest A1 contract (docs/prds/repl-autosuggest/design.md):
 
      1. PROJECTION DETERMINISM — `context` is a pure function of the db
-        VALUE: rendered twice over the same `(db/as-of db rendered-as-of)`
+        VALUE: rendered twice over the same exact resolved coordinate
         it is byte-identical, shows the database BEFORE the turn (the prior
         turn's eval, not the turn's own), and fits the ~700-token budget.
      2. EXPORT ROW SHAPE — `export!` writes one JSONL row per ok-eval
         turn: context/cards/target/meta, target = the turn's ok sources
-        in order, meta carries turn-id/agent/basis-t/database/projection-sha.
+        in order, meta carries turn-id/agent/coordinate/database/projection-sha.
      3. CURATION — `rate!` upserts `::rating` onto a real turn (an unknown
         id is refused as a value); `:excluded` turns drop out of the
         export; a rating rides the row's meta.
@@ -29,6 +29,7 @@
     [seon.ai.tokens :as tokens]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.repl.autocomplete :as auto]
@@ -110,8 +111,10 @@
               aid  (:seon.agent/id a)
               _    (await (drive-turn! a "(+ 11 22)\n"))
               t2   (await (drive-turn! a "(* 3 4)\n"))
-              t    (:seon.agent.turn/rendered-as-of t2)
-              aodb (db/as-of @db/*conn* t)
+              point (turn/rendered-coordinate t2)
+              aodb (await (db/at-coordinate db/*conn* point))
+              _ (when-let [message (:seon.error/message aodb)]
+                  (throw (ex-info message {:point point :error aodb})))
               c1   (auto/context {:seon.agent/id aid :seon.db/db aodb})
               c2   (auto/context {:seon.agent/id aid :seon.db/db aodb})]
           (is (= c1 c2)
@@ -128,11 +131,11 @@
           (is (<= (tokens/estimate c1) 700)
               (str "fits the encoder budget — got " (tokens/estimate c1)
                    " tokens"))
-          ;; live-db render agrees with as-of render at the same basis
-          (let [live (auto/context {:seon.agent/id aid
-                                    :seon.db/db (db/as-of @db/*conn* t)})]
-            (is (= c1 live)
-                "re-deriving the same as-of value reproduces the bytes"))))
+          (let [resolved-again (await (db/at-coordinate db/*conn* point))
+                rerendered (auto/context {:seon.agent/id aid
+                                          :seon.db/db resolved-again})]
+            (is (= c1 rerendered)
+                "resolving the same complete coordinate reproduces bytes"))))
       done)))
 
 ;; ---------------------------------------------------------------------------
@@ -195,9 +198,10 @@
               t2   (await (drive-turn!
                             a "(db/query {:seon.db/query '[:find ?id :where [_ :seon.agent/id ?id]]})\n"))
               out  (str fixture-dir "/rows.jsonl")
-              res  (auto/export! {:seon.repl.autocomplete/out-path out
-                                  :seon.repl.autocomplete/projection-sha "test-sha"
-                                  :seon.db/db @db/*conn*})]
+              res  (await
+                     (auto/export! {:seon.repl.autocomplete/out-path out
+                                    :seon.repl.autocomplete/projection-sha "test-sha"
+                                    :seon.db/db @db/*conn*}))]
           (is (true? (:seon.repl.autocomplete/ok? res)))
           (is (= 2 (:seon.repl.autocomplete/rows res))
               "both ok-eval turns row out")
@@ -210,9 +214,15 @@
                               (contains? % "target") (contains? % "meta"))
                         rows)
                 "every row carries the design.md shape")
-            (is (= (:seon.agent.turn/rendered-as-of t2)
-                   (get-in r2 ["meta" "basis-t"]))
-                "meta basis-t IS the turn's rendered-as-of")
+            (let [point (turn/rendered-coordinate t2)]
+              (is (= (str (::coordinate/database-id point))
+                     (get-in r2 ["meta" "coordinate" "database-id"])))
+              (is (= (name (::coordinate/branch point))
+                     (get-in r2 ["meta" "coordinate" "branch"])))
+              (is (= (str (::coordinate/commit-id point))
+                     (get-in r2 ["meta" "coordinate" "commit-id"])))
+              (is (= (::coordinate/t point)
+                     (get-in r2 ["meta" "coordinate" "t"]))))
             (is (= aid (get-in r2 ["meta" "agent"])))
             (is (= "test-sha" (get-in r2 ["meta" "projection-sha"])))
             (is (= (:seon.agent.turn/id t2) (get-in r2 ["meta" "turn-id"])))
@@ -227,9 +237,10 @@
                                          :seon.repl.autocomplete/rating :excluded}))
                 r-au (await (auto/rate! {:seon.agent.turn/id (:seon.agent.turn/id t2)
                                          :seon.repl.autocomplete/rating :gold}))
-                res2 (auto/export! {:seon.repl.autocomplete/out-path out
-                                    :seon.repl.autocomplete/projection-sha "test-sha"
-                                    :seon.db/db @db/*conn*})
+                res2 (await
+                       (auto/export! {:seon.repl.autocomplete/out-path out
+                                      :seon.repl.autocomplete/projection-sha "test-sha"
+                                      :seon.db/db @db/*conn*}))
                 rows2 (read-rows out)]
             (is (true? (:seon.repl.autocomplete/ok? r-ex)))
             (is (true? (:seon.repl.autocomplete/ok? r-au)))

@@ -67,7 +67,9 @@ progress, replay, bookmark, error, or cache identity.
 
 ## Remaining
 
-Turn/error capture, autocomplete exports, frozen web caches/bookmarks, and
-native branch lifecycle still need the same coordinate. The exact historical
-read dependency now exists; the issue remains open until those downstream
-identity copies are removed.
+Turn capture and autocomplete exports now carry and resolve the complete
+coordinate. Focused proof passed 11 tests/73 assertions; rebuilt live turn
+`ep2np287dio2` stored all four facts, and resolving its point returned the
+pre-turn t while excluding the later turn datom. Error capture, frozen web
+caches/bookmarks, and native branch lifecycle still need the same coordinate;
+the issue remains open until those downstream identity copies are removed.

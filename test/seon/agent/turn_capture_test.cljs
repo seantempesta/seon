@@ -2,19 +2,18 @@
   "Observability turn-capture contract (observability.md):
 
      1. CAPTURE ON SUCCESS — a real `run-turn!` persists, ALWAYS ON (no
-        debug flag): `:seon.agent.turn/rendered-as-of` (the PRE-turn
-        basis-t of the frozen db the prompt rendered from), a
+        debug flag): the complete PRE-turn database coordinate, a
         `:seon.agent.turn/prompt-blob` ref whose content is the VERBATIM
         assembled prompt (system + ctx — the exact bytes the adapters
         build), and a `:seon.agent.turn/reply-blob` ref holding the raw
         LLM reply.
-     2. CAPTURE ON ERROR — an LLM failure still leaves rendered-as-of +
+     2. CAPTURE ON ERROR — an LLM failure still leaves the coordinate +
         the prompt blob on the turn, plus `:seon.agent.turn/error` as
         data; capture never depends on turn success.
      3. `agent-debug/turn` ROUND-TRIP — one call reconstructs the turn:
         the verbatim prompt/reply text back from the blobs and token
         estimates from the ONE estimator. Unknown ids are error VALUES.
-     4. `agent-debug/turn-diff` — basis-t delta + prompt drift summary
+     4. `agent-debug/turn-diff` — lineage-safe t delta + prompt drift summary
         between two captured turns.
 
    Hermetic: blobs go to a pid-scoped tmp dir (my.blob/!dir re-pointed
@@ -36,6 +35,7 @@
     [seon.ai.tokens :as tokens]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.test-seed :as test-seed]))
@@ -153,23 +153,22 @@
 ;; 1 + 3. Capture on success → agent-debug/turn round-trip.
 ;; ---------------------------------------------------------------------------
 
-(deftest success-turn-captures-basis-t-and-both-blobs
+(deftest success-turn-captures-coordinate-and-both-blobs
   (async done
     (run-test
       (fn ^:async run []
         (let [a        (await (fresh-agent!))
               reply    "(+ 100 200)\n"
               !ctx     (atom nil)
-              expected (db/basis-t @db/*conn*)
+              expected (db/head-coordinate @db/*conn*)
               turn     (await (drive-turn!
                                 a (fn [p]
                                     (reset! !ctx p)
                                     (js/Promise.resolve {:text reply}))))
               turn-id  (:seon.agent.turn/id turn)]
           (is (= :done (:seon.agent.turn/status turn)))
-          ;; the PRE-turn basis-t — the frozen db the prompt rendered from
-          (is (= expected (:seon.agent.turn/rendered-as-of turn))
-              "rendered-as-of is the basis-t BEFORE the turn's own txs")
+          (is (= expected (turn/rendered-coordinate turn))
+              "the complete coordinate is from BEFORE the turn's own txs")
           (is (some? (:seon.agent.turn/prompt-blob turn))
               "the turn carries a prompt blob ref — always on")
           (is (some? (:seon.agent.turn/reply-blob turn))
@@ -185,7 +184,7 @@
             (is (= (tokens/estimate (:seon.agent.debug/prompt b))
                    (:seon.agent.debug/prompt-tokens b))
                 "prompt size reports in TOKENS from the one estimator")
-            (is (= expected (:seon.agent.turn/rendered-as-of b))))))
+            (is (= expected (turn/rendered-coordinate b))))))
       done)))
 
 ;; ---------------------------------------------------------------------------
@@ -204,8 +203,8 @@
                                                    :seon.ai/status 401}}))))
               turn-id (:seon.agent.turn/id turn)]
           (is (= :error (:seon.agent.turn/status turn)))
-          (is (some? (:seon.agent.turn/rendered-as-of turn))
-              "basis-t captured before the LLM call — independent of success")
+          (is (nil? (:seon.error/message (turn/rendered-coordinate turn)))
+              "the complete coordinate is captured independently of success")
           (is (some? (:seon.agent.turn/prompt-blob turn))
               "prompt blob captured before the LLM call")
           (is (nil? (:seon.agent.turn/reply-blob turn))
@@ -235,10 +234,10 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
-;; 4. turn-diff — basis-t delta + prompt drift between two captured turns.
+;; 4. turn-diff — no numeric range without proven common lineage.
 ;; ---------------------------------------------------------------------------
 
-(deftest turn-diff-reports-basis-t-delta-and-prompt-drift
+(deftest turn-diff-refuses-cross-commit-t-delta-and-reports-prompt-drift
   (async done
     (run-test
       (fn ^:async run []
@@ -249,8 +248,10 @@
               d   (agent-debug/turn-diff {:seon.agent.debug/from (:seon.agent.turn/id t1)
                                       :seon.agent.debug/to   (:seon.agent.turn/id t2)})]
           (is (true? (:seon.agent.debug/ok? d)))
-          (is (pos? (:seon.agent.debug/basis-t-delta d))
-              "turn 2 rendered over a LATER basis-t — the database advanced")
+          (is (nil? (:seon.agent.debug/basis-t-delta d))
+              "different containing commits do not imply a linear t range")
+          (is (not= (::coordinate/commit-id (turn/rendered-coordinate t1))
+                    (::coordinate/commit-id (turn/rendered-coordinate t2))))
           (is (int? (:seon.agent.debug/prompt-token-delta d))
               "prompt drift summarized in TOKENS")
           (is (int? (:seon.agent.debug/prompt-lines-added d))
