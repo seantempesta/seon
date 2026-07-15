@@ -547,19 +547,30 @@
                            (accepting-unmanaged? config id)))))
           vec))))
 
-(defn- clear-readiness! [config id]
+(defn- readiness-paths
+  [config id]
   (case id
     :seon.dev.process/writer
-    (doseq [path [(:seon.dev.config/request-socket config)
-                  (:seon.dev.config/publish-socket config)
-                  (:seon.dev.config/writer-repl-port-file config)]]
-      (fs/delete-if-exists path))
+    (->> [(:seon.dev.config/request-socket config)
+          (:seon.dev.config/publish-socket config)
+          (:seon.dev.config/writer-repl-port-file config)]
+         (filterv string?))
     :seon.dev.process/pod
-    (fs/delete-if-exists
-     (or (get-in config [:seon.dev.config/launch-descriptor
-                         ::launch/process ::launch/http-port-file])
-         (:seon.dev.config/http-port-file config)))
-    nil))
+    (if-let [path
+             (or (get-in config [:seon.dev.config/launch-descriptor
+                                 ::launch/process ::launch/http-port-file])
+                 (:seon.dev.config/http-port-file config))]
+      [path]
+      [])
+    []))
+
+(defn- clear-readiness! [config id]
+  (doseq [path (readiness-paths config id)]
+    (fs/delete-if-exists path)))
+
+(defn- prepare-readiness! [config id]
+  (doseq [path (readiness-paths config id)]
+    (fs/create-dirs (fs/parent path))))
 
 (defn- spawn-detached! [config spec]
   (let [id (:seon.dev.process/id spec)
@@ -744,6 +755,7 @@
            (throw (ex-info "An unmanaged listener blocks the Seon process."
                            {:seon.dev.process/id id})))
          (clear-readiness! config id)
+         (prepare-readiness! config id)
          (let [started
                (start-owned! id #(spawn-detached! config spec))]
            (wait-ready! config spec started)))))))

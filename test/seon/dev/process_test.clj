@@ -894,6 +894,51 @@
                     :seon.dev.process/b
                     {:seon.dev.process/dependencies [:seon.dev.process/a]}})))))
 
+(deftest ensure-prepares-default-and-branch-port-parents-before-spawn
+  (let [directory (fs/create-temp-dir {:prefix "seon-readiness-parent-"})
+        default-port (str (fs/path directory "default-ports/pod.port"))
+        branch-port
+        (str (fs/path directory "branch-ports/default-proof.port"))
+        default-config
+        {:seon.dev.config/launch-descriptor
+         {::launch/process {::launch/http-port-file default-port}}}
+        branch-config
+        {:seon.dev.config/launch-descriptor
+         {::launch/process {::launch/http-port-file branch-port}}}
+        pod-spec {:seon.dev.process/id process/pod-id
+                  :seon.dev.process/external-dependencies []}
+        spawned (atom [])]
+    (try
+      (with-redefs-fn
+        {#'process/read-process (fn [_ _] nil)
+         #'process/converged? (fn [_ _] false)
+         #'process/accepting-unmanaged? (fn [_ _] false)
+         #'process/spawn-detached!
+         (fn [selected _]
+           (let [port-file
+                 (get-in selected [:seon.dev.config/launch-descriptor
+                                   ::launch/process ::launch/http-port-file])]
+             (is (fs/directory? (fs/parent port-file))
+                 "the descriptor-owned readiness parent exists before spawn")
+             (swap! spawned conj port-file)
+             {:seon.dev.process/id process/pod-id}))
+         #'process/wait-ready! (fn [_ _ record] record)}
+        (fn []
+          (process/ensure! default-config pod-spec)
+          (process/ensure! branch-config pod-spec)))
+      (is (= [default-port branch-port] @spawned))
+      (let [sibling (str (fs/path (fs/parent branch-port) "other.port"))]
+        (spit branch-port "7891")
+        (spit sibling "7892")
+        (#'process/clear-readiness! branch-config process/pod-id)
+        (is (not (fs/exists? branch-port)))
+        (is (fs/regular-file? sibling)
+            "cleanup preserves sibling readiness files")
+        (is (fs/directory? (fs/parent branch-port))
+            "cleanup never owns or removes the shared parent"))
+      (finally
+        (fs/delete-tree directory {:force true})))))
+
 (deftest branch-descriptor-publishes-one-pod-with-real-external-owners
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)
