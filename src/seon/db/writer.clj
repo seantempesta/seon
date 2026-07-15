@@ -65,20 +65,9 @@
   [::publisher ::publisher]
   [::database-name ::database-name]])
 (schema/register! ::stopped? :boolean)
-(schema/register!
- ::release-result
- [:map {:closed true}
-  [::registry/database-name ::registry/database-name]
-  [::registry/attachment ::coordinate/attachment]
-  [::registry/coordinate ::coordinate/coordinate]
-  [::registry/released? :boolean]
-  [::registry/release-error {:optional true} ::registry/release-error]])
-(schema/register! ::release-results [:vector ::release-result])
-(schema/register!
- ::stop-response
- [:map {:closed true}
-  [::stopped? ::stopped?]
-  [::release-results ::release-results]])
+(schema/register! ::release-result :seon.db.protocol/writer-release-result)
+(schema/register! ::release-results :seon.db.protocol/writer-release-results)
+(schema/register! ::stop-response :seon.db.protocol/writer-stop-response)
 (schema/register! ::database-initialized? :boolean)
 (schema/register!
  ::initialize-request

@@ -69,6 +69,8 @@
 
 (def current-version 2)
 
+(def writer-process :seon.dev.process/writer)
+
 ;;; Shared schemas
 
 (schema/register!
@@ -142,6 +144,57 @@
  [:enum committed-status unknown-status feed-behind-status])
 (schema/register! ::attempts [:int {:min 1}])
 (schema/register! ::transport-failure :keyword)
+
+;; The containment owner transports this application value as opaque EDN.
+;; Keep the complete database-release shape portable so the JVM publisher and
+;; Babashka operator validate the same value without loading writer resources.
+(schema/register!
+ ::writer-release-result
+ [:map {:closed true}
+  [:seon.db.registry/database-name :keyword]
+  [:seon.db.registry/attachment ::coordinate/attachment]
+  [:seon.db.registry/coordinate ::coordinate/coordinate]
+  [:seon.db.registry/released? :boolean]
+  [:seon.db.registry/release-error {:optional true}
+   [:string {:min 1}]]])
+(schema/register! ::writer-release-results
+                  [:vector ::writer-release-result])
+(schema/register!
+ ::writer-stop-response
+ [:map {:closed true}
+  [:seon.db.writer/stopped? :boolean]
+  [:seon.db.writer/release-results ::writer-release-results]])
+(schema/register!
+ ::server-stop-response
+ [:map {:closed true}
+  [:seon.db.server/stopped? :boolean]
+  [:seon.db.server/release-results ::writer-release-results]])
+(schema/register!
+ :seon.db.terminal/generation
+ [:and :string
+  [:re "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"]])
+(schema/register! :seon.db.terminal/process [:= writer-process])
+(schema/register! :seon.db.terminal/completed? :boolean)
+(schema/register! :seon.db.terminal/stop-response ::server-stop-response)
+(schema/register! :seon.db.terminal/stop-error
+                  [:string {:min 1 :max 4096}])
+(schema/register!
+ ::completed-writer-terminal-result
+ [:map {:closed true}
+  [:seon.db.terminal/generation :seon.db.terminal/generation]
+  [:seon.db.terminal/process :seon.db.terminal/process]
+  [:seon.db.terminal/completed? [:= true]]
+  [:seon.db.terminal/stop-response :seon.db.terminal/stop-response]])
+(schema/register!
+ ::failed-writer-terminal-result
+ [:map {:closed true}
+  [:seon.db.terminal/generation :seon.db.terminal/generation]
+  [:seon.db.terminal/process :seon.db.terminal/process]
+  [:seon.db.terminal/completed? [:= false]]
+  [:seon.db.terminal/stop-error :seon.db.terminal/stop-error]])
+(schema/register!
+ ::writer-terminal-result
+ [:or ::completed-writer-terminal-result ::failed-writer-terminal-result])
 
 (schema/register!
  ::transaction-event-map
@@ -491,6 +544,12 @@
   {:malli/schema [:=> [:cat :any] :boolean]}
   [response]
   (m/validate ::response response))
+
+(defn valid-writer-terminal-result?
+  "True when `result` is one complete writer terminal value."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [result]
+  (m/validate ::writer-terminal-result result))
 
 (defn explain-response
   "Malli explanation for an invalid response, or nil when valid."

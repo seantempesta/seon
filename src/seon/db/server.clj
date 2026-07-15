@@ -4,9 +4,14 @@
             [clojure.java.io :as io]
             ;; Register the optional Proximum index before any database opens.
             [datahike.index.secondary.proximum]
+            [seon.db.protocol :as protocol]
             [seon.db.writer :as writer]
             [seon.embed :as embed]
             [seon.schema :as schema])
+  (:import [java.io BufferedWriter FileOutputStream OutputStreamWriter]
+           [java.nio.charset StandardCharsets]
+           [java.nio.file CopyOption Files StandardCopyOption]
+           [java.nio.file.attribute FileAttribute])
   (:gen-class))
 
 (schema/register! ::arguments [:sequential :string])
@@ -36,11 +41,91 @@
   [::repl-port-file {:optional true} ::repl-port-file]])
 (schema/register! ::stopped? :boolean)
 (schema/register! ::release-results :seon.db.writer/release-results)
-(schema/register!
- ::stop-response
- [:map {:closed true}
-  [::stopped? ::stopped?]
-  [::release-results ::release-results]])
+(schema/register! ::stop-response :seon.db.protocol/server-stop-response)
+
+(def ^:private process-generation-environment "SEON_PROCESS_GENERATION")
+(def ^:private application-result-path-environment
+  "SEON_APPLICATION_RESULT_PATH")
+(def ^:private stop-error-limit 4096)
+
+(defn- terminal-configuration
+  [environment]
+  (let [generation (not-empty (get environment process-generation-environment))
+        result-path (not-empty (get environment
+                                    application-result-path-environment))]
+    (cond
+      (and (nil? generation) (nil? result-path)) nil
+      (or (nil? generation) (nil? result-path))
+      (throw
+       (ex-info "Writer terminal-result environment is incomplete."
+                {:seon.error/kind :configuration
+                 ::missing-environment
+                 (cond-> []
+                   (nil? generation) (conj process-generation-environment)
+                   (nil? result-path)
+                   (conj application-result-path-environment))}))
+      (not (schema/valid-candidate-value?
+            :seon.db.terminal/generation generation))
+      (throw
+       (ex-info "Writer process generation is not a canonical UUID string."
+                {:seon.error/kind :configuration
+                 ::environment process-generation-environment
+                 ::value generation}))
+      :else
+      {::generation generation ::result-path result-path})))
+
+(defn- bounded-stop-error
+  [throwable]
+  (let [message (.toString ^Throwable throwable)]
+    (subs message 0 (min stop-error-limit (count message)))))
+
+(defn- completed-terminal-result
+  [generation stop-response]
+  {:seon.db.terminal/generation generation
+   :seon.db.terminal/process protocol/writer-process
+   :seon.db.terminal/completed? true
+   :seon.db.terminal/stop-response stop-response})
+
+(defn- failed-terminal-result
+  [generation throwable]
+  {:seon.db.terminal/generation generation
+   :seon.db.terminal/process protocol/writer-process
+   :seon.db.terminal/completed? false
+   :seon.db.terminal/stop-error (bounded-stop-error throwable)})
+
+(defn- atomic-write-edn!
+  [result-path value]
+  (let [target (.toAbsolutePath (.toPath (io/file result-path)))
+        parent (.getParent target)
+        temp (Files/createTempFile
+              parent
+              (str (.getFileName target) ".")
+              ".tmp"
+              (make-array FileAttribute 0))]
+    (try
+      (with-open [stream (FileOutputStream. (.toFile temp))
+                  writer (BufferedWriter.
+                          (OutputStreamWriter.
+                           stream StandardCharsets/UTF_8))]
+        (.write writer (str (pr-str value) "\n"))
+        (.flush writer)
+        (.sync (.getFD stream)))
+      (Files/move temp target
+                  (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE]))
+      value
+      (finally
+        (Files/deleteIfExists temp)))))
+
+(defn- terminal-publisher
+  [{::keys [result-path]}]
+  (let [claimed? (atom false)]
+    (fn [result]
+      (when (compare-and-set! claimed? false true)
+        (when-not (protocol/valid-writer-terminal-result? result)
+          (throw
+           (ex-info "Refusing to publish an invalid writer terminal result."
+                    {::terminal-result result})))
+        (atomic-write-edn! result-path result)))))
 
 (defn- parse-arguments
   [arguments]
@@ -176,6 +261,17 @@
     {::stopped? (::writer/stopped? result)
      ::release-results (::writer/release-results result)}))
 
+(defn- run-shutdown!
+  [server {::keys [generation] :as configuration}]
+  (if-not configuration
+    (stop! server)
+    (let [result (try
+                   (completed-terminal-result generation (stop! server))
+                   (catch Throwable throwable
+                     (failed-terminal-result generation throwable)))]
+      ((terminal-publisher configuration) result)
+      result)))
+
 (defn -main
   "Run the database process or its optional embedding preflight."
   {:malli/schema [:=> [:cat [:* :string]] :any]}
@@ -184,17 +280,29 @@
     (let [code ((requiring-resolve 'seon.embed.preflight/run-preflight!))]
       (flush)
       (System/exit code))
-    (let [server (start! arguments)
+    (let [terminal-config (terminal-configuration (System/getenv))
+          server (start! arguments)
           shutdown-hook
           (Thread.
            ^Runnable
            (fn []
              (try
-               (let [result (stop! server)]
-                 (when-not (::stopped? result)
+               (let [result (run-shutdown! server terminal-config)
+                     stop-response
+                     (if terminal-config
+                       (:seon.db.terminal/stop-response result)
+                       result)]
+                 (cond
+                   (and terminal-config
+                        (false? (:seon.db.terminal/completed? result)))
+                   (binding [*out* *err*]
+                     (println "[database] shutdown failed:"
+                              (:seon.db.terminal/stop-error result)))
+
+                   (not (::stopped? stop-response))
                    (binding [*out* *err*]
                      (println "[database] shutdown incomplete:"
-                              (pr-str result)))))
+                              (pr-str stop-response)))))
                (catch Throwable throwable
                  (binding [*out* *err*]
                    (println "[database] shutdown failed:"
