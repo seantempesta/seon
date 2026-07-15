@@ -660,6 +660,63 @@
             "successful hot reload bytes cannot retain the old identity"))
       (finally (fs/delete-tree directory)))))
 
+(deftest prepared-watcher-admits-only-the-published-client-bytes
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        output (fs/path directory "client.js")
+        runtime (fs/path directory
+                         "shadow/builds/client/dev/out/cljs-runtime/a.js")
+        log (fs/path directory "watcher.log")
+        configuration
+        (assoc configuration
+               :seon.dev.config/artifact-flavor
+               :seon.dev.artifact.flavor/default
+               :seon.dev.config/client-build-id "client"
+               :seon.dev.config/client-output (str output)
+               :seon.dev.config/shadow-cache-root
+               (str (fs/path directory "shadow")))
+        spec (#'process/watcher-spec
+              configuration @#'process/unpublished-client-digest)
+        pid (.pid (java.lang.ProcessHandle/current))
+        record {:seon.dev.process/id process/watcher-id
+                :seon.dev.process/pid pid
+                :seon.dev.process/start-instant
+                (state/process-start-instant pid)
+                :seon.dev.process/process-group pid
+                :seon.dev.process/argv (:seon.dev.process/argv spec)
+                :seon.dev.process/environment-digest
+                (#'process/environment-digest
+                 (:seon.dev.process/environment spec))
+                :seon.dev.process/artifact-digest
+                @#'process/unpublished-client-digest
+                :seon.dev.process/target :seon.dev.target/development
+                :seon.dev.process/started-at "test"
+                :seon.dev.process/log (str log)}]
+    (try
+      (fs/create-dirs (fs/parent output))
+      (fs/create-dirs (fs/parent runtime))
+      (spit (str output) "main-a")
+      (spit (str runtime) "runtime-a")
+      (spit (str log) "[:client] Build completed.\n[:test] Build completed.\n")
+      (#'process/write-process! configuration process/watcher-id record)
+      (let [digest (artifact/current-client-digest configuration)]
+        (is (= process/process-record-schema
+               (last (:malli/schema
+                      (meta #'process/prepare-watcher!)))))
+        (is (= process/process-record-schema
+               (last (:malli/schema
+                      (meta #'process/admit-watcher-artifact!)))))
+        (is (= digest
+               (:seon.dev.process/artifact-digest
+                (process/admit-watcher-artifact! configuration digest))))
+        (#'process/write-process! configuration process/watcher-id record)
+        (spit (str runtime) "runtime-b")
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"cannot admit"
+             (process/admit-watcher-artifact! configuration digest))))
+      (finally (fs/delete-tree directory)))))
+
 (deftest stale-port-file-does-not-advertise-a-url
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)

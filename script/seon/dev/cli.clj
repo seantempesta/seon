@@ -53,7 +53,11 @@
    (fn [start-owned!]
      (process/stop! configuration process/watcher-id)
      (process/stop! configuration process/pod-id)
-     (let [manifest (artifact/build! configuration)
+     (let [manifest (artifact/build!
+                     configuration
+                     #(process/prepare-watcher! configuration start-owned!))
+           _ (process/admit-watcher-artifact!
+              configuration (:seon.dev.artifact/client-digest manifest))
            changed (:seon.dev.artifact/changed manifest)
            spec-map (process/specs configuration manifest)]
        (when (contains? changed :seon.dev.artifact/application)

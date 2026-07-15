@@ -40,6 +40,18 @@ status exposes only non-secret process identity digests plus the PID start
 stamp. The running ACME target consequently changed from false-ready to
 degraded without a restart.
 
+The first default startup after that fail-closed check exposed a deeper
+publication-order defect. The source build used a one-shot Shadow `compile`
+and published client digest `72f21886…`; the newly started managed watcher then
+completed `:client` and `:test` with digest `9be6d787…`, so watcher readiness
+correctly remained false and the writer/pod never started. Shadow's one-shot
+dev build has no worker information. A watch worker adds its process id, server
+token, worker client id, and Node devtools client during configuration, so the
+two closures cannot be byte-identical while live reload is enabled. The owning
+source is `shadow.cljs.devtools.api/compile*`,
+`shadow.cljs.devtools.server.worker.impl/build-configure`, and
+`shadow.build.targets.node-script/configure` in `reference-code/shadow-cljs`.
+
 ## Bounded implementation
 
 Artifact manifest version 3 now records a content-addressed runtime root. A
@@ -57,6 +69,17 @@ path. The bootstrap digest is also part of the pod spec, so readiness hashes
 the exact published directory and fails when its bytes differ. Version 1/2
 manifests remain readable for already-running targets; the next source build
 publishes version 3.
+
+The client now has one output owner as well. A source artifact build prepares
+the writer, bootstrap, and CSS, then starts the managed Shadow watcher while
+still holding the checkout artifact lock. The watcher completes every
+flavor-owned build before `seon.dev.artifact` hashes its actual client closure
+and publishes the manifest once. Its process record carries a temporary,
+non-admitted marker only inside the signal-safe startup bracket;
+`admit-watcher-artifact!` re-hashes the current closure and atomically binds the
+published digest to that same live process before ordinary process
+reconciliation can admit it. No one-shot client compiler or post-mutation
+manifest refresh remains.
 
 ## Owner
 
@@ -92,5 +115,10 @@ PRD owning the immutable package form.
   bytes, and that a completed watcher becomes unready after either admitted
   closure changes. A live `bin/acme status --edn` probe reports the same target
   degraded while leaving its writer and pod alive.
+- Focused operator tests prove source publication orders static build, managed
+  watcher flush, digest derivation, and one manifest publication; rejects a
+  source build without that watcher owner; admits the watcher only when its
+  current bytes equal the published digest; rejects drift between flush and
+  admission; and reverses a newly acquired watcher if publication fails.
 - No pod was restarted or reset in this bounded unit. The final simultaneous
   default/ACME rebuild and resolved-path evidence remain open acceptance work.

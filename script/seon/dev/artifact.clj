@@ -312,9 +312,6 @@
                 "--enable-native-access=ALL-UNNAMED"
                 "-XX:+UseG1GC" "-Xmx2g" "-jar"
                 (:seon.dev.config/writer-output config) "--preflight"]))
-  (run-step! config "build client"
-             (cljs-command config "compile"
-                           (:seon.dev.config/client-build-id config)))
   (run-step! config "build self-host bootstrap"
              (cljs-command config "compile" "bootstrap"))
   (run-step! config "repair bootstrap macro metadata"
@@ -429,30 +426,42 @@
          :seon.dev.artifact/application-digest application-digest}))))
 
 (defn build!
-  "Build and atomically publish one canonical artifact manifest."
-  [config]
-  (if (:seon.dev.config/source-checkout? config)
-    (with-build-lock
-      config
-      #(do
-         (build-source! config)
-         ;; Keep output validation, hashing, and flavor-manifest publication
-         ;; inside the same lock. A following build may replace the canonical
-         ;; writer/bootstrap/CSS bytes as soon as this publication completes.
-         (let [previous (read-manifest config)
-               manifest (output-manifest config)
-               changed (cond-> #{}
-                         (not= (:seon.dev.artifact/writer-digest previous)
-                               (:seon.dev.artifact/writer-digest manifest))
-                         (conj :seon.dev.artifact/writer)
+  "Build and atomically publish one canonical artifact manifest.
 
-                         (not= (:seon.dev.artifact/application-digest previous)
-                               (:seon.dev.artifact/application-digest manifest))
-                         (conj :seon.dev.artifact/application))]
-           (atomic-spit! (:seon.dev.config/artifact-manifest config) manifest)
-           (assoc manifest :seon.dev.artifact/changed changed))))
-    (let [manifest (or (read-manifest config)
-                       (throw (ex-info "Packaged Seon is missing its artifact manifest."
-                                       {:seon.dev.artifact/path
-                                        (:seon.dev.config/artifact-manifest config)})))]
-      (assoc manifest :seon.dev.artifact/changed #{}))))
+   A source build delegates the client flush to `prepare-client!` because a
+   Shadow watch worker injects process-specific devtools coordinates that a
+   one-shot compile cannot reproduce. The checkout artifact lock remains held
+   across that first watcher flush and manifest publication."
+  ([config] (build! config nil))
+  ([config prepare-client!]
+   (if (:seon.dev.config/source-checkout? config)
+     (with-build-lock
+       config
+       #(do
+          (when-not (fn? prepare-client!)
+            (throw
+             (ex-info "A source artifact build requires its managed watcher."
+                      {:seon.dev.artifact/failure
+                       :seon.dev.artifact.failure/missing-client-owner})))
+          (build-source! config)
+          ;; The long-lived watcher is the one client-output owner. Its first
+          ;; completed flush happens under the same checkout-wide lock as the
+          ;; remaining outputs and the one final manifest publication.
+          (prepare-client!)
+          (let [previous (read-manifest config)
+                manifest (output-manifest config)
+                changed (cond-> #{}
+                          (not= (:seon.dev.artifact/writer-digest previous)
+                                (:seon.dev.artifact/writer-digest manifest))
+                          (conj :seon.dev.artifact/writer)
+
+                          (not= (:seon.dev.artifact/application-digest previous)
+                                (:seon.dev.artifact/application-digest manifest))
+                          (conj :seon.dev.artifact/application))]
+            (atomic-spit! (:seon.dev.config/artifact-manifest config) manifest)
+            (assoc manifest :seon.dev.artifact/changed changed))))
+     (let [manifest (or (read-manifest config)
+                        (throw (ex-info "Packaged Seon is missing its artifact manifest."
+                                        {:seon.dev.artifact/path
+                                         (:seon.dev.config/artifact-manifest config)})))]
+       (assoc manifest :seon.dev.artifact/changed #{})))))

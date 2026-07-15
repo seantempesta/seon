@@ -20,6 +20,9 @@
 (def pod-id :seon.dev.process/pod)
 (def target-processes [watcher-id writer-id pod-id])
 
+(def ^:private unpublished-client-digest
+  "unpublished-client-watcher-flush")
+
 (def external-dependency-schema
   [:map {:closed true}
    [:seon.dev.process/id qualified-keyword?]
@@ -177,6 +180,15 @@
       (seq config-merge)
       (into ["--config-merge" (pr-str config-merge)]))))
 
+(defn- watcher-spec [config artifact-digest]
+  {:seon.dev.process/id watcher-id
+   :seon.dev.process/argv (into ["clj"] (extra-cljs-watch-args config))
+   :seon.dev.process/environment (:seon.dev.config/environment config)
+   :seon.dev.process/dependencies []
+   :seon.dev.process/readiness :seon.dev.process.readiness/watcher
+   :seon.dev.process/ready-timeout-ms 300000
+   :seon.dev.process/artifact-digest artifact-digest})
+
 (defn specs
   "Derive the complete development process graph from one manifest."
   [config manifest]
@@ -257,14 +269,7 @@
                    (:seon.dev.artifact/writer-digest manifest)}]))
         spec-map
         {watcher-id
-     {:seon.dev.process/id watcher-id
-      :seon.dev.process/argv (into ["clj"] (extra-cljs-watch-args config))
-      :seon.dev.process/environment environment
-      :seon.dev.process/dependencies []
-      :seon.dev.process/readiness :seon.dev.process.readiness/watcher
-      :seon.dev.process/ready-timeout-ms 300000
-      :seon.dev.process/artifact-digest
-      (:seon.dev.artifact/client-digest manifest)}
+         (watcher-spec config (:seon.dev.artifact/client-digest manifest))
 
      writer-id
      {:seon.dev.process/id writer-id
@@ -470,6 +475,32 @@
         (throw (ex-info "Timed out waiting for Seon process readiness."
                         {:seon.dev.process/id (:seon.dev.process/id spec)
                          :seon.dev.process/log (:seon.dev.process/log record)}))))))
+
+(defn- wait-watcher-flush! [config spec record]
+  (let [deadline (+ (System/currentTimeMillis)
+                    (:seon.dev.process/ready-timeout-ms spec))]
+    (loop []
+      (cond
+        (and (= :seon.dev.process.status/alive (process-status record))
+             (watcher-ready? config record))
+        record
+
+        (readiness-failure config record)
+        (throw (ex-info "The managed watcher failed before its first flush."
+                        {:seon.dev.process/id watcher-id
+                         :seon.dev.process/failure
+                         (readiness-failure config record)
+                         :seon.dev.process/log
+                         (:seon.dev.process/log record)}))
+
+        (< (System/currentTimeMillis) deadline)
+        (do (Thread/sleep 200) (recur))
+
+        :else
+        (throw (ex-info "Timed out waiting for the managed watcher's first flush."
+                        {:seon.dev.process/id watcher-id
+                         :seon.dev.process/log
+                         (:seon.dev.process/log record)}))))))
 
 (defn- accepting-unmanaged? [config id]
   (case id
@@ -716,6 +747,50 @@
          (let [started
                (start-owned! id #(spawn-detached! config spec))]
            (wait-ready! config spec started)))))))
+
+(defn prepare-watcher!
+  "Start the sole client-output owner and await its first complete flush."
+  {:malli/schema
+   [:=> [:catn [:config map?] [:start-owned! fn?]] process-record-schema]}
+  [config start-owned!]
+  (let [spec (validate!
+              process-spec-schema
+              (watcher-spec config unpublished-client-digest)
+              "The prepared watcher specification is invalid."
+              :seon.dev.process/explanation)
+        record (read-process config watcher-id)]
+    (when record (stop! config watcher-id))
+    (when (accepting-unmanaged? config watcher-id)
+      (throw (ex-info "An unmanaged Shadow watcher blocks client publication."
+                      {:seon.dev.process/id watcher-id})))
+    (let [started (start-owned! watcher-id #(spawn-detached! config spec))]
+      (wait-watcher-flush! config spec started))))
+
+(defn admit-watcher-artifact!
+  "Bind a prepared watcher lifetime to its exact published client digest."
+  {:malli/schema
+   [:=>
+    [:catn [:config map?] [:client-digest [:re #"[0-9a-f]{64}"]]]
+    process-record-schema]}
+  [config client-digest]
+  (let [record (read-process config watcher-id)
+        actual (artifact/current-client-digest config)]
+    (when-not (and record
+                   (= :seon.dev.process.status/alive (process-status record))
+                   (= unpublished-client-digest
+                      (:seon.dev.process/artifact-digest record))
+                   (watcher-ready? config record)
+                   (= client-digest actual))
+      (throw
+       (ex-info "The managed watcher cannot admit the published client artifact."
+                {:seon.dev.process/id watcher-id
+                 :seon.dev.process/expected-client-digest client-digest
+                 :seon.dev.process/actual-client-digest actual
+                 :seon.dev.process/recorded-artifact-digest
+                 (:seon.dev.process/artifact-digest record)})))
+    (write-process!
+     config watcher-id
+     (assoc record :seon.dev.process/artifact-digest client-digest))))
 
 (defn- unwind-owned! [ownerships]
   (let [failures

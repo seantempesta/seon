@@ -90,6 +90,40 @@
     (is (= ["clj" "-M:cljs" "compile" "client"]
            (artifact/cljs-command config "compile" "client")))))
 
+(deftest source-publication-orders-the-watcher-flush-before-one-manifest
+  (let [events (atom [])
+        manifest {:seon.dev.artifact/writer-digest "writer"
+                  :seon.dev.artifact/application-digest "application"}
+        config {:seon.dev.config/source-checkout? true
+                :seon.dev.config/artifact-manifest "/unused/artifact.edn"}]
+    (with-redefs-fn
+      {#'artifact/with-build-lock
+       (fn [_ build] (build))
+       #'artifact/build-source!
+       (fn [_] (swap! events conj :source))
+       #'artifact/read-manifest
+       (constantly nil)
+       #'artifact/output-manifest
+       (fn [_] (swap! events conj :manifest) manifest)
+       #'artifact/atomic-spit!
+       (fn [_ value] (swap! events conj :publish) value)}
+      #(let [result (artifact/build!
+                     config (fn [] (swap! events conj :watcher-flush)))]
+         (is (= [:source :watcher-flush :manifest :publish] @events))
+         (is (= manifest
+                (dissoc result :seon.dev.artifact/changed)))))))
+
+(deftest source-publication-requires-the-managed-watcher
+  (let [config {:seon.dev.config/source-checkout? true}]
+    (with-redefs-fn
+      {#'artifact/with-build-lock (fn [_ build] (build))}
+      #(is (= :seon.dev.artifact.failure/missing-client-owner
+              (try
+                (artifact/build! config)
+                nil
+                (catch clojure.lang.ExceptionInfo error
+                  (:seon.dev.artifact/failure (ex-data error)))))))))
+
 (deftest source-artifact-builds-share-one-checkout-lock
   (let [directory (fs/create-temp-dir {:prefix "seon-artifact-lock-test-"})
         root (str directory)

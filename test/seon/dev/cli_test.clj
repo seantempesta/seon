@@ -32,6 +32,34 @@
       (is (= "http://127.0.0.1:7890/"
              (#'cli/ordinary-agent-url "http://127.0.0.1:7890"))))))
 
+(deftest failure-after-watcher-flush-unwinds-the-prepared-lifetime
+  (let [root (fs/create-temp-dir {:prefix "seon-cli-watcher-unwind-"})
+        configuration {:seon.dev.config/root (str root)
+                       :seon.dev.config/cluster-dir
+                       (str (fs/path root "data/clusters/default"))
+                       :seon.dev.config/environment {}}
+        stopped (atom [])]
+    (try
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"injected publication failure"
+           (with-redefs-fn
+             {#'process/stop!
+              (fn [_ id] (swap! stopped conj id))
+              #'process/prepare-watcher!
+              (fn [_ start-owned!]
+                (start-owned! process/watcher-id
+                              (constantly :prepared-watcher)))
+              #'artifact/build!
+              (fn [_ prepare-client!]
+                (prepare-client!)
+                (throw (ex-info "injected publication failure" {})))}
+             #(#'cli/reconcile-development! configuration))))
+      (is (= [process/watcher-id process/pod-id process/watcher-id]
+             @stopped)
+          "the startup bracket reverses the acquired watcher after publication fails")
+      (finally (fs/delete-tree root {:force true})))))
+
 (defn- configuration [root]
   {:seon.dev.config/root root
    :seon.dev.config/environment {}})
