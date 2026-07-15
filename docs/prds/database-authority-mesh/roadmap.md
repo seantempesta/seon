@@ -71,6 +71,12 @@ sibling branches, raw and temporal values, concurrent connections, cache hits,
 transaction propagation, release, and reconnect all retain correct isolation
 and bounded resources.
 
+The first research wave found a deterministic false cache hit under the current
+`[hash max-tx max-eid]` key and eight complete computations for eight concurrent
+identical misses. The integrated candidate and remaining product decisions now
+live in [[research/architecture-recommendation-2026-07-15]]. No recommendation
+in that report is settled until Sean reviews its six decision briefs.
+
 ## Ordered research and implementation
 
 1. Execute [[research/source-grounded-research-tasks-2026-07-15]] tasks 1–3:
