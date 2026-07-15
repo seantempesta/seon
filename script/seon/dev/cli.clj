@@ -5,11 +5,13 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [seon.dev.artifact :as artifact]
+            [seon.dev.branch :as branch]
             [seon.dev.config :as config]
             [seon.dev.changed-test :as changed-test]
             [seon.dev.process :as process]
             [seon.dev.skills :as skills]
-            [seon.dev.state :as state]))
+            [seon.dev.state :as state]
+            [seon.launch :as launch]))
 
 (defn- root-argument [arguments]
   (if (= "--seon-root" (first arguments))
@@ -226,7 +228,8 @@
 
 (defn- status-value [configuration]
   (let [foreign (process/ownership-conflicts configuration)]
-    (if-let [legacy (legacy-database-path configuration)]
+    (cond->
+     (if-let [legacy (legacy-database-path configuration)]
       (cond->
         {:seon.dev.target/name :seon.dev.target/development
          :seon.dev.target/status :seon.dev.target.status/ownership-conflict
@@ -251,7 +254,9 @@
          :seon.dev.target/database-path
          (str (fs/path (:seon.dev.config/cluster-dir configuration) "db"))
          :seon.dev.target/failure :seon.dev.target.failure/missing-artifact}
-        (seq foreign) (assoc :seon.dev.target/foreign-processes foreign))))))
+        (seq foreign) (assoc :seon.dev.target/foreign-processes foreign))))
+     (:seon.dev.config/launch-descriptor configuration)
+     (assoc :seon.dev.target/branches (branch/inventory configuration)))))
 
 (defn- status! [configuration arguments]
   (let [edn? (= ["--edn"] (vec arguments))]
@@ -275,7 +280,89 @@
                           (when-let [pid (:seon.dev.process/pid value)]
                             (str "  pid=" pid))
                           (when-not (:seon.dev.process/ready? value)
-                            "  not-ready")))))))))
+                            "  not-ready"))))
+          (doseq [retained (:seon.dev.target/branches status)]
+            (println
+             (str "  branch " (::branch/runtime-cluster retained) "  "
+                  (name (:seon.dev.target/status retained)) "  "
+                  (name (::branch/phase retained))
+                  (when-let [url (:seon.dev.target/url retained)]
+                    (str "  " url))))))))))
+
+(defn- branch-request
+  [configuration name]
+  (branch/request {::branch/configuration configuration ::branch/name name}))
+
+(defn- print-branch-result!
+  [result]
+  (let [target (::branch/target-private result)
+        descriptor (::branch/launch-descriptor result)
+        endpoint (when descriptor
+                   (let [port-file (get-in descriptor [::launch/process
+                                                       ::launch/http-port-file])
+                         port (when (fs/regular-file? port-file)
+                                (some-> (slurp port-file) str/trim parse-long))]
+                     (when port (str "http://127.0.0.1:" port))))]
+    (println (str "◆ Branch " (name (::branch/phase result))))
+    (println (str "  runtime: " (::branch/runtime-cluster target)))
+    (println (str "  database: " (::branch/target-database-name target)))
+    (println (str "  branch: " (::branch/target-branch target)))
+    (when endpoint (println (str "  web: " endpoint)))))
+
+(defn- print-branch-status!
+  [status]
+  (println (str "◆ Branch " (::branch/runtime-cluster status) " "
+                (name (:seon.dev.target/status status))))
+  (println (str "  database: " (::branch/target-database-name status)))
+  (println (str "  branch: " (::branch/target-branch status)))
+  (println (str "  phase: " (name (::branch/phase status))))
+  (when-let [url (:seon.dev.target/url status)]
+    (println (str "  web: " url))))
+
+(defn- branch!
+  [configuration arguments]
+  (let [[operation name & options] arguments]
+    (when (str/blank? name)
+      (throw (ex-info "Use `branch open|restart|close|status <name>`."
+                      {:seon.dev.cli/arguments (vec arguments)})))
+    (case operation
+      "open"
+      (do
+        (when (seq options)
+          (throw (ex-info "`branch open` takes one name."
+                          {:seon.dev.cli/arguments (vec arguments)})))
+        (print-branch-result!
+         (branch/open! (branch-request configuration name))))
+
+      "restart"
+      (do
+        (when (seq options)
+          (throw (ex-info "`branch restart` takes one name."
+                          {:seon.dev.cli/arguments (vec arguments)})))
+        (print-branch-result!
+         (branch/restart! (branch-request configuration name))))
+
+      "close"
+      (do
+        (when (seq options)
+          (throw (ex-info "`branch close` takes one name."
+                          {:seon.dev.cli/arguments (vec arguments)})))
+        (let [open-request (branch-request configuration name)]
+          (print-branch-result!
+           (branch/close! {::branch/configuration configuration
+                           ::branch/lifecycle-path
+                           (::branch/lifecycle-path open-request)}))))
+
+      "status"
+      (let [edn? (= ["--edn"] (vec options))]
+        (when (and (seq options) (not edn?))
+          (throw (ex-info "`branch status` accepts only `--edn`."
+                          {:seon.dev.cli/arguments (vec arguments)})))
+        (let [status (branch/status configuration name)]
+          (if edn? (prn status) (print-branch-status! status))))
+
+      (throw (ex-info "Use `branch open|restart|close|status <name>`."
+                      {:seon.dev.cli/arguments (vec arguments)})))))
 
 (defn- parse-log-id [value]
   (case value
@@ -474,6 +561,7 @@
          "  restart [--open] [--config PATH] drain, rebuild, and reconcile\n"
          "  config apply PATH        explicitly reconcile database config\n"
          "  status [--edn]           report live health\n"
+         "  branch open|restart|close|status NAME [--edn]\n"
          "  logs [writer|watcher|pod] [--lines N] [--follow]\n"
          "  doctor [--edn]           check host prerequisites\n"
          "  test changed --path PATH...  run affected tests from the warm graph\n"
@@ -495,6 +583,7 @@
           "down" (down! configuration command-arguments)
           "restart" (restart! configuration command-arguments)
           "status" (status! configuration command-arguments)
+          "branch" (branch! configuration command-arguments)
           "logs" (logs! configuration command-arguments)
           "doctor" (doctor! configuration command-arguments)
           "test" (test! configuration command-arguments)

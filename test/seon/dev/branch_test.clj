@@ -15,6 +15,35 @@
             [seon.launch :as launch])
   (:import [java.util.concurrent TimeUnit]))
 
+(deftest public-name-derives-one-source-prefixed-target
+  (let [root (System/getProperty "user.dir")
+        configuration (config/load! root)
+        request (branch/request {::branch/configuration configuration
+                                 ::branch/name "proof"})
+        source-process-dir (:seon.dev.config/process-dir configuration)
+        source-log-dir (:seon.dev.config/log-dir configuration)]
+    (is (= "default-proof" (::branch/runtime-cluster request)))
+    (is (= "default-proof" (::branch/target-database-name request)))
+    (is (= :seon.branch/default-proof (::branch/target-branch request)))
+    (is (= (str (fs/path source-process-dir "branches"
+                         "default-proof.edn"))
+           (::branch/lifecycle-path request)))
+    (is (= (str (fs/path source-process-dir "branch-processes"
+                         "default-proof"))
+           (::branch/process-dir request)))
+    (is (= (str (fs/path source-log-dir "branches" "default-proof"))
+           (::branch/log-dir request)))
+    (is (= 0 (::branch/http-port request)))
+    (is (= (str (fs/path source-process-dir "branch-ports"
+                         "default-proof.port"))
+           (::branch/http-port-file request)))
+    (is (= (str (fs/path root "data/branches/default-proof/blobs"))
+           (::branch/writable-blob-dir request)))
+    (doseq [invalid ["" "../proof" "Proof" "proof/name" "-proof" "proof-"]]
+      (is (thrown? Exception
+                   (branch/request {::branch/configuration configuration
+                                    ::branch/name invalid}))))))
+
 (defn- signal-source-config [directory socket]
   (-> ((deref #'process-test/signal-fixture-config) directory)
       (assoc :seon.dev.config/request-socket socket)
@@ -505,6 +534,27 @@
               "launch retains the immutable creation cut")
           (is (= 2 @create-attempts))
           (is (= [[:ensure process/pod-id]] @process-events)))
+        (let [restarted (branch/restart! request)]
+          (is (= :seon.dev.branch.phase/ready (::branch/phase restarted)))
+          (is (= 2 @create-attempts)
+              "pod-only restart never recreates the native branch")
+          (is (= [[:ensure process/pod-id]
+                  [:stop process/pod-id]
+                  [:ensure process/pod-id]]
+                 @process-events)))
+        (let [inventory-path
+              (str (fs/path (#'branch/branch-record-directory source-config)
+                            "trial.edn"))
+              retained (state/read-edn lifecycle-path)]
+          (state/write-edn! inventory-path retained)
+          (let [status (first (branch/inventory source-config))]
+            (is (= "trial" (::branch/runtime-cluster status)))
+            (is (= fork-head (::branch/coordinate-at-launch status)))
+            (is (= (::branch/launch-descriptor retained)
+                   (::branch/launch-descriptor status)))
+            (is (= :seon.dev.target.status/down
+                   (:seon.dev.target/status status))))
+          (fs/delete-if-exists inventory-path))
         (doseq [path [process-dir log-dir writable-blob-dir]]
           (fs/create-dirs path))
         (spit http-port-file "7891\n")
@@ -516,6 +566,8 @@
           (is (= :seon.dev.branch.phase/closed (::branch/phase closed)))
           (is (= advanced-head (::branch/target-head closed)))
           (is (= [[:ensure process/pod-id]
+                  [:stop process/pod-id]
+                  [:ensure process/pod-id]
                   [:stop process/pod-id]]
                  @process-events))
           (is (false? @branch-exists?))

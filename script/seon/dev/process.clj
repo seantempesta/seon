@@ -619,6 +619,31 @@
            (writer-ready? probe-config)
            false))))
 
+(defn- external-dependency-status
+  [config dependency]
+  (let [owner-config
+        (assoc config :seon.dev.config/process-dir
+               (:seon.dev.process/owner-process-dir dependency))
+        id (:seon.dev.process/id dependency)
+        record (read-process owner-config id)
+        recorded-state (process-status record)]
+    (cond->
+      {:seon.dev.process/status recorded-state
+       :seon.dev.process/ready?
+       (boolean (external-dependency-ready? config dependency))
+       :seon.dev.process/owner-process-dir
+       (:seon.dev.process/owner-process-dir dependency)
+       :seon.dev.process/readiness
+       (:seon.dev.process/readiness dependency)
+       :seon.dev.process/artifact-digest
+       (:seon.dev.process/artifact-digest dependency)}
+      record
+      (assoc :seon.dev.process/pid (:seon.dev.process/pid record)
+             :seon.dev.process/start-instant
+             (:seon.dev.process/start-instant record)
+             :seon.dev.process/recorded-artifact-digest
+             (:seon.dev.process/artifact-digest record)))))
+
 (defn- drain-group! [id pid]
   (when (and pid (group-alive? pid))
     (group-command "-TERM" pid)
@@ -830,12 +855,28 @@
                                :seon.dev.process/log
                                (:seon.dev.process/log record)))])))
               ordered)
+        external-dependencies
+        (into {}
+              (mapcat
+               (fn [id]
+                 (map (fn [dependency]
+                        [(:seon.dev.process/id dependency)
+                         (external-dependency-status config dependency)])
+                      (:seon.dev.process/external-dependencies
+                       (get spec-map id))))
+               ordered))
         foreign? (seq (ownership-conflicts config ordered))
-        all-ready? (every? (fn [[_ value]]
-                             (and (= :seon.dev.process.status/alive
-                                     (:seon.dev.process/status value))
-                                  (:seon.dev.process/ready? value)))
-                           processes)
+        all-ready?
+        (and (every? (fn [[_ value]]
+                       (and (= :seon.dev.process.status/alive
+                               (:seon.dev.process/status value))
+                            (:seon.dev.process/ready? value)))
+                     processes)
+             (every? (fn [[_ value]]
+                       (and (= :seon.dev.process.status/alive
+                               (:seon.dev.process/status value))
+                            (:seon.dev.process/ready? value)))
+                     external-dependencies))
         pod-ready (get-in processes [pod-id :seon.dev.process/ready?])
         port (when (and pod-ready
                         (fs/regular-file?
@@ -877,6 +918,7 @@
      (:seon.db.protocol/database-path descriptor-database)
      :seon.dev.target/artifact artifact
      :seon.dev.target/processes processes
+     :seon.dev.target/external-dependencies external-dependencies
      :seon.dev.target/endpoints
      (cond-> {:seon.dev.endpoint/cljs-build-id
               (::launch/client-build-id descriptor-runtime)}

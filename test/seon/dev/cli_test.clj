@@ -3,6 +3,7 @@
             [babashka.process :as shell]
             [clojure.test :refer [deftest is testing]]
             [seon.dev.artifact :as artifact]
+            [seon.dev.branch :as branch]
             [seon.dev.cli :as cli]
             [seon.dev.process :as process]
             [seon.dev.state :as state]))
@@ -68,6 +69,74 @@
          (#'cli/parse-start-options ["--config" "config/system.edn" "--open"])))
   (is (thrown? Exception (#'cli/parse-start-options ["--config"])))
   (is (thrown? Exception (#'cli/parse-start-options ["--unknown"]))))
+
+(deftest branch-commands-call-only-the-retained-lifecycle-owner
+  (let [configuration {:seon.dev.config/launch-descriptor :source}
+        open-request {::branch/configuration configuration
+                      ::branch/lifecycle-path "/retained/default-proof.edn"}
+        calls (atom [])]
+    (with-redefs-fn
+      {#'branch/request
+       (fn [request]
+         (swap! calls conj [:request request])
+         open-request)
+       #'branch/open! (fn [request] (swap! calls conj [:open request]) :opened)
+       #'branch/restart!
+       (fn [request] (swap! calls conj [:restart request]) :restarted)
+       #'branch/close! (fn [request] (swap! calls conj [:close request]) :closed)
+       #'branch/status
+       (fn [selected name]
+         (swap! calls conj [:status selected name])
+         {:seon.dev.target/status :seon.dev.target.status/degraded})
+       #'cli/print-branch-result!
+       (fn [result] (swap! calls conj [:print-result result]))
+       #'cli/print-branch-status!
+       (fn [result] (swap! calls conj [:print-status result]))}
+      (fn []
+        (#'cli/branch! configuration ["open" "proof"])
+        (#'cli/branch! configuration ["restart" "proof"])
+        (#'cli/branch! configuration ["close" "proof"])
+        (#'cli/branch! configuration ["status" "proof"])))
+    (is (= [[:request {::branch/configuration configuration
+                       ::branch/name "proof"}]
+            [:open open-request]
+            [:print-result :opened]
+            [:request {::branch/configuration configuration
+                       ::branch/name "proof"}]
+            [:restart open-request]
+            [:print-result :restarted]
+            [:request {::branch/configuration configuration
+                       ::branch/name "proof"}]
+            [:close {::branch/configuration configuration
+                     ::branch/lifecycle-path
+                     "/retained/default-proof.edn"}]
+            [:print-result :closed]
+            [:status configuration "proof"]
+            [:print-status
+             {:seon.dev.target/status :seon.dev.target.status/degraded}]]
+           @calls))
+    (doseq [arguments [["create" "proof"]
+                       ["release" "proof"]
+                       ["delete" "proof"]
+                       ["open" "proof" "extra"]
+                       ["status" "proof" "--json"]]]
+      (is (thrown? Exception (#'cli/branch! configuration arguments))))))
+
+(deftest ordinary-status-includes-retained-branch-projections
+  (let [configuration {:seon.dev.config/launch-descriptor :source
+                       :seon.dev.config/cluster-dir "/cluster"
+                       :seon.dev.config/cluster-name "default"}
+        retained [{::branch/runtime-cluster "default-proof"}]]
+    (with-redefs-fn
+      {#'process/ownership-conflicts (fn [_] [])
+       #'artifact/read-manifest (constantly nil)
+       #'branch/inventory (fn [selected]
+                            (is (= configuration selected))
+                            retained)}
+      (fn []
+        (is (= retained
+               (:seon.dev.target/branches
+                (#'cli/status-value configuration))))))))
 
 (deftest config-is-implicit-only-for-a-fresh-database
   (let [root (fs/create-temp-dir {:prefix "seon-cli-config-"})

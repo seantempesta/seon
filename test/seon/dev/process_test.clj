@@ -896,6 +896,39 @@
            (process/ensure! branch-config pod)))
       (is (nil? (process/read-process branch-config process/pod-id))
           "dependency rejection occurs before pod publication")
+      (let [dependency-ready? (atom true)
+            pid (.pid (java.lang.ProcessHandle/current))
+            record {:seon.dev.process/id process/pod-id
+                    :seon.dev.process/pid pid
+                    :seon.dev.process/start-instant
+                    (state/process-start-instant pid)
+                    :seon.dev.process/artifact-digest "application"}]
+        (with-redefs-fn
+          {#'process/read-process
+           (fn [_ selected-id]
+             (assoc record :seon.dev.process/id selected-id))
+           #'process/same-process-spec? (fn [_ _] true)
+           #'process/ready? (fn [_ _ _] true)
+           #'process/external-dependency-ready?
+           (fn [_ _] @dependency-ready?)
+           #'process/ownership-conflicts (fn [_ _] [])}
+          (fn []
+            (let [ready (process/status branch-config target-manifest)]
+              (is (= :seon.dev.target.status/ready
+                     (:seon.dev.target/status ready)))
+              (is (= #{process/watcher-id process/writer-id}
+                     (set (keys
+                           (:seon.dev.target/external-dependencies ready)))))
+              (is (every? :seon.dev.process/ready?
+                          (vals (:seon.dev.target/external-dependencies
+                                 ready)))))
+            (reset! dependency-ready? false)
+            (let [degraded (process/status branch-config target-manifest)]
+              (is (= :seon.dev.target.status/degraded
+                     (:seon.dev.target/status degraded)))
+              (is (not-any? :seon.dev.process/ready?
+                            (vals (:seon.dev.target/external-dependencies
+                                   degraded))))))))
       (finally
         (fs/delete-tree directory)))))
 

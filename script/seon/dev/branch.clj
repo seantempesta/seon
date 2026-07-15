@@ -21,6 +21,10 @@
 (schema/register! ::http-port ::launch/http-port)
 (schema/register! ::http-port-file ::launch/http-port-file)
 (schema/register! ::writable-blob-dir ::launch/path)
+(schema/register!
+ ::name
+ [:re "\\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\z"])
+(schema/register! ::coordinate-at-launch ::coordinate/coordinate)
 (schema/register! ::desired-state [:enum :seon.dev.branch.state/open
                                     :seon.dev.branch.state/closed])
 (schema/register!
@@ -73,6 +77,12 @@
  [:map {:closed true}
   [::configuration config/configuration-schema]
   [::lifecycle-path ::lifecycle-path]])
+
+(schema/register!
+ ::target-request
+ [:map {:closed true}
+  [::configuration config/configuration-schema]
+  [::name ::name]])
 
 (schema/register!
  ::record
@@ -174,6 +184,47 @@
   (select-keys request [::runtime-cluster ::target-database-name
                         ::target-branch ::process-dir ::log-dir ::http-port
                         ::http-port-file ::writable-blob-dir]))
+
+(defn- branch-record-directory
+  [configuration]
+  (let [descriptor (:seon.dev.config/launch-descriptor configuration)]
+    (str (fs/path (get-in descriptor [::launch/process
+                                      ::launch/process-dir])
+                  "branches"))))
+
+(defn request
+  "Derive one validated retained-branch request from a public name."
+  {:malli/schema [:=> [:cat ::target-request] ::open-request]}
+  [{::keys [configuration name] :as target-request}]
+  (validate! ::target-request target-request
+             "The public branch target is invalid.")
+  (let [descriptor (:seon.dev.config/launch-descriptor configuration)
+        source-runtime (get-in descriptor [::launch/runtime
+                                           ::launch/runtime-cluster])
+        source-process-dir (get-in descriptor [::launch/process
+                                               ::launch/process-dir])
+        source-log-dir (get-in descriptor [::launch/process ::launch/log-dir])
+        runtime-cluster (str source-runtime "-" name)]
+    (validate!
+     ::open-request
+     {::configuration configuration
+      ::lifecycle-path
+      (str (fs/path (branch-record-directory configuration)
+                    (str runtime-cluster ".edn")))
+      ::runtime-cluster runtime-cluster
+      ::target-database-name runtime-cluster
+      ::target-branch (keyword "seon.branch" runtime-cluster)
+      ::process-dir
+      (str (fs/path source-process-dir "branch-processes" runtime-cluster))
+      ::log-dir (str (fs/path source-log-dir "branches" runtime-cluster))
+      ::http-port 0
+      ::http-port-file
+      (str (fs/path source-process-dir "branch-ports"
+                    (str runtime-cluster ".port")))
+      ::writable-blob-dir
+      (str (fs/path (:seon.dev.config/root configuration)
+                    "data" "branches" runtime-cluster "blobs"))}
+     "The derived public branch request is invalid.")))
 
 (defn- new-intent
   [request source-descriptor]
@@ -631,3 +682,81 @@
                                         {::lifecycle-path lifecycle-path})))]
          (close-record! configuration lifecycle-path
                         (ensure-created! lifecycle-path record)))))))
+
+(defn restart!
+  "Stop one retained branch pod and reconcile that same open intent."
+  {:malli/schema [:=> [:cat ::open-request] ::record]}
+  [open-request]
+  (validate! ::open-request open-request
+             "The branch restart request is invalid.")
+  (let [configuration (::configuration open-request)
+        lifecycle-path (::lifecycle-path open-request)
+        record
+        (or (read-record! lifecycle-path)
+            (throw (ex-info "No retained branch intent exists."
+                            {::lifecycle-path lifecycle-path})))
+        retained
+        (require-retained-request! record open-request configuration)]
+    (when (::launch-descriptor retained)
+      (process/stop! (branch-configuration configuration retained)
+                     process/pod-id))
+    (open! open-request)))
+
+(defn- retained-status
+  [configuration lifecycle-path record]
+  (let [record
+        (require-retained-request!
+         record
+         (merge {::configuration configuration
+                 ::lifecycle-path lifecycle-path}
+                (::target-private record))
+         configuration)
+        descriptor (::launch-descriptor record)
+        manifest (artifact/read-manifest configuration)
+        live (when (and descriptor manifest)
+               (process/status
+                (branch-configuration configuration record)
+                manifest))
+        target (::target-private record)]
+    (cond->
+      (merge
+       (or live
+           {:seon.dev.target/status :seon.dev.target.status/degraded
+            :seon.dev.target/name :seon.dev.target/branch
+            :seon.dev.target/processes {}
+            :seon.dev.target/external-dependencies {}
+            :seon.dev.target/endpoints {}})
+       {::lifecycle-path lifecycle-path
+        ::desired-state (::desired-state record)
+        ::phase (::phase record)
+        ::target-private target
+        ::runtime-cluster (::runtime-cluster target)
+        ::target-database-name (::target-database-name target)
+        ::target-branch (::target-branch target)
+        ::coordinate-at-launch (expected-target-coordinate record)
+        :seon.dev.target/name :seon.dev.target/branch})
+      descriptor (assoc ::launch-descriptor descriptor))))
+
+(defn status
+  "Project one retained branch record with its current process health."
+  [configuration name]
+  (let [open-request (request {::configuration configuration ::name name})
+        lifecycle-path (::lifecycle-path open-request)
+        record
+        (or (read-record! lifecycle-path)
+            (throw (ex-info "No retained branch intent exists."
+                            {::lifecycle-path lifecycle-path})))]
+    (retained-status configuration lifecycle-path record)))
+
+(defn inventory
+  "Project every validated retained branch record for one source."
+  [configuration]
+  (let [directory (branch-record-directory configuration)]
+    (if-not (fs/directory? directory)
+      []
+      (->> (fs/list-dir directory "*.edn")
+           (sort-by str)
+           (mapv (fn [path]
+                   (let [lifecycle-path (str path)]
+                     (retained-status configuration lifecycle-path
+                                      (read-record! lifecycle-path)))))))))
