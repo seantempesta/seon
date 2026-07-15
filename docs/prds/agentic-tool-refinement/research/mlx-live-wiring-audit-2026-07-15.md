@@ -289,6 +289,49 @@ retained `.eval` and inspect sample id, status, source/target/model start and
 end maps, the successful attempt join, database-operation evidence, final
 database coordinate, unchanged scores, and any reviewed classification.
 
+## Formal P0b result
+
+The finalized retained artifact is
+`evals/runs/2026-07-15-p0b-db-qwen25coder05b-admitted-r2/inspect-logs/2026-07-15T17-16-51-00-00_milestone-lift_cPCFAUTN6ZkhdUi54p8prA.eval`.
+Its source admission selects Seon `74530d90`, Inspect AI `05322696`, and
+Inspect Evals `97c99f5f`. Source, ACME static target, and model-server identity
+are byte-equal at start and end. The target status digest is `95d556e2`; the
+model snapshot revision is `6b16732e`, its manifest digest is `5b5a0fa1`, and
+its retained size is 289,601,531 bytes.
+
+All three turns contain exactly one successful ordinal-zero attempt. Their
+coordinates are exact retained transaction origins, their endpoint and
+requested/response model equal the admitted absolute snapshot, and their
+fingerprint equals the admitted MLX runtime. `pod_eval_evidence` equals
+`eval_rows`: three ordered successful narration evaluations with empty source
+and canonical absence of database-operation evidence. The sample is therefore
+valid capability evidence, not an infrastructure failure.
+
+Qwen2.5 Coder 0.5B did not perform the task. Prompt/reply estimates grew from
+22,417/558 through 22,971/731 to 23,697/924 tokens. The replies increasingly
+restated visible context in prose/comment form; the forgiving parser bounded
+that text as narration, extracted no executable source, and the run closed
+`:no-forms`. The unchanged scorer returned `I`, every workflow check remained
+false, and fabrication stayed zero. Inspect's public score edit records the
+reviewed label `model reasoning failure` without changing score or metrics.
+This closes immutable transport and final-log admission, but the exact
+transaction/later-query/327 correctness proof remains open.
+
+The first formal invocation directory is intentionally retained as rejected
+evidence. It failed before task construction because the shell exported a
+host-only selector as `SEON_MLX_PID`; the operator correctly treated the new
+`SEON_*` value as managed-process configuration and rejected the static
+target. The successful `r2` invocation passed the PID as a Python positional
+argument instead. Experiment-local selectors must never borrow the semantic
+operator prefix.
+
+Independent cross-task proof also closes the preceding PATH issue. ACME was
+ready without environment adjustment. Default's actual process projections
+equaled their records; a second task differed only in the intentionally
+managed `DEEPSEEK_API_KEY`, and privately injecting the launched value made
+all three checks ready. Both tasks observed both page pairs returning 200 and
+all four gzip event streams decoding `datastar-patch-elements`.
+
 ## Shortest falsifiers
 
 1. **Missing operational wiring:** run the old heredoc unchanged. It must fail

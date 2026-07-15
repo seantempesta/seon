@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, orchestrator, flow]
 ---
@@ -61,3 +61,28 @@ Codex-specific status exception or weaken artifact/process containment.
   path reordering, and actual selected-executable drift.
 - Default and ACME remain simultaneously ready when status is queried from a
   task other than the one that launched them.
+
+## Resolution
+
+Commit `74530d90` replaces raw `PATH` bytes with the canonical executable
+selected for each managed process's own `argv[0]`. Record publication and
+`same-process-spec?` use that one projection. The child keeps its original
+`PATH`; missing, unresolved, and relative executable paths fail closed; and
+managed `SEON_*`, provider, Java, Node, and temporary-directory configuration
+remain exact identity.
+
+The focused process gate passes 48 tests and 226 assertions. A sequential
+default-then-ACME rebuild selected the same manifest-v4 dependency vector and
+writer digest
+`3cbacfc0852807f0726c2b82ff7d2b673f68343c3affaaf126aa621453e45ceb`.
+From a second Codex task, ACME was immediately ready. Default's actual launch
+projection equaled all three recorded digests; the observer differed only in
+the intentionally managed `DEEPSEEK_API_KEY`. Injecting the launched key
+privately made all three default checks ready without revealing secret
+material. Canonical Clojure, absolute Java, and canonical Node paths agreed
+across tasks.
+
+Both tasks independently observed default and ACME `/` and `/data` returning
+200. All four root/data feeds returned gzip `text/event-stream` responses and
+decoded a `datastar-patch-elements` event. Provider drift therefore remains a
+real restart signal while task-local wrapper paths no longer are one.

@@ -186,7 +186,7 @@ database model value. The prior local Qwen 3.5 2B quant has vanished and is
 replaced in the candidate matrix by the complete revision-pinned BF16 snapshot.
 Exact evidence and order remain in [[research/local-model-serving-inventory-2026-07-15]].
 
-The formal local-model boundary now admits one immutable MLX identity through
+The formal local-model boundary admits one immutable MLX identity through
 the existing native-run start/end admission and retained-log finalizer. It
 hashes the complete revision-pinned Hugging Face snapshot, server module, exact
 argument vector, and serving package tuple while checking a stable PID/start;
@@ -195,21 +195,18 @@ and absolute snapshot path, then joins each successful response model and
 fingerprint. Externally mutable services and Ollama tags remain diagnostic
 until they can prove loaded bytes. The focused cluster/catalog/solver/log gate
 passes 110 tests. The source design and falsifiers are in
-[[research/model-server-identity-audit-2026-07-15]]; the blocker remains open
-until the dedicated listener participates in one finalized and reopened native
-`.eval`.
+[[research/model-server-identity-audit-2026-07-15]]. The dedicated listener now
+participates in one finalized and reopened native `.eval`; immutable transport
+admission is closed for this arm.
 
-The lane now owns that dedicated 0.5B listener. One exact-path, one-token smoke
-returned the absolute snapshot as response model and the expected MLX
-fingerprint. Two consecutive full observer calls then produced byte-equal
-closed maps over the stable PID/start/argv, serving module and package tuple,
-and the 289,601,531-byte snapshot manifest. No source gap blocks the replay:
-the existing one-shot `run_native_task` invocation selects
-`database_workflow-seed1-000` and supplies an invocation-local callback that
-revalidates the selected process and loopback socket on both observations.
-This remains pre-run evidence, not P0b. The exact callback and post-handoff
-database/read-back sequence are in
-[[research/mlx-live-wiring-audit-2026-07-15]].
+The lane's dedicated 0.5B listener completed that formal replay. Source,
+static-target, and model-server identities agree at start and end; all three
+successful attempts join the exact endpoint, absolute snapshot, response
+model, and fingerprint. The model produced three bounded narration evals with
+empty source, closed `:no-forms`, scored incorrect with zero fabrication, and
+was reviewed as `model reasoning failure`. Exact evidence is in
+[[research/mlx-live-wiring-audit-2026-07-15]]. This closes the admission and
+transport proof while leaving the database-workflow correctness proof open.
 
 The admitted native runner now bridges its validated source, static-target,
 and model-server start maps into every sample state through Inspect's public
@@ -235,9 +232,10 @@ threshold while leaving sample id and prompt bytes unchanged. Correctness
 requires both typed schema registrations (including unique identity), all five
 records in one transaction, a later strict-threshold query, and separate human
 and completion reports containing 327. The focused freeze/oracle/native-run
-gate passes 151 tests. A diagnostic sample may now run, but formal P0b
-acceptance still needs the committed bounded proof to pass in an admitted live
-run and survive native-log read-back. That remaining proof is recorded in
+gate passes 151 tests. Formal P0b now survives admitted live execution and
+native-log read-back, but the model did not perform the transaction or query.
+The scorer correctly failed closed, so a successful bounded proof is still
+required to close
 [[../../seon/issues/database-workflow-scorer-lacks-query-result-evidence]].
 
 That evidence contract is implemented through the existing global database
@@ -250,8 +248,10 @@ coordinates, and exposes only bounded tagged JSON or a bounded failure status.
 The generated database scorer now requires the exact successful transaction
 and later scalar query result from the request's turns. Three focused CLJS
 selectors pass seventeen assertions and the focused Inspect modules pass
-fifty-three tests. The admitted live sample and native-log read-back remain the
-graduation proof. Exact falsifiers and ownership are in
+fifty-three tests. The admitted live sample proves that canonical absence
+survives native-log read-back without being mistaken for success; a later
+capable-model sample must supply the positive transaction/query graduation
+proof. Exact falsifiers and ownership are in
 [[research/database-query-result-evidence-audit-2026-07-15]].
 
 Model transport evidence has the same intent-versus-execution distinction. A
@@ -338,6 +338,11 @@ tasks are runnable serially through the admitted static target. Planning and
 per-sample paths remain fail-closed at `ClusterLeaseUnavailable` until the
 operator lease exists. Do not treat task construction or a legacy Python row
 run as P0b evidence.
+
+P0b is recorded by the finalized `database_workflow-seed1-000` artifact at
+Seon `74530d90`. It is a valid classified incorrect result, not a task pass:
+all admission and evidence checks succeed, while the model emits no forms and
+the scorer preserves exact operation-evidence absence.
 
 ### P1 — Establish reproducible execution
 
@@ -610,15 +615,18 @@ readiness from this paragraph.
   unretained commit ids for both model and database-operation evidence. The
   focused source gate passes 40 tests and 218 assertions across config, web,
   and retry/attempt persistence. Immutable model-server weights identity and
-  one admitted live read-back remain formal evidence gaps.
+  immutable model-server identity. The admitted live read-back now closes the
+  transport gap; model-revision equality still does not prove mutable serving
+  state for services without a content-pinned process observer.
 - One awaited database-operation observer spans eval plus auto-await and
   retains ordered normalized reads and transactions with explicit position,
   success, source classification, and complete coordinate. Canonical blob
   persistence and atomic eval attachment preserve absence for no-operation
   evals. The final-snapshot door projection is bounded and lossless for
   supported EDN, and the generated scorer fails closed without the exact
-  transaction and later query result. The admitted live sample is the one
-  remaining proof for this contract.
+  transaction and later query result. The admitted live sample correctly
+  preserves operation-evidence absence, so a successful transaction/query
+  sample remains the one correctness proof for this contract.
 - Failed eval diagnostics now retain the database-configured 1,500-character
   component cap under no flag, `full?`, escape-clipping, or both. Successful
   authored/citable content keeps its existing release behavior. A 100K
@@ -629,23 +637,21 @@ readiness from this paragraph.
 
 ### Current blockers
 
-- Shared source currently contains uncommitted runtime, dependency, artifact,
-  and roadmap edits owned by other lanes. The selected public coordinates are
-  Datahike `9ada755087228e10cfb179fa5779ce227a6ed220`, Konserve
-  `b5c99bc02a7175652a610324215288b78551801f`, and Proximum
-  `9846d3e79e1aee48474bc876d3d563d7137209c6`. Cold public-consumer and root
-  dependency/classpath proofs pass, and the default operator gate passes 185
-  tests with 1,070 assertions. The writer checkpoint is still running, so the
-  runtime lane has not handed off the coordinated checkout/gitlink/pins/build
-  inputs/artifact manifest/default-runtime coordinate. Restarting ACME before
-  that explicit handoff would still build an unreviewed mixed closure. Wait for
-  the post-runtime-proof handoff and coherent source commits, then restart only
-  ACME and require ready status.
-- The native milestone task can now enter through common source admission,
-  mandatory finalization, and exact before/after operator status. The remaining
-  P1a gate is a clean ACME rebuild after concurrent source owners commit; the
-  operator now correctly reports the current target degraded because its live
-  client closure predates canonical publication.
+- The admitted database workflow is infrastructure-valid but capability-red.
+  Qwen2.5 Coder 0.5B repeated visible context across three turns, emitted no
+  executable source, and closed `:no-forms`. Exact transaction, later-query,
+  and answer evidence remain absent. One failure does not authorize prompt
+  prose changes or a broad model matrix.
+- The first ranked reachability row cannot yet address the existing root agent
+  through `seon_pod_solver`. The existing solver must forward an explicit
+  agent id while preserving omission for tasks that mint a fresh ordinary
+  agent. See
+  [[../../seon/issues/inspect-pod-solver-cannot-address-existing-agent]].
+- Root has a configured `seon.agent` require edge but no eligible callable;
+  ordinary agents lack home edges to eligible `my.ns` and `my.skills`; and
+  ACME still requires empty fixture namespaces instead of its real product
+  namespaces. These are separate positive-fact changes and must be falsified
+  one row at a time with newly minted ordinary agents.
 - A planning restart on the static development target must be owned by the
   semantic ACME operator and preserve the same database/agent identity. The
   full parallel solution remains the P1b lease.
@@ -663,49 +669,34 @@ readiness from this paragraph.
   [[../../seon/issues/multi-form-eval-order-is-not-durable]] and belongs to
   P4 after the first accepted serial slice unless it directly invalidates the
   active sample.
-- Formal P0 evidence can now prove the database answer and exact per-attempt
-  transport configuration offline from persisted final-snapshot facts, and
-  the source boundary now admits an immutable revision-pinned MLX server at
-  run start and end. Its admitted live read-back is still pending: no formal
-  cross-model claim exists until the dedicated listener's exact server map and
-  attempt joins survive one finalized native `.eval`. Neither consumer
-  reconstructs an attempt from final config or rendered transcript text.
+- The filesystem standing surface still contains overlapping read/edit
+  generations and inconsistent result envelopes. Its measured convergence
+  unit remains after the four reachability rows, not an excuse to change tools
+  before the current selection evidence exists.
 
 ### Exact next order
 
-1. Read `git status --short` and `bin/acme status --edn`. If another owner still
-   has dirty runtime inputs, do documentation or read-only source grounding
-   only; do not restart, stage, or repair their files.
-2. Treat the green frozen-execution and immutable model-server commits as the
-   source checkpoint. Do not restart while either source owner or another
-   admitted runtime owner remains dirty.
-3. Wait for the runtime lane's explicit maintained Datahike coordinate handoff.
-   When dependency pins and shared runtime edits converge, restart only ACME
-   and prove a ready, ownership-coherent artifact plus clean admitted source.
-4. Start one owned dedicated MLX listener for the recorded Qwen2.5 Coder 0.5B
-   absolute snapshot. Build its start/end snapshot through the admitted
-   observer; transact that exact absolute path into ACME's model configuration
-   and read the resolved value back from the rebuilt immutable database.
-5. Query the rebuilt immutable database projection and require the stored
-   `query` and `transact!` contracts to carry `:seon.db/request` with no `&` or
-   private accumulator name. Require `my.canvas/button`, `input`, `select`, and
-   `toggle` to expose exactly one callable alternative and no implementation
-   body data. Require the model-attempt and operation-evidence attributes to be
-   installed and queryable.
-6. Replay `database_workflow-seed1-000` through common source admission, exact
-   operator and MLX snapshots, and mandatory finalization. Read back the native
-   log and compare its prompt, reply, eval/database-operation evidence, attempt
-   facts, database coordinate, model identity, and classification with the
-   admitted baseline.
-7. Classify any narration repetition using the established raw-reply → parser
-   → stored-eval → transcript trace; do not mutate prompt policy from one
-   uncontrolled sample.
-8. With both live evidence contracts closed, run the remaining nine frozen
-   members serially and inspect every `.eval`.
-   Only after P0b is recorded may the model matrix or P3 comparison begin.
-9. After P0b, repair and prove durable multi-form order before the P4 batch /
-   stream comparison. Do not substitute timestamps, random ids, Python list
-   position, or synthetic Inspect tool calls for a database event fact.
+1. Commit the retained P0b artifact plus its reviewed classification and
+   update this roadmap, the MLX evidence, and the closed PATH issue together.
+2. Repair explicit existing-agent routing in the one pod solver. Run only the
+   focused solver and reachability tests; do not add another task adapter.
+3. Run `root_orchestration` through common source/target/model admission and
+   inspect its six scorer facts. Treat the first run as controlled evidence,
+   not permission to edit several namespace owners at once.
+4. Run `namespace_discovery`, `skill_lifecycle`, and `acme_product_tools` one
+   at a time. Mint fresh ordinary/ACME agents where home requirements are
+   copied at birth, and change only the positive require/eligibility facts
+   falsified by that row.
+5. After all four rows pass, run frozen `namespace_workflow-seed1-000` as the
+   first composition proof of movement, dynamic require, cross-namespace
+   definition, database use, and reporting.
+6. Use the four frozen filesystem rows to converge the bounded read and
+   anchored edit surface; rerun exact failures before any broader slice.
+7. Make multi-form execution order an explicit durable database fact before
+   the P4 batch/stream comparison. Never substitute timestamps, random ids,
+   Python list position, or synthetic Inspect calls.
+8. Only then advance the remaining frozen suite serially and compare models.
+   Every run retains exact admission and receives a reviewed classification.
 
 ### Stop rules
 

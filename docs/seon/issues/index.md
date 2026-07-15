@@ -32,7 +32,7 @@ See `README.md` for the convention.
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
 
-## Friction (36)
+## Friction (35)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -59,7 +59,6 @@ See `README.md` for the convention.
 | [Make multi-form eval order a durable database fact](multi-form-eval-order-is-not-durable.md) | friction | agent |
 | [Make schema hot reload atomic](hot-reload-schema-import-can-partially-fail.md) | friction | agent |
 | [Model can ghost-echo runtime scaffolding into the transcript spine](narration-ghost-echo-not-neutralized.md) | friction | agent |
-| [Normalize operator PATH identity across Codex tasks](operator-path-identity-is-codex-task-specific.md) | friction | Core |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
 | [Plan reconcile scope can delete unseen work](plan-reconcile-scope-can-delete-unseen-work.md) | friction | agent |
 | [Prepare selected git dependencies before test compilation](test-runner-does-not-prepare-selected-git-dependencies.md) | friction | Core |
