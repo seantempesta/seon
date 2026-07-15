@@ -43,6 +43,7 @@
    [:seon.dev.process/http-port-file {:optional true} :string]
    [:seon.dev.process/readiness qualified-keyword?]
    [:seon.dev.process/ready-timeout-ms [:int {:min 1}]]
+   [:seon.dev.process/shutdown-grace-ms [:int {:min 1}]]
    [:seon.dev.process/bootstrap-digest {:optional true}
     [:re #"[0-9a-f]{64}"]]
    [:seon.dev.process/artifact-digest :string]])
@@ -57,9 +58,12 @@
    [:seon.dev.process.containment/process-group pos-int?]
    [:seon.dev.process.containment/workload-pid pos-int?]
    [:seon.dev.process.containment/workload-start-instant :string]
+   [:seon.dev.process.containment/shutdown-grace-ms [:int {:min 1}]]
    [:seon.dev.process.containment/control-socket :string]
    [:seon.dev.process.containment/adoption-path :string]
-   [:seon.dev.process.containment/result-path :string]])
+   [:seon.dev.process.containment/result-path :string]
+   [:seon.dev.process.containment/application-result-path
+    {:optional true} :string]])
 
 (def process-record-schema
   [:map
@@ -204,6 +208,7 @@
    :seon.dev.process/dependencies []
    :seon.dev.process/readiness :seon.dev.process.readiness/watcher
    :seon.dev.process/ready-timeout-ms 300000
+   :seon.dev.process/shutdown-grace-ms 2500
    :seon.dev.process/artifact-digest artifact-digest})
 
 (defn specs
@@ -262,6 +267,7 @@
            (::launch/http-port-file descriptor-process)
            :seon.dev.process/readiness :seon.dev.process.readiness/pod
            :seon.dev.process/ready-timeout-ms 120000
+           :seon.dev.process/shutdown-grace-ms 5000
            :seon.dev.process/artifact-digest
            (:seon.dev.artifact/application-digest manifest)}
           runtime-root
@@ -305,6 +311,7 @@
       :seon.dev.process/dependencies []
       :seon.dev.process/readiness :seon.dev.process.readiness/writer
       :seon.dev.process/ready-timeout-ms 180000
+      :seon.dev.process/shutdown-grace-ms 30000
       :seon.dev.process/artifact-digest
       (:seon.dev.artifact/writer-digest manifest)}
 
@@ -635,18 +642,27 @@
         (str (fs/path (:seon.dev.config/root config) "tmp" "seon-containment"
                       (str generation ".sock")))
         result-path (str (fs/path containment-dir "result.json"))
+        application-result-path
+        (when (= writer-id id)
+          (str (fs/path containment-dir "application.edn")))
+        launch-environment
+        (cond-> (:seon.dev.process/environment spec)
+          application-result-path
+          (assoc "SEON_PROCESS_GENERATION" (str generation)
+                 "SEON_APPLICATION_RESULT_PATH" application-result-path))
         helper (str (fs/path (:seon.dev.config/root config)
                              "script/seon/dev/detach.py"))
         _ (do (fs/create-dirs containment-dir)
               (fs/create-dirs (fs/parent control-socket)))
         argv (into ["python3" helper "launch"
                     (:seon.dev.config/root config) (str log) (str generation)
-                    descriptor-path control-socket result-path]
+                    descriptor-path control-socket result-path
+                    (str (:seon.dev.process/shutdown-grace-ms spec))]
                    (:seon.dev.process/argv spec))
         result (process/sh {:continue true
                             :out :string
                             :err :string
-                            :env (:seon.dev.process/environment spec)
+                            :env launch-environment
                             :cmd argv})
         launch-result
         (when (zero? (:exit result))
@@ -665,6 +681,10 @@
                      (= anchor-pid process-group)
                      (= control-socket (:control_socket launch-result))
                      (= result-path (:result_path launch-result))
+                     (= application-result-path
+                        (:application_result_path launch-result))
+                     (= (:seon.dev.process/shutdown-grace-ms spec)
+                        (:shutdown_grace_ms launch-result))
                      (string? adoption-path))
         (throw (ex-info "Failed to launch a detached Seon process."
                         {:seon.dev.process/id id
@@ -709,9 +729,17 @@
                 :seon.dev.process.containment/workload-pid workload-pid
                 :seon.dev.process.containment/workload-start-instant
                 workload-start
+                :seon.dev.process.containment/shutdown-grace-ms
+                (:seon.dev.process/shutdown-grace-ms spec)
                 :seon.dev.process.containment/control-socket control-socket
                 :seon.dev.process.containment/adoption-path adoption-path
-                :seon.dev.process.containment/result-path result-path}}]
+                :seon.dev.process.containment/result-path result-path}}
+              record
+              (cond-> record
+                application-result-path
+                (assoc-in [:seon.dev.process/containment
+                           :seon.dev.process.containment/application-result-path]
+                          application-result-path))]
           (write-process! config id record)
           (adopt-containment! record)
           record))
@@ -846,11 +874,15 @@
   (and (= (str (:seon.dev.process.containment/generation containment))
           (:generation result))
        (= "drained" (:status result))
+       (contains? #{"requested" "workload-exit"} (:trigger result))
        (= -9 (:anchor_exit result))))
 
 (defn- await-terminal! [record]
   (let [containment (:seon.dev.process/containment record)
-        deadline (+ (System/currentTimeMillis) 20000)]
+        deadline (+ (System/currentTimeMillis)
+                    (:seon.dev.process.containment/shutdown-grace-ms
+                     containment)
+                    10000)]
     (loop []
       (let [result (terminal-result containment)
             owner-alive? (state/process-identity-alive?
@@ -897,7 +929,9 @@
          :seon.dev.process.containment/owner-start-instant owner-start
          :seon.dev.process.containment/control-socket
          (:control_socket launch-result)
-         :seon.dev.process.containment/result-path (:result_path launch-result)}
+         :seon.dev.process.containment/result-path (:result_path launch-result)
+         :seon.dev.process.containment/shutdown-grace-ms
+         (:shutdown_grace_ms launch-result)}
         record {:seon.dev.process/id id
                 :seon.dev.process/containment containment}]
     (when owner-start

@@ -79,6 +79,7 @@
    :seon.dev.process/http-port-file (::branch/http-port-file request)
    :seon.dev.process/readiness :seon.dev.process.readiness/pod
    :seon.dev.process/ready-timeout-ms 310000
+   :seon.dev.process/shutdown-grace-ms 100
    :seon.dev.process/artifact-digest "application"})
 
 (defn- signal-writer! [socket source-database]

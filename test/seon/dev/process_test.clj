@@ -30,6 +30,7 @@
    :seon.dev.process/dependencies []
    :seon.dev.process/readiness :seon.dev.process.readiness/process
    :seon.dev.process/ready-timeout-ms 5000
+   :seon.dev.process/shutdown-grace-ms 100
    :seon.dev.process/artifact-digest "test-artifact"})
 
 (defn- live-probe-record [configuration record]
@@ -52,6 +53,7 @@
             :seon.dev.process.containment/process-group pid
             :seon.dev.process.containment/workload-pid pid
             :seon.dev.process.containment/workload-start-instant start
+            :seon.dev.process.containment/shutdown-grace-ms 100
             :seon.dev.process.containment/control-socket
             (str (fs/path (:seon.dev.test/directory configuration)
                           (str generation ".sock")))
@@ -217,6 +219,7 @@
       :seon.dev.process/dependencies []
       :seon.dev.process/readiness :seon.dev.process.readiness/watcher
       :seon.dev.process/ready-timeout-ms 310000
+      :seon.dev.process/shutdown-grace-ms 100
       :seon.dev.process/artifact-digest watcher-digest}
      process/writer-id
      {:seon.dev.process/id process/writer-id
@@ -229,6 +232,7 @@
       :seon.dev.process/dependencies []
       :seon.dev.process/readiness :seon.dev.process.readiness/writer
       :seon.dev.process/ready-timeout-ms 310000
+      :seon.dev.process/shutdown-grace-ms 100
       :seon.dev.process/artifact-digest "writer"}
      process/pod-id
      {:seon.dev.process/id process/pod-id
@@ -240,6 +244,7 @@
       :seon.dev.process/dependencies [process/watcher-id process/writer-id]
       :seon.dev.process/readiness :seon.dev.process.readiness/pod
       :seon.dev.process/ready-timeout-ms 310000
+      :seon.dev.process/shutdown-grace-ms 100
       :seon.dev.process/artifact-digest "pod"}}))
 
 (defn run-signal-fixture!
@@ -556,7 +561,7 @@
                     (:seon.dev.config/root configuration)
                     (str (fs/path directory "failure.log")) generation
                     descriptor control result
-                    "sleep" "300"]})
+                    "100" "sleep" "300"]})
             published (json/parse-string (str/trim (:out started)) true)
             identities
             (mapv (fn [key]
@@ -581,7 +586,8 @@
             (Thread/sleep 10)
             (recur (dec remaining))))
         (let [terminal (json/parse-string (slurp result) true)]
-          (is (= {:generation generation :status "drained" :anchor_exit -9}
+          (is (= {:generation generation :status "drained"
+                  :trigger "requested" :anchor_exit -9}
                  terminal))
           (is (not-any? state/process-identity-alive? identities))
           (is (not (fs/exists? control)))))
@@ -622,7 +628,7 @@
                     (:seon.dev.config/root configuration)
                     (str (fs/path directory "term.log")) generation
                     (str (fs/path directory "term-descriptor.json"))
-                    control result "sleep" "300"]})
+                    control result "100" "sleep" "300"]})
             published (json/parse-string (str/trim (:out started)) true)
             identities
             (mapv (fn [key]
@@ -643,7 +649,8 @@
                      (some state/process-identity-alive? identities))
             (Thread/sleep 10)
             (recur (dec remaining))))
-        (is (= {:generation generation :status "drained" :anchor_exit -9}
+        (is (= {:generation generation :status "drained"
+                :trigger "requested" :anchor_exit -9}
                (json/parse-string (slurp result) true)))
         (is (not-any? state/process-identity-alive? identities))
         (is (not (fs/exists? control))))
@@ -701,6 +708,41 @@
           "the workload inherits SIG_DFL and runs its graceful TERM handler")
       (finally (cleanup! configuration [id])))))
 
+(deftest writer-application-result-is-captured-inside-the-terminal-result
+  (let [configuration (test-config)
+        id process/writer-id
+        ready-file (str (fs/path (:seon.dev.test/directory configuration)
+                                 "writer-terminal-ready"))
+        source
+        (str "import os,signal,sys,time\n"
+             "ready=sys.argv[1]\n"
+             "def on_term(signum,frame):\n"
+             " open(os.environ['SEON_APPLICATION_RESULT_PATH'],'w').write('{:ok true}\\n')\n"
+             " raise SystemExit(0)\n"
+             "signal.signal(signal.SIGTERM,on_term)\n"
+             "open(ready,'w').write('ready')\n"
+             "while True: time.sleep(1)\n")
+        spec (harmless-spec id ["python3" "-c" source ready-file])]
+    (try
+      (let [record (process/ensure! configuration spec)
+            containment (:seon.dev.process/containment record)]
+        (loop [remaining 100]
+          (when (and (pos? remaining) (not (fs/regular-file? ready-file)))
+            (Thread/sleep 10)
+            (recur (dec remaining))))
+        (is (string?
+             (:seon.dev.process.containment/application-result-path
+              containment)))
+        (let [terminal (#'process/drain-containment! record)
+              capture (:application_result terminal)]
+          (is (= "requested" (:trigger terminal)))
+          (is (= "captured" (:status capture)))
+          (is (= "{:ok true}\n" (:edn capture)))
+          (is (re-matches #"[0-9a-f]{64}" (:sha256 capture))))
+        (process/stop! configuration id)
+        (is (nil? (process/read-process configuration id))))
+      (finally (cleanup! configuration [id])))))
+
 (deftest dead-workload-drains-a-term-ignoring-descendant-before-replacement
   (let [configuration (test-config)
         id :seon.dev.process/dead-workload
@@ -727,6 +769,12 @@
                               containment))))
               (Thread/sleep 10)
               (recur (dec remaining))))
+          (is (= "workload-exit"
+                 (:trigger
+                  (json/parse-string
+                   (slurp (:seon.dev.process.containment/result-path
+                           containment))
+                   true))))
           (process/stop! configuration id)
           (is (nil? (state/process-start-instant child))
               "the final anchored KILL removes the TERM-ignoring child")
