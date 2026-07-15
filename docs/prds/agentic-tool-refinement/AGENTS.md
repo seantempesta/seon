@@ -75,13 +75,16 @@ callback maps retained around the finalized native sample close P0b. The exact
 invocation-local callback and replay command are in
 [[research/mlx-live-wiring-audit-2026-07-15]].
 
-The current handoff is withheld because the full Datahike Node CLJS gate found
-that Konserve 0.9.359's Node filestore delete rejects an already-absent path
-with `ENOENT` instead of succeeding idempotently. The runtime lane must repair
-and publish that existing Konserve mechanism, republish Datahike against the
-new exact SHA, prove both public HTTPS coordinates, cut the root pins/build
-inputs, and pass default-cluster artifact/runtime proof. Never pin or rebuild
-against an interim candidate from this lane.
+The dependency fixes are now public at Datahike
+`9ada755087228e10cfb179fa5779ce227a6ed220`, Konserve
+`b5c99bc02a7175652a610324215288b78551801f`, and Proximum
+`9846d3e79e1aee48474bc876d3d563d7137209c6`. Their cold public consumer and
+root dependency/classpath proofs pass, as does the default operator gate at
+185 tests and 1,070 assertions. The runtime lane is still running the writer
+checkpoint and has not handed off the coordinated runtime/artifact coordinate.
+Treat the public SHAs as evidence, not restart authority: never pin, stage,
+rebuild, or restart ACME until that lane sends its explicit post-runtime-proof
+handoff.
 
 The multi-form ordering defect is real but queued for P4, not the active gate:
 `:seon.agent.turn/evals` is cardinality-many and its identity datom transaction

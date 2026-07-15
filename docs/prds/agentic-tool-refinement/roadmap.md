@@ -211,6 +211,16 @@ This remains pre-run evidence, not P0b. The exact callback and post-handoff
 database/read-back sequence are in
 [[research/mlx-live-wiring-audit-2026-07-15]].
 
+The admitted native runner now bridges its validated source, static-target,
+and model-server start maps into every sample state through Inspect's public
+task-setup mechanism before task-owned setup runs. Eval metadata and sample
+metadata exact-merge the same immutable maps: equal values are accepted and a
+contradiction fails before task setup can act. One real finalized/reopened
+Inspect log proves complete attempt evidence and model identity reach the
+unchanged admission gate and scorer. The older frozen-tool scorer proof now
+uses this common admitted door instead of calling `inspect.eval` directly.
+The combined focused catalog, native-run, and frozen-tool gate passes 57 tests.
+
 The pinned Inspect source audit also identifies seven reusable mechanisms for
 later tool work: database-native namespace exposure, frozen-coordinate
 reconstruction, durable multi-form positions, bounded typed recovery,
@@ -619,21 +629,18 @@ readiness from this paragraph.
 
 ### Current blockers
 
-- Shared source currently contains uncommitted runtime edits owned by other
-  lanes. The runtime lane is also selecting a maintained Datahike secondary-
-  index commit and will hand off the protected checkout, gitlink, dependency
-  pins, and artifact manifest as one coordinate. Restarting ACME before that
-  explicit handoff would build an unreviewed mixed dependency closure. Wait for
-  the coordinate handoff and coherent source commits, then restart ACME and
-  require ready status.
-- The interim guarded-force Datahike candidate passed its focused integration,
-  but the full Node CLJS gate found one lower dependency failure: Konserve
-  0.9.359's Node filestore delete rejects an already-absent path with `ENOENT`
-  instead of succeeding idempotently. The runtime lane owns the existing
-  mechanism and must publish its corrected exact SHA, republish Datahike
-  against it, verify both public HTTPS coordinates, cut root pins/build inputs,
-  and pass the default-cluster artifact/runtime proof before handoff. This is a
-  withheld dependency coordinate, not an ACME failure to work around locally.
+- Shared source currently contains uncommitted runtime, dependency, artifact,
+  and roadmap edits owned by other lanes. The selected public coordinates are
+  Datahike `9ada755087228e10cfb179fa5779ce227a6ed220`, Konserve
+  `b5c99bc02a7175652a610324215288b78551801f`, and Proximum
+  `9846d3e79e1aee48474bc876d3d563d7137209c6`. Cold public-consumer and root
+  dependency/classpath proofs pass, and the default operator gate passes 185
+  tests with 1,070 assertions. The writer checkpoint is still running, so the
+  runtime lane has not handed off the coordinated checkout/gitlink/pins/build
+  inputs/artifact manifest/default-runtime coordinate. Restarting ACME before
+  that explicit handoff would still build an unreviewed mixed closure. Wait for
+  the post-runtime-proof handoff and coherent source commits, then restart only
+  ACME and require ready status.
 - The native milestone task can now enter through common source admission,
   mandatory finalization, and exact before/after operator status. The remaining
   P1a gate is a clean ACME rebuild after concurrent source owners commit; the

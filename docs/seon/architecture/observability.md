@@ -301,6 +301,13 @@ construction and again after the terminal log is published. Remotely managed
 weights and mutable local tags remain diagnostic until their serving boundary
 can prove the loaded content digest.
 
+The admitted opening identities are one immutable value at the run boundary.
+Inspect retains them at eval scope and exact-merges them into every sample's
+state before task-owned setup runs, so setup, solver admission, and scoring see
+the same maps. A byte-equal value already present on a sample is accepted; a
+contradiction rejects the sample before task setup can produce side effects.
+Eval metadata alone never stands in for sample-state evidence.
+
 All closing observations are written before evidence finalization. A changed
 source, target, or model-server identity makes the run rejected infrastructure
 evidence while preserving the terminal bytes; it never becomes a capability
