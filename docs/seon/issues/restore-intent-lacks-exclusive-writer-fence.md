@@ -53,16 +53,21 @@ rechecks admin absence, and deletes the intent last. Focused plan/apply/abort,
 same-`t` completion-coordinate, CLI, and coordinator proof is green at 51 tests
 and 221 assertions.
 
-The issue remains open for an accepted-UDS-write crash-cut falsifier and the
-source-frozen live restore/abort/replan sequence. A 2026-07-15 executable
-runbook audit found that the public coordinator still converges every derived
-command in one uninterrupted invocation. Polling and killing a process cannot
-name an exact durable cut and would bypass supervisor ownership. The minimal
-proof support is invocation-local fault injection at the existing derived
-command boundary, with no persisted phase or second coordinator; it must cover
-after intent/before force, after force/before completion, after
-completion/before evidence deletion, and after deletion/before fresh ordinary
-startup.
+The deterministic proof support is now implemented in the same coordinator.
+One explicit `--proof-crash-cut` apply-plan argument selects a closed
+invocation-local value; it is never placed in the immutable intent, managed
+environment, artifact identity, or another state file. The selected invocation
+throws only after one named durable boundary: intent publication, exact admin
+force result, restore-pod completion/readiness, or external evidence deletion.
+Retry re-enters the unchanged fact-derived convergence path; the last cut has
+no retained intent and continues through a fresh ordinary `up`. There is no
+polling, process-group kill, persisted phase, or second coordinator.
+
+Focused restore plus CLI proof passes 64 tests/280 assertions. It checks the
+exact effect prefix at every cut, retained retry propagation, closed CLI
+selection, and unchanged ordinary behavior. The issue remains open for the
+accepted-UDS-write falsifier and source-frozen live restore/abort/replan plus
+restore/crash/undo sequence.
 
 ## Owner
 

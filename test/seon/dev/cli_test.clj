@@ -776,6 +776,33 @@
       (reset! calls [])
       (with-redefs-fn
         {#'state/with-lock (fn [_ _ _ transition] (transition))
+         #'restore-state/apply!
+         (fn [request]
+           (swap! calls conj [:apply request])
+           result)}
+        (fn []
+          (#'cli/restore-cluster!
+           configuration
+           ["target" "--apply-plan" plan-path "--confirm" "EXACT"
+            "--proof-crash-cut" "after-force-before-completion"])))
+      (is (= [[:apply
+               {::restore-state/configuration configuration
+                ::restore-state/branch-name "target"
+                ::restore/plan plan
+                ::restore/confirmation-text "EXACT"
+                ::restore-state/proof-crash-cut
+                :seon.dev.restore.proof-cut/after-force-before-completion}]]
+             @calls))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Unknown restore proof crash cut"
+           (#'cli/restore-cluster!
+            configuration
+            ["target" "--apply-plan" plan-path "--confirm" "EXACT"
+             "--proof-crash-cut" "unknown"])))
+      (reset! calls [])
+      (with-redefs-fn
+        {#'state/with-lock (fn [_ _ _ transition] (transition))
          #'restore-state/abort!
          (fn [request]
            (swap! calls conj [:abort request])

@@ -30,6 +30,13 @@
 (schema/register! ::branch-name ::branch/name)
 (schema/register! ::completion-id ::db.restore/id)
 (schema/register! ::admin-timeout-ms ::restore/admin-timeout-ms)
+(schema/register!
+ ::proof-crash-cut
+ [:enum
+  :seon.dev.restore.proof-cut/after-intent-publication-before-force
+  :seon.dev.restore.proof-cut/after-force-before-completion
+  :seon.dev.restore.proof-cut/after-completion-before-evidence-deletion
+  :seon.dev.restore.proof-cut/after-evidence-deletion-before-autonomous-start])
 (schema/register! ::intent-retained? :boolean)
 (schema/register! ::admin-outcome :keyword)
 (schema/register! ::restored-coordinate ::coordinate/coordinate)
@@ -76,6 +83,7 @@
   [::branch-name ::branch-name]
   [::restore/plan ::restore/plan]
   [::restore/confirmation-text ::restore/confirmation-text]
+  [::proof-crash-cut {:optional true} ::proof-crash-cut]
   [::admin-timeout-ms {:optional true} ::admin-timeout-ms]])
 (schema/register!
  ::undo-plan-request
@@ -89,12 +97,14 @@
   [::completion-id ::completion-id]
   [::restore/plan ::restore/plan]
   [::restore/confirmation-text ::restore/confirmation-text]
+  [::proof-crash-cut {:optional true} ::proof-crash-cut]
   [::admin-timeout-ms {:optional true} ::admin-timeout-ms]])
 (schema/register!
  ::resume-request
  [:map {:closed true}
   [::configuration config/configuration-schema]
   [::branch-name {:optional true} ::branch-name]
+  [::proof-crash-cut {:optional true} ::proof-crash-cut]
   [::admin-timeout-ms {:optional true} ::admin-timeout-ms]])
 (schema/register!
  ::restore-result
@@ -904,6 +914,16 @@
       (ensure-processes! configuration manifest [process/writer-id])
       configuration)))
 
+(defn- reach-proof-crash-cut!
+  [selected reached intent]
+  (when (= selected reached)
+    (throw
+     (ex-info
+      "Restore proof crash cut reached after its durable boundary."
+      {::proof-crash-cut reached
+       ::restore/intent-id (::restore/intent-id intent)
+       :seon.error/kind :seon.dev.restore.error/proof-crash-cut}))))
+
 (defn- prove-restore-pod!
   [configuration manifest intent admin-result blob-result observation]
   (let [restore-config
@@ -956,6 +976,7 @@
   {:malli/schema [:=> [:cat ::resume-request] ::restore-result]}
   [{configuration ::configuration
     branch-name ::branch-name
+    proof-crash-cut ::proof-crash-cut
     timeout-ms ::admin-timeout-ms
     :or {timeout-ms 120000}
     :as request}]
@@ -1036,6 +1057,10 @@
                 (reset! !admin-result
                         (invoke-admin!
                          configuration manifest intent timeout-ms))
+                (reach-proof-crash-cut!
+                 proof-crash-cut
+                 :seon.dev.restore.proof-cut/after-force-before-completion
+                 intent)
                 (start-writer-after-admin!
                  configuration manifest @!admin-result))
 
@@ -1068,6 +1093,10 @@
                 (require-next-command!
                  configuration intent
                  :seon.dev.restore.command/prove-readiness)
+                (reach-proof-crash-cut!
+                 proof-crash-cut
+                 :seon.dev.restore.proof-cut/after-completion-before-evidence-deletion
+                 intent)
                 (stop-main-consumers!
                  configuration
                  :seon.dev.process.operation/restore)
@@ -1077,6 +1106,10 @@
                 (state/delete-edn! (restore/intent-path cluster-dir))
                 (state/delete-edn! (::restore/admin-result-path invocation))
                 (state/delete-edn! (blob-result-path cluster-dir intent))
+                (reach-proof-crash-cut!
+                 proof-crash-cut
+                 :seon.dev.restore.proof-cut/after-evidence-deletion-before-autonomous-start
+                 intent)
                 (ensure-processes!
                  configuration manifest
                  [process/watcher-id process/writer-id process/pod-id]))))})]
@@ -1088,7 +1121,7 @@
 
 (defn- apply-transition!
   [configuration plan supplied-confirmation timeout-ms require-authority!
-   derive-fresh! resume-request]
+   derive-fresh! resume-request proof-crash-cut]
   (let [{intent ::restore/intent
          expected-confirmation ::restore/confirmation-text}
         (restore/validate-plan plan)]
@@ -1109,7 +1142,10 @@
             {::restore/intent-id (::restore/intent-id retained)
              :seon.error/kind
              :seon.dev.restore.error/retained-intent})))
-        (resume! (assoc resume-request ::admin-timeout-ms timeout-ms)))
+        (resume! (cond-> (assoc resume-request
+                                ::admin-timeout-ms timeout-ms)
+                   proof-crash-cut
+                   (assoc ::proof-crash-cut proof-crash-cut))))
       (let [manifest (require-manifest! configuration)
             artifact-identity (::restore/artifact-identity intent)
             _ (require-artifact-identity!
@@ -1127,7 +1163,14 @@
         (publish-intent!
          {::cluster-dir (:seon.dev.config/cluster-dir configuration)
           ::restore/intent intent})
-        (resume! (assoc resume-request ::admin-timeout-ms timeout-ms))))))
+        (reach-proof-crash-cut!
+         proof-crash-cut
+         :seon.dev.restore.proof-cut/after-intent-publication-before-force
+         intent)
+        (resume! (cond-> (assoc resume-request
+                                ::admin-timeout-ms timeout-ms)
+                   proof-crash-cut
+                   (assoc ::proof-crash-cut proof-crash-cut)))))))
 
 (defn apply!
   "Publish one exactly confirmed fresh plan, then enter prompt-free resume."
@@ -1136,6 +1179,7 @@
     branch-name ::branch-name
     plan ::restore/plan
     supplied-confirmation ::restore/confirmation-text
+    proof-crash-cut ::proof-crash-cut
     timeout-ms ::admin-timeout-ms
     :or {timeout-ms 120000}
     :as request}]
@@ -1151,7 +1195,8 @@
       configuration branch-name manifest
       (::restore/intent-id intent)
       (::restore/consumer-generations intent)))
-   {::configuration configuration ::branch-name branch-name}))
+   {::configuration configuration ::branch-name branch-name}
+   proof-crash-cut))
 
 (defn apply-undo!
   "Publish one confirmed completion-selected inverse, then resume it."
@@ -1160,6 +1205,7 @@
     completion-id ::completion-id
     plan ::restore/plan
     supplied-confirmation ::restore/confirmation-text
+    proof-crash-cut ::proof-crash-cut
     timeout-ms ::admin-timeout-ms
     :or {timeout-ms 120000}
     :as request}]
@@ -1175,7 +1221,8 @@
       configuration manifest completion-id
       (::restore/intent-id intent)
       (::restore/consumer-generations intent)))
-   {::configuration configuration}))
+   {::configuration configuration}
+   proof-crash-cut))
 
 (defn- matching-restore-pod-record [configuration intent]
   (let [expected-generation

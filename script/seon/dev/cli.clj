@@ -663,15 +663,52 @@
   (println (str "  admin: "
                 (name (::restore-state/admin-outcome result)))))
 
+(def ^:private proof-crash-cuts
+  {"after-intent-publication-before-force"
+   :seon.dev.restore.proof-cut/after-intent-publication-before-force
+   "after-force-before-completion"
+   :seon.dev.restore.proof-cut/after-force-before-completion
+   "after-completion-before-evidence-deletion"
+   :seon.dev.restore.proof-cut/after-completion-before-evidence-deletion
+   "after-evidence-deletion-before-autonomous-start"
+   :seon.dev.restore.proof-cut/after-evidence-deletion-before-autonomous-start})
+
+(defn- parse-proof-crash-cut [value]
+  (or (get proof-crash-cuts value)
+      (throw
+       (ex-info "Unknown restore proof crash cut."
+                {:seon.dev.restore-state/proof-crash-cut value
+                 :seon.dev.restore-state/known-proof-crash-cuts
+                 (vec (sort (keys proof-crash-cuts)))}))))
+
+(defn- parse-apply-plan-options [options]
+  (cond
+    (and (= 4 (count options))
+         (= ["--apply-plan" "--confirm"]
+            [(nth options 0) (nth options 2)]))
+    {::plan-path (nth options 1)
+     ::confirmation (nth options 3)}
+
+    (and (= 6 (count options))
+         (= ["--apply-plan" "--confirm" "--proof-crash-cut"]
+            [(nth options 0) (nth options 2) (nth options 4)]))
+    {::plan-path (nth options 1)
+     ::confirmation (nth options 3)
+     ::proof-crash-cut (parse-proof-crash-cut (nth options 5))}
+
+    :else nil))
+
 (defn- apply-restore-plan!
-  [configuration branch-name plan confirmation]
+  [configuration branch-name plan confirmation proof-crash-cut]
   (state/with-lock
    configuration :stack 1800000
    #(restore-state/apply!
-     {::restore-state/configuration configuration
-      ::restore-state/branch-name branch-name
-      ::restore/plan plan
-      ::restore/confirmation-text confirmation})))
+     (cond-> {::restore-state/configuration configuration
+              ::restore-state/branch-name branch-name
+              ::restore/plan plan
+              ::restore/confirmation-text confirmation}
+       proof-crash-cut
+       (assoc ::restore-state/proof-crash-cut proof-crash-cut)))))
 
 (defn- abort-restore!
   [configuration branch-name confirmation]
@@ -683,14 +720,16 @@
       ::restore/confirmation-text confirmation})))
 
 (defn- apply-undo-plan!
-  [configuration completion-id plan confirmation]
+  [configuration completion-id plan confirmation proof-crash-cut]
   (state/with-lock
    configuration :stack 1800000
    #(restore-state/apply-undo!
-     {::restore-state/configuration configuration
-      ::restore-state/completion-id completion-id
-      ::restore/plan plan
-      ::restore/confirmation-text confirmation})))
+     (cond-> {::restore-state/configuration configuration
+              ::restore-state/completion-id completion-id
+              ::restore/plan plan
+              ::restore/confirmation-text confirmation}
+       proof-crash-cut
+       (assoc ::restore-state/proof-crash-cut proof-crash-cut)))))
 
 (defn- abort-undo!
   [configuration completion-id confirmation]
@@ -712,7 +751,8 @@
 
 (defn- restore-cluster! [configuration arguments]
   (let [branch-name (first arguments)
-        options (vec (rest arguments))]
+        options (vec (rest arguments))
+        apply-options (parse-apply-plan-options options)]
     (when-not branch-name
       (throw (ex-info "`cluster restore` requires one retained branch name."
                       {:seon.dev.cli/arguments (vec arguments)})))
@@ -738,17 +778,16 @@
         (print-restore-result!
          branch-name
          (apply-restore-plan!
-          configuration branch-name plan confirmation)))
+          configuration branch-name plan confirmation nil)))
 
-      (and (= 4 (count options))
-           (= "--apply-plan" (nth options 0))
-           (= "--confirm" (nth options 2)))
-      (let [plan (read-restore-plan! (nth options 1))
-            confirmation (nth options 3)]
+      apply-options
+      (let [plan (read-restore-plan! (::plan-path apply-options))
+            confirmation (::confirmation apply-options)]
         (print-restore-result!
          branch-name
          (apply-restore-plan!
-          configuration branch-name plan confirmation)))
+          configuration branch-name plan confirmation
+          (::proof-crash-cut apply-options))))
 
       (= ["--abort"] options)
       (let [confirmation
@@ -774,7 +813,8 @@
 
 (defn- undo-cluster! [configuration arguments]
   (let [completion-id (first arguments)
-        options (vec (rest arguments))]
+        options (vec (rest arguments))
+        apply-options (parse-apply-plan-options options)]
     (when-not completion-id
       (throw (ex-info "`cluster undo` requires one completed restore id."
                       {:seon.dev.cli/arguments (vec arguments)})))
@@ -800,17 +840,16 @@
         (print-restore-result!
          completion-id
          (apply-undo-plan!
-          configuration completion-id plan confirmation)))
+          configuration completion-id plan confirmation nil)))
 
-      (and (= 4 (count options))
-           (= "--apply-plan" (nth options 0))
-           (= "--confirm" (nth options 2)))
-      (let [plan (read-restore-plan! (nth options 1))
-            confirmation (nth options 3)]
+      apply-options
+      (let [plan (read-restore-plan! (::plan-path apply-options))
+            confirmation (::confirmation apply-options)]
         (print-restore-result!
          completion-id
          (apply-undo-plan!
-          configuration completion-id plan confirmation)))
+          configuration completion-id plan confirmation
+          (::proof-crash-cut apply-options))))
 
       (= ["--abort"] options)
       (let [confirmation
@@ -924,7 +963,8 @@
          "  skills sync|check        generate or verify tool-facing skill adapters\n"
          "  cluster reset <name>     drain and reset one named database\n"
          "  cluster restore <branch> restore one exact retained branch head\n"
-         "  cluster undo <completion-id> restore its exact retained undo head\n")))
+         "  cluster undo <completion-id> restore its exact retained undo head\n"
+         "    --proof-crash-cut NAME test one durable apply-plan boundary\n")))
 
 (defn -main
   "Run one Seon operator command."

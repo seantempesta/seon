@@ -845,6 +845,99 @@
             [:ensure [process/watcher-id process/writer-id process/pod-id]]]
            @calls))))
 
+(deftest invocation-local-proof-cuts-stop-after-the-named-durable-boundary
+  (let [configuration (config/load! (System/getProperty "user.dir"))
+        intent (derived-intent)
+        calls (atom [])
+        admin-result {::restore-admin/outcome
+                      :seon.db.restore-admin.outcome/applied}
+        blob-result {:my.blob/ok? true}
+        manifest artifact-identity
+        commands [:seon.dev.restore.command/create-undo
+                  :seon.dev.restore.command/create-target
+                  :seon.dev.restore.command/prepare-exclusive-transition
+                  :seon.dev.restore.command/reconstruct-and-complete
+                  :seon.dev.restore.command/prove-readiness]
+        intent-path
+        (restore/intent-path (:seon.dev.config/cluster-dir configuration))
+        blob-path
+        (str (:seon.dev.config/cluster-dir configuration)
+             "/lifecycle/restore-blobs-" intent-id ".edn")
+        after-force
+        [:prepare-observation-writer :materialize :stop-retained :stop-main
+         [:ensure [process/writer-id]]
+         [:require :seon.dev.restore.command/create-undo]
+         [:create :undo] [:create :target] :stop-retained :stop-main :admin]
+        after-completion
+        (into after-force
+              [:start-writer :start-restore-pod :prove-restore-pod
+               [:require :seon.dev.restore.command/prove-readiness]])
+        after-deletion
+        (into after-completion
+              [:stop-main [:delete intent-path] [:delete "/admin.edn"]
+               [:delete blob-path]])
+        expected
+        {:seon.dev.restore.proof-cut/after-force-before-completion after-force
+         :seon.dev.restore.proof-cut/after-completion-before-evidence-deletion
+         after-completion
+         :seon.dev.restore.proof-cut/after-evidence-deletion-before-autonomous-start
+         after-deletion}]
+    (with-redefs-fn
+      {#'restore-state/require-manifest! (constantly manifest)
+       #'restore-state/retained-intent (constantly intent)
+       #'restore-state/require-selected-branch! (fn [_ _ value] value)
+       #'artifact/current-writer-digest (constantly digest)
+       #'artifact/current-output-digests (constantly artifact-identity)
+       #'restore-state/admin-invocation
+       (fn [& _] {::restore/admin-result-path "/admin.edn"})
+       #'restore-state/read-admin-result (constantly nil)
+       #'restore-state/read-materialization-result (constantly nil)
+       #'restore-state/prepare-observation-writer!
+       (fn [& _] (swap! calls conj :prepare-observation-writer))
+       #'restore-state/create-reserved-branch!
+       (fn [_ _ role] (swap! calls conj [:create role]))
+       #'restore-state/require-next-command!
+       (fn [_ _ command] (swap! calls conj [:require command]))
+       #'restore-state/materialize-retained-blobs!
+       (fn [& _] (swap! calls conj :materialize) blob-result)
+       #'restore-state/stop-retained-pods!
+       (fn [_] (swap! calls conj :stop-retained))
+       #'restore-state/stop-main-consumers!
+       (fn [_ _] (swap! calls conj :stop-main))
+       #'restore-state/invoke-admin!
+       (fn [& _] (swap! calls conj :admin) admin-result)
+       #'restore-state/start-writer-after-admin!
+       (fn [& _] (swap! calls conj :start-writer))
+       #'restore-state/start-restore-pod!
+       (fn [& _] (swap! calls conj :start-restore-pod))
+       #'restore-state/prove-restore-pod!
+       (fn [& _] (swap! calls conj :prove-restore-pod))
+       #'state/delete-edn!
+       (fn [path] (swap! calls conj [:delete path]))
+       #'restore-state/ensure-processes!
+       (fn [_ _ ids] (swap! calls conj [:ensure ids]))
+       #'restore-state/converge!
+       (fn [{effect ::restore-state/effect!}]
+         (doseq [command commands]
+           (effect {::restore/intent intent
+                    ::restore/observation
+                    (observation intent source {} #{} [] {})
+                    ::restore/command command})))}
+      (fn []
+        (doseq [[cut expected-calls] expected]
+          (reset! calls [])
+          (let [error
+                (try
+                  (restore-state/resume!
+                   {::restore-state/configuration configuration
+                    ::restore-state/branch-name "target"
+                    ::restore-state/proof-crash-cut cut})
+                  (catch clojure.lang.ExceptionInfo error error))]
+            (is (= :seon.dev.restore.error/proof-crash-cut
+                   (:seon.error/kind (ex-data error))))
+            (is (= cut (::restore-state/proof-crash-cut (ex-data error))))
+            (is (= expected-calls @calls))))))))
+
 (deftest stale-managed-records-drain-before-restore-replacement
   (let [configuration (config/load! (System/getProperty "user.dir"))
         calls (atom [])
@@ -1178,6 +1271,18 @@
                       ::restore-state/admin-timeout-ms 120000}]]
            @calls))
     (reset! calls [])
+    (let [cut
+          :seon.dev.restore.proof-cut/after-intent-publication-before-force
+          error
+          (try
+            (with-redefs-fn
+              base
+              #(restore-state/apply-undo!
+                (assoc request ::restore-state/proof-crash-cut cut)))
+            (catch clojure.lang.ExceptionInfo error error))]
+      (is (= cut (::restore-state/proof-crash-cut (ex-data error))))
+      (is (= [[:publish intent]] @calls)))
+    (reset! calls [])
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
          #"does not resolve exactly one"
@@ -1192,7 +1297,18 @@
         #(restore-state/apply-undo! request))
       (is (= [[:resume {::restore-state/configuration configuration
                         ::restore-state/admin-timeout-ms 120000}]]
-             @calls)))))
+             @calls))
+      (reset! calls [])
+      (let [cut :seon.dev.restore.proof-cut/after-force-before-completion]
+        (with-redefs-fn
+          (assoc base #'restore-state/retained-intent (constantly intent))
+          #(restore-state/apply-undo!
+            (assoc request ::restore-state/proof-crash-cut cut)))
+        (is (= [[:resume
+                 {::restore-state/configuration configuration
+                  ::restore-state/admin-timeout-ms 120000
+                  ::restore-state/proof-crash-cut cut}]]
+               @calls))))))
 
 (deftest apply-rejects-wrong-or-stale-authority-before-publication
   (let [configuration (config/load! (System/getProperty "user.dir"))
