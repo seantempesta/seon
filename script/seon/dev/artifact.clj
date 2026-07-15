@@ -338,8 +338,8 @@
        "local-inputs"
        (digest-paths root ["build.clj"
                            "deps.edn"
-                           "src"
-                           "reference-code/datahike/src-secondary"])
+                           "java"
+                           "src"])
        "clojure-cli" (capture-command! config ["clojure" "-Sdescribe"])
        "writer-classpath" (capture-command! config
                                              ["clojure" "-Spath" "-M:writer"])

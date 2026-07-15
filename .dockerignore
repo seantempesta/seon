@@ -18,9 +18,8 @@
 !seon-skills/
 !externs/
 
-# Writer-classpath extra paths (deps.edn :simd alias)
+# Writer-classpath preparation inputs
 !dev-resources/
-!reference-code/datahike/src-secondary/
 
 # Bootstrap-bundle post-build fix (babashka script)
 !bin/fix-bootstrap-macros

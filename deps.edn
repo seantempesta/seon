@@ -8,8 +8,7 @@
 
  :aliases
  {;; JVM datahike writer. This alias is the complete server contract: it
-  ;; selects the maintained
-  ;; Datahike/Konserve pair, exposes the optional Proximum source, and carries
+  ;; selects the maintained Datahike/Konserve/Proximum closure and carries
   ;; the launch flags required by its SIMD implementation. Source launch,
   ;; focused tests, the Docker classpath, and writer-uber all use this basis.
   ;;
@@ -17,19 +16,18 @@
   ;; provider.
   :writer
   {:replace-paths ["src"]
-   :extra-paths ["reference-code/datahike/src-secondary"]
    :replace-deps
    {org.clojure/clojure {:mvn/version "1.12.0"}
     metosin/malli {:mvn/version "0.20.0"}
 
     org.replikativ/datahike
     {:git/url "https://github.com/seantempesta/datahike"
-     :git/sha "417649383c65e13f15ea41d394fb1ed742477965"
+     :git/sha "9ada755087228e10cfb179fa5779ce227a6ed220"
      :exclusions [org.clojure/clojurescript
                   com.github.pkpkpk/cljs-cache]}
     org.replikativ/konserve
     {:git/url "https://github.com/seantempesta/konserve"
-     :git/sha "df6818d43ea3363a808cd051c0d68917f1b987a9"
+     :git/sha "b5c99bc02a7175652a610324215288b78551801f"
      :exclusions [org.clojure/clojurescript
                   org.clojars.mmb90/cljs-cache
                   com.github.pkpkpk/cljs-node-io
@@ -40,7 +38,9 @@
 
     com.taoensso/timbre {:mvn/version "6.5.0"}
     com.cognitect/transit-clj {:mvn/version "1.0.333"}
-    org.replikativ/proximum {:mvn/version "0.1.25"}
+    org.replikativ/proximum
+    {:git/url "https://github.com/seantempesta/proximum"
+     :git/sha "9846d3e79e1aee48474bc876d3d563d7137209c6"}
     com.google.genai/google-genai {:mvn/version "1.59.0"}
     com.github.kkuegler/human-readable-ids-java {:mvn/version "0.4"}
     io.github.thibaultmeyer/cuid {:mvn/version "2.0.5"}
@@ -151,14 +151,12 @@
          ;; PR-shaped pending upstream review.
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
-                          :git/sha "417649383c65e13f15ea41d394fb1ed742477965"}
-                         ;; Konserve 0.9.356 plus the shared CLJ/CLJS legacy
-                         ;; one-byte metadata-header reader. The fork publishes
-                         ;; its own 0.9.356-seon.1 Maven resource, so no consumer
-                         ;; version shim is required.
+                          :git/sha "9ada755087228e10cfb179fa5779ce227a6ed220"}
+                         ;; Konserve 0.9.359 plus the shared CLJ/CLJS legacy
+                         ;; header reader and idempotent Node filestore deletion.
                          org.replikativ/konserve
                          {:git/url "https://github.com/seantempesta/konserve"
-                          :git/sha "df6818d43ea3363a808cd051c0d68917f1b987a9"}
+                          :git/sha "b5c99bc02a7175652a610324215288b78551801f"}
                          org.replikativ/superv.async
                          ;; Patched simple-supervisor's stale-pending
                          ;; watchdog to be LAZY: instead of starting a

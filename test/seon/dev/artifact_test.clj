@@ -329,7 +329,7 @@
             'org.replikativ/konserve
             'org.replikativ/proximum
             'thheller/shadow-cljs
-           'org.replikativ/superv.async
+            'org.replikativ/superv.async
             'is.simm/partial-cps]
            (mapv :seon.dev.artifact/dependency-library coordinates)))
     (is (every? #(re-matches #"[0-9a-f]{40}"

@@ -186,11 +186,12 @@
         (is (= (::registry/coordinate applied)
                (::registry/coordinate retry)))))))
 
-(deftest file-backed-proximum-root-divergence-blocks-restore-success
+(deftest file-backed-proximum-root-follows-the-forced-primary-head
   (with-restore-database
     :file
     (fn [{:keys [config request target roster embedding]}]
-      (let [failure (thrown-info #(registry/admin-restore-main! request))
+      (let [applied (registry/admin-restore-main! request)
+            retry (registry/admin-restore-main! request)
             connection (d/connect config)]
         (try
           (let [main-db (d/db connection)
@@ -203,11 +204,14 @@
                 main-index (get-in main-db [:secondary-indices embed/index-ident])
                 target-index
                 (get-in target-db [:secondary-indices embed/index-ident])]
-            (is (= :seon.db.protocol.error/restore-divergence
-                   (:seon.error/kind (ex-data failure))))
-            (is (true? (::registry/force-invoked? (ex-data failure))))
+            (is (= :seon.db.registry.admin/applied
+                   (::registry/admin-outcome applied)))
+            (is (true? (::registry/force-invoked? applied)))
             (is (= :seon.db.restore-admin.connection/released
-                   (::registry/admin-connection-state (ex-data failure))))
+                   (::registry/admin-connection-state applied)))
+            (is (= :seon.db.registry.admin/already-applied
+                   (::registry/admin-outcome retry)))
+            (is (false? (::registry/force-invoked? retry)))
             (is (= roster (set (d/branches connection))))
             (is (= (::coordinate/t target)
                    (::coordinate/t (coordinate/resolved main-db))))
@@ -220,9 +224,9 @@
             (is (= 1 (count (embed/knn target-db embedding 5))))
             (is (= 1 (count (embed/knn main-db embedding 5))))
             (is (some? (index-audit/-merkle-root main-index)))
-            (is (not= (index-audit/-merkle-root target-index)
-                      (index-audit/-merkle-root main-index))
-                "selected force flushes source-branch secondary state under :db"))
+            (is (= (index-audit/-merkle-root target-index)
+                   (index-audit/-merkle-root main-index))
+                "guarded force moves the native secondary with the primary head"))
           (finally
             (d/release connection)))))))
 

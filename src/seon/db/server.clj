@@ -16,8 +16,7 @@
            [java.nio.charset StandardCharsets]
            [java.nio.channels FileChannel]
            [java.nio.file CopyOption Files OpenOption StandardCopyOption]
-           [java.nio.file.attribute FileAttribute])
-  (:gen-class))
+           [java.nio.file.attribute FileAttribute]))
 
 (schema/register! ::arguments [:sequential :string])
 (schema/register! ::database-name :seon.db.writer/database-name)

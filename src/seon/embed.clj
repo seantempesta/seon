@@ -26,7 +26,8 @@
    (writing.cljc) re-instantiates every secondary index on every conn open. For
    a `:proximum` index it dispatches `-sec-restore`, which `load-commit`s the
    committed HNSW from Proximum's konserve store. Our datahike fork's `:proximum`
-   factory (src-secondary/.../proximum.clj) is CONNECT-IF-EXISTS: when the
+   factory (the Datahike Git dependency's src-secondary/.../proximum.clj) is
+   CONNECT-IF-EXISTS: when the
    konserve store already exists it returns a passive restore-skeleton instead
    of `create-store`-ing a fresh one — so `-sec-restore`→`load-commit` populates
    the real index from durable storage. The durable konserve store therefore
@@ -63,8 +64,9 @@
    build on. DOCUMENTS get no prefix; only queries do (v2 has no taskType).
 
    Runs on the WIRE-SERVER classpath (the `:writer` alias), which exposes
-   `reference-code/datahike/src-secondary` + the `org.replikativ/proximum`
-   dep + the required `--add-modules jdk.incubator.vector` JVM flags. The
+   the Datahike Git dependency's `src-secondary` path + the
+   `org.replikativ/proximum` dependency + the required
+   `--add-modules jdk.incubator.vector` JVM flags. The
    database server transacts all writes as raw Datahike maps through its single
    conn (it does NOT route through `seon.db/transact!`); `install!` follows
    the same convention — it transacts directly via `datahike.api/transact`."
