@@ -1062,7 +1062,9 @@
       ::protocol/restore-completions
       (::registry/restore-completions observation)
       ::protocol/completed-restore-ids
-      (::registry/completed-restore-ids observation)})))
+      (::registry/completed-restore-ids observation)
+      ::protocol/restore-completion-transaction-ts
+      (::registry/restore-completion-transaction-ts observation)})))
 
 (defn- handle-release-database
   [request]

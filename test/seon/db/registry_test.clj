@@ -416,6 +416,13 @@
            (datahike.schema/malli-map->datahike-schema completion-schema)))
     (d/transact connection [completion])
     (let [main-db (d/db connection)
+          completion-t
+          (d/q '[:find ?transaction .
+                 :in $ ?id
+                 :where
+                 [?completion :seon.db.restore/id ?id ?transaction true]]
+               (d/history main-db)
+               completion-id)
           observation
           (registry/observe-database-lifecycle
            {::registry/database-name database-name})]
@@ -424,8 +431,10 @@
       (is (= [completion] (::registry/restore-completions observation)))
       (is (= #{completion-id}
              (::registry/completed-restore-ids observation)))
+      (is (= {completion-id completion-t}
+             (::registry/restore-completion-transaction-ts observation)))
       (let [original-pull d/pull
-            malformed
+            foreign
             (with-redefs [d/pull
                           (fn [db pattern lookup-ref]
                             (assoc (original-pull db pattern lookup-ref)
@@ -436,7 +445,39 @@
                 nil
                 (catch clojure.lang.ExceptionInfo exception exception)))]
         (is (= :seon.db.protocol.error/restore-divergence
-               (:seon.error/kind (ex-data malformed))))))))
+               (:seon.error/kind (ex-data foreign)))))
+      (let [original-pull d/pull
+            malformed
+            (with-redefs [d/pull
+                          (fn [db pattern lookup-ref]
+                            (dissoc (original-pull db pattern lookup-ref)
+                                    ::db.restore/to-t))]
+              (try
+                (registry/observe-database-lifecycle
+                 {::registry/database-name database-name})
+                nil
+                (catch clojure.lang.ExceptionInfo exception exception)))]
+        (is (= :seon.db.protocol.error/restore-divergence
+               (:seon.error/kind (ex-data malformed)))))
+      (let [original-q d/q
+            transaction-query
+            '[:find ?id ?transaction
+              :where
+              [?completion :seon.db.restore/id ?id ?transaction true]]
+            ambiguous
+            (with-redefs [d/q
+                          (fn [query db & inputs]
+                            (if (= transaction-query query)
+                              #{[completion-id completion-t]
+                                [completion-id (inc completion-t)]}
+                              (apply original-q query db inputs)))]
+              (try
+                (registry/observe-database-lifecycle
+                 {::registry/database-name database-name})
+                nil
+                (catch clojure.lang.ExceptionInfo exception exception)))]
+        (is (= :seon.db.protocol.error/restore-divergence
+               (:seon.error/kind (ex-data ambiguous))))))))
 
 (deftest lifecycle-observation-fails-closed-on-partial-or-moving-storage
   (let [database-name :registry/lifecycle-observation-failure

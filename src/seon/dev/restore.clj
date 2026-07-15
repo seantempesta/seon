@@ -17,6 +17,7 @@
 (schema/register! ::selected-target-descriptor ::launch/descriptor)
 (schema/register! ::undo-branch :keyword)
 (schema/register! ::prepared-target-branch :keyword)
+(schema/register! ::reserved-branch-roster [:set :keyword])
 (schema/register! ::undo-coordinate ::coordinate/coordinate)
 (schema/register! ::prepared-target-coordinate ::coordinate/coordinate)
 (schema/register! ::expected-branch-roster [:set :keyword])
@@ -29,10 +30,11 @@
 (schema/register! ::intent-path ::launch/path)
 (schema/register! ::branch-heads [:map-of :keyword ::coordinate/coordinate])
 (schema/register! ::main-coordinate ::coordinate/coordinate)
-(schema/register! ::forced-main-coordinate ::coordinate/coordinate)
-(schema/register! ::forced-main-parent-commit-ids [:set :uuid])
+(schema/register! ::main-parent-commit-ids [:set :uuid])
 (schema/register! ::completed-intent-ids [:set ::intent-id])
 (schema/register! ::completion-facts [:vector ::db.restore/completion])
+(schema/register! ::completion-transaction-ts
+                  [:map-of ::intent-id ::coordinate/t])
 (schema/register! ::selected-completion-id ::intent-id)
 (schema/register! ::selected-undo-branch :keyword)
 (schema/register!
@@ -105,10 +107,11 @@
  ::observation
   [:map {:closed true}
   [::main-coordinate ::main-coordinate]
-  [::forced-main-coordinate {:optional true} ::forced-main-coordinate]
-  [::forced-main-parent-commit-ids ::forced-main-parent-commit-ids]
+  [::main-parent-commit-ids ::main-parent-commit-ids]
   [::branch-heads ::branch-heads]
-  [::completed-intent-ids ::completed-intent-ids]])
+  [::completed-intent-ids ::completed-intent-ids]
+  [::completion-facts ::completion-facts]
+  [::completion-transaction-ts ::completion-transaction-ts]])
 
 (schema/register!
  ::admin-invocation-request
@@ -155,6 +158,15 @@
 
 (defn- reserved-branch [role intent-id]
   (keyword (str "seon.restore." (name role)) (str "r-" intent-id)))
+
+(defn reserved-branch-roster
+  "Add the two intent-derived restore branches to one observed native roster."
+  {:malli/schema
+   [:=> [:cat ::intent-id [:set :keyword]] ::reserved-branch-roster]}
+  [intent-id observed-roster]
+  (conj observed-roster
+        (reserved-branch :undo intent-id)
+        (reserved-branch :target intent-id)))
 
 (defn- descriptor-coordinate [descriptor]
   (get-in descriptor [::launch/database ::coordinate/coordinate]))
@@ -444,20 +456,52 @@
      (str cluster-dir "/lifecycle/restore-admin-" (::intent-id intent) ".edn")
      ::admin-timeout-ms admin-timeout-ms}))
 
+(defn- completion-ids [completion-facts]
+  (mapv ::db.restore/id completion-facts))
+
+(defn- expected-completion-with-forced-commit
+  [intent forced-commit-id]
+  (let [from
+        (descriptor-coordinate (::pre-restore-main-descriptor intent))
+        to
+        (descriptor-coordinate (::selected-target-descriptor intent))
+        database-name
+        (get-in intent [::pre-restore-main-descriptor
+                        ::launch/database ::protocol/database-name])]
+    {::db.restore/id (::intent-id intent)
+     ::db.restore/db-name (keyword database-name)
+     ::db.restore/database-id (::coordinate/database-id from)
+     ::db.restore/from-branch (::coordinate/branch from)
+     ::db.restore/from-commit-id (::coordinate/commit-id from)
+     ::db.restore/from-t (::coordinate/t from)
+     ::db.restore/to-branch (::coordinate/branch to)
+     ::db.restore/to-commit-id (::coordinate/commit-id to)
+     ::db.restore/to-t (::coordinate/t to)
+     ::db.restore/forced-commit-id forced-commit-id
+     ::db.restore/undo-branch (::undo-branch intent)
+     ::db.restore/target-branch (::prepared-target-branch intent)}))
+
 (defn- validate-observation-consistency! [intent observation]
   (let [pre-restore-main
         (descriptor-coordinate (::pre-restore-main-descriptor intent))
         database-id (::coordinate/database-id pre-restore-main)
+        database-name
+        (keyword
+         (get-in intent [::pre-restore-main-descriptor
+                         ::launch/database ::protocol/database-name]))
         main (::main-coordinate observation)
-        forced-main (::forced-main-coordinate observation)
-        forced-parents (::forced-main-parent-commit-ids observation)
+        main-parents (::main-parent-commit-ids observation)
         heads (::branch-heads observation)
+        completions (::completion-facts observation)
+        observed-completion-ids (completion-ids completions)
+        completed-intent-ids (::completed-intent-ids observation)
+        completion-transaction-ts (::completion-transaction-ts observation)
         expected-roster (::expected-branch-roster intent)
         undo-branch (::undo-branch intent)
         prepared-target-branch (::prepared-target-branch intent)
         required-existing-roster
         (disj expected-roster undo-branch prepared-target-branch)
-        points (cond-> (into [main] (vals heads)) forced-main (conj forced-main))]
+        points (into [main] (vals heads))]
     (require-consistency!
      (every? #(= database-id (::coordinate/database-id %)) points)
      "Restore observations cross physical databases."
@@ -473,20 +517,31 @@
      "The observed durable branch roster is missing or contains an unknown branch."
      {::expected-branch-roster expected-roster
       ::branch-heads heads})
-    (when forced-main
-      (require-consistency!
-       (and (= main forced-main)
-            (= (::coordinate/branch pre-restore-main)
-               (::coordinate/branch forced-main))
-            (not= pre-restore-main forced-main))
-       "The observed forced main coordinate is not the exact current main."
-       {::main-coordinate main
-        ::forced-main-coordinate forced-main}))
     (require-consistency!
-     (= (boolean forced-main) (boolean (seq forced-parents)))
-     "Forced-main parent evidence exists without its exact result coordinate."
-     {::forced-main-coordinate forced-main
-      ::forced-main-parent-commit-ids forced-parents})
+     (and (= (count observed-completion-ids)
+             (count (set observed-completion-ids)))
+          (= completed-intent-ids (set observed-completion-ids))
+          (= completed-intent-ids
+             (set (keys completion-transaction-ts))))
+     "Restore completion facts and transaction evidence disagree."
+     {::completed-intent-ids completed-intent-ids
+      :seon.dev.restore/completion-fact-ids observed-completion-ids
+      ::completion-transaction-ts completion-transaction-ts})
+    (require-consistency!
+     (every?
+      (fn [completion]
+        (and (= database-id (::db.restore/database-id completion))
+             (= database-name (::db.restore/db-name completion))))
+      completions)
+     "Restore completion observations cross logical or physical databases."
+     {::intent-id (::intent-id intent)
+      ::completion-facts completions})
+    (require-consistency!
+     (every? #(<= % (::coordinate/t main))
+             (vals completion-transaction-ts))
+     "A restore completion transaction is later than the observed main head."
+     {::main-coordinate main
+      ::completion-transaction-ts completion-transaction-ts})
     observation))
 
 (defn next-command
@@ -508,22 +563,35 @@
         undo-head (get heads (::undo-branch intent))
         target-head (get heads (::prepared-target-branch intent))
         main (::main-coordinate observation)
-        forced-main (::forced-main-coordinate observation)
+        main-parents (::main-parent-commit-ids observation)
         pre-restore-main? (= pre-restore-main main)
         selected-target-parent?
         (= #{(::coordinate/commit-id selected-target)}
-           (::forced-main-parent-commit-ids observation))
-        completed?
-        (contains? (::completed-intent-ids observation) intent-id)
+           main-parents)
+        matching-completions
+        (filterv #(= intent-id (::db.restore/id %))
+                 (::completion-facts observation))
+        completion (first matching-completions)
+        completion-transaction-t
+        (get (::completion-transaction-ts observation) intent-id)
+        completion-forced-commit-id
+        (::db.restore/forced-commit-id completion)
+        completion-current?
+        (and completion
+             (= completion
+                (expected-completion-with-forced-commit
+                 intent completion-forced-commit-id))
+             (= completion-transaction-t (::coordinate/t main))
+             (= #{completion-forced-commit-id} main-parents))
         reserved-heads-converged?
         (and (= undo undo-head) (= target target-head))
         command
         (cond
-          (and forced-main completed? selected-target-parent?
+          (and completion-current?
                reserved-heads-converged?)
           :seon.dev.restore.command/prove-readiness
 
-          completed?
+          completion
           :seon.dev.restore.command/diagnose-divergence
 
           (and pre-restore-main? (nil? undo-head))
@@ -541,7 +609,7 @@
           pre-restore-main?
           :seon.dev.restore.command/prepare-exclusive-transition
 
-          (and forced-main selected-target-parent?
+          (and (not pre-restore-main?) selected-target-parent?
                reserved-heads-converged?)
           :seon.dev.restore.command/reconstruct-and-complete
 

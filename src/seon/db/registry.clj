@@ -78,6 +78,8 @@
 (schema/register! ::branch-coordinates [:map-of :keyword ::coordinate])
 (schema/register! ::restore-completions [:vector ::db.restore/completion])
 (schema/register! ::completed-restore-ids [:set ::db.restore/id])
+(schema/register! ::restore-completion-transaction-ts
+                  [:map-of ::db.restore/id ::coordinate/t])
 (schema/register! ::pre-restore-main-coordinate ::coordinate)
 (schema/register! ::selected-target-coordinate ::coordinate)
 (schema/register! ::prepared-target-coordinate ::coordinate)
@@ -145,7 +147,9 @@
   [::branch-coordinates ::branch-coordinates]
   [::branch-roster ::branch-roster]
   [::restore-completions ::restore-completions]
-  [::completed-restore-ids ::completed-restore-ids]])
+  [::completed-restore-ids ::completed-restore-ids]
+  [::restore-completion-transaction-ts
+   ::restore-completion-transaction-ts]])
 
 (schema/register!
  ::create-branch!-request
@@ -642,6 +646,17 @@
                        main-db)
                  sort
                  vec)
+        transaction-rows
+        (d/q '[:find ?id ?transaction
+               :where
+               [?completion :seon.db.restore/id ?id ?transaction true]]
+             (d/history main-db))
+        transactions-by-id
+        (reduce
+         (fn [result [completion-id transaction]]
+           (update result completion-id (fnil conj #{}) transaction))
+         {}
+         transaction-rows)
         completions
         (mapv
          (fn [completion-id]
@@ -662,10 +677,35 @@
                  :seon.db.restore/id completion-id
                  :seon.db.restore/completion completion}))
              completion))
-         ids)]
+         ids)
+        transaction-ts
+        (into {}
+              (map
+               (fn [completion-id]
+                 (let [transactions (get transactions-by-id completion-id)]
+                   (when-not (= 1 (count transactions))
+                     (lifecycle-fail!
+                      :seon.db.protocol.error/restore-divergence
+                      "A durable restore completion has no unique publication transaction."
+                      {::database-name database-name
+                       ::main-coordinate main-coordinate
+                       :seon.db.restore/id completion-id
+                       :seon.db.restore/transaction-ids transactions}))
+                   [completion-id (first transactions)])))
+              ids)]
+    (when-not (= (set ids) (set (keys transactions-by-id)))
+      (lifecycle-fail!
+       :seon.db.protocol.error/restore-divergence
+       "Restore completion history disagrees with the current main database."
+       {::database-name database-name
+        ::main-coordinate main-coordinate
+        ::completed-restore-ids (set ids)
+        :seon.db.restore/historical-completion-ids
+        (set (keys transactions-by-id))}))
     {::main-parent-commit-ids (set (or (d/parent-commit-ids main-db) []))
      ::restore-completions completions
-     ::completed-restore-ids (set ids)}))
+     ::completed-restore-ids (set ids)
+     ::restore-completion-transaction-ts transaction-ts}))
 
 (defn- observe-main-lifecycle-facts!
   [database-name connection attachment expected-coordinate]
@@ -755,7 +795,9 @@
            ::branch-coordinates branch-coordinates
            ::branch-roster roster-before
            ::restore-completions (::restore-completions main-facts)
-           ::completed-restore-ids (::completed-restore-ids main-facts)})))))
+           ::completed-restore-ids (::completed-restore-ids main-facts)
+           ::restore-completion-transaction-ts
+           (::restore-completion-transaction-ts main-facts)})))))
 
 (defn- datahike-lifecycle-kind
   [throwable]
