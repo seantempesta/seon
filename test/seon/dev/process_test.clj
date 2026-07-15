@@ -1987,6 +1987,29 @@
       (finally
         (fs/delete-tree directory {:force true})))))
 
+(deftest restore-pod-launch-consumes-the-precommitted-generation
+  (let [expected (random-uuid)
+        fallback (random-uuid)
+        configuration
+        (assoc-in
+         (test-config)
+         [:seon.dev.config/launch-descriptor
+          ::launch/restore-startup
+          :seon.dev.restore/startup-identity
+          :seon.dev.restore/consumer-generations
+          process/pod-id]
+         expected)]
+    (with-redefs [random-uuid (constantly fallback)]
+      (is (= expected
+             (#'process/selected-process-generation
+              configuration process/pod-id)))
+      (is (= fallback
+             (#'process/selected-process-generation
+              configuration process/watcher-id)))
+      (is (= fallback
+             (#'process/selected-process-generation
+              (test-config) process/pod-id))))))
+
 (deftest branch-descriptor-publishes-one-pod-with-real-external-owners
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)

@@ -684,10 +684,21 @@
 
 (declare abort-unpublished-containment! adopt-containment!)
 
+(defn- selected-process-generation
+  [config id]
+  (or (when (= pod-id id)
+        (get-in config
+                [:seon.dev.config/launch-descriptor
+                 ::launch/restore-startup
+                 :seon.dev.restore/startup-identity
+                 :seon.dev.restore/consumer-generations
+                 pod-id]))
+      (random-uuid)))
+
 (defn- spawn-detached! [config spec]
   (let [id (:seon.dev.process/id spec)
         instance (str (random-uuid))
-        generation (random-uuid)
+        generation (selected-process-generation config id)
         log (log-file config id instance)
         containment-dir
         (fs/path (fs/parent (state-file config id)) "containment"
