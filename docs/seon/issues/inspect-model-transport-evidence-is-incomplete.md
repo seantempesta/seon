@@ -102,6 +102,16 @@ and reopen one native admitted `.eval` as the end-to-end proof. The dedicated
 launcher and health/request boundary own server identity. Per-call evidence is
 never inferred from final/current state or from `/v1/models` alone.
 
+The source-grounded owner and falsifiers are now fixed in
+[[../../prds/agentic-tool-refinement/research/model-server-identity-audit-2026-07-15]].
+Extend the existing native start/end admission with one model-server snapshot,
+then join that map to the existing ordered attempt endpoint, requested model,
+response model, and fingerprint in the common capability gate. MLX is the
+first formal path: one dedicated PID/start identity, one absolute Hugging Face
+snapshot in both launch and request, and one canonical content-manifest
+digest. Ollama tags remain insufficient without their manifest and loaded
+digests. This is not a new runner, supervisor, or Datahike attempt schema.
+
 ## Acceptance
 
 - Transact AI row A with a distinct endpoint and timeout, retain its complete
