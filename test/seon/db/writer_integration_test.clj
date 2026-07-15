@@ -223,6 +223,107 @@
           (run! (fn [^File file] (.delete file))
                 (reverse (file-seq database-root))))))))
 
+(deftest typed-native-branch-lifecycle-routes-through-one-writer
+  (let [source-name (str "writer-lifecycle-source-" (random-uuid))
+        target-name (str "writer-lifecycle-target-" (random-uuid))
+        request-path (socket-path "life-req")
+        publish-path (socket-path "life-pub")
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name source-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})]
+    (try
+      (with-open [channel (uds/connect! request-path)]
+        (let [initial-head
+              (::registry/coordinate
+               (registry/resolve-connection
+                {::registry/database-name (keyword source-name)}))
+              source-write
+              (call! channel
+                     (protocol/transaction-request
+                      {::protocol/database-name source-name
+                       ::protocol/request-id "lifecycle/source-schema"
+                       ::protocol/transaction-data
+                       [{:db/ident :writer.lifecycle/value
+                         :db/valueType :db.type/string
+                         :db/cardinality :db.cardinality/one}
+                        {:writer.lifecycle/value "shared"}]}))
+              source-head (::protocol/coordinate source-write)
+              branch :experiment/typed-lifecycle
+              stale
+              (call! channel
+                     (protocol/create-branch-request
+                      {::protocol/source-database-name source-name
+                       ::protocol/target-database-name target-name
+                       ::protocol/source-coordinate source-head
+                       ::protocol/expected-source-head initial-head
+                       ::protocol/target-branch branch}))
+              created
+              (call! channel
+                     (protocol/create-branch-request
+                      {::protocol/source-database-name source-name
+                       ::protocol/target-database-name target-name
+                       ::protocol/source-coordinate source-head
+                       ::protocol/expected-source-head source-head
+                       ::protocol/target-branch branch}))
+              target-attachment (::protocol/target-attachment created)
+              target-write
+              (call! channel
+                     (protocol/transaction-request
+                      {::protocol/database-name target-name
+                       ::protocol/request-id "lifecycle/target-write"
+                       ::protocol/transaction-data
+                       [{:writer.lifecycle/value "target-only"}]}))
+              target-head (::protocol/coordinate target-write)
+              source-connection
+              (::registry/conn
+               (registry/resolve-connection
+                {::registry/database-name (keyword source-name)}))
+              target-connection
+              (::registry/conn
+               (registry/resolve-connection
+                {::registry/database-name (keyword target-name)}))]
+          (is (= protocol/stale-source-head-error
+                 (::protocol/error-kind stale)))
+          (is (::protocol/success? created))
+          (is (true? (::protocol/created? created)))
+          (is (false? (::protocol/adopted? created)))
+          (is (= (assoc source-head ::coordinate/branch branch)
+                 (::protocol/coordinate created)))
+          (is (::protocol/success? target-write))
+          (is (some? (d/q '[:find ?entity .
+                             :where [?entity :writer.lifecycle/value "target-only"]]
+                           (d/db target-connection))))
+          (is (nil? (d/q '[:find ?entity .
+                            :where [?entity :writer.lifecycle/value "target-only"]]
+                          (d/db source-connection))))
+          (let [released
+                (call! channel
+                       (protocol/release-database-request
+                        {::protocol/target-database-name target-name
+                         ::protocol/target-attachment target-attachment
+                         ::protocol/expected-target-head target-head}))
+                deleted
+                (call! channel
+                       (protocol/delete-branch-request
+                        {::protocol/source-database-name source-name
+                         ::protocol/target-database-name target-name
+                         ::protocol/target-attachment target-attachment
+                         ::protocol/expected-target-head target-head}))]
+            (is (::protocol/success? released))
+            (is (true? (::protocol/released? released)))
+            (is (::protocol/success? deleted))
+            (is (false? (::protocol/released? deleted)))
+            (is (true? (::protocol/deleted? deleted)))
+            (is (not (contains? (d/branches source-connection) branch))))))
+      (finally
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
+
 (deftest canonical-writes-route-commit-and-publish-exactly-once
   (let [database-name (str "writer-integration-" (random-uuid))
         request-path (socket-path "request")

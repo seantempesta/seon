@@ -772,6 +772,12 @@
     attachment (assoc ::registry/attachment attachment)
     database-path (assoc ::registry/path database-path)))
 
+(defn- connection-initializer
+  [runtime]
+  (fn [initialize-request]
+    (initialize-connection!
+     (assoc initialize-request ::runtime runtime))))
+
 (defn- handle-ensure-database
   [runtime request]
   (let [database-name (::protocol/database-name request)
@@ -782,9 +788,7 @@
           (::protocol/backend request)
           (::protocol/database-path request)
           (::coordinate/attachment request)
-          (fn [initialize-request]
-            (initialize-connection!
-             (assoc initialize-request ::runtime runtime)))))
+          (connection-initializer runtime)))
         backend-kind (::registry/backend entry)
         database-path (::registry/path entry)]
     (protocol/success
@@ -794,6 +798,65 @@
        ::protocol/backend backend-kind}
        database-path
        (assoc ::protocol/database-path database-path)))))
+
+(defn- handle-create-branch
+  [runtime request]
+  (let [result
+        (registry/create-branch!
+         {::registry/source-database-name
+          (keyword (::protocol/source-database-name request))
+          ::registry/target-database-name
+          (keyword (::protocol/target-database-name request))
+          ::registry/source-coordinate (::protocol/source-coordinate request)
+          ::registry/expected-source-head
+          (::protocol/expected-source-head request)
+          ::registry/target-branch (::protocol/target-branch request)
+          ::registry/initialize-connection!
+          (connection-initializer runtime)})]
+    (protocol/success
+     (cond-> {::protocol/target-database-name
+              (::protocol/target-database-name request)
+              ::protocol/target-attachment (::registry/attachment result)
+              ::protocol/coordinate (::registry/coordinate result)
+              ::protocol/backend (::registry/backend result)
+              ::protocol/created? (::registry/created? result)
+              ::protocol/adopted? (::registry/adopted? result)}
+       (::registry/path result)
+       (assoc ::protocol/database-path (::registry/path result))))))
+
+(defn- handle-release-database
+  [request]
+  (let [result
+        (registry/release-attachment!
+         {::registry/target-database-name
+          (keyword (::protocol/target-database-name request))
+          ::registry/attachment (::protocol/target-attachment request)
+          ::registry/expected-target-head
+          (::protocol/expected-target-head request)})]
+    (protocol/success
+     {::protocol/target-database-name
+      (::protocol/target-database-name request)
+      ::protocol/target-attachment (::registry/attachment result)
+      ::protocol/released? (::registry/released? result)})))
+
+(defn- handle-delete-branch
+  [request]
+  (let [result
+        (registry/delete-branch!
+         {::registry/source-database-name
+          (keyword (::protocol/source-database-name request))
+          ::registry/target-database-name
+          (keyword (::protocol/target-database-name request))
+          ::registry/attachment (::protocol/target-attachment request)
+          ::registry/expected-target-head
+          (::protocol/expected-target-head request)})]
+    (protocol/success
+     {::protocol/target-database-name
+      (::protocol/target-database-name request)
+      ::protocol/target-attachment (::registry/attachment result)
+      ::protocol/source-head (::registry/coordinate result)
+      ::protocol/released? (::registry/released? result)
+      ::protocol/deleted? (::registry/deleted? result)})))
 
 (defn- connection-for-request
   [request]
@@ -939,6 +1002,15 @@
          :seon.db.protocol.operation/ensure-database
          (handle-ensure-database runtime request)
 
+         :seon.db.protocol.operation/create-branch
+         (handle-create-branch runtime request)
+
+         :seon.db.protocol.operation/release-database
+         (handle-release-database request)
+
+         :seon.db.protocol.operation/delete-branch
+         (handle-delete-branch request)
+
          (if-let [{::keys [connection database-name]}
                   (connection-for-request request)]
            (case (::protocol/operation request)
@@ -958,7 +1030,16 @@
        (catch clojure.lang.ExceptionInfo exception
          (protocol/failure
           {::protocol/error-kind
-           (or (::failure-kind (ex-data exception)) protocol/database-error)
+           (let [kind (:seon.error/kind (ex-data exception))]
+             (cond
+               (::failure-kind (ex-data exception))
+               (::failure-kind (ex-data exception))
+
+               (or (= protocol/not-found-error kind)
+                   (contains? protocol/lifecycle-error-kinds kind))
+               kind
+
+               :else protocol/database-error))
            ::protocol/error
            (str (.getMessage exception) " " (pr-str (ex-data exception)))}))
        (catch Throwable throwable

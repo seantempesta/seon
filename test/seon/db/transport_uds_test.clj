@@ -96,6 +96,48 @@
     (is (= attachment (::coordinate/attachment decoded)))
     (is (= request decoded))))
 
+(deftest lifecycle-requests-are-closed-and-transit-stable
+  (let [source
+        {::coordinate/database-id
+         #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
+         ::coordinate/branch :db
+         ::coordinate/commit-id
+         #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
+         ::coordinate/t 536870929}
+        target-attachment
+        (assoc (coordinate/attachment source)
+               ::coordinate/branch :experiment/lifecycle)
+        target-head (merge source target-attachment)
+        requests
+        [(protocol/create-branch-request
+          {::protocol/source-database-name "default"
+           ::protocol/target-database-name "default-lifecycle"
+           ::protocol/source-coordinate source
+           ::protocol/expected-source-head source
+           ::protocol/target-branch :experiment/lifecycle})
+         (protocol/release-database-request
+          {::protocol/target-database-name "default-lifecycle"
+           ::protocol/target-attachment target-attachment
+           ::protocol/expected-target-head target-head})
+         (protocol/delete-branch-request
+          {::protocol/source-database-name "default"
+           ::protocol/target-database-name "default-lifecycle"
+           ::protocol/target-attachment target-attachment
+           ::protocol/expected-target-head target-head})]]
+    (is (every? protocol/valid-request? requests))
+    (is (= requests (mapv #(uds/decode (uds/encode %)) requests)))
+    (is (every? false?
+                (map #(protocol/valid-request?
+                       (assoc % :unexpected/field true))
+                     requests))
+        "lifecycle requests reject unknown fields")
+    (is (false? (protocol/valid-request?
+                 (dissoc (first requests) ::protocol/source-coordinate))))
+    (is (false? (protocol/valid-request?
+                 (assoc (second requests)
+                        ::protocol/expected-target-head
+                        (coordinate/attachment target-head)))))))
+
 (deftest request-server-delivers-maps-without-interpreting-them
   (let [path (socket-path "transport-request")
         seen (atom [])

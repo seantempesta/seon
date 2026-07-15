@@ -41,6 +41,8 @@
 ;;; --- Schemas ---------------------------------------------------------------
 
 (schema/register! ::database-name :seon.db.backend/database-name)
+(schema/register! ::source-database-name ::database-name)
+(schema/register! ::target-database-name ::database-name)
 (schema/register! ::backend :seon.db.backend/backend)
 (schema/register! ::path :seon.db.backend/path)
 (schema/register! ::initial-tx :seon.db.backend/initial-tx)
@@ -54,6 +56,13 @@
 (schema/register! ::open-intent
                   [:enum :seon.db.registry.open/main
                    :seon.db.registry.open/branch])
+(schema/register! ::source-coordinate ::coordinate)
+(schema/register! ::expected-source-head ::coordinate)
+(schema/register! ::expected-target-head ::coordinate)
+(schema/register! ::target-branch :keyword)
+(schema/register! ::created? :boolean)
+(schema/register! ::adopted? :boolean)
+(schema/register! ::deleted? :boolean)
 
 ;; A live conn is an opaque clojure.lang.IAtom2 (datahike connection
 ;; type). We don't constrain its shape; the registry hands it out as-is.
@@ -64,7 +73,6 @@
                    [::conn ::conn]
                    [::attachment ::attachment]
                    [::backend ::backend]
-                   [::entry-state ::entry-state]
                    [::path {:optional true} ::path]
                    [::release-error {:optional true} ::release-error]
                    [::initialization-error {:optional true}
@@ -101,6 +109,55 @@
 
 (schema/register! ::ensure-database!-response ::entry-view)
 
+(schema/register!
+ ::create-branch!-request
+ [:map
+  [::source-database-name ::source-database-name]
+  [::target-database-name ::target-database-name]
+  [::source-coordinate ::source-coordinate]
+  [::expected-source-head ::expected-source-head]
+  [::target-branch ::target-branch]
+  [::initialize-connection! 'fn?]])
+(schema/register!
+ ::create-branch!-response
+ [:map
+  [::target-database-name ::target-database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::backend ::backend]
+  [::path {:optional true} ::path]
+  [::created? ::created?]
+  [::adopted? ::adopted?]])
+
+(schema/register!
+ ::release-attachment!-request
+ [:map
+  [::target-database-name ::target-database-name]
+  [::attachment ::attachment]
+  [::expected-target-head ::expected-target-head]])
+(schema/register!
+ ::release-attachment!-response
+ [:map
+  [::target-database-name ::target-database-name]
+  [::attachment ::attachment]
+  [::released? :boolean]])
+
+(schema/register!
+ ::delete-branch!-request
+ [:map
+  [::source-database-name ::source-database-name]
+  [::target-database-name ::target-database-name]
+  [::attachment ::attachment]
+  [::expected-target-head ::expected-target-head]])
+(schema/register!
+ ::delete-branch!-response
+ [:map
+  [::target-database-name ::target-database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::released? :boolean]
+  [::deleted? ::deleted?]])
+
 (schema/register! ::release-database!-response
                   [:map
                    [::database-name ::database-name]
@@ -111,26 +168,6 @@
                   [:map
                    [::released? :boolean]
                    [::deleted? :boolean]
-                   [::error {:optional true} :string]])
-
-;; Legacy physical-copy fork point: a transaction id inside the selected
-;; source database. Public historical identities must be resolved complete
-;; coordinates before this third-party boundary is reached.
-(schema/register! ::at :int)
-
-(schema/register! ::fork-database!-request
-                  [:map
-                   [::database-name ::database-name]
-                   [::fork-database-name ::database-name]
-                   [::at {:optional true} ::at]
-                   [::path {:optional true} ::path]])
-
-(schema/register! ::fork-database!-response
-                  [:map
-                   [::forked? :boolean]
-                   [::database-name {:optional true} ::database-name]
-                   [::basis-t {:optional true} :int]
-                   [::path {:optional true} ::path]
                    [::error {:optional true} :string]])
 
 (schema/register! ::database-summary
@@ -191,22 +228,34 @@
   [{::keys [conn]}]
   (coordinate/resolved (d/db conn)))
 
+(defn- cleanup-required?
+  [entry]
+  (boolean (or (::release-error entry)
+               (::initialization-error entry))))
+
+(defn- derived-entry-state
+  [entry]
+  (if (cleanup-required? entry)
+    :seon.db.registry.entry/cleanup-required
+    :seon.db.registry.entry/ready))
+
 (defn- entry-view
   [database-name entry]
   (assoc entry
          ::database-name database-name
+         ::entry-state (derived-entry-state entry)
          ::coordinate (current-coordinate entry)))
 
 (defn- summary
   "Public view of an entry, sans live conn."
-  [database-name {::keys [attachment backend entry-state path release-error
+  [database-name {::keys [attachment backend path release-error
                           initialization-error]
                   :as entry}]
   (cond-> {::database-name database-name
            ::attachment attachment
            ::coordinate (current-coordinate entry)
            ::backend backend
-           ::entry-state entry-state}
+           ::entry-state (derived-entry-state entry)}
     path (assoc ::path path)
     release-error (assoc ::release-error release-error)
     initialization-error (assoc ::initialization-error initialization-error)))
@@ -282,7 +331,7 @@
       ::existing-attachment (::attachment entry)
       ::existing-backend (::backend entry)
       ::existing-path (::path entry)}))
-  (if (= :seon.db.registry.entry/cleanup-required (::entry-state entry))
+  (if (cleanup-required? entry)
     (throw
      (ex-info "A failed database open still requires resource cleanup."
               {:seon.error/kind :seon.db.registry.error/cleanup-required
@@ -330,7 +379,11 @@
            {::database-name database-name
             ::attachment attachment
             ::available-branches (d/branches source)}))))
-    (let [conn (d/connect (id/allocation-connect-config cfg))]
+    (let [conn (d/connect (id/allocation-connect-config cfg))
+          entry (cond-> {::conn conn
+                         ::attachment attachment
+                         ::backend backend-kind}
+                  path (assoc ::path path))]
       (try
         (id/assert-allocation-writer! conn)
         (let [actual (coordinate/attachment (coordinate/resolved (d/db conn)))]
@@ -340,13 +393,27 @@
              {::database-name database-name
               ::attachment attachment
               ::actual-attachment actual})))
-        (cond-> {::conn conn
-                 ::attachment attachment
-                 ::backend backend-kind
-                 ::entry-state :seon.db.registry.entry/ready}
-          path (assoc ::path path))
+        entry
         (catch Throwable throwable
-          (try (d/release conn) (catch Throwable _))
+          (try
+            (d/release conn)
+            (catch Throwable release-throwable
+              (let [retained
+                    (assoc entry
+                           ::initialization-error (.toString throwable)
+                           ::release-error (.toString release-throwable))]
+                (swap! !registry assoc database-name retained)
+                (throw
+                 (ex-info
+                  "Database open validation failed and connection cleanup is unproved."
+                  {:seon.error/kind
+                   :seon.db.registry.error/cleanup-required
+                   ::database-name database-name
+                   ::attachment attachment
+                   ::coordinate (current-coordinate retained)
+                   ::initialization-error (.toString throwable)
+                   ::release-error (.toString release-throwable)}
+                  throwable)))))
           (throw throwable))))))
 
 ;;; --- Public API ------------------------------------------------------------
@@ -420,8 +487,6 @@
                     (catch Throwable release-throwable
                       (let [retained
                             (assoc entry
-                                   ::entry-state
-                                   :seon.db.registry.entry/cleanup-required
                                    ::initialization-error (.toString throwable)
                                    ::release-error (.toString release-throwable))]
                         (swap! !registry assoc database-name retained)
@@ -437,6 +502,339 @@
                            ::release-error (.toString release-throwable)}
                           throwable)))))
                   (throw throwable))))))))))
+
+(defn- lifecycle-fail!
+  [kind message data]
+  (throw (ex-info message (assoc data :seon.error/kind kind))))
+
+(declare release-database!)
+
+(defn- require-ready-entry!
+  [database-name]
+  (let [entry (get @!registry database-name)]
+    (cond
+      (nil? entry)
+      (lifecycle-fail!
+       :seon.db.protocol.error/not-found
+       "The requested database route is not registered."
+       {::database-name database-name})
+
+      (cleanup-required? entry)
+      (lifecycle-fail!
+       :seon.db.protocol.error/cleanup-required
+       "The requested database route has unproved resource cleanup."
+       {::database-name database-name
+        ::attachment (::attachment entry)
+        ::coordinate (current-coordinate entry)
+        ::release-error (::release-error entry)})
+
+      :else entry)))
+
+(defn- require-attachment!
+  [label expected actual data]
+  (when-not (= expected actual)
+    (lifecycle-fail!
+     :seon.db.protocol.error/attachment-mismatch
+     (str label " belongs to a different database attachment.")
+     (assoc data ::expected-attachment expected ::actual-attachment actual))))
+
+(defn- require-head!
+  [kind label expected actual data]
+  (when-not (= expected actual)
+    (lifecycle-fail!
+     kind
+     (str label " changed before the lifecycle operation.")
+     (assoc data ::expected-coordinate expected ::coordinate actual))))
+
+(defn- datahike-lifecycle-kind
+  [throwable]
+  (case (:type (ex-data throwable))
+    :commit-graph-disabled :seon.db.protocol.error/unsupported-history
+    :commit-not-found :seon.db.protocol.error/missing-commit
+    :branch-already-exists :seon.db.protocol.error/branch-exists
+    :branch-does-not-exist :seon.db.protocol.error/branch-missing
+    :cannot-delete-main-db-branch
+    :seon.db.protocol.error/protected-main-branch
+    :branch-has-active-connection :seon.db.protocol.error/active-branch
+    :seon.db.protocol.error/database))
+
+(defn- call-datahike-lifecycle!
+  [operation data]
+  (try
+    (operation)
+    (catch clojure.lang.ExceptionInfo throwable
+      (lifecycle-fail! (datahike-lifecycle-kind throwable)
+                       (.getMessage throwable)
+                       (merge data (ex-data throwable))))))
+
+(defn- delete-unpublished-branch!
+  [source-entry target-database-name target-branch attachment cause]
+  (when-let [target-entry (get @!registry target-database-name)]
+    (let [{::keys [released? release-error]}
+          (release-database! {::database-name target-database-name})]
+      (when-not released?
+        (lifecycle-fail!
+         :seon.db.protocol.error/cleanup-required
+         "Branch open failed and target connection cleanup is unproved."
+         {::target-database-name target-database-name
+          ::attachment attachment
+          ::coordinate (current-coordinate target-entry)
+          ::release-error release-error
+          ::initialization-error (.toString cause)}))))
+  (try
+    (d/delete-branch! (::conn source-entry) target-branch)
+    (catch Throwable cleanup-throwable
+      (lifecycle-fail!
+       :seon.db.protocol.error/cleanup-required
+       "Branch open failed and target branch cleanup is unproved."
+       {::target-database-name target-database-name
+        ::attachment attachment
+        ::release-error (.toString cleanup-throwable)
+        ::initialization-error (.toString cause)})))
+  (when (contains? (d/branches (::conn source-entry)) target-branch)
+    (lifecycle-fail!
+     :seon.db.protocol.error/cleanup-required
+     "Target branch remained in the durable roster after cleanup."
+     {::target-database-name target-database-name
+      ::attachment attachment
+      ::initialization-error (.toString cause)})))
+
+(defn create-branch!
+  "Create or adopt one exact native branch and publish its logical route."
+  {:malli/schema [:=> [:cat ::create-branch!-request]
+                  ::create-branch!-response]}
+  [{::keys [source-database-name target-database-name source-coordinate
+            expected-source-head target-branch initialize-connection!]}]
+  (locking !registry
+    (let [source-entry (require-ready-entry! source-database-name)
+          source-attachment (::attachment source-entry)
+          source-connection (::conn source-entry)
+          target-attachment
+          (assoc source-attachment ::coordinate/branch target-branch)
+          backend-kind (::backend source-entry)
+          path (::path source-entry)]
+      (when (= :db target-branch)
+        (lifecycle-fail!
+         :seon.db.protocol.error/protected-main-branch
+         "The main :db branch cannot be a lifecycle target."
+         {::target-branch target-branch}))
+      (when (contains? @!registry target-database-name)
+        (lifecycle-fail!
+         :seon.db.protocol.error/duplicate-route
+         "The target logical database route already exists."
+         {::target-database-name target-database-name}))
+      (when (some (fn [[_ entry]]
+                    (= target-attachment (::attachment entry)))
+                  @!registry)
+        (lifecycle-fail!
+         :seon.db.protocol.error/duplicate-attachment
+         "The target database attachment already has a logical route."
+         {::target-database-name target-database-name
+          ::attachment target-attachment}))
+      (require-attachment!
+       "Source coordinate" source-attachment
+       (coordinate/attachment source-coordinate)
+       {::source-coordinate source-coordinate})
+      (require-attachment!
+       "Expected source head" source-attachment
+       (coordinate/attachment expected-source-head)
+       {::expected-source-head expected-source-head})
+      (locking source-connection
+        (let [current-source-head (current-coordinate source-entry)]
+          (require-head!
+           :seon.db.protocol.error/stale-source-head
+           "Source head" expected-source-head current-source-head
+           {::source-database-name source-database-name})
+          (let [commit-db
+                (call-datahike-lifecycle!
+                 #(d/commit-as-db source-connection
+                                  (::coordinate/commit-id source-coordinate))
+                 {::source-coordinate source-coordinate})]
+            (when-not commit-db
+              (lifecycle-fail!
+               :seon.db.protocol.error/missing-commit
+               "The requested source commit is not retained."
+               {::source-coordinate source-coordinate}))
+            (let [commit-coordinate (coordinate/resolved commit-db)]
+              (require-attachment!
+               "Retained source commit" source-attachment
+               (coordinate/attachment commit-coordinate)
+               {::source-coordinate source-coordinate
+                ::coordinate commit-coordinate})
+              (when-not (= (::coordinate/commit-id source-coordinate)
+                           (::coordinate/commit-id commit-coordinate))
+                (lifecycle-fail!
+                 :seon.db.protocol.error/missing-commit
+                 "The retained commit did not resolve to the requested id."
+                 {::source-coordinate source-coordinate
+                  ::coordinate commit-coordinate}))
+              (when-not (= (::coordinate/t source-coordinate)
+                           (::coordinate/t commit-coordinate))
+                (lifecycle-fail!
+                 :seon.db.protocol.error/cut-not-branchable
+                 "The requested temporal cut is not the containing commit head."
+                 {::source-coordinate source-coordinate
+                  ::coordinate commit-coordinate}))
+              (let [branches (d/branches source-connection)
+                    existing? (contains? branches target-branch)
+                    _ (when-not existing?
+                        (call-datahike-lifecycle!
+                         #(d/branch! source-connection
+                                     (::coordinate/commit-id source-coordinate)
+                                     target-branch)
+                         {::target-branch target-branch}))]
+                (try
+                  (let [target-db
+                        (d/branch-as-db source-connection target-branch)
+                        target-coordinate (coordinate/resolved target-db)
+                        expected-target-coordinate
+                        (assoc source-coordinate ::coordinate/branch target-branch)
+                        _ (when (and existing?
+                                     (not= expected-target-coordinate
+                                           target-coordinate))
+                            (lifecycle-fail!
+                             :seon.db.protocol.error/branch-exists
+                             "The target branch exists at a different coordinate."
+                             {::expected-coordinate expected-target-coordinate
+                              ::coordinate target-coordinate}))
+                        _ (when-not (= (vec (d/datoms commit-db :eavt))
+                                       (vec (d/datoms target-db :eavt)))
+                            (lifecycle-fail!
+                             :seon.db.protocol.error/initializer
+                             "The target branch primary datoms differ from its source commit."
+                             {::source-coordinate source-coordinate
+                              ::coordinate target-coordinate}))
+                        entry
+                        (ensure-database!
+                         (cond-> {::database-name target-database-name
+                                  ::backend backend-kind
+                                  ::attachment target-attachment
+                                  ::initialize-connection!
+                                  initialize-connection!}
+                           path (assoc ::path path)))
+                        actual-coordinate (::coordinate entry)]
+                    (when-not (= expected-target-coordinate actual-coordinate)
+                      (lifecycle-fail!
+                       :seon.db.protocol.error/initializer
+                       "The opened target branch moved from its exact fork point."
+                       {::expected-coordinate expected-target-coordinate
+                        ::coordinate actual-coordinate}))
+                    (cond-> {::target-database-name target-database-name
+                             ::attachment target-attachment
+                             ::coordinate actual-coordinate
+                             ::backend backend-kind
+                             ::created? (not existing?)
+                             ::adopted? existing?}
+                      path (assoc ::path path)))
+                  (catch Throwable throwable
+                    (when-not existing?
+                      (delete-unpublished-branch!
+                       source-entry target-database-name target-branch
+                       target-attachment throwable))
+                    (throw throwable)))))))))))
+
+(defn release-attachment!
+  "Release one exact logical attachment without deleting its native branch."
+  {:malli/schema [:=> [:cat ::release-attachment!-request]
+                  ::release-attachment!-response]}
+  [{::keys [target-database-name attachment expected-target-head]}]
+  (locking !registry
+    (if-let [entry (get @!registry target-database-name)]
+      (do
+        (require-attachment!
+         "Release target" attachment (::attachment entry)
+         {::target-database-name target-database-name})
+        (require-head!
+         :seon.db.protocol.error/stale-target-head
+         "Target head" expected-target-head (current-coordinate entry)
+         {::target-database-name target-database-name})
+        (let [{::keys [released? release-error]}
+              (release-database! {::database-name target-database-name})]
+          (when (and (not released?) release-error)
+            (lifecycle-fail!
+             :seon.db.protocol.error/release
+             "The target database connection release is unproved."
+             {::target-database-name target-database-name
+              ::attachment attachment
+              ::release-error release-error}))
+          {::target-database-name target-database-name
+           ::attachment attachment
+           ::released? released?}))
+      {::target-database-name target-database-name
+       ::attachment attachment
+       ::released? false})))
+
+(defn delete-branch!
+  "Release and delete one exact non-main native branch."
+  {:malli/schema [:=> [:cat ::delete-branch!-request]
+                  ::delete-branch!-response]}
+  [{::keys [source-database-name target-database-name attachment
+            expected-target-head]}]
+  (locking !registry
+    (let [source-entry (require-ready-entry! source-database-name)
+          source-attachment (::attachment source-entry)
+          source-connection (::conn source-entry)
+          branch (::coordinate/branch attachment)]
+      (when (= :db branch)
+        (lifecycle-fail!
+         :seon.db.protocol.error/protected-main-branch
+         "The main :db branch cannot be deleted."
+         {::attachment attachment}))
+      (when-not (= (::coordinate/database-id source-attachment)
+                   (::coordinate/database-id attachment))
+        (lifecycle-fail!
+         :seon.db.protocol.error/attachment-mismatch
+         "The target branch does not belong to the source physical database."
+         {::attachment attachment ::source-attachment source-attachment}))
+      (require-attachment!
+       "Expected target head" attachment
+       (coordinate/attachment expected-target-head)
+       {::expected-target-head expected-target-head})
+      (locking source-connection
+        (let [target-entry (get @!registry target-database-name)
+              released?
+              (if target-entry
+                (do
+                  (require-attachment!
+                   "Delete target route" attachment (::attachment target-entry)
+                   {::target-database-name target-database-name})
+                  (require-head!
+                   :seon.db.protocol.error/stale-target-head
+                   "Target head" expected-target-head
+                   (current-coordinate target-entry)
+                   {::target-database-name target-database-name})
+                  (::released?
+                   (release-attachment!
+                    {::target-database-name target-database-name
+                     ::attachment attachment
+                     ::expected-target-head expected-target-head})))
+                false)
+              branches (d/branches source-connection)]
+          (when-not (contains? branches branch)
+            (lifecycle-fail!
+             :seon.db.protocol.error/branch-missing
+             "The target branch is absent from the durable roster."
+             {::attachment attachment}))
+          (let [target-coordinate
+                (coordinate/resolved
+                 (d/branch-as-db source-connection branch))]
+            (require-head!
+             :seon.db.protocol.error/stale-target-head
+             "Target head" expected-target-head target-coordinate
+             {::target-database-name target-database-name})
+            (call-datahike-lifecycle!
+             #(d/delete-branch! source-connection branch)
+             {::attachment attachment})
+            (when (contains? (d/branches source-connection) branch)
+              (lifecycle-fail!
+               :seon.db.protocol.error/cleanup-required
+               "The target branch remained in the durable roster after deletion."
+               {::attachment attachment}))
+            {::target-database-name target-database-name
+             ::attachment attachment
+             ::coordinate (current-coordinate source-entry)
+             ::released? released?
+             ::deleted? true}))))))
 
 (defn release-database!
   "Release the registered conn for `database-name` and drop the entry.
@@ -520,128 +918,13 @@
                    ::error (str (.getMessage t))}))))))
       {::released? false ::deleted? false})))
 
-(defn- fork-verify!
-  "Connect `cfg`, prove the fork is whole, release. Returns its basis-t.
-
-   Two checks, both real reads: the head sits exactly at the fork point
-   (`:max-tx` == `at`; skipped for a head fork), and a full history
-   `:eavt` scan completes — the scan forces every index node to load,
-   so a torn konserve copy (source written to mid-copy) surfaces HERE
-   as a throw instead of later inside the fork pod. Throws on failure;
-   the caller deletes the torn target and retries once."
-  [cfg at]
-  (let [conn (d/connect (id/allocation-connect-config cfg))]
-    (id/assert-allocation-writer! conn)
-    (try
-      (let [db (d/db conn)
-            bt (:max-tx db)]
-        (when (and at (not= (long at) (long bt)))
-          (throw (ex-info "fork head is not at the fork point"
-                          {::at at ::basis-t bt})))
-        ;; Force-load the whole index (history includes retractions).
-        (count (d/datoms (d/history db) :eavt))
-        bt)
-      (finally
-        (try (d/release conn) (catch Throwable _))))))
-
-(defn fork-database!
-  "Fork a registered database at basis-t `::at` into an independent database.
-
-   Wraps `datahike.api/fork-database`: copies the source backend at the
-   Konserve layer, points the fork's head at the commit whose `:max-tx`
-   equals `::at` (absent = the current head), and mints the fork's own
-   deterministic database identity (`backend/datahike-config` on
-   `::fork-database-name`).
-   The fork is fully writable and byte-faithful as of the fork point —
-   eids/tx-eids are identical. A bare stored basis-t is not a portable
-   identity across that boundary; callers must resolve and carry a complete
-   database coordinate before selecting or reconstructing history.
-
-   The selected point predates any later forensic/error-record datom; the
-   fork is the snapshot the failure arose from, not the later snapshot that
-   already contains its record.
-
-   The fork is NOT registered here — the fork pod's own boot database ensure
-   registers/connects it, the same one creation path `cluster create`
-   uses, so the end state is indistinguishable from a normal cluster.
-   `::path` defaults via the backend adapter (cluster callers pass
-   `data/clusters/<fork-database-name>/db` explicitly).
-
-   Copy-while-live: the source keeps taking writes during the copy
-   (fork-point commits are immutable, so this is normally safe); the
-   fork is VERIFIED after the copy (head at `::at` + a full history
-   index scan) and re-forked once on a torn copy. Operator-facing
-   (`bin/seon cluster fork` via the 7891 REPL) — never agent-exposed.
-   Errors return as values: `{::forked? false ::error msg}`."
-  {:malli/schema [:=> [:cat ::fork-database!-request] ::fork-database!-response]}
-  [{::keys [database-name fork-database-name at path]}]
-  (let [entry (get @!registry database-name)]
-    (cond
-      (nil? entry)
-      {::forked? false
-       ::error (str "source database-name not registered: " database-name
-                    " — ensure-database! it first (a cluster's db registers when"
-                    " its pod boots; the ambient cluster is always registered)")}
-
-      (= database-name fork-database-name)
-      {::forked? false ::error "fork-database-name must differ from the source database-name"}
-
-      (contains? @!registry fork-database-name)
-      {::forked? false
-       ::error (str "fork-database-name already registered: " fork-database-name)}
-
-      :else
-      (let [{::keys [attachment backend] src-path ::path} entry
-            src-cfg (backend/datahike-config
-                     (cond-> {::backend/database-name database-name
-                              ::backend/backend backend
-                              ::coordinate/attachment attachment}
-                       src-path (assoc ::backend/path src-path)))
-            tgt-cfg (backend/datahike-config
-                     (cond-> {::backend/database-name fork-database-name
-                              ::backend/backend :file}
-                       path (assoc ::backend/path path)))
-            backend-path (::backend/path
-                          (backend/backend-facts
-                           (cond-> {::backend/database-name fork-database-name
-                                    ::backend/backend :file}
-                             path (assoc ::backend/path path))))
-            fork-once! (fn []
-                         (backend/ensure-parent-dir!
-                          {:seon.db.backend/path backend-path})
-                         (d/fork-database src-cfg tgt-cfg
-                                          (cond-> {} at (assoc :at at)))
-                         (fork-verify! tgt-cfg at))]
-        (try
-          (if (d/database-exists? tgt-cfg)
-            {::forked? false
-             ::error (str "fork target database already exists: " backend-path)}
-            (let [bt (try
-                       (fork-once!)
-                       (catch Throwable t
-                         ;; Torn copy (source written to mid-copy) or a
-                         ;; transient store error — wipe the partial target
-                         ;; and retry ONCE; a second failure surfaces.
-                         (log/warn t "fork-database!: first fork attempt failed — retrying once"
-                                   {::database-name database-name ::fork-database-name fork-database-name ::at at})
-                         (try (d/delete-database tgt-cfg) (catch Throwable _))
-                         (fork-once!)))]
-              {::forked? true
-               ::database-name fork-database-name
-               ::basis-t (long bt)
-               ::path backend-path}))
-          (catch Throwable t
-            {::forked? false
-             ::error (str "fork failed: " (.getMessage t)
-                          " " (pr-str (ex-data t)))}))))))
-
 (defn lookup-connection
   "Return `{::conn <conn>}` if `database-name` is registered, else `{}`.
    Does NOT auto-create — callers must `ensure-database!` first."
   {:malli/schema [:=> [:cat ::connection-request] ::connection-response]}
   [{::keys [database-name]}]
   (let [entry (get @!registry database-name)]
-    (if (= :seon.db.registry.entry/ready (::entry-state entry))
+    (if (and entry (not (cleanup-required? entry)))
       {::conn (::conn entry)}
       {})))
 
@@ -662,7 +945,7 @@
   {:malli/schema [:=> [:cat ::resolve-connection-request] ::resolve-connection-response]}
   [{::keys [database-name]}]
   (if-let [entry (get @!registry database-name)]
-    (if (= :seon.db.registry.entry/ready (::entry-state entry))
+    (if-not (cleanup-required? entry)
       (entry-view database-name entry)
       {::error-kind :seon.db.registry.error/cleanup-required
        ::error (str "database open cleanup is unproved: " database-name)})

@@ -3,14 +3,12 @@
 ;; bin/seon-server-call — structured RPC helper for the bin/seon supervisor.
 ;;
 ;; Sends ONE Clojure expression to the database server's loopback io-prepl
-;; (the same supervisor channel `cluster fork`/`cluster destroy` have always
-;; used — clojure.core.server/io-prepl on 127.0.0.1, port in the per-supervisor
+;; (clojure.core.server/io-prepl on 127.0.0.1, port in the per-supervisor
 ;; $SEON_WRITER_REPL_PORT_FILE) and PARSES the printed reply as EDN instead of
-;; pattern-matching it. Owner directive: the moment structure crosses a
-;; boundary it is parsed as data — bash never greps printed EDN (the grep
-;; approach broke once already: the REPL prints namespaced-map literals
-;; `#:seon.db.registry{:forked? true …}`, so a grep for the fully
-;; qualified keyword never matched; 7c83cec9 papered over it).
+;; pattern-matching it. This is retained as a general structured helper for
+;; archive/readback tooling; it does not define a cluster fork/destroy command
+;; or branch-lifecycle success keys. Owner directive: the moment structure
+;; crosses a boundary it is parsed as data — bash never greps printed EDN.
 ;;
 ;; Usage:
 ;;   bin/seon-server-call [--port N] [--timeout SECS] [--get KEY] EXPR [SUCCESS-KEY]

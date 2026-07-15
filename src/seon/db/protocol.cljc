@@ -20,6 +20,10 @@
 (def ping-operation :seon.db.protocol.operation/ping)
 (def ensure-database-operation
   :seon.db.protocol.operation/ensure-database)
+(def create-branch-operation :seon.db.protocol.operation/create-branch)
+(def release-database-operation
+  :seon.db.protocol.operation/release-database)
+(def delete-branch-operation :seon.db.protocol.operation/delete-branch)
 (def transact-operation :seon.db.protocol.operation/transact)
 (def replay-transactions-operation
   :seon.db.protocol.operation/replay-transactions)
@@ -35,6 +39,29 @@
 (def stale-coordinate-error :seon.db.protocol.error/stale-coordinate)
 (def generated-candidate-conflict-error
   :seon.db.protocol.error/generated-candidate-conflict)
+(def duplicate-route-error :seon.db.protocol.error/duplicate-route)
+(def duplicate-attachment-error :seon.db.protocol.error/duplicate-attachment)
+(def attachment-mismatch-error :seon.db.protocol.error/attachment-mismatch)
+(def stale-source-head-error :seon.db.protocol.error/stale-source-head)
+(def stale-target-head-error :seon.db.protocol.error/stale-target-head)
+(def missing-commit-error :seon.db.protocol.error/missing-commit)
+(def unsupported-history-error :seon.db.protocol.error/unsupported-history)
+(def cut-not-branchable-error :seon.db.protocol.error/cut-not-branchable)
+(def branch-exists-error :seon.db.protocol.error/branch-exists)
+(def branch-missing-error :seon.db.protocol.error/branch-missing)
+(def protected-main-branch-error
+  :seon.db.protocol.error/protected-main-branch)
+(def active-branch-error :seon.db.protocol.error/active-branch)
+(def initializer-error :seon.db.protocol.error/initializer)
+(def release-error :seon.db.protocol.error/release)
+(def cleanup-required-error :seon.db.protocol.error/cleanup-required)
+
+(def lifecycle-error-kinds
+  #{duplicate-route-error duplicate-attachment-error attachment-mismatch-error
+    stale-source-head-error stale-target-head-error missing-commit-error
+    unsupported-history-error cut-not-branchable-error branch-exists-error
+    branch-missing-error protected-main-branch-error active-branch-error
+    initializer-error release-error cleanup-required-error})
 
 (def committed-status :seon.db.protocol.status/committed)
 (def unknown-status :seon.db.protocol.status/unknown)
@@ -48,6 +75,9 @@
  ::operation
  [:enum ping-operation
   ensure-database-operation
+  create-branch-operation
+  release-database-operation
+  delete-branch-operation
   transact-operation
   replay-transactions-operation
   knn-search-operation])
@@ -63,6 +93,19 @@
 (schema/register! ::continuation-coordinate ::coordinate/coordinate)
 (schema/register! ::expected-coordinate ::coordinate/coordinate)
 (schema/register! ::current-coordinate ::coordinate/coordinate)
+(schema/register! ::source-coordinate ::coordinate/coordinate)
+(schema/register! ::expected-source-head ::coordinate/coordinate)
+(schema/register! ::expected-target-head ::coordinate/coordinate)
+(schema/register! ::source-head ::coordinate/coordinate)
+(schema/register! ::attachment ::coordinate/attachment)
+(schema/register! ::target-attachment ::coordinate/attachment)
+(schema/register! ::target-branch :keyword)
+(schema/register! ::source-database-name ::database-name)
+(schema/register! ::target-database-name ::database-name)
+(schema/register! ::created? :boolean)
+(schema/register! ::adopted? :boolean)
+(schema/register! ::released? :boolean)
+(schema/register! ::deleted? :boolean)
 (schema/register! ::complete? :boolean)
 (schema/register! ::replayed-count [:int {:min 0}])
 (schema/register! ::datoms-added [:int {:min 0}])
@@ -87,7 +130,12 @@
  ::error-kind
  [:enum protocol-error database-error internal-error not-found-error
   request-conflict-error stale-coordinate-error
-  generated-candidate-conflict-error])
+  generated-candidate-conflict-error
+  duplicate-route-error duplicate-attachment-error attachment-mismatch-error
+  stale-source-head-error stale-target-head-error missing-commit-error
+  unsupported-history-error cut-not-branchable-error branch-exists-error
+  branch-missing-error protected-main-branch-error active-branch-error
+  initializer-error release-error cleanup-required-error])
 (schema/register! ::error [:string {:min 1}])
 (schema/register!
  ::status
@@ -124,6 +172,30 @@
   [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [::database-path {:optional true} ::database-path]])
 (schema/register!
+ ::create-branch-request
+ [:map {:closed true}
+  [::operation [:= create-branch-operation]]
+  [::source-database-name ::source-database-name]
+  [::target-database-name ::target-database-name]
+  [::source-coordinate ::source-coordinate]
+  [::expected-source-head ::expected-source-head]
+  [::target-branch ::target-branch]])
+(schema/register!
+ ::release-database-request
+ [:map {:closed true}
+  [::operation [:= release-database-operation]]
+  [::target-database-name ::target-database-name]
+  [::target-attachment ::target-attachment]
+  [::expected-target-head ::expected-target-head]])
+(schema/register!
+ ::delete-branch-request
+ [:map {:closed true}
+  [::operation [:= delete-branch-operation]]
+  [::source-database-name ::source-database-name]
+  [::target-database-name ::target-database-name]
+  [::target-attachment ::target-attachment]
+  [::expected-target-head ::expected-target-head]])
+(schema/register!
   ::transaction-request
   [:map
   [::operation [:= transact-operation]]
@@ -154,6 +226,9 @@
  [:multi {:dispatch ::operation}
   [ping-operation ::ping-request]
   [ensure-database-operation ::ensure-database-request]
+  [create-branch-operation ::create-branch-request]
+  [release-database-operation ::release-database-request]
+  [delete-branch-operation ::delete-branch-request]
   [transact-operation ::transaction-request]
   [replay-transactions-operation ::replay-transactions-request]
   [knn-search-operation ::knn-search-request]])
@@ -178,6 +253,33 @@
   [::coordinate/coordinate ::coordinate/coordinate]
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]])
+(schema/register!
+ ::create-branch-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::target-database-name ::target-database-name]
+  [::target-attachment ::target-attachment]
+  [::coordinate ::coordinate]
+  [::backend ::backend]
+  [::database-path {:optional true} ::database-path]
+  [::created? ::created?]
+  [::adopted? ::adopted?]])
+(schema/register!
+ ::release-database-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::target-database-name ::target-database-name]
+  [::target-attachment ::target-attachment]
+  [::released? ::released?]])
+(schema/register!
+ ::delete-branch-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::target-database-name ::target-database-name]
+  [::target-attachment ::target-attachment]
+  [::source-head ::source-head]
+  [::released? ::released?]
+  [::deleted? ::deleted?]])
 (schema/register!
  ::transaction-response
  [:map
@@ -214,6 +316,9 @@
   ::failed-response
   ::ping-response
   ::ensure-database-response
+  ::create-branch-response
+  ::release-database-response
+  ::delete-branch-response
   ::transaction-response
   ::replay-transactions-response
   ::knn-search-response])
@@ -232,6 +337,27 @@
   [::backend ::backend]
   [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [::database-path {:optional true} ::database-path]])
+(schema/register!
+ ::create-branch-request-input
+ [:map {:closed true}
+  [::source-database-name ::source-database-name]
+  [::target-database-name ::target-database-name]
+  [::source-coordinate ::source-coordinate]
+  [::expected-source-head ::expected-source-head]
+  [::target-branch ::target-branch]])
+(schema/register!
+ ::release-database-request-input
+ [:map {:closed true}
+  [::target-database-name ::target-database-name]
+  [::target-attachment ::target-attachment]
+  [::expected-target-head ::expected-target-head]])
+(schema/register!
+ ::delete-branch-request-input
+ [:map {:closed true}
+  [::source-database-name ::source-database-name]
+  [::target-database-name ::target-database-name]
+  [::target-attachment ::target-attachment]
+  [::expected-target-head ::expected-target-head]])
 (schema/register!
   ::transaction-request-input
   [:map
@@ -274,6 +400,27 @@
            ::backend backend}
     attachment (assoc ::coordinate/attachment attachment)
     database-path (assoc ::database-path database-path)))
+
+(defn create-branch-request
+  "Construct one exact native branch-creation request."
+  {:malli/schema [:=> [:cat ::create-branch-request-input]
+                  ::create-branch-request]}
+  [input]
+  (assoc input ::operation create-branch-operation))
+
+(defn release-database-request
+  "Construct one attachment-fenced database-release request."
+  {:malli/schema [:=> [:cat ::release-database-request-input]
+                  ::release-database-request]}
+  [input]
+  (assoc input ::operation release-database-operation))
+
+(defn delete-branch-request
+  "Construct one exact native branch-deletion request."
+  {:malli/schema [:=> [:cat ::delete-branch-request-input]
+                  ::delete-branch-request]}
+  [input]
+  (assoc input ::operation delete-branch-operation))
 
 (defn transaction-request
   "Construct one idempotent logical transaction request."

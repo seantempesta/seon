@@ -1,12 +1,11 @@
 (ns seon.db.registry-test
-  "Database registry lifecycle, concurrency, and fork tests."
+  "Database registry lifecycle, routing, and native branch tests."
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [datahike.api :as d]
             [seon.db.backend :as backend]
             [seon.db.coordinate :as coordinate]
             [seon.db.id :as id]
-            [seon.db.registry :as registry])
-  (:import [java.io File]))
+            [seon.db.registry :as registry]))
 
 (defn- isolate-registry
   [test-fn]
@@ -23,13 +22,6 @@
   (registry/ensure-database!
    (assoc request ::registry/initialize-connection!
           (fn [_request] nil))))
-
-(defn- delete-tree!
-  [path]
-  (let [root (File. ^String path)]
-    (when (.exists root)
-      (run! (fn [^File file] (.delete file))
-            (reverse (file-seq root))))))
 
 (deftest ensure-is-idempotent-and-concurrent
   (let [database-name :registry/concurrent
@@ -83,13 +75,49 @@
                  (::registry/release-error failure)))
     (is (= failure retry)
         "the same process cannot reclassify an unproved release as success")
-    (is (identical? (::registry/conn entry)
-                    (::registry/conn
-                     (registry/lookup-connection
-                      {::registry/database-name database-name})))
-        "the registry retains the exact failed identity for diagnosis")
+    (is (= {} (registry/lookup-connection
+               {::registry/database-name database-name}))
+        "a terminal release failure is retained but never routed")
+    (is (= :seon.db.registry.error/cleanup-required
+           (::registry/error-kind
+            (registry/resolve-connection
+             {::registry/database-name database-name}))))
     (is (= (::registry/release-error failure)
            (::registry/release-error listed)))))
+
+(deftest failed-open-validation-retains-unproved-cleanup-identity
+  (let [database-name :registry/open-validation-cleanup
+        failure
+        (with-redefs [id/assert-allocation-writer!
+                      (fn [_connection]
+                        (throw (ex-info "injected allocation validation" {})))
+                      d/release
+                      (fn [_connection]
+                        (throw (ex-info "injected validation cleanup" {})))]
+          (try
+            (ensure-database!
+             {::registry/database-name database-name
+              ::registry/backend :memory})
+            nil
+            (catch clojure.lang.ExceptionInfo exception exception)))
+        retained
+        (first
+         (filter #(= database-name (::registry/database-name %))
+                 (::registry/databases (registry/list-databases {}))))]
+    (is (= :seon.db.registry.error/cleanup-required
+           (:seon.error/kind (ex-data failure))))
+    (is (= :seon.db.registry.entry/cleanup-required
+           (::registry/entry-state retained)))
+    (is (re-find #"injected allocation validation"
+                 (::registry/initialization-error retained)))
+    (is (re-find #"injected validation cleanup"
+                 (::registry/release-error retained)))
+    (is (= {} (registry/lookup-connection
+               {::registry/database-name database-name})))
+    (is (= :seon.db.registry.error/cleanup-required
+           (::registry/error-kind
+            (registry/resolve-connection
+             {::registry/database-name database-name}))))))
 
 (deftest delete-refuses-to-run-after-release-failure
   (let [database-name :registry/delete-release-failure
@@ -238,54 +266,165 @@
     (is (empty? (registry/lookup-connection
                  {::registry/database-name branch-name})))))
 
-(deftest file-fork-has-independent-identity-and-exact-fork-state
-  (let [root (str (System/getProperty "java.io.tmpdir")
-                  "/seon-registry-fork-" (random-uuid))
-        source-name :registry/fork-source
-        fork-name :registry/fork-target
-        source-path (str root "/source/db")
-        fork-path (str root "/fork/db")]
-    (try
-      (let [source-entry
-            (ensure-database!
-             {::registry/database-name source-name
-              ::registry/backend :file
-              ::registry/path source-path})
-            source-connection (::registry/conn source-entry)]
-        (d/transact source-connection
-                    [{:db/ident :fork/value
-                      :db/valueType :db.type/string
-                      :db/cardinality :db.cardinality/one}
-                     {:fork/value "at-fork"}])
-        (let [basis-t (:max-tx (d/db source-connection))
-              forked
-              (registry/fork-database!
-               {::registry/database-name source-name
-                ::registry/fork-database-name fork-name
-                ::registry/at basis-t
-                ::registry/path fork-path})
-              fork-entry
-              (ensure-database!
-               {::registry/database-name fork-name
-                ::registry/backend :file
-                ::registry/path fork-path})
-              fork-connection (::registry/conn fork-entry)]
-          (is (true? (::registry/forked? forked)))
-          (is (= basis-t (::registry/basis-t forked)))
-          (is (= basis-t (:max-tx (d/db fork-connection))))
-          (is (= "at-fork"
-                 (d/q '[:find ?value . :where [_ :fork/value ?value]]
-                      (d/db fork-connection))))
-          (is (not= (backend/database-id source-name)
-                    (backend/database-id fork-name))
-              "the fork is a new database, not a second name for the source")
-          (d/transact fork-connection [{:fork/value "fork-only"}])
-          (is (nil? (d/q '[:find ?entity .
-                            :where [?entity :fork/value "fork-only"]]
-                          (d/db source-connection))))))
-      (finally
-        (registry/delete-database!
-         {::registry/database-name fork-name})
-        (registry/delete-database!
-         {::registry/database-name source-name})
-        (delete-tree! root)))))
+(deftest native-branch-create-release-delete-is-exact-and-isolated
+  (let [source-name :registry/lifecycle-source
+        target-name :registry/lifecycle-target
+        target-branch :registry.branch/lifecycle
+        source (ensure-database!
+                {::registry/database-name source-name
+                 ::registry/backend :memory})
+        source-connection (::registry/conn source)]
+    (d/transact source-connection
+                [{:db/ident :registry.lifecycle/value
+                  :db/valueType :db.type/string
+                  :db/cardinality :db.cardinality/one}
+                 {:registry.lifecycle/value "shared"}])
+    (let [source-head
+          (::registry/coordinate
+           (registry/resolve-connection
+            {::registry/database-name source-name}))
+          created
+          (registry/create-branch!
+           {::registry/source-database-name source-name
+            ::registry/target-database-name target-name
+            ::registry/source-coordinate source-head
+            ::registry/expected-source-head source-head
+            ::registry/target-branch target-branch
+            ::registry/initialize-connection! (fn [_request] nil)})
+          target-connection (::registry/conn
+                             (registry/lookup-connection
+                              {::registry/database-name target-name}))]
+      (is (true? (::registry/created? created)))
+      (is (false? (::registry/adopted? created)))
+      (is (= (assoc source-head ::coordinate/branch target-branch)
+             (::registry/coordinate created)))
+      (is (= "shared"
+             (d/q '[:find ?value .
+                    :where [_ :registry.lifecycle/value ?value]]
+                  (d/db target-connection))))
+      (d/transact target-connection
+                  [{:registry.lifecycle/value "target-only"}])
+      (is (nil? (d/q '[:find ?entity .
+                        :where [?entity :registry.lifecycle/value "target-only"]]
+                      (d/db source-connection))))
+      (let [target-head
+            (::registry/coordinate
+             (registry/resolve-connection
+              {::registry/database-name target-name}))
+            release
+            (registry/release-attachment!
+             {::registry/target-database-name target-name
+              ::registry/attachment (::registry/attachment created)
+              ::registry/expected-target-head target-head})
+            deleted
+            (registry/delete-branch!
+             {::registry/source-database-name source-name
+              ::registry/target-database-name target-name
+              ::registry/attachment (::registry/attachment created)
+              ::registry/expected-target-head target-head})]
+        (is (true? (::registry/released? release)))
+        (is (false? (::registry/released? deleted))
+            "delete is retryable after a separately completed release")
+        (is (true? (::registry/deleted? deleted)))
+        (is (not (contains? (d/branches source-connection) target-branch)))
+        (is (some? (d/branch-as-db source-connection target-branch))
+            "Datahike retains a stale raw head until garbage collection")
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"absent from Datahike's durable branch roster"
+             (ensure-database!
+              {::registry/database-name target-name
+               ::registry/backend :memory
+               ::registry/attachment (::registry/attachment created)})))))))
+
+(deftest native-branch-create-rejects-contained-cut-and-adopts-exact-head
+  (let [source-name :registry/lifecycle-cut-source
+        source (ensure-database!
+                {::registry/database-name source-name
+                 ::registry/backend :memory})
+        source-connection (::registry/conn source)]
+    (d/transact source-connection
+                [{:db/ident :registry.lifecycle.cut/value
+                  :db/valueType :db.type/string
+                  :db/cardinality :db.cardinality/one}])
+    (let [source-db (d/db source-connection)
+          source-head (coordinate/resolved source-db)
+          contained-cut
+          (coordinate/at
+           {::coordinate/db-value source-db
+            ::coordinate/target-t (dec (::coordinate/t source-head))})
+          cut-branch :registry.branch/cut
+          cut-failure
+          (try
+            (registry/create-branch!
+             {::registry/source-database-name source-name
+              ::registry/target-database-name :registry/lifecycle-cut-target
+              ::registry/source-coordinate contained-cut
+              ::registry/expected-source-head source-head
+              ::registry/target-branch cut-branch
+              ::registry/initialize-connection! (fn [_request] nil)})
+            nil
+            (catch clojure.lang.ExceptionInfo exception exception))]
+      (is (= :seon.db.protocol.error/cut-not-branchable
+             (:seon.error/kind (ex-data cut-failure))))
+      (is (not (contains? (d/branches source-connection) cut-branch)))
+      (let [created-failure-branch :registry.branch/created-failure
+            created-failure-name :registry/lifecycle-created-failure
+            failure
+            (try
+              (registry/create-branch!
+               {::registry/source-database-name source-name
+                ::registry/target-database-name created-failure-name
+                ::registry/source-coordinate source-head
+                ::registry/expected-source-head source-head
+                ::registry/target-branch created-failure-branch
+                ::registry/initialize-connection!
+                (fn [_request]
+                  (throw (ex-info "injected created open failure" {})))})
+              nil
+              (catch clojure.lang.ExceptionInfo exception exception))]
+        (is (re-find #"injected created open failure" (.getMessage failure)))
+        (is (not (contains? (d/branches source-connection)
+                            created-failure-branch))
+            "a branch created by the failed invocation is cleanup-owned")
+        (is (= {} (registry/lookup-connection
+                   {::registry/database-name created-failure-name}))))
+      (let [adopted-branch :registry.branch/adopted
+            _ (d/branch! source-connection
+                         (::coordinate/commit-id source-head)
+                         adopted-branch)
+            adopted
+            (registry/create-branch!
+             {::registry/source-database-name source-name
+              ::registry/target-database-name :registry/lifecycle-adopted
+              ::registry/source-coordinate source-head
+              ::registry/expected-source-head source-head
+              ::registry/target-branch adopted-branch
+              ::registry/initialize-connection! (fn [_request] nil)})]
+        (is (false? (::registry/created? adopted)))
+        (is (true? (::registry/adopted? adopted)))
+        (is (= (assoc source-head ::coordinate/branch adopted-branch)
+               (::registry/coordinate adopted))))
+      (let [retained-branch :registry.branch/retained-adoption
+            retained-name :registry/lifecycle-retained-adoption
+            _ (d/branch! source-connection
+                         (::coordinate/commit-id source-head)
+                         retained-branch)
+            failure
+            (try
+              (registry/create-branch!
+               {::registry/source-database-name source-name
+                ::registry/target-database-name retained-name
+                ::registry/source-coordinate source-head
+                ::registry/expected-source-head source-head
+                ::registry/target-branch retained-branch
+                ::registry/initialize-connection!
+                (fn [_request]
+                  (throw (ex-info "injected adopted open failure" {})))})
+              nil
+              (catch clojure.lang.ExceptionInfo exception exception))]
+        (is (re-find #"injected adopted open failure" (.getMessage failure)))
+        (is (contains? (d/branches source-connection) retained-branch)
+            "an exact pre-existing branch is never cleanup-owned")
+        (is (= {} (registry/lookup-connection
+                   {::registry/database-name retained-name})))))))
