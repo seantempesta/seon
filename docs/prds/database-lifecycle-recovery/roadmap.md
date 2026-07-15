@@ -150,8 +150,9 @@ incomplete live/schema arity coverage before mutation. The one publication
 transition closes admission, reconstructs the complete committed projection,
 verifies wrappers, retries once from a newly frozen database value, and either
 publishes that generation or leaves readiness unavailable. Agent and web
-boundaries consume the same admission state. Focused tests pass; deterministic
-failure injection plus config-free live restart remain the graduation proof.
+boundaries consume the same admission state. The combined publication boundary
+gate passes 57 tests/361 assertions. Unit failure injection proves one retry,
+one owning fault, and deterministic fail-closed behavior.
 
 The agent-side admission cut is implemented against the one runtime gate.
 Messages refuse before identity allocation or durable write; public spawn,
@@ -163,8 +164,14 @@ unhost remain available for diagnosis and drain. Cold boot alone continues to
 call the non-agent-facing `create!`/`mint!` primitives before committed program
 publication; there is no public bypass. Focused proof passes admission 8
 tests/46 assertions, lifecycle 11/75, loop 18/92, and message 14/66 with zero
-failures or errors. Web/readiness and config-free live restart remain part of
-the complete publication graduation proof.
+failures or errors. Config-free live restart rebuilt every source artifact and
+reopened writer and pod at
+`54b5b7e7-51fb-3220-b079-81a81914d86f`/`:db`/
+`6a570614-19ab-5c2b-855e-231d990ed4fc`/`536870983`. Admission and the active
+projection agreed on fingerprint `-833049123` (1,575 schemas and 819 function
+contracts). A live MCP transition made `/_seon/ready` return 503 while closed,
+reconciled 814 wrappers with no coverage gaps, and restored 200 on the same
+generation. Root, `/data`, gzip SSE, and browser-console checks were clean.
 
 The JVM writer-drain prerequisite is implemented in place. The UDS request
 server admits each decoded request under its existing lifecycle lock, rejects
