@@ -2,6 +2,7 @@
   "Focused lifecycle proof for active database-derived render units."
   (:require
    [cljs.test :refer [async deftest is]]
+   [clojure.set :as set]
    [datahike.api :as d]
    [seon.agent.ctx.render-fns]
    [seon.agent.message]
@@ -13,6 +14,7 @@
 
 (schema/register! ::id [:string {:seon.db/identity true}])
 (schema/register! ::value :int)
+(schema/register! ::unrelated :int)
 
 (defn- fresh-conn
   []
@@ -28,7 +30,9 @@
                 (fn [_]
                   (db/transact!
                    {:seon.db/conn conn
-                    :seon.db/tx-data [{::id "debug" ::value 1}]})))
+                    :seon.db/tx-data [{::id "debug"
+                                       ::value 1
+                                       ::unrelated 1}]})))
                (.then
                 (fn [{ok? :seon.db/ok? error :seon.db/error}]
                   (when-not ok?
@@ -48,6 +52,39 @@
 (defn- debug-schema-present?
   [dbv]
   (contains? (db/installed-schema dbv) ::value))
+
+(defn- complete-change
+  "Build complete routing evidence for a known immutable-db transaction."
+  [attributes]
+  {:seon.db/changed-attrs attributes
+   :seon.db/attr-index
+   (into {} (map #(vector % []) attributes))})
+
+(defn- replay-all-dirty-tokens
+  "Test oracle: tokens whose retained reads differ on one immutable db value."
+  [state dbv]
+  (into #{}
+        (keep
+         (fn [[token retained]]
+           (let [observations (::unit/read-observations retained)]
+             (when (or (empty? observations)
+                       (some #(db/read-observation-changed?
+                               {:seon.db/db dbv
+                                :seon.db/read-observation %})
+                             observations))
+               token))))
+        (::unit/units state)))
+
+(defn- attach-oracle-unit
+  [state dbv unit-name producer]
+  (unit/attach-consumer
+   {::unit/state state
+    ::unit/coordinate {::oracle-unit unit-name}
+    ::unit/consumer-id "oracle"
+    :seon.db/db dbv
+    ::unit/database-coordinate (db.coordinate/resolved dbv)
+    ::unit/renderer-token "oracle-v1"
+    ::unit/producer producer}))
 
 (deftest lazy-debug-unit-replays-one-snapshot-and-releases-on-final-close
   (async done
@@ -217,4 +254,156 @@
                (is (true? (::unit/released? detached)))
                (is (= unit/empty-state (::unit/state detached))
                    "final release removes units and every reverse bucket")))))
+        (settle! done))))
+
+(deftest observed-attribute-routing-never-omits-a-replay-all-dirty-unit
+  (async done
+    (-> (fresh-conn)
+        (.then
+         (fn [conn]
+           (let [unit-specs
+                 [[::literal-query
+                   (fn [dbv]
+                     [:section (debug-value dbv)])]
+                  [::exact-index
+                   (fn [dbv]
+                     [:section
+                      (pr-str
+                       (db/index-datoms
+                        {:seon.db/db dbv
+                         :seon.db/index :aevt
+                         :seon.db/components [::value]
+                         :seon.db/index-limit 32
+                         :seon.db/seek? false}))])]
+                  [::mixed-literals
+                   (fn [dbv]
+                     [:section
+                      (debug-value dbv)
+                      (pr-str
+                       (db/index-datoms
+                        {:seon.db/db dbv
+                         :seon.db/index :aevt
+                         :seon.db/components [::value]
+                         :seon.db/index-limit 32
+                         :seon.db/seek? false}))])]
+                  [::dynamic-query
+                   (fn [dbv]
+                     [:section
+                      (pr-str
+                       (db/query
+                        {:seon.db/db dbv
+                         :seon.db/query
+                         '[:find ?result
+                           :in $ ?attribute
+                           :where [?entity ?attribute ?result]]
+                         :seon.db/args [::value]}))])]
+                  [::pull
+                   (fn [dbv]
+                     [:section
+                      (pr-str
+                       (db/pull
+                        {:seon.db/db dbv
+                         :seon.db/pull-pattern [::value]
+                         :seon.db/ref [::id "debug"]}))])]
+                  [::zero-read (constantly [:section "constant"])]]
+                 attach-state
+                 (fn [dbv]
+                   (reduce
+                    (fn [{state ::unit/state tokens ::tokens}
+                         [unit-name producer]]
+                      (let [attached
+                            (attach-oracle-unit state dbv unit-name producer)]
+                        {::unit/state (::unit/state attached)
+                         ::tokens
+                         (assoc tokens unit-name (::unit/token attached))}))
+                    {::unit/state unit/empty-state ::tokens {}}
+                    unit-specs))
+                 scenarios
+                 (vec
+                  (for [change-value? [false true]
+                        change-unrelated? [false true]
+                        additional? [false true]
+                        :when (or change-value? change-unrelated? additional?)]
+                    {::change-value? change-value?
+                     ::change-unrelated? change-unrelated?
+                     ::additional? additional?}))
+                 provenance-attributes
+                 #{:db/txInstant :seon.db/user :seon.db/process}]
+             (->
+              (reduce
+               (fn [chain
+                    [scenario-number
+                     {change-value? ::change-value?
+                      change-unrelated? ::change-unrelated?
+                      additional? ::additional?}]]
+                 (.then
+                  chain
+                  (fn [checked]
+                    (let [before @conn
+                          {initial-state ::unit/state tokens ::tokens}
+                          (attach-state before)
+                          value (+ 2 (* scenario-number 10))
+                          unrelated (+ 3 (* scenario-number 10))
+                          debug-update
+                          (cond-> {::id "debug"}
+                            change-value? (assoc ::value value)
+                            change-unrelated? (assoc ::unrelated unrelated))
+                          tx-data
+                          (cond-> [debug-update]
+                            additional?
+                            (conj {::id (str "other-" scenario-number)
+                                   ::value (+ 100 scenario-number)}))
+                          domain-attributes
+                          (cond-> #{}
+                            change-value? (conj ::value)
+                            change-unrelated? (conj ::unrelated)
+                            additional? (into #{::id ::value}))
+                          routing-attributes
+                          (into provenance-attributes domain-attributes)]
+                      (-> (db/transact!
+                           {:seon.db/conn conn
+                            :seon.db/tx-data tx-data})
+                          (.then
+                           (fn [{ok? :seon.db/ok? error :seon.db/error}]
+                             (when-not ok?
+                               (throw
+                                (ex-info "oracle scenario transaction failed"
+                                         {:seon.db/error error
+                                          ::scenario-number scenario-number})))
+                             (let [after @conn
+                                   dirty
+                                   (replay-all-dirty-tokens initial-state after)
+                                   candidates
+                                   (unit/candidate-tokens
+                                    {::unit/state initial-state
+                                     ::unit/change
+                                     (complete-change routing-attributes)})
+                                   narrow-tokens
+                                   (set (map tokens
+                                             [::literal-query
+                                              ::exact-index
+                                              ::mixed-literals]))]
+                               (is (set/subset? dirty candidates)
+                                   (str
+                                    "candidate routing omitted replay-all dirty "
+                                    "tokens for " (pr-str domain-attributes)
+                                    ": "
+                                    (pr-str (set/difference dirty candidates))))
+                               (when (= #{::unrelated} domain-attributes)
+                                 (is (empty?
+                                      (set/intersection narrow-tokens candidates))
+                                     "unrelated changes select no literal units")
+                                 (is
+                                  (set/subset?
+                                   (set (map tokens
+                                             [::dynamic-query ::pull ::zero-read]))
+                                   candidates)
+                                  "unproved and zero-read units remain broad"))
+                               (inc checked)))))))))
+               (js/Promise.resolve 0)
+               (map-indexed vector scenarios))
+              (.then
+               (fn [checked]
+                 (is (= 7 checked)
+                     "the generated matrix checks every nonempty change")))))))
         (settle! done))))

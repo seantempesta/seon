@@ -364,6 +364,25 @@ Evidence is retained at `tmp/test-cljs-20260715-045642-83341.log` and its
 sibling report. Live default-cluster gzip/browser evidence remains the next
 ordered boundary; no page-specific transition was removed in this slice.
 
+The broader soundness oracle now compares candidate routing with the retained
+replay-all authority rather than restating projection examples. It captures six
+representative unit shapes from real reads: a literal query, exact AEVT prefix,
+mixed literal reads, dynamic query, pull, and a zero-read producer. A generated
+matrix of all seven nonempty combinations of value, unrelated, and additional-
+entity changes is applied serially through the public `seon.db/transact!`
+boundary on one explicit fresh connection. Each scenario captures its own
+pre-write retained state, inspects the actual post-write immutable database
+value, and fails when any replay-all dirty token is absent from the candidates
+selected by complete domain plus provenance transaction evidence. The
+unrelated-only case separately keeps every literal/index unit out of the
+candidate set while dynamic, pull, and zero-read observations remain broad.
+
+The exact selector requested 1 var, matched 1 var, and executed 1 var. It
+passes 1 test and 10 assertions with zero failures or errors. Evidence is
+retained at `tmp/test-cljs-20260715-052511-49015.log` and its sibling report.
+The oracle is test-only; production still has one candidate router and one
+exact replay authority.
+
 This ordering advances unit 2 without assuming unit-1 native branch/restart
 contracts or the later root/debug/data consumer lifecycle. The pure candidate
 mechanism consumes only contracts already committed on the current branch.

@@ -143,7 +143,20 @@ work; incomplete evidence performs one conservative replay; and a related
 complete change replays and renders one shared unit once before identical
 fanout. Retained evidence is
 `tmp/test-cljs-20260715-045642-83341.log`. Live default-cluster gzip/browser
-proof and the broader replay-all soundness oracle remain open graduation work.
+proof remains open graduation work.
+
+The broader replay-all soundness oracle is now implemented in the existing
+view-unit test owner. Six real retained unit shapes capture a literal query,
+exact AEVT prefix, mixed literal reads, dynamic query, pull, and zero-read
+producer. Seven generated nonempty domain-change combinations run serially
+through `seon.db/transact!` on one explicit fresh connection. For each actual
+post-write immutable value, the test-only replay-all authority derives every
+dirty token and proves that complete changed-attribute routing selects a
+superset. The unrelated-only case also proves that no proven literal/index
+token becomes a candidate while unproved and zero-read units remain broad.
+The exact selector requested, matched, and executed 1 test with 10 assertions,
+zero failures, and zero errors. Retained evidence is
+`tmp/test-cljs-20260715-052511-49015.log` and its sibling report.
 
 ## Research evidence
 
