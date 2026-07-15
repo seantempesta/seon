@@ -34,6 +34,16 @@ runtime admission, and operator do not yet launch or own branch-qualified
 runtimes. Quiesced clean restart, restore/undo, branch-local blob launch,
 promotion, and ordered multi-form process-failure proof remain unimplemented.
 
+The branch-qualified replica/operator audit is complete at
+[[research/branch-qualified-replica-operator-launch-audit-2026-07-15]]. It
+defines one closed launch descriptor separating runtime identity, target
+database route/attachment/path, source writer ownership, process coordinates,
+artifact flavor/build, non-autonomous capability, and blob storage view. The
+smallest reviewed implementation order is descriptor derivation and exact
+replica consumption first, typed pod-only operator lifecycle second, then the
+restart/crash matrix. `bin/seon` and `bin/acme` remain thin wrappers over the
+one Babashka supervisor; a branch reuses its source flavor's watcher and writer.
+
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in
 [[research/database-lifecycle-source-audit-2026-07-14]]. Implementation began
@@ -288,6 +298,10 @@ materialization, and retention remain later lifecycle slices.
 - [[research/non-autonomous-runtime-launch-reconciliation-2026-07-15]] — exact
   pod launch capability, replay write suppression, hot-reload preservation,
   ordered teardown, and the remaining branch-qualified operator boundary.
+- [[research/branch-qualified-replica-operator-launch-audit-2026-07-15]] — one
+  launch descriptor, pod-only/shared-writer ownership, exact replica/feed/blob
+  consumption, MCP writer-owner routing, deletion order, restart matrix, and
+  the smallest path-bounded implementation slice.
 - [[research/quiesced-restart-restore-undo-audit-2026-07-14]] — planned drain,
   unexpected recovery, immutable restore intent, promotion, and undo.
 - [[research/post-commit-program-admission-audit-2026-07-14]] — exact

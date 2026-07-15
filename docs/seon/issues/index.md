@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (7)
+## Blocker (8)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -21,6 +21,7 @@ See `README.md` for the convention.
 | [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Scope the activated schema projection to one database attachment](activated-schema-projection-crosses-database-attachments.md) | blocker | agent |
+| [Unwind managed processes when the operator is interrupted](operator-interruption-can-orphan-managed-process.md) | blocker | Core |
 
 ## Friction (32)
 

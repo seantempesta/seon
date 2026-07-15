@@ -123,8 +123,8 @@ contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | Review returned slices, preserve the full ledger, and integrate branch-qualified launch ownership without outrunning lifecycle proof | Integration and design judgment cannot be delegated; typed native create/release/delete, attachment-scoped projection, and non-autonomous pod lifecycle are settled at `f34b7bda`, `81129753`, and `e0bd14b6` | Review the branch-qualified replica/operator audit, then integrate its smallest launch-descriptor slice and restart/crash proof |
-| Database lifecycle | **Branch-qualified replica/operator audit in progress:** reconcile one launch descriptor across writer attachment, replica feed, pod capability, supervisor, MCP ports, and blob storage view | Non-autonomous start/stop now reconstructs without autonomous writes and retries every ordered inverse; the combined lifecycle/admission/instrumentation gate is green at 38 tests/316 assertions | Implement the reviewed branch-qualified launch slice, then restart/crash recovery, restore/undo, and multi-form proof in that order |
+| Top-level integration | Review returned slices, preserve the full ledger, and integrate branch-qualified launch ownership without outrunning lifecycle proof | Integration and design judgment cannot be delegated; typed native create/release/delete, attachment-scoped projection, non-autonomous pod lifecycle, and the launch ownership audit are settled at `f34b7bda`, `81129753`, `e0bd14b6`, and [[branch-qualified-replica-operator-launch-audit-2026-07-15]] | Review and integrate descriptor derivation plus exact replica consumption, then the pod-only operator lifecycle and restart/crash proof |
+| Database lifecycle | **Launch audit complete; implementation review next:** one descriptor separates runtime identity, target route/attachment/path, source writer ownership, process coordinates, artifact flavor/build, capability, and blob storage view | Exact writer reopen requires the source route first after writer restart; CLJS MCP can pin the branch runtime today, while CLJ MCP must resolve its writer-owner port instead of deriving one from runtime identity | Implement descriptor derivation and exact replica consumption first; then typed pod-only operator create/close, restart/crash recovery, restore/undo, and multi-form proof in that order |
 | Reactive/database views | **Cursor Slice A in progress; reverse index dependency recorded:** implement the pure opaque coordinate-bound cursor in `seon.db.browser` while the render-unit index waits on a public Datahike query-dependency projection | Both headers and the shared unit lifecycle are settled; cursor hardening consumes only the complete coordinate and bounded Datahike indexes, so it does not assume the blocked reactive index | Prove bounded current/history cursor semantics, then cut the existing `/data` adapter; separately coordinate the Datahike projection API before implementing reverse selection |
 | Agent runtime correctness | **Provider-cancellation audit in progress:** attachment-scoped projection is integrated at `81129753`, and unit 6 now grounds cancellation through the existing provider attempt/adapters without adding a retry owner | Dependency-complete fixtures and A→B publication/detach are green at 14 tests/77 assertions; async contracts remain green at 77 assertions | Review and implement the smallest cancellation slice, then settle plan evidence/authority and hard process-death containment before unit 7 trials |
 
@@ -133,8 +133,9 @@ The ordered top-level sequence is therefore:
 1. **Complete:** integrate and falsify validation-only non-main open;
 2. **Complete:** implement the one typed native create/release/delete lifecycle,
    prove exact fork coordinates, and remove physical directory copying;
-3. **In progress:** implement non-autonomous runtime stop/start and
-   branch-qualified replica/operator ownership, then finish unit 1
+3. **In progress:** non-autonomous runtime stop/start is complete; implement
+   the reviewed launch descriptor and exact replica consumption, then
+   pod-only branch operator ownership and unit 1
    restart/crash, restore/undo, and multi-form transition proof;
 4. graduate units 2 and 6 from bounded consumers into their complete acceptance
    matrices while starting unit 3/4 only from their settled contracts;
