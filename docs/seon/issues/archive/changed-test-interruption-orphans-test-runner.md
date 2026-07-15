@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, cljs, flow]
 ---
@@ -39,9 +39,9 @@ or test runner.
 - A concurrent exact runner either observes the live owner and fails closed or
   acquires a fully quiescent artifact boundary.
 
-## Implementation evidence
+## Resolution
 
-Implemented on 2026-07-15 in the one `seon.dev.changed-test/run-command!`
+Resolved on 2026-07-15 in the one `seon.dev.changed-test/run-command!`
 lifecycle. Every child command now registers an owner-process shutdown hook,
 captures a stable `ProcessHandle` tree, signals descendants before ancestors,
 and awaits their absence. Timeout and thread-interruption paths retain the hook
@@ -62,8 +62,20 @@ after an external uncatchable kill, the existing PID-validated stale-lock
 recovery remains the next-invocation repair boundary rather than a claim that
 the killed owner performed cleanup.
 
-The focused process-tree proof is not yet sufficient to close this issue. A
-source-frozen verification window must still interrupt the real changed-test
-owner once during CLJS compilation and once during Node execution, then prove
-that the shared test lock is released only after every owned descendant has
-exited and that no orphan continues to write or execute `out/test/test.js`.
+Source-frozen live verification then exercised both real stages. The public
+changed-test Node owner `72239` owned `bin/test-cljs` `72288`, Node `72906`,
+tee `72907`, Bash `72908`, and lock PID `72288`. TERM to owner `72239` removed
+the entire tree, released the lock, and left artifact SHA-256
+`9e43dfa7ea93dd9f83d9b06e21a0778d617a222a9fcf3d1337e24307e33ffb52`
+stable immediately and after one second.
+
+The compile-stage proof used the same one-shot `run-command!` owner without a
+second runner or manifest mutation: owner `91928`, `bin/test-cljs` `91933`,
+real Shadow compiler JVM `92139`, tee `92142`, and lock PID `91933`. TERM to
+the owner returned the boundary as exit 143, removed every observed and late
+descendant, released the lock, and preserved artifact SHA-256
+`e951f0ca438ce00773561fb0a8bfe90c3cc6ab36bacb268b4c1204b4a0140730`
+immediately and after one second. Repeated owner-only cleanup of stale queued
+public hooks independently produced the same descendant, lock, and artifact
+quiescence; their admission defect remains separately open in
+[[changed-test-hooks-queue-stale-runs-behind-active-owner]].

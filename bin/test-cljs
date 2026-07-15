@@ -132,6 +132,7 @@ acquire_test_lock
 # namespace or one fully-qualified var. Comma-separated selectors follow
 # Shadow's own CLI grammar.
 SELECTED_NS=()
+SELECTED_EXACT=()
 if [ "${#TEST_ARGS[@]}" -gt 0 ]; then
   for test_arg in "${TEST_ARGS[@]}"; do
     selector="${test_arg#--test=}"
@@ -149,11 +150,19 @@ if [ "${#TEST_ARGS[@]}" -gt 0 ]; then
         *" $ns "*) duplicate=1 ;;
       esac
       [ "$duplicate" -eq 0 ] && SELECTED_NS+=("$ns")
+      if [ "$selected" != "$ns" ]; then
+        duplicate=0
+        case " ${SELECTED_EXACT[*]-} " in
+          *" $selected "*) duplicate=1 ;;
+        esac
+        [ "$duplicate" -eq 0 ] && SELECTED_EXACT+=("$selected")
+      fi
       IFS=','
     done
     IFS="$old_ifs"
   done
 fi
+REQUESTED_EXACT_COUNT=${#SELECTED_EXACT[@]}
 
 NAMESPACE_EDN=""
 if [ "${#SELECTED_NS[@]}" -gt 0 ]; then
@@ -222,6 +231,9 @@ write_test_report() {
   local namespaces="${10}"
   local node_exit="${11}"
   local core_faults="${12}"
+  local requested_exact="${13:-nil}"
+  local matched_exact="${14:-nil}"
+  local executed_exact="${15:-nil}"
   {
     printf '{:seon.dev.test-runner/status :%s\n' "$status"
     printf ' :seon.dev.test-runner/phase :%s\n' "$phase"
@@ -231,6 +243,9 @@ write_test_report() {
     printf ' :seon.dev.test-runner/failures %s\n' "$failures"
     printf ' :seon.dev.test-runner/errors %s\n' "$errors"
     printf ' :seon.dev.test-runner/core-faults %s\n' "$core_faults"
+    printf ' :seon.dev.test-runner/requested-exact-selectors %s\n' "$requested_exact"
+    printf ' :seon.dev.test-runner/matched-exact-selectors %s\n' "$matched_exact"
+    printf ' :seon.dev.test-runner/executed-exact-selectors %s\n' "$executed_exact"
     printf ' :seon.dev.test-runner/namespaces %s\n' "$namespaces"
     printf ' :seon.dev.test-runner/compile-seconds %s\n' "$compile_seconds"
     printf ' :seon.dev.test-runner/node-seconds %s\n' "$node_seconds"
@@ -277,13 +292,31 @@ if [ "$BUILD" = "1" ]; then
     CONFIG_MERGE="{:seon.dev.test-artifact/publish? false :devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
   fi
   COMPILE_CMD+=(--config-merge "$CONFIG_MERGE")
+  echo "== Preparing :cljs dependencies =="
+  bb --config bb.edn --deps-root . -e \
+    '(require (quote seon.dev.artifact) (quote seon.dev.config))
+     (seon.dev.artifact/prepare-dependencies!
+       (seon.dev.config/load! (System/getProperty "user.dir"))
+       [:cljs])
+     nil' 2>&1 | tee "$TMPOUT"
+  PREP_EXIT=${PIPESTATUS[0]}
+  if [ "$PREP_EXIT" -ne 0 ]; then
+    COMPILE_END=$(date +%s)
+    COMPILE_ELAPSED=$((COMPILE_END - COMPILE_START))
+    write_test_report error dependency-prep false nil nil nil nil \
+      "$COMPILE_ELAPSED" nil nil nil nil "$REQUESTED_EXACT_COUNT" nil nil
+    prune_test_logs
+    echo "Dependency preparation failed; full output: $TMPOUT"
+    exit 2
+  fi
   echo "== Compiling :test build (shadow-cljs, dev) =="
-  "${COMPILE_CMD[@]}" 2>&1 | tee "$TMPOUT"
+  "${COMPILE_CMD[@]}" 2>&1 | tee -a "$TMPOUT"
   COMPILE_EXIT=${PIPESTATUS[0]}
   if [ "$COMPILE_EXIT" -ne 0 ]; then
     COMPILE_END=$(date +%s)
     COMPILE_ELAPSED=$((COMPILE_END - COMPILE_START))
-    write_test_report error compile false nil nil nil nil "$COMPILE_ELAPSED" nil nil nil nil
+    write_test_report error compile false nil nil nil nil \
+      "$COMPILE_ELAPSED" nil nil nil nil "$REQUESTED_EXACT_COUNT" nil nil
     prune_test_logs
     echo ""
     echo "========================================"
@@ -400,6 +433,7 @@ parse_counts()  { grep -aE '^[0-9]+ failures, [0-9]+ errors\.' "$1" | tail -1; }
 RAN=$(parse_ran "$TMPOUT"); : "${RAN:=0}"
 SUMMARY_LINE=$(parse_summary "$TMPOUT")
 COUNTS_LINE=$(parse_counts "$TMPOUT")
+SELECTION_LINE=$(grep -aE '^SHADOW-TEST-SELECTION requested-exact=[0-9]+ matched-exact=[0-9]+ selected-vars=[0-9]+$' "$TMPOUT" | tail -1)
 REAL_FAILS=$(parse_realfail "$TMPOUT"); : "${REAL_FAILS:=0}"
 
 INCOMPLETE=0
@@ -440,11 +474,28 @@ if [ "$CORE_DIAL" != ":log" ] && [ "$CORE_FAULTS" -gt 0 ]; then
   CORE_GATE_TRIPPED=1
 fi
 
+REPORTED_REQUESTED_EXACT=nil
+MATCHED_EXACT_COUNT=nil
+EXACT_SELECTION_INVALID=0
+if [ "$REQUESTED_EXACT_COUNT" -gt 0 ]; then
+  if [ -z "$SELECTION_LINE" ]; then
+    EXACT_SELECTION_INVALID=1
+  else
+    REPORTED_REQUESTED_EXACT=$(printf '%s\n' "$SELECTION_LINE" | sed -E 's/.*requested-exact=([0-9]+).*/\1/')
+    MATCHED_EXACT_COUNT=$(printf '%s\n' "$SELECTION_LINE" | sed -E 's/.*matched-exact=([0-9]+).*/\1/')
+    if [ "$REPORTED_REQUESTED_EXACT" -ne "$REQUESTED_EXACT_COUNT" ] || \
+       [ "$MATCHED_EXACT_COUNT" -ne "$REQUESTED_EXACT_COUNT" ]; then
+      EXACT_SELECTION_INVALID=1
+    fi
+  fi
+fi
+
 VERDICT_FAIL=0
 [ "$NODE_EXIT" -ne 0 ] && VERDICT_FAIL=1
 [ "$INCOMPLETE" -ne 0 ] && VERDICT_FAIL=1
 [ "$REAL_FAILS" -ne 0 ] && VERDICT_FAIL=1
 [ "$CORE_GATE_TRIPPED" -ne 0 ] && VERDICT_FAIL=1
+[ "$EXACT_SELECTION_INVALID" -ne 0 ] && VERDICT_FAIL=1
 
 TEST_COUNT=$(printf '%s\n' "$SUMMARY_LINE" | awk '{print $2}')
 ASSERTION_COUNT=$(printf '%s\n' "$SUMMARY_LINE" | awk '{print $5}')
@@ -456,9 +507,19 @@ REPORT_STATUS=pass
 [ "$VERDICT_FAIL" -ne 0 ] && REPORT_STATUS=fail
 REPORT_COMPLETE=true
 [ "$INCOMPLETE" -ne 0 ] && REPORT_COMPLETE=false
+EXECUTED_EXACT_COUNT=nil
+if [ "$INCOMPLETE" -eq 0 ] && [ "$MATCHED_EXACT_COUNT" != nil ]; then
+  EXECUTED_EXACT_COUNT="$MATCHED_EXACT_COUNT"
+elif [ "$EXACT_SELECTION_INVALID" -ne 0 ] && \
+     [ "$MATCHED_EXACT_COUNT" != nil ] && [ "$NODE_EXIT" -ne 0 ]; then
+  # The pinned Shadow runner rejects the unmatched request before executing
+  # any selected var. Missing telemetry remains nil rather than inventing proof.
+  EXECUTED_EXACT_COUNT=0
+fi
 write_test_report "$REPORT_STATUS" runtime "$REPORT_COMPLETE" \
   "$TEST_COUNT" "$ASSERTION_COUNT" "$FAILURE_COUNT" "$ERROR_COUNT" \
-  "$COMPILE_ELAPSED" "$NODE_ELAPSED" "$RAN" "$NODE_EXIT" "$CORE_FAULTS"
+  "$COMPILE_ELAPSED" "$NODE_ELAPSED" "$RAN" "$NODE_EXIT" "$CORE_FAULTS" \
+  "$REQUESTED_EXACT_COUNT" "$MATCHED_EXACT_COUNT" "$EXECUTED_EXACT_COUNT"
 
 END=$(date +%s)
 ELAPSED=$((END - START))
@@ -467,6 +528,8 @@ echo ""
 echo "========================================"
 echo "compile: ${COMPILE_STATUS}"
 echo "node: ${NODE_ELAPSED}s; namespaces started: ${RAN}; exit: ${NODE_EXIT}"
+[ "$REQUESTED_EXACT_COUNT" -gt 0 ] && \
+  echo "exact selectors: requested ${REQUESTED_EXACT_COUNT}; matched ${MATCHED_EXACT_COUNT}; executed ${EXECUTED_EXACT_COUNT}"
 [ -n "$SUMMARY_LINE" ] && echo "summary: ${SUMMARY_LINE}  ${COUNTS_LINE}"
 if [ "$VERDICT_FAIL" -eq 0 ]; then
   echo "PASS (${ELAPSED}s total)"
@@ -501,6 +564,11 @@ else
     echo "independent of the assertions above. Fix the underlying defect (each"
     echo "line below is one seon.error/record! marker):"
     grep -a 'SEON-CORE-FAULT' "$TMPOUT" | grep -v 'SEON-EXPECTED-CORE-FAULT' | cut -c1-300 | head -20 || true
+  fi
+  if [ "$EXACT_SELECTION_INVALID" -ne 0 ]; then
+    echo ""
+    echo "EXACT SELECTOR MISMATCH: requested ${REQUESTED_EXACT_COUNT}; matched ${MATCHED_EXACT_COUNT}."
+    echo "A nonempty exact-var request must match every requested test."
   fi
 fi
 echo "========================================"

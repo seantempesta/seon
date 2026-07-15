@@ -128,6 +128,49 @@
         (deliver release true)
         (fs/delete-tree directory)))))
 
+(deftest dependency-preparation-uses-the-source-artifact-owner
+  (let [directory (fs/create-temp-dir {:prefix "seon-prep-owner-test-"})
+        config {:seon.dev.config/root (str directory)
+                :seon.dev.config/environment {}
+                :seon.dev.config/process-dir
+                (str (fs/path directory "target"))}
+        commands (atom [])]
+    (try
+      (with-redefs [artifact/run-step!
+                    (fn [_ label argv]
+                      (swap! commands conj [label argv])
+                      {:exit 0})]
+        (is (= {:seon.dev.artifact/prepared-aliases [:writer :cljs]}
+               (artifact/prepare-dependencies! config [:writer :cljs])))
+        (is (= [["prepare writer, cljs dependencies"
+                 ["clojure" "-X:deps" "prep" ":aliases"
+                  "[:writer :cljs]"]]]
+               @commands)))
+      (finally
+        (fs/delete-tree directory)))))
+
+(deftest downstream-cljs-preparation-includes-its-local-root
+  (let [directory (fs/create-temp-dir {:prefix "seon-prep-downstream-test-"})
+        config {:seon.dev.config/root (str directory)
+                :seon.dev.config/environment
+                {"SEON_EXTRA_SRC" "/checkout/acme"}
+                :seon.dev.config/process-dir
+                (str (fs/path directory "target"))}
+        command (atom nil)]
+    (try
+      (with-redefs [artifact/run-step!
+                    (fn [_ _ argv]
+                      (reset! command argv)
+                      {:exit 0})]
+        (artifact/prepare-dependencies! config [:cljs])
+        (is (= ["clojure" "-Sdeps"] (subvec @command 0 2)))
+        (is (= {:deps {'seon.extra/src {:local/root "/checkout/acme"}}}
+               (edn/read-string (nth @command 2))))
+        (is (= ["-X:deps" "prep" ":aliases" "[:cljs]"]
+               (subvec @command 3))))
+      (finally
+        (fs/delete-tree directory)))))
+
 (deftest canonical-writer-reuses-and-invalidates-verified-output
   (let [directory (fs/create-temp-dir {:prefix "seon-writer-cache-test-"})
         root (str directory)

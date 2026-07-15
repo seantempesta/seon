@@ -14,6 +14,13 @@ case "${1:-}" in
     ;;
 esac
 
+bb --config bb.edn --deps-root . -e \
+  '(require (quote seon.dev.artifact) (quote seon.dev.config))
+   (seon.dev.artifact/prepare-dependencies!
+     (seon.dev.config/load! (System/getProperty "user.dir"))
+     [:writer])
+   nil'
+
 WRITER_TEST_LIST=$(IFS=,; echo "$*")
 
 RUNNER='(let [log-fn-var (requiring-resolve (quote taoensso.trove/*log-fn*))

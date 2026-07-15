@@ -48,3 +48,28 @@ selected aliases and prep fingerprints from their artifact flavor.
 - A focused regression advances a fixture git dependency with
   `:deps/prep-lib`, starts from no ensure output, and proves the requested
   command continues into its normal compile/test boundary.
+
+## Implementation evidence
+
+The shared owner now exists as `seon.dev.artifact/prepare-dependencies!` under
+the checkout-wide source-artifact lock. `build-source!` uses its unlocked inner
+operation while holding that same lock; `bin/test-cljs` selects `[:cljs]`,
+`bin/test-writer` selects `[:writer]`, and downstream CLJS preparation includes
+its `SEON_EXTRA_SRC` local-root basis. Focused artifact proof passed 12 tests
+and 46 assertions.
+
+Fresh-cache CLJS proof removed fork commit `4e72595f` from the gitlib cache and
+then invoked only public `bin/test-cljs`. The retained transcript shows checkout,
+standard `:deps/prep-lib` Java preparation, compile, and the 10-test/72-assertion
+Node pass in one command at
+`tmp/test-cljs-20260715-034817-65956.log`.
+
+The public writer path was also exercised directly with
+`bin/test-writer seon.db.coordinate-test`. It selected and completed the shared
+`[:writer]` preparation owner, then passed 4 tests and 16 assertions with zero
+failures/errors.
+
+This issue remains open until the same fresh-cache acceptance is observed
+through `bin/seon up`, a genuinely fresh writer dependency, and a downstream
+ACME basis, and until the declared fixture proves stale ensure-output
+invalidation rather than only a missing fresh checkout.

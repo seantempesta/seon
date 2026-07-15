@@ -266,10 +266,6 @@
         (catch Throwable _ nil)))))
 
 (defn- ensure-writer! [config]
-  ;; Dependency preparation precedes the fingerprint because a cold git
-  ;; dependency may need prep output before `-Spath` can resolve its basis.
-  (run-step! config "prepare writer dependencies"
-             ["clojure" "-X:deps" "prep" ":aliases" "[:writer]"])
   (let [input-digest (writer-input-digest config)]
     (if-let [writer-digest (verified-writer-digest config input-digest)]
       (do
@@ -288,10 +284,24 @@
              :seon.dev.writer-cache/writer-digest writer-digest})
           writer-digest)))))
 
+(defn- prepare-dependencies-unlocked! [config aliases]
+  (let [extra-args (when (some #{:cljs} aliases)
+                     (take-while #(not= "--config-merge" %)
+                                 (extra-cljs-args config)))]
+    (run-step! config
+               (str "prepare " (str/join ", " (map name aliases))
+                    " dependencies")
+               (into ["clojure"]
+                     (concat extra-args
+                             ["-X:deps" "prep" ":aliases"
+                              (pr-str aliases)])))
+    {:seon.dev.artifact/prepared-aliases aliases}))
+
 (defn- build-source! [config]
+  ;; The caller already owns the checkout-wide artifact lock. Keep dependency
+  ;; preparation inside that bracket without attempting to reacquire it.
+  (prepare-dependencies-unlocked! config [:writer :cljs])
   (ensure-writer! config)
-  (run-step! config "prepare CLJS dependencies"
-             ["clojure" "-X:deps" "prep" ":aliases" "[:cljs]"])
   (run-step! config "warm CLJS classpath" ["clojure" "-P" "-M:cljs"])
   ;; `--preflight` is explicitly the live embedding round-trip gate. Its
   ;; correct master-OFF result is exit 11, not a failed writer artifact.
@@ -322,6 +332,20 @@
 (defn- with-build-lock [config build]
   (state/with-lock (build-lock-configuration config)
                    :source-artifacts 1800000 build))
+
+(defn prepare-dependencies!
+  "Prepare selected dependency aliases under the checkout artifact lock.
+
+   CLJS preparation includes the selected downstream source basis."
+  {:malli/schema
+   [:=> [:cat [:map
+               [:seon.dev.config/root :string]
+               [:seon.dev.config/environment [:map-of :string :string]]]
+         [:vector {:min 1} :keyword]]
+    [:map [:seon.dev.artifact/prepared-aliases
+           [:vector {:min 1} :keyword]]]]}
+  [config aliases]
+  (with-build-lock config #(prepare-dependencies-unlocked! config aliases)))
 
 (def ^:private runtime-root-links ["src" "test" "guest-cljs" "resources"])
 

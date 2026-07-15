@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, cljs, flow]
 ---
@@ -45,9 +45,9 @@ add a second runner.
 - A nonempty exact-selector request that matches zero tests exits nonzero.
 - The retained summary reports the requested and executed selector counts.
 
-## Implementation evidence
+## Resolution
 
-The dependency-owned hash-promotion defect was fixed on 2026-07-15. Shadow
+Resolved on 2026-07-15. Shadow
 3.4.11 constructed each
 registered var symbol with `(symbol ns name)`, even though metadata `:ns` and
 `:name` are already symbols. Exact CLI symbols compared equal while the
@@ -74,9 +74,15 @@ warnings. Retained log:
 `tmp/test-cljs-20260715-031618-3190.log`. This replaces both false-green
 zero-test logs without chunking, retrying, or stitching multiple runs.
 
-This proof closes the observed greater-than-eight selector failure, but the
-issue remains open at the wrapper boundary. `bin/test-cljs` still accepts a
-complete `Ran 0 tests` summary as green for a nonempty selector request, and
-its retained report does not compare requested and executed selector counts.
-Closure requires the remaining fail-closed validation and reporting acceptance
-above, including focused regressions for an unmatched exact selector.
+Final fresh-cache proof used public `bin/test-cljs` alone. It checked out and
+prepared fork commit `4e72595f57618f5c43388ad13d5136cd3bede566`, compiled
+the two requested namespaces with zero warnings, and ran the original ten
+exact selectors in one Node process: 10 tests and 72 assertions, with retained
+requested, matched, and executed counts all equal to 10. Evidence:
+`tmp/test-cljs-20260715-034817-65956.log` and its adjacent report.
+
+The same artifact then received eleven exact selectors including one
+unregistered var. Shadow reported requested 11 and matched 10, exited 1 before
+executing tests, and the wrapper retained executed 0 and failed closed. The
+outer negative assertion also exited successfully. Evidence:
+`tmp/test-cljs-20260715-034903-69055.log` and its adjacent report.

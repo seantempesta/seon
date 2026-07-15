@@ -112,7 +112,7 @@
                          ;; npm shadow-cljs stays at 3.4.10 for the CLI shim.
                          thheller/shadow-cljs
                          {:git/url "https://github.com/seantempesta/shadow-cljs"
-                          :git/sha "9b73a5db33e5077cb9622fd9eadff5022d66578a"}
+                          :git/sha "4e72595f57618f5c43388ad13d5136cd3bede566"}
                          aero/aero                            {:mvn/version "1.1.6"}
                          com.taoensso/timbre                  {:mvn/version "6.5.0"}
                          parinferish/parinferish              {:mvn/version "0.8.0"}
