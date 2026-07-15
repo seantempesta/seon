@@ -219,9 +219,15 @@ if it changes. The pre-edit probe advanced a branch from commit
 `6a570735-9d96-52a7-b0b7-0f2e9b925364` at `t=536870913`; the regression now
 rejects that write. Focused registry proof passes 12 tests/67 assertions, the
 writer/UDS fixture restores a real file-backed Proximum branch at an unchanged
-coordinate in 6/51, and the complete writer checkpoint passes 70/400. Typed
-native lifecycle operations are the next boundary. Forensic pod, operator, and
-restore work remain ordered after that writer-local cut.
+coordinate in 6/51. Review then exposed a failed-open cleanup hole: release
+errors were swallowed for an unpublished connection. Commit `1a46d3c5` retains
+that exact resource in the same registry as `cleanup-required`, excludes it
+from connection resolution, and preserves initialization plus release evidence
+without pretending cleanup or route admission succeeded. The injected cleanup
+proof passes in the 5-test/40-assertion registry-routing gate, and the complete
+writer checkpoint passes 71/409. Typed native lifecycle operations are the next
+boundary. Forensic pod, operator, and restore work remain ordered after that
+writer-local cut.
 
 The first branch-local blob prerequisite is implemented independently of
 native branch attachment. `my.blob` now consumes one validated process-local

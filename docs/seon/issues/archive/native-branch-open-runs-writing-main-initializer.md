@@ -56,7 +56,7 @@ parallel branch boot path.
 
 ## Resolution
 
-Resolved by `3649c6b1`. The existing registry initializer now receives one
+Resolved by `3649c6b1` and `1a46d3c5`. The existing registry initializer now receives one
 namespaced request containing the connection, logical route, exact attachment,
 and main/branch open intent. Main retains database initialization. A non-main
 open validates inherited protocol schema and every declared secondary instance,
@@ -69,5 +69,10 @@ regression now proves that mutation is rejected without a registry route.
 Focused registry tests pass 12 tests/67 assertions. A writer/UDS test creates a
 real file-backed Proximum index, branches its exact commit, and proves the
 target reopens declared and live at the unchanged coordinate while the writing
-initializer runs only once for main. The writer integration gate passes 6/51,
-and the complete writer checkpoint passes 70/400.
+initializer runs only once for main. Review then injected failure into release
+of a rejected connection. That exact resource now remains in the one registry
+as `cleanup-required`, is excluded from route lookup/resolution, and retains
+both initialization and release errors; neither retry nor deletion can mistake
+unproved cleanup for success. The writer integration gate passes 6/51, the
+registry-routing gate passes 5/40, and the complete writer checkpoint passes
+71/409.
