@@ -158,6 +158,17 @@ Likewise `.env.acme` is still sourced as executable shell; it must eventually
 be parsed through the existing configuration-data boundary without admitting
 credential bytes into evaluation evidence.
 
+A real interrupted reachability row makes evaluator cancellation concrete.
+Inspect recorded an interrupted native and retained log, but
+`anyio.to_thread.run_sync` was waiting on the blocking `urllib` pod request.
+The first operator interrupt therefore finalized the cancelled Inspect task
+while Python continued joining the request thread; a second interrupt was
+required to exit the process. The addressed root run continued from turn 10
+through turn 20 after the evaluator had stopped and had to be closed through
+the canonical fenced `seon.agent.run/close-run!` transition. This is evidence
+for the existing addressable-cancellation acceptance requirement, not
+permission to add a Python-only timeout or kill the pod.
+
 A generated-workflow probe exposed one remaining static-path contradiction.
 `planning.fetch_eval_rows` still sent a raw sentinel-printing form to the
 writer socket, but the writer now speaks io-prepl event maps. The query reached

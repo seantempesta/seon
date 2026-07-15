@@ -9,23 +9,31 @@ tags: [issue, agent, research, flow]
 
 ## Problem
 
-`seon_inspect.solver.pod_run` already owns the typed optional `agent_id` wire
-field, but `seon_pod_solver` cannot accept or forward it. Ordinary rows can
-correctly omit the field and mint a fresh agent; the root reachability row
-cannot address the existing `root` agent without duplicating the common static
-pod solver.
+`seon_inspect.solver.pod_run` owns the typed optional `agent_id` wire field.
+The common static solver now forwards it, but the root reachability row has not
+yet completed one finalized, source-stable native run proving that the retained
+agent is the existing `root`. Ordinary rows must continue omitting the field so
+the pod mints a fresh agent.
 
 ## Evidence
 
 `src-inspect-ai/src/seon_inspect/solver.py` conditionally adds `agent_id` to
 the `/agents/run` payload and preserves HTTP 422 as `AgentRunRefused`.
-`seon_pod_solver` calls that function with only prompt, timeout, and URL.
+Commit `8efd3366` threads the optional value through `seon_pod_solver` and
+selects `"root"` only for the root orchestration row. Ordinary rows pass
+`None`, so `pod_run` preserves payload absence and the pod still mints a fresh
+agent. The focused solver/reachability gate passes 79 tests.
 
-The separate experimental task in
-`src-inspect-ai/src/seon_inspect/tasks/namespace_reachability.py` therefore
-fails root-row construction rather than inventing another solver. The exact
-root trajectory and shared-mechanism decision are in
+The first live row passed construction and `POST /agents/run` recorded
+`:agent "root", :reused true`. Concurrent runtime source edits then changed
+the admitted ACME target while the model was still running, so Inspect retained
+the attempt as interrupted/rejected rather than fabricating the remaining
+acceptance proof. The exact root trajectory and shared-mechanism decision are in
 [[../../prds/agentic-tool-refinement/research/tool-reachability-falsifiers-2026-07-15]].
+
+The source boundary is complete. This issue remains open only until a coherent
+ACME source freeze permits one finalized native log to retain
+`pod_agent_id == "root"` with equal start/end target identity.
 
 ## Owner
 

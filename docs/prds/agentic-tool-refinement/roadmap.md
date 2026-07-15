@@ -218,6 +218,15 @@ unchanged admission gate and scorer. The older frozen-tool scorer proof now
 uses this common admitted door instead of calling `inspect.eval` directly.
 The combined focused catalog, native-run, and frozen-tool gate passes 57 tests.
 
+The existing-agent reachability prerequisite is now implemented at
+`8efd3366`. The common pod solver forwards an exact optional agent id; root
+orchestration selects `"root"`, while ordinary rows preserve absence and fresh
+agent creation. The focused solver/reachability gate passes 79 tests. Its first
+live attempt reached and reused root, but concurrent retained-head source edits
+changed the admitted ACME target before completion. Inspect retained the run as
+interrupted/rejected. Finalized root-row evidence waits for the next coherent
+source freeze; no competing rebuild is allowed meanwhile.
+
 The pinned Inspect source audit also identifies seven reusable mechanisms for
 later tool work: database-native namespace exposure, frozen-coordinate
 reconstruction, durable multi-form positions, bounded typed recovery,
@@ -678,9 +687,10 @@ readiness from this paragraph.
 
 1. Commit the retained P0b artifact plus its reviewed classification and
    update this roadmap, the MLX evidence, and the closed PATH issue together.
-2. Repair explicit existing-agent routing in the one pod solver. Run only the
-   focused solver and reachability tests; do not add another task adapter.
-3. Run `root_orchestration` through common source/target/model admission and
+2. Treat existing-agent routing as source-complete at `8efd3366`. Wait for the
+   retained-head owner to commit and hand off a coherent source freeze, then
+   rebuild ACME once; do not rebuild over its active database source edits.
+3. Rerun `root_orchestration` through common source/target/model admission and
    inspect its six scorer facts. Treat the first run as controlled evidence,
    not permission to edit several namespace owners at once.
 4. Run `namespace_discovery`, `skill_lifecycle`, and `acme_product_tools` one
