@@ -416,9 +416,10 @@ evidence and return to the ledger unless it blocks the active gate.
 Read this short operational handoff before logs, broad tests, or source
 archaeology.
 
-**Active gate:** rebuild the committed callable-contract projection into ACME,
-prove the database-indexed `query` and `transact!` contracts from one immutable
-database value, then replay the exact admitted
+**Active gate:** close the second global callable-contract defect, rebuild the
+committed projection into ACME, prove the database-indexed `query`,
+`transact!`, and canvas-control contracts from one immutable database value,
+then replay the exact admitted
 `database_workflow-seed1-000` sample. Do not run the ten-member slice or model
 matrix until that controlled before/after pair is retained.
 
@@ -507,6 +508,33 @@ readiness from this paragraph.
   `transact!`, and omits `&` as an argument label. Five focused tests pass with
   32 assertions. A clean ACME reindex and exact replay remain before/after
   proof, not additional design work.
+- The complete database-derived tool audit at
+  [[research/tool-namespace-colocation-audit-2026-07-15]] enumerates 114
+  eligible functions across eighteen namespaces. It distinguishes real
+  reachability/eligibility problems from namespace movement: root's configured
+  orchestration namespace exposes no eligible functions, `my.ns` and
+  `my.skills` have no home edge, ACME requires empty fixture namespaces instead
+  of its real downstream tools, sample-domain `my.kb` functions pollute the
+  standing surface, and filesystem presents overlapping generations. Those
+  policy changes wait for controlled falsifiers. The audit also found a second
+  global correctness defect: four one-argument canvas controls render returned
+  Hiccup as a phantom positional arity. That defect is recorded separately and
+  must close before the ACME contract replay.
+- One OpenAI-compatible attempt now consumes one immutable resolved config
+  value. A fake provider call captured config A, transacted ambient config B,
+  and retained A for endpoint, credential source, model, sampling, thinking,
+  timeout, extra-body digest, and secret-free response evidence. The exact
+  selector passes sixteen assertions. The resolver helper preserves credential
+  absence through a one-arity call rather than `[:maybe ...]`. Ordered durable
+  per-attempt component facts and the web/Inspect projection remain open.
+- One awaited database-operation observer now spans eval plus auto-await and
+  retains ordered normalized reads and transactions with explicit position,
+  success, source classification, and complete coordinate. Failed transaction
+  envelopes remain operation failures even when the eval succeeds; concurrent
+  fibers are isolated and no-operation evals preserve absence. The focused
+  read observer passes 119 assertions and the eval handoff selector passes
+  seven. Canonical blob persistence, atomic eval attachment, door projection,
+  and fail-closed Inspect scoring remain open.
 - Failed eval diagnostics now retain the database-configured 1,500-character
   component cap under no flag, `full?`, escape-clipping, or both. Successful
   authored/citable content keeps its existing release behavior. A 100K
@@ -543,6 +571,12 @@ readiness from this paragraph.
   [[../../seon/issues/multi-form-eval-order-is-not-durable]] and belongs to
   P4 after the first accepted serial slice unless it directly invalidates the
   active sample.
+- Formal P0 evidence still cannot prove the actual provider attempt or database
+  answer. Immutable OpenAI request resolution and process-local per-eval
+  operation capture are settled substrates, but attempt component facts and
+  operation-vector blob attachment are not yet queryable from the terminal
+  database snapshot. Web/Inspect must consume those persisted facts losslessly;
+  neither may reconstruct them from final config or rendered transcript text.
 
 ### Exact next order
 
@@ -553,7 +587,9 @@ readiness from this paragraph.
    ownership-coherent artifact plus clean admitted source.
 3. Query the rebuilt immutable database projection and require the stored
    `query` and `transact!` contracts to carry `:seon.db/request` with no `&` or
-   private accumulator name.
+   private accumulator name. Require `my.canvas/button`, `input`, `select`, and
+   `toggle` to expose exactly one callable alternative and no implementation
+   body data.
 4. Replay `database_workflow-seed1-000` through common source admission, exact
    operator snapshot, and mandatory finalization. Compare its prompt, reply,
    eval evidence, database coordinate, model identity, and classification with
