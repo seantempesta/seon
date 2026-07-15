@@ -171,11 +171,16 @@ committed program from the restored facts, and applies only the config/core
 policy explicitly frozen by that restore contract. It must not silently overlay
 whatever source/config happens to be current on disk.
 
-Before admission opens, transact one completion fact that binds the intent id,
-pre-restore coordinate, retained undo branch, target coordinate, actual restored
-coordinate, reconstructed generation, and verified blob digest. The operator
-then durably records completion. Retry derives convergence from those facts and
-the current head; it never repeats force on an assumed phase.
+Before admission opens, transact the architecture-defined completion fact that
+binds the intent id, pre-restore coordinate, retained undo branch, target
+coordinate, forced commit, and only committed overlay digests. Its transaction
+coordinate is the actual restored completion point. The same closed transition
+proves the process-local reconstructed generation and the intent's reachable-
+blob digest before opening; it does not persist either as an invented durable
+identity. The operator then durably records completion. Retry derives
+convergence from those facts and the current head; it never repeats force on an
+assumed phase. Exact grounding is in
+[[research/restore-blob-and-cold-reconstruction-contract-2026-07-15]].
 
 ### Undo
 
