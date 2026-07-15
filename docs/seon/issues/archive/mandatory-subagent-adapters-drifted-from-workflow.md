@@ -24,8 +24,8 @@ shared repository guidance already owned by `AGENTS.md` and `AGENT.md`.
 ## Owner
 
 The `.claude/agents/` and `.codex/agents/` files are format-specific client
-adapters. Shared development policy belongs in `AGENTS.md`; top-level and
-delegated role overlays belong in `ORCHESTRATOR.md` and `AGENT.md`.
+adapters. Shared development policy and top-level integration ownership belong
+in `AGENTS.md`; only the delegated role overlay belongs in `AGENT.md`.
 
 ## Acceptance
 
@@ -41,3 +41,8 @@ Commit `64b72dbb` retained both compatibility aliases, made their use selective
 and risk-based, and removed 255 lines of duplicate instructions. Claude YAML
 frontmatter and Codex TOML parsed successfully; the updated orchestrator audit
 passed `seon.dev.markdown/validate-file`; `git diff --check` was clean.
+
+The 2026-07-14 follow-up found that neither harness loads `ORCHESTRATOR.md` and
+that root `AGENTS.md` had absorbed its remaining durable rules. The active file
+is therefore a superseded historical stub, and `AGENT.md` is reduced to the
+delegated-lane rules the client aliases actually need.

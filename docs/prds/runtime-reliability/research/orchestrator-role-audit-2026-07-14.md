@@ -8,17 +8,9 @@ tags: [research, orchestrator, flow]
 
 ## Decision
 
-Retain `ORCHESTRATOR.md` as a thin compatibility and role overlay, not a second
-repository instruction authority. Remove its duplicated operator, test,
-provider, issue, model, and platform instructions. Keep only the few duties
-unique to the top-level development agent: integration ownership, durable
-context checkpoints, coherent delegation, independent verification, and
-shared-tree coordination.
-
-Deleting the file would save little and would break useful historical links
-plus Claude/Codex role adapters that still name the orchestrator workflow. A
-thin file preserves that compatibility without asking current models to load a
-291-line duplicate manual.
+Superseded by the 2026-07-14 follow-up below: `ORCHESTRATOR.md` is now a
+historical compatibility stub, while its remaining durable integration duties
+live in the one root `AGENTS.md` authority.
 
 ## Why the old shape existed
 
@@ -110,3 +102,24 @@ delegated-lane workflow; the verifier adapter is used when risk warrants an
 independent falsification pass. Neither adapter prescribes universal delegation
 or a cheaper model. Claude's metadata format and Codex's TOML format remain
 separate so existing client configuration continues to load.
+
+## Follow-up — authority consolidation
+
+After the first cleanup, root `AGENTS.md` absorbed the dependency-ledger,
+delegation, compaction, shared-tree, REPL, test, and roadmap rules that had
+justified retaining a thin role overlay. A second audit of actual client
+loading found that neither harness loads `ORCHESTRATOR.md`: Codex discovers
+`AGENTS.md`, Claude reads the same bytes through `CLAUDE.md`, and the delegated
+Claude/Codex adapters load `AGENT.md` only.
+
+The remaining unique duties were top-level ownership of user communication,
+cross-lane integration, final design judgment, coherent delegation, and review
+of agent reports as falsifiable claims. They now form one compact paragraph in
+root `AGENTS.md`. `ORCHESTRATOR.md` remains as a `status: superseded` stub so
+historical links resolve without advertising a second active authority.
+
+`AGENT.md` remains because both client adapter formats use it, but it is now a
+thin delegated-lane overlay: bounded scope, no recursive delegation, protected
+shared state, lifecycle authorization, and evidence returned to the top-level
+integrator. Runtime topology, commands, routes, tests, and documentation policy
+stay solely in root or localized `AGENTS.md` files.

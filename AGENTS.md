@@ -2,12 +2,20 @@
 
 This is the one maintained repository instruction authority. Codex reads
 `AGENTS.md` directly; Claude reads the same bytes through the same-directory
-`CLAUDE.md -> AGENTS.md` compatibility link. Role-specific workflow lives in
-`ORCHESTRATOR.md` and `AGENT.md`.
+`CLAUDE.md -> AGENTS.md` compatibility link. The thin delegated-lane adapter
+lives in `AGENT.md`; `ORCHESTRATOR.md` is a superseded historical stub.
 
 If you were spawned as a subagent, execute the assigned task directly. Do not
 spawn or delegate again. If the task is too broad, report that to the top-level
 orchestrator for rescoping.
+
+The top-level agent owns user communication, the active roadmap, cross-lane
+integration, final design judgment, and proof that separately completed work
+forms one system. Delegate only a coherent independent result, not fragments
+whose integration requires the delegate to reconstruct the whole question.
+Returned reports are claims to review: read enough source to judge them,
+falsify risky conclusions independently, and keep overlapping shared files at
+the top level.
 
 ## Instruction discovery and localization
 
@@ -441,4 +449,4 @@ embeddings PRD.
 - `docs/conventions.md` — code/schema patterns;
 - `src/seon/AGENTS.md` — one-mechanism and runtime ownership table;
 - `src/my/AGENTS.md` — agent-facing toolkit constraints;
-- `ORCHESTRATOR.md` / `AGENT.md` — role-specific workflow.
+- `AGENT.md` — thin delegated-lane compatibility adapter.
