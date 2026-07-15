@@ -14,6 +14,7 @@
     [seon.render :as render]
     [seon.render.surface :as surface]
     [seon.ui.agent-view :as agent-view]
+    [seon.ui.header :as header]
     [seon.ui.html :as html]))
 
 (def ^:private agent-a "view-aaaa00001")
@@ -522,7 +523,7 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 
-(deftest agent-header-is-independent-of-the-legacy-page-transition
+(deftest demanded-headers-are-independent-of-the-legacy-page-transition
   (async done
     (-> (with-agents
           [[agent-a []]]
@@ -556,12 +557,16 @@
                             changes (::agent-view/elements transition)
                             fleet-header (element-by-id changes "system-header")
                             agent-header (element-by-id changes "agent-view-header")
+                            direct-fleet-header (header/system-header @conn)
                             direct-header (agent-view/agent-header @conn agent-a)]
-                        (is (vector? fleet-header)
-                            "running transition patches the fleet header")
+                        (is (nil? fleet-header)
+                            "the legacy page transition no longer owns the system header")
                         (is (nil? agent-header)
                             "the legacy page transition no longer owns the agent header")
-                        (is (= 1 (:data-running-agents (second fleet-header))))
+                        (is (not (contains? deps
+                                            ::agent-view/system-header-read-observations)))
+                        (is (= 1 (:data-running-agents
+                                  (second direct-fleet-header))))
                         (is (= "running" (:data-agent-state (second direct-header))))
                         (-> (run/close-run!
                               {:seon.agent.run/id (:seon.agent.run/id opened)
@@ -578,9 +583,12 @@
                                  ::agent-view/dependencies deps}))
                             fleet-header (element-by-id changes "system-header")
                             agent-header (element-by-id changes "agent-view-header")
+                            direct-fleet-header (header/system-header @conn)
                             direct-header (agent-view/agent-header @conn agent-a)]
-                        (is (zero? (:data-running-agents (second fleet-header))))
+                        (is (nil? fleet-header))
                         (is (nil? agent-header))
+                        (is (zero? (:data-running-agents
+                                    (second direct-fleet-header))))
                         (is (= "idle" (:data-agent-state (second direct-header)))))))
                   (.finally (fn [] (set! db/*conn* prior-conn))))))))
         (.then (fn [_] (done)))

@@ -64,20 +64,31 @@ and releases on final view close. The remaining debug descriptors, whole-debug
 transition, agent/root page transition, and declared-attribute veto are still
 legacy and remain open work.
 
-The same-subscription framing prerequisite and the next bounded page consumer
-are now implemented. The ordinary agent header attaches as one always-demanded
-unit before first paint, shares one immutable database value with page
-composition, transitions only through `seon.web.view-unit`, and leaves no
-agent-header declared-attribute or captured-observation branch in
-`seon.ui.agent-view`. Historical replacement inherits no demanded live unit.
-Focused evidence is 38 tests/226 assertions in `seon.web.datastar-test` and 17
-tests/73 assertions in `seon.ui.agent-view-test`. It covers same-fingerprint
-two-socket sharing, producer-once first paint, same-view reconnect, structural
-full-page plus same-id unit convergence, historical replacement, first-close
-retention, and final release. Default-cluster browser and server-side gzip
-proof remains pending: a coordinated restart failed closed in watcher
-reconciliation when other active lanes changed client source after artifact
-publication. No internal process was launched around the operator.
+The same-subscription framing prerequisite and the first two bounded page
+consumers are now implemented. The ordinary agent header and global system
+header attach as always-demanded units before first paint, share the exact
+immutable database value with page composition, transition only through
+`seon.web.view-unit`, and leave no header declared-attribute or
+captured-observation branch in `seon.ui.agent-view`. The system-header
+coordinate deliberately omits page and agent identity, so different agent
+subscriptions share one producer, captured-read set, and serialized complete
+element while retaining independent socket consumers. Both retained strings
+enter page composition as explicit immutable inputs; historical replacement
+inherits no demanded live unit and renders directly from its frozen database
+value.
+
+Focused evidence is 59 tests/339 assertions across
+`seon.ui.agent-view-test`, `seon.ui.header-test`, and
+`seon.web.datastar-test`, with zero failures or errors. It covers
+same-fingerprint two-socket sharing,
+cross-agent subscription sharing, producer-once first paint and broadcast,
+byte-identical global targets, concrete non-nil demanded tokens, same-view
+reconnect, structural full-page plus same-id unit convergence, historical
+replacement, first-close retention, and final release. Exact focused runner
+output is retained at `tmp/test-cljs-20260715-012522-92741.log` and its sibling
+report. Default-cluster browser and server-side gzip proof remains pending: the
+cluster is currently watcher-only and other active runtime lanes have
+uncommitted source, so this slice did not restart or bypass the operator.
 
 ## Research evidence
 
@@ -109,13 +120,15 @@ publication. No internal process was launched around the operator.
    that state in its existing registry and fans emitted bytes through the one
    gzip transport. Managed fan-in emits a shared element once per normalized
    subscription while every socket receives the event.
-2. **Agent-header source cut complete; live proof pending:** the generic
-   always-demanded attachment/first-paint seam owns the ordinary agent header,
-   and its legacy dependency/veto path is deleted. After active source lanes
-   converge, perform one coordinated default restart and capture browser,
-   server-side gzip, reconnect, and final-release evidence. Then continue
-   agent/root units onto the lifecycle and remove the remaining page-specific
-   dependency map rather than adding an interim routing path.
+2. **Both header source cuts and focused proof complete; live proof pending:** the generic
+   always-demanded attachment/first-paint seam owns the ordinary agent header
+   and the globally shared system header. Their legacy page dependency/veto
+   paths are deleted. After active source lanes converge, perform one
+   coordinated default restart and capture
+   browser, server-side gzip, reconnect, cross-agent sharing, and final-release
+   evidence. Continue agent/root units onto the lifecycle and remove the
+   remaining page-specific dependency map rather than adding an interim
+   routing path.
 3. Derive the conservative reverse candidate index from runtime-observed
    database read requests. Exact result equality remains the final authority.
 4. Normalize equivalent subscribers across tabs and prove single execution.

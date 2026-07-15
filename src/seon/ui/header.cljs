@@ -17,10 +17,12 @@
                   to the new `/agent/{id}`) + small `/` and `⛁ data` links +
                   a subtle system-health dot.
 
-   On the morphed app views the header rides inside `#app-view`, so every
-   commit re-renders it and the stats tick LIVE. On the server-rendered
-   `/data` and `/debug` pages it is a request-time snapshot. The `+ new
-   agent` button creates immediately without a modal; the agents page owns the
+   Live agent views demand one globally coordinated render unit before first
+   paint. Equivalent pages share its captured reads and serialized element;
+   relevant changes fan the same complete `#system-header` target to every
+   consumer. Historical and server-rendered pages call this pure function
+   directly against their selected immutable database value. The `+ new agent`
+   button creates immediately without a modal; the agents page owns the
    optional-purpose input outside its live morph target."
   (:require
     [seon.db :as db]
@@ -140,7 +142,8 @@
 ;; ============================================================
 
 (defn system-header
-  "view = f(db): the persistent global status bar as a fixed top `<header>`.
+  "The persistent global status bar derived from one database value.
+
    Pure of external state (reads only the supplied db value); NEVER throws —
    a render error degrades to a minimal brand-only bar so the bar can sit on
    every page without endangering the page. Composes [[agents-chunk]] (fleet

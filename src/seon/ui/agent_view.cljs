@@ -20,7 +20,6 @@
 (schema/register! ::changed-attrs [:set :qualified-keyword])
 (schema/register! ::surface-attrs [:set :qualified-keyword])
 (schema/register! ::structural-attrs [:set :qualified-keyword])
-(schema/register! ::header-attrs [:set :qualified-keyword])
 (schema/register! ::surface-read-attrs
                   [:map-of :seon.render.surface/selection
                    :seon.render.surface/read-attrs])
@@ -31,18 +30,18 @@
   [:map
    [::surface-attrs ::surface-attrs]
    [::structural-attrs ::structural-attrs]
-   [::header-attrs ::header-attrs]
    [::surface-read-attrs ::surface-read-attrs]
-   [::surface-read-observations ::surface-read-observations]
-   [::system-header-read-observations :seon.db/read-observations]])
+   [::surface-read-observations ::surface-read-observations]])
 (schema/register! ::element :seon.render.canvas/hiccup)
 (schema/register! ::elements [:vector :seon.render.canvas/hiccup])
 (schema/register! ::agent-header-html :string)
+(schema/register! ::system-header-html :string)
 (schema/register! ::render-request
                   [:map
                    [:seon.db/db :seon.db/db-val]
                    [:seon.agent/id :seon.agent/id]
-                   [::agent-header-html {:optional true} ::agent-header-html]])
+                   [::agent-header-html {:optional true} ::agent-header-html]
+                   [::system-header-html {:optional true} ::system-header-html]])
 (schema/register! ::render-result
                   [:map [::element ::element] [::dependencies ::dependencies]])
 (schema/register! ::transition-request
@@ -51,6 +50,7 @@
                    [:seon.agent/id :seon.agent/id]
                    [::changed-attrs ::changed-attrs]
                    [::agent-header-html {:optional true} ::agent-header-html]
+                   [::system-header-html {:optional true} ::system-header-html]
                    [::dependencies ::dependencies]])
 (schema/register! ::transition-result
                   [:map [::elements ::elements] [::dependencies ::dependencies]])
@@ -193,43 +193,15 @@
   [changed-attrs]
   (boolean (seq (set/intersection structural-attrs changed-attrs))))
 
-(def ^:private header-attrs
-  "Stored inputs that materially change the fleet status header.
-
-   The datom set is intentionally sampled on these meaningful changes,
-   not on every program-graph bookkeeping transaction."
-  (set/union
-    derive/agent-state-read-attrs
-    #{:seon.agent.run/agent
-      :seon.agent.run/closed-at
-      :seon.agent.run/closed-reason
-      :seon.agent.run/resumed-at
-      :seon.agent.turn/at
-      :seon.agent.turn/status
-      :seon.agent.turn/llm-usage
-      :seon.eval/id
-      :seon.eval/ok?}))
-
-(defn- captured-hiccup
-  "Render one database-derived unit and retain only immutable read facts."
-  [dbv thunk]
-  (let [capture (db/capture-reads
-                  {:seon.db/db dbv :seon.db/thunk thunk})]
-    {::element (:seon.db/result capture)
-     :seon.db/read-observations (:seon.db/read-observations capture)}))
-
 (defn- dependencies-for
-  [catalog surfaces system-header-capture]
+  [catalog surfaces]
   {::surface-attrs (into #{} (mapcat ::surface/read-attrs) catalog)
    ::structural-attrs structural-attrs
-   ::header-attrs header-attrs
    ::surface-read-attrs
    (into {} (map (juxt ::surface/selection ::surface/read-attrs)) catalog)
    ::surface-read-observations
    (into {} (map (juxt ::surface/selection
-                       :seon.db/read-observations)) surfaces)
-   ::system-header-read-observations
-   (:seon.db/read-observations system-header-capture)})
+                       :seon.db/read-observations)) surfaces)})
 
 (defn- reads-changed?
   "Whether a unit's captured semantic reads differ at `dbv`.
@@ -306,7 +278,8 @@
   {:malli/schema [:=> [:cat ::render-request]
                   ::render-result]}
   [{db :seon.db/db agent-id :seon.agent/id
-    serialized-agent-header ::agent-header-html}]
+    serialized-agent-header ::agent-header-html
+    serialized-system-header ::system-header-html}]
   (try
     (let [catalog (surface/surface-catalog db agent-id)
           surfaces (->> (surface/materialize-surfaces
@@ -322,18 +295,20 @@
           latest (some #(when (= latest-selection (::surface/selection %)) %)
                        present-catalog)
           latest-touch (::surface/focus-touch latest)
-          system-header-capture
-          (captured-hiccup db #(header/system-header db))
+          system-header-element
+          (if serialized-system-header
+            (html/raw serialized-system-header)
+            (header/system-header db))
           agent-header-element
           (if serialized-agent-header
             (html/raw serialized-agent-header)
             (agent-header db agent-id))]
       {::element
        (view-element surfaces latest-selection latest-touch
-                     (::element system-header-capture)
+                     system-header-element
                      agent-header-element)
        ::dependencies
-       (dependencies-for catalog surfaces system-header-capture)})
+       (dependencies-for catalog surfaces)})
     (catch :default e
       {::element
        [:main {:id "app-view" :class "flex flex-col gap-3 w-full"}
@@ -342,10 +317,8 @@
        ::dependencies
        {::surface-attrs #{:seon.render.canvas/content}
         ::structural-attrs structural-attrs
-        ::header-attrs header-attrs
         ::surface-read-attrs {"canvas" #{:seon.render.canvas/content}}
-        ::surface-read-observations {}
-        ::system-header-read-observations []}})))
+        ::surface-read-observations {}}})))
 
 (defn agent-view
   "Render one agent's canvas and HTML context blocks from `db`."
@@ -359,12 +332,16 @@
   "Render only units whose captured database results changed."
   {:malli/schema [:=> [:cat ::transition-request] ::transition-result]}
   [{dbv :seon.db/db agent-id :seon.agent/id changed-attrs ::changed-attrs
-    serialized-agent-header ::agent-header-html dependencies ::dependencies}]
+    serialized-agent-header ::agent-header-html
+    serialized-system-header ::system-header-html
+    dependencies ::dependencies}]
   (if (structural-change? changed-attrs)
     (let [rendered (render-agent-view
                      (cond-> {:seon.db/db dbv :seon.agent/id agent-id}
                        serialized-agent-header
-                       (assoc ::agent-header-html serialized-agent-header)))]
+                       (assoc ::agent-header-html serialized-agent-header)
+                       serialized-system-header
+                       (assoc ::system-header-html serialized-system-header)))]
       {::elements [(::element rendered)]
        ::dependencies (::dependencies rendered)})
     (let [surface-read-attrs (::surface-read-attrs dependencies)
@@ -377,10 +354,6 @@
                                      dbv (get surface-observations selection [])))
                           selection)))
                 surface-read-attrs)
-          system-header-dirty?
-          (and (seq (set/intersection changed-attrs header-attrs))
-               (reads-changed?
-                 dbv (::system-header-read-observations dependencies)))
           affected
           (if (seq affected-selections)
             (surface/materialize-surfaces
@@ -394,7 +367,10 @@
                          (cond-> {:seon.db/db dbv :seon.agent/id agent-id}
                            serialized-agent-header
                            (assoc ::agent-header-html
-                                  serialized-agent-header)))]
+                                  serialized-agent-header)
+                           serialized-system-header
+                           (assoc ::system-header-html
+                                  serialized-system-header)))]
           {::elements [(::element rendered)]
            ::dependencies (::dependencies rendered)})
         (let [catalog (when (seq affected-selections)
@@ -405,14 +381,8 @@
                        (some #(when (= latest-selection
                                         (::surface/selection %)) %)
                              catalog))
-              system-header-capture
-              (when system-header-dirty?
-                (captured-hiccup dbv #(header/system-header dbv)))
               next-dependencies
               (cond-> dependencies
-                system-header-capture
-                (assoc ::system-header-read-observations
-                       (:seon.db/read-observations system-header-capture))
                 (seq affected)
                 (update ::surface-read-observations
                         into
@@ -422,9 +392,7 @@
               (into (cond-> []
                       catalog
                       (conj (focus-marker (::surface/selection latest)
-                                          (::surface/focus-touch latest)))
-                      system-header-capture
-                      (conj (::element system-header-capture)))
+                                          (::surface/focus-touch latest))))
                     (mapcat surface-elements)
                     affected)]
           {::elements elements ::dependencies next-dependencies})))))

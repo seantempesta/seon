@@ -38,8 +38,9 @@
     [seon.db.coordinate :as db.coordinate]
     [seon.log :as log]
     [seon.schema :as schema]
-    [seon.ui.html :as html]
     [seon.ui.agent-view :as agent-view]
+    [seon.ui.header :as header]
+    [seon.ui.html :as html]
     [seon.web.brand :as brand]
     [seon.web.view-unit :as view-unit]))
 
@@ -1690,11 +1691,17 @@
   (write-agent-page! (:seon.http/node-res r) "root"))
 
 (defn- live-agent-feed-definition
-  "Build one live agent feed with its demanded header unit."
+  "Build one live agent feed with both demanded header units."
   [id view-id]
   (let [catalog
         (unit-catalog
           [{::coordinate
+            {:seon.web.view-unit/name :seon.web.view-unit/system-header}
+            ::view-unit? true
+            ::complete-element? true
+            ::renderer-token "seon.ui.header/system-header-v1"
+            ::producer #(header/system-header %)}
+           {::coordinate
             {:seon.route/name :seon.route/agent-feed
              :seon.agent/id id
              :seon.web.view-unit/name :seon.web.view-unit/agent-header}
@@ -1702,14 +1709,29 @@
             ::complete-element? true
             ::renderer-token "seon.ui.agent-view/agent-header-v1"
             ::producer #(agent-view/agent-header % id)}])
-        header-token (::token (first catalog))
-        header-html #(retained-unit-html header-token)]
+        tokens-by-name
+        (into {}
+              (map (juxt #(get-in % [::coordinate
+                                     :seon.web.view-unit/name])
+                         ::token))
+              catalog)
+        expected-names #{:seon.web.view-unit/agent-header
+                         :seon.web.view-unit/system-header}
+        _ (when-not (= expected-names (set (keys tokens-by-name)))
+            (throw (js/Error. "agent feed requires exactly both header units")))
+        agent-header-token
+        (get tokens-by-name :seon.web.view-unit/agent-header)
+        system-header-token
+        (get tokens-by-name :seon.web.view-unit/system-header)
+        demanded-tokens (into #{} (vals tokens-by-name))
+        agent-header-html #(retained-unit-html agent-header-token)
+        system-header-html #(retained-unit-html system-header-token)]
     (cond->
       {:seon.web.feed/key [:seon.web.feed/agent id]
        :seon.web.feed/live? true
        ::catalog catalog
-       ::active-tokens #{header-token}
-       ::demanded-tokens #{header-token}
+       ::active-tokens demanded-tokens
+       ::demanded-tokens demanded-tokens
        ::render-full-with-db? true
        :seon.web.feed/render-full
        (fn [dbv]
@@ -1717,7 +1739,8 @@
                (agent-view/render-agent-view
                  {:seon.db/db dbv
                   :seon.agent/id id
-                  ::agent-view/agent-header-html (header-html)})]
+                  ::agent-view/agent-header-html (agent-header-html)
+                  ::agent-view/system-header-html (system-header-html)})]
            {::element (::agent-view/element rendered)
             ::dependencies (::agent-view/dependencies rendered)}))
        :seon.web.feed/render-change
@@ -1728,7 +1751,8 @@
                  {:seon.db/db dbv
                   :seon.agent/id id
                   ::agent-view/changed-attrs attrs
-                  ::agent-view/agent-header-html (header-html)
+                  ::agent-view/agent-header-html (agent-header-html)
+                  ::agent-view/system-header-html (system-header-html)
                   ::agent-view/dependencies dependencies})]
            {::elements (::agent-view/elements transition)
             ::dependencies (::agent-view/dependencies transition)}))}
