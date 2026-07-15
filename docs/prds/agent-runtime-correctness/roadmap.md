@@ -128,12 +128,18 @@ failures or errors).
    data rather than rewriting replies.
 6. **Audit complete; experiment pending:** implement the non-production
    pod-owned disposable-child experiment first. Prove child CPU/heap/external
-   memory death, a hard platform memory ceiling, capability refusal, prompt
+   memory death, a hard platform memory ceiling, capability refusal, ambient
+   filesystem/network/environment/process denial, allowed framed IPC, prompt
    kill/reap, reconstruction cost, and pod/writer health without moving
-   application eval. Then add durable started/terminal receipts and the
-   parent-stamped actor capability before provider and eval cutovers. Plan
-   lifecycle authority may land its pure decisions earlier, but cannot claim
-   an unforgeable actor while eval can replace `seon.db/with-agent` context.
+   application eval. Direct children use Node's deny-by-default permission
+   model as a bypassable defense-in-depth belt; the hostile proof uses the
+   hardened per-task Docker/OS backend. The current canonical image's Node
+   `22.23.1` must converge with the audited/launch-described runtime before its
+   permission flags count as evidence. Then add durable started/terminal receipts
+   and the parent-stamped actor capability before provider and eval cutovers.
+   Plan lifecycle authority may land its pure decisions earlier, but cannot
+   claim an unforgeable actor while eval can replace `seon.db/with-agent`
+   context.
 7. Integrate Inspect tasks/scorers that falsify each transition, then run paid
    or small-model trials only after deterministic runtime gates pass.
 

@@ -67,7 +67,7 @@ destructive first-slice measurements below mandatory rather than inferred.
 
 | Dependency or mechanism | Selected identity | Exact source and consequence |
 |---|---|---|
-| Node.js | live `v26.4.0`, release commit `2022edf3e32ce28ee08b17f8566243a090dacd95`, V8 `14.6.202.34-node.21` | Official tag source `doc/api/worker_threads.md`, `child_process.md`, and `cli.md`: worker limits exclude external memory; child abort sends a signal but does not prove exit; `SIGTERM` needs escalation; old-space and fatal reports are diagnostic/heap controls, not total RSS limits. Exact source was located at the official tag because no Node mirror exists under `reference-code/`. |
+| Node.js | live `v26.4.0`, release commit `2022edf3e32ce28ee08b17f8566243a090dacd95`, V8 `14.6.202.34-node.21` | Official tag source `doc/api/worker_threads.md`, `child_process.md`, `cli.md`, and `permissions.md`: worker limits exclude external memory; child abort sends a signal but does not prove exit; old-space is not a total RSS limit; `--permission` denies filesystem, network, child process, workers, addons, WASI, FFI, and inspector by default. Node explicitly calls that model a bypassable seat belt for trusted code, not a malicious-code security boundary. Exact source was located at the official tag because no Node mirror exists under `reference-code/`. |
 | ClojureScript self-host | selected `1.12.145`; official tag `r1.12.145`, commit `bd23d9a2475d822ea8dfd65deaa6732428b9ed25` | `reference-code/clojurescript/src/main/cljs/cljs/js.cljs` and current `seon.eval` establish that analyzer state and definitions persist across `cljs.js/eval-str` calls. Child reconstruction must load committed program source, never replay effects. |
 | Shadow CLJS | selected `3.4.10`, release commit `d3c04691952aa9ea33f7287ffe9a2b3109c1e510` | The bootstrap/client artifact and analysis cache are immutable child inputs. Artifact identity must match the parent launch descriptor; never select Shadow's latest runtime. |
 | SCI | `0.13.53`, commit `b4917436550c857a18b8f6a4a8b5b26356acc2c4` | Pinned for bounded interpreted surfaces. The application evaluator uses `cljs.js`; SCI interruption cannot contain emitted native JS and is not the process boundary. |
@@ -76,6 +76,7 @@ destructive first-slice measurements below mandatory rather than inferred.
 | Provider SDKs | OpenAI Node `6.42.0`, Anthropic `0.104.2`; exact source mapped by the provider cancellation audit | One fresh attempt signal remains valid cooperative cancellation. Hard timeout additionally kills and reaps the attempt child; SDK retry stays disabled and `call-llm!` remains the sole retry decision owner. |
 | Pod lifecycle | `seon.client/start-runtime!` / `stop-runtime!`, `seon.agent.runtime`, `seon.runtime.recovery` | Child handles are process-local artifacts owned by the existing runtime inverse. Stop closes admission, cancels/kills/reaps children, then releases the replica/database. Recovery derives unfinished receipts from committed facts. |
 | Operator | `bin/seon` supervisor and launch descriptor work | The operator must treat execution children as the pod's non-detached subtree, reap them on pod death, and include their artifact/cache identity in readiness. It does not gain another service, port registry, or autonomous lifecycle. |
+| Inspect Docker substrate | `src-inspect-ai/src/seon_inspect/swebench_arm.py` and canonical `docker/Dockerfile` | The existing null arm proves `network_mode: none`; the agent arm proves an internal-only network plus model-API relay, immutable `/opt/seon:ro`, and `mem_limit`. It does not yet set a read-only root, non-root user, dropped capabilities, no-new-privileges, or a child-specific PID limit. The image also pins Node `22.23.1`, not the audited live `26.4.0`; it is a source pattern and available substrate, not already-complete eval isolation. |
 
 ## Current boundary and the exact seam
 
@@ -154,6 +155,72 @@ This bridge is not a second database protocol. It is the local execution
 capability adapter that calls `seon.db`; only the existing writer protocol
 commits. The immutable database value remains in the pod, so one eval form sees
 one coordinate even if the writer advances concurrently.
+
+## Launch permissions and operating-system enforcement
+
+A plain Node child inherits the host filesystem, network, environment, process
+namespace, and module loader. Process disposal does not remove those ambient
+capabilities. Every direct child therefore starts with Node `v26.4.0`
+`--permission`, not an allow-all runtime followed by attempted revocation.
+
+The eval-child launch grants only exact immutable artifact/bootstrap read paths
+and the already-open framed capability descriptors. It grants no filesystem
+write, network, child-process, worker-thread, native-addon, WASI, FFI, or
+inspector permission. Its `env` is a closed allowlist of non-secret runtime
+coordinates; provider keys, host tokens, proxy variables, home-directory
+credentials, `NODE_OPTIONS`, and ambient configuration are absent. Node states
+that existing file descriptors bypass its permission checks; that exception is
+intentional only for the parent-created request/response pipes, whose framing,
+size, receipt, and operation checks remain parent-owned.
+
+The provider-attempt child never receives agent source or an eval capability.
+It gets exact adapter/artifact read paths, no write/child/worker/addon/WASI/FFI/
+inspector permission, a minimal selected-provider credential environment, and
+network permission. Under the hard container backend that network joins an
+internal-only namespace whose sole egress is the selected model API relay,
+following the existing Inspect arm. Provider credentials disappear with that
+child and are never present when an eval child launches.
+
+Node's permission model is defense in depth, not the hard sandbox. Its exact
+documentation warns that malicious code can bypass it, filesystem grants follow
+relative symlinks, `node:sqlite` can reach files outside `node:fs` checks,
+pre-initialization flags can read files, existing descriptors remain usable,
+and `process._debugProcess()` can signal another same-user Node process. Native
+addons are denied because they would escape the JS checks; a dependency that
+requires one is incompatible until it has a separately measured backend. The
+child cannot receive `--allow-child-process` or `--allow-worker`; provider and
+eval bundles must fail admission if a selected dependency requires either.
+
+Hard eval enforcement is the platform launch backend described by the same
+execution contract. On the existing Docker-capable macOS/Inspect path it uses a
+fresh per-task container with:
+
+- `network_mode: none` for eval; an internal-only model-relay network for a
+  provider attempt;
+- a read-only root filesystem and exact read-only artifact mounts;
+- one bounded tmpfs only if the runtime proves it needs scratch space;
+- a non-root uid, all Linux capabilities dropped, no-new-privileges, no Docker
+  socket/host PID namespace/devices, and a Node-compatible bounded PID count;
+- the measured memory/CPU ceiling and bounded stdout/stderr; and
+- one mounted parent-owned Unix capability socket directory, containing no
+  database/writer/feed socket and removed after the task.
+
+The canonical image currently bundles Node `22.23.1`. Slice 1 must first make
+the child artifact's Node identity equal the launch descriptor and read that
+exact release's permission behavior. The audited `v26.4.0` network denial and
+`--allow-net` flag cannot be projected backward onto the current image. Prefer
+updating the child/runtime image to the same selected `v26.4.0`; if packaging
+temporarily retains `22.23.1`, Docker's network namespace is the only network
+enforcement claimed and unsupported Node flags are omitted. Readiness rejects an
+artifact/runtime mismatch rather than silently weakening permissions.
+
+Node uses `--allow-net` inside that container only to reach the mounted Unix
+capability socket (and, for provider tasks, the relay); the OS network namespace
+is the actual egress enforcement. Slice 1 must verify whether the exact Node
+permission check classifies the Unix socket as network on each packaged Node
+version. Direct non-container children are allowed as a fast development arm
+only after the same denial tests pass, and their Node permission result is never
+reported as hostile-code or hard memory isolation.
 
 ## Disposal granularity
 
@@ -244,6 +311,18 @@ generated fixtures for synchronous loop, ordinary heap, `ArrayBuffer` external
 memory, uncaught exception, explicit exit, output flood, TERM refusal, and
 parent disappearance.
 
+The same child must attempt and fail all ambient-capability probes: read a host
+file outside the exact artifact allowlist, write beside the artifact, open a TCP
+and UDP socket, read a seeded fake provider secret from `process.env`, spawn a
+child process, start a worker, load a native addon, enable an inspector, and use
+the known `node:sqlite`, symlink, and `process._debugProcess()` caveat shapes.
+In the direct arm, the ordinary permission-controlled operations must return
+`ERR_ACCESS_DENIED` or the documented addon-specific denial. In the hard Docker
+arm, bypass-shaped probes must still fail at the read-only mount, namespace,
+uid/capability, seccomp/no-new-privileges, or PID boundary. The framed parent IPC
+read and stale write-refusal probes must continue to work under those same
+denials.
+
 Measure cold artifact load, bootstrap reconstruction, committed program replay,
 first form, batch of forms, normal shutdown, TERM-to-exit, KILL-to-reap, peak
 RSS/heap/external memory, descriptor/fd cleanup, and pod event-loop latency.
@@ -311,6 +390,13 @@ small-model or paid provider trials.
 
 - Exact dependency identities, child artifact digest, launch backend, memory/
   CPU limits, and parent capability coordinate appear in the retained test log.
+- The eval child's launch argv records `--permission` and only exact artifact/
+  IPC grants; its environment contains no seeded provider or host secret. Reads,
+  writes, TCP/UDP, child spawn, worker creation, addon load, inspector, symlink,
+  sqlite, and cross-process-debug probes are denied, while bounded framed IPC to
+  the parent succeeds. Container evidence records network mode, mounts, uid,
+  dropped capabilities, no-new-privileges, PID/memory/CPU limits, and absence of
+  the Docker socket and writer/feed sockets.
 - A sync infinite loop exceeds its deadline, the pod web/status and writer ping
   remain responsive during termination, and the child is reaped within the
   configured bound.
@@ -376,5 +462,8 @@ database facts.
   `reference-code/piscina/test/test-uncaught-exception-from-handler.test.ts` —
   deterministic termination/replacement examples only.
 - Node `v26.4.0` official tag source `doc/api/worker_threads.md`,
-  `doc/api/child_process.md`, and `doc/api/cli.md` at commit
-  `2022edf3e32ce28ee08b17f8566243a090dacd95`.
+  `doc/api/child_process.md`, `doc/api/cli.md`, and `doc/api/permissions.md` at
+  commit `2022edf3e32ce28ee08b17f8566243a090dacd95`.
+- `src-inspect-ai/src/seon_inspect/swebench_arm.py` — existing Docker
+  network-none, internal relay, read-only artifact mount, and memory-limit
+  patterns plus the controls still missing for a hard eval child.
