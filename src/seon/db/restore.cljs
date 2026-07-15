@@ -4,7 +4,9 @@
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as protocol]
     [seon.error :as error]
+    [seon.launch :as launch]
     [seon.schema :as schema]))
 
 ;;; Durable completion fact
@@ -44,6 +46,42 @@
    [::target-branch ::target-branch]
    [::core-overlay-digest {:optional true} ::core-overlay-digest]
    [::config-overlay-digest {:optional true} ::config-overlay-digest]])
+
+(schema/register! ::completion-from-launch-request
+  [:map {:closed true}
+   [::launch/descriptor ::launch/descriptor]])
+
+(defn completion-from-launch
+  "Derive one preserve-only completion from validated startup evidence."
+  {:malli/schema
+   [:=> [:cat ::completion-from-launch-request] ::completion]}
+  [{descriptor ::launch/descriptor}]
+  (let [descriptor (launch/validate-descriptor descriptor)
+        startup (::launch/restore-startup descriptor)
+        _ (when-not startup
+            (throw
+              (ex-info "The launch descriptor has no restore startup evidence."
+                       {:seon.error/kind :core-bug})))
+        identity (:seon.dev.restore/startup-identity startup)
+        admin (:seon.db.restore-admin/result startup)
+        database (::launch/database descriptor)
+        from (:seon.db.restore-admin/pre-restore-main-coordinate admin)
+        to (:seon.db.restore-admin/selected-target-coordinate admin)
+        forced (:seon.db.restore-admin/forced-main-coordinate admin)
+        undo (:seon.db.restore-admin/undo-coordinate admin)
+        target (:seon.db.restore-admin/prepared-target-coordinate admin)]
+    {::id (:seon.dev.restore/intent-id identity)
+     ::db-name (keyword (::protocol/database-name database))
+     ::database-id (::coordinate/database-id forced)
+     ::from-branch (::coordinate/branch from)
+     ::from-commit-id (::coordinate/commit-id from)
+     ::from-t (::coordinate/t from)
+     ::to-branch (::coordinate/branch to)
+     ::to-commit-id (::coordinate/commit-id to)
+     ::to-t (::coordinate/t to)
+     ::forced-commit-id (::coordinate/commit-id forced)
+     ::undo-branch (::coordinate/branch undo)
+     ::target-branch (::coordinate/branch target)}))
 
 ;;; Idempotent completion operation
 

@@ -2500,6 +2500,62 @@
    [:seon.web/port :int]
    [:seon.web/port-file :string]])
 
+(declare process-generation)
+
+(defn- validate-restore-launch!
+  [descriptor capability attached?]
+  (when-let [startup (::launch/restore-startup descriptor)]
+    (let [expected-generation
+          (get-in startup
+                  [:seon.dev.restore/startup-identity
+                   :seon.dev.restore/consumer-generations
+                   :seon.dev.process/pod])
+          actual-generation (process-generation)]
+      (when attached?
+        (throw
+          (ex-info "Restore startup requires a fresh unattached process."
+                   {:seon.error/kind :core-bug})))
+      (when-not (true? (::autonomous? capability))
+        (throw
+          (ex-info "Restore startup requires the autonomous main capability."
+                   {:seon.error/kind :core-bug})))
+      (when-not (= (str expected-generation) actual-generation)
+        (throw
+          (ex-info "Restore startup crossed its expected pod generation."
+                   {:seon.client/expected-process-generation
+                    expected-generation
+                    :seon.client/actual-process-generation actual-generation
+                    :seon.error/kind :core-bug})))
+      startup)))
+
+(defn- validate-restore-attachment!
+  [conn descriptor startup]
+  (when startup
+    (let [database @conn
+          actual (db/head-coordinate database)
+          expected (get-in descriptor
+                           [::launch/database ::db.coordinate/coordinate])
+          forced (get-in startup
+                         [:seon.db.restore-admin/result
+                          :seon.db.restore-admin/forced-main-coordinate])
+          missing-schema
+          (into []
+                (remove #(contains? (db/installed-schema database) %))
+                db.restore/completion-attrs)]
+      (when-not (and (= expected forced actual)
+                     (= :db (::db.coordinate/branch actual)))
+        (throw
+          (ex-info "Restore startup attached another main database point."
+                   {:seon.client/expected-restore-coordinate expected
+                    :seon.client/forced-restore-coordinate forced
+                    :seon.client/actual-restore-coordinate actual
+                    :seon.error/kind :core-bug})))
+      (when (seq missing-schema)
+        (throw
+          (ex-info "The restored database lacks completion schema."
+                   {:seon.client/missing-restore-schema missing-schema
+                    :seon.error/kind :core-bug}))))))
+
 (defn- ^:async start-runtime-impl!
   "Cold-start the cluster process or refresh attached read-surface readiness.
 
@@ -2515,8 +2571,17 @@
   [{::keys [llm-fn launch-capability]}]
   (let [capability (or launch-capability default-launch-capability)
         _ (claim-launch-capability! capability)
-        autonomous? (true? (::autonomous? capability))]
-    (if (db/attached?)
+        autonomous? (true? (::autonomous? capability))
+        descriptor (launch/validate-descriptor
+                     replica/process-launch-descriptor)
+        attached? (db/attached?)
+        restore-startup
+        (validate-restore-launch! descriptor capability attached?)
+        restore-completion
+        (when restore-startup
+          (db.restore/completion-from-launch
+            {::launch/descriptor descriptor}))]
+    (if attached?
       (let [conn db/*conn*
             available-ids (agent/resumable-agent-ids {:seon.db/db @conn})
             resumed-ids (if autonomous? available-ids [])
@@ -2535,13 +2600,17 @@
          :seon.web/port-file port-file})
       (let [conn (await
                    (open-database-connection!
-                    {::prepare-writes? autonomous?}))
+                    {::prepare-writes? (and autonomous?
+                                            (nil? restore-startup))}))
             _ (set! db/*conn* conn)
+            _ (validate-restore-attachment!
+               conn descriptor restore-startup)
             _ (db/assert-preconditions! {:seon.db/conn conn})
             ;; Bootstrap compilation can overlap autonomous database work.
             compile-promise (repl/ensure-bootstrap!)]
+        (when (and autonomous? (nil? restore-startup))
+          (await (boot-seed! {:seon.db/conn conn})))
         (when autonomous?
-          (await (boot-seed! {:seon.db/conn conn}))
           (let [recovered
                 (await
                  (db/with-tx-context
@@ -2561,10 +2630,11 @@
         (let [root-home [:seon.ns/name (keyword (str (home/home-ns "root")))]
               root-ready-before?
               (and autonomous?
+                   (nil? restore-startup)
                    (string?
                     (:seon.ns/source (db/entity {:seon.db/ref root-home}))))
               root-result
-              (when autonomous?
+              (when (and autonomous? (nil? restore-startup))
                 (await
                  (db/with-tx-context
                   {:seon.db/user [:seon.agent/id "root"]
@@ -2572,11 +2642,12 @@
                    (db.process/lookup-ref :seon.db.process/boot)}
                   (fn [] (agent/create! {:seon.agent/id "root"})))))
               _ (when (and autonomous?
+                           (nil? restore-startup)
                            (false? (:seon.db/ok? root-result)))
                   (throw (ex-info "start-runtime!: root birth failed"
                                   root-result)))
               initial-result
-              (when autonomous?
+              (when (and autonomous? (nil? restore-startup))
                 (await
                  (db/with-tx-context
                   {:seon.db/user [:seon.agent/id "root"]
@@ -2584,14 +2655,18 @@
                    (db.process/lookup-ref :seon.db.process/boot)}
                   (fn [] (agent/ensure-initial-agent! {})))))
               _ (when (and autonomous?
+                           (nil? restore-startup)
                            (false? (:seon.db/ok? initial-result)))
                   (throw (ex-info "start-runtime!: initial agent birth failed"
                                   initial-result)))
               initial-id (when (and autonomous?
+                                    (nil? restore-startup)
                                     (::agent/initial-created? initial-result))
                            (:seon.agent/id initial-result))
               created-ids (cond-> []
-                            (and autonomous? (not root-ready-before?))
+                            (and autonomous?
+                                 (nil? restore-startup)
+                                 (not root-ready-before?))
                             (conj "root")
                             initial-id (conj initial-id))
               compile-state (await compile-promise)
@@ -2621,7 +2696,49 @@
                    ::record-failures? autonomous?}))
                 _ (log/info-console! "seon.client/start-runtime!"
                                      (str "replay: " (pr-str replay-stats)))
-                publication (admission/publish-committed!)
+                _ (when (and restore-startup
+                             (pos? (::replay-n-fail replay-stats)))
+                    (throw
+                      (ex-info
+                        "start-runtime!: restored program replay failed"
+                        replay-stats)))
+                preparation
+                (when restore-startup
+                  (admission/prepare-committed!))
+                _ (when (and restore-startup
+                             (not (::admission/prepared? preparation)))
+                    (throw
+                      (ex-info
+                        "start-runtime!: restore program preparation failed"
+                        preparation)))
+                completion-result
+                (when restore-startup
+                  (await
+                    (db/with-tx-context
+                      {:seon.db/user [:seon.agent/id "root"]
+                       :seon.db/process
+                       (db.process/lookup-ref :seon.db.process/boot)}
+                      (fn []
+                        (db.restore/record! restore-completion)))))
+                _ (when (and restore-startup
+                             (not
+                               (and (true? (::db.restore/ok?
+                                             completion-result))
+                                    (= restore-completion
+                                       (::db.restore/completion
+                                         completion-result))
+                                    (schema/valid-candidate-value?
+                                      ::db.coordinate/coordinate
+                                      (::db.restore/completion-coordinate
+                                        completion-result)))))
+                    (throw
+                      (ex-info
+                        "start-runtime!: restore completion failed"
+                        completion-result)))
+                publication
+                (if restore-startup
+                  (admission/admit-prepared! preparation)
+                  (admission/publish-committed!))
                 _ (when-not (::admission/published? publication)
                     (throw
                      (ex-info

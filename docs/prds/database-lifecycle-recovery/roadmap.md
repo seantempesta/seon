@@ -274,13 +274,9 @@ intent deletion. It must not add shadow completion metadata or another restore
 state machine.
 
 The current-source cold-composition reconciliation is retained at
-[[research/restore-cold-composition-reconciliation-2026-07-15]]. The local blob,
-completion, and split admission primitives are sufficient, but the current
-`seon.client/start-runtime!` ordering is not: autonomous attach can install
-schema, boot, config, and crash-recovery writes before restore evidence is
-validated, while both autonomous and non-autonomous cold calls admit internally
-before an external completion call can close the transition. Commit `c2b4013d`
-completes the first in-place runtime unit: one optional closed, digest-bound
+[[research/restore-cold-composition-reconciliation-2026-07-15]]. Commit
+`c2b4013d` completes the first in-place runtime unit: one optional closed,
+digest-bound
 restore startup value travels through the existing launch descriptor and its
 exact `pr-str` process publication. It contains only the authoritative frozen
 intent identity/digests/consumer map, exact admin success, and exact blob
@@ -288,19 +284,24 @@ success. Relational validation derives agreement on intent, plan, reachable
 blobs, selected target, the required pod generation member, and the descriptor's
 actual forced-main coordinate; ordinary descriptor bytes remain unchanged.
 Focused proof passes launch 7 tests/47 assertions, blob 21/148, admin 9/53, and
-operator restore 9/57. The remaining in-place unit is a fresh main attach with
-writes closed, exact startup validation, preserve-only reconstruction,
-`prepare-committed!`, root/boot completion recording, and `admit-prepared!` of
-that same generation. Autonomy and readiness start last; intent deletion
-remains the external operator's durable inverse. No restore-only boot path,
-callback, status, or ambient intent-file reread is permitted. The
-transaction-coordinate resolver is complete at `b2461d64`; the Proximum
-force-secondary repair remains the hard predecessor of the destructive
-integrated gate. A complete CLJS checkpoint also exposed that the globally
-derived restore-id generator policy currently precedes installation of the
-restore completion schema in `agent-bootstrap-attrs`; the initial-schema owner
-must install the full completion closure before policy publication without
-weakening validation.
+operator restore 9/57. The second in-place unit is now implemented in the
+existing cold entry: a fresh main attach keeps writes closed, validates the
+exact startup generation/head and preinstalled completion schema, performs
+preserve-only recovery and replay, calls `prepare-committed!`, records and
+reads back completion under root/boot provenance, and admits that exact
+generation. Any replay or completion failure stays closed; ordinary cold start
+retains its existing composition. Autonomy and readiness start last; intent
+deletion remains the external operator's durable inverse. No restore-only boot
+path, callback, status, or ambient intent-file reread was added. The
+transaction-coordinate resolver is complete at `b2461d64`, and the fresh
+schema owner now installs the complete restore closure before generator-policy
+publication. The Proximum force-secondary repair remains the hard predecessor
+of the destructive integrated gate; therefore no public restore command or
+destructive default/ACME proof is claimed yet. Focused cold-composition proof
+passes 29 tests/195 assertions, including post-completion crash and idempotent
+retry before exact admission, with zero compile warnings at
+`tmp/test-cljs-20260715-112026-67588.log`; adjacent restore, admission, and
+launch owners pass 7/37, 14/85, and 7/47 respectively.
 
 The exact inverse contract is grounded at
 [[research/retained-head-restore-undo-contract-audit-2026-07-15]]. Undo is not a

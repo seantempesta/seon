@@ -8,13 +8,13 @@ tags: [research, database, flow, pod]
 
 ## Result
 
-The Slice-5 primitives are now real, but they do not yet compose into one cold
-restore transition. `my.blob/materialize-retained!` proves the exact retained
-database coordinate and blob set, `seon.db.restore/record!` owns the one
-completion transaction, and `seon.runtime.admission/prepare-committed!` plus
-`admit-prepared!` can keep executable admission closed across that transaction.
-The missing owner is the existing `seon.client/start-runtime!` cold entry and
-its operator-supplied immutable startup input—not another restore runtime.
+The Slice-5 primitives now compose into one cold restore transition in the
+existing `seon.client/start-runtime!` owner. `my.blob/materialize-retained!`
+proves the exact retained database coordinate and blob set,
+`seon.db.restore/record!` owns the one completion transaction, and
+`seon.runtime.admission/prepare-committed!` plus `admit-prepared!` keep
+executable admission closed across that transaction. The caller consumes the
+operator-supplied immutable startup value; there is no second restore runtime.
 
 The current cold entry still performs autonomous schema/boot/config/recovery
 writes before it begins program publication, and then admits inside the same
@@ -36,10 +36,12 @@ One destructive predecessor remains explicit:
   destination branch with equal Merkle roots, so the closed writer-admin result
   correctly rejects the transition.
 
-The client source is now ready for the in-place cold-composition refactor. A
-separate fresh-schema defect found by the complete CLJS checkpoint is fixed at
-the canonical bootstrap owner below; it does not relax the preserve-only
-restore rule.
+The client composition and the separate fresh-schema correction are now
+implemented in place. Focused source proof covers ordering, mismatch,
+completion failure and retry, missing restored schema, replay failure, and
+ordinary-start parity. The destructive named-cluster proof remains gated by
+the Proximum dependency repair; no destructive default or ACME transition was
+attempted.
 
 ## Dependency ledger
 
@@ -253,11 +255,46 @@ assertions with zero failures, errors, or compile warnings at
 that this schema already exists after force; it never installs current-source
 schema as an implicit overlay.
 
-## Exact in-place client plan after the landed contracts
+## In-place client composition implemented
 
-The remaining runtime change strengthens `seon.client/start-runtime!` and its
-existing helpers. It does not add a `restore-runtime!`, another process mode,
-another admission state, or another replay/registry path.
+`seon.client/start-runtime!` now consumes the optional startup value before its
+first await or database write. Restore requires a fresh autonomous process and
+the exact frozen pod generation. It attaches main with `prepare-writes? false`,
+then proves the writer/replica head equals both the launch coordinate and the
+admin result's forced coordinate and proves the complete completion schema was
+already present in the restored database. A mismatch fails before recovery,
+replay, completion, hosts, web, provider synchronization, branding, or ticker
+installation.
+
+Preserve-only reconstruction skips ordinary boot seed, ambient config, root
+creation, and initial-agent creation. It runs the existing crash-recovery and
+program-replay owners under their existing root/boot boundaries, prepares the
+committed projection, records and reads back the exact completion, and admits
+only the unchanged preparation. Hosts, web, provider synchronization,
+branding, and the ticker remain after admission. Ordinary cold startup still
+uses its existing boot/config/publication composition when the optional value
+is absent.
+
+Replay fault persistence is an intentional bounded exception to the phrase
+"no restore overlay writes." Existing replay with `record-failures? true` may
+record operational fault evidence under the existing provenance boundary while
+admission remains closed. That evidence is not a core, config, provider, or
+schema overlay. Any nonzero replay failure blocks preparation, completion, and
+admission; it cannot turn a damaged reconstruction into a ready process.
+
+The implementation adds no `restore-runtime!`, callback, process mode,
+admission status, registry, replay path, or ambient environment reread. The
+destructive integrated proof remains unchanged: after the Proximum force repair
+lands, an isolated named cluster must prove force/blob agreement, completion
+before first readiness, crash/retry without a second force or completion fact,
+and config-free restart at the same facts and original completion coordinate.
+
+Focused proof passes `seon.client-runtime-test` at 29 tests/195 assertions,
+including crash after committed completion and idempotent completion reuse
+before retry admission, with zero compile warnings at
+`tmp/test-cljs-20260715-112026-67588.log`. Adjacent owner proof passes
+`seon.db.restore-test` at 7/37, `seon.runtime.admission-test` at 14/85, and
+`seon.launch-test` at 7/47, all with zero failures, errors, or compile warnings.
 
 ### Pure selection and evidence projection
 
