@@ -337,6 +337,46 @@
     (is (not (str/includes? card "arg-1"))
         "a single logical schema still benefits from physical binding names")))
 
+(deftest compact-fn-record-never-promotes-vector-output-data-to-an-arity
+  (doseq [{:keys [sym arglists expected-input expected-output]}
+          [{:sym "my.view/nested"
+            :arglists
+            "([request] [:section [:header \"Title\"] (into [:ul] (map (fn [x] [:li x]) items))])"
+            :expected-input "request :my.view/request"
+            :expected-output "-> :my.view/control"}
+           {:sym "my.view/recursive"
+            :arglists
+            "([node] [:branch (when-let [children (:children node)] (mapv (fn [child] [:branch (walk child)]) children))])"
+            :expected-input "node :my.view/node"
+            :expected-output "-> [:vector :my.view/node]"}]]
+    (let [card (nss/compact-fn-head
+                 {:seon.fn/sym sym
+                  :seon.fn/arglists arglists
+                  :seon.fn/spec
+                  (str "[:=> [:cat "
+                       (if (= sym "my.view/nested")
+                         ":my.view/request"
+                         ":my.view/node")
+                       "] "
+                       (if (= sym "my.view/nested")
+                         ":my.view/control"
+                         "[:vector :my.view/node]")
+                       "]")})]
+      (is (str/includes? card expected-input) sym)
+      (is (str/includes? card expected-output) sym)
+      (is (not (str/includes? card " OR "))
+          (str sym " has exactly one schema-declared callable alternative"))
+      (is (not (str/includes? card "<return unspecified>"))
+          (str sym " never renders returned vector data as an input")))))
+
+(deftest compact-fn-record-retains-physical-arities-without-a-schema
+  (let [card (nss/compact-fn-head
+               {:seon.fn/sym "my.helper/legacy"
+                :seon.fn/arglists "([x] [x y])"})]
+    (is (= 1 (count (re-seq #" OR " card))))
+    (is (= 2 (count (re-seq #"<return unspecified>" card)))
+        "physical arglists remain truthful fallback data when no spec exists")))
+
 (deftest compact-namespace-card-is-inert-at-the-reply-parser-boundary
   (async done
     (-> (with-seeded

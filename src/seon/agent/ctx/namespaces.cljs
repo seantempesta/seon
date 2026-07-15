@@ -687,7 +687,14 @@
                                (some #{'&} (first physical-args)))
                         []
                         physical-args)
-        n             (max (count args) (count specs))]
+        ;; A valid persisted Malli function schema is the callable authority:
+        ;; render exactly its logical arities. Source indexing may recover a
+        ;; vector-valued implementation body as another physical arglist (for
+        ;; example returned Hiccup immediately following a single arg vector).
+        ;; Such implementation data must never become an unspecced alternative.
+        ;; Physical arglists remain the fallback only when no callable schema
+        ;; was indexed at all.
+        n             (if (seq specs) (count specs) (count args))]
     (if (zero? n)
       "positional [] -> <return unspecified>"
       (str/join " OR "

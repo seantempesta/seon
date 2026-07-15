@@ -33,6 +33,31 @@ mechanism needs a falsifier proving whether the extra vector first entered the
 stored `:seon.fn/arglists` fact or was introduced while parsing it; it must not
 be hidden with a symbol allow-list.
 
+The isolated boot index falsifier selects the four rows directly from
+`seon.client/index-core!` before any database rendering. Every stored fact is
+already corrupt: `button`, `input`, `select`, and `toggle` each decode to two
+top-level vectors. The first is the real destructuring arglist and the second
+is the returned Hiccup body. For example, `button` stores
+`([{:my.canvas/keys [label handler data]}] [:button ... label])` beside its
+single `[:=> [:cat :my.canvas/button-request] :my.canvas/control]` schema.
+The exact focused falsifier produced four failures with actual top-level count
+two. Therefore `parsed-arglists` faithfully exposes already-corrupt indexed
+data; it does not introduce the phantom vector.
+
+## Implementation checkpoint — 2026-07-15
+
+The shared callable projection now treats any valid persisted Malli function
+schema as the authority for the number of logical callable alternatives.
+Physical arglists supply labels for those alternatives, and remain the
+fallback only when no callable schema exists. Thus indexed implementation
+vectors cannot create an additional unspecced arity, while genuinely
+unspecced functions still expose every stored physical arglist.
+
+A table-driven focused regression covers nested Hiccup and recursive vector
+output data. Together with the existing pure-variadic regressions, the focused
+gate passes four tests and twenty assertions. The issue remains open until the
+coordinated clean ACME rebuild proves all four database-derived canvas cards.
+
 ## Acceptance criteria
 
 - The stored analyzer facts and compact projection are inspected from one
