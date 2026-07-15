@@ -352,16 +352,26 @@ It freezes the actual latest main as the new redo point and rejects arbitrary
 valid branches, crossed database/lineage, duplicate or consumed completions,
 advanced heads, stale rosters, and occupied reserved branches before intent
 publication. The selection evidence compiles into the unchanged immutable
-intent and existing fact-derived command mechanism; no effect path or public
-destructive command was added. Focused pure proof passes 10 tests/72 assertions
-and adjacent writer-admin proof passes 9/53. A 2026-07-15 live-proof audit
-confirmed that this last sentence is still an execution gap: effectful planning
-and CLI dispatch hardcode ordinary branch-name restore, so the pure selector is
-not yet a completion-authorized operator operation. The next ordered unit is
-completion-id plan/apply through the same artifact freeze, confirmation, and
-converge mechanism, followed by invocation-local deterministic cuts at derived
-coordinator commands. Only then can the destructive restore/crash/undo matrix
-run honestly.
+intent and existing fact-derived command mechanism. Commit `9101e322` now
+carries one completion id through public undo plan/apply/abort and retained
+retry while reusing the same artifact freeze, confirmation, and convergence
+path. Commit `6e43e8d9` adds four closed invocation-local proof cuts at the
+existing durable boundaries without placing phase data in the intent,
+environment, artifact, or another state file. Focused restore plus CLI proof
+passes 64 tests/280 assertions. Commit `d4bd67ea` also makes the running eval
+receipt durable before form execution; `d0d13a87` proves an allocation failure
+executes no form and a later form receives its own receipt.
+
+The first source-frozen default rebuild succeeded, but the destructive reset
+then exposed the next exact integration blocker before restore mutation. Fresh
+root startup resolves `[seon.agent :refer [start! delegate! set-purpose!]]`
+from database context, while the self-host analyzer seed still knows only the
+old hardcoded lifecycle refer namespace. `setup-agent-ns!` therefore fails
+closed on missing `seon.agent/start!` and the pod never becomes ready. The
+earliest unsettled contract is now one require-derived analyzer seed at the
+existing namespace setup boundary, with a fresh-bootstrap regression for all
+three explicit root refers. After that source commit, rebuild and restart the
+destructive restore/crash/undo/pod-death matrix from a new frozen coordinate.
 
 The operator restore slice now owns one closed immutable intent and
 derives its next command from the current main coordinate, an explicitly
