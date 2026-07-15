@@ -13,8 +13,11 @@ combines Seon-native workflow tasks with four categories of upstream BFCL. The
 membership is exact below, but the P0 gate is **not yet closed**: three selected
 tool rows still use a legacy Python runner instead of an Inspect `Task`, and the
 database and namespace contracts do not yet have disjoint generated milestone
-and blind variants. Running the currently available seven Inspect samples is a
-useful smoke, not the reproducible P0 suite promised by [[../roadmap]].
+and blind variants. The apparent `endpoint="pod"` milestone and planning tasks
+also call `cluster.create_cluster`, which currently returns
+`ClusterLeaseUnavailable`; they are not static-ACME-ready. Individual BFCL
+static-URL samples are useful smokes, but there is no currently available
+seven-sample native suite matching the promised P0 contract.
 
 The minimum correction is to strengthen the existing freeze and task
 mechanisms in place:
@@ -113,9 +116,9 @@ Selection is structural rather than cherry-picked:
 
 | Inspect task | Exact sample ID | Capability | Verdict owner | Ready |
 |---|---|---|---|---|
-| `milestone_lift(milestone="db", endpoint="pod", epochs=1)` | `db` | schema registration; transact; later database query; aggregate; report | `milestone_scorer` / `check_store_recall` | yes |
-| `milestone_lift(milestone="namespaces", endpoint="pod", epochs=1)` | `namespaces` | namespace movement; required namespace loading; function definition and in-place update; database sum; composition; report | `milestone_scorer` / `check_ns_movement` | yes |
-| `long_term_planning(seed=1, n=1, endpoint="pod", epochs=1)` | `long_term_planning-seed1-000` | durable plan; store first batch; restart; retrieve and resume; verify all steps closed; final report | `planning_scorer` | yes |
+| `milestone_lift(milestone="db", endpoint="pod", epochs=1)` | `db` | schema registration; transact; later database query; aggregate; report | `milestone_scorer` / `check_store_recall` | no static-target adapter/evidence projection |
+| `milestone_lift(milestone="namespaces", endpoint="pod", epochs=1)` | `namespaces` | namespace movement; required namespace loading; function definition and in-place update; database sum; composition; report | `milestone_scorer` / `check_ns_movement` | no static-target adapter/evidence projection |
+| `long_term_planning(seed=1, n=1, endpoint="pod", epochs=1)` | `long_term_planning-seed1-000` | durable plan; store first batch; restart; retrieve and resume; verify all steps closed; final report | `planning_scorer` | no owned static restart path/evidence projection |
 | proposed `shell_use(seed=1, positions=[0])` | `shell_use-seed1-000` | inspect several files; shell aggregation; write exact result | `workspace_scorer` | no Inspect task wrapper |
 | proposed `file_edit(seed=1, positions=[3])` | `file_edit-seed1-003` | inspect and edit ClojureScript; parse; behavioral verification | `workspace_scorer` | no Inspect task wrapper |
 | proposed `web_fetch(seed=1, positions=[2])` | `web_fetch-seed1-002` | fetch an index; follow the relevant page; extract and report evidence | `fixture_answer_scorer` | no Inspect task wrapper |

@@ -190,6 +190,14 @@ Exit evidence is one reproducible serial ACME run whose native `.eval` retains
 the selected task identity, exact prompt/reply bytes, Seon database and turn
 coordinates, artifact/config identity, model identity, and classified result.
 
+P0 is split into two gates. P0a freezes membership, scorers, floors, and
+failure classification without running the suite. P0b is the first complete
+serial run and depends on the static-target portion of P1. The existing
+`endpoint="pod"` milestone and planning adapters are not runnable: they call
+`cluster.create_cluster`, whose current contract deliberately returns
+`ClusterLeaseUnavailable`. Do not treat task construction or a legacy Python
+row run as P0b evidence.
+
 ### P1 — Establish reproducible execution
 
 P1 begins beside P0 and must finish before comparative claims. Content-pin the
@@ -200,6 +208,13 @@ target. Keep native Inspect `.eval` output as the evaluation authority.
 
 Exit evidence is replay of the P0 sample from its recorded identities and
 coordinates, plus cleanup and restart proof without cross-sample state drift.
+
+P1 has two separately visible boundaries. P1a makes serial development honest:
+strict source/lock identity, mandatory native-log finalization, an explicitly
+owned static ACME URL, and bounded pod-provided evidence. P1b adds the
+operator-owned, token-fenced per-sample lease needed for parallel runs and
+isolated restart claims. P0b may proceed after P1a; comparative concurrency
+and graduation may not proceed before P1b.
 
 ### P2 — Measure context and model baselines
 
@@ -304,6 +319,77 @@ reruns. Do not skip a gate to accumulate broad model runs, redesign unrelated
 tools, run the entire test suite, or chase a failure outside the selected
 sample and its current owner. Record an external discovery as one issue with
 evidence and return to the ledger unless it blocks the active gate.
+
+## Resumption packet — 2026-07-15
+
+Read this short operational handoff before logs, broad tests, or source
+archaeology.
+
+### Proven and committed
+
+- The proposed development slice has ten exact members and fixed category
+  floors in [[research/inspect-suite-freeze-2026-07-15]]. Its membership is
+  frozen; its native execution path is not yet complete.
+- Inspect, Inspect Evals, dataset, Python-lock, pod-client, model, and operator
+  identity gaps are localized in
+  [[research/inspect-reproducibility-boundary-2026-07-15]]. The selected
+  Inspect checkout is recursively mismatched because `ts-mono` is at
+  `f3588038` while its parent records `eccde6b7`; do not silently reset or bless
+  either commit.
+- Local serving inventory is recorded in
+  [[research/local-model-serving-inventory-2026-07-15]]. No preferred small
+  model has been selected. The live candidates are evidence inputs, not a
+  leaderboard conclusion.
+- ACME was reset after strict startup correctly rejected retained malformed
+  canvas data. The fresh cluster is ready at `http://127.0.0.1:7994`; its
+  current bridge decodes the stored `"acme.widget/dash"` value to a Clojure
+  symbol. The retained-data incompatibility is preserved in
+  [[../../seon/issues/acme-operator-migration-drift]].
+- A fresh ordinary ACME agent renders 22,171 total estimated tokens, including
+  20,406 namespace tokens. P2 must inventory exact frozen-sample contexts;
+  this aggregate is not evidence for a shared-schema redesign.
+
+### Current blockers
+
+- `milestone_lift(endpoint="pod")` and
+  `long_term_planning(endpoint="pod")` still call the unavailable ephemeral
+  cluster API. Static ACME support must be explicit in the Inspect solver/task
+  boundary; it must not reintroduce raw process or database lifecycle code.
+- Shell, file, and web rows are frozen data with real scorers but still need
+  native Inspect `Task` wrappers before they count toward P0b.
+- The pod's `/agents/run` response retains ordered turn evidence and a final
+  database coordinate, but milestone and planning scorers still need a current,
+  bounded structured outcome projection. Do not revive removed
+  `seon.db.registry` or raw writer-REPL helpers.
+- A planning restart on the static development target must be owned by the
+  semantic ACME operator and preserve the same database/agent identity. The
+  full parallel solution remains the P1b lease.
+
+### Exact next order
+
+1. Finish and review the three narrow in-flight units: native shell/file/web
+   tasks, generated database/namespace tier variants plus safe subset
+   selection, and the exact schema-weight audit.
+2. Finish P1a source admission and native-log finalization, resolving the
+   selected `ts-mono` identity explicitly rather than mutating it implicitly.
+3. Add explicit static-ACME execution and bounded scorer evidence through the
+   existing Inspect solver and `/agents/run` owners.
+4. Run one sample at a time and inspect every native `.eval`; first run the
+   smallest database or namespace sample, then the ten-member development
+   slice. Classify and fix infrastructure failures before model failures.
+5. Update the P0 report and this roadmap with artifact paths and results. Only
+   then begin the P2 model matrix or P3 shared-schema implementation.
+
+### Stop rules
+
+- Do not run a full repository or benchmark suite while a selected sample has
+  an unresolved infrastructure failure.
+- Do not optimize context from aggregate token counts or model prose; require
+  an exact rendered block, database coordinate, and classified Inspect result.
+- Do not create another harness, supervisor, worktree, lifecycle helper, or
+  stored context authority.
+- Do not change standing context prose unless it is false or a controlled
+  batch/multi-form experiment proves a non-derivable rule is missing.
 
 ## Open blockers
 

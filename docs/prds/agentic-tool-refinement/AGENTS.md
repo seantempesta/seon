@@ -50,3 +50,10 @@ surface editing from intuition: first freeze the serial Inspect development
 slice, then measure an exact failed sample and change its smallest current
 owner. The dependency order, parallel lanes, gates, and morning checkpoint are
 maintained in [[roadmap#Execution ledger]].
+
+The immediate resumption authority is [[roadmap#Resumption packet —
+2026-07-15]]. P0 membership is frozen but has not run as one native suite.
+`endpoint="pod"` currently means the unavailable ephemeral lease path, not the
+ready static ACME target. Finish P1a static-target identity/evidence, then run
+P0b serially at `http://127.0.0.1:7994`; leave parallel execution and isolated
+restart graduation behind the P1b operator lease.
