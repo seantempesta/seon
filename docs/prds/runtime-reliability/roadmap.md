@@ -107,6 +107,37 @@ autocomplete implementation lane, and one independent-downstream packaging lane.
 When a lane finishes, refill it from the earliest dependency-ready unit rather
 than expanding the current implementation into unrelated files.
 
+### Current working portfolio and refill queue
+
+The 2026-07-14 integrated portfolio is deliberately split between ordered
+contract work and independent consumers:
+
+| Lane | Current boundary | Why it can run now | Refill when complete |
+|---|---|---|---|
+| Top-level integration | Review each returned slice, preserve the full ledger, run focused cross-boundary proof, and advance unit 1's native lifecycle contract | Integration and design judgment cannot be delegated; it is the critical path | Next unit-1 transition: typed create/release/delete, then restart/crash and restore/undo proof |
+| Database lifecycle | Make non-main branch open validation-only before adding typed native lifecycle operations | It owns the earliest unresolved prerequisite and does not depend on UI/runtime slices | Remaining unit-1 lifecycle transition or recovery proof |
+| Reactive render units | Move one real lazy debug consumer onto the already-proven unit kernel | The pure kernel and publication admission contract are settled; one bounded consumer can falsify the abstraction without claiming the full cutover | Next distinct consumer, then unit 3 cursor contract only after the unit API settles |
+| Agent runtime correctness | Preserve exact provider reply bytes and remove result-claim rewriting | It owns the agent-loop/observability boundary and is independent of database branch creation and web rendering | Complete-form/async/containment correctness, then unit 7 Inspect evidence integration |
+
+The ordered top-level sequence is therefore:
+
+1. integrate and falsify validation-only non-main open;
+2. implement the one typed native create/release/delete lifecycle and prove
+   exact fork coordinates without physical directory copying;
+3. finish unit 1 restart/crash, restore/undo, and multi-form transition proof;
+4. graduate units 2 and 6 from bounded consumers into their complete acceptance
+   matrices while starting unit 3/4 only from their settled contracts;
+5. complete canvas, Inspect/autocomplete, and independent artifact consumption
+   in dependency order; and
+6. run unit 9's destructive, browser, performance, simultaneous-cluster, and
+   authorized legacy-worktree cleanup matrix last.
+
+On every lane return, the top-level agent first reviews source and proof,
+updates the owning roadmap, and integrates or rejects the result. It then fills
+the free slot with the earliest dependency-ready row above. Findings that do
+not block that row are recorded with evidence and acceptance criteria instead
+of becoming an unplanned detour.
+
 Immediate unit-0 queue:
 
 1. **Complete:** the documentation hierarchy and practiced REPL-driven

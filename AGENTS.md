@@ -46,6 +46,14 @@ subagent are never the only record of what remains. Parallel throughput never
 overrides dependency order, one-mechanism ownership, shared-tree safety, or
 the requirement that the top-level agent prove the integrated system.
 
+Do not let a locally interesting defect silently replace the program. Before
+expanding an investigation, name the roadmap exit measure it blocks. If it
+does not block the active slice and can be isolated safely, record it in the
+owning issue/PRD with evidence and acceptance criteria, then return to the
+earliest dependency-ready work. A bug becomes an interrupt only when it
+invalidates current proof, threatens data or shared-tree safety, or prevents
+the next ordered boundary from being implemented.
+
 ## Instruction discovery and localization
 
 Before changing a subtree, find and read the closest nested `AGENTS.md`, and
