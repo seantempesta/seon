@@ -122,3 +122,56 @@
       (is (not= before (::registry/coordinate-after (ex-data failure))))
       (is (= {} (registry/lookup-connection
                  {::registry/database-name branch-name}))))))
+
+(deftest failed-branch-initializer-retains-unproved-cleanup-identity
+  (let [main-name :routing/cleanup-main
+        branch-name :routing/cleanup-branch
+        main (ensure-memory! main-name (fn [_request] nil))
+        main-connection (::registry/conn main)
+        branch :routing.branch/cleanup
+        attachment (assoc (::registry/attachment main)
+                          ::coordinate/branch branch)]
+    (d/branch! main-connection :db branch)
+    (let [failure
+          (with-redefs [d/release
+                        (fn [_connection]
+                          (throw (ex-info "injected open cleanup failure" {})))]
+            (try
+              (registry/ensure-database!
+               {::registry/database-name branch-name
+                ::registry/backend :memory
+                ::registry/attachment attachment
+                ::registry/initialize-connection!
+                (fn [{::registry/keys [conn]}]
+                  (d/transact conn
+                              [{:db/ident :routing.cleanup/value
+                                :db/valueType :db.type/string
+                                :db/cardinality :db.cardinality/one}]))})
+              nil
+              (catch clojure.lang.ExceptionInfo exception exception)))
+          retained
+          (first
+           (filter #(= branch-name (::registry/database-name %))
+                   (::registry/databases (registry/list-databases {}))))
+          resolved
+          (registry/resolve-connection
+           {::registry/database-name branch-name})
+          release
+          (registry/release-database!
+           {::registry/database-name branch-name})]
+      (is (= :seon.db.registry.error/cleanup-required
+             (:seon.error/kind (ex-data failure))))
+      (is (= :seon.db.registry.entry/cleanup-required
+             (::registry/entry-state retained)))
+      (is (= attachment (::registry/attachment retained)))
+      (is (re-find #"branch initializer changed"
+                   (::registry/initialization-error retained)))
+      (is (re-find #"injected open cleanup failure"
+                   (::registry/release-error retained)))
+      (is (= {} (registry/lookup-connection
+                 {::registry/database-name branch-name})))
+      (is (= :seon.db.registry.error/cleanup-required
+             (::registry/error-kind resolved)))
+      (is (false? (::registry/released? release)))
+      (is (= (::registry/release-error retained)
+             (::registry/release-error release))))))

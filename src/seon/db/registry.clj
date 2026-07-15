@@ -47,6 +47,10 @@
 (schema/register! ::attachment ::coordinate/attachment)
 (schema/register! ::coordinate ::coordinate/coordinate)
 (schema/register! ::release-error :string)
+(schema/register! ::initialization-error :string)
+(schema/register! ::entry-state
+                  [:enum :seon.db.registry.entry/ready
+                   :seon.db.registry.entry/cleanup-required])
 (schema/register! ::open-intent
                   [:enum :seon.db.registry.open/main
                    :seon.db.registry.open/branch])
@@ -60,8 +64,11 @@
                    [::conn ::conn]
                    [::attachment ::attachment]
                    [::backend ::backend]
+                   [::entry-state ::entry-state]
                    [::path {:optional true} ::path]
-                   [::release-error {:optional true} ::release-error]])
+                   [::release-error {:optional true} ::release-error]
+                   [::initialization-error {:optional true}
+                    ::initialization-error]])
 
 (schema/register! ::ensure-database!-request
                   [:map
@@ -86,8 +93,11 @@
                    [::attachment ::attachment]
                    [::coordinate ::coordinate]
                    [::backend ::backend]
+                   [::entry-state ::entry-state]
                    [::path {:optional true} ::path]
-                   [::release-error {:optional true} ::release-error]])
+                   [::release-error {:optional true} ::release-error]
+                   [::initialization-error {:optional true}
+                    ::initialization-error]])
 
 (schema/register! ::ensure-database!-response ::entry-view)
 
@@ -129,8 +139,11 @@
                    [::attachment ::attachment]
                    [::coordinate ::coordinate]
                    [::backend ::backend]
+                   [::entry-state ::entry-state]
                    [::path {:optional true} ::path]
-                   [::release-error {:optional true} ::release-error]])
+                   [::release-error {:optional true} ::release-error]
+                   [::initialization-error {:optional true}
+                    ::initialization-error]])
 
 (schema/register! ::list-databases-request [:map])
 (schema/register! ::list-databases-response
@@ -164,7 +177,8 @@
                    [::attachment {:optional true} ::attachment]
                    [::coordinate {:optional true} ::coordinate]
                    [::error-kind {:optional true}
-                    [:enum :seon.db.registry.error/not-found]]
+                    [:enum :seon.db.registry.error/not-found
+                     :seon.db.registry.error/cleanup-required]]
                    [::error {:optional true} :string]])
 
 ;;; --- Registry --------------------------------------------------------------
@@ -185,13 +199,17 @@
 
 (defn- summary
   "Public view of an entry, sans live conn."
-  [database-name {::keys [attachment backend path release-error] :as entry}]
+  [database-name {::keys [attachment backend entry-state path release-error
+                          initialization-error]
+                  :as entry}]
   (cond-> {::database-name database-name
            ::attachment attachment
            ::coordinate (current-coordinate entry)
-           ::backend backend}
+           ::backend backend
+           ::entry-state entry-state}
     path (assoc ::path path)
-    release-error (assoc ::release-error release-error)))
+    release-error (assoc ::release-error release-error)
+    initialization-error (assoc ::initialization-error initialization-error)))
 
 (defn- backend-request
   [{::keys [database-name backend path attachment initial-tx]}]
@@ -264,7 +282,16 @@
       ::existing-attachment (::attachment entry)
       ::existing-backend (::backend entry)
       ::existing-path (::path entry)}))
-  (entry-view database-name entry))
+  (if (= :seon.db.registry.entry/cleanup-required (::entry-state entry))
+    (throw
+     (ex-info "A failed database open still requires resource cleanup."
+              {:seon.error/kind :seon.db.registry.error/cleanup-required
+               ::database-name database-name
+               ::attachment (::attachment entry)
+               ::coordinate (current-coordinate entry)
+               ::release-error (::release-error entry)
+               ::initialization-error (::initialization-error entry)}))
+    (entry-view database-name entry)))
 
 (defn- branch-source
   [registry attachment]
@@ -315,7 +342,8 @@
               ::actual-attachment actual})))
         (cond-> {::conn conn
                  ::attachment attachment
-                 ::backend backend-kind}
+                 ::backend backend-kind
+                 ::entry-state :seon.db.registry.entry/ready}
           path (assoc ::path path))
         (catch Throwable throwable
           (try (d/release conn) (catch Throwable _))
@@ -387,7 +415,27 @@
                 (swap! !registry assoc database-name entry)
                 (entry-view database-name entry)
                 (catch Throwable throwable
-                  (try (d/release conn) (catch Throwable _))
+                  (try
+                    (d/release conn)
+                    (catch Throwable release-throwable
+                      (let [retained
+                            (assoc entry
+                                   ::entry-state
+                                   :seon.db.registry.entry/cleanup-required
+                                   ::initialization-error (.toString throwable)
+                                   ::release-error (.toString release-throwable))]
+                        (swap! !registry assoc database-name retained)
+                        (throw
+                         (ex-info
+                          "Database initialization failed and connection cleanup is unproved."
+                          {:seon.error/kind
+                           :seon.db.registry.error/cleanup-required
+                           ::database-name database-name
+                           ::attachment attachment*
+                           ::coordinate (current-coordinate retained)
+                           ::initialization-error (.toString throwable)
+                           ::release-error (.toString release-throwable)}
+                          throwable)))))
                   (throw throwable))))))))))
 
 (defn release-database!
@@ -592,9 +640,10 @@
    Does NOT auto-create — callers must `ensure-database!` first."
   {:malli/schema [:=> [:cat ::connection-request] ::connection-response]}
   [{::keys [database-name]}]
-  (if-let [conn (some-> @!registry (get database-name) ::conn)]
-    {::conn conn}
-    {}))
+  (let [entry (get @!registry database-name)]
+    (if (= :seon.db.registry.entry/ready (::entry-state entry))
+      {::conn (::conn entry)}
+      {})))
 
 (defn list-databases
   "Return `{::databases [...]}` — one summary per registered database.
@@ -613,7 +662,10 @@
   {:malli/schema [:=> [:cat ::resolve-connection-request] ::resolve-connection-response]}
   [{::keys [database-name]}]
   (if-let [entry (get @!registry database-name)]
-    (entry-view database-name entry)
+    (if (= :seon.db.registry.entry/ready (::entry-state entry))
+      (entry-view database-name entry)
+      {::error-kind :seon.db.registry.error/cleanup-required
+       ::error (str "database open cleanup is unproved: " database-name)})
     {::error-kind :seon.db.registry.error/not-found
      ::error (str "unknown database-name: " database-name)}))
 
