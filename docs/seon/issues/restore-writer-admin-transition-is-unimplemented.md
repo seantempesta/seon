@@ -7,6 +7,31 @@ tags: [issue, database, flow]
 
 # Restore writer admin transition is unimplemented
 
+## Partial implementation
+
+The no-listener restore-admin selector in `seon.db.server`, the
+invocation-local observational transition in `seon.db.registry`, and the
+portable closed request/result contract in `seon.db.restore-admin`. The
+transition fences the exact old, prepared, undo, and roster state; calls
+guarded `force-branch!` at most once; and proves fresh read-back, primary EAVT
+equivalence, declared secondary Merkle-root equivalence, parentage, roster,
+and release before success.
+
+Focused JVM proof covers primary-only response-loss convergence, stale-roster refusal,
+connect and pre-force operation failures, first and second release failures,
+fresh read-back connect failure, force evidence after every post-force
+failure, explicit unknown effect after an unexpected invocation failure, and
+atomic replacement at the intent-specific result path.
+
+The real file-backed Proximum falsifier remains closed: selected Datahike
+`force-branch!` flushes a source-branch secondary while labeling the resulting
+key map with destination branch `:db`. Target and forced main reopen with the
+same primary EAVT and the same one-vector KNN result but different secondary
+Merkle roots. Seon rejects that state as restore divergence. This issue cannot
+close until Datahike branches every versioned secondary to the forced
+destination before publishing the new primary head and the full file-backed
+proof converges.
+
 ## Problem
 
 The maintained Datahike fork has guarded, read-back-verified

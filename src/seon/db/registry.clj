@@ -32,6 +32,7 @@
    half-initialized registry entry."
   (:require [clojure.set :as set]
             [datahike.api :as d]
+            [datahike.index.audit :as index-audit]
             [seon.db.coordinate :as coordinate]
             [seon.db.id :as id]
             [seon.schema :as schema]
@@ -63,6 +64,22 @@
 (schema/register! ::created? :boolean)
 (schema/register! ::adopted? :boolean)
 (schema/register! ::deleted? :boolean)
+(schema/register! ::force-invoked? :boolean)
+(schema/register!
+ ::admin-connection-state
+ [:enum :seon.db.restore-admin.connection/not-opened
+  :seon.db.restore-admin.connection/released
+  :seon.db.restore-admin.connection/cleanup-unproved])
+(schema/register! ::expected-branch-roster [:set :keyword])
+(schema/register! ::branch-roster [:set :keyword])
+(schema/register! ::pre-restore-main-coordinate ::coordinate)
+(schema/register! ::selected-target-coordinate ::coordinate)
+(schema/register! ::prepared-target-coordinate ::coordinate)
+(schema/register! ::undo-coordinate ::coordinate)
+(schema/register! ::validate-db! 'fn?)
+(schema/register! ::admin-outcome
+                  [:enum :seon.db.registry.admin/applied
+                   :seon.db.registry.admin/already-applied])
 
 ;; A live conn is an opaque clojure.lang.IAtom2 (datahike connection
 ;; type). We don't constrain its shape; the registry hands it out as-is.
@@ -157,6 +174,31 @@
   [::coordinate ::coordinate]
   [::released? :boolean]
   [::deleted? ::deleted?]])
+
+(schema/register!
+ ::admin-restore-main!-request
+ [:map {:closed true}
+  [::database-name ::database-name]
+  [::backend ::backend]
+  [::path {:optional true} ::path]
+  [::pre-restore-main-coordinate ::pre-restore-main-coordinate]
+  [::selected-target-coordinate ::selected-target-coordinate]
+  [::prepared-target-coordinate ::prepared-target-coordinate]
+  [::undo-coordinate ::undo-coordinate]
+  [::expected-branch-roster ::expected-branch-roster]
+  [::validate-db! ::validate-db!]])
+(schema/register!
+ ::admin-restore-main!-response
+ [:map {:closed true}
+  [::admin-outcome ::admin-outcome]
+  [::pre-restore-main-coordinate ::pre-restore-main-coordinate]
+  [::selected-target-coordinate ::selected-target-coordinate]
+  [::prepared-target-coordinate ::prepared-target-coordinate]
+  [::undo-coordinate ::undo-coordinate]
+  [::coordinate ::coordinate]
+  [::branch-roster ::branch-roster]
+  [::force-invoked? ::force-invoked?]
+  [::admin-connection-state ::admin-connection-state]])
 
 (schema/register! ::release-database!-response
                   [:map
@@ -556,6 +598,10 @@
     :cannot-delete-main-db-branch
     :seon.db.protocol.error/protected-main-branch
     :branch-has-active-connection :seon.db.protocol.error/active-branch
+    :stale-branch-head :seon.db.protocol.error/stale-target-head
+    :force-branch-readback-mismatch
+    :seon.db.protocol.error/restore-divergence
+    :invalid-force-branch-options :seon.db.protocol.error/protocol
     :seon.db.protocol.error/database))
 
 (defn- call-datahike-lifecycle!
@@ -789,6 +835,256 @@
                      source-entry target-database-name target-branch
                      target-attachment throwable))
                   (throw throwable))))))))))
+
+(defn- require-branch-roster!
+  [connection expected]
+  (let [actual (set (d/branches connection))]
+    (when-not (= expected actual)
+      (lifecycle-fail!
+       :seon.db.protocol.error/stale-branch-roster
+       "The durable branch roster changed before restore administration."
+       {::expected-branch-roster expected
+        ::branch-roster actual}))
+    actual))
+
+(defn- branch-db-at!
+  [connection expected label]
+  (let [branch (::coordinate/branch expected)
+        db-value (d/branch-as-db connection branch)]
+    (when-not db-value
+      (lifecycle-fail!
+       :seon.db.protocol.error/branch-missing
+       (str label " is absent from durable storage.")
+       {::coordinate expected}))
+    (let [actual (coordinate/resolved db-value)]
+      (require-head!
+       :seon.db.protocol.error/stale-target-head
+       label expected actual {::coordinate expected})
+      db-value)))
+
+(defn- secondary-identifiers [db-value]
+  (set (keys (:secondary-indices db-value))))
+
+(defn- secondary-roots [db-value]
+  (reduce-kv
+   (fn [roots identifier index]
+     (assoc roots identifier
+            (try
+              (index-audit/-merkle-root index)
+              (catch Throwable _ nil))))
+   {}
+   (:secondary-indices db-value)))
+
+(defn- desired-main?
+  [validate-db! expected-main selected-target target-db main-db]
+  (validate-db! target-db)
+  (validate-db! main-db)
+  (let [actual (coordinate/resolved main-db)
+        target-secondary-roots (secondary-roots target-db)
+        main-secondary-roots (secondary-roots main-db)]
+    (and (= (::coordinate/database-id expected-main)
+            (::coordinate/database-id actual))
+         (= :db (::coordinate/branch actual))
+         (= (::coordinate/t selected-target) (::coordinate/t actual))
+         (not= (::coordinate/commit-id expected-main)
+               (::coordinate/commit-id actual))
+         (= #{(::coordinate/commit-id selected-target)}
+            (set (d/parent-commit-ids main-db)))
+         (same-ordered-values? (d/datoms target-db :eavt)
+                               (d/datoms main-db :eavt))
+         (= (secondary-identifiers target-db)
+            (secondary-identifiers main-db))
+         (every? some? (vals target-secondary-roots))
+         (= target-secondary-roots main-secondary-roots))))
+
+(defn- with-admin-connection
+  [config force-called? operation]
+  (let [connection
+        (try
+          (d/connect (id/allocation-connect-config config))
+          (catch Throwable throwable
+            (throw
+             (ex-info
+              "Restore administration could not prove failed-connect cleanup."
+              {:seon.error/kind :seon.db.protocol.error/cleanup-required
+               ::admin-connection-state
+               :seon.db.restore-admin.connection/cleanup-unproved
+               ::force-invoked? @force-called?}
+              throwable))))
+        operation-result
+        (try
+          {::result (operation connection)}
+          (catch Throwable throwable
+            {::operation-error throwable}))
+        release-error
+        (try
+          (d/release connection)
+          nil
+          (catch Throwable throwable throwable))]
+    (cond
+      release-error
+      (throw
+       (ex-info
+        "Restore administration could not prove connection release."
+        {:seon.error/kind :seon.db.protocol.error/cleanup-required
+         ::admin-connection-state
+         :seon.db.restore-admin.connection/cleanup-unproved
+         ::force-invoked? @force-called?
+         ::release-error (.toString release-error)
+         ::initialization-error
+         (some-> (::operation-error operation-result) .toString)}
+        (or (::operation-error operation-result) release-error)))
+
+      (::operation-error operation-result)
+      (let [throwable (::operation-error operation-result)]
+        (throw
+         (ex-info
+          (.getMessage ^Throwable throwable)
+          (assoc (or (ex-data throwable) {})
+                 ::admin-connection-state
+                 :seon.db.restore-admin.connection/released
+                 ::force-invoked? @force-called?)
+          throwable)))
+
+      :else
+      (::result operation-result))))
+
+(defn admin-restore-main!
+  "Move main to one prepared branch head without publishing runtime resources."
+  {:malli/schema [:=> [:cat ::admin-restore-main!-request]
+                  ::admin-restore-main!-response]}
+  [{::keys [database-name backend path pre-restore-main-coordinate
+            selected-target-coordinate prepared-target-coordinate
+            undo-coordinate expected-branch-roster validate-db!]}]
+  (let [main-attachment (coordinate/attachment pre-restore-main-coordinate)
+        database-id (::coordinate/database-id main-attachment)
+        config (backend/datahike-config
+                (cond-> {::backend/database-name database-name
+                         ::backend/backend backend
+                         ::coordinate/attachment main-attachment}
+                  path (assoc ::backend/path path)))
+        required-branches
+        #{:db
+          (::coordinate/branch prepared-target-coordinate)
+          (::coordinate/branch undo-coordinate)}]
+    (when-not (= :db (::coordinate/branch pre-restore-main-coordinate))
+      (lifecycle-fail!
+       :seon.db.protocol.error/attachment-mismatch
+       "Restore administration requires the main :db branch."
+       {::pre-restore-main-coordinate pre-restore-main-coordinate}))
+    (when-not (and (= database-id
+                      (::coordinate/database-id selected-target-coordinate)
+                      (::coordinate/database-id prepared-target-coordinate)
+                      (::coordinate/database-id undo-coordinate))
+                   (= (::coordinate/commit-id selected-target-coordinate)
+                      (::coordinate/commit-id prepared-target-coordinate))
+                   (= (::coordinate/t selected-target-coordinate)
+                      (::coordinate/t prepared-target-coordinate))
+                   (= (::coordinate/commit-id pre-restore-main-coordinate)
+                      (::coordinate/commit-id undo-coordinate))
+                   (= (::coordinate/t pre-restore-main-coordinate)
+                      (::coordinate/t undo-coordinate))
+                   (every? expected-branch-roster required-branches))
+      (lifecycle-fail!
+       :seon.db.protocol.error/attachment-mismatch
+       "Restore administration coordinates are not one prepared transition."
+       {::pre-restore-main-coordinate pre-restore-main-coordinate
+        ::selected-target-coordinate selected-target-coordinate
+        ::prepared-target-coordinate prepared-target-coordinate
+        ::undo-coordinate undo-coordinate
+        ::expected-branch-roster expected-branch-roster}))
+    (when-not (d/database-exists? config)
+      (lifecycle-fail!
+       :seon.db.protocol.error/not-found
+       "Restore administration never creates a missing database."
+       {::database-name database-name
+        ::attachment main-attachment}))
+    (let [force-called? (atom false)
+          {::keys [admin-outcome force-invoked?]}
+          (with-admin-connection
+            config
+            force-called?
+            (fn [connection]
+              (require-branch-roster! connection expected-branch-roster)
+              (let [target-db
+                    (branch-db-at! connection prepared-target-coordinate
+                                   "Prepared target head")
+                    _ (branch-db-at! connection undo-coordinate "Undo head")
+                    main-db (d/branch-as-db connection :db)
+                    actual-main (coordinate/resolved main-db)]
+                (cond
+                  (= pre-restore-main-coordinate actual-main)
+                  (do
+                    (validate-db! target-db)
+                    (reset! force-called? true)
+                    (call-datahike-lifecycle!
+                     #(d/force-branch!
+                       target-db :db
+                       #{(::coordinate/commit-id selected-target-coordinate)}
+                       {:expected-current-commit
+                        (::coordinate/commit-id pre-restore-main-coordinate)})
+                     {::pre-restore-main-coordinate
+                      pre-restore-main-coordinate
+                      ::selected-target-coordinate
+                      selected-target-coordinate
+                      ::force-invoked? true})
+                    {::admin-outcome :seon.db.registry.admin/applied
+                     ::force-invoked? true})
+
+                  (desired-main? validate-db! pre-restore-main-coordinate
+                                 selected-target-coordinate target-db main-db)
+                  {::admin-outcome
+                   :seon.db.registry.admin/already-applied
+                   ::force-invoked? false}
+
+                  :else
+                  (lifecycle-fail!
+                   :seon.db.protocol.error/restore-divergence
+                   "Main is neither the expected nor the prepared restore value."
+                   {::pre-restore-main-coordinate
+                    pre-restore-main-coordinate
+                    ::coordinate actual-main})))))
+          final
+          (try
+            (with-admin-connection
+              config
+              force-called?
+              (fn [connection]
+                (let [roster (require-branch-roster!
+                              connection expected-branch-roster)
+                      target-db
+                      (branch-db-at! connection prepared-target-coordinate
+                                     "Prepared target head")
+                      _ (branch-db-at! connection undo-coordinate "Undo head")
+                      main-db (d/branch-as-db connection :db)
+                      coordinate (coordinate/resolved main-db)]
+                  (when-not
+                    (desired-main? validate-db! pre-restore-main-coordinate
+                                   selected-target-coordinate target-db main-db)
+                    (lifecycle-fail!
+                     :seon.db.protocol.error/restore-divergence
+                     "Forced main failed complete restore read-back."
+                     {::pre-restore-main-coordinate
+                      pre-restore-main-coordinate
+                      ::coordinate coordinate}))
+                  {::coordinate coordinate
+                   ::branch-roster roster})))
+            (catch clojure.lang.ExceptionInfo throwable
+              (throw
+               (ex-info (.getMessage throwable)
+                        (assoc (ex-data throwable)
+                               ::force-invoked? @force-called?)
+                        throwable))))]
+      (merge
+       {::admin-outcome admin-outcome
+        ::pre-restore-main-coordinate pre-restore-main-coordinate
+        ::selected-target-coordinate selected-target-coordinate
+        ::prepared-target-coordinate prepared-target-coordinate
+        ::undo-coordinate undo-coordinate
+        ::force-invoked? force-invoked?
+        ::admin-connection-state
+        :seon.db.restore-admin.connection/released}
+       final))))
 
 (defn release-attachment!
   "Release one exact logical attachment without deleting its native branch."

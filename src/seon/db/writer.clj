@@ -17,7 +17,10 @@
             [seon.db.id :as id]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
+            [seon.db.restore-admin :as restore-admin]
             [seon.db.transport.uds :as uds]
+            [seon.dev.restore :as restore]
+            [seon.launch :as launch]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
 
@@ -197,8 +200,8 @@
    (apply dissoc (or transaction-meta {}) protocol/reserved-attributes)))
 
 (defn- assert-protocol-native-schema!
-  [connection]
-  (let [installed (:schema (d/db connection))
+  [db-value]
+  (let [installed (:schema db-value)
         incompatible
         (keep
          (fn [{:db/keys [ident] :as declaration}]
@@ -224,9 +227,8 @@
                  ::missing-schema (mapv :db/ident missing)})))))
 
 (defn- assert-declared-secondary-indices-live!
-  [connection]
-  (let [db-value (d/db connection)
-        declared (into #{}
+  [db-value]
+  (let [declared (into #{}
                        (keep (fn [[ident entry]]
                                (when (and (keyword? ident)
                                           (map? entry)
@@ -240,6 +242,96 @@
        (ex-info "A declared secondary index did not restore on branch open."
                 {::failure-kind protocol/protocol-error
                  ::missing-secondary-indices missing})))))
+
+(defn validate-observational-db!
+  "Validate protocol schema and declared secondary availability without effects."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [db-value]
+  (assert-protocol-native-schema! db-value)
+  (assert-declared-secondary-indices-live! db-value)
+  true)
+
+(defn- bounded-admin-error [throwable]
+  (let [message (.toString ^Throwable throwable)]
+    (subs message 0 (min 4096 (count message)))))
+
+(defn- restore-error-kind [throwable]
+  (let [kind (:seon.error/kind (ex-data throwable))]
+    (if (or (contains? protocol/lifecycle-error-kinds kind)
+            (#{protocol/protocol-error protocol/database-error
+               protocol/internal-error protocol/not-found-error}
+             kind))
+      kind
+      protocol/database-error)))
+
+(defn admin-restore!
+  "Run one no-listener restore transition from a validated immutable intent."
+  {:malli/schema [:=> [:cat ::restore-admin/request] ::restore-admin/result]}
+  [{intent ::restore-admin/intent}]
+  (let [intent (restore/validate-intent intent)
+        base (restore-admin/result-base intent)
+        main-database
+        (get-in intent
+                [::restore/pre-restore-main-descriptor ::launch/database])]
+    (try
+      (let [result
+            (registry/admin-restore-main!
+             (cond->
+               {::registry/database-name
+                (keyword (::protocol/database-name main-database))
+                ::registry/backend (::protocol/backend main-database)
+                ::registry/pre-restore-main-coordinate
+                (::restore-admin/pre-restore-main-coordinate base)
+                ::registry/selected-target-coordinate
+                (::restore-admin/selected-target-coordinate base)
+                ::registry/prepared-target-coordinate
+                (::restore/prepared-target-coordinate intent)
+                ::registry/undo-coordinate (::restore/undo-coordinate intent)
+                ::registry/expected-branch-roster
+                (::restore/expected-branch-roster intent)
+                ::registry/validate-db! validate-observational-db!}
+               (::protocol/database-path main-database)
+               (assoc ::registry/path
+                      (::protocol/database-path main-database))))
+            outcome
+            (case (::registry/admin-outcome result)
+              :seon.db.registry.admin/applied
+              :seon.db.restore-admin.outcome/applied
+
+              :seon.db.registry.admin/already-applied
+              :seon.db.restore-admin.outcome/already-applied)]
+        (merge base
+               {::restore-admin/outcome outcome
+                ::restore-admin/forced-main-coordinate
+                (::registry/coordinate result)
+                ::restore-admin/branch-roster
+                (::registry/branch-roster result)
+                ::restore-admin/force-invoked?
+                (::registry/force-invoked? result)
+                ::restore-admin/connection-state
+                (::registry/admin-connection-state result)}))
+      (catch Throwable throwable
+        (let [data (ex-data throwable)]
+          (if-let [connection-state (::registry/admin-connection-state data)]
+            (cond->
+              (merge base
+                     {::restore-admin/error-kind
+                      (restore-error-kind throwable)
+                      ::restore-admin/error (bounded-admin-error throwable)
+                      ::restore-admin/force-invoked?
+                      (boolean (::registry/force-invoked? data))
+                      ::restore-admin/connection-state connection-state})
+              (::registry/branch-roster data)
+              (assoc ::restore-admin/branch-roster
+                     (::registry/branch-roster data)))
+            (merge
+             base
+             {::restore-admin/error-kind protocol/internal-error
+              ::restore-admin/error (bounded-admin-error throwable)
+              ::restore-admin/effect-state
+              :seon.db.restore-admin.effect/unknown
+              ::restore-admin/connection-state
+              :seon.db.restore-admin.connection/cleanup-unproved})))))))
 
 ;;; Transaction report and publication
 
@@ -312,9 +404,9 @@
     connection ::registry/conn
     database-name ::registry/database-name
     open-intent ::registry/open-intent}]
-  (assert-protocol-native-schema! connection)
+  (assert-protocol-native-schema! (d/db connection))
   (when (= :seon.db.registry.open/branch open-intent)
-    (assert-declared-secondary-indices-live! connection))
+    (assert-declared-secondary-indices-live! (d/db connection)))
   (d/listen connection ::transaction-publication
             (transaction-listener runtime database-name))
   (when (= :seon.db.registry.open/main open-intent)

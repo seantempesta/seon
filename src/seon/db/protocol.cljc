@@ -55,13 +55,18 @@
 (def initializer-error :seon.db.protocol.error/initializer)
 (def release-error :seon.db.protocol.error/release)
 (def cleanup-required-error :seon.db.protocol.error/cleanup-required)
+(def stale-branch-roster-error
+  :seon.db.protocol.error/stale-branch-roster)
+(def restore-divergence-error
+  :seon.db.protocol.error/restore-divergence)
 
 (def lifecycle-error-kinds
   #{duplicate-route-error duplicate-attachment-error attachment-mismatch-error
     stale-source-head-error stale-target-head-error missing-commit-error
     unsupported-history-error cut-not-branchable-error branch-exists-error
     branch-missing-error protected-main-branch-error active-branch-error
-    initializer-error release-error cleanup-required-error})
+    initializer-error release-error cleanup-required-error
+    stale-branch-roster-error restore-divergence-error})
 
 (def committed-status :seon.db.protocol.status/committed)
 (def unknown-status :seon.db.protocol.status/unknown)
@@ -137,7 +142,8 @@
   stale-source-head-error stale-target-head-error missing-commit-error
   unsupported-history-error cut-not-branchable-error branch-exists-error
   branch-missing-error protected-main-branch-error active-branch-error
-  initializer-error release-error cleanup-required-error])
+  initializer-error release-error cleanup-required-error
+  stale-branch-roster-error restore-divergence-error])
 (schema/register! ::error [:string {:min 1}])
 (schema/register!
  ::status

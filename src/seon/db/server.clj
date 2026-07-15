@@ -1,16 +1,21 @@
 (ns seon.db.server
   "Assemble and run the authoritative database process."
   (:require [clojure.core.server :as core-server]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             ;; Register the optional Proximum index before any database opens.
             [datahike.index.secondary.proximum]
             [seon.db.protocol :as protocol]
+            [seon.db.restore-admin :as restore-admin]
             [seon.db.writer :as writer]
+            [seon.dev.restore :as restore]
             [seon.embed :as embed]
             [seon.schema :as schema])
-  (:import [java.io BufferedWriter FileOutputStream OutputStreamWriter]
+  (:import [java.io BufferedWriter FileInputStream FileOutputStream
+            OutputStreamWriter]
            [java.nio.charset StandardCharsets]
-           [java.nio.file CopyOption Files StandardCopyOption]
+           [java.nio.channels FileChannel]
+           [java.nio.file CopyOption Files OpenOption StandardCopyOption]
            [java.nio.file.attribute FileAttribute])
   (:gen-class))
 
@@ -22,6 +27,13 @@
 (schema/register! ::publish-socket-path :seon.db.writer/publish-socket-path)
 (schema/register! ::repl-port [:int {:min 0 :max 65535}])
 (schema/register! ::repl-port-file [:string {:min 1}])
+(schema/register! ::intent-path [:string {:min 1}])
+(schema/register! ::result-path [:string {:min 1}])
+(schema/register!
+ ::admin-options
+ [:map {:closed true}
+  [::intent-path ::intent-path]
+  [::result-path ::result-path]])
 (schema/register!
  ::options
  [:map
@@ -47,6 +59,7 @@
 (def ^:private application-result-path-environment
   "SEON_APPLICATION_RESULT_PATH")
 (def ^:private stop-error-limit 4096)
+(def ^:private admin-input-limit (* 1024 1024))
 
 (defn- terminal-configuration
   [environment]
@@ -111,7 +124,12 @@
         (.flush writer)
         (.sync (.getFD stream)))
       (Files/move temp target
-                  (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE]))
+                  (into-array CopyOption
+                              [StandardCopyOption/ATOMIC_MOVE
+                               StandardCopyOption/REPLACE_EXISTING]))
+      (with-open [channel
+                  (FileChannel/open parent (make-array OpenOption 0))]
+        (.force channel true))
       value
       (finally
         (Files/deleteIfExists temp)))))
@@ -170,6 +188,94 @@
       (throw
        (ex-info "Unknown database-server argument."
                 {::argument (first remaining)})))))
+
+(defn- admin-configuration [arguments]
+  (when (some #{"--restore-admin-intent" "--restore-admin-result"} arguments)
+    (let [options
+          (loop [result {} remaining arguments]
+            (case (first remaining)
+              "--restore-admin-intent"
+              (recur (assoc result ::intent-path (second remaining))
+                     (drop 2 remaining))
+
+              "--restore-admin-result"
+              (recur (assoc result ::result-path (second remaining))
+                     (drop 2 remaining))
+
+              nil result
+
+              (throw
+               (ex-info "Unknown restore-admin argument."
+                        {::argument (first remaining)}))))]
+      (when-not (and (= 4 (count arguments))
+                     (not-empty (::intent-path options))
+                     (not-empty (::result-path options)))
+        (throw
+         (ex-info "Restore administration requires exact intent and result paths."
+                  {::arguments arguments})))
+      options)))
+
+(defn- read-bounded-edn [path]
+  (with-open [stream (FileInputStream. (io/file path))]
+    (let [bytes (.readNBytes stream (inc admin-input-limit))
+          byte-count (alength bytes)]
+      (when (> byte-count admin-input-limit)
+        (throw
+         (ex-info "Restore admin intent exceeds the bounded input size."
+                  {::byte-count byte-count
+                   ::byte-limit admin-input-limit})))
+      (edn/read-string (String. bytes StandardCharsets/UTF_8)))))
+
+(defn- invalid-admin-result [throwable]
+  {::restore-admin/error-kind protocol/protocol-error
+   ::restore-admin/error (bounded-stop-error throwable)
+   ::restore-admin/force-invoked? false
+   ::restore-admin/connection-state
+   :seon.db.restore-admin.connection/not-opened})
+
+(defn- unknown-admin-result [intent throwable]
+  (merge
+   (restore-admin/result-base intent)
+   {::restore-admin/error-kind protocol/internal-error
+    ::restore-admin/error (bounded-stop-error throwable)
+    ::restore-admin/effect-state :seon.db.restore-admin.effect/unknown
+    ::restore-admin/connection-state
+    :seon.db.restore-admin.connection/cleanup-unproved}))
+
+(defn run-restore-admin!
+  "Consume one retained intent and atomically publish one closed admin result."
+  {:malli/schema [:=> [:cat ::admin-options] ::restore-admin/result]}
+  [{::keys [intent-path result-path]}]
+  (let [parsed
+        (try
+          {::intent
+           (restore/validate-intent (read-bounded-edn intent-path))}
+          (catch Throwable throwable
+            {::result (invalid-admin-result throwable)}))
+        intent (::intent parsed)
+        result
+        (or (::result parsed)
+            (try
+              (let [candidate
+                    (writer/admin-restore!
+                     {::restore-admin/intent intent})]
+                (if (restore-admin/valid-result? candidate)
+                  candidate
+                  (unknown-admin-result
+                   intent
+                   (ex-info "Writer returned an invalid restore-admin result."
+                            {::explanation
+                             (restore-admin/explain-result candidate)}))))
+              (catch Throwable throwable
+                (unknown-admin-result intent throwable))))
+        result
+        (if (restore-admin/valid-result? result)
+          result
+          (throw
+           (ex-info "Restore-admin result construction violated its contract."
+                    {::explanation (restore-admin/explain-result result)})))]
+    (atomic-write-edn! result-path result)
+    result))
 
 (defn writer-runtime
   "Construct the immutable database-writer dependencies once."
@@ -276,7 +382,11 @@
   "Run the database process or its optional embedding preflight."
   {:malli/schema [:=> [:cat [:* :string]] :any]}
   [& arguments]
-  (if (some #{"--preflight"} arguments)
+  (if-let [admin (admin-configuration arguments)]
+    (let [result (run-restore-admin! admin)]
+      (flush)
+      (System/exit (if (restore-admin/success-result? result) 0 1)))
+    (if (some #{"--preflight"} arguments)
     (let [code ((requiring-resolve 'seon.embed.preflight/run-preflight!))]
       (flush)
       (System/exit code))
@@ -309,4 +419,4 @@
                             (.toString throwable))))))
            "seon-database-shutdown")]
       (.addShutdownHook (Runtime/getRuntime) shutdown-hook)
-      (.. (Thread/currentThread) join))))
+      (.. (Thread/currentThread) join)))))
