@@ -38,6 +38,7 @@
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
+    [seon.db.restore :as db.restore]
     [seon.derive :as derive]
     [seon.eval :as seval]
     [seon.log :as log]
@@ -95,14 +96,30 @@
 
 (defn- handle-readiness!
   "Report current executable admission; this can turn false after startup."
-  [_req res]
-  (let [ready? (admission/available?)]
+  [restore-completion-result _req res]
+  (let [restore-completion (::db.restore/completion
+                             restore-completion-result)
+        restore-coordinate (::db.restore/completion-coordinate
+                             restore-completion-result)
+        restore-readiness
+        (when (and restore-completion-result (db/attached?))
+          (db.restore/readiness
+           {::db.restore/completion restore-completion
+            ::db.restore/completion-coordinate restore-coordinate
+            :seon.runtime.admission/state (admission/state)
+            :seon.db/db @db/*conn*}))
+        ready? (if restore-readiness
+                 (::db.restore/ready? restore-readiness)
+                 (admission/available?))
+        body (or restore-readiness
+                 (assoc (admission/state)
+                        :seon.runtime.admission/available? ready?
+                        ::db.restore/executable? ready?))]
     (write-status!
       res
       (if ready? 200 503)
       "application/edn; charset=utf-8"
-      (pr-str (assoc (admission/state)
-                     :seon.runtime.admission/available? ready?)))))
+      (pr-str body))))
 
 (defn- serve-static! [res url]
   (if-let [[prefix root] (some (fn [[p r]]
@@ -1674,6 +1691,14 @@
   []
   (or (.. js/process -env -SEON_BIND) "127.0.0.1"))
 
+(schema/register! ::readiness-only? :boolean)
+(schema/register! ::restore-completion-result ::db.restore/record-success)
+(schema/register! ::start-request
+                  [:map {:closed true}
+                   [::readiness-only? {:optional true} ::readiness-only?]
+                   [::restore-completion-result
+                    {:optional true} ::restore-completion-result]])
+
 (defn start!
   "Start the HTTP+SSE server on a loopback port.
 
@@ -1695,22 +1720,41 @@
    If the requested port is in use, the listen fails fast — that's
    the expected behavior for a dev pod (only one instance at a time).
    To run multiple pods, set SEON_PORT=0 for ephemeral allocation."
-  {:malli/schema [:=> [:cat] :any]}
-  []
+  {:malli/schema [:=> [:cat ::start-request] :any]}
+  [{::keys [readiness-only? restore-completion-result]}]
   (js/Promise.
     (fn [resolve reject]
+      (when-not (= (boolean readiness-only?)
+                   (boolean restore-completion-result))
+        (throw
+          (ex-info "Restore readiness requires exact completion evidence."
+                   {::readiness-only? readiness-only?
+                    ::restore-completion-result restore-completion-result
+                    :seon.error/kind :core-bug})))
       ;; Attach the router's stable database listener and reconcile the
       ;; NOW-SEEDED route projection before accepting a request. The top-level
       ;; install ran before boot-seed! and therefore initially compiled only
       ;; the static supplement; route transactions after this point update the
       ;; cache through the same Datahike listener bus as the rest of the pod.
-      (router/attach!)
+      (when-not readiness-only?
+        (router/attach!))
       (if-let [live-addr (some-> @!server .address)]
         ;; Already listening — reuse (see docstring; a second
         ;; start-runtime! on the same pod must NOT bounce the server).
-        (resolve {:seon.web/port      (.-port live-addr)
-                  :seon.web/port-file (or (.. js/process -env -SEON_PORT_FILE)
-                                          "tmp/seon-port")})
+        (if (= (boolean readiness-only?)
+               (boolean (gobj/get @!server "seonReadinessOnly")))
+          (if (= restore-completion-result
+                 (gobj/get @!server "seonRestoreCompletionResult"))
+            (resolve {:seon.web/port      (.-port live-addr)
+                      :seon.web/port-file
+                      (or (.. js/process -env -SEON_PORT_FILE)
+                          "tmp/seon-port")})
+            (reject
+              (ex-info "The HTTP server retains different restore evidence."
+                       {::restore-completion-result
+                        restore-completion-result})))
+          (reject (ex-info "The HTTP server already owns another admission surface."
+                           {::readiness-only? readiness-only?})))
         (do
           (when-let [old @!server]
             ;; Exists but not listening (closed/dead) — replace it.
@@ -1722,8 +1766,21 @@
                 ;; ring-handler, which `router/install!` rebuilds on every
                 ;; serve hot-reload — so a reloaded route never 404s until
                 ;; pod restart (the live 2026-06-10 agent-birth failure mode).
-                server (.createServer http (fn [req res] (router/handle-request req res)))
+                server
+                (.createServer
+                 http
+                 (if readiness-only?
+                   (fn [req res]
+                     (if (and (= "GET" (.-method req))
+                              (= "/_seon/ready" (.-url req)))
+                       (handle-readiness! restore-completion-result req res)
+                       (write-status! res 503 "text/plain; charset=utf-8"
+                                      "Restore preparation is not executable.")))
+                   (fn [req res] (router/handle-request req res))))
                 port   (requested-port)]
+            (gobj/set server "seonReadinessOnly" (boolean readiness-only?))
+            (gobj/set server "seonRestoreCompletionResult"
+                      restore-completion-result)
             (.once server "error"
                    (fn [err]
                      (log/error-console! "seon.web.serve"

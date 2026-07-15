@@ -9,6 +9,7 @@
   (:require
     [cljs.reader :as reader]
     [cljs.test :refer [async deftest is testing]]
+    [datahike.api :as d]
     [goog.object :as gobj]
     [my.blob :as blob]
     [seon.agent.run :as run]
@@ -16,6 +17,9 @@
     [seon.ai :as ai]
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
+    [seon.db.id :as db.id]
+    [seon.db.process :as process]
+    [seon.db.restore :as restore]
     [seon.eval :as seval]
     [seon.runtime.admission :as admission]
     [seon.web.serve :as serve]))
@@ -444,7 +448,8 @@
 
 (defn- readiness-response
   "Status and body written by the live readiness handler."
-  []
+  ([] (readiness-response nil))
+  ([restore-completion-result]
   (let [!response (atom {})
         response #js {:writeHead
                       (fn [status _headers]
@@ -452,8 +457,9 @@
                       :end
                       (fn [body]
                         (swap! !response assoc ::body body))}]
-    ((deref #'serve/handle-readiness!) nil response)
-    @!response))
+    ((deref #'serve/handle-readiness!)
+     restore-completion-result nil response)
+    @!response)))
 
 (deftest readiness-tracks-admission-after-startup
   (let [prior (admission/state)]
@@ -461,15 +467,19 @@
       (reset! @#'admission/!state
               {::admission/status :available
                ::admission/generation 17})
-      (is (= 200 (::status (readiness-response))))
+      (let [response (readiness-response)
+            body (reader/read-string (::body response))]
+        (is (= 200 (::status response)))
+        (is (true? (::restore/executable? body))))
       (reset! @#'admission/!state
               {::admission/status :unavailable
                ::admission/generation 17
                ::admission/reason "injected publication failure"})
       (let [response (readiness-response)]
         (is (= 503 (::status response)))
-        (is (re-find #":seon.runtime.admission/status :unavailable"
-                     (::body response))))
+        (let [body (reader/read-string (::body response))]
+          (is (= :unavailable (::admission/status body)))
+          (is (false? (::restore/executable? body)))))
       (let [!response (atom {})
             response #js {:writeHead
                           (fn [status _headers]
@@ -486,3 +496,90 @@
             "nil request proves refusal occurred before body parsing"))
       (finally
         (reset! @#'admission/!state prior)))))
+
+(deftest restore-readiness-serves-only-the-exact-closed-completion-head
+  (async done
+    (let [prior-admission (admission/state)
+          prior-conn db/*conn*
+          !fresh-conn (atom nil)
+          completion-claim
+          {::restore/plan-digest (apply str (repeat 64 "a"))
+           ::restore/db-name :default
+           ::restore/database-id
+           #uuid "11111111-1111-4111-8111-111111111111"
+           ::restore/from-branch :db
+           ::restore/from-commit-id
+           #uuid "22222222-2222-4222-8222-222222222222"
+           ::restore/from-t 10
+           ::restore/to-branch :retained
+           ::restore/to-commit-id
+           #uuid "33333333-3333-4333-8333-333333333333"
+           ::restore/to-t 8
+           ::restore/forced-commit-id
+           #uuid "44444444-4444-4444-8444-444444444444"
+           ::restore/undo-branch :undo
+           ::restore/target-branch :target}
+          config {:store {:backend :memory :id (random-uuid)}
+                  :schema-flexibility :write
+                  :keep-history? true}
+          connect-config (db.id/allocation-connect-config config)]
+      (-> (d/create-database config)
+          (.then (fn [_] (d/connect connect-config {:sync? false})))
+          (.then
+           (fn ^:async prove-endpoint [conn]
+             (reset! !fresh-conn conn)
+             (set! db/*conn* conn)
+             (await (db/ensure-provenance! {:seon.db/conn conn}))
+             (await
+              (d/transact!
+               conn
+               {:tx-data
+                (db/malli->datahike-schema
+                  (into restore/completion-attrs
+                        [:seon.schema/key :seon.db.id/generator]))}))
+             (await
+              (d/transact!
+               conn
+               {:tx-data
+                [{:seon.schema/key ::restore/id
+                  :seon.db.id/generator
+                  :seon.db.id.generator/compact}]}))
+             (let [expected (db/head-coordinate @conn)
+                   recorded
+                   (await
+                    (db/with-tx-context
+                     {:seon.db/user [:seon.agent/id "root"]
+                      :seon.db/process (process/lookup-ref ::process/boot)}
+                     (fn []
+                       (restore/record!
+                        {::restore/completion-claim completion-claim
+                         ::restore/expected-coordinate expected}))))
+                   c (::restore/completion-coordinate recorded)
+                   full-completion (::restore/completion recorded)]
+               (is (true? (::restore/ok? recorded)) (pr-str recorded))
+               (reset! @#'admission/!state {::admission/status :publishing})
+               (let [response (readiness-response recorded)
+                       body (reader/read-string (::body response))]
+                   (is (= 200 (::status response)))
+                   (is (= {::restore/ready? true
+                           ::restore/executable? false
+                           ::restore/completion full-completion
+                           ::restore/completion-coordinate c}
+                          body)
+                       "the public body is the exact closed readiness schema"))
+                 (await
+                  (db/with-tx-context
+                   {:seon.db/user [:seon.agent/id "root"]
+                    :seon.db/process (process/lookup-ref ::process/boot)}
+                   (fn []
+                     (db/transact!
+                      {:seon.db/tx-data [{:seon.user/id "later"}]}))))
+                 (is (= 503 (::status (readiness-response recorded)))))))
+          (.catch (fn [error]
+                    (is false (str "restore readiness endpoint threw " error))))
+          (.finally
+           (fn []
+             (when-let [conn @!fresh-conn] (d/release conn))
+             (set! db/*conn* prior-conn)
+             (reset! @#'admission/!state prior-admission)))
+          (.then (fn [_] (done)))))))

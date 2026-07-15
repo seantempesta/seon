@@ -31,13 +31,15 @@
         forced (point :db
                       #uuid "497628ef-2308-455a-ab83-9487584bf2ed" 47)]
     {:seon.dev.restore/startup-identity
-     {:seon.dev.restore/intent-id "restoretest1"
+     {:seon.dev.restore/intent-id
+      #uuid "a5217d14-f006-49f5-8504-fbf65ec22e85"
       :seon.dev.restore/plan-digest digest-a
       :seon.dev.restore/reachable-hash-digest digest-b
       :seon.dev.restore/consumer-generations
       {:seon.dev.process/pod consumer-generation}}
      :seon.db.restore-admin/result
-     {:seon.db.restore-admin/intent-id "restoretest1"
+     {:seon.db.restore-admin/intent-id
+      #uuid "a5217d14-f006-49f5-8504-fbf65ec22e85"
       :seon.db.restore-admin/plan-digest digest-a
       :seon.db.restore-admin/outcome
       :seon.db.restore-admin.outcome/applied
@@ -227,6 +229,16 @@
                     :seon.dev.process/pod])))
     (is (= forced-main
            (get-in descriptor [::launch/database ::coordinate/coordinate])))
+    (is (= {:seon.client/autonomous? false}
+           (get-in descriptor
+                   [::launch/runtime :seon.client/launch-capability])))
+    (is (thrown? js/Error
+                 (launch/validate-descriptor
+                  (assoc-in descriptor
+                            [::launch/runtime
+                             :seon.client/launch-capability
+                             :seon.client/autonomous?]
+                            true))))
     (is (false?
          (schema/valid-candidate-value?
           ::launch/restore-startup
@@ -241,7 +253,7 @@
         mutations
         [(assoc-in startup [:seon.db.restore-admin/result
                             :seon.db.restore-admin/intent-id]
-                   "anotherid001")
+                   #uuid "4fe1ec1e-5bf4-46ed-b76b-f6a1fc8a786e")
          (assoc-in startup [:seon.db.restore-admin/result
                             :seon.db.restore-admin/plan-digest]
                    digest-b)

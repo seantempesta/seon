@@ -49,13 +49,15 @@
         digest-b (apply str (repeat 64 "b"))
         startup
         {:seon.dev.restore/startup-identity
-         {:seon.dev.restore/intent-id "restoretest1"
+         {:seon.dev.restore/intent-id
+          #uuid "77777777-7777-4777-8777-777777777777"
           :seon.dev.restore/plan-digest digest-a
           :seon.dev.restore/reachable-hash-digest digest-b
           :seon.dev.restore/consumer-generations
           {:seon.dev.process/pod generation}}
          :seon.db.restore-admin/result
-         {:seon.db.restore-admin/intent-id "restoretest1"
+         {:seon.db.restore-admin/intent-id
+          #uuid "77777777-7777-4777-8777-777777777777"
           :seon.db.restore-admin/plan-digest digest-a
           :seon.db.restore-admin/outcome
           :seon.db.restore-admin.outcome/applied
@@ -178,6 +180,8 @@
         original-admit admission/admit-prepared!
         original-publish admission/publish-committed!
         original-record db.restore/record!
+        original-readiness db.restore/readiness
+        original-replica-attach replica/attach!
         original-resume agent/resume!
         original-web-start web.serve/start!
         original-ai-sync ai/sync!
@@ -186,6 +190,12 @@
         startup (::launch/restore-startup descriptor)
         forced (get-in descriptor
                        [::launch/database ::db.coordinate/coordinate])
+        completion-coordinate
+        (assoc forced
+               ::db.coordinate/commit-id
+               #uuid "4bc361ce-9c21-40b0-a61a-52a4dd3ecdb2"
+               ::db.coordinate/t (inc (::db.coordinate/t forced)))
+        !head (atom forced)
         preparation {::admission/prepared? true
                      ::admission/recovered? false
                      ::admission/generation 101
@@ -206,8 +216,8 @@
     (set! db/attached? (fn [] (some? db/*conn*)))
     (set! db/head-coordinate
           (fn
-            ([] forced)
-            ([_] forced)))
+            ([] @!head)
+            ([_] @!head)))
     (set! db/installed-schema
           (fn [_] (zipmap db.restore/completion-attrs (repeat {}))))
     (set! db/entity
@@ -278,23 +288,43 @@
             (assoc (dissoc actual ::admission/prepared?)
                    ::admission/published? true)))
     (set! db.restore/record!
-          (fn [completion]
-            (swap! effects conj [:restore/completion completion])
+          (fn [{::db.restore/keys [completion-claim expected-coordinate]
+                :as request}]
+            (swap! effects conj [:restore/completion request])
+            (when (= expected-coordinate @!head)
+              (reset! !head completion-coordinate))
             (promise-value
               {::db.restore/ok? true
                ::db.restore/recorded? true
                ::db.restore/already-completed? false
-               ::db.restore/completion completion
-               ::db.restore/completion-coordinate forced})))
+               ::db.restore/completion
+               (assoc completion-claim ::db.restore/id "restoretest1")
+               ::db.restore/completion-coordinate completion-coordinate})))
+    (set! db.restore/readiness
+          (fn [{::db.restore/keys [completion completion-coordinate]}]
+            {::db.restore/ready? true
+             ::db.restore/executable? false
+             ::db.restore/completion completion
+             ::db.restore/completion-coordinate completion-coordinate}))
+    (set! replica/attach!
+          (fn [_]
+            (swap! effects conj :replica)
+            (promise-value {})))
     (set! agent/resume!
           (fn [_]
             (swap! effects conj :forbidden/host)
             (promise-value {:seon.agent.runtime/resumed? true})))
     (set! web.serve/start!
-          (fn []
-            (swap! effects conj :web)
-            (promise-value {:seon.web/port 7890
-                            :seon.web/port-file "tmp/test-port"})))
+          (fn [request]
+            (if (empty? request)
+              (do
+             (swap! effects conj :web)
+             (promise-value {:seon.web/port 7890
+                             :seon.web/port-file "tmp/test-port"}))
+              (do
+                (swap! effects conj [:web request])
+                (promise-value {:seon.web/port 7890
+                                :seon.web/port-file "tmp/test-port"})))))
     (set! ai/sync!
           (fn []
             (swap! effects conj :forbidden/provider)
@@ -334,6 +364,8 @@
            (set! admission/admit-prepared! original-admit)
            (set! admission/publish-committed! original-publish)
            (set! db.restore/record! original-record)
+           (set! db.restore/readiness original-readiness)
+           (set! replica/attach! original-replica-attach)
            (set! agent/resume! original-resume)
            (set! web.serve/start! original-web-start)
            (set! ai/sync! original-ai-sync)
@@ -419,14 +451,18 @@
             {::admission/published? true ::admission/instrumentation {}}
             descriptor
             (fn [effects]
-              (-> (client/start-runtime!
-                    {::client/launch-capability non-autonomous-capability})
+              (-> (promise-value nil)
+                  (.then
+                    (fn []
+                      (client/start-runtime!
+                        {::client/launch-capability
+                         client/default-launch-capability})))
                   (.then
                     (fn [_]
                       (throw (js/Error. "non-autonomous restore passed"))))
                   (.catch
                     (fn [error]
-                      (is (re-find #"autonomous main capability"
+                      (is (re-find #"nonautonomous capability"
                                    (or (.-message error) (str error))))
                       (is (empty? @effects))
                       (reset! client/!state
@@ -438,9 +474,12 @@
                               (zipmap (remove #{::db.restore/id}
                                               db.restore/completion-attrs)
                                       (repeat {}))))
-                      (-> (client/start-runtime!
-                            {::client/launch-capability
-                             client/default-launch-capability})
+                      (-> (promise-value nil)
+                          (.then
+                            (fn []
+                              (client/start-runtime!
+                                {::client/launch-capability
+                                 non-autonomous-capability})))
                           (.then
                             (fn [_]
                               (throw (js/Error. "missing restore schema passed"))))
@@ -458,11 +497,11 @@
               (is false (str "restore precondition proof threw " error))
               (done)))))))
 
-(deftest restore-startup-prepares-completes-and-admits-before-autonomy
+(deftest restore-startup-prepares-completes-and-stays-closed
   (async done
     (let [{descriptor :seon.client.test/descriptor}
           (restore-launch-fixture)
-          expected-completion
+          expected-claim
           (db.restore/completion-from-launch
             {::launch/descriptor descriptor})]
       (-> (with-start-stubs
@@ -471,7 +510,7 @@
             (fn [effects]
               (-> (client/start-runtime!
                     {::client/launch-capability
-                     client/default-launch-capability})
+                     non-autonomous-capability})
                   (.then
                     (fn [result]
                       (let [events @effects
@@ -480,35 +519,70 @@
                               (filter #(and (vector? %)
                                             (= :restore/completion (first %)))
                                       events))
-                            admit-event
+                            completion-request (second completion-event)
+                            web-event
                             (first
                               (filter #(and (vector? %)
-                                            (= :restore/admit (first %)))
-                                      events))]
-                        (is (true? (::client/autonomous? result)))
+                                            (= :web (first %)))
+                                      events))
+                            web-request (second web-event)]
+                        (is (false? (::client/autonomous? result)))
                         (is (= [] (::client/created-ids result)))
+                        (is (= [] (::client/resumed-ids result)))
                         (is (= false
                                (-> events first second
                                    ::client/prepare-writes?)))
-                        (is (= expected-completion (second completion-event)))
+                        (is (= expected-claim
+                               (::db.restore/completion-claim
+                                completion-request)))
+                        (is (= (get-in descriptor
+                                       [::launch/database
+                                        ::db.coordinate/coordinate])
+                               (::db.restore/expected-coordinate
+                                completion-request)))
                         (is (= :restore/prepare
                                (nth events
                                     (effect-index events :restore/prepare))))
                         (is (< (effect-index events :publication-begin)
                                (effect-index events :restore/prepare)
                                (effect-index events completion-event)
-                               (effect-index events admit-event)
-                               (effect-index events :forbidden/host)
-                               (effect-index events :web)
-                               (effect-index events :forbidden/provider)
-                               (effect-index events :forbidden/brand)
-                               (effect-index events :forbidden/ticker)))
+                               (effect-index events web-event)))
+                        (is (true? (::web.serve/readiness-only? web-request)))
+                        (is (= "restoretest1"
+                               (get-in web-request
+                                       [::web.serve/restore-completion-result
+                                        ::db.restore/completion
+                                        ::db.restore/id])))
                         (is (not-any? #{:forbidden/boot-seed
+                                        :forbidden/recovery
                                         :forbidden/genesis
                                         :forbidden/initial-agent
                                         :forbidden/transaction
-                                        :publication-finish}
-                                      events))))))))
+                                        :publication-finish
+                                        :forbidden/host
+                                        :web
+                                        :forbidden/provider
+                                        :forbidden/brand
+                                        :forbidden/ticker}
+                                      events))
+                        (is (not-any? #(and (vector? %)
+                                           (= :restore/admit (first %)))
+                                      events))
+                        (client/start-runtime!
+                          {::client/launch-capability
+                           non-autonomous-capability}))))
+                  (.then
+                    (fn [repeated]
+                      (is (false? (::client/autonomous? repeated)))
+                      (is (= 1 (count (filter #(and (vector? %)
+                                                    (= :restore/completion
+                                                       (first %)))
+                                             @effects)))
+                          "attached refresh reuses retained completion+C")
+                      (is (= 2 (count (filter #(and (vector? %)
+                                                    (= :web (first %)))
+                                             @effects)))
+                          "attached refresh reproves the same readiness door"))))))
           (.then (fn [_] (done)))
           (.catch
             (fn [error]
@@ -529,7 +603,7 @@
                     "00000000-0000-4000-8000-000000000000")
               (-> (client/start-runtime!
                     {::client/launch-capability
-                     client/default-launch-capability})
+                     non-autonomous-capability})
                   (.then
                     (fn [_]
                       (throw (js/Error. "generation mismatch passed"))))
@@ -551,7 +625,7 @@
                       (swap! client/!state dissoc ::client/runtime-phase)
                       (-> (client/start-runtime!
                             {::client/launch-capability
-                             client/default-launch-capability})
+                             non-autonomous-capability})
                           (.then
                             (fn [_]
                               (throw (js/Error. "head mismatch passed"))))
@@ -588,7 +662,7 @@
                          ::client/replay-n-fail 1})))
               (-> (client/start-runtime!
                     {::client/launch-capability
-                     client/default-launch-capability})
+                     non-autonomous-capability})
                   (.then
                     (fn [_]
                       (throw (js/Error. "failed restore replay completed"))))
@@ -596,7 +670,7 @@
                     (fn [error]
                       (is (re-find #"restored program replay failed"
                                    (or (.-message error) (str error))))
-                      (is (some #{[:restore/replay-fault true]} @effects))
+                      (is (some #{[:restore/replay-fault false]} @effects))
                       (is (not-any? #(or (= :restore/prepare %)
                                          (and (vector? %)
                                               (#{:restore/completion
@@ -613,17 +687,14 @@
               (is false (str "restore replay proof threw " error))
               (done)))))))
 
-(deftest restore-completion-failure-remains-closed-and-retry-admits
+(deftest restore-completion-failure-remains-closed
   (async done
-    (let [{descriptor :seon.client.test/descriptor
-           forced :seon.client.test/forced-coordinate}
-          (restore-launch-fixture)
-          observed-effects (atom nil)]
+    (let [{descriptor :seon.client.test/descriptor}
+          (restore-launch-fixture)]
       (-> (with-start-stubs
             {::admission/published? true ::admission/instrumentation {}}
             descriptor
             (fn [effects]
-              (reset! observed-effects effects)
               (set! db.restore/record!
                     (fn [_]
                       (swap! effects conj :restore/completion-failed)
@@ -632,7 +703,7 @@
                          :seon/error {:seon.error/kind :core-bug}})))
               (-> (client/start-runtime!
                     {::client/launch-capability
-                     client/default-launch-capability})
+                     non-autonomous-capability})
                   (.then
                     (fn [_]
                       (throw (js/Error. "completion failure admitted"))))
@@ -648,96 +719,53 @@
                                             :forbidden/provider
                                             :forbidden/brand
                                             :forbidden/ticker} %))
-                                    @effects))
-                      (swap! client/!state dissoc ::client/runtime-phase)
-                      (set! db/*conn* nil)
-                      (set! db.restore/record!
-                            (fn [completion]
-                              (swap! effects conj :restore/completion-existing)
-                              (promise-value
-                                {::db.restore/ok? true
-                                 ::db.restore/recorded? false
-                                 ::db.restore/already-completed? true
-                                 ::db.restore/completion completion
-                                 ::db.restore/completion-coordinate forced})))
-                      (client/start-runtime!
-                        {::client/launch-capability
-                         client/default-launch-capability}))))))
-          (.then
-            (fn [_]
-              (is (some #{:restore/completion-existing}
-                        @(deref observed-effects)))
-              (is (some #(and (vector? %)
-                              (= :restore/admit (first %)))
-                        @(deref observed-effects)))))
+                                    @effects)))))))
           (.then (fn [_] (done)))
           (.catch
             (fn [error]
               (is false (str "restore completion retry proof threw " error))
               (done)))))))
 
-(deftest restore-crash-after-completion-reuses-the-fact-before-admission
+(deftest restore-rejects-completion-whose-origin-is-not-current-head
   (async done
     (let [{descriptor :seon.client.test/descriptor
            forced :seon.client.test/forced-coordinate}
-          (restore-launch-fixture)
-          observed-effects (atom nil)]
+          (restore-launch-fixture)]
       (-> (with-start-stubs
             {::admission/published? true ::admission/instrumentation {}}
             descriptor
             (fn [effects]
-              (reset! observed-effects effects)
-              (set! admission/admit-prepared!
-                    (fn [preparation]
-                      (swap! effects conj :restore/admission-crash)
-                      (assoc (dissoc preparation ::admission/prepared?)
-                             ::admission/published? false)))
+              (set! db.restore/record!
+                    (fn [{::db.restore/keys [completion-claim]}]
+                      (swap! effects conj :restore/completion-at-stale-head)
+                      (set! db/head-coordinate
+                            (fn
+                              ([] (update forced ::db.coordinate/t inc))
+                              ([_] (update forced ::db.coordinate/t inc))))
+                      (promise-value
+                       {::db.restore/ok? true
+                        ::db.restore/recorded? false
+                        ::db.restore/already-completed? true
+                        ::db.restore/completion
+                        (assoc completion-claim
+                               ::db.restore/id "restoretest1")
+                        ::db.restore/completion-coordinate forced})))
               (-> (client/start-runtime!
                     {::client/launch-capability
-                     client/default-launch-capability})
+                     non-autonomous-capability})
                   (.then
                     (fn [_]
-                      (throw (js/Error. "admission crash reported ready"))))
+                      (throw (js/Error. "stale completion reported ready"))))
                   (.catch
                     (fn [error]
-                      (is (re-find #"program reconstruction failed"
+                      (is (re-find #"restore completion failed"
                                    (or (.-message error) (str error))))
-                      (is (some #(and (vector? %)
-                                      (= :restore/completion (first %)))
-                                @effects))
+                      (is (some #{:restore/completion-at-stale-head} @effects))
                       (is (not-any? #{:forbidden/host :web
                                       :forbidden/provider
                                       :forbidden/brand
                                       :forbidden/ticker}
-                                    @effects))
-                      (swap! client/!state dissoc ::client/runtime-phase)
-                      (set! db/*conn* nil)
-                      (set! db.restore/record!
-                            (fn [completion]
-                              (swap! effects conj :restore/completion-existing)
-                              (promise-value
-                                {::db.restore/ok? true
-                                 ::db.restore/recorded? false
-                                 ::db.restore/already-completed? true
-                                 ::db.restore/completion completion
-                                 ::db.restore/completion-coordinate forced})))
-                      (set! admission/admit-prepared!
-                            (fn [preparation]
-                              (swap! effects conj :restore/admission-retry)
-                              (assoc (dissoc preparation
-                                             ::admission/prepared?)
-                                     ::admission/published? true)))
-                      (client/start-runtime!
-                        {::client/launch-capability
-                         client/default-launch-capability}))))))
-          (.then
-            (fn [_]
-              (let [effects @(deref observed-effects)]
-                (is (some #{:restore/completion-existing} effects))
-                (is (some #{:restore/admission-retry} effects))
-                (is (< (effect-index effects :restore/completion-existing)
-                       (effect-index effects :restore/admission-retry)
-                       (effect-index effects :forbidden/host))))))
+                                    @effects)))))))
           (.then (fn [_] (done)))
           (.catch
             (fn [error]
@@ -780,7 +808,7 @@
               (swap! effects conj :replica)
               (promise-value {})))
       (set! web.serve/start!
-            (fn []
+            (fn [_]
               (swap! effects conj :web)
               (promise-value {:seon.web/port 7890
                               :seon.web/port-file "tmp/test-port"})))
@@ -975,6 +1003,36 @@
                        ((deref #'client/claim-launch-capability!)
                         client/default-launch-capability)))))
       (finally
+        (reset! client/!state previous-state)))))
+
+(deftest restore-preparation-ignores-shadow-build-admission
+  (let [{descriptor :seon.client.test/descriptor}
+        (restore-launch-fixture)
+        previous-descriptor replica/process-launch-descriptor
+        previous-state @client/!state
+        effects (atom [])]
+    (try
+      (set! replica/process-launch-descriptor descriptor)
+      (reset! client/!state
+              (assoc previous-state
+                     ::client/launch-capability non-autonomous-capability))
+      (with-redefs [db/attached? (constantly true)
+                    admission/begin-publication!
+                    (fn [] (swap! effects conj :begin) true)
+                    admission/mark-unavailable!
+                    (fn [_] (swap! effects conj :unavailable) true)
+                    admission/publish-committed!
+                    (fn []
+                      (swap! effects conj :publish)
+                      {::admission/published? true})]
+        (doseq [message [{:type :build-start}
+                         {:type :build-failure}
+                         {:type :build-complete}]]
+          (is (true? (client/shadow-build-notify! message))))
+        (is (empty? @effects)
+            "restore preparation cannot open or replace admission on reload"))
+      (finally
+        (set! replica/process-launch-descriptor previous-descriptor)
         (reset! client/!state previous-state)))))
 
 (deftest bulk-unhost-derives-exact-process-local-owners

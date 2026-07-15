@@ -74,25 +74,42 @@ number at a different commit id, so `t` alone cannot admit terminal cleanup.
 The resolver moved intact into the registry lifecycle owner, and the standalone
 writer RPC delegates to it; there is still one commit-graph walker.
 
-The issue remains open because the restore-aware cold caller has not yet
-composed the closed forced-main result, exact completion transaction and
-read-back, reconstruction, and final admission. That caller must consume the
-settled resolver rather than reimplement commit-graph inference. No contract is
-represented by a new admission status here.
+The restore-aware cold caller is implemented under focused proof.
+`with-restore-startup` forces the existing launch capability to
+nonautonomous. Cold startup attaches exact forced head `F`, replays and prepares
+the one committed projection under the existing `:publishing` state, then
+submits the frozen completion claim to one whole-head-fenced `record!` operation
+`F→C`. The database allocates the completion's 12-character id; the caller
+retains the returned full completion and exact `C`, rather than treating the
+UUID operator intent as completion identity. It does not admit that projection,
+host or resume agents, seed or recover facts, record replay faults, open the
+public web surface, synchronize provider/brand data, install the ticker, or
+react to Shadow build admission.
+
+The existing `/_seon/ready` route is the only observable preparation door. Its
+restore projection returns 200 only when the expected completion entity is
+exact, its identity datom was asserted by the current main-branch head `C`, and
+admission remains `:publishing`. Its body is the shared closed
+`:seon.db.restore/readiness-response`: exact generated completion, exact `C`,
+`:seon.db.restore/ready? true`, and `:seon.db.restore/executable? false`. Any
+later head `D` returns 503. A fresh ordinary restart, after the external
+coordinator removes the retained intent, owns normal admission. No restore
+phase, registry, or second status path is introduced.
 
 ## Acceptance
 
 - The existing `:publishing` state can retain one verified, activated projection
   while an owning cold transition commits restore completion.
-- Completion read-back precedes the exact transition to `:available`.
+- Completion read-back leaves admission exactly `:publishing` and executable
+  work closed.
 - Ordinary boot and hot reload still use the same factored publication owner;
   there is no second registry, restore instrumentation path, force-open, or new
   admission status.
 - Completion failure leaves admission closed and process retry reconstructs
   disposable projection state from committed facts.
-- A crash after completion but before admission observes the same completion,
-  does not repeat guarded force or overlays, and safely reconstructs runtime
-  state before opening.
+- A crash after completion observes the same completion, does not repeat
+  guarded force or overlays, and remains nonautonomous until intent cleanup and
+  a fresh ordinary restart.
 - An exact retry after a later branch transaction resolves and returns the
   original completion coordinate without writing or inventing stored commit
   metadata.
@@ -110,6 +127,15 @@ resolver, and writer-integration selector at 28 tests/190 assertions. Its real
 Datahike falsifier publishes a completion, force-commits the same `t` at a
 different commit id, reopens the database, and requires lifecycle observation
 to return the original completion commit coordinate rather than the force head.
+
+The caller boundary passes the focused launch selector at 7 tests/49
+assertions, client-runtime selector at 30 tests/202 assertions, and web selector
+at 13 tests/75 assertions. These cover UUID intent evidence, the exact
+`::completion-claim` request, generated completion identity, attached refresh
+reuse, unchanged ordinary readiness, byte/semantic-equivalent closed restore
+readiness, and rejection after a later head `D`. The issue remains open only
+until the external coordinator consumes that endpoint through a complete
+restore lifecycle proof.
 
 ## Fresh schema integration fixed
 

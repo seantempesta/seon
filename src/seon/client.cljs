@@ -252,6 +252,7 @@
    :seon.client.runtime/stopping
    :seon.client.runtime/cleanup-required])
 (schema/register! ::blob-storage-view :my.blob/storage-view)
+(schema/register! ::restore-completion-result ::db.restore/record-success)
 
 (def default-launch-capability
   {::autonomous? true})
@@ -420,7 +421,9 @@
   "Close on build start; reconstruct and rehost only after a complete build."
   {:malli/schema [:=> [:catn [::message :any]] :boolean]}
   [message]
-  (when (db/attached?)
+  (when (and (db/attached?)
+             (nil? (::launch/restore-startup
+                    replica/process-launch-descriptor)))
     (case (:type message)
       :build-start
       (admission/begin-publication!)
@@ -2503,7 +2506,7 @@
 (declare process-generation)
 
 (defn- validate-restore-launch!
-  [descriptor capability attached?]
+  [descriptor capability]
   (when-let [startup (::launch/restore-startup descriptor)]
     (let [expected-generation
           (get-in startup
@@ -2511,13 +2514,9 @@
                    :seon.dev.restore/consumer-generations
                    :seon.dev.process/pod])
           actual-generation (process-generation)]
-      (when attached?
+      (when-not (false? (::autonomous? capability))
         (throw
-          (ex-info "Restore startup requires a fresh unattached process."
-                   {:seon.error/kind :core-bug})))
-      (when-not (true? (::autonomous? capability))
-        (throw
-          (ex-info "Restore startup requires the autonomous main capability."
+          (ex-info "Restore startup requires a nonautonomous capability."
                    {:seon.error/kind :core-bug})))
       (when-not (= (str expected-generation) actual-generation)
         (throw
@@ -2527,6 +2526,31 @@
                     :seon.client/actual-process-generation actual-generation
                     :seon.error/kind :core-bug})))
       startup)))
+
+(defn- validate-restore-completion!
+  "Prove retained completion evidence against the current closed database."
+  [claim result database]
+  (let [completion (::db.restore/completion result)
+        coordinate (::db.restore/completion-coordinate result)
+        readiness
+        (when (and (true? (::db.restore/ok? result))
+                   (= claim (dissoc completion ::db.restore/id))
+                   (schema/valid-candidate-value?
+                     ::db.coordinate/coordinate coordinate)
+                   (= coordinate (db/head-coordinate database)))
+          (db.restore/readiness
+            {::db.restore/completion completion
+             ::db.restore/completion-coordinate coordinate
+             :seon.runtime.admission/state (admission/state)
+             :seon.db/db database}))]
+    (when-not (true? (::db.restore/ready? readiness))
+      (throw
+        (ex-info "start-runtime!: restore completion failed"
+                 {:seon.client/restore-claim claim
+                  :seon.client/restore-completion-result result
+                  :seon.client/restore-readiness readiness
+                  :seon.error/kind :core-bug})))
+    result))
 
 (defn- validate-restore-attachment!
   [conn descriptor startup]
@@ -2576,13 +2600,19 @@
                      replica/process-launch-descriptor)
         attached? (db/attached?)
         restore-startup
-        (validate-restore-launch! descriptor capability attached?)
-        restore-completion
+        (validate-restore-launch! descriptor capability)
+        restore-completion-claim
         (when restore-startup
           (db.restore/completion-from-launch
             {::launch/descriptor descriptor}))]
     (if attached?
       (let [conn db/*conn*
+            restore-completion-result
+            (when restore-startup
+              (validate-restore-completion!
+                restore-completion-claim
+                (::restore-completion-result @!state)
+                @conn))
             available-ids (agent/resumable-agent-ids {:seon.db/db @conn})
             resumed-ids (if autonomous? available-ids [])
             primary (or (first (remove #{"root"} available-ids))
@@ -2591,7 +2621,14 @@
             _ (await (replica/attach!
                       {::replica/conn conn
                        ::launch/descriptor replica/process-launch-descriptor}))
-            {:seon.web/keys [port port-file]} (await (web.serve/start!))]
+            {:seon.web/keys [port port-file]}
+            (await
+              (web.serve/start!
+                (if restore-startup
+                  {::web.serve/readiness-only? true
+                   ::web.serve/restore-completion-result
+                   restore-completion-result}
+                  {})))]
         {:seon.agent/id primary
          ::autonomous? autonomous?
          :seon.client/resumed-ids resumed-ids
@@ -2719,32 +2756,31 @@
                        :seon.db/process
                        (db.process/lookup-ref :seon.db.process/boot)}
                       (fn []
-                        (db.restore/record! restore-completion)))))
-                _ (when (and restore-startup
-                             (not
-                               (and (true? (::db.restore/ok?
-                                             completion-result))
-                                    (= restore-completion
-                                       (::db.restore/completion
-                                         completion-result))
-                                    (schema/valid-candidate-value?
-                                      ::db.coordinate/coordinate
-                                      (::db.restore/completion-coordinate
-                                        completion-result)))))
-                    (throw
-                      (ex-info
-                        "start-runtime!: restore completion failed"
-                        completion-result)))
-                publication
-                (if restore-startup
-                  (admission/admit-prepared! preparation)
-                  (admission/publish-committed!))
-                _ (when-not (::admission/published? publication)
+                        (db.restore/record!
+                         {::db.restore/completion-claim
+                          restore-completion-claim
+                          ::db.restore/expected-coordinate
+                          (get-in descriptor
+                                  [::launch/database
+                                   ::db.coordinate/coordinate])})))))
+                completion-result
+                (when restore-startup
+                  (validate-restore-completion!
+                    restore-completion-claim completion-result @conn))
+                _ (when restore-startup
+                    (swap! !state assoc
+                           ::restore-completion-result completion-result))
+                publication (when-not restore-startup
+                              (admission/publish-committed!))
+                _ (when (and (nil? restore-startup)
+                             (not (::admission/published? publication)))
                     (throw
                      (ex-info
                       "start-runtime!: committed program reconstruction failed"
                       publication)))
-                instrument-stats (::admission/instrumentation publication)
+                instrument-stats
+                (::admission/instrumentation
+                 (or preparation publication))
                 _ (log/info-console!
                    "seon.client/start-runtime!"
                    (str "instrumentation: "
@@ -2775,7 +2811,12 @@
                 hosted (or (some #(when (= primary (:seon.agent/id %)) %) results)
                            (first results))
                 {:seon.web/keys [port port-file]}
-                (await (web.serve/start!))]
+                (await
+                 (if restore-startup
+                   (web.serve/start!
+                     {::web.serve/readiness-only? true
+                      ::web.serve/restore-completion-result completion-result})
+                   (web.serve/start! {})))]
             (when autonomous?
               (await (ai/sync!))
               (await (web.brand/sync!))
@@ -2826,7 +2867,8 @@
                      (-> state
                          (assoc ::runtime-phase
                                 :seon.client.runtime/cleanup-required)
-                         (dissoc ::cleanup-requires-connection?))))
+                         (dissoc ::cleanup-requires-connection?
+                                 ::restore-completion-result))))
             (throw error))))
       (throw
        (ex-info
@@ -3124,7 +3166,8 @@
                ::runtime-phase
                ::quiesce-result
                ::quiesce-started?
-               ::cleanup-requires-connection?)
+               ::cleanup-requires-connection?
+               ::restore-completion-result)
         {::stopped? true
          ::agent-runtime/unhosted-ids
          (or (::agent-runtime/unhosted-ids quiesce-result) [])}
@@ -3160,7 +3203,8 @@
                    ::runtime-phase
                    ::cleanup-requires-connection?
                    ::quiesce-started?
-                   ::quiesce-result)
+                   ::quiesce-result
+                   ::restore-completion-result)
             {::stopped? true
              ::agent-runtime/unhosted-ids
              (::agent-runtime/unhosted-ids drained)})

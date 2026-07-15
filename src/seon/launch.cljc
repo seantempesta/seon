@@ -87,9 +87,12 @@
 (defn- descriptor-consistent?
   [descriptor]
   (if-let [startup (::restore-startup descriptor)]
-    (= (get-in startup [:seon.db.restore-admin/result
-                        :seon.db.restore-admin/forced-main-coordinate])
-       (get-in descriptor [::database ::coordinate/coordinate]))
+    (and (= (get-in startup [:seon.db.restore-admin/result
+                             :seon.db.restore-admin/forced-main-coordinate])
+            (get-in descriptor [::database ::coordinate/coordinate]))
+         (false? (get-in descriptor
+                         [::runtime :seon.client/launch-capability
+                          :seon.client/autonomous?])))
     true))
 
 (schema/register!
@@ -206,11 +209,14 @@
   [::restore-startup ::restore-startup]])
 
 (defn with-restore-startup
-  "Attach one validated inert restore startup value to a pinned launch."
+  "Attach restore evidence and close the launch to autonomous effects."
   {:malli/schema [:=> [:cat ::with-restore-startup-request] ::descriptor]}
   [{descriptor ::descriptor startup ::restore-startup}]
-  (validate-descriptor (assoc descriptor ::restore-startup
-                              (validate-restore-startup startup))))
+  (validate-descriptor
+   (-> descriptor
+       (assoc ::restore-startup (validate-restore-startup startup))
+       (assoc-in [::runtime :seon.client/launch-capability]
+                 {:seon.client/autonomous? false}))))
 
 (defn default-descriptor
   "Derive one ordinary autonomous-cluster launch descriptor."
