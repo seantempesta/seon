@@ -150,6 +150,16 @@ blocks independent harness work. The remaining operator provenance gap is one
 canonical process/status digest over the full operator closure, recorded in
 [[../../seon/issues/inspect-live-cluster-caller-drift]].
 
+Failure review now remains inside the same native Inspect artifact. One
+scorecard operation accepts—but never infers—exactly one frozen taxonomy label,
+merges it into the incorrect capability score's existing oracle metadata, and
+uses Inspect's `ScoreEdit` provenance/history without changing the score or
+aggregate metrics. Passing scores reject failure labels. A real offline native
+round trip proves classification, source admission, end source identity, and
+end target identity coexist after write, finalization, copy, and read-back.
+The focused native-run, classification, admission, cluster, and milestone gate
+passes 127 tests.
+
 A subsequent purity probe found that historical result-handle display depends
 on a process-local cache. The target is now explicit and falsifiable: the same
 agent and resolved database coordinate regenerate a byte-identical cacheable

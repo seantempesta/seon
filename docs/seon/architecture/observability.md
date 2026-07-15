@@ -277,6 +277,12 @@ terminal bytes; it never becomes a capability score. The target identity
 includes one canonical digest of the operator closure and runtime that started
 the processes, so a checkout that later converges cannot make transient launch
 bytes appear reproducible.
+An incorrect scored sample receives one explicit human-reviewed failure label
+from the frozen experiment taxonomy on that existing score. The edit preserves
+the scorer's value, explanation, metadata, and aggregate metrics, and Inspect's
+native score history records who made the classification and why. Passing
+scores carry no manufactured failure label, infrastructure failures remain
+unscored, and no heuristic classifier becomes another evidence authority.
 Long-term planning is a pod-backed Inspect task: one ephemeral cluster spans
 multiple interactions and a pod restart, then host-side scoring reads the
 resulting plan and eval facts. Offline good/bad fixtures exercise the same

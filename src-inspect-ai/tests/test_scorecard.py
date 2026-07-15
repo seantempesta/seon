@@ -1,6 +1,7 @@
 """scorecard.py — reducer math, ledger append discipline, regression check."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -64,6 +65,74 @@ def test_metrics_sample_with_flaked_epoch_excluded_from_pass_hat_k():
 def test_metrics_empty_raises():
     with pytest.raises(ValueError):
         compute_metrics([])
+
+
+def test_failure_classification_is_explicit_and_preserves_score(monkeypatch):
+    score = SimpleNamespace(
+        value="I", answer="327", explanation="oracle explanation",
+        metadata={"failures": ["query_later"]})
+    sample = SimpleNamespace(
+        id="database_workflow-seed1-000", epoch=1,
+        scores={"milestone_scorer": score})
+    log = SimpleNamespace(samples=[sample])
+    captured = {}
+
+    def edit_score(log_value, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(scorecard, "edit_score", edit_score)
+    out = scorecard.annotate_failure_classification(
+        log,
+        sample_id=sample.id,
+        epoch=1,
+        score_name="milestone_scorer",
+        classification="opaque schema",
+        author="seon-operator",
+        reason="Reviewed retained evidence",
+    )
+
+    assert out is log
+    assert captured["recompute_metrics"] is False
+    edit = captured["edit"]
+    assert edit.value == "UNCHANGED"
+    assert edit.answer == "UNCHANGED"
+    assert edit.explanation == "UNCHANGED"
+    assert edit.metadata == {
+        "failures": ["query_later"],
+        "seon_failure_classification": "opaque schema",
+    }
+    assert edit.provenance.author == "seon-operator"
+
+
+@pytest.mark.parametrize("classification", ["made up", ""])
+def test_failure_classification_rejects_unknown_label(classification):
+    with pytest.raises(ValueError, match="unknown failure classification"):
+        scorecard.annotate_failure_classification(
+            SimpleNamespace(samples=[]),
+            sample_id="sample",
+            epoch=1,
+            score_name="score",
+            classification=classification,
+            author="operator",
+            reason="reviewed",
+        )
+
+
+def test_failure_classification_rejects_passing_or_missing_score():
+    passing = SimpleNamespace(
+        id="sample", epoch=1,
+        scores={"score": SimpleNamespace(value="C", metadata={})})
+    log = SimpleNamespace(samples=[passing])
+    with pytest.raises(ValueError, match="passing score"):
+        scorecard.annotate_failure_classification(
+            log, sample_id="sample", epoch=1, score_name="score",
+            classification="model reasoning failure", author="operator",
+            reason="reviewed")
+    with pytest.raises(ValueError, match="no score"):
+        scorecard.annotate_failure_classification(
+            log, sample_id="sample", epoch=1, score_name="missing",
+            classification="model reasoning failure", author="operator",
+            reason="reviewed")
 
 
 # ---------------------------------------------------------------------------

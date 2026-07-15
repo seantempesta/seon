@@ -39,6 +39,9 @@ import statistics
 from pathlib import Path
 from typing import Any
 
+from inspect_ai.log import ProvenanceData, edit_score
+from inspect_ai.scorer import ScoreEdit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCORECARD_PATH = REPO_ROOT / "evals" / "scorecard.jsonl"
 
@@ -117,6 +120,80 @@ def model_provenance_from_run(model_config: dict[str, Any] | None,
 PASS = "pass"
 FAIL = "fail"
 BEHAVIOR_MISS = "behavior_miss"
+
+FAILURE_TAXONOMY = frozenset({
+    "tool absent",
+    "tool not required",
+    "wrong selection",
+    "unclear identity",
+    "unclear description",
+    "opaque schema",
+    "unclear arguments",
+    "overlap",
+    "misleading envelope",
+    "unactionable error",
+    "missing fact",
+    "plan failure",
+    "verification failure",
+    "sandbox/bridge failure",
+    "model reasoning failure",
+    "benchmark/scorer failure",
+})
+
+
+def annotate_failure_classification(
+    log: Any,
+    *,
+    sample_id: int | str,
+    epoch: int,
+    score_name: str,
+    classification: str,
+    author: str,
+    reason: str,
+) -> Any:
+    """Attach one explicit frozen-taxonomy label to an incorrect score.
+
+    This function never infers a diagnosis. The operator supplies the label
+    after reviewing the retained turn, eval, and scorer evidence. Inspect's
+    score edit preserves the original score in history; merging metadata here
+    preserves the oracle's own evidence. The caller writes the edited native
+    log through Inspect's public ``write_eval_log`` operation.
+    """
+    if classification not in FAILURE_TAXONOMY:
+        raise ValueError(
+            f"unknown failure classification {classification!r}; expected "
+            f"one of {sorted(FAILURE_TAXONOMY)}")
+    if not author.strip() or not reason.strip():
+        raise ValueError("failure classification requires author and reason")
+    matches = [
+        sample for sample in (getattr(log, "samples", None) or [])
+        if sample.id == sample_id and sample.epoch == epoch
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"expected one sample {sample_id!r} at epoch {epoch}; "
+            f"found {len(matches)}")
+    score = (matches[0].scores or {}).get(score_name)
+    if score is None:
+        raise ValueError(
+            f"sample {sample_id!r} epoch {epoch} has no score {score_name!r}")
+    if score.value in ("C", 1, 1.0, True):
+        raise ValueError("a passing score cannot receive a failure classification")
+    edit_score(
+        log,
+        sample_id=sample_id,
+        epoch=epoch,
+        score_name=score_name,
+        edit=ScoreEdit(
+            metadata={
+                **dict(score.metadata or {}),
+                "seon_failure_classification": classification,
+            },
+            provenance=ProvenanceData(author=author, reason=reason),
+        ),
+        recompute_metrics=False,
+    )
+    return log
 
 # closed_reason values that mean "the run's own bounds cut it before a
 # terminal reply" (src/seon/agent/run.cljs close reasons).

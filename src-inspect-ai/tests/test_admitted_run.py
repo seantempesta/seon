@@ -4,11 +4,11 @@ from pathlib import Path
 
 from inspect_ai import Task
 from inspect_ai.dataset import Sample
-from inspect_ai.log import read_eval_log
+from inspect_ai.log import read_eval_log, write_eval_log
 from inspect_ai.scorer import match
 from inspect_ai.solver import solver
 
-from seon_inspect import catalog
+from seon_inspect import catalog, scorecard, source_admission
 
 
 @solver
@@ -96,3 +96,54 @@ def test_run_native_task_retains_log_with_exact_admission(monkeypatch, tmp_path)
     assert native.metadata["seon_static_target_end"] == {
         "artifact": "stable"}
     assert native.log_updates[-1].provenance.author == "seon_inspect.catalog"
+
+
+def test_classified_failure_roundtrips_with_native_evidence(monkeypatch, tmp_path):
+    identity = {
+        "schema_version": 2,
+        "bench": {"name": "database_workflow", "kind": "seon-native"},
+    }
+    monkeypatch.setattr(
+        catalog.source_admission, "verify_sources", lambda selected: identity)
+
+    def task_factory(_admission):
+        return Task(
+            dataset=[Sample(id="native-failure", input="return accepted",
+                            target="different")],
+            solver=[_fixed_reply()],
+            scorer=match(),
+        )
+
+    evidence = tmp_path / "evidence"
+    logs = catalog.run_native_task(
+        identity["bench"],
+        task_factory,
+        evidence_dir=evidence,
+        target_snapshot=lambda: {"artifact": "stable"},
+        log_dir=str(tmp_path / "logs"),
+        display="none",
+    )
+    log = logs[0]
+    scorecard.annotate_failure_classification(
+        log,
+        sample_id="native-failure",
+        epoch=1,
+        score_name="match",
+        classification="model reasoning failure",
+        author="seon-operator",
+        reason="Reviewed retained prompt, reply, and scorer evidence",
+    )
+    write_eval_log(log)
+    manifest = source_admission.finalize_native_logs(
+        logs, evidence_dir=evidence, expected_admission=identity)
+    native = read_eval_log(manifest[0]["retained_path"])
+    score = native.samples[0].scores["match"]
+
+    assert score.value == "I"
+    assert score.metadata["seon_failure_classification"] == \
+        "model reasoning failure"
+    assert score.history[-1].provenance.author == "seon-operator"
+    assert native.eval.metadata["seon_source_admission"] == identity
+    assert native.metadata["seon_source_admission_end"] == identity
+    assert native.metadata["seon_static_target_end"] == {
+        "artifact": "stable"}
