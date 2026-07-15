@@ -77,9 +77,17 @@ source-build mechanism is public HTTPS Git dependencies pinned by full SHA,
 followed by a release manifest that binds those SHAs to the standalone writer
 digest. Datahike `9ada7550…` exposes `src-secondary` through its declared paths;
 Proximum `9846d3e7…` is the public upstream-`v0.1.26` descendant with guarded
-force and cold checked-in-Java preparation. Root pin/build-input removal, cold
-dependency preparation, and stable writer-manifest evidence remain before the
-ACME admission handoff.
+force and cold checked-in-Java preparation. The root cutover's first two clean
+writer builds exposed nondeterministic transitive Clojure AOT output despite
+identical source and dependency inputs. The artifact owner now compiles only a
+stable Java `seon.DatabaseServerMain` entry point, which source-loads the one
+`seon.db.server` implementation at process start; it does not recursively AOT
+dependency namespaces. Commit `be30f420` carries that exact closure. Its two
+clean builds share normalized digest
+`d7011dacb7192decc826b37b014502ee372f362bc26a4a0c7e44a56ebd4e2deb`, while
+raw ZIP metadata is deliberately outside that digest. `java -jar` reaches the
+real preflight and exits 11 only because `SEON_EMBED` is absent. Default runtime
+proof remains before the ACME admission handoff.
 
 The complete maintained-fork freshness ledger is
 [[research/custom-dependency-freshness-audit-2026-07-15]]. It adds one required

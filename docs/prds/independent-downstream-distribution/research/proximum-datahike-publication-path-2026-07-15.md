@@ -178,9 +178,10 @@ Once both final public SHAs exist:
 4. remove `reference-code/datahike/src-secondary` from root `:writer`
    `:extra-paths`, `build.clj` source copying/compilation inputs, and the writer
    cache's local-input digest; and
-5. keep AOT of `datahike.index.secondary.proximum` in `writer-uber`. Its source
-   now arrives through the Datahike Git dependency path, while tools.build
-   packages the compiled closure into the standalone jar.
+5. package `datahike.index.secondary.proximum` through the dependency basis,
+   but do not recursively AOT it or the server dependency closure. Compile the
+   stable Java entry point only; it source-loads the one `seon.db.server`
+   implementation when the artifact starts.
 
 Datahike does not need a transitive Proximum dependency in its main manifest.
 The optional adapter is selected only by Seon's JVM writer, so Seon's
@@ -287,3 +288,20 @@ Node gate is 105/824 after the Konserve correction. Publication is therefore
 settled; the remaining boundary is Seon's root pin/build-input cutover, cold
 dependency preparation, stable writer digest, version-4 manifest, and selected
 file-backed restore proof.
+
+The root cutover then falsified the audit's original AOT assumption. Two clean
+`writer-uber` builds from identical inputs produced different normalized
+digests because recursive Clojure AOT emitted nondeterministic captured-local
+slot order in transitive dependency classes. The one artifact mechanism now
+compiles deterministic `java/seon/DatabaseServerMain.java` and lets that class
+`require` and invoke the source-loaded `seon.db.server/-main`; `:gen-class` and
+Clojure AOT are removed rather than supplemented by a second server.
+
+Commit `be30f420` records the corrected artifact mechanism. Two clean builds
+share normalized digest
+`d7011dacb7192decc826b37b014502ee372f362bc26a4a0c7e44a56ebd4e2deb`. Their
+raw ZIP bytes may differ in metadata, which the established sorted-entry-name
+and entry-byte digest intentionally excludes. `java -jar` reaches the real
+writer preflight and exits 11 only because `SEON_EMBED` is absent. The remaining
+publication gate is default artifact/runtime proof and the explicit downstream
+handoff, not more AOT tuning.
