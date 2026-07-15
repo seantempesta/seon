@@ -28,8 +28,9 @@ lifecycle, or planning restart semantics.
   Generated data changes oracle values, not the capability contract or scorer
   family.
 - `seon_inspect.tasks.milestone_lift` is the existing Inspect task boundary.
-  Its pod path must target an explicit serial ACME URL, cluster name, and writer
-  port; it must not call the unavailable ephemeral cluster lease API.
+  Its pod path targets one explicit serial ACME URL and consumes the response's
+  request-scoped evidence; it neither opens a writer endpoint nor calls the
+  unavailable ephemeral cluster lease API.
 - `seon_inspect.solver._record_result` is the current canonical projection of
   `/agents/run` output into Inspect task metadata. Ordered turns and the final
   database coordinate remain native Inspect evidence.
