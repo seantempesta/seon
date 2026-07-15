@@ -121,6 +121,15 @@ as `run_bench`. A real native `.eval` proves the retained identity. Static
 artifact/config binding and the per-sample operator lease remain open parts of
 this issue.
 
+Static artifact binding is now executable for native runs. Inspect consumes
+the caller-selected semantic operator status command, requires `:ready` and an
+exact URL match, retains the status EDN and digest in the `.eval`, and rejects
+any before/after change. It does not derive artifact paths, ports, or process
+ownership itself. A clean target rebuild remains necessary before an accepted
+sample because a development watcher can compile shared dirty source after the
+last manifest publication; the per-sample lease remains the parallel/restart
+owner.
+
 A generated-workflow probe exposed one remaining static-path contradiction.
 `planning.fetch_eval_rows` still sent a raw sentinel-printing form to the
 writer socket, but the writer now speaks io-prepl event maps. The query reached

@@ -16,6 +16,7 @@ Nothing here talks to a pod at import time.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -24,15 +25,15 @@ import subprocess
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Temporary observation-only identity for the retired frozen output. The
-# operator does not yet publish an artifact flavor/digest in its target
-# status, so no caller may build this path; `ensure_bench_bundle` fails before
-# mutation. Keeping read-only identity lets existing offline contamination
-# tests remain meaningful until the lease carries the canonical manifest.
+# operator now publishes the maintained target artifact in structured status;
+# no caller may build this legacy path. Keeping read-only identity lets
+# existing offline contamination tests remain meaningful until the lease
+# carries the canonical manifest.
 BENCH_BUNDLE = REPO_ROOT / "out-bench" / "client" / "main.js"
 BENCH_BUNDLE_SHA = BENCH_BUNDLE.parent / (BENCH_BUNDLE.name + ".sha256")
 
@@ -179,6 +180,47 @@ def bundle_violation(start: dict[str, Any] | None) -> str | None:
     return (f"frozen bench bundle changed mid-run (start={start}, end={end}) "
             "— the run is contaminated; classify its executions as "
             "'frozen_bundle_changed' and publish no capability number")
+
+
+def static_target_snapshot(
+    cluster_url: str,
+    status_command: Sequence[str],
+    *,
+    runner: Callable[..., Any] = subprocess.run,
+) -> dict[str, Any]:
+    """Read one ready static target identity from the semantic operator.
+
+    The EDN is retained byte-for-byte because it already contains the
+    operator-owned artifact digests, process identities, endpoints, database
+    path, and target status. Inspect neither reconstructs nor mutates them.
+    """
+    command = list(status_command)
+    if not command:
+        raise ValueError("status_command must name the target operator")
+    result = runner(
+        command,
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        lines = (result.stderr or result.stdout or "operator status failed")
+        detail = lines.strip().splitlines()[0] if lines.strip() else "operator status failed"
+        raise RuntimeError(f"static target status failed: {detail}")
+    status_edn = result.stdout.strip()
+    target_url = cluster_url.removesuffix("/agents/run").rstrip("/")
+    if ":status :seon.dev.target.status/ready" not in status_edn:
+        raise RuntimeError("static target status is not ready")
+    if f':url "{target_url}"' not in status_edn:
+        raise RuntimeError(
+            "static target status URL does not match the selected pod door")
+    return {
+        "cluster_url": cluster_url,
+        "status_command": command,
+        "status_edn": status_edn,
+        "status_sha256": hashlib.sha256(status_edn.encode()).hexdigest(),
+    }
 
 
 def ensure_bench_bundle(runner: Callable[..., Any] = subprocess.run

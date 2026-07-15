@@ -119,6 +119,7 @@ def test_run_native_task_admits_before_construction_and_finalizes(monkeypatch):
     catalog.run_native_task(
         {"name": "native"}, factory,
         task_kwargs={"cluster_url": "http://example.test/agents/run"},
+        target_snapshot=lambda: {"artifact": "stable"},
     )
     assert captured["identity"] == {"name": "native"}
     assert captured["factory_kwargs"]["_admission"] == admitted
@@ -139,8 +140,23 @@ def test_run_native_task_rejects_before_construction(monkeypatch):
         catalog.run_native_task(
             {"name": "native"},
             lambda **kwargs: constructed.append(kwargs) or _FakeTask(),
+            target_snapshot=lambda: {"artifact": "stable"},
         )
     assert constructed == []
+
+
+def test_run_native_task_rejects_target_drift(monkeypatch):
+    monkeypatch.setattr(
+        catalog.source_admission, "verify_sources",
+        lambda identity: {"bench": identity})
+    monkeypatch.setattr(catalog, "inspect_eval", lambda *args, **kwargs: ["log"])
+    snapshots = iter([{"artifact": "before"}, {"artifact": "after"}])
+    with pytest.raises(RuntimeError, match="identity changed"):
+        catalog.run_native_task(
+            {"name": "native"},
+            lambda **kwargs: _FakeTask(),
+            target_snapshot=lambda: next(snapshots),
+        )
 
 
 def test_run_bench_max_samples_overridable(monkeypatch):

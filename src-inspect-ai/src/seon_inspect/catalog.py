@@ -279,6 +279,7 @@ def run_native_task(
     *,
     task_kwargs: dict[str, Any] | None = None,
     evidence_dir: Path | None = None,
+    target_snapshot: Callable[[], dict[str, Any]] | None = None,
     **eval_kwargs: Any,
 ):
     """Run one Seon-native Task with mandatory admission and finalization.
@@ -290,14 +291,25 @@ def run_native_task(
     ``run_bench`` rather than a second evaluation harness.
     """
     admission = source_admission.verify_sources(identity)
+    if target_snapshot is None:
+        raise ValueError(
+            "target_snapshot is required for an admitted native live run")
+    target_start = target_snapshot()
     task = task_factory(_admission=admission, **(task_kwargs or {}))
-    return _eval_admitted_task(
+    md = dict(eval_kwargs.pop("metadata", None) or {})
+    md["seon_static_target"] = target_start
+    logs = _eval_admitted_task(
         task,
         admission,
         evidence_dir=evidence_dir,
         max_samples=config.POD_MAX_SAMPLES,
+        metadata=md,
         **eval_kwargs,
     )
+    target_end = target_snapshot()
+    if target_end != target_start:
+        raise RuntimeError("static target identity changed during native run")
+    return logs
 
 
 def run_bench(

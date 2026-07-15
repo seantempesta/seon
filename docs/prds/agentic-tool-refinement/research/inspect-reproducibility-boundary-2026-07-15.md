@@ -206,6 +206,18 @@ focused gate passes 58 tests, including a real native `.eval` read-back. Static
 operator artifact/config identity remains R1/P1a work; this change does not
 promote a URL or source commit into artifact proof.
 
+The native boundary now also requires a semantic-operator target snapshot. It
+invokes the caller-selected status command, requires the selected URL and
+`:ready` state, retains the operator's exact EDN plus SHA-256 in native run
+metadata, and requires byte-identical status after finalization. That EDN
+contains the ACME artifact flavor and application/writer/client/bootstrap
+digests, database path, process identities, and dynamic endpoints. The focused
+gate is 82 tests. A clean rebuild is still required before the first accepted
+sample because the development watcher may have compiled concurrent dirty
+source since the last artifact publication. The final database coordinate and
+resolved model configuration remain the database-derived config/model
+evidence; a URL alone remains insufficient.
+
 ### R3 — Honest provider and model identity
 
 Owners: `seon.ai`/provider adapter for facts known inside the pod, and the

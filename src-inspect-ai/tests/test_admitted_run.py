@@ -84,6 +84,7 @@ def test_run_native_task_retains_log_with_exact_admission(monkeypatch, tmp_path)
         identity["bench"],
         task_factory,
         evidence_dir=evidence,
+        target_snapshot=lambda: {"artifact": "stable"},
         log_dir=str(tmp_path / "logs"),
         display="none",
     )

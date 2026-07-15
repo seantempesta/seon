@@ -23,6 +23,41 @@ class FakeRunner:
                                            stdout="", stderr="boom")
 
 
+def test_static_target_snapshot_retains_operator_identity():
+    status = (
+        '#:seon.dev.target{:status :seon.dev.target.status/ready '
+        ':artifact #:seon.dev.artifact{:application-digest "abc"} '
+        ':url "http://127.0.0.1:7994"}')
+
+    def run(argv, **kwargs):
+        assert argv == ["bin/acme", "status", "--edn"]
+        assert kwargs["cwd"] == cl.REPO_ROOT
+        return subprocess.CompletedProcess(argv, 0, stdout=status, stderr="")
+
+    snapshot = cl.static_target_snapshot(
+        "http://127.0.0.1:7994/agents/run",
+        ["bin/acme", "status", "--edn"], runner=run)
+    assert snapshot["status_edn"] == status
+    assert len(snapshot["status_sha256"]) == 64
+
+
+def test_static_target_snapshot_rejects_wrong_url_or_status():
+    def runner(stdout):
+        return lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 0, stdout=stdout, stderr="")
+
+    with pytest.raises(RuntimeError, match="not ready"):
+        cl.static_target_snapshot(
+            "http://127.0.0.1:7994/agents/run", ["status"],
+            runner=runner('{:status :seon.dev.target.status/stopped}'))
+    with pytest.raises(RuntimeError, match="URL"):
+        cl.static_target_snapshot(
+            "http://127.0.0.1:7994/agents/run", ["status"],
+            runner=runner(
+                '{:status :seon.dev.target.status/ready '
+                ':url "http://127.0.0.1:9999"}'))
+
+
 def test_create_cluster_refuses_retired_operator_command():
     runner = FakeRunner()
     with pytest.raises(cl.ClusterLeaseUnavailable, match="structured per-sample lease"):
