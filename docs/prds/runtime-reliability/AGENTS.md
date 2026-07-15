@@ -36,6 +36,12 @@ are explicit. The top level reviews and integrates every return, updates
 Do not make all lanes wait for one another, and do not manufacture parallel
 edits inside one owner.
 
+Treat every lane return, compaction, and material discovery as a program-level
+scheduling boundary: reread the complete unit ledger, update the lane's proof
+and dependency edge, identify its next refill, and only then continue. Never
+promote a lane's local task list into the program plan or report progress
+without the remaining units 1–9 and unit 9 graduation gate still visible.
+
 The 2026-07-14 live-browser baseline in [[roadmap]] is the current falsification
 set: existing feeds partially stale plan/transcript/root units because a
 non-transitive declared-attribute gate skips exact observed reads; root uses the

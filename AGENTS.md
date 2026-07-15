@@ -63,6 +63,13 @@ completed commit:
 4. advance the earliest dependency-ready implementation at the top level; and
 5. refill every other safe slot from the documented queue.
 
+This reconciliation is the scheduling clock for the whole program. Perform it
+before accepting follow-on work from a returned lane, before expanding a local
+investigation, and before reporting cumulative status. The answer must still
+name the earliest unsettled contract, every occupied parallel lane, the next
+dependency-ready refill, and the final graduation gate. A locally green slice
+does not change the persistent goal or make later units disappear.
+
 The top-level working plan is a compact projection of that ledger, not a second
 roadmap. Keep it current, with exactly one in-progress critical-path item and
 explicit pending integration/proof boundaries. If the current work cannot be
