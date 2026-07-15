@@ -353,6 +353,108 @@
                ::registry/backend :memory
                ::registry/attachment (::registry/attachment created)})))))))
 
+(deftest native-branch-create-retries-adopt-the-exact-published-route
+  (let [source-name :registry/retry-source
+        target-name :registry/retry-target
+        target-branch :registry.branch/retry
+        source (ensure-database!
+                {::registry/database-name source-name
+                 ::registry/backend :memory})
+        source-connection (::registry/conn source)
+        source-head (::registry/coordinate
+                     (registry/resolve-connection
+                      {::registry/database-name source-name}))
+        request {::registry/source-database-name source-name
+                 ::registry/target-database-name target-name
+                 ::registry/source-coordinate source-head
+                 ::registry/expected-source-head source-head
+                 ::registry/target-branch target-branch
+                 ::registry/initialize-connection! (fn [_request] nil)}
+        created (registry/create-branch! request)
+        immediate-retry (registry/create-branch! request)
+        target-connection (::registry/conn
+                           (registry/lookup-connection
+                            {::registry/database-name target-name}))]
+    (is (true? (::registry/created? created)))
+    (is (false? (::registry/created? immediate-retry)))
+    (is (true? (::registry/adopted? immediate-retry)))
+    (is (= (::registry/coordinate created)
+           (::registry/coordinate immediate-retry)))
+    (d/transact target-connection
+                [{:db/ident :registry.retry/value
+                  :db/valueType :db.type/string
+                  :db/cardinality :db.cardinality/one}])
+    (let [advanced-head (::registry/coordinate
+                         (registry/resolve-connection
+                          {::registry/database-name target-name}))
+          restart-retry (registry/create-branch! request)]
+      (is (not= (::registry/coordinate created) advanced-head))
+      (is (false? (::registry/created? restart-retry)))
+      (is (true? (::registry/adopted? restart-retry)))
+      (is (= advanced-head (::registry/coordinate restart-retry))
+          "a retained create intent adopts the exact route at its fresh head"))))
+
+(deftest native-branch-create-adopts-retained-branch-before-source-head-fence
+  (let [source-name :registry/retained-retry-source
+        source (ensure-database!
+                {::registry/database-name source-name
+                 ::registry/backend :memory})
+        source-connection (::registry/conn source)
+        source-head (coordinate/resolved (d/db source-connection))
+        adopted-branch :registry.branch/retained-retry
+        mismatch-branch :registry.branch/retained-mismatch
+        stale-new-branch :registry.branch/stale-new]
+    (d/branch! source-connection
+               (::coordinate/commit-id source-head)
+               adopted-branch)
+    (d/transact source-connection
+                [{:db/ident :registry.retained/value
+                  :db/valueType :db.type/string
+                  :db/cardinality :db.cardinality/one}])
+    (let [current-source-head (coordinate/resolved (d/db source-connection))
+          _ (d/branch! source-connection
+                       (::coordinate/commit-id current-source-head)
+                       mismatch-branch)
+          adopted
+          (registry/create-branch!
+           {::registry/source-database-name source-name
+            ::registry/target-database-name :registry/retained-retry-target
+            ::registry/source-coordinate source-head
+            ::registry/expected-source-head source-head
+            ::registry/target-branch adopted-branch
+            ::registry/initialize-connection! (fn [_request] nil)})
+          mismatch
+          (try
+            (registry/create-branch!
+             {::registry/source-database-name source-name
+              ::registry/target-database-name :registry/retained-mismatch-target
+              ::registry/source-coordinate source-head
+              ::registry/expected-source-head source-head
+              ::registry/target-branch mismatch-branch
+              ::registry/initialize-connection! (fn [_request] nil)})
+            nil
+            (catch clojure.lang.ExceptionInfo exception exception))
+          stale-new
+          (try
+            (registry/create-branch!
+             {::registry/source-database-name source-name
+              ::registry/target-database-name :registry/stale-new-target
+              ::registry/source-coordinate source-head
+              ::registry/expected-source-head source-head
+              ::registry/target-branch stale-new-branch
+              ::registry/initialize-connection! (fn [_request] nil)})
+            nil
+            (catch clojure.lang.ExceptionInfo exception exception))]
+      (is (false? (::registry/created? adopted)))
+      (is (true? (::registry/adopted? adopted)))
+      (is (= (assoc source-head ::coordinate/branch adopted-branch)
+             (::registry/coordinate adopted)))
+      (is (= :seon.db.protocol.error/branch-exists
+             (:seon.error/kind (ex-data mismatch))))
+      (is (= :seon.db.protocol.error/stale-source-head
+             (:seon.error/kind (ex-data stale-new))))
+      (is (not (contains? (d/branches source-connection) stale-new-branch))))))
+
 (deftest native-branch-create-rejects-contained-cut-and-adopts-exact-head
   (let [source-name :registry/lifecycle-cut-source
         source (ensure-database!

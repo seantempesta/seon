@@ -611,6 +611,74 @@
       ::attachment attachment
       ::initialization-error (.toString cause)})))
 
+(defn- branch-result
+  [target-database-name attachment coordinate backend-kind path created?]
+  (cond-> {::target-database-name target-database-name
+           ::attachment attachment
+           ::coordinate coordinate
+           ::backend backend-kind
+           ::created? created?
+           ::adopted? (not created?)}
+    path (assoc ::path path)))
+
+(defn- reconcile-existing-target!
+  [{::keys [target-database-name target-branch source-connection attachment
+            backend path]
+    target-entry ::entry}]
+  (let [actual-coordinate (current-coordinate target-entry)]
+    (require-attachment!
+     "Existing target route" attachment (::attachment target-entry)
+     {::target-database-name target-database-name})
+    (when-not (contains? (d/branches source-connection) target-branch)
+      (lifecycle-fail!
+       :seon.db.protocol.error/branch-missing
+       "The existing target route is absent from the durable branch roster."
+       {::target-database-name target-database-name
+        ::attachment attachment}))
+    (when-not (and (= backend (::backend target-entry))
+                   (= path (::path target-entry)))
+      (lifecycle-fail!
+       :seon.db.protocol.error/duplicate-route
+       "The target route uses different physical database coordinates."
+       {::target-database-name target-database-name
+        ::attachment attachment}))
+    (branch-result target-database-name attachment actual-coordinate
+                   backend path false)))
+
+(defn- retained-source-db!
+  [source-connection source-attachment source-coordinate]
+  (let [commit-db
+        (call-datahike-lifecycle!
+         #(d/commit-as-db source-connection
+                          (::coordinate/commit-id source-coordinate))
+         {::source-coordinate source-coordinate})]
+    (when-not commit-db
+      (lifecycle-fail!
+       :seon.db.protocol.error/missing-commit
+       "The requested source commit is not retained."
+       {::source-coordinate source-coordinate}))
+    (let [commit-coordinate (coordinate/resolved commit-db)]
+      (require-attachment!
+       "Retained source commit" source-attachment
+       (coordinate/attachment commit-coordinate)
+       {::source-coordinate source-coordinate
+        ::coordinate commit-coordinate})
+      (when-not (= (::coordinate/commit-id source-coordinate)
+                   (::coordinate/commit-id commit-coordinate))
+        (lifecycle-fail!
+         :seon.db.protocol.error/missing-commit
+         "The retained commit did not resolve to the requested id."
+         {::source-coordinate source-coordinate
+          ::coordinate commit-coordinate}))
+      (when-not (= (::coordinate/t source-coordinate)
+                   (::coordinate/t commit-coordinate))
+        (lifecycle-fail!
+         :seon.db.protocol.error/cut-not-branchable
+         "The requested temporal cut is not the containing commit head."
+         {::source-coordinate source-coordinate
+          ::coordinate commit-coordinate})))
+    commit-db))
+
 (defn create-branch!
   "Create or adopt one exact native branch and publish its logical route."
   {:malli/schema [:=> [:cat ::create-branch!-request]
@@ -623,6 +691,8 @@
           source-connection (::conn source-entry)
           target-attachment
           (assoc source-attachment ::coordinate/branch target-branch)
+          expected-target-coordinate
+          (assoc source-coordinate ::coordinate/branch target-branch)
           backend-kind (::backend source-entry)
           path (::path source-entry)]
       (when (= :db target-branch)
@@ -630,19 +700,6 @@
          :seon.db.protocol.error/protected-main-branch
          "The main :db branch cannot be a lifecycle target."
          {::target-branch target-branch}))
-      (when (contains? @!registry target-database-name)
-        (lifecycle-fail!
-         :seon.db.protocol.error/duplicate-route
-         "The target logical database route already exists."
-         {::target-database-name target-database-name}))
-      (when (some (fn [[_ entry]]
-                    (= target-attachment (::attachment entry)))
-                  @!registry)
-        (lifecycle-fail!
-         :seon.db.protocol.error/duplicate-attachment
-         "The target database attachment already has a logical route."
-         {::target-database-name target-database-name
-          ::attachment target-attachment}))
       (require-attachment!
        "Source coordinate" source-attachment
        (coordinate/attachment source-coordinate)
@@ -651,100 +708,87 @@
        "Expected source head" source-attachment
        (coordinate/attachment expected-source-head)
        {::expected-source-head expected-source-head})
-      (locking source-connection
-        (let [current-source-head (current-coordinate source-entry)]
-          (require-head!
-           :seon.db.protocol.error/stale-source-head
-           "Source head" expected-source-head current-source-head
-           {::source-database-name source-database-name})
-          (let [commit-db
-                (call-datahike-lifecycle!
-                 #(d/commit-as-db source-connection
-                                  (::coordinate/commit-id source-coordinate))
-                 {::source-coordinate source-coordinate})]
-            (when-not commit-db
-              (lifecycle-fail!
-               :seon.db.protocol.error/missing-commit
-               "The requested source commit is not retained."
-               {::source-coordinate source-coordinate}))
-            (let [commit-coordinate (coordinate/resolved commit-db)]
-              (require-attachment!
-               "Retained source commit" source-attachment
-               (coordinate/attachment commit-coordinate)
-               {::source-coordinate source-coordinate
-                ::coordinate commit-coordinate})
-              (when-not (= (::coordinate/commit-id source-coordinate)
-                           (::coordinate/commit-id commit-coordinate))
-                (lifecycle-fail!
-                 :seon.db.protocol.error/missing-commit
-                 "The retained commit did not resolve to the requested id."
-                 {::source-coordinate source-coordinate
-                  ::coordinate commit-coordinate}))
-              (when-not (= (::coordinate/t source-coordinate)
-                           (::coordinate/t commit-coordinate))
-                (lifecycle-fail!
-                 :seon.db.protocol.error/cut-not-branchable
-                 "The requested temporal cut is not the containing commit head."
-                 {::source-coordinate source-coordinate
-                  ::coordinate commit-coordinate}))
-              (let [branches (d/branches source-connection)
-                    existing? (contains? branches target-branch)
-                    _ (when-not existing?
-                        (call-datahike-lifecycle!
-                         #(d/branch! source-connection
-                                     (::coordinate/commit-id source-coordinate)
-                                     target-branch)
-                         {::target-branch target-branch}))]
-                (try
-                  (let [target-db
-                        (d/branch-as-db source-connection target-branch)
-                        target-coordinate (coordinate/resolved target-db)
-                        expected-target-coordinate
-                        (assoc source-coordinate ::coordinate/branch target-branch)
-                        _ (when (and existing?
-                                     (not= expected-target-coordinate
-                                           target-coordinate))
-                            (lifecycle-fail!
-                             :seon.db.protocol.error/branch-exists
-                             "The target branch exists at a different coordinate."
-                             {::expected-coordinate expected-target-coordinate
-                              ::coordinate target-coordinate}))
-                        _ (when-not (same-ordered-values?
-                                     (d/datoms commit-db :eavt)
-                                     (d/datoms target-db :eavt))
-                            (lifecycle-fail!
-                             :seon.db.protocol.error/initializer
-                             "The target branch primary datoms differ from its source commit."
-                             {::source-coordinate source-coordinate
-                              ::coordinate target-coordinate}))
-                        entry
-                        (ensure-database!
-                         (cond-> {::database-name target-database-name
-                                  ::backend backend-kind
-                                  ::attachment target-attachment
-                                  ::initialize-connection!
-                                  initialize-connection!}
-                           path (assoc ::path path)))
-                        actual-coordinate (::coordinate entry)]
-                    (when-not (= expected-target-coordinate actual-coordinate)
-                      (lifecycle-fail!
-                       :seon.db.protocol.error/initializer
-                       "The opened target branch moved from its exact fork point."
-                       {::expected-coordinate expected-target-coordinate
-                        ::coordinate actual-coordinate}))
-                    (cond-> {::target-database-name target-database-name
-                             ::attachment target-attachment
-                             ::coordinate actual-coordinate
-                             ::backend backend-kind
-                             ::created? (not existing?)
-                             ::adopted? existing?}
-                      path (assoc ::path path)))
-                  (catch Throwable throwable
-                    (when-not existing?
-                      (delete-unpublished-branch!
-                       source-entry target-database-name target-branch
-                       target-attachment throwable))
-                    (throw throwable)))))))))))
+      (if-let [target-entry (get @!registry target-database-name)]
+        (locking source-connection
+          (reconcile-existing-target!
+           {::target-database-name target-database-name
+            ::target-branch target-branch
+            ::source-connection source-connection
+            ::attachment target-attachment
+            ::backend backend-kind
+            ::path path
+            ::entry target-entry}))
+        (do
+          (when (some (fn [[_ entry]]
+                        (= target-attachment (::attachment entry)))
+                      @!registry)
+            (lifecycle-fail!
+             :seon.db.protocol.error/duplicate-attachment
+             "The target database attachment already has a logical route."
+             {::target-database-name target-database-name
+              ::attachment target-attachment}))
+          (locking source-connection
+            (let [existing?
+                  (contains? (d/branches source-connection) target-branch)
+                  _ (when-not existing?
+                      (require-head!
+                       :seon.db.protocol.error/stale-source-head
+                       "Source head" expected-source-head
+                       (current-coordinate source-entry)
+                       {::source-database-name source-database-name}))
+                  commit-db
+                  (retained-source-db! source-connection source-attachment
+                                       source-coordinate)
+                  _ (when-not existing?
+                      (call-datahike-lifecycle!
+                       #(d/branch! source-connection
+                                   (::coordinate/commit-id source-coordinate)
+                                   target-branch)
+                       {::target-branch target-branch}))]
+              (try
+                (let [target-db
+                      (d/branch-as-db source-connection target-branch)
+                      target-coordinate (coordinate/resolved target-db)
+                      _ (when (and existing?
+                                   (not= expected-target-coordinate
+                                         target-coordinate))
+                          (lifecycle-fail!
+                           :seon.db.protocol.error/branch-exists
+                           "The target branch exists at a different coordinate."
+                           {::expected-coordinate expected-target-coordinate
+                            ::coordinate target-coordinate}))
+                      _ (when-not (same-ordered-values?
+                                   (d/datoms commit-db :eavt)
+                                   (d/datoms target-db :eavt))
+                          (lifecycle-fail!
+                           :seon.db.protocol.error/initializer
+                           "The target branch primary datoms differ from its source commit."
+                           {::source-coordinate source-coordinate
+                            ::coordinate target-coordinate}))
+                      entry
+                      (ensure-database!
+                       (cond-> {::database-name target-database-name
+                                ::backend backend-kind
+                                ::attachment target-attachment
+                                ::initialize-connection!
+                                initialize-connection!}
+                         path (assoc ::path path)))
+                      actual-coordinate (::coordinate entry)]
+                  (when-not (= expected-target-coordinate actual-coordinate)
+                    (lifecycle-fail!
+                     :seon.db.protocol.error/initializer
+                     "The opened target branch moved from its exact fork point."
+                     {::expected-coordinate expected-target-coordinate
+                      ::coordinate actual-coordinate}))
+                  (branch-result target-database-name target-attachment
+                                 actual-coordinate backend-kind path
+                                 (not existing?)))
+                (catch Throwable throwable
+                  (when-not existing?
+                    (delete-unpublished-branch!
+                     source-entry target-database-name target-branch
+                     target-attachment throwable))
+                  (throw throwable))))))))))
 
 (defn release-attachment!
   "Release one exact logical attachment without deleting its native branch."
