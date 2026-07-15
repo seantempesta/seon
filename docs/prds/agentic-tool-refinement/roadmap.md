@@ -88,10 +88,19 @@ fact; current namespace source stays full. Exact `seon.db` and `seon.schema`
 inventories prevent internal projection/eval/database mechanics from silently
 re-entering context and retain the standard current-agent accessor. The focused
 gate passes 66 tests and 319 assertions across indexing, tee persistence,
-namespace cards, and menus. Domain/entity schemas retain a positive data-model
-inclusion rule. No renderer blocklist or benchmark-specific exclusion list is
-admitted. Downstream ACME declarations still require their separate handback
-review. The exact audit and acceptance boundary are in
+namespace cards, and menus. `my.ns/functions` now answers its explicit "what
+can I call?" question from the same fact while full namespace inspection keeps
+the complete program graph reachable. Domain/entity schemas retain a positive
+data-model inclusion rule. No renderer blocklist or benchmark-specific exclusion
+list is admitted.
+
+The downstream handback review retains only `acme.brand/tagline` and
+`acme.widget/set-location!` as ACME tools. Canvas renderers, deliberate failure
+probes, and intentionally unspecced indexing fixtures remain program data. The
+rebuilt live database contains 1,034 indexed functions but only 114 eligible
+ones. `metal-hairs-lose` renders 20,406 namespace tokens, down from 22,106;
+`seon.db` fell from 36 advertised functions to 15 and `seon.schema` from 24 to
+seven. The exact audit and acceptance evidence are in
 [[research/namespace-surface-audit-2026-07-15]].
 
 The first policy unit now resolves run ceilings through one config manifest

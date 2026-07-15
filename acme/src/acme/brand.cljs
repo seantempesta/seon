@@ -7,7 +7,7 @@
    acme/branding/acme.css, inlined after seon's output.css so its token
    overrides win).")
 
-(defn tagline
+(defn ^:seon.fn/agent-facing? tagline
   "Acme's product tagline — specced so this ns is indexed + shown."
   {:malli/schema [:=> [:cat] :string]}
   []

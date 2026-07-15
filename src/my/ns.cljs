@@ -37,8 +37,9 @@
   "List the functions a namespace defines — name, doc, and args.
 
    Answers \"what can I call in X?\" for ANY indexed namespace (seon.*,
-   my.*, your own) straight from the `:seon.fn` rows. Private fns are
-   excluded; cards sort by name. SYNC — reads only.
+   my.*, your own) from positive `:seon.fn/agent-facing?` facts.
+   Implementation and private fns remain indexed but are excluded;
+   cards sort by name. SYNC — reads only.
 
      (my.ns/functions {:my.ns/ns 'my.plan})
      ; ⟹ «map: :seon.result/ok? true, :my.ns/cards [\"fn my.plan/done! […]\" …],
@@ -66,9 +67,11 @@
       (let [pulled (db/pull db
                             '[{:seon.fn/_ns [:seon.fn/sym :seon.fn/arglists
                                              :seon.fn/doc :seon.fn/spec
-                                             :seon.fn/private?]}]
+                                             :seon.fn/private?
+                                             :seon.fn/agent-facing?]}]
                             eid)
             cards  (->> (:seon.fn/_ns pulled)
+                        (filter :seon.fn/agent-facing?)
                         (remove :seon.fn/private?)
                         (sort-by :seon.fn/sym)
                         (mapv ns-cards/compact-fn-head))]
@@ -76,6 +79,6 @@
                  ::cards cards
                  ::count (count cards)}
           (empty? cards)
-          (assoc ::hint (str "indexed, but no public fns — "
+          (assoc ::hint (str "indexed, but no agent-facing fns — "
                              "(seon.agent.ctx/render-namespace {:seon.ns/name "
                              ns-kw "}) shows the whole namespace.")))))))

@@ -51,7 +51,7 @@
      :seon.render/ai
      (str "Acme grounded-dims surface — " n " dims (" (pr-str grounded-dims) ").")}))
 
-(defn set-location!
+(defn ^:seon.fn/agent-facing? set-location!
   "Specced product fn — the index/context proof."
   {:malli/schema [:=> [:cat :string] :string]}
   [loc]

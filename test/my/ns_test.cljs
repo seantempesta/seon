@@ -61,18 +61,23 @@
   (fn [x] (set! db/*conn* conn) (f x)))
 
 (defn- seed-demo-ns!
-  "One indexed ns (:my.demo) with two public fns + one private."
+  "One indexed ns with two tools, one implementation fn, and one private."
   []
   (db/transact!
     {:seon.db/tx-data
      [{:db/id "ns" :seon.ns/name :my.demo}
       {:seon.fn/sym "my.demo/twice" :seon.fn/ns "ns"
+       :seon.fn/agent-facing? true
        :seon.fn/doc "Double a number.\n\nThe mechanism story lives below the fold."
        :seon.fn/arglists "([n])"
        :seon.fn/spec "[:=> [:cat :int] :int]"}
       {:seon.fn/sym "my.demo/add" :seon.fn/ns "ns"
+       :seon.fn/agent-facing? true
        :seon.fn/doc "Add two numbers."
        :seon.fn/arglists "([a b])"}
+      {:seon.fn/sym "my.demo/runtime-helper" :seon.fn/ns "ns"
+       :seon.fn/doc "Implementation detail."
+       :seon.fn/arglists "([x])"}
       {:seon.fn/sym "my.demo/secret-helper" :seon.fn/ns "ns"
        :seon.fn/private? true
        :seon.fn/arglists "([x])"}]}))
@@ -91,8 +96,10 @@
                              twice (second cards)]
                          (is (true? ok?))
                          (is (= 2 (:my.ns/count res))
-                             "two public fns; the private one is excluded")
+                             "only the two positively agent-facing fns appear")
                          (is (= 2 (count cards)))
+                         (is (not-any? #(str/includes? % "runtime-helper") cards)
+                             "an unmarked public implementation fn is excluded")
                          (is (str/includes? (first cards) "my.demo/add")
                              "cards sort by name")
                          (is (str/includes? twice "my.demo/twice"))

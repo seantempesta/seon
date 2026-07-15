@@ -1,6 +1,6 @@
 ---
 type: issue
-status: closed
+status: archived
 severity: friction
 tags: [issue, agent, capability, schema]
 ---
@@ -49,4 +49,7 @@ redefinition. Namespace cards and function menus query the same program fact.
 Exact protected inventories cover `seon.db` and `seon.schema`, including
 positive and negative eligibility, so a public implementation function cannot
 enter compact tool context merely by being public. Focused proof: 66 tests,
-319 assertions, zero failures.
+319 assertions, zero failures. The rebuilt ACME database retains 1,034 indexed
+functions and 114 positive tool facts; the exact agent render drops the
+namespace block from 22,106 to 20,406 tokens while omitting the named internal
+operations and retaining the named capabilities.

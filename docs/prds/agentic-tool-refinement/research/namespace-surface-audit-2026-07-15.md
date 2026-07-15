@@ -55,19 +55,42 @@ the canonical facade. A renderer symbol exclusion set would create a second
 registry and make every new function unsafe by default. Docstring prefixes
 such as `INTERNAL:` are prose, not policy.
 
-## Candidate mechanism
+## Implemented mechanism
 
-Persist positive agent-facing metadata as an optional `:seon.fn` fact projected
+Positive agent-facing metadata is persisted as an optional `:seon.fn` fact projected
 from colocated analyzer metadata. Compact cards derive function rows from that
 fact, then derive transitive schema closure only from selected contracts.
 Current namespace source remains full regardless of the marker. Domain/entity
 schemas use a positive structural inclusion rule so useful data models do not
 disappear merely because no function references them.
 
-The metadata spelling remains unsettled until analyzer, boot index, eval tee,
-and Clojure metadata behavior are probed together. The design uses one fact and
-one derivation; it adds no catalog, blocklist, duplicated renderer, or
+The settled source spelling is `^:seon.fn/agent-facing?`; the stored fact is
+`:seon.fn/agent-facing? true`. Absence means program data, not a callable tool.
+Both AOT var metadata and self-host analyzer metadata preserve the declaration;
+redefinition without it emits an explicit retraction. The design uses one fact
+and one derivation; it adds no catalog, blocklist, duplicated renderer, or
 benchmark-specific policy.
+
+## Live result
+
+After rebuilding and restarting the ordinary ACME target, its database contains
+1,034 indexed function entities and 114 positive agent-facing facts. Exact pulls
+show `seon.db/query`, `seon.schema/register!`, `my.plan/plan!`,
+`seon.agent.message/user`, and `acme.brand/tagline` eligible, while
+`seon.db/listen!`, `seon.schema/clear-all!`, and
+`seon.agent.message/recent-all` remain indexed without the fact.
+
+The byte path used by the agent, `seon.agent.debug/ctx-preview` for
+`metal-hairs-lose`, now renders 20,406 namespace tokens, down from 22,106.
+`seon.db` fell from 36 functions and 3,966 tokens to 15 and 3,039;
+`seon.schema` fell from 24 functions and 1,151 tokens to seven and 448; and
+`seon.agent.message` exposes only its two delivery functions. Function-head
+checks on the exact rendered text confirm the retained and omitted symbols.
+
+Most remaining weight is therefore not function noise: filesystem, plan,
+shell, search, and web cards remain schema-closure dominated. This is the next
+measured context problem; eligibility should not be weakened merely to compress
+those complete contracts.
 
 ## Acceptance
 
