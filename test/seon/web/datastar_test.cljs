@@ -20,6 +20,7 @@
     [datahike.db :as datahike]
     [seon.client :as client]
     [seon.agent.debug :as agent-debug]
+    [seon.agent.run :as run]
     [seon.db :as db]
     [seon.db.coordinate :as db.coordinate]
     [seon.render.surface :as surface]
@@ -110,6 +111,8 @@
      ::datastar/view-id view-id
      ::datastar/catalog []
      ::datastar/active-tokens #{}
+     ::datastar/demanded-tokens #{}
+     ::datastar/render-full-with-db? false
      :seon.web.feed/id (random-uuid)}
     overrides))
 
@@ -448,6 +451,172 @@
                             "final socket close releases shared state"))
                       (finally
                         (set! db/*conn* original-conn))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest demanded-agent-header-shares-first-paint-reconnect-and-broadcast
+  (async done
+    (-> (with-conn
+          [agent-a]
+          (fn [conn]
+            (let [original-conn db/*conn*
+                  idle @conn]
+              (set! db/*conn* conn)
+              (-> (run/open-run!
+                    {:seon.agent/id agent-a
+                     :seon.agent.run/trigger :message})
+                  (.then (fn [_] [idle @conn]))
+                  (.finally (fn [] (set! db/*conn* original-conn)))))))
+        (.then
+          (fn [[idle running]]
+            (let [EventEmitter (.-EventEmitter (js/require "node:events"))
+                  PassThrough (.-PassThrough (js/require "node:stream"))
+                  stream
+                  (fn []
+                    (let [req (new EventEmitter)
+                          res (new PassThrough)]
+                      (aset res "writeHead" (fn [_ _] nil))
+                      [req res]))
+                  [req-a res-a] (stream)
+                  [req-b res-b] (stream)
+                  [req-a2 res-a2] (stream)
+                  [req-historical res-historical] (stream)
+                  header-dbs (atom [])
+                  full-dbs (atom [])
+                  base-feed (@#'datastar/live-agent-feed-definition
+                              agent-a "header-view-a")
+                  base-render (:seon.web.feed/render-full base-feed)
+                  feed-a (assoc base-feed :seon.web.feed/render-full
+                                (fn [dbv]
+                                  (swap! full-dbs conj dbv)
+                                  (base-render dbv)))
+                  feed-b (@#'datastar/live-agent-feed-definition
+                           agent-a "header-view-b")
+                  original-conn db/*conn*
+                  original-header agent-view/agent-header
+                  header-renders (atom 0)
+                  pushes (atom [])]
+              (set! db/*conn* (atom idle))
+              (try
+                (with-redefs
+                  [datastar/!feeds (atom @#'datastar/empty-feed-registry)
+                   datastar/install! (constantly nil)
+                   datastar/uninstall! (constantly nil)
+                   datastar/push-event!
+                   (fn [conn event]
+                     (swap! pushes conj [(::datastar/view-id conn) event]))
+                   agent-view/agent-header
+                   (fn [dbv agent-id]
+                     (swap! header-renders inc)
+                     (swap! header-dbs conj dbv)
+                     (original-header dbv agent-id))]
+                  (@#'datastar/open-feed! req-a res-a feed-a)
+                  (@#'datastar/open-feed! req-b res-b feed-b)
+                  (let [registry @datastar/!feeds
+                        units (get-in registry
+                                      [::view-unit/state ::view-unit/units])
+                        unit (first (vals units))
+                        initial-events (mapv second @pushes)]
+                    (is (= 1 @header-renders)
+                        "same-fingerprint sockets share one header producer")
+                    (is (= 1 (count @full-dbs))
+                        "the explicit db-valued render-full contract runs once")
+                    (is (identical? (first @header-dbs) (first @full-dbs))
+                        "unit attachment and first paint share one immutable db")
+                    (is (= 1 (count (::datastar/subscriptions registry))))
+                    (is (= #{"header-view-a" "header-view-b"}
+                           (::view-unit/consumers unit)))
+                    (is (= 2 (count initial-events))
+                        "both sockets receive the shared first paint")
+                    (is (= 1 (count (re-seq #"id=\"agent-view-header\""
+                                            (first initial-events))))
+                        "first paint composes one retained header")
+                    (is (= (first initial-events) (second initial-events))))
+
+                  (@#'datastar/open-feed! req-a2 res-a2 feed-a)
+                  (is (= 1 @header-renders)
+                      "same-view reconnect reuses retained first paint")
+                  (is (= #{"header-view-a" "header-view-b"}
+                         (-> @datastar/!feeds
+                             (get-in [::view-unit/state ::view-unit/units])
+                             vals first ::view-unit/consumers))
+                      "reconnect keeps one set member per consumer")
+                  (.emit ^js res-a "close")
+                  (is (= 2 (count (::datastar/views @datastar/!feeds)))
+                      "the replaced socket cannot release current ownership")
+
+                  (reset! pushes [])
+                  (@#'datastar/broadcast!
+                    {:seon.db/db running
+                     :seon.db/changed-attrs
+                     #{:seon.agent/ctx :seon.agent/run}})
+                  (is (= 2 @header-renders)
+                      "the relevant snapshot advances the shared header once")
+                  (is (= 2 (count @pushes))
+                      "the one normalized event is pushed to both sockets")
+                  (let [events (mapv second @pushes)
+                        event (first events)
+                        element-lines
+                        (filterv #(str/starts-with? % "data: elements ")
+                                 (str/split-lines event))]
+                    (is (= (first events) (second events)))
+                    (is (= 2 (count element-lines))
+                        "the structural page and header are two complete targets")
+                    (is (= 1 (count (re-seq #"id=\"agent-view-header\""
+                                            (first element-lines))))
+                        "the fallback full render contains one header identity")
+                    (is (= 1 (count (re-seq #"id=\"agent-view-header\""
+                                            (second element-lines))))
+                        "the unit contributes one standalone header target")
+                    (is (= 1 (count (re-seq #"id=\"app-view\"" event)))
+                        "the structural fallback contributes one complete page")
+                    (is (= 2 (count (re-seq #"id=\"agent-view-header\"" event)))
+                        "the page header and standalone unit converge by one DOM id")
+                    (is (= 4 (count (re-seq #"data-agent-state=\"running\""
+                                            event)))
+                        "both headers and both status chips carry the same state")
+                    (is (not (str/includes? event "data-seon-unit"))
+                        "a complete-element producer adds no wrapper target"))
+
+                  (@#'datastar/open-feed!
+                    req-historical res-historical
+                    {:seon.web.feed/key
+                     [:seon.web.feed/agent agent-a
+                      :seon.web.feed/at historical-point]
+                     :seon.web.feed/live? false
+                     :seon.web.feed/coordinate historical-point
+                     :seon.web.feed/render-full
+                     #(agent-view/agent-view running agent-a)
+                     :seon.web.feed/render-change
+                     (fn [_subscription _change] {::datastar/elements []})
+                     ::datastar/view-id "header-view-a"})
+                  (is (empty? (::datastar/demanded-tokens
+                                (registry-view @datastar/!feeds
+                                               "header-view-a")))
+                      "historical replacement inherits no demanded live unit")
+                  (is (= #{"header-view-b"}
+                         (-> @datastar/!feeds
+                             (get-in [::view-unit/state ::view-unit/units])
+                             vals first ::view-unit/consumers))
+                      "historical replacement detaches only its live consumer")
+                  (is (= 1 (count (re-seq #"id=\"agent-view-header\""
+                                          (second (last @pushes)))))
+                      "historical first paint renders one direct frozen header")
+                  (.emit ^js res-a2 "close")
+                  (is (= 2 (count (::datastar/views @datastar/!feeds)))
+                      "the replaced live reconnect cannot close historical ownership")
+                  (.emit ^js res-historical "close")
+                  (is (= #{"header-view-b"}
+                         (-> @datastar/!feeds
+                             (get-in [::view-unit/state ::view-unit/units])
+                             vals first ::view-unit/consumers))
+                      "closing the frozen view leaves the live peer's unit")
+                  (.emit ^js res-b "close")
+                  (is (= view-unit/empty-state
+                         (::view-unit/state @datastar/!feeds))
+                      "final close releases observations and output"))
+                (finally
+                  (set! db/*conn* original-conn))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 
@@ -850,7 +1019,7 @@
     (with-redefs [datastar/!feeds (atom @#'datastar/empty-feed-registry)
                   datastar/install! (fn [] nil)
                   datastar/uninstall! (fn [] nil)
-                  datastar/push-full! (fn [_] nil)]
+                  datastar/push-full! (fn ([_] nil) ([_ _] nil))]
       (@#'datastar/open-feed! req res feed)
       (is (= 200 (:status @response)))
       (is (= (pr-str historical-point)
@@ -903,7 +1072,7 @@
     (with-redefs [datastar/!feeds (atom @#'datastar/empty-feed-registry)
                   datastar/install! (fn [] nil)
                   datastar/uninstall! (fn [] nil)
-                  datastar/push-full! (fn [_] nil)
+                  datastar/push-full! (fn ([_] nil) ([_ _] nil))
                   datastar/push-event!
                   (fn [conn event]
                     (swap! pushes conj [(::datastar/view-id conn) event]))]
@@ -1483,7 +1652,7 @@
     (with-redefs [datastar/!feeds (atom @#'datastar/empty-feed-registry)
                   datastar/install! (fn [] nil)
                   datastar/uninstall! (fn [] (swap! uninstalls inc))
-                  datastar/push-full! (fn [_] nil)]
+                  datastar/push-full! (fn ([_] nil) ([_ _] nil))]
       (@#'datastar/open-feed!
         req-a res-a (assoc base
                            ::datastar/catalog catalog

@@ -14,13 +14,13 @@
     [seon.derive :as derive]
     [seon.render.surface :as surface]
     [seon.schema :as schema]
-    [seon.ui.header :as header]))
+    [seon.ui.header :as header]
+    [seon.ui.html :as html]))
 
 (schema/register! ::changed-attrs [:set :qualified-keyword])
 (schema/register! ::surface-attrs [:set :qualified-keyword])
 (schema/register! ::structural-attrs [:set :qualified-keyword])
 (schema/register! ::header-attrs [:set :qualified-keyword])
-(schema/register! ::agent-state-attrs [:set :qualified-keyword])
 (schema/register! ::surface-read-attrs
                   [:map-of :seon.render.surface/selection
                    :seon.render.surface/read-attrs])
@@ -32,13 +32,17 @@
    [::surface-attrs ::surface-attrs]
    [::structural-attrs ::structural-attrs]
    [::header-attrs ::header-attrs]
-   [::agent-state-attrs ::agent-state-attrs]
    [::surface-read-attrs ::surface-read-attrs]
    [::surface-read-observations ::surface-read-observations]
-   [::system-header-read-observations :seon.db/read-observations]
-   [::agent-header-read-observations :seon.db/read-observations]])
+   [::system-header-read-observations :seon.db/read-observations]])
 (schema/register! ::element :seon.render.canvas/hiccup)
 (schema/register! ::elements [:vector :seon.render.canvas/hiccup])
+(schema/register! ::agent-header-html :string)
+(schema/register! ::render-request
+                  [:map
+                   [:seon.db/db :seon.db/db-val]
+                   [:seon.agent/id :seon.agent/id]
+                   [::agent-header-html {:optional true} ::agent-header-html]])
 (schema/register! ::render-result
                   [:map [::element ::element] [::dependencies ::dependencies]])
 (schema/register! ::transition-request
@@ -46,6 +50,7 @@
                    [:seon.db/db :seon.db/db-val]
                    [:seon.agent/id :seon.agent/id]
                    [::changed-attrs ::changed-attrs]
+                   [::agent-header-html {:optional true} ::agent-header-html]
                    [::dependencies ::dependencies]])
 (schema/register! ::transition-result
                   [:map [::elements ::elements] [::dependencies ::dependencies]])
@@ -69,8 +74,11 @@
      [:span {:class class} dot]
      [:span {:class "text-text-200"} label]]))
 
-(defn- agent-header
+(defn agent-header
   "The stable per-agent header render unit derived from one database value."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/id :seon.agent/id]]
+                  ::element]}
   [dbv agent-id]
   (let [state (try
                 (derive/derive-state dbv agent-id)
@@ -211,20 +219,17 @@
      :seon.db/read-observations (:seon.db/read-observations capture)}))
 
 (defn- dependencies-for
-  [catalog surfaces system-header-capture agent-header-capture]
+  [catalog surfaces system-header-capture]
   {::surface-attrs (into #{} (mapcat ::surface/read-attrs) catalog)
    ::structural-attrs structural-attrs
    ::header-attrs header-attrs
-   ::agent-state-attrs derive/agent-state-read-attrs
    ::surface-read-attrs
    (into {} (map (juxt ::surface/selection ::surface/read-attrs)) catalog)
    ::surface-read-observations
    (into {} (map (juxt ::surface/selection
                        :seon.db/read-observations)) surfaces)
    ::system-header-read-observations
-   (:seon.db/read-observations system-header-capture)
-   ::agent-header-read-observations
-   (:seon.db/read-observations agent-header-capture)})
+   (:seon.db/read-observations system-header-capture)})
 
 (defn- reads-changed?
   "Whether a unit's captured semantic reads differ at `dbv`.
@@ -298,10 +303,10 @@
 
 (defn render-agent-view
   "Render one agent view plus its runtime-only exact database dependencies."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
-                             [:seon.agent/id :string]]
+  {:malli/schema [:=> [:cat ::render-request]
                   ::render-result]}
-  [db agent-id]
+  [{db :seon.db/db agent-id :seon.agent/id
+    serialized-agent-header ::agent-header-html}]
   (try
     (let [catalog (surface/surface-catalog db agent-id)
           surfaces (->> (surface/materialize-surfaces
@@ -319,15 +324,16 @@
           latest-touch (::surface/focus-touch latest)
           system-header-capture
           (captured-hiccup db #(header/system-header db))
-          agent-header-capture
-          (captured-hiccup db #(agent-header db agent-id))]
+          agent-header-element
+          (if serialized-agent-header
+            (html/raw serialized-agent-header)
+            (agent-header db agent-id))]
       {::element
        (view-element surfaces latest-selection latest-touch
                      (::element system-header-capture)
-                     (::element agent-header-capture))
+                     agent-header-element)
        ::dependencies
-       (dependencies-for catalog surfaces system-header-capture
-                         agent-header-capture)})
+       (dependencies-for catalog surfaces system-header-capture)})
     (catch :default e
       {::element
        [:main {:id "app-view" :class "flex flex-col gap-3 w-full"}
@@ -337,11 +343,9 @@
        {::surface-attrs #{:seon.render.canvas/content}
         ::structural-attrs structural-attrs
         ::header-attrs header-attrs
-        ::agent-state-attrs derive/agent-state-read-attrs
         ::surface-read-attrs {"canvas" #{:seon.render.canvas/content}}
         ::surface-read-observations {}
-        ::system-header-read-observations []
-        ::agent-header-read-observations []}})))
+        ::system-header-read-observations []}})))
 
 (defn agent-view
   "Render one agent's canvas and HTML context blocks from `db`."
@@ -349,15 +353,18 @@
                              [:seon.agent/id :string]]
                   ::element]}
   [db agent-id]
-  (::element (render-agent-view db agent-id)))
+  (::element (render-agent-view {:seon.db/db db :seon.agent/id agent-id})))
 
 (defn transition
   "Render only units whose captured database results changed."
   {:malli/schema [:=> [:cat ::transition-request] ::transition-result]}
   [{dbv :seon.db/db agent-id :seon.agent/id changed-attrs ::changed-attrs
-    dependencies ::dependencies}]
+    serialized-agent-header ::agent-header-html dependencies ::dependencies}]
   (if (structural-change? changed-attrs)
-    (let [rendered (render-agent-view dbv agent-id)]
+    (let [rendered (render-agent-view
+                     (cond-> {:seon.db/db dbv :seon.agent/id agent-id}
+                       serialized-agent-header
+                       (assoc ::agent-header-html serialized-agent-header)))]
       {::elements [(::element rendered)]
        ::dependencies (::dependencies rendered)})
     (let [surface-read-attrs (::surface-read-attrs dependencies)
@@ -374,11 +381,6 @@
           (and (seq (set/intersection changed-attrs header-attrs))
                (reads-changed?
                  dbv (::system-header-read-observations dependencies)))
-          agent-header-dirty?
-          (and (seq (set/intersection changed-attrs
-                                      derive/agent-state-read-attrs))
-               (reads-changed?
-                 dbv (::agent-header-read-observations dependencies)))
           affected
           (if (seq affected-selections)
             (surface/materialize-surfaces
@@ -388,7 +390,11 @@
             [])]
       ;; A conditional surface disappearing requires a complete shell morph.
       (if (< (count affected) (count affected-selections))
-        (let [rendered (render-agent-view dbv agent-id)]
+        (let [rendered (render-agent-view
+                         (cond-> {:seon.db/db dbv :seon.agent/id agent-id}
+                           serialized-agent-header
+                           (assoc ::agent-header-html
+                                  serialized-agent-header)))]
           {::elements [(::element rendered)]
            ::dependencies (::dependencies rendered)})
         (let [catalog (when (seq affected-selections)
@@ -402,17 +408,11 @@
               system-header-capture
               (when system-header-dirty?
                 (captured-hiccup dbv #(header/system-header dbv)))
-              agent-header-capture
-              (when agent-header-dirty?
-                (captured-hiccup dbv #(agent-header dbv agent-id)))
               next-dependencies
               (cond-> dependencies
                 system-header-capture
                 (assoc ::system-header-read-observations
                        (:seon.db/read-observations system-header-capture))
-                agent-header-capture
-                (assoc ::agent-header-read-observations
-                       (:seon.db/read-observations agent-header-capture))
                 (seq affected)
                 (update ::surface-read-observations
                         into
@@ -424,9 +424,7 @@
                       (conj (focus-marker (::surface/selection latest)
                                           (::surface/focus-touch latest)))
                       system-header-capture
-                      (conj (::element system-header-capture))
-                      agent-header-capture
-                      (conj (::element agent-header-capture)))
+                      (conj (::element system-header-capture)))
                     (mapcat surface-elements)
                     affected)]
           {::elements elements ::dependencies next-dependencies})))))

@@ -81,3 +81,21 @@ subscription initially contributed the same managed serialized element twice
 to that subscription's patch. The transport now deduplicates managed elements
 after consumer fan-in, and the focused lifecycle regression covers that common
 same-subscription case without changing cross-subscription delivery.
+
+The ordinary agent header is now the second production consumer and proves the
+same lifecycle for an always-demanded page unit. Feed attachment reconciles it
+before first paint against the same immutable database value used by page
+composition; reconnect reuses the retained output, structural full-page and
+standalone header patches converge through one DOM id, and historical feeds
+inherit no demanded live unit. Its former declared-attribute veto and custom
+captured-observation branch are deleted. Focused evidence is 38 tests/226
+assertions in `seon.web.datastar-test` and 17 tests/73 assertions in
+`seon.ui.agent-view-test`.
+
+Default-cluster browser and server-side gzip evidence for this second consumer
+is still pending a coordinated restart after concurrent source lanes converge.
+The restart attempted during implementation failed closed in watcher
+reconciliation when source changed after artifact publication; no process was
+started outside the operator. This does not close the issue: the remaining
+debug descriptors and whole-debug projection still own the legacy path named
+above.

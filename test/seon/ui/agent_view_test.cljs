@@ -443,7 +443,9 @@
                       (let [deps
                             (:seon.ui.agent-view/surface-attrs
                               (::agent-view/dependencies
-                                (agent-view/render-agent-view @conn agent-a)))]
+                                (agent-view/render-agent-view
+                                  {:seon.db/db @conn
+                                   :seon.agent/id agent-a})))]
                         (is (contains? deps :my.agent.view/state)))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
@@ -456,7 +458,9 @@
             (let [deps
                   (:seon.ui.agent-view/surface-attrs
                     (::agent-view/dependencies
-                      (agent-view/render-agent-view @conn agent-a)))]
+                      (agent-view/render-agent-view
+                        {:seon.db/db @conn
+                         :seon.agent/id agent-a})))]
               (is (contains? deps :seon.render.canvas/content)))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
@@ -482,7 +486,9 @@
                                [?agent :seon.agent/id ?aid]
                                [?agent :seon.agent/purpose ?purpose]]
                              :seon.db/args [agent-a]})})))
-                  initial (agent-view/render-agent-view db-before agent-a)
+                  initial (agent-view/render-agent-view
+                            {:seon.db/db db-before
+                             :seon.agent/id agent-a})
                   dependencies
                   (-> (::agent-view/dependencies initial)
                       (assoc ::agent-view/surface-attrs
@@ -516,7 +522,7 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 
-(deftest derived-state-transition-patches-both-status-headers
+(deftest agent-header-is-independent-of-the-legacy-page-transition
   (async done
     (-> (with-agents
           [[agent-a []]]
@@ -531,7 +537,9 @@
                                  :seon.agent.run/closed-reason
                                  :seon.agent.run/closed-at}]
               (set! db/*conn* conn)
-              (let [initial (agent-view/render-agent-view @conn agent-a)]
+              (let [initial (agent-view/render-agent-view
+                              {:seon.db/db @conn
+                               :seon.agent/id agent-a})]
                 (-> (run/open-run!
                     {:seon.agent/id agent-a
                      :seon.agent.run/trigger :message})
@@ -547,17 +555,14 @@
                             deps (::agent-view/dependencies transition)
                             changes (::agent-view/elements transition)
                             fleet-header (element-by-id changes "system-header")
-                            agent-header (element-by-id changes "agent-view-header")]
-                        (is (contains?
-                              (::agent-view/agent-state-attrs deps)
-                              :seon.agent/run)
-                            "the current-run pointer is a declared state dependency")
+                            agent-header (element-by-id changes "agent-view-header")
+                            direct-header (agent-view/agent-header @conn agent-a)]
                         (is (vector? fleet-header)
                             "running transition patches the fleet header")
-                        (is (vector? agent-header)
-                            "running transition patches the local agent header")
+                        (is (nil? agent-header)
+                            "the legacy page transition no longer owns the agent header")
                         (is (= 1 (:data-running-agents (second fleet-header))))
-                        (is (= "running" (:data-agent-state (second agent-header))))
+                        (is (= "running" (:data-agent-state (second direct-header))))
                         (-> (run/close-run!
                               {:seon.agent.run/id (:seon.agent.run/id opened)
                                :seon.agent.run/closed-reason :completed})
@@ -572,9 +577,11 @@
                                  ::agent-view/changed-attrs closed-attrs
                                  ::agent-view/dependencies deps}))
                             fleet-header (element-by-id changes "system-header")
-                            agent-header (element-by-id changes "agent-view-header")]
+                            agent-header (element-by-id changes "agent-view-header")
+                            direct-header (agent-view/agent-header @conn agent-a)]
                         (is (zero? (:data-running-agents (second fleet-header))))
-                        (is (= "idle" (:data-agent-state (second agent-header)))))))
+                        (is (nil? agent-header))
+                        (is (= "idle" (:data-agent-state (second direct-header)))))))
                   (.finally (fn [] (set! db/*conn* prior-conn))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
@@ -605,7 +612,9 @@
                         (is (str/includes?
                               (html/->string
                                 (::agent-view/element
-                                  (agent-view/render-agent-view @conn agent-a)))
+                                  (agent-view/render-agent-view
+                                    {:seon.db/db @conn
+                                     :seon.agent/id agent-a})))
                               "render error"))
                         (is (= :core
                               (:seon.error/fault @recorded))))))))))

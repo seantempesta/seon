@@ -64,14 +64,20 @@ and releases on final view close. The remaining debug descriptors, whole-debug
 transition, agent/root page transition, and declared-attribute veto are still
 legacy and remain open work.
 
-The next bounded page consumer is now source-grounded in
-[[research/agent-header-next-consumer-cutover-audit-2026-07-15]]. The ordinary
-agent header is the smallest always-demanded stable-ID unit and can delete its
-page-specific captured-observation branch without taking on surface selection
-or root-layout work. Before that cut, the integration lane must land the
-same-subscription framing regression exposed by the first consumer: two views
-sharing both a normalized subscription and one unit receive one managed target
-per event, while both sockets still receive the event.
+The same-subscription framing prerequisite and the next bounded page consumer
+are now implemented. The ordinary agent header attaches as one always-demanded
+unit before first paint, shares one immutable database value with page
+composition, transitions only through `seon.web.view-unit`, and leaves no
+agent-header declared-attribute or captured-observation branch in
+`seon.ui.agent-view`. Historical replacement inherits no demanded live unit.
+Focused evidence is 38 tests/226 assertions in `seon.web.datastar-test` and 17
+tests/73 assertions in `seon.ui.agent-view-test`. It covers same-fingerprint
+two-socket sharing, producer-once first paint, same-view reconnect, structural
+full-page plus same-id unit convergence, historical replacement, first-close
+retention, and final release. Default-cluster browser and server-side gzip
+proof remains pending: a coordinated restart failed closed in watcher
+reconciliation when other active lanes changed client source after artifact
+publication. No internal process was launched around the operator.
 
 ## Research evidence
 
@@ -97,15 +103,17 @@ per event, while both sockets still receive the event.
 
 ## Ordered work
 
-1. **First production unit complete:** `seon.web.view-unit` owns pure attach,
+1. **First production unit and framing complete:** `seon.web.view-unit` owns pure attach,
    observed render, replay-all transition, output suppression, detach, and final
    release. `seon.web.datastar` commits one real lazy debug HTML descriptor into
    that state in its existing registry and fans emitted bytes through the one
-   gzip transport. Land the same-subscription managed-element framing
-   regression discovered during integration review.
-2. Add one generic always-demanded attachment/first-paint seam and cut the
-   ordinary agent header onto it. Delete its declared-attribute veto, captured
-   observation keys, and transition branch in the same slice. Then continue
+   gzip transport. Managed fan-in emits a shared element once per normalized
+   subscription while every socket receives the event.
+2. **Agent-header source cut complete; live proof pending:** the generic
+   always-demanded attachment/first-paint seam owns the ordinary agent header,
+   and its legacy dependency/veto path is deleted. After active source lanes
+   converge, perform one coordinated default restart and capture browser,
+   server-side gzip, reconnect, and final-release evidence. Then continue
    agent/root units onto the lifecycle and remove the remaining page-specific
    dependency map rather than adding an interim routing path.
 3. Derive the conservative reverse candidate index from runtime-observed
