@@ -95,3 +95,18 @@ orchestrator artificially ignorant of the code it must integrate.
   state without conversation archaeology.
 - Delegation is chosen for independence, parallelism, or verification—not as a
   blanket prohibition on direct implementation.
+
+## Adapter follow-through
+
+The subsequent compatibility audit found one remaining contradiction outside
+`ORCHESTRATOR.md`: the Claude and Codex `seon-agent` descriptions still required
+delegation for every implementation task, while both verifier adapters assumed
+a mandatory lower-cost verification stage. Their long embedded manuals also
+duplicated `AGENTS.md` and `AGENT.md`, creating another drift surface.
+
+Both client formats now retain the role names but define them as selective,
+bounded aliases. The implementation adapter points to the shared authority and
+delegated-lane workflow; the verifier adapter is used when risk warrants an
+independent falsification pass. Neither adapter prescribes universal delegation
+or a cheaper model. Claude's metadata format and Codex's TOML format remain
+separate so existing client configuration continues to load.
