@@ -2835,7 +2835,8 @@
     (let [detached (admission/detach!)]
       (when (false? (::admission/detached? detached))
         (throw (ex-info "Runtime projection detach failed." detached))))
-    (let [coordinate (when capture-coordinate? (db/head-coordinate @conn))]
+    (let [coordinate (when capture-coordinate? (db/head-coordinate @conn))
+          generation (process-generation)]
       (await (db/release-connection! {::db/conn conn}))
       (set! db/*conn* nil)
       (swap! !state dissoc
@@ -2845,16 +2846,16 @@
       (cond->
        (assoc progress ::quiesced? true)
         coordinate (assoc ::db.coordinate/coordinate coordinate)
-        (process-generation)
+        generation
         (assoc ::runtime.lifecycle/process-generation
-               (process-generation))))))
+               generation)))))
 
 (defn- quiesce-failure
   [message]
-  (cond-> {::quiesced? false ::quiesce-error message}
-    (process-generation)
-    (assoc ::runtime.lifecycle/process-generation
-           (process-generation))))
+  (let [generation (process-generation)]
+    (cond-> {::quiesced? false ::quiesce-error message}
+      generation
+      (assoc ::runtime.lifecycle/process-generation generation))))
 
 (defn ^:async quiesce-runtime!
   "Drain this pod and return its final complete database coordinate.
