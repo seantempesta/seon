@@ -124,9 +124,9 @@ contract work and independent consumers:
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
 | Top-level integration | Review returned slices, preserve the full ledger, and integrate branch launch/runtime ownership without outrunning its lifecycle proofs | Integration and design judgment cannot be delegated; typed native create/release/delete is settled at `f34b7bda` + `989b6ed3` | Review non-autonomous launch, then branch-qualified replica/operator ownership and restart/crash proof |
-| Database lifecycle | **Writer-local lifecycle integrated:** split non-autonomous runtime attachment from autonomous activation and add graceful stop | Native create/adopt/release/delete, honest cleanup, bounded equality, and physical-fork deletion are green at 76 tests/456 assertions | Branch-qualified replica/operator launch, then restart/crash and restore/undo proof |
-| Reactive render units | **Header cut in progress:** move the ordinary agent header through the demanded-unit first-paint seam after `739a646c`, `330abf0d`, and audit `8c19490a` | The kernel, live debug consumer, and same-subscription framing are settled; this cut can delete one page-specific dependency authority | System-header or surface consumer only after the demanded-unit seam is reviewed, then settle unit 3's cursor contract |
-| Agent runtime correctness | **Async implementation in progress:** generalize the one instrumentation constructor from exact-source audit `2d99c79f` | Exact provider evidence and compiler/Malli callable shapes are settled independently of database and web work | Complete-form/process-death containment after async coverage is exact, then integrate unit-7 Inspect evidence |
+| Database lifecycle | **Non-autonomous launch/stop under integration:** make attachment distinct from activation, publish an honest runtime phase, suppress replay writes during validation, and unwind feeds, agents, replica, and Datahike ownership through one retryable stop | Native create/adopt/release/delete, honest cleanup, bounded equality, and physical-fork deletion are green at 76 tests/456 assertions; the current slice consumes those settled writer-local contracts | Review and falsify this slice, then implement branch-qualified replica/operator launch, restart/crash recovery, restore/undo, and multi-form proof in that order |
+| Reactive render units | **System-header cut in progress:** the ordinary agent header is integrated at `1ec738e2`; move the next system-header consumer through the same demanded-unit first-paint and shared-subscription seam | The kernel, live debug consumer, ordinary header, and same-subscription framing are settled; this cut can remove another page-specific dependency authority without assuming later lifecycle behavior | Review the system-header cut, then take the next bounded surface consumer or settle unit 3's cursor contract when the unit contract is complete |
+| Agent runtime correctness | **Async instrumentation under integration:** generalize the one instrumentation constructor from exact Malli/compiler source, including fixed, variadic, and multi-arity Promise results without duplicate fault recording | Exact provider evidence and callable shapes are settled independently of database and web work; the focused slice must enter the canonical test manifest before it is accepted | Review the async slice, then assign complete-form/process-death containment and finally consume its settled boundary in unit 7 |
 
 The ordered top-level sequence is therefore:
 
@@ -145,9 +145,12 @@ The ordered top-level sequence is therefore:
 
 On every lane return, the top-level agent first reviews source and proof,
 updates the owning roadmap, and integrates or rejects the result. It then fills
-the free slot with the earliest dependency-ready row above. Findings that do
-not block that row are recorded with evidence and acceptance criteria instead
-of becoming an unplanned detour.
+the free slot with the earliest dependency-ready row above. The immediate
+refills are branch-qualified replica/operator ownership after non-autonomous
+launch, the next demanded render consumer after system header, and
+complete-form/process-death containment after async instrumentation. Findings
+that do not block those exits are recorded with evidence and acceptance
+criteria instead of becoming an unplanned detour.
 
 The portfolio is a rolling queue, not a batch barrier. A lane may begin its
 documented refill as soon as its owned paths are committed and the top-level
