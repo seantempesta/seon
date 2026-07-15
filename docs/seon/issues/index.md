@@ -17,7 +17,7 @@ See `README.md` for the convention.
 | [Arbitrary eval allocation lacks hard process memory containment](eval-process-isolation-memory-containment.md) | blocker | agent |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 
-## Friction (24)
+## Friction (23)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -41,7 +41,6 @@ See `README.md` for the convention.
 | [LoRA audit runner depends on a retired Shadow target and pinned checkout](lora-audit-runner-drift.md) | friction | general |
 | [Model can ghost-echo runtime scaffolding into the transcript spine](narration-ghost-echo-not-neutralized.md) | friction | agent |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
-| [Reconcile empty cardinality-many values without metadata-only transactions](reconcile-empty-many-metadata-only-transaction.md) | friction | Core |
 | [Self-host `cljs.test/is` throws inside a dynamically-evaled `:test` thunk](selfhost-cljs-test-is-thunk-resolution.md) | friction | agent |
 | [Shadow deps-mode declarations imply inactive build paths](shadow-deps-mode-declaration-drift.md) | friction | docs |
 | [Transcript decay does not bound total context](transcript-decay-does-not-bound-total-context.md) | friction | agent |
