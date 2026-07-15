@@ -231,8 +231,8 @@ there is no intent from which a new supervisor can derive the next safe action.
 | Failed schema/program publication | Candidate build precedes commit; failed tee can fall back without accepting declaration facts | Post-commit instrumentation failure records an error but leaves admission open with old projection | Deterministically fail publication after commit; next work is rejected; cold reconstruction activates the committed generation or readiness fails |
 | Clean planned restart | Supervisor has process ordering and writer release; pod reconstructs process-local state | No turn-boundary admission/drain protocol | Start bounded work, request restart, observe final committed turn/run coordinate before process stop, then reconstruct without crash marks |
 | Unexpected interrupted-run recovery | `seon.runtime.recovery/recover!` and tests CAS-fence open runs/turns and record one recovery anchor transaction | Must prove supervisor invokes it only for unexpected exits and before autonomous hosts restart | Kill during an open turn; one recovery tx marks interruption/crash, no fabricated eval, agent derives idle, later restart is idempotent |
-| Canonical coordinate | Writer Datahike value has branch, commit UUID, and t; replica knows database UUID and branch | No shared schema; protocol/feed/registry/turn/error/cache boundaries remain partially or t-only keyed | Two branches with colliding t remain distinguishable in reads, feeds, caches, bookmarks, errors, and turn capture |
-| Read-only as-of | `seon.db/as-of` and basis correction work over immutable Datahike values | Selector is numeric and lineage-local; no resolved commit response or non-autonomous forensic runtime | Resolve `{branch,t}` to exactly one commit; ambiguous/missing selector returns data; reads create no transaction or runtime host |
+| Canonical coordinate | One closed coordinate now crosses writer responses, receipts, feeds, replay, replica progress, write fences, and exact historical reads | Registry/turn/error/cache boundaries remain partially or t-only keyed | Two branches with colliding t remain distinguishable in reads, feeds, caches, bookmarks, errors, and turn capture |
+| Read-only as-of | `seon.db/at-coordinate` asynchronously loads the named containing commit, validates its attachment and cut, and returns an immutable `as-of` view or structured error data | Turn/error/debug/autocomplete/web consumers still call numeric `as-of`; no non-autonomous forensic runtime | A complete retained coordinate reproduces exact state; partial/wrong/missing selectors return data; reads create no transaction or runtime host |
 | Writable branch | Maintained Datahike `branch!`, `branch-as-db`, `delete-branch!` and secondary-index behavior exist | Seon uses physical `fork-database`; attachments, feeds, registry, membership, blobs, and operator are not branch-qualified | Branch at historical commit; primary and every secondary query match; source and branch accept isolated writes; branch release cannot delete source |
 | Restore and undo | Maintained guarded `force-branch!` and commit roots exist | No quiescence, external intent, undo branch, attachment rebuild, completion fact, or crash-resume derivation | Kill after every restore boundary; restart derives next action, preserves undo head, rebuilds from promoted facts, then undo follows the same restore path |
 | Branch-local blobs | Core blob facts are content addressed | No read-only source base plus branch-local writable overlay or restore materialization rule | Branch reads source blobs, writes only its overlay, release deletes only overlay, restore verifies every referenced blob before admission |
@@ -269,6 +269,17 @@ inside it. Parent traversal is valid only to prove that an initial cursor
 commit is an ancestor of that frozen container, never to invent identity from
 `t`. Datahike `as-of` remains a read filter and does not supply another commit
 identity.
+
+The first downstream dependency is now implemented. On CLJS,
+`datahike.api/commit-as-db` is asynchronous because it reads Konserve; the
+public `seon.db/at-coordinate` contract is therefore explicitly `^:async`.
+It accepts only the current connection's complete database/branch attachment,
+loads the requested commit directly, reprojects the requested coordinate with
+`seon.db.coordinate/at`, and only then creates the temporal `as-of` wrapper.
+Focused proof covers a t inside a later containing commit, wrong branch,
+missing commit, partial coordinate, and out-of-range t (2 tests/11 assertions).
+This resolver precedes removal of the t-only turn/error/cache fields; no
+synchronous compatibility selector was introduced.
 
 ### Slice 2 — one schema/program candidate and fail-closed publication
 

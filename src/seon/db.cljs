@@ -1523,6 +1523,73 @@
          {::time-point t} result false))
      result)))
 
+(schema/register! ::at-coordinate-response [:or ::db-val ::error])
+
+(defn ^:async at-coordinate
+  "Resolve an exact immutable historical database value.
+
+   A complete coordinate pins both the containing Datahike commit and the
+   temporal cut inside it. `commit-as-db` touches storage and is asynchronous
+   on CLJS, so this function is honestly `^:async`; agent eval awaits it.
+
+   Omit `conn` to use `*conn*`. The selected coordinate must name that
+   connection's database and branch. A missing retained commit, wrong
+   attachment, partial coordinate, or out-of-range t returns a structured
+   `:seon.error/*` value instead of throwing.
+
+     (db/at-coordinate
+       {:seon.db.coordinate/database-id #uuid \"...\"
+        :seon.db.coordinate/branch :db
+        :seon.db.coordinate/commit-id #uuid \"...\"
+        :seon.db.coordinate/t 536870914})"
+  {:malli/schema
+   [:function
+    [:=> [:catn [::coordinate ::coordinate]] ::at-coordinate-response]
+    [:=> [:catn [::conn ::conn] [::coordinate ::coordinate]]
+     ::at-coordinate-response]]}
+  ([coordinate]
+   (await (at-coordinate *conn* coordinate)))
+  ([conn coordinate]
+   (try
+     (when-not (schema/valid-candidate-value? ::coordinate coordinate)
+       (throw
+        (ex-info "at-coordinate requires one complete database coordinate."
+                 {::coordinate coordinate
+                  :seon.error/kind :user-input})))
+     (let [connection (internal/resolve-conn conn)
+           current-coordinate (db.coordinate/resolved @connection)]
+       (when-not (db.coordinate/same-attachment?
+                  current-coordinate coordinate)
+         (throw
+          (ex-info "The coordinate names a different database attachment."
+                   {::coordinate coordinate
+                    ::current-coordinate current-coordinate
+                    :seon.error/kind :user-input})))
+       (let [container
+             (await
+              (d/commit-as-db
+               connection (::db.coordinate/commit-id coordinate)))]
+         (when-not container
+           (throw
+            (ex-info "The coordinate's retained commit was not found."
+                     {::coordinate coordinate
+                      :seon.error/kind :user-input})))
+         (let [resolved
+               (db.coordinate/at
+                {::db.coordinate/db-value container
+                 ::db.coordinate/attachment
+                 (db.coordinate/attachment coordinate)
+                 ::db.coordinate/target-t (::db.coordinate/t coordinate)})]
+           (when-not (= coordinate resolved)
+             (throw
+              (ex-info "The retained commit does not resolve this coordinate."
+                       {::coordinate coordinate
+                        ::resolved-coordinate resolved
+                        :seon.error/kind :user-input})))
+           (d/as-of container (::db.coordinate/t coordinate)))))
+     (catch :default e
+       (error/->map e)))))
+
 (defn since
   "The complement of [[as-of]] — a db value of datoms added after `t`.
 

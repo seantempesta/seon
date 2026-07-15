@@ -33,6 +33,11 @@ which lineage produced a value or frame.
   progress, and own-write correlations now use the canonical coordinate.
   Replay freezes one containing commit and proves the initial cursor commit is
   an ancestor; the full JVM and CLJS gates pass.
+- `seon.db/at-coordinate` now resolves a complete point without guessing from
+  t: CLJS asynchronously loads the named retained commit, proves the current
+  database/branch attachment, validates the cut inside that container, and
+  returns structured errors for partial, missing, mismatched, or out-of-range
+  coordinates. The focused proof passes 2 tests/11 assertions.
 
 The source and dependency evidence is in
 [[../../prds/database-lifecycle-recovery/research/database-lifecycle-source-audit-2026-07-14]].
@@ -62,6 +67,7 @@ progress, replay, bookmark, error, or cache identity.
 
 ## Remaining
 
-Turn/error capture, frozen caches, bookmarks, and native branch lifecycle still
-need the same coordinate. The issue remains open until those downstream
+Turn/error capture, autocomplete exports, frozen web caches/bookmarks, and
+native branch lifecycle still need the same coordinate. The exact historical
+read dependency now exists; the issue remains open until those downstream
 identity copies are removed.
