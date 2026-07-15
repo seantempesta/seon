@@ -92,23 +92,28 @@ advances. Attachment, physical database, durable roster, and fork-coordinate
 fences remain closed; the expected-source-head fence runs immediately before
 new mutation only. Focused writer proof passes 37 tests/259 assertions.
 
-The next dependency-ordered slice is therefore the retained typed operator
-lifecycle described in
-[[research/operator-descriptor-publication-pod-only-plan-2026-07-15]].
-Atomically retain the source descriptor, exact create request, and target-
-private coordinates before asking the writer to create or exactly adopt the
-branch. Validate and retain the returned descriptor before pod publication.
-The descriptor's coordinate is the immutable creation cut, not the current
-target head used by close after branch writes. Close must stop and prove the pod
-absent, read the exact current target head, release and delete with that fence,
-and use the retained source logical route—never infer it from writer cluster
-identity.
+The internal retained typed operator lifecycle is implemented at `74bfa7e2`.
+One finite, atomically published record owns the source descriptor, exact create
+request, target-private coordinates, response, launch descriptor, desired
+state, phase, and inverse evidence. Every read semantically re-derives those
+relationships before effects. Open proves source owners, creates or adopts the
+exact branch, and starts only its pod. Close stops and proves that pod absent,
+reads the exact current target head, releases and deletes with that fence
+through the retained source logical route, and cleans only descriptor-derived
+private paths. The launch descriptor retains the immutable creation cut.
 
-Interruption-safe process unwind is a prerequisite for this destructive
-transition: only processes newly started by the invocation are drained, and an
-unproved process inverse prevents branch deletion. Status and MCP exposure of
-the external watcher/writer owner, then the restart/crash matrix, follow that
-lifecycle boundary; branch create/delete CLI remains later.
+The bounded real Transit UDS fixture covers response-loss retry, exact adopt,
+created-coordinate mismatch, target advancement before close, newly-started
+publication-failure cleanup, and preservation of a pre-existing converged pod.
+The branch/process/config/CLI selector passes 30 tests/130 assertions. This is
+an internal boundary, not yet a public lifecycle command.
+
+The next dependency-ordered slice is the remaining interruption and public
+ownership boundary: inject real signals at watcher/writer/pod start and
+readiness cuts, prove only invocation-owned processes unwind, then expose the
+settled internal transition through CLI/status/MCP. A real default plus ACME
+create/write/restart/close checkpoint follows before the restart/crash matrix.
+An unproved process inverse continues to forbid branch deletion.
 
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in

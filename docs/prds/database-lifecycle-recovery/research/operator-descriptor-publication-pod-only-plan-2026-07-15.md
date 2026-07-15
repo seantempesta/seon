@@ -278,3 +278,32 @@ failure at every inverse retaining retry data, and SIGINT at every process
 start/readiness boundary without a newly started child surviving under PID 1.
 Only then should CLI syntax, external-owner status/MCP exposure, and live
 default-plus-ACME branch experiments widen the boundary.
+
+### Internal lifecycle boundary implemented
+
+Commit `74bfa7e2` implements the closed retained record and internal pod-only
+open/close transition without widening CLI syntax. The operator proves the
+source manifest plus real watcher/writer readiness, ensures and retains the
+exact source descriptor and create request before mutation, exactly adopts a
+published/durable retry, derives the launch descriptor from the immutable fork
+cut, and starts only the branch pod. Close stops and proves that pod absent,
+ensures the exact target attachment at its fresh current head, then releases
+and deletes through the retained source logical route before deleting paths
+derived from the validated descriptor.
+
+The lifecycle record is a finite desired-state/phase machine. Every read
+re-derives source/create/target/descriptor consistency and rejects impossible
+field combinations before process, writer, or filesystem effects. Descriptor
+path-containment validation therefore runs before create. A post-ensure state-
+publication failure cleans up a pod newly started by that invocation through
+the one close owner; the same failure leaves a pre-existing converged pod and
+branch untouched with resumable retained evidence.
+
+The bounded Transit UDS fixture proves intent publication before mutation,
+response loss followed by exact adoption, created-coordinate mismatch
+rejection, immutable creation-cut launch, fresh-head deletion after a target
+advance, exact inverse ordering, and descriptor-derived private-path cleanup.
+The branch/process/config/CLI selector passes 30 tests/130 assertions. Remaining
+before this slice graduates: real signal injection at watcher/writer/pod
+readiness boundaries, CLI/status/MCP exposure, and live default plus ACME
+create/write/restart/close proof.

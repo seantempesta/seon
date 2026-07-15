@@ -36,6 +36,14 @@ closed its own resources.
 The full launch audit and failure boundary are in
 [[branch-qualified-replica-operator-launch-audit-2026-07-15]].
 
+The internal native-branch transition at `74bfa7e2` now records whether the
+target pod was converged before `ensure!`. An injected state-publication failure
+after ensure drains a newly started pod through the one exact close owner, but
+leaves a pre-existing converged pod/branch running with resumable retained
+evidence. This closes the branch-local ownership decision in a bounded fixture;
+it does not close the issue because real SIGINT coverage and the ordinary
+watcher/writer/pod supervisor transition remain outstanding.
+
 ## Owner
 
 The one Babashka supervisor transition in `seon.dev.cli` and
