@@ -45,6 +45,8 @@
     ;; Instrumentation publishes the validated database-derived projection
     ;; once at boot; accepted eval/hot-reload transitions publish exact deltas.
     [seon.instrument :as instrument]
+    [seon.launch :as launch]
+    [seon.client.schema]
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-runtime! runs.
     [seon.agent :as agent]
@@ -162,7 +164,7 @@
     ;; Content-addressed blob store — the disk tier (big text lives behind
     ;; a :my.blob/hash ref, never as datoms). Required so it builds +
     ;; indexes at boot and turn-capture/web-fetch can compose on it.
-    [my.blob]
+    [my.blob :as blob]
     ;; Program-graph introspection — (my.ns/functions {:my.ns/ns 'x})
     ;; lists a namespace's fns as the compact one-line cards. Required so
     ;; it builds + indexes at boot.
@@ -240,15 +242,12 @@
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
 ;; ---------------------------------------------------------------------------
 
-(schema/register! ::autonomous? :boolean)
-(schema/register! ::launch-capability
-  [:map {:closed true}
-   [::autonomous? ::autonomous?]])
 (schema/register! ::runtime-phase
   [:enum :seon.client.runtime/starting
    :seon.client.runtime/running
    :seon.client.runtime/stopping
    :seon.client.runtime/cleanup-required])
+(schema/register! ::blob-storage-view :my.blob/storage-view)
 
 (def default-launch-capability
   {::autonomous? true})
@@ -292,6 +291,31 @@
                    ::active-launch-capability retained})))
       (swap! !state assoc ::launch-capability capability))
     capability))
+
+(defn- claim-blob-storage-view!
+  [view]
+  (when-not (schema/valid-candidate-value? ::blob-storage-view view)
+    (throw
+     (ex-info "The process cannot claim an invalid blob storage view."
+              {::blob-storage-view view
+               :seon.error/kind :core-bug})))
+  (let [retained (::blob-storage-view @!state)]
+    (cond
+      (nil? retained)
+      (do
+        (reset! blob/!storage-view view)
+        (swap! !state assoc ::blob-storage-view view)
+        view)
+
+      (= retained view)
+      view
+
+      :else
+      (throw
+       (ex-info "The process already claimed a different blob storage view."
+                {::blob-storage-view view
+                 ::active-blob-storage-view retained
+                 :seon.error/kind :core-bug})))))
 
 (defn runtime-advertisement
   "Project this pod's MCP addressable agents directly from its database.
@@ -786,23 +810,38 @@
   {:malli/schema
    [:=> [:cat ::open-database-connection-request] :any]}
   [{::keys [prepare-writes?]}]
-  (await (replica/ping!))
-  (let [opened (await (replica/ensure-database!))
+  (let [descriptor replica/default-launch-descriptor
+        writer-owner (::launch/writer-owner descriptor)
+        database-selection (::launch/database descriptor)]
+    (await (replica/ping! {::launch/descriptor descriptor}))
+    (let [opened (await (replica/ensure-database!
+                         {::launch/descriptor descriptor}))
         resolved-coordinate (::db.coordinate/coordinate opened)
+        descriptor (launch/with-coordinate
+                    {::launch/descriptor descriptor
+                     ::db.coordinate/coordinate resolved-coordinate})
         conn (await
               (d/connect
                (replica/database-config
-                (db.coordinate/attachment resolved-coordinate))))]
-    (id/assert-allocation-writer! conn)
-    (log/info-console! "seon.client/open-database-connection!"
-                       (str "database " replica/database-name
-                            ": " replica/default-database-path
-                            " (writer: " replica/default-request-socket-path ")"))
-    (when prepare-writes?
-      (await (db/ensure-provenance! {:seon.db/conn conn}))
-      (await (install-runtime-schema! conn false)))
-    (await (replica/attach! {::replica/conn conn}))
-    conn))
+                {::launch/descriptor descriptor})))]
+      (id/assert-allocation-writer! conn)
+      (log/info-console! "seon.client/open-database-connection!"
+                         (str "database "
+                              (::db.protocol/database-name database-selection)
+                              ": "
+                              (::db.protocol/database-path database-selection)
+                              " (writer: "
+                              (::launch/request-socket-path writer-owner) ")"))
+      (when prepare-writes?
+        (await (db/ensure-provenance! {:seon.db/conn conn}))
+        (await (install-runtime-schema! conn false)))
+      (await (replica/attach!
+              {::replica/conn conn
+               ::replica/request-socket-path
+               (::launch/request-socket-path writer-owner)
+               ::replica/publish-socket-path
+               (::launch/publish-socket-path writer-owner)}))
+      conn)))
 
 ;; ---------------------------------------------------------------------------
 ;; Resume — replay-program-graph! (the DB-is-the-running-system spine)
@@ -2755,6 +2794,8 @@
   ;; cold-store web UI render, 2026-06-09). Must run before start-runtime!
   ;; opens the store.
   (log/quiet-library-logs!)
+  (claim-blob-storage-view!
+   (::launch/blob-storage-view replica/default-launch-descriptor))
   (install-process-safety-net!)
   (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
   ;; Malli instrumentation is installed from the validated PROGRAM projection
@@ -2784,7 +2825,11 @@
                                  "canned replies. Export the key and restart "
                                  "(SEON_CONFIG must ride the restart) if this "
                                  "pod is meant to do real work.")))
-      (-> (start-runtime! {::llm-fn llm-fn})
+      (-> (start-runtime!
+           {::llm-fn llm-fn
+            ::launch-capability
+            (get-in replica/default-launch-descriptor
+                    [::launch/runtime :seon.client/launch-capability])})
           (.then (fn [{:seon.agent/keys [id ns]
                        :seon.client/keys [resumed-ids created-ids]
                        :seon.web/keys [port port-file]}]

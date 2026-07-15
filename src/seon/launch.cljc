@@ -1,0 +1,252 @@
+(ns seon.launch
+  "Immutable process-launch data shared by the operator and pod."
+  (:require [clojure.string :as str]
+            [my.blob.schema]
+            [seon.client.schema]
+            [seon.db.coordinate :as coordinate]
+            [seon.db.protocol :as protocol]
+            [seon.schema :as schema]))
+
+(schema/register! ::path [:string {:min 1}])
+(schema/register! ::socket-path ::path)
+(schema/register! ::runtime-cluster [:string {:min 1}])
+(schema/register! ::writer-cluster [:string {:min 1}])
+(schema/register! ::artifact-flavor
+                  [:enum :seon.dev.artifact.flavor/default
+                   :seon.dev.artifact.flavor/acme])
+(schema/register! ::client-build-id [:string {:min 1}])
+(schema/register! ::cluster-dir ::path)
+(schema/register! ::process-dir ::path)
+(schema/register! ::log-dir ::path)
+(schema/register! ::http-port [:int {:min 0 :max 65535}])
+(schema/register! ::http-port-file ::path)
+(schema/register! ::writer-repl-port-file ::path)
+(schema/register! ::request-socket-path ::socket-path)
+(schema/register! ::publish-socket-path ::socket-path)
+
+(schema/register!
+ ::runtime
+ [:map {:closed true}
+  [::runtime-cluster ::runtime-cluster]
+  [::artifact-flavor ::artifact-flavor]
+  [::client-build-id ::client-build-id]
+  [:seon.client/launch-capability :seon.client/launch-capability]])
+(schema/register!
+ ::database
+ [:map {:closed true}
+  [::protocol/database-name ::protocol/database-name]
+  [::coordinate/attachment {:optional true} ::coordinate/attachment]
+  [::coordinate/coordinate {:optional true} ::coordinate/coordinate]
+  [::protocol/backend ::protocol/backend]
+  [::protocol/database-path ::protocol/database-path]])
+(schema/register!
+ ::writer-owner
+ [:map {:closed true}
+  [::writer-cluster ::writer-cluster]
+  [::request-socket-path ::request-socket-path]
+  [::publish-socket-path ::publish-socket-path]
+  [::writer-repl-port-file ::writer-repl-port-file]])
+(schema/register!
+ ::process
+ [:map {:closed true}
+  [::process-dir ::process-dir]
+  [::log-dir ::log-dir]
+  [::http-port ::http-port]
+  [::http-port-file ::http-port-file]])
+
+(schema/register! ::blob-storage-view :my.blob/storage-view)
+(schema/register!
+ ::descriptor
+ [:map {:closed true}
+  [::runtime ::runtime]
+  [::database ::database]
+  [::writer-owner ::writer-owner]
+  [::process ::process]
+  [::blob-storage-view ::blob-storage-view]])
+
+(schema/register!
+ ::default-descriptor-request
+ [:map {:closed true}
+  [::cluster-dir ::cluster-dir]
+  [::artifact-flavor ::artifact-flavor]
+  [::client-build-id ::client-build-id]
+  [::request-socket-path ::request-socket-path]
+  [::publish-socket-path ::publish-socket-path]
+  [::writer-repl-port-file ::writer-repl-port-file]
+  [::process-dir ::process-dir]
+  [::log-dir ::log-dir]
+  [::http-port ::http-port]
+  [::http-port-file ::http-port-file]])
+(schema/register! ::source-descriptor ::descriptor)
+(schema/register! ::target-database-name ::protocol/database-name)
+(schema/register! ::target-coordinate ::coordinate/coordinate)
+(schema/register! ::writable-blob-dir ::path)
+(schema/register!
+ ::branch-descriptor-request
+ [:map {:closed true}
+  [::source-descriptor ::source-descriptor]
+  [::runtime-cluster ::runtime-cluster]
+  [::target-database-name ::target-database-name]
+  [::target-coordinate ::target-coordinate]
+  [::process-dir ::process-dir]
+  [::log-dir ::log-dir]
+  [::http-port ::http-port]
+  [::http-port-file ::http-port-file]
+  [::writable-blob-dir ::writable-blob-dir]])
+
+(defn- basename
+  [path]
+  (last (remove str/blank? (str/split path #"/"))))
+
+(defn- normalize-path
+  [path]
+  (let [absolute? (str/starts-with? path "/")
+        segments
+        (reduce
+         (fn [result segment]
+           (cond
+             (or (str/blank? segment) (= "." segment)) result
+             (= ".." segment)
+             (if (and (seq result) (not= ".." (peek result)))
+               (pop result)
+               (conj result segment))
+             :else (conj result segment)))
+         []
+         (str/split (str/replace path #"\\\\" "/") #"/"))
+        normalized (str (when absolute? "/") (str/join "/" segments))]
+    (if (str/blank? normalized) "." normalized)))
+
+(defn- paths-overlap?
+  [left right]
+  (let [left (normalize-path left)
+        right (normalize-path right)]
+    (or (= left right)
+        (str/starts-with? left (str right "/"))
+        (str/starts-with? right (str left "/")))))
+
+(defn- invariant!
+  [condition message data]
+  (when-not condition
+    (throw (ex-info message
+                    (assoc data :seon.error/kind
+                           :seon.launch.error/invariant)))))
+
+(defn default-descriptor
+  "Derive one ordinary autonomous-cluster launch descriptor."
+  {:malli/schema [:=> [:cat ::default-descriptor-request] ::descriptor]}
+  [{::keys [cluster-dir artifact-flavor client-build-id request-socket-path
+            publish-socket-path writer-repl-port-file process-dir log-dir
+            http-port http-port-file]}]
+  (let [cluster-dir (normalize-path cluster-dir)
+        cluster (basename cluster-dir)]
+    (invariant! (not (str/blank? cluster))
+                "A cluster directory must have a basename."
+                {::cluster-dir cluster-dir})
+    {::runtime
+     {::runtime-cluster cluster
+      ::artifact-flavor artifact-flavor
+      ::client-build-id client-build-id
+      :seon.client/launch-capability {:seon.client/autonomous? true}}
+     ::database
+     {::protocol/database-name cluster
+      ::protocol/backend :file
+      ::protocol/database-path (str cluster-dir "/db")}
+     ::writer-owner
+     {::writer-cluster cluster
+      ::request-socket-path request-socket-path
+      ::publish-socket-path publish-socket-path
+      ::writer-repl-port-file writer-repl-port-file}
+     ::process
+     {::process-dir (normalize-path process-dir)
+      ::log-dir (normalize-path log-dir)
+      ::http-port http-port
+      ::http-port-file (normalize-path http-port-file)}
+     ::blob-storage-view
+     {:my.blob/writable-dir
+      (str cluster-dir "/blobs")
+      :my.blob/read-only-dirs []}}))
+
+(schema/register!
+ ::with-coordinate-request
+ [:map {:closed true}
+  [::descriptor ::descriptor]
+  [::coordinate/coordinate ::coordinate/coordinate]])
+
+(defn with-coordinate
+  "Return `descriptor` pinned to one writer-returned complete coordinate."
+  {:malli/schema [:=> [:cat ::with-coordinate-request] ::descriptor]}
+  [{descriptor ::descriptor point ::coordinate/coordinate}]
+  (let [database (::database descriptor)
+        retained-attachment (::coordinate/attachment database)
+        attachment (coordinate/attachment point)]
+    (invariant! (or (nil? retained-attachment)
+                    (= retained-attachment attachment))
+                "The writer coordinate does not match the launch attachment."
+                {::coordinate/attachment retained-attachment
+                 ::coordinate/coordinate point})
+    (assoc descriptor ::database
+           (assoc database
+                  ::coordinate/attachment attachment
+                  ::coordinate/coordinate point))))
+
+(defn branch-descriptor
+  "Derive one non-autonomous branch descriptor from its source launch."
+  {:malli/schema [:=> [:cat ::branch-descriptor-request] ::descriptor]}
+  [{::keys [source-descriptor runtime-cluster target-database-name
+            target-coordinate process-dir log-dir http-port http-port-file
+            writable-blob-dir]}]
+  (let [source-runtime (::runtime source-descriptor)
+        source-database (::database source-descriptor)
+        source-attachment (::coordinate/attachment source-database)
+        target-attachment (coordinate/attachment target-coordinate)
+        source-blobs (::blob-storage-view source-descriptor)
+        read-only-dirs
+        (vec
+         (distinct
+          (map normalize-path
+               (cons (:my.blob/writable-dir source-blobs)
+                     (:my.blob/read-only-dirs source-blobs)))))
+        source-bases (conj read-only-dirs
+                           (normalize-path
+                            (::protocol/database-path source-database)))
+        target-private
+        (mapv normalize-path
+              [process-dir log-dir http-port-file writable-blob-dir])]
+    (invariant! (some? source-attachment)
+                "A branch launch requires its writer-owned source attachment."
+                {::source-descriptor source-descriptor})
+    (invariant! (= (::coordinate/database-id source-attachment)
+                   (::coordinate/database-id target-attachment))
+                "A native branch must retain its source database identity."
+                {::coordinate/attachment source-attachment
+                 ::target-coordinate target-coordinate})
+    (invariant! (not= :db (::coordinate/branch target-attachment))
+                "A branch launch cannot target the protected main branch."
+                {::target-coordinate target-coordinate})
+    (invariant! (not-any? true?
+                          (for [target target-private
+                                source source-bases]
+                            (paths-overlap? target source)))
+                "Branch-private paths must not overlap source database or blob bases."
+                {::target-private-paths target-private
+                 ::source-paths source-bases})
+    {::runtime
+     {::runtime-cluster runtime-cluster
+      ::artifact-flavor (::artifact-flavor source-runtime)
+      ::client-build-id (::client-build-id source-runtime)
+      :seon.client/launch-capability {:seon.client/autonomous? false}}
+     ::database
+     {::protocol/database-name target-database-name
+      ::coordinate/attachment target-attachment
+      ::coordinate/coordinate target-coordinate
+      ::protocol/backend (::protocol/backend source-database)
+      ::protocol/database-path (::protocol/database-path source-database)}
+     ::writer-owner (::writer-owner source-descriptor)
+     ::process
+     {::process-dir (normalize-path process-dir)
+      ::log-dir (normalize-path log-dir)
+      ::http-port http-port
+      ::http-port-file (normalize-path http-port-file)}
+     ::blob-storage-view
+     {:my.blob/writable-dir (normalize-path writable-blob-dir)
+      :my.blob/read-only-dirs read-only-dirs}}))

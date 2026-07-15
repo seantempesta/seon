@@ -18,6 +18,7 @@
    [seon.db.coordinate :as coordinate]
    [seon.db.protocol :as protocol]
    [seon.db.transport.uds :as uds]
+   [seon.launch :as launch]
    [seon.platform :as platform]
    [seon.log :as log]
    [seon.schema :as schema]))
@@ -45,7 +46,17 @@
 (schema/register! ::database-config-response :map)
 (schema/register!
  ::database-config-request
- ::coordinate/attachment)
+ [:map {:closed true}
+  [::launch/descriptor ::launch/descriptor]])
+(schema/register!
+ ::launch-request
+ [:map {:closed true}
+  [::launch/descriptor ::launch/descriptor]])
+(schema/register!
+ ::ensure-response-validation-request
+ [:map {:closed true}
+  [::launch/descriptor ::launch/descriptor]
+  [::response :map]])
 (schema/register!
  ::knn-search-request
  [:map
@@ -80,6 +91,30 @@
 (def default-database-path
   (str cluster-dir "/db"))
 
+(def default-launch-descriptor
+  (let [artifact-name (or (platform/env-val "SEON_ARTIFACT_FLAVOR") "default")
+        artifact-flavor (keyword "seon.dev.artifact.flavor" artifact-name)]
+    (launch/default-descriptor
+     {::launch/cluster-dir cluster-dir
+      ::launch/artifact-flavor artifact-flavor
+      ::launch/client-build-id
+      (if (= :seon.dev.artifact.flavor/acme artifact-flavor)
+        "acme-client"
+        "client")
+      ::launch/request-socket-path default-request-socket-path
+      ::launch/publish-socket-path default-publish-socket-path
+      ::launch/writer-repl-port-file
+      (or (platform/env-val "SEON_WRITER_REPL_PORT_FILE")
+          (str "tmp/seon-writer-repl-port-" database-name))
+      ::launch/process-dir
+      (or (platform/env-val "SEON_PROC_DIR") "tmp/seon-operator")
+      ::launch/log-dir
+      (or (platform/env-val "SEON_LOG_DIR") "logs/operator")
+      ::launch/http-port
+      (js/parseInt (or (platform/env-val "SEON_PORT") "7890") 10)
+      ::launch/http-port-file
+      (or (platform/env-val "SEON_PORT_FILE") "tmp/seon-port")})))
+
 (defn database-config
   "Build the private Datahike config for this read replica.
 
@@ -96,17 +131,29 @@
    local konserve."
   {:malli/schema [:=> [:cat ::database-config-request]
                   ::database-config-response]}
-  [{::coordinate/keys [database-id branch]}]
-  {:store               {:backend :file
-                         :path    default-database-path
+  [{descriptor ::launch/descriptor}]
+  (let [database-selection (::launch/database descriptor)
+        point (::coordinate/coordinate database-selection)
+        _ (when-not (schema/valid-candidate-value? ::coordinate/coordinate point)
+            (throw
+             (ex-info "The launch descriptor has no complete database coordinate."
+                      {::launch/descriptor descriptor
+                       :seon.error/kind :core-bug})))
+        {::coordinate/keys [database-id branch]} point
+        writer-owner (::launch/writer-owner descriptor)]
+    {:store               {:backend (::protocol/backend database-selection)
+                         :path    (::protocol/database-path database-selection)
                          :id      database-id
                          :config  {:lock-blob? false}}
-   :branch              branch
-   :keep-history?       true
-   :schema-flexibility  :write
-   :writer              {:backend :seon.db.writer/remote
-                         :socket-path default-request-socket-path}
-   :allow-unsafe-config true})
+     :branch              branch
+     :keep-history?       true
+     :schema-flexibility  :write
+     :writer              {:backend :seon.db.writer/remote
+                           :database-name
+                           (::protocol/database-name database-selection)
+                           :socket-path
+                           (::launch/request-socket-path writer-owner)}
+     :allow-unsafe-config true}))
 
 ;; ---------------------------------------------------------------------------
 ;; Boot gate — fail LOUD if the database writer is down. No dual backend: a
@@ -133,8 +180,11 @@
 
 (defn ^:async ^:private ping-once!
   "One ping rpc. Resolves to the reply map; throws on not-ok/transport."
-  []
-  (let [resp (await (uds/rpc {::uds/socket-path default-request-socket-path
+  [descriptor]
+  (let [request-socket-path
+        (get-in descriptor [::launch/writer-owner
+                            ::launch/request-socket-path])
+        resp (await (uds/rpc {::uds/socket-path request-socket-path
                               ::uds/message (protocol/ping-request)
                               ::uds/timeout-ms ping-timeout-ms}))]
     (when-not (::protocol/success? resp)
@@ -148,12 +198,15 @@
    Resolves to the reply map on success; throws a clear, actionable
    error once the budget is exhausted."
   ;; Resolves to a protocol response crossing the transport boundary.
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (await
-   ((fn ^:async attempt [n]
+  {:malli/schema [:=> [:cat ::launch-request] :any]}
+  [{descriptor ::launch/descriptor}]
+  (let [request-socket-path
+        (get-in descriptor [::launch/writer-owner
+                            ::launch/request-socket-path])]
+    (await
+     ((fn ^:async attempt [n]
       (try
-        (await (ping-once!))
+        (await (ping-once! descriptor))
         (catch :default e
           (if (< n ping-attempts)
             (do (js/console.warn
@@ -164,16 +217,64 @@
                 (await (attempt (inc n))))
             (throw (ex-info
                     (str "The authoritative database writer is unreachable at "
-                         default-request-socket-path " ("
+                         request-socket-path " ("
                          (or (.-message e) (str e)) ") "
                          "after " n " attempts. "
                          "The pod boots only against the cluster database — there is "
                          "no local fallback. Start the database server with: "
                          "bin/seon up")
-                    {::socket-path default-request-socket-path
+                    {::socket-path request-socket-path
                      ::attempts  n
                      :seon.error/kind :core-bug}))))))
-    1)))
+      1))))
+
+(defn validate-ensure-response
+  "Validate a writer open response against its exact launch selection."
+  {:malli/schema
+   [:=> [:cat ::ensure-response-validation-request]
+    ::protocol/ensure-database-response]}
+  [{descriptor ::launch/descriptor response ::response}]
+  (let [database-selection (::launch/database descriptor)
+        expected
+        (cond->
+         {::protocol/database-name
+          (::protocol/database-name database-selection)
+          ::protocol/backend (::protocol/backend database-selection)
+          ::protocol/database-path
+          (::protocol/database-path database-selection)}
+          (::coordinate/attachment database-selection)
+          (assoc ::coordinate/attachment
+                 (::coordinate/attachment database-selection)))
+        response-coordinate (::coordinate/coordinate response)
+        actual
+        (cond->
+         {::protocol/database-name (::protocol/database-name response)
+          ::protocol/backend (::protocol/backend response)
+          ::protocol/database-path (::protocol/database-path response)}
+          (schema/valid-candidate-value? ::coordinate/coordinate
+                                         response-coordinate)
+          (assoc ::coordinate/attachment
+                 (coordinate/attachment response-coordinate)))]
+    (when-not (::protocol/success? response)
+      (throw (ex-info (str "Opening database "
+                           (::protocol/database-name database-selection)
+                           " failed: " (::protocol/error response))
+                      {::expected expected
+                       ::response response
+                       :seon.error/kind :core-bug})))
+    (when-not (schema/valid-candidate-value?
+               ::protocol/ensure-database-response response)
+      (throw (ex-info "The writer returned an invalid database-open response."
+                      {::expected expected
+                       ::response response
+                       :seon.error/kind :core-bug})))
+    (when-not (= expected (select-keys actual (keys expected)))
+      (throw (ex-info "The writer opened a different database selection."
+                      {::expected expected
+                       ::actual actual
+                       ::response response
+                       :seon.error/kind :core-bug})))
+    response))
 
 (defn ^:async ensure-database!
   "Ensure this pod's database is open on the authoritative writer.
@@ -181,25 +282,22 @@
    A freshly created database exists before the pod attaches its read replica.
    Throws on a not-ok reply (fail-loud, same posture as [[ping!]])."
   ;; Resolves to a protocol response crossing the transport boundary.
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (let [resp
+  {:malli/schema [:=> [:cat ::launch-request] :any]}
+  [{descriptor ::launch/descriptor}]
+  (let [database-selection (::launch/database descriptor)
+        writer-owner (::launch/writer-owner descriptor)
+        resp
         (await
          (uds/rpc
-          {::uds/socket-path default-request-socket-path
+          {::uds/socket-path (::launch/request-socket-path writer-owner)
            ::uds/message
            (protocol/ensure-database-request
-            {::protocol/database-name database-name
-             ::protocol/backend :file
-             ::protocol/database-path default-database-path})
+            database-selection)
            ::uds/timeout-ms ensure-database-timeout-ms}))]
-    (when-not (::protocol/success? resp)
-      (throw (ex-info (str "Opening database " database-name " failed: "
-                           (::protocol/error resp))
-                      {::database-name database-name
-                       ::resp resp
-                       :seon.error/kind :core-bug})))
-    resp))
+    (validate-ensure-response
+     {::launch/descriptor descriptor ::response resp})))
+
+(declare !attachment)
 
 (defn ^:async knn-search!
   "Ask the JVM database authority for nearest embedding neighbors.
@@ -208,15 +306,23 @@
    Query embedding and index access remain on the JVM."
   {:malli/schema [:=> [:cat ::knn-search-request] :any]}
   [{::protocol/keys [query limit entity-ids]
-    ::keys [request-socket-path]
-    :or {request-socket-path default-request-socket-path}}]
-  (let [response
+    ::keys [request-socket-path]}]
+  (let [attachment-state @!attachment
+        request-socket-path
+        (or request-socket-path
+            (::request-socket-path attachment-state)
+            default-request-socket-path)
+        routed-database-name
+        (or (get-in attachment-state
+                    [::database-coordinate ::database-name])
+            database-name)
+        response
         (await
          (uds/rpc
           {::uds/socket-path request-socket-path
            ::uds/message
            (protocol/knn-search-request
-            (cond-> {::protocol/database-name database-name
+            (cond-> {::protocol/database-name routed-database-name
                      ::protocol/query query
                      ::protocol/limit limit}
               (seq entity-ids)
@@ -268,7 +374,7 @@
    explicit bound instead of growing process memory without limit."
   4096)
 
-(declare !attachment fire-own-tx-listeners!)
+(declare fire-own-tx-listeners!)
 
 (defn- attachment-active-for-conn?
   [state conn]
@@ -458,7 +564,7 @@
       (put! done true))
     done))
 
-(defrecord RemoteWriter [request-socket-path conn lifecycle]
+(defrecord RemoteWriter [database-name request-socket-path conn lifecycle]
   w/PWriter
   (-dispatch! [_ {:keys [op args]}]
     (let [p (promise-chan)]
@@ -574,8 +680,9 @@
   (-streaming? [_] false))
 
 (defmethod w/create-writer :seon.db.writer/remote
-  [{:keys [socket-path]} connection]
-  (->RemoteWriter (or socket-path default-request-socket-path)
+  [{:keys [database-name socket-path]} connection]
+  (->RemoteWriter database-name
+                  (or socket-path default-request-socket-path)
                   connection
                   (atom {::writer-open? true
                          ::writer-pending #{}})))
@@ -611,12 +718,18 @@
   (let [config         (:config db)
         resolved       (coordinate/resolved db)
         attachment     (coordinate/attachment resolved)
-        writer-backend (get-in config [:writer :backend])]
+        writer-backend (get-in config [:writer :backend])
+        routed-database-name (get-in config [:writer :database-name])]
     (when-not (keyword? writer-backend)
       (throw (ex-info "The attached database has no writer backend identity."
                       {::writer-backend writer-backend
                        :seon.error/kind :core-bug})))
-    {::database-name database-name
+    (when-not (and (string? routed-database-name)
+                   (not (str/blank? routed-database-name)))
+      (throw (ex-info "The attached database has no logical writer route."
+                      {::database-name routed-database-name
+                       :seon.error/kind :core-bug})))
+    {::database-name routed-database-name
      ::coordinate/attachment attachment
      ::writer-backend writer-backend}))
 

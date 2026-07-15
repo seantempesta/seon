@@ -11,6 +11,8 @@
     [seon.error :as error]
     [seon.eval :as seval]
     [seon.instrument :as instrument]
+    [seon.launch :as launch]
+    [my.blob :as blob]
     [seon.log :as log]
     [seon.repl :as repl]
     [seon.db.replica :as replica]
@@ -22,6 +24,46 @@
 
 (def non-autonomous-capability
   {::client/autonomous? false})
+
+(deftest launch-descriptor-composes-the-client-capability-owner
+  (let [previous-state @client/!state
+        capability
+        (get-in replica/default-launch-descriptor
+                [::launch/runtime :seon.client/launch-capability])]
+    (try
+      (swap! client/!state dissoc ::client/launch-capability)
+      (is (= client/default-launch-capability capability))
+      (is (= capability
+             ((deref #'client/claim-launch-capability!) capability)))
+      (is (= capability (client/launch-capability)))
+      (finally
+        (reset! client/!state previous-state)))))
+
+(deftest client-claims-one-valid-process-blob-view
+  (let [previous-state @client/!state
+        previous-view @blob/!storage-view
+        claimed {:my.blob/writable-dir "tmp/claimed-blobs"
+                 :my.blob/read-only-dirs ["data/source-blobs"]}
+        claim! (deref #'client/claim-blob-storage-view!)]
+    (try
+      (swap! client/!state dissoc ::client/blob-storage-view)
+      (is (thrown? js/Error
+                   (claim! {:my.blob/writable-dir ""
+                            :my.blob/read-only-dirs []})))
+      (is (= previous-view @blob/!storage-view)
+          "invalid launch data cannot mutate the blob view")
+      (is (nil? (::client/blob-storage-view @client/!state))
+          "invalid launch data cannot reserve process ownership")
+      (is (= claimed (claim! claimed)))
+      (is (= claimed @blob/!storage-view))
+      (is (= claimed (claim! claimed))
+          "hot reload may reclaim the identical launch view")
+      (is (thrown? js/Error
+                   (claim! {:my.blob/writable-dir "tmp/other-blobs"
+                            :my.blob/read-only-dirs []})))
+      (finally
+        (reset! client/!state previous-state)
+        (reset! blob/!storage-view previous-view)))))
 
 (defn- promise-value
   [value]

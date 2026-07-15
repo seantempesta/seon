@@ -147,8 +147,9 @@ composition and the relationship invariants:
 
 - runtime cluster is a unique MCP/process/web identity, not a database id;
 - database route is the writer-returned target logical name;
-- attachment and coordinate must agree, and the ensure response must equal
-  both plus backend and path before the pod connects locally;
+- attachment and creation coordinate must agree. Reopen validates exact route,
+  attachment, backend, and path plus a complete current head on that same
+  attachment before the pod connects locally; the current head may advance;
 - writer-owner endpoints are the source cluster's existing endpoints;
 - artifact flavor/build must equal the writer owner's cluster flavor;
 - branch launch requires `autonomous? false`;
@@ -188,6 +189,9 @@ database path, and sockets with the validated launch descriptor. Its
 path. It rejects any response whose route, complete coordinate attachment,
 backend, or path differs before `d/connect`. Feed filtering continues to use
 the target route while transport connects to the writer-owner publish socket.
+The descriptor coordinate is the immutable branch-creation cut and provenance,
+not a restart head fence. An observational reopen returns the complete current
+head, which may have advanced through intentional branch writes.
 
 `seon.client/_main` reads the descriptor once, installs its storage view, and
 passes the retained capability to the existing `start-runtime!`. There is no
@@ -209,7 +213,7 @@ targets the source writer intentionally; it does not imply a branch-local JVM.
 | Create at exact source coordinate | Writer returns target route, attachment, coordinate, backend, path; operator validates and publishes descriptor | Any mismatch deletes only a newly created unpublished branch through the existing writer cleanup; no pod starts. |
 | Pod launch after create | Exact ensure opens target route observationally; local replica attaches same branch; blob overlay/base and non-autonomous capability are retained | Stop partial pod, exact-release target route, exact-delete target branch. Retain descriptor/overlay/logs if any inverse is unproved. |
 | Branch pod restart, writer alive | Reuse descriptor; ensure returns the same attachment and current target head; no autonomous write occurs | Moved/missing attachment, route conflict, or path mismatch prevents local connect. |
-| Source writer restart | Ordinary source route reopens first. Branch operator then ensures target route with exact attachment/path and proves its retained expected head before pod attach | Missing durable branch, unavailable source route, or moved head prevents branch pod restart. Never create a main database under the target route. |
+| Source writer restart | Ordinary source route reopens first. Branch operator then ensures the target route with exact attachment/path and proves a complete current head on that attachment before pod attach | Missing durable branch, unavailable source route, or moved attachment prevents branch pod restart. Never create a main database under the target route. |
 | Source watcher restart | Branch pod reconnects only to the same flavor/build; MCP re-probes its new runtime id by advertisement | Wrong flavor/build or absent owner watcher leaves branch target degraded, not silently attached to another build. |
 | Operator interrupted during reconcile | Every child started by the interrupted transition is unwound, or the command explicitly reports retained ownership and performs the same unwind before returning | Never leave a newly started watcher/writer/pod adopted by PID 1 merely because the parent Babashka process received SIGINT. A later `down` being able to reap it is recovery, not successful interruption cleanup. |
 | Pod crash | Source writer retains target route/branch; operator reports pod dead and keeps descriptor/overlay | No lifecycle delete occurs until an explicit close retries ordered teardown. |
@@ -272,7 +276,8 @@ sub-slice adds the typed operator transition and the complete failure matrix.
   branch, filters feed events by target route, and rejects every mismatched
   response without connection publication.
 - Focused client proof installs the descriptor's blob view and capability once,
-  reconstructs with no coordinate change, and closes every local inverse.
+  accepts a complete advanced head on the same attachment, and closes every
+  local inverse.
 - Operator proof starts only the branch pod and never owns/stops the source
   watcher or writer. Status distinguishes owned processes from external
   dependencies.

@@ -44,6 +44,25 @@ replica consumption first, typed pod-only operator lifecycle second, then the
 restart/crash matrix. `bin/seon` and `bin/acme` remain thin wrappers over the
 one Babashka supervisor; a branch reuses its source flavor's watcher and writer.
 
+The first non-mutating implementation slice is complete. `seon.launch` derives
+the same closed descriptor for default and ACME,
+composes the existing client launch capability, retains the immutable branch
+creation coordinate, rejects source/target path containment, and identifies
+the source writer owner. `seon.db.replica` consumes its exact route,
+attachment, backend, database path, and sockets for ensure, local config,
+remote writes, replay, and feed selection. Reopen requires a complete current
+head on the same attachment but does not compare it to the creation cut because
+intentional branch writes advance that head. `seon.client` claims the blob view
+once before runtime work and fails a conflicting or invalid claim closed.
+The four-namespace proof passed 53 tests/330 assertions before the claim helper
+moved from the agent-facing blob namespace to its correct private process owner.
+The smallest post-move client/blob selector passes 29 tests/197 assertions with
+zero failures or errors at `tmp/test-cljs-20260715-030704-86367.log`; the next
+integrated source-frozen checkpoint must rerun the complete descriptor/replica/
+client/blob set. Operator descriptor publication, pod-only process ownership,
+MCP writer-owner resolution, and the restart/crash matrix remain the next
+ordered slice; branch create/delete CLI remains later.
+
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in
 [[research/database-lifecycle-source-audit-2026-07-14]]. Implementation began

@@ -21,6 +21,7 @@
    [seon.db.coordinate :as coordinate]
    [seon.db.protocol :as protocol]
    [seon.db.transport.uds :as uds]
+   [seon.launch :as launch]
    [seon.db.replica :as replica]))
 
 (defn- with-rpc-stub
@@ -112,19 +113,115 @@
 (def ^:private expected-transaction-attempts 3)
 
 (deftest database-config-uses-the-writer-owned-attachment
-  (let [attachment {::coordinate/database-id fake-database-id
-                    ::coordinate/branch :experiment}
-        config (replica/database-config attachment)]
+  (let [point {::coordinate/database-id fake-database-id
+               ::coordinate/branch :experiment
+               ::coordinate/commit-id fake-commit-id
+               ::coordinate/t 17}
+        descriptor
+        (launch/with-coordinate
+         {::launch/descriptor replica/default-launch-descriptor
+          ::coordinate/coordinate point})
+        config (replica/database-config
+                {::launch/descriptor descriptor})]
     (is (= fake-database-id (get-in config [:store :id])))
-    (is (= :experiment (:branch config)))))
+    (is (= :experiment (:branch config)))
+    (is (= replica/database-name (get-in config [:writer :database-name])))
+    (is (= replica/default-request-socket-path
+           (get-in config [:writer :socket-path])))))
+
+(defn- branch-launch-descriptor
+  []
+  (let [source-attachment {::coordinate/database-id fake-database-id
+                           ::coordinate/branch :db}
+        source
+        (assoc-in replica/default-launch-descriptor
+                  [::launch/database ::coordinate/attachment]
+                  source-attachment)]
+    (launch/branch-descriptor
+     {::launch/source-descriptor source
+      ::launch/runtime-cluster "experiment"
+      ::launch/target-database-name "experiment-route"
+      ::launch/target-coordinate
+      (merge source-attachment
+             {::coordinate/branch :experiment
+              ::coordinate/commit-id fake-commit-id
+              ::coordinate/t 17})
+      ::launch/process-dir "tmp/experiment"
+      ::launch/log-dir "logs/experiment"
+      ::launch/http-port 0
+      ::launch/http-port-file "tmp/experiment/http.port"
+      ::launch/writable-blob-dir "data/branches/experiment/blobs"})))
+
+(defn- open-response
+  [descriptor]
+  (let [database-selection (::launch/database descriptor)
+        attachment (::coordinate/attachment database-selection)]
+    {::protocol/success? true
+     ::protocol/database-name (::protocol/database-name database-selection)
+     ::coordinate/coordinate
+     (merge attachment
+            {::coordinate/commit-id fake-commit-id
+             ::coordinate/t 17})
+     ::protocol/backend (::protocol/backend database-selection)
+     ::protocol/database-path (::protocol/database-path database-selection)}))
+
+(deftest ensure-response-validation-rejects-every-crossed-selection
+  (let [descriptor (branch-launch-descriptor)
+        response (open-response descriptor)
+        validate #(replica/validate-ensure-response
+                   {::launch/descriptor descriptor ::replica/response %})]
+    (is (= response (validate response)))
+    (let [advanced
+          (update response ::coordinate/coordinate
+                  assoc
+                  ::coordinate/commit-id
+                  #uuid "ce476f3c-077e-48ba-b5f8-a4acfe75a26f"
+                  ::coordinate/t 23)]
+      (is (= advanced (validate advanced))
+          "reopen returns the current head, which may advance on the same attachment"))
+    (doseq [crossed
+            [(assoc response ::protocol/database-name "other-route")
+             (assoc-in response
+                       [::coordinate/coordinate ::coordinate/branch]
+                       :other-branch)
+             (assoc response ::protocol/backend :memory)
+             (assoc response ::protocol/database-path "data/other/db")]]
+      (is (thrown? js/Error (validate crossed))))))
+
+(deftest ensure-database-routes-the-exact-branch-selection
+  (async done
+    (let [descriptor (branch-launch-descriptor)
+          expected-response (open-response descriptor)
+          writer-owner (::launch/writer-owner descriptor)]
+      (-> (with-rpc-stub
+           (fn [socket-path request _]
+             (is (= (::launch/request-socket-path writer-owner) socket-path))
+             (is (= (protocol/ensure-database-request
+                     (::launch/database descriptor))
+                    request))
+             (js/Promise.resolve expected-response))
+           #(replica/ensure-database! {::launch/descriptor descriptor}))
+          (.then #(is (= expected-response %)))
+          (.catch #(is false (str "exact branch ensure threw: " %)))
+          (.finally done)))))
 
 (defn- fake-db
-  ([basis-t] (fake-db basis-t :db))
-  ([basis-t branch]
+  ([basis-t] (fake-db basis-t :db replica/database-name))
+  ([basis-t branch] (fake-db basis-t branch replica/database-name))
+  ([basis-t branch route]
    {:max-tx basis-t
     :config {:store {:id fake-database-id}
              :branch branch
-             :writer {:backend :seon.db.writer/remote}}}))
+             :writer {:backend :seon.db.writer/remote
+                      :database-name route}}}))
+
+(deftest connection-coordinate-retains-the-descriptor-feed-route
+  (let [coordinate (#'replica/connection-coordinate
+                    (fake-db 17 :experiment "experiment-route"))]
+    (is (= "experiment-route" (::replica/database-name coordinate)))
+    (is (= :experiment
+           (get-in coordinate
+                   [::coordinate/attachment ::coordinate/branch])))))
 
 (defn- fake-conn
   "Minimal conn surface used by the wire writer and native listeners."
@@ -152,7 +249,7 @@
   (channel->promise
    (writer/-dispatch!
     (replica/->RemoteWriter
-     "stub.sock" conn
+     "test-route" "stub.sock" conn
      (atom {:seon.db.replica/writer-open? true
             :seon.db.replica/writer-pending #{}}))
     {:op 'transact! :args [arg-map]})))
@@ -160,7 +257,7 @@
 (defn- test-writer
   [conn]
   (replica/->RemoteWriter
-   "stub.sock" conn
+   "test-route" "stub.sock" conn
    (atom {:seon.db.replica/writer-open? true
           :seon.db.replica/writer-pending #{}})))
 
@@ -288,7 +385,8 @@
            (stopped-state)
            (fn []
              (with-rpc-stub
-              (fn [_sock-path _request _opts]
+              (fn [_sock-path request _opts]
+                (is (= "test-route" (::protocol/database-name request)))
                 (js/Promise.
                  (fn [deliver _reject]
                    (reset! respond deliver))))
@@ -335,7 +433,9 @@
               (if (< (swap! !calls inc) 3)
                 (js/Promise.reject (js/Error. "connect ECONNREFUSED (stub)"))
                 (js/Promise.resolve {::protocol/success? true})))
-            (fn [] (replica/ping!)))
+            (fn [] (replica/ping!
+                    {::launch/descriptor
+                     replica/default-launch-descriptor})))
           (.then (fn [resp]
                    (is (true? (::protocol/success? resp))
                        "resolves to the reply map once an attempt succeeds")
@@ -355,7 +455,9 @@
             (fn [_sock-path _req _opts]
               (swap! !calls inc)
               (js/Promise.reject (js/Error. "connect ECONNREFUSED (stub)")))
-            (fn [] (replica/ping!)))
+            (fn [] (replica/ping!
+                    {::launch/descriptor
+                     replica/default-launch-descriptor})))
           (.then (fn [_]
                    (is false "ping! must throw once the retry budget is exhausted")))
           (.catch (fn [e]

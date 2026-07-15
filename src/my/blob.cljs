@@ -34,6 +34,7 @@
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
+    [my.blob.schema]
     [seon.platform :as platform]
     [seon.schema :as schema]))
 
@@ -50,13 +51,6 @@
 (schema/register! ::ok?     :boolean)
 (schema/register! ::error   :string)
 (schema/register! ::exists? :boolean)
-(schema/register! ::directory [:string {:min 1}])
-(schema/register! ::writable-dir ::directory)
-(schema/register! ::read-only-dirs [:vector ::directory])
-(schema/register! ::storage-view
-  [:map
-   [::writable-dir ::writable-dir]
-   [::read-only-dirs ::read-only-dirs]])
 
 ;; text paging — 1-based line window + honest totals (the fs precedent).
 (schema/register! ::from-line      :int)
