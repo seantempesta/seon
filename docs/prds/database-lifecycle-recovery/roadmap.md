@@ -26,13 +26,13 @@ eval, web-command, schedule, wake, run-loop, or ticker work proceeds.
 Deterministic publication-failure and config-free live restart evidence remain
 before this transition graduates.
 
-The maintained Datahike SHA already contains same-store branch/delete,
-commit/branch root reads, historical-secondary-index correction, awaited
-connection release, and guarded/read-back-verified force. Seon still exposes a
-physical-copy fork with a new database identity. Its feed, replica, runtime
-admission, and operator do not yet implement native branch lifecycle.
-Quiesced clean restart, restore/undo, branch-local blobs, and ordered multi-form
-process-failure proof remain unimplemented.
+The maintained Datahike SHA contains same-store branch/delete, commit/branch
+root reads, historical-secondary-index correction, awaited connection release,
+and guarded/read-back-verified force. Seon's writer now exposes typed native
+create/release/delete and has removed the physical-copy fork. Its feed, replica,
+runtime admission, and operator do not yet launch or own branch-qualified
+runtimes. Quiesced clean restart, restore/undo, branch-local blob launch,
+promotion, and ordered multi-form process-failure proof remain unimplemented.
 
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in
@@ -223,11 +223,26 @@ coordinate in 6/51. Review then exposed a failed-open cleanup hole: release
 errors were swallowed for an unpublished connection. Commit `1a46d3c5` retains
 that exact resource in the same registry as `cleanup-required`, excludes it
 from connection resolution, and preserves initialization plus release evidence
-without pretending cleanup or route admission succeeded. The injected cleanup
-proof passes in the 5-test/40-assertion registry-routing gate, and the complete
-writer checkpoint passes 71/409. Typed native lifecycle operations are the next
-boundary. Forensic pod, operator, and restore work remain ordered after that
-writer-local cut.
+without pretending cleanup or route admission succeeded.
+
+Commit `f34b7bda` completes the typed JVM-native branch lifecycle. Closed
+Transit create, release, and delete requests now pass through the one UDS
+writer protocol. Creation fences the exact source attachment and head, resolves
+the selected immutable commit, rejects a cut that Datahike cannot branch
+without advancing, creates or exactly adopts the durable branch, opens it
+observationally, and publishes only after complete-coordinate read-back.
+Release fences the target attachment and head. Delete proves release, the
+durable roster entry, and exact branch head before removal, then proves roster
+absence. Any failed release or failed-open cleanup retains the exact connection
+and error facts and is unroutable; `cleanup-required` is derived from those
+canonical facts instead of stored as parallel state. The superseded physical-
+copy fork implementation and tests are deleted. Exact primary-datom equality
+uses a bounded-memory lockstep EAVT comparison that stops at the first
+mismatch. The focused registry, routing, UDS, and writer gate passes 31
+tests/194 assertions, and the complete writer checkpoint passes 76/456.
+Branch-qualified feed/replica launch, non-autonomous
+pod/operator ownership, forensic runtime, blob-view injection, promotion,
+restart/crash, restore, and undo remain ordered after this writer-local cut.
 
 The first branch-local blob prerequisite is implemented independently of
 native branch attachment. `my.blob` now consumes one validated process-local

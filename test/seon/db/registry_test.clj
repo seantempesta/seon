@@ -23,6 +23,22 @@
    (assoc request ::registry/initialize-connection!
           (fn [_request] nil))))
 
+(deftest ordered-lifecycle-comparison-stops-at-first-mismatch
+  (let [left-realized (atom 0)
+        right-realized (atom 0)]
+    (letfn [(counted [counter values]
+              (lazy-seq
+               (when-let [[value & remaining] (seq values)]
+                 (swap! counter inc)
+                 (cons value (counted counter remaining)))))]
+      (is (false? (#'registry/same-ordered-values?
+                   (counted left-realized [1 2 3])
+                   (counted right-realized [9 2 3]))))
+      (is (= 1 @left-realized))
+      (is (= 1 @right-realized)))
+    (is (true? (#'registry/same-ordered-values? [1 2 3] [1 2 3])))
+    (is (false? (#'registry/same-ordered-values? [1 2] [1 2 3])))))
+
 (deftest ensure-is-idempotent-and-concurrent
   (let [database-name :registry/concurrent
         start (promise)

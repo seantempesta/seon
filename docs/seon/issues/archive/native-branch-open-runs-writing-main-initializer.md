@@ -56,13 +56,14 @@ parallel branch boot path.
 
 ## Resolution
 
-Resolved by `3649c6b1` and `1a46d3c5`. The existing registry initializer now receives one
-namespaced request containing the connection, logical route, exact attachment,
-and main/branch open intent. Main retains database initialization. A non-main
-open validates inherited protocol schema and every declared secondary instance,
+Resolved by `3649c6b1`, `1a46d3c5`, and the integrated native lifecycle in
+`f34b7bda`. The existing registry initializer now receives one namespaced
+request containing the connection, logical route, exact attachment, and
+main/branch open intent. Main retains database initialization. A non-main open
+validates inherited protocol schema and every declared secondary instance,
 installs the existing transaction listener, and performs no database
-initialization. The registry compares complete coordinates around that callback;
-a writing callback is released and never published.
+initialization. The registry compares complete coordinates around that
+callback; a writing callback is released and never published.
 
 The executable pre-edit probe advanced a branch by one transaction. Its
 regression now proves that mutation is rejected without a registry route.
@@ -73,6 +74,9 @@ initializer runs only once for main. Review then injected failure into release
 of a rejected connection. That exact resource now remains in the one registry
 as `cleanup-required`, is excluded from route lookup/resolution, and retains
 both initialization and release errors; neither retry nor deletion can mistake
-unproved cleanup for success. The writer integration gate passes 6/51, the
-registry-routing gate passes 5/40, and the complete writer checkpoint passes
-71/409.
+unproved cleanup for success. The integrated lifecycle derives that state from
+the canonical error facts rather than storing a second state field, and covers
+both newly created and exactly adopted branch-open failures without deleting a
+branch it did not create. The focused registry, routing, UDS, and writer gate
+passes 31 tests/194 assertions, and the complete writer checkpoint passes
+76/456.

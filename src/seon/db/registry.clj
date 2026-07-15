@@ -567,6 +567,18 @@
                        (.getMessage throwable)
                        (merge data (ex-data throwable))))))
 
+(defn- same-ordered-values?
+  "Compare ordered values in lockstep without materializing either input."
+  [left right]
+  (loop [left-values (seq left)
+         right-values (seq right)]
+    (cond
+      (nil? left-values) (nil? right-values)
+      (nil? right-values) false
+      (= (first left-values) (first right-values))
+      (recur (next left-values) (next right-values))
+      :else false)))
+
 (defn- delete-unpublished-branch!
   [source-entry target-database-name target-branch attachment cause]
   (when-let [target-entry (get @!registry target-database-name)]
@@ -697,8 +709,9 @@
                              "The target branch exists at a different coordinate."
                              {::expected-coordinate expected-target-coordinate
                               ::coordinate target-coordinate}))
-                        _ (when-not (= (vec (d/datoms commit-db :eavt))
-                                       (vec (d/datoms target-db :eavt)))
+                        _ (when-not (same-ordered-values?
+                                     (d/datoms commit-db :eavt)
+                                     (d/datoms target-db :eavt))
                             (lifecycle-fail!
                              :seon.db.protocol.error/initializer
                              "The target branch primary datoms differ from its source commit."
