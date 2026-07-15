@@ -208,11 +208,20 @@ blob-view injection, promotion, and restore remain later slices.
 The implementation-ready reconciliation for the next boundary is
 [[research/native-branch-create-delete-implementation-plan-2026-07-14]]. Typed
 JVM create/release/delete can now land against the existing registry and source
-connection monitor. One prerequisite belongs in the same unit: a non-main open
-must validate inherited schema and secondary resources without running the
-writing main initializer, because embedding installation/backfill can otherwise
-advance the branch before its exact fork point is published. Forensic pod,
-operator, and restore work remain ordered after this writer-local cut.
+connection monitor. Commit `3649c6b1` completed its observational-open
+prerequisite in the one existing initializer: every open receives its exact
+attachment and main/branch intent; a branch validates inherited protocol schema
+and every declared secondary instance, installs only its process-local
+listener, and never runs the writing database initializer. The registry compares
+the complete coordinate around initialization and releases without publication
+if it changes. The pre-edit probe advanced a branch from commit
+`6a570735-a43b-512a-894f-3561ece6d4ba` at `t=536870912` to
+`6a570735-9d96-52a7-b0b7-0f2e9b925364` at `t=536870913`; the regression now
+rejects that write. Focused registry proof passes 12 tests/67 assertions, the
+writer/UDS fixture restores a real file-backed Proximum branch at an unchanged
+coordinate in 6/51, and the complete writer checkpoint passes 70/400. Typed
+native lifecycle operations are the next boundary. Forensic pod, operator, and
+restore work remain ordered after that writer-local cut.
 
 The first branch-local blob prerequisite is implemented independently of
 native branch attachment. `my.blob` now consumes one validated process-local

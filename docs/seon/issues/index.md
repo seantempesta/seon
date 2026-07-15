@@ -17,15 +17,16 @@ See `README.md` for the convention.
 | [Arbitrary eval allocation lacks hard process memory containment](eval-process-isolation-memory-containment.md) | blocker | agent |
 | [Capture dependencies when a lazy view unit activates](lazy-view-unit-activation-drops-read-observations.md) | blocker | UI |
 | [Carry one complete database coordinate through the protocol](database-protocol-coordinate-is-incomplete.md) | blocker | Core |
-| [Database receipts bypass the canonical schema candidate](database-receipt-schema-bypasses-candidate.md) | blocker | Core |
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
+| [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 
-## Friction (30)
+## Friction (31)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [ACME cannot migrate safely through the current operator](acme-operator-migration-drift.md) | friction | UI |
+| [ACME typeahead worker is unavailable during live Inspect runs](acme-typeahead-worker-unavailable.md) | friction | agent |
 | [AI and HTML render twins may run one derivation twice](render-twin-runs-function-twice.md) | friction | UI |
 | [AI context is not pure over its database value](ai-context-is-not-pure-over-database-value.md) | friction | agent |
 | [Address-message steps can displace authored plan work](plan-address-step-priority.md) | friction | agent |

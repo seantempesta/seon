@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, flow]
 ---
@@ -53,3 +53,21 @@ parallel branch boot path.
   registry publication.
 - Focused tests exercise a declared live Proximum index, not only the default
   embeddings-disabled path.
+
+## Resolution
+
+Resolved by `3649c6b1`. The existing registry initializer now receives one
+namespaced request containing the connection, logical route, exact attachment,
+and main/branch open intent. Main retains database initialization. A non-main
+open validates inherited protocol schema and every declared secondary instance,
+installs the existing transaction listener, and performs no database
+initialization. The registry compares complete coordinates around that callback;
+a writing callback is released and never published.
+
+The executable pre-edit probe advanced a branch by one transaction. Its
+regression now proves that mutation is rejected without a registry route.
+Focused registry tests pass 12 tests/67 assertions. A writer/UDS test creates a
+real file-backed Proximum index, branches its exact commit, and proves the
+target reopens declared and live at the unchanged coordinate while the writing
+initializer runs only once for main. The writer integration gate passes 6/51,
+and the complete writer checkpoint passes 70/400.
