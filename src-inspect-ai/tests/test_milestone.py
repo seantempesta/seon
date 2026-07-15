@@ -238,31 +238,35 @@ def test_run_milestone_sample_wires_effects():
     assert check_store_recall(res["eval_rows"], res["reply"])["ok"]
 
 
-def test_pod_driver_uses_explicit_static_coordinates(monkeypatch):
+def test_pod_driver_uses_explicit_static_coordinate_and_response_evidence(
+    monkeypatch
+):
     calls = {}
 
     def fake_run(text, timeout_ms, url):
         calls["run"] = (text, timeout_ms, url)
-        return {"reply": _DB_GOOD_REPLY, "agent_id": "a-static"}
-
-    def fake_fetch(cluster, agent_id, *, port=None):
-        calls["fetch"] = (cluster, agent_id, port)
-        return _DB_GOOD_ROWS
+        return {"reply": _DB_GOOD_REPLY, "agent_id": "a-static",
+                "eval_evidence": _DB_GOOD_ROWS}
 
     monkeypatch.setattr("seon_inspect.solver.pod_run", fake_run)
-    monkeypatch.setattr("seon_inspect.planning.fetch_eval_rows", fake_fetch)
-    monkeypatch.setattr("seon_inspect.cluster.assert_llm_live",
-                        lambda cluster: calls.setdefault("live", cluster))
     result = pod_milestone_driver(
         DB_MEMORY_CONTRACT, "db",
         cluster_url="http://127.0.0.1:7994/agents/run",
-        cluster_name="acme", writer_port=7991, timeout_ms=1234)
+        timeout_ms=1234)
 
     assert calls["run"] == (DB_MEMORY_CONTRACT, 1234,
                             "http://127.0.0.1:7994/agents/run")
-    assert calls["fetch"] == ("acme", "a-static", 7991)
-    assert calls["live"] == "acme"
-    assert result["cluster"] == "acme"
+    assert result["eval_rows"] == _DB_GOOD_ROWS
+
+
+def test_pod_driver_rejects_missing_response_evidence(monkeypatch):
+    monkeypatch.setattr(
+        "seon_inspect.solver.pod_run",
+        lambda *_args: {"reply": "", "agent_id": "a-static"})
+    with pytest.raises(RuntimeError, match="omitted.*eval_evidence"):
+        pod_milestone_driver(
+            DB_MEMORY_CONTRACT, "db",
+            cluster_url="http://127.0.0.1:7994/agents/run")
 
 
 def test_generated_milestone_task_requires_and_records_static_target():
@@ -273,8 +277,7 @@ def test_generated_milestone_task_requires_and_records_static_target():
 
     task = milestone_lift(
         milestone="db", endpoint="pod", seed=1, positions=[0], epochs=1,
-        cluster_url="http://127.0.0.1:7994/agents/run",
-        cluster_name="acme", writer_port=7991)
+        cluster_url="http://127.0.0.1:7994/agents/run")
     assert len(task.dataset) == 1
     sample = task.dataset[0]
     assert sample.id == "database_workflow-seed1-000"

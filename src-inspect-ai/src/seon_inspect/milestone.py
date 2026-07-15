@@ -5,10 +5,9 @@ were run by a bespoke shell lineage (`tools/min-drive.sh` + Python transcript
 oracles) that this module RETIRES into the standard bench. Each drive POSTed a
 contract to a cluster pod, then scored the RENDERED transcript with a regex
 scanner. That scanner is replaced here by a pure oracle over the agent's
-STRUCTURED eval rows — the same `{source, ok, at_ms, narration}` shape the
-planning row already reads back over the wire-server REPL
-(`seon_inspect.planning.fetch_eval_rows`). Structured rows, not scraped text,
-are the bench's native data: eids are monotonic so list order IS eval order.
+STRUCTURED eval rows — the same `{source, ok, at, narration}` projection the
+pod composition door returns from its final immutable database value.
+Structured rows, not scraped text, are the bench's native data.
 
 Milestones covered here (the `plan` milestone is `seon_inspect.planning` —
 already first-class; do NOT duplicate it):
@@ -29,8 +28,8 @@ CORRECT iff its capability oracle holds; the fab count rides in metadata.
 
 Every check is pure data-in/data-out and offline-testable; the live driver
 (`pod_milestone_driver`) binds the effects to one explicitly provisioned
-static cluster, reusing the existing `pod_run` + `fetch_eval_rows` machinery
-(no cluster lifecycle side path).
+static cluster through `pod_run`; the same response carries eval evidence
+(no writer-REPL or cluster lifecycle side path).
 """
 
 from __future__ import annotations
@@ -352,36 +351,32 @@ def pod_milestone_driver(
     milestone: str,
     *,
     cluster_url: str,
-    cluster_name: str,
-    writer_port: int,
     timeout_ms: int | None = None,
-    require_live_llm: bool = True,
 ) -> dict[str, Any]:
     """Drive one milestone on an explicitly provisioned static cluster.
 
-    P0 is serial. The caller supplies the pod and writer coordinates from the
-    current operator status; this function never creates, restarts, or releases
-    a cluster. The explicit boundary keeps the useful static ACME path live
-    while the ownership-fenced per-sample lease remains unavailable."""
-    from seon_inspect import cluster as cl
+    P0 is serial. The caller supplies the pod coordinate from the current
+    operator status; this function never opens a writer REPL or creates,
+    restarts, or releases a cluster. The response's database-derived evidence
+    keeps the useful static ACME path live while the ownership-fenced
+    per-sample lease remains unavailable."""
     from seon_inspect.config import DEFAULT_RUN_TIMEOUT_S
-    from seon_inspect.planning import fetch_eval_rows
     from seon_inspect.solver import pod_run
 
     budget_ms = timeout_ms or DEFAULT_RUN_TIMEOUT_S * 1000
-    if require_live_llm:
-        cl.assert_llm_live(cluster_name)
 
     def run(text: str) -> dict[str, Any]:
         return pod_run(text, budget_ms, cluster_url)
 
     def fetch(r: dict[str, Any]) -> list[dict[str, Any]]:
-        return fetch_eval_rows(cluster_name, r["agent_id"], port=writer_port)
+        rows = r.get("eval_evidence")
+        if not isinstance(rows, list):
+            raise RuntimeError(
+                "pod response omitted database-derived eval_evidence")
+        return rows
 
-    result = run_milestone_sample(contract, milestone,
-                                  run=run, fetch_evals=fetch)
-    result["cluster"] = cluster_name
-    return result
+    return run_milestone_sample(contract, milestone,
+                                run=run, fetch_evals=fetch)
 
 
 # ---------------------------------------------------------------------------

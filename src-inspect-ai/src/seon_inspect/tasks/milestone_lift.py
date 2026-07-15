@@ -15,8 +15,8 @@ Two solver modes (arm switch, like `ladder_lift`):
     DISCRIMINATION is provable with no pod and no LLM (`mock:good` scores
     CORRECT, `mock:bad` INCORRECT).
   - `endpoint="pod"` — LIVE: `seon_inspect.milestone.pod_milestone_driver`
-    POSTs to an explicitly supplied static cluster URL, reads eval rows back
-    from its explicitly supplied writer endpoint, and scores. The model column
+    POSTs to an explicitly supplied static cluster URL, consumes the response's
+    database-derived eval rows, and scores. The model column
     (deepseek vs spark) is
     RUNTIME-DERIVED from the pod's `model_config` — no arm plumbing needed
     (scorecard.model_provenance_from_run).
@@ -126,9 +126,7 @@ def _generated_samples(milestone: str, seed: int | str,
 
 @solver
 def milestone_solver(milestone: str, endpoint: str,
-                     cluster_url: str | None = None,
-                     cluster_name: str | None = None,
-                     writer_port: int | None = None):
+                     cluster_url: str | None = None):
     """Drive the pod (endpoint="pod") or replay a frozen golden pair (mock:*)."""
 
     async def solve(state: TaskState, generate: Generate) -> TaskState:
@@ -142,14 +140,15 @@ def milestone_solver(milestone: str, endpoint: str,
             import anyio
 
             from seon_inspect.milestone import pod_milestone_driver
-            from seon_inspect.solver import _record_result
+            from seon_inspect.solver import (
+                _record_result,
+                require_scorable_pod_state,
+            )
             res = await anyio.to_thread.run_sync(
                 lambda: pod_milestone_driver(
                     state.input_text, milestone,
-                    cluster_url=cluster_url,
-                    cluster_name=cluster_name,
-                    writer_port=writer_port))
-            _record_result(state, res["run"])
+                    cluster_url=cluster_url))
+            require_scorable_pod_state(_record_result(state, res["run"]))
             state.metadata["eval_rows"] = res["eval_rows"]
             state.metadata["milestone_run"] = {
                 "cluster": res.get("cluster"), "agent_id": res.get("agent_id"),
@@ -168,8 +167,7 @@ def milestone_lift(milestone: str = "namespaces",
                    seed: int | str | None = None,
                    positions: list[int] | None = None,
                    cluster_url: str | None = None,
-                   cluster_name: str | None = None,
-                   writer_port: int | None = None):
+                   ):
     """Capability milestone variants x pass^k (namespaces | db).
 
     `seed=None` keeps the fixed regression contract. A seed selects generated
@@ -179,19 +177,17 @@ def milestone_lift(milestone: str = "namespaces",
     if milestone not in ROWS:
         raise ValueError(f"unknown milestone {milestone!r} "
                          f"(known: {sorted(ROWS)})")
-    if endpoint == "pod" and (not cluster_url or not cluster_name
-                               or writer_port is None):
+    if endpoint == "pod" and not cluster_url:
         raise ValueError(
-            "endpoint='pod' requires explicit cluster_url, cluster_name, and "
-            "writer_port from the owned static target")
+            "endpoint='pod' requires an explicit cluster_url from the owned "
+            "static target")
     if seed is not None and endpoint.startswith("mock:"):
         raise ValueError("generated workflow variants require endpoint='pod'")
     samples = ([_sample(milestone)] if seed is None else
                _generated_samples(milestone, seed, positions or [0]))
     return Task(
         dataset=MemoryDataset(samples),
-        solver=milestone_solver(milestone, endpoint, cluster_url,
-                                cluster_name, writer_port),
+        solver=milestone_solver(milestone, endpoint, cluster_url),
         scorer=[milestone_scorer(), fabrication_metric()],
         epochs=Epochs(epochs, ["mean", pass_at(epochs)]),
     )

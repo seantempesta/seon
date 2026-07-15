@@ -23,7 +23,7 @@ from seon_inspect.generators import (
     serve_fixtures,
 )
 from seon_inspect import source_admission
-from seon_inspect.solver import seon_pod_solver
+from seon_inspect.solver import require_scorable_pod_state, seon_pod_solver
 from seon_inspect.tool_scorers import fixture_answer_scorer, workspace_scorer
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -39,10 +39,6 @@ def _bench_identity(row: str) -> dict[str, str]:
         "attribute": "frozen_tool_rows",
         "kind": "seon-native",
     }
-
-
-class ToolRowInfrastructureError(RuntimeError):
-    """A pod failure that invalidates the sample instead of scoring it wrong."""
 
 
 def parse_positions(positions: str) -> tuple[int, ...]:
@@ -89,19 +85,6 @@ def _sample_row(state: TaskState) -> dict:
     }
 
 
-def _require_completed_run(state: TaskState) -> None:
-    """Raise on infrastructure closes so accuracy never counts them as misses."""
-    metadata = state.metadata or {}
-    if metadata.get("pod_timed_out"):
-        raise ToolRowInfrastructureError(
-            "pod timed out; tool-row capability was not scored"
-        )
-    if str(metadata.get("pod_closed_reason") or "") == ":error":
-        raise ToolRowInfrastructureError(
-            "pod closed with a core error; tool-row capability was not scored"
-        )
-
-
 @solver
 def frozen_tool_row_solver(
     row: str,
@@ -143,7 +126,7 @@ def frozen_tool_row_solver(
                     )
                     state = await pod_solver(state, generate)
 
-            _require_completed_run(state)
+            require_scorable_pod_state(state)
             if admission is not None:
                 end = source_admission.verify_sources(_bench_identity(row))
                 if end != admission:

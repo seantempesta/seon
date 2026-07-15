@@ -33,9 +33,10 @@ lifecycle, or planning restart semantics.
 - `seon_inspect.solver._record_result` is the current canonical projection of
   `/agents/run` output into Inspect task metadata. Ordered turns and the final
   database coordinate remain native Inspect evidence.
-- `seon_inspect.planning.fetch_eval_rows` is the existing writer-boundary query.
-  Static execution supplies the selected writer port explicitly and never
-  creates, restarts, resets, or destroys a cluster.
+- `POST /agents/run` returns the exact request-scoped eval projection from the
+  pod's final immutable database value. Static execution consumes that response
+  directly and never opens a writer REPL or creates, restarts, resets, or
+  destroys a cluster.
 - `seon_inspect.freeze` and `evals/datasets.lock` remain the only tier and
   dataset-lock owners. Upstream Inspect positional filtering remains grounded in
   `reference-code/inspect-ai/src/inspect_ai/_eval/task/util.py` and
@@ -59,7 +60,7 @@ Acceptance requires all of the following:
   between seeds `1` and `2`;
 - each generated row carries only the structured oracle facts required by the
   existing milestone scorer;
-- the task requires explicit static coordinates and performs no cluster
+- the task requires an explicit static pod coordinate and performs no cluster
   lifecycle operation;
 - pod reply, ordered turn bundle, final database coordinate, and bounded writer
   evidence reach native Inspect metadata and the existing scorer;
@@ -82,12 +83,11 @@ Implemented but not yet graduated:
   answers.
 - `check_store_recall` and `check_ns_movement` accept sample oracle data while
   retaining the fixed regression rows as defaults.
-- `pod_milestone_driver` accepts explicit `cluster_url`, `cluster_name`, and
-  `writer_port`, calls the ordinary pod bridge, and queries evaluation evidence
-  at that selected writer boundary. It no longer owns ephemeral cluster
-  lifecycle.
-- `milestone_lift` accepts generated seed/position selection and explicit static
-  coordinates. Missing static coordinates fail task construction rather than
+- `pod_milestone_driver` accepts an explicit `cluster_url`, calls the ordinary
+  pod bridge, and consumes its database-derived evaluation evidence. It owns
+  neither a writer-REPL parser nor ephemeral cluster lifecycle.
+- `milestone_lift` accepts generated seed/position selection and an explicit
+  static pod coordinate. Its absence fails task construction rather than
   silently entering the broken lease path.
 - `run_split` accepts a positional subset and selects internally. The public
   milestone and blind split representations remain aggregate-only.

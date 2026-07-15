@@ -8,7 +8,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from seon_inspect.solver import AgentRunRefused, _record_result, pod_run
+from seon_inspect.solver import (
+    AgentRunRefused,
+    PodRunInfrastructureError,
+    _record_result,
+    pod_run,
+    require_scorable_pod_state,
+)
 
 
 @contextlib.contextmanager
@@ -70,18 +76,42 @@ def test_record_result_preserves_database_and_turn_evidence():
                   "commit_id": "commit-1", "t": 536870930}
     turns = [{"turn_id": "turn-1", "prompt": "exact prompt",
               "reply": "raw reply", "rendered_coordinate": coordinate}]
+    evals = [{"eval_id": "eval-1", "source": "(+ 1 2)", "ok": True}]
     state = SimpleNamespace(output=SimpleNamespace(completion=""), metadata={})
 
     _record_result(state, {"reply": "answer",
                            "database_coordinate": coordinate,
-                           "turn_evidence": turns})
+                           "turn_evidence": turns,
+                           "eval_evidence": evals})
 
     assert state.output.completion == "answer"
     assert state.metadata["pod_database_coordinate"] == coordinate
     assert state.metadata["pod_turn_evidence"] == turns
+    assert state.metadata["pod_eval_evidence"] == evals
 
     incomplete = SimpleNamespace(output=SimpleNamespace(completion=""),
                                  metadata={})
     _record_result(incomplete, {"reply": "legacy"})
     assert "pod_database_coordinate" not in incomplete.metadata
     assert "pod_turn_evidence" not in incomplete.metadata
+    assert "pod_eval_evidence" not in incomplete.metadata
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"pod_timed_out": True, "pod_closed_reason": "timeout"},
+        {"pod_timed_out": False, "pod_closed_reason": ":error"},
+    ],
+)
+def test_unscorable_pod_close_is_infrastructure(metadata):
+    state = SimpleNamespace(metadata=metadata)
+    with pytest.raises(PodRunInfrastructureError,
+                       match="model capability was not scored"):
+        require_scorable_pod_state(state)
+
+
+def test_completed_pod_state_is_scorable():
+    state = SimpleNamespace(
+        metadata={"pod_timed_out": False, "pod_closed_reason": ":completed"})
+    assert require_scorable_pod_state(state) is state

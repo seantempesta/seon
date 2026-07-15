@@ -239,7 +239,9 @@ cluster (optional `agent_id` — durable database, so the same agent can be
 driven again across a pod restart), deliver the input through the real wake
 path, await the derived `:idle` of the run it woke, return the truthful
 reply plus termination metadata (turns/evals scoped to this request's
-window, closed-reason, timed-out) and `model_config` — the RESOLVED LLM
+window, closed-reason, timed-out), an ordered `eval_evidence` projection of
+that same window's eval ids, times, sources, success facts, and present
+narration, and `model_config` — the RESOLVED LLM
 config the agent runs under (provider/model/temperature/max-tokens/
 thinking), COMPUTED at response time by the pure resolver
 `seon.ai/resolved-config` (agent overrides → config row → shipped
@@ -248,6 +250,13 @@ exactness is the same resolver over an as-of db). Inspect AI drives per-sample
 ephemeral clusters by port through this same production boundary; there is no
 in-process evaluator lifecycle. The answer key never enters the pod — scoring
 stays host-side. Benchmark vocabulary is harness-side only.
+
+The eval projection is derived from the same final immutable database value
+and exact turn-entity set used for the response counts. It never contains eval
+results, printed output, exception stacks, or source dumps unrelated to the
+request. Attribute absence remains absence in the JSON projection. Inspect
+consumes this production response directly; it does not issue arbitrary forms
+through the writer REPL to reconstruct eval rows.
 
 Standard Inspect tasks measure the selected model and scorer. Pod-backed Inspect
 tasks measure Seon's production agent/runtime behavior through this door; the

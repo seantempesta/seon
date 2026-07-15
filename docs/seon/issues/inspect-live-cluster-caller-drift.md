@@ -111,6 +111,17 @@ replies are directly visible in the `.eval`. This does not close the issue:
 concurrent per-sample allocation, restart, and cleanup still require the
 ownership-fenced lease described below.
 
+A generated-workflow probe exposed one remaining static-path contradiction.
+`planning.fetch_eval_rows` still sent a raw sentinel-printing form to the
+writer socket, but the writer now speaks io-prepl event maps. The query reached
+the writer while the Python parser failed as `JSONDecodeError`, leaving the
+native milestone scorer without rows. The composition door now derives an
+ordered `eval_evidence` projection from the same final database value and exact
+request turn set already used for counts. It includes only eval id/time/source,
+success, and present narration; results, stdout, and error stacks stay out.
+Milestone Inspect code consumes this response and the obsolete raw writer
+read-back is removed from that accepted path.
+
 This is distinct from `acme-operator-migration-drift.md`. That issue owns the
 ACME process/artifact/database migration itself; this issue owns Inspect's
 live consumers after the current operator boundary exists.

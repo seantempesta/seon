@@ -38,6 +38,10 @@ class AgentRunRefused(Exception):
     caller must treat it as harness wiring to fix, not a model result."""
 
 
+class PodRunInfrastructureError(RuntimeError):
+    """A pod run ended before capability scoring was meaningful."""
+
+
 def pod_run(prompt: str, timeout_ms: int, url: str | None = None,
             agent_id: str | None = None) -> dict:
     """One request/response call to a cluster pod's /agents/run door.
@@ -121,8 +125,22 @@ def _record_result(state: TaskState, result: dict) -> TaskState:
         state.metadata["pod_database_coordinate"] = result["database_coordinate"]
     if "turn_evidence" in result:
         state.metadata["pod_turn_evidence"] = result["turn_evidence"]
+    if "eval_evidence" in result:
+        state.metadata["pod_eval_evidence"] = result["eval_evidence"]
     if result.get("evidence_blobs") is not None:
         state.metadata["pod_evidence_blobs"] = result["evidence_blobs"]
+    return state
+
+
+def require_scorable_pod_state(state: TaskState) -> TaskState:
+    """Reject timeout and core-error closes before a task's scorer runs."""
+    metadata = state.metadata or {}
+    if metadata.get("pod_timed_out"):
+        raise PodRunInfrastructureError(
+            "pod timed out; model capability was not scored")
+    if str(metadata.get("pod_closed_reason") or "") == ":error":
+        raise PodRunInfrastructureError(
+            "pod closed with a core error; model capability was not scored")
     return state
 
 
