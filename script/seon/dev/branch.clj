@@ -47,6 +47,38 @@
 (schema/register! ::absence-response ::protocol/failed-response)
 
 (schema/register!
+ ::process-status
+ [:map {:closed true}
+  [:seon.dev.process/status :keyword]
+  [:seon.dev.process/ready? :boolean]
+  [:seon.dev.process/pid {:optional true} [:int {:min 1}]]
+  [:seon.dev.process/start-instant {:optional true} :string]
+  [:seon.dev.process/environment-digest {:optional true} :string]
+  [:seon.dev.process/artifact-digest {:optional true} :string]
+  [:seon.dev.process/log {:optional true} :string]
+  [:seon.dev.process/owner-process-dir {:optional true} :string]
+  [:seon.dev.process/readiness {:optional true} :keyword]
+  [:seon.dev.process/recorded-artifact-digest {:optional true} :string]])
+(schema/register! ::processes [:map-of :keyword ::process-status])
+(schema/register!
+ ::artifact
+ [:map {:closed true}
+  [:seon.dev.artifact/flavor {:optional true} :keyword]
+  [:seon.dev.artifact/client-build-id {:optional true} :string]
+  [:seon.dev.artifact/application-digest {:optional true} :string]
+  [:seon.dev.artifact/writer-digest {:optional true} :string]
+  [:seon.dev.artifact/client-digest {:optional true} :string]
+  [:seon.dev.artifact/bootstrap-digest {:optional true} :string]
+  [:seon.dev.artifact/runtime-root {:optional true} :string]])
+(schema/register!
+ ::endpoints
+ [:map {:closed true}
+  [:seon.dev.endpoint/cljs-build-id {:optional true} :string]
+  [:seon.dev.endpoint/web {:optional true} :string]
+  [:seon.dev.endpoint/clj {:optional true} :string]
+  [:seon.dev.endpoint/cljs {:optional true} :string]])
+
+(schema/register!
  ::target-private
  [:map {:closed true}
   [::runtime-cluster ::runtime-cluster]
@@ -100,6 +132,28 @@
   [::delete-request {:optional true} ::delete-request]
   [::delete-response {:optional true} ::delete-response]
   [::absence-response {:optional true} ::absence-response]])
+
+(schema/register!
+ ::status
+ [:map {:closed true}
+  [:seon.dev.target/status :keyword]
+  [:seon.dev.target/name [:= :seon.dev.target/branch]]
+  [:seon.dev.target/cluster-name {:optional true} :string]
+  [:seon.dev.target/database-path {:optional true} :string]
+  [:seon.dev.target/artifact {:optional true} ::artifact]
+  [:seon.dev.target/processes ::processes]
+  [:seon.dev.target/external-dependencies ::processes]
+  [:seon.dev.target/endpoints ::endpoints]
+  [:seon.dev.target/url {:optional true} :string]
+  [::lifecycle-path ::lifecycle-path]
+  [::desired-state ::desired-state]
+  [::phase ::phase]
+  [::target-private ::target-private]
+  [::runtime-cluster ::runtime-cluster]
+  [::target-database-name ::target-database-name]
+  [::target-branch ::target-branch]
+  [::coordinate-at-launch ::coordinate-at-launch]
+  [::launch-descriptor {:optional true} ::launch-descriptor]])
 
 (defn- validate!
   [schema-key value message]
@@ -603,69 +657,65 @@
           (fs/delete-if-exists lifecycle-path)
           closed))))))
 
+(defn- open-under-lock!
+  [request acquire-owned!]
+  (let [configuration (::configuration request)
+        lifecycle-path (::lifecycle-path request)
+        manifest (source-manifest! configuration)
+        retained (read-record! lifecycle-path)
+        record
+        (if retained
+          (require-retained-request! retained request configuration)
+          (write-record!
+           lifecycle-path
+           (new-intent request (exact-source-descriptor! configuration))))
+        owned-branch (atom nil)
+        {:seon.dev.branch/keys [created target-config pod]}
+        (acquire-owned!
+         :seon.dev.branch/native-branch
+         (fn []
+           (let [created
+                 (ensure-created! lifecycle-path record
+                                  #(reset! owned-branch %))
+                 target-config
+                 (branch-configuration configuration created)
+                 pod (get (process/specs target-config manifest) process/pod-id)
+                 converged? (process/converged? target-config pod)]
+             ;; A converged pod proves this invocation did not acquire the
+             ;; already-live branch runtime.
+             (when converged? (reset! owned-branch nil))
+             {:seon.dev.branch/created created
+              :seon.dev.branch/target-config target-config
+              :seon.dev.branch/pod pod}))
+         (fn []
+           (when-let [created @owned-branch]
+             (let [target-config
+                   (branch-configuration configuration created)]
+               ;; Uncertain pod absence retains the exact native branch.
+               (process-absent! target-config)
+               (close-record! configuration lifecycle-path created true)))))]
+    (write-record! lifecycle-path
+                   (assoc created ::phase
+                          :seon.dev.branch.phase/pod-starting))
+    (process/ensure!
+     target-config pod
+     (fn [id acquire!]
+       (acquire-owned! id acquire! #(process/stop! target-config id))))
+    (write-record! lifecycle-path
+                   (assoc created ::phase :seon.dev.branch.phase/ready))))
+
 (defn open!
   "Retain exact intent, create/adopt one branch, and start only its pod."
   {:malli/schema [:=> [:cat ::open-request] ::record]}
   [request]
   (validate! ::open-request request "The branch open request is invalid.")
-  (let [configuration (::configuration request)
-        lifecycle-path (::lifecycle-path request)]
+  (let [configuration (::configuration request)]
     (process/with-startup-ownership
      configuration
      (fn [acquire-owned!]
        (state/with-lock
         configuration :branch 30000
-        (fn []
-          (let [manifest (source-manifest! configuration)
-                retained (read-record! lifecycle-path)
-                record
-                (if retained
-                  (require-retained-request! retained request configuration)
-                  (write-record!
-                   lifecycle-path
-                   (new-intent request
-                               (exact-source-descriptor! configuration))))
-                owned-branch (atom nil)
-                {:seon.dev.branch/keys [created target-config pod]}
-                (acquire-owned!
-                 :seon.dev.branch/native-branch
-                 (fn []
-                   (let [created
-                         (ensure-created! lifecycle-path record
-                                          #(reset! owned-branch %))
-                         target-config
-                         (branch-configuration configuration created)
-                         pod
-                         (get (process/specs target-config manifest)
-                              process/pod-id)
-                         converged? (process/converged? target-config pod)]
-                     ;; A converged pod proves this invocation did not acquire
-                     ;; the already-live branch runtime even if retained writer
-                     ;; evidence happens to say how the branch was first made.
-                     (when converged? (reset! owned-branch nil))
-                     {:seon.dev.branch/created created
-                      :seon.dev.branch/target-config target-config
-                      :seon.dev.branch/pod pod}))
-                 (fn []
-                   (when-let [created @owned-branch]
-                     (let [target-config
-                           (branch-configuration configuration created)]
-                       ;; A failed or uncertain pod inverse must retain the
-                       ;; branch. Only exact process absence admits deletion.
-                       (process-absent! target-config)
-                       (close-record! configuration lifecycle-path created
-                                      true)))))]
-            (write-record! lifecycle-path
-                           (assoc created ::phase
-                                  :seon.dev.branch.phase/pod-starting))
-            (process/ensure!
-             target-config pod
-             (fn [id acquire!]
-               (acquire-owned! id acquire!
-                               #(process/stop! target-config id))))
-            (write-record! lifecycle-path
-                           (assoc created ::phase
-                                  :seon.dev.branch.phase/ready)))))))))
+        #(open-under-lock! request acquire-owned!))))))
 
 (defn close!
   "Stop one retained branch pod and delete its exact current native branch."
@@ -690,17 +740,23 @@
   (validate! ::open-request open-request
              "The branch restart request is invalid.")
   (let [configuration (::configuration open-request)
-        lifecycle-path (::lifecycle-path open-request)
-        record
-        (or (read-record! lifecycle-path)
-            (throw (ex-info "No retained branch intent exists."
-                            {::lifecycle-path lifecycle-path})))
-        retained
-        (require-retained-request! record open-request configuration)]
-    (when (::launch-descriptor retained)
-      (process/stop! (branch-configuration configuration retained)
-                     process/pod-id))
-    (open! open-request)))
+        lifecycle-path (::lifecycle-path open-request)]
+    (process/with-startup-ownership
+     configuration
+     (fn [acquire-owned!]
+       (state/with-lock
+        configuration :branch 30000
+        (fn []
+          (let [record
+                (or (read-record! lifecycle-path)
+                    (throw (ex-info "No retained branch intent exists."
+                                    {::lifecycle-path lifecycle-path})))
+                retained
+                (require-retained-request! record open-request configuration)]
+            (when (::launch-descriptor retained)
+              (process/stop! (branch-configuration configuration retained)
+                             process/pod-id))
+            (open-under-lock! open-request acquire-owned!))))))))
 
 (defn- retained-status
   [configuration lifecycle-path record]
@@ -714,9 +770,12 @@
         descriptor (::launch-descriptor record)
         manifest (artifact/read-manifest configuration)
         live (when (and descriptor manifest)
-               (process/status
-                (branch-configuration configuration record)
-                manifest))
+               (let [status (process/status
+                             (branch-configuration configuration record)
+                             manifest)]
+                 (cond-> status
+                   (nil? (:seon.dev.target/url status))
+                   (dissoc :seon.dev.target/url))))
         target (::target-private record)]
     (cond->
       (merge
@@ -739,6 +798,11 @@
 
 (defn status
   "Project one retained branch record with its current process health."
+  {:malli/schema
+   [:=>
+    [:catn [::configuration config/configuration-schema]
+     [::name ::name]]
+    ::status]}
   [configuration name]
   (let [open-request (request {::configuration configuration ::name name})
         lifecycle-path (::lifecycle-path open-request)
@@ -750,6 +814,10 @@
 
 (defn inventory
   "Project every validated retained branch record for one source."
+  {:malli/schema
+   [:=>
+    [:catn [::configuration config/configuration-schema]]
+    [:vector ::status]]}
   [configuration]
   (let [directory (branch-record-directory configuration)]
     (if-not (fs/directory? directory)

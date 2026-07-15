@@ -3,6 +3,7 @@
             [babashka.process :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is run-tests]]
+            [malli.core :as m]
             [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
@@ -42,7 +43,11 @@
     (doseq [invalid ["" "../proof" "Proof" "proof/name" "-proof" "proof-"]]
       (is (thrown? Exception
                    (branch/request {::branch/configuration configuration
-                                    ::branch/name invalid}))))))
+                                    ::branch/name invalid}))))
+    (is (= ::branch/status
+           (last (:malli/schema (meta #'branch/status)))))
+    (is (= [:vector ::branch/status]
+           (last (:malli/schema (meta #'branch/inventory)))))))
 
 (defn- signal-source-config [directory socket]
   (-> ((deref #'process-test/signal-fixture-config) directory)
@@ -399,6 +404,9 @@
         create-mode (atom :drop)
         requests (atom [])
         process-events (atom [])
+        block-next-stop? (atom false)
+        stop-entered (promise)
+        release-stop (promise)
         write-edn! state/write-edn!
         target-name "trial-route"
         target-attachment (coordinate/attachment fork-head)
@@ -517,7 +525,11 @@
                           #(swap! process-events conj
                                   [:ensure (:seon.dev.process/id spec)])))))
                     process/stop!
-                    (fn [_ id] (swap! process-events conj [:stop id]))
+                    (fn [_ id]
+                      (swap! process-events conj [:stop id])
+                      (when (compare-and-set! block-next-stop? true false)
+                        (deliver stop-entered true)
+                        @release-stop))
                     process/ownership-conflicts (fn [_ _] [])]
         (is (thrown-with-msg?
              Exception #"rejected a branch lifecycle request"
@@ -534,12 +546,22 @@
               "launch retains the immutable creation cut")
           (is (= 2 @create-attempts))
           (is (= [[:ensure process/pod-id]] @process-events)))
-        (let [restarted (branch/restart! request)]
-          (is (= :seon.dev.branch.phase/ready (::branch/phase restarted)))
+        (reset! block-next-stop? true)
+        (let [restarted (future (branch/restart! request))]
+          (is (true? (deref stop-entered 1000 false)))
+          (let [concurrent-open (future (branch/open! request))]
+            (is (= ::blocked (deref concurrent-open 100 ::blocked))
+                "open cannot interleave between restart stop and reconcile")
+            (deliver release-stop true)
+            (is (= :seon.dev.branch.phase/ready
+                   (::branch/phase (deref restarted 5000 ::timeout))))
+            (is (= :seon.dev.branch.phase/ready
+                   (::branch/phase (deref concurrent-open 5000 ::timeout)))))
           (is (= 2 @create-attempts)
               "pod-only restart never recreates the native branch")
           (is (= [[:ensure process/pod-id]
                   [:stop process/pod-id]
+                  [:ensure process/pod-id]
                   [:ensure process/pod-id]]
                  @process-events)))
         (let [inventory-path
@@ -547,11 +569,14 @@
                             "trial.edn"))
               retained (state/read-edn lifecycle-path)]
           (state/write-edn! inventory-path retained)
-          (let [status (first (branch/inventory source-config))]
+          (let [inventory (branch/inventory source-config)
+                status (first inventory)]
+            (is (m/validate [:vector ::branch/status] inventory))
             (is (= "trial" (::branch/runtime-cluster status)))
             (is (= fork-head (::branch/coordinate-at-launch status)))
             (is (= (::branch/launch-descriptor retained)
                    (::branch/launch-descriptor status)))
+            (is (m/validate ::branch/status status))
             (is (= :seon.dev.target.status/down
                    (:seon.dev.target/status status))))
           (fs/delete-if-exists inventory-path))
@@ -567,6 +592,7 @@
           (is (= advanced-head (::branch/target-head closed)))
           (is (= [[:ensure process/pod-id]
                   [:stop process/pod-id]
+                  [:ensure process/pod-id]
                   [:ensure process/pod-id]
                   [:stop process/pod-id]]
                  @process-events))
@@ -639,6 +665,7 @@
         (branch/close! {::branch/configuration source-config
                         ::branch/lifecycle-path lifecycle-path}))
       (finally
+        (deliver release-stop true)
         (uds/close-request-server! server)
         (fs/delete-tree directory)))))
 
