@@ -61,17 +61,19 @@
                   [:map {:closed true}
                    [::completion-claim ::completion-claim]
                    [::expected-coordinate ::expected-coordinate]])
+(schema/register! ::record-success
+                  [:map {:closed true}
+                   [::ok? [:= true]]
+                   [::recorded? ::recorded?]
+                   [::already-completed? ::already-completed?]
+                   [::completion ::completion]
+                   [::completion-coordinate ::completion-coordinate]])
+(schema/register! ::record-failure
+                  [:map {:closed true}
+                   [::ok? [:= false]]
+                   [:seon/error :map]])
 (schema/register! ::record-response
-                  [:or
-                   [:map {:closed true}
-                    [::ok? [:= true]]
-                    [::recorded? ::recorded?]
-                    [::already-completed? ::already-completed?]
-                    [::completion ::completion]
-                    [::completion-coordinate ::completion-coordinate]]
-                   [:map {:closed true}
-                    [::ok? [:= false]]
-                    [:seon/error :map]]])
+                  [:or ::record-success ::record-failure])
 
 (schema/register!
  ::readiness-response
