@@ -279,17 +279,39 @@ completion, and split admission primitives are sufficient, but the current
 `seon.client/start-runtime!` ordering is not: autonomous attach can install
 schema, boot, config, and crash-recovery writes before restore evidence is
 validated, while both autonomous and non-autonomous cold calls admit internally
-before an external completion call can close the transition. The next in-place
-runtime unit is one optional closed, digest-bound restore startup value in the
-existing launch/process descriptor, followed by a fresh main attach with writes
-closed, exact intent/admin/blob validation, preserve-only reconstruction,
-`prepare-committed!`, root/boot completion recording, and
-`admit-prepared!` of that same generation. Autonomy and readiness start last;
-intent deletion remains the external operator's durable inverse. No restore-
-only boot path, callback, status, or ambient intent-file reread is permitted.
-The transaction-coordinate resolver is complete at `b2461d64`; the Proximum
+before an external completion call can close the transition. Commit `c2b4013d`
+completes the first in-place runtime unit: one optional closed, digest-bound
+restore startup value travels through the existing launch descriptor and its
+exact `pr-str` process publication. It contains only the authoritative frozen
+intent identity/digests/consumer map, exact admin success, and exact blob
+success. Relational validation derives agreement on intent, plan, reachable
+blobs, selected target, the required pod generation member, and the descriptor's
+actual forced-main coordinate; ordinary descriptor bytes remain unchanged.
+Focused proof passes launch 7 tests/47 assertions, blob 21/148, admin 9/53, and
+operator restore 9/57. The remaining in-place unit is a fresh main attach with
+writes closed, exact startup validation, preserve-only reconstruction,
+`prepare-committed!`, root/boot completion recording, and `admit-prepared!` of
+that same generation. Autonomy and readiness start last; intent deletion
+remains the external operator's durable inverse. No restore-only boot path,
+callback, status, or ambient intent-file reread is permitted. The
+transaction-coordinate resolver is complete at `b2461d64`; the Proximum
 force-secondary repair remains the hard predecessor of the destructive
-integrated gate.
+integrated gate. A complete CLJS checkpoint also exposed that the globally
+derived restore-id generator policy currently precedes installation of the
+restore completion schema in `agent-bootstrap-attrs`; the initial-schema owner
+must install the full completion closure before policy publication without
+weakening validation.
+
+The exact inverse contract is grounded at
+[[research/retained-head-restore-undo-contract-audit-2026-07-15]]. Undo is not a
+reverse-datom operation: it retains the actual current main head as a redo
+point, selects the prior completion's exact retained undo head, and reuses the
+same force/reconstruction/completion transition. Current intent derivation can
+still label any structurally valid retained target as `undo`; the future
+operator selector must bind it to one prior completion's database id, undo
+branch, source commit, and source transaction before intent publication. That
+gap is tracked at
+[[../../seon/issues/undo-target-is-not-bound-to-retained-completion]].
 
 The first operator-only restore slice now owns one closed immutable intent and
 derives its next command from the current main coordinate, an explicitly
