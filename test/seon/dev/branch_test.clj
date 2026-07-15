@@ -172,9 +172,11 @@
 
           (= cut :seon.dev.branch-test.cut/cleanup-failure)
           (assoc #'process/stop!
-                 (fn [_ id]
-                   (throw (ex-info "injected retained-pod inverse failure"
-                                   {:seon.dev.process/id id}))))
+                 (fn [configuration id & _]
+                   (when (process/read-process configuration id)
+                     (throw
+                      (ex-info "injected retained-pod inverse failure"
+                               {:seon.dev.process/id id})))))
 
           (#{:seon.dev.branch-test.cut/before-spawn
              :seon.dev.branch-test.cut/ready-publication} cut)
@@ -405,6 +407,7 @@
         create-mode (atom :drop)
         requests (atom [])
         process-events (atom [])
+        stop-classification (atom :seon.dev.process.classification/absent)
         block-next-stop? (atom false)
         stop-entered (promise)
         release-stop (promise)
@@ -525,12 +528,41 @@
                           (:seon.dev.process/id spec)
                           #(swap! process-events conj
                                   [:ensure (:seon.dev.process/id spec)])))))
-                    process/stop!
-                    (fn [_ id]
-                      (swap! process-events conj [:stop id])
+                    process/clean-or-force!
+                    (fn [{:seon.dev.process/keys [operation targets]}]
+                      (swap! process-events conj
+                             [:clean-or-force operation targets])
                       (when (compare-and-set! block-next-stop? true false)
                         (deliver stop-entered true)
-                        @release-stop))
+                        @release-stop)
+                      (if (= :seon.dev.process.classification/containment-uncertain
+                             @stop-classification)
+                        (throw
+                         (ex-info
+                          "injected retained pod containment uncertainty"
+                          {:seon.dev.process/classification
+                           @stop-classification
+                           :seon.dev.process/results []}))
+                        (let [result
+                              {:seon.dev.process/operation operation
+                               :seon.dev.process/classification
+                               @stop-classification
+                               :seon.dev.process/budget-ms 1
+                               :seon.dev.process/elapsed-ms 0
+                               :seon.dev.process/results
+                               [(cond->
+                                 {:seon.dev.process/id process/pod-id
+                                  :seon.dev.process/classification
+                                  @stop-classification}
+                                  (= :seon.dev.process.classification/forced
+                                     @stop-classification)
+                                  (assoc
+                                   :seon.dev.process/reason
+                                   :seon.dev.process.reason/incomplete-application))]}]
+                          result)))
+                    process/stop!
+                    (fn [_ id]
+                      (swap! process-events conj [:stop id]))
                     process/ownership-conflicts (fn [_ _] [])]
         (is (thrown-with-msg?
              Exception #"rejected a branch lifecycle request"
@@ -546,7 +578,63 @@
                                  ::coordinate/coordinate]))
               "launch retains the immutable creation cut")
           (is (= 2 @create-attempts))
-          (is (= [[:ensure process/pod-id]] @process-events)))
+          (is (= [[:clean-or-force
+                   :seon.dev.process.operation/retained-restart
+                   #{process/pod-id}]
+                  [:ensure process/pod-id]]
+                 @process-events)))
+        (reset! process-events [])
+        (reset! stop-classification
+                :seon.dev.process.classification/containment-uncertain)
+        (let [request-count (count @requests)]
+          (is (thrown-with-msg?
+               Exception #"retained pod containment uncertainty"
+               (branch/open! request)))
+          (let [retained (state/read-edn lifecycle-path)]
+            (is (= :seon.dev.branch.state/open
+                   (::branch/desired-state retained)))
+            (is (= :seon.dev.branch.phase/stopping-pod
+                   (::branch/phase retained)))
+            (is (nil? (::branch/stop-result retained))))
+          (is (= request-count (count @requests))
+              "uncertain open replacement performs no writer request")
+          (is (= [[:clean-or-force
+                   :seon.dev.process.operation/retained-restart
+                   #{process/pod-id}]]
+                 @process-events)
+              "uncertain open replacement never reaches ensure"))
+        (reset! stop-classification
+                :seon.dev.process.classification/forced)
+        (reset! process-events [])
+        (let [recovered (branch/open! request)]
+          (is (= :seon.dev.branch.phase/ready (::branch/phase recovered)))
+          (is (= :seon.dev.process.classification/forced
+                 (get-in recovered
+                         [::branch/stop-result
+                          :seon.dev.process/classification]))))
+        (reset! process-events [])
+        (reset! stop-classification
+                :seon.dev.process.classification/containment-uncertain)
+        (let [request-count (count @requests)]
+          (is (thrown-with-msg?
+               Exception #"retained pod containment uncertainty"
+               (branch/restart! request)))
+          (let [retained (state/read-edn lifecycle-path)]
+            (is (= :seon.dev.branch.state/open
+                   (::branch/desired-state retained)))
+            (is (= :seon.dev.branch.phase/stopping-pod
+                   (::branch/phase retained)))
+            (is (nil? (::branch/stop-result retained))))
+          (is (= request-count (count @requests))
+              "uncertain restart performs no writer request")
+          (is (= [[:clean-or-force
+                   :seon.dev.process.operation/retained-restart
+                   #{process/pod-id}]]
+                 @process-events)
+              "uncertain restart never opens the replacement"))
+        (reset! stop-classification
+                :seon.dev.process.classification/absent)
+        (reset! process-events [])
         (reset! block-next-stop? true)
         (let [restarted (future (branch/restart! request))]
           (is (true? (deref stop-entered 1000 false)))
@@ -554,15 +642,24 @@
             (is (= ::blocked (deref concurrent-open 100 ::blocked))
                 "open cannot interleave between restart stop and reconcile")
             (deliver release-stop true)
-            (is (= :seon.dev.branch.phase/ready
-                   (::branch/phase (deref restarted 5000 ::timeout))))
+            (let [restarted-record (deref restarted 5000 ::timeout)]
+              (is (= :seon.dev.branch.phase/ready
+                     (::branch/phase restarted-record)))
+              (is (= :seon.dev.process.classification/absent
+                     (get-in restarted-record
+                             [::branch/stop-result
+                              :seon.dev.process/classification]))))
             (is (= :seon.dev.branch.phase/ready
                    (::branch/phase (deref concurrent-open 5000 ::timeout)))))
           (is (= 2 @create-attempts)
               "pod-only restart never recreates the native branch")
-          (is (= [[:ensure process/pod-id]
-                  [:stop process/pod-id]
+          (is (= [[:clean-or-force
+                   :seon.dev.process.operation/retained-restart
+                   #{process/pod-id}]
                   [:ensure process/pod-id]
+                  [:clean-or-force
+                   :seon.dev.process.operation/retained-restart
+                   #{process/pod-id}]
                   [:ensure process/pod-id]]
                  @process-events)))
         (let [inventory-path
@@ -585,17 +682,45 @@
           (fs/create-dirs path))
         (spit http-port-file "7891\n")
         (reset! target-head advanced-head)
+        (reset! process-events [])
+        (reset! stop-classification
+                :seon.dev.process.classification/containment-uncertain)
+        (let [request-count (count @requests)]
+          (is (thrown-with-msg?
+               Exception #"retained pod containment uncertainty"
+               (branch/close!
+                {::branch/configuration source-config
+                 ::branch/lifecycle-path lifecycle-path})))
+          (let [retained (state/read-edn lifecycle-path)]
+            (is (= :seon.dev.branch.state/closed
+                   (::branch/desired-state retained)))
+            (is (= :seon.dev.branch.phase/stopping-pod
+                   (::branch/phase retained)))
+            (is (nil? (::branch/stop-result retained))))
+          (is (= request-count (count @requests))
+              "uncertain close cannot ensure, release, or delete")
+          (is @branch-exists?)
+          (is (= [[:clean-or-force
+                   :seon.dev.process.operation/retained-close
+                   #{process/pod-id}]]
+                 @process-events)))
+        (reset! stop-classification
+                :seon.dev.process.classification/forced)
         (let [closed
               (branch/close!
                {::branch/configuration source-config
                 ::branch/lifecycle-path lifecycle-path})]
           (is (= :seon.dev.branch.phase/closed (::branch/phase closed)))
           (is (= advanced-head (::branch/target-head closed)))
-          (is (= [[:ensure process/pod-id]
-                  [:stop process/pod-id]
-                  [:ensure process/pod-id]
-                  [:ensure process/pod-id]
-                  [:stop process/pod-id]]
+          (is (= :seon.dev.process.classification/forced
+                 (get-in closed [::branch/stop-result
+                                 :seon.dev.process/classification])))
+          (is (= [[:clean-or-force
+                   :seon.dev.process.operation/retained-close
+                   #{process/pod-id}]
+                  [:clean-or-force
+                   :seon.dev.process.operation/retained-close
+                   #{process/pod-id}]]
                  @process-events))
           (is (false? @branch-exists?))
           (is (not (fs/exists? lifecycle-path)))
@@ -622,7 +747,10 @@
           (is (thrown-with-msg?
                Exception #"injected ready publication failure"
                (branch/open! request))))
-        (is (= [[:ensure process/pod-id]
+        (is (= [[:clean-or-force
+                 :seon.dev.process.operation/retained-restart
+                 #{process/pod-id}]
+                [:ensure process/pod-id]
                 [:stop process/pod-id]]
                @process-events)
             "a newly started pod is drained before exact branch cleanup")
@@ -643,7 +771,10 @@
           (is (thrown-with-msg?
                Exception #"injected reused publication failure"
                (branch/open! request))))
-        (is (= [[:ensure process/pod-id]
+        (is (= [[:clean-or-force
+                 :seon.dev.process.operation/retained-restart
+                 #{process/pod-id}]
+                [:ensure process/pod-id]
                 [:ensure process/pod-id]]
                @process-events)
             "a converged pod is not stopped by another invocation's failure")

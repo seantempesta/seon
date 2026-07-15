@@ -45,6 +45,7 @@
 (schema/register! ::delete-request ::protocol/delete-branch-request)
 (schema/register! ::delete-response ::protocol/delete-branch-response)
 (schema/register! ::absence-response ::protocol/failed-response)
+(schema/register! ::stop-result process/clean-or-force-result-schema)
 
 (schema/register!
  ::process-status
@@ -131,7 +132,8 @@
   [::release-response {:optional true} ::release-response]
   [::delete-request {:optional true} ::delete-request]
   [::delete-response {:optional true} ::delete-response]
-  [::absence-response {:optional true} ::absence-response]])
+  [::absence-response {:optional true} ::absence-response]
+  [::stop-result {:optional true} ::stop-result]])
 
 (schema/register!
  ::status
@@ -401,6 +403,7 @@
         delete-request (::delete-request record)
         delete-response (::delete-response record)
         absence-response (::absence-response record)
+        stop-result (::stop-result record)
         desired (::desired-state record)
         phase (::phase record)
         allowed-phases
@@ -408,6 +411,7 @@
           :seon.dev.branch.state/open
           #{:seon.dev.branch.phase/intent-retained
             :seon.dev.branch.phase/branch-retained
+            :seon.dev.branch.phase/stopping-pod
             :seon.dev.branch.phase/pod-starting
             :seon.dev.branch.phase/ready}
           :seon.dev.branch.state/closed
@@ -446,6 +450,21 @@
                          record))
     (when create-response
       (require-create-response! record create-response))
+    (when stop-result
+      (let [expected-operation
+            (if (= desired :seon.dev.branch.state/closed)
+              :seon.dev.process.operation/retained-close
+              :seon.dev.process.operation/retained-restart)]
+        (when-not
+         (and (m/validate process/clean-or-force-result-schema stop-result)
+              (= expected-operation
+                 (:seon.dev.process/operation stop-result))
+              (= [process/pod-id]
+                 (mapv :seon.dev.process/id
+                       (:seon.dev.process/results stop-result))))
+          (consistency-fail!
+           "The retained pod stop result names another lifecycle."
+           record))))
     (when target-head
       (when-not (= (coordinate/attachment target-head)
                    (get-in descriptor
@@ -537,6 +556,21 @@
                     {:seon.dev.branch/process process/pod-id})))
   true)
 
+(defn- stop-retained-pod!
+  [lifecycle-path record configuration operation]
+  (let [stopping
+        (write-record!
+         lifecycle-path
+         (-> record
+             (dissoc ::stop-result)
+             (assoc ::phase :seon.dev.branch.phase/stopping-pod)))
+        result
+        (process/clean-or-force!
+         {:seon.dev.process/configuration configuration
+          :seon.dev.process/operation operation
+          :seon.dev.process/targets #{process/pod-id}})]
+    (write-record! lifecycle-path (assoc stopping ::stop-result result))))
+
 (defn- cleanup-private!
   [record]
   (let [descriptor (::launch-descriptor record)
@@ -587,14 +621,20 @@
   ([configuration lifecycle-path record]
    (close-record! configuration lifecycle-path record false))
   ([configuration lifecycle-path record pod-absence-proved?]
-   (let [closing (write-record!
-                  lifecycle-path
-                  (assoc record
-                         ::desired-state :seon.dev.branch.state/closed
-                         ::phase :seon.dev.branch.phase/stopping-pod))
-         target-config (branch-configuration configuration closing)]
-     (when-not pod-absence-proved?
-       (process/stop! target-config process/pod-id))
+   (let [closing-intent
+         (write-record!
+          lifecycle-path
+          (-> record
+              (dissoc ::stop-result)
+              (assoc ::desired-state :seon.dev.branch.state/closed
+                     ::phase :seon.dev.branch.phase/stopping-pod)))
+         target-config (branch-configuration configuration closing-intent)
+         closing
+         (if pod-absence-proved?
+           closing-intent
+           (stop-retained-pod!
+            lifecycle-path closing-intent target-config
+            :seon.dev.process.operation/retained-close))]
      (process-absent! target-config)
      (let [descriptor (::launch-descriptor closing)
           target-database (::launch/database descriptor)
@@ -658,11 +698,11 @@
           closed))))))
 
 (defn- open-under-lock!
-  [request acquire-owned!]
+  [request acquire-owned! initial-record pod-absence-proved?]
   (let [configuration (::configuration request)
         lifecycle-path (::lifecycle-path request)
         manifest (source-manifest! configuration)
-        retained (read-record! lifecycle-path)
+        retained (or initial-record (read-record! lifecycle-path))
         record
         (if retained
           (require-retained-request! retained request configuration)
@@ -680,7 +720,18 @@
                  target-config
                  (branch-configuration configuration created)
                  pod (get (process/specs target-config manifest) process/pod-id)
-                 converged? (process/converged? target-config pod)]
+                 converged? (process/converged? target-config pod)
+                 created
+                 (cond
+                   converged? created
+                   pod-absence-proved? created
+                   :else
+                   (let [stopped
+                         (stop-retained-pod!
+                          lifecycle-path created target-config
+                          :seon.dev.process.operation/retained-restart)]
+                     (process-absent! target-config)
+                     stopped))]
              ;; A converged pod proves this invocation did not acquire the
              ;; already-live branch runtime.
              (when converged? (reset! owned-branch nil))
@@ -715,7 +766,7 @@
      (fn [acquire-owned!]
        (state/with-lock
         configuration :branch 30000
-        #(open-under-lock! request acquire-owned!))))))
+        #(open-under-lock! request acquire-owned! nil false))))))
 
 (defn close!
   "Stop one retained branch pod and delete its exact current native branch."
@@ -751,12 +802,18 @@
                 (or (read-record! lifecycle-path)
                     (throw (ex-info "No retained branch intent exists."
                                     {::lifecycle-path lifecycle-path})))
-                retained
-                (require-retained-request! record open-request configuration)]
-            (when (::launch-descriptor retained)
-              (process/stop! (branch-configuration configuration retained)
-                             process/pod-id))
-            (open-under-lock! open-request acquire-owned!))))))))
+                _ (require-retained-request! record open-request configuration)]
+            (if (::launch-descriptor record)
+              (let [target-config
+                    (branch-configuration configuration record)
+                    stopped
+                    (stop-retained-pod!
+                     lifecycle-path record target-config
+                     :seon.dev.process.operation/retained-restart)]
+                (process-absent! target-config)
+                (open-under-lock! open-request acquire-owned! stopped true))
+              (open-under-lock!
+               open-request acquire-owned! record false)))))))))
 
 (defn- retained-status
   [configuration lifecycle-path record]
