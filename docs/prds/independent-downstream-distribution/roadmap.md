@@ -54,6 +54,19 @@ Implementation waits for the runtime/database contracts named by the
 high-level [[../runtime-reliability/roadmap]] ledger; research and manifest
 specification may proceed independently.
 
+The pending guarded-force dependency publication is reconciled at
+[[research/proximum-datahike-publication-path-2026-07-15]]. The exact
+source-build mechanism is public HTTPS Git dependencies pinned by full SHA,
+followed by a release manifest that binds those SHAs to the standalone writer
+digest. Datahike already supports cold Git preparation, but its final
+integration must expose `src-secondary` through its declared paths. Proximum
+commit `fb6572c…` is local-only, lacks cold Java prep, and is based on upstream
+`v0.1.25`; upstream `v0.1.26`/`c1235796…` already owns the Maven version the
+local commit count would produce. Forward-port, checked-in-Java prep, public
+fork creation, and final public SHAs remain prerequisites to changing Seon's
+production pins. ACME and the current root dependencies remain untouched until
+those immutable coordinates exist.
+
 ## Ordered work
 
 1. Freeze a versioned compatibility manifest for source, database protocol,

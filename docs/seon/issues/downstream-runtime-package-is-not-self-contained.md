@@ -48,6 +48,15 @@ operator, compatibility manifest, or one-command release/downstream build.
   Exact source is also absent for Clojure, tools.build, superv.async, and
   partial-cps, so the compatibility contract is not grounded in every selected
   implementation.
+- The guarded Proximum force commit `fb6572c…` is local-only, based on upstream
+  `v0.1.25`, and cannot be published as `0.1.26`: upstream tag and Clojars
+  version `0.1.26` already identify different commit `c1235796…`. Proximum also
+  lacks `:deps/prep-lib`, so a cold Git dependency would expose Java source but
+  not its required compiled classes.
+- Datahike's exact Git dependency supports cold Java preparation, but its
+  declared `:paths` omit `src-secondary`. The source writer therefore still
+  copies the adapter from `reference-code/datahike/src-secondary` instead of
+  consuming the exact public dependency closure.
 
 Full evidence and the proposed artifact boundary are in
 [[../../prds/independent-downstream-distribution/research/independent-acme-distribution-audit-2026-07-14]].
@@ -55,6 +64,9 @@ Current-head reconciliation and parallel implementation order are in
 [[../../prds/independent-downstream-distribution/research/acme-artifact-boundary-reconciliation-2026-07-14]].
 The refreshed source ledger and next offline executable slice are in
 [[../../prds/independent-downstream-distribution/research/no-source-package-inventory-slice-2026-07-15]].
+The exact Proximum/Datahike public-Git cutover, upstream divergence, cold-prep
+contract, and source-absent writer/SDK proof are in
+[[../../prds/independent-downstream-distribution/research/proximum-datahike-publication-path-2026-07-15]].
 
 ## Owner
 
@@ -77,6 +89,13 @@ no-source acceptance fixture.
   absolute producer paths, or mutable dependency selection.
 - The release binds exact maintained dependency identities and rejects a mixed
   writer/pod/SDK/config protocol set before database mutation.
+- The tested Proximum and Datahike commits are reachable by public HTTPS Git
+  SHA; a disposable-cache producer build prepares both, exposes Datahike's
+  secondary adapter without `reference-code/`, and resolves no local root or
+  unpublished Maven coordinate.
+- Proximum preparation compiles checked-in generated Java, while release CI
+  regenerates it separately and requires a clean diff. Two cold builds produce
+  the same normalized writer digest.
 - The no-source proof exercises consumer source, dependencies, config, routes,
   renderers, brand CSS, MCP CLJ/CLJS evaluation, restart, and database readback.
 - Every selected dependency has exact mirrored source, and one pure package
