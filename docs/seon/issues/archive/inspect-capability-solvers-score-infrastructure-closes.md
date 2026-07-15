@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, research, flow]
 ---
@@ -69,3 +69,19 @@ weakening the capability default.
 - One admitted static-pod run injects each infrastructure terminal state and
   proves that no capability number is published, while a completed control run
   reaches the unchanged upstream scorer.
+
+## Resolution
+
+Resolved by `f13ecc33`. The static and ephemeral capability solvers now record
+the pod result and immediately apply the shared scorable-state guard. The
+timeout-honesty contract opts into the distinctly named
+`seon_diagnostic_pod_solver`; the ordinary frozen-tool task no longer carries a
+second guard. BFCL composition proves parsing is never reached after timeout,
+`:error`, or `:quiesced`, while completed controls still reach the unchanged
+upstream AST and frozen-task scorers.
+
+The scorecard reducer classifies the three terminal states independently as
+`solve_timeout`, `run_error`, and `run_quiesced` before considering a native
+sample error or scorer value. Admitted static `run_bench` fixtures retain the
+source identity and terminal evidence as errored samples with no scores. The
+complete offline checkpoint passes 403 tests with eight expected skips.

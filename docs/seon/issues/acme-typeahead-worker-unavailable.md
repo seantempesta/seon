@@ -27,10 +27,12 @@ worker endpoint, implementation, weights, or transport state that actually
 failed.
 
 The initial native log incorrectly carried an ordinary incorrect milestone
-score. A scorable-state guard now rejects timeout and `:error` closes on the
-task paths that invoke it, but the common static-pod solver does not yet apply
-that guard. [[inspect-capability-solvers-score-infrastructure-closes]] owns the
-remaining shared-boundary correction.
+score. Commit `f13ecc33` closes that separate scoring leak: the common
+capability solver now rejects timeout, `:error`, and `:quiesced` before parsing
+or scoring, and the scorecard classifies each independently. This issue remains
+open for the worker identity, readiness, and successful static-ACME evidence in
+its acceptance contract; the resolved shared-boundary correction is archived
+at [[inspect-capability-solvers-score-infrastructure-closes]].
 
 ## Owner
 

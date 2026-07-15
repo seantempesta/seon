@@ -23,7 +23,7 @@ creating a benchmark-only context or runtime.
 
 ## Current state
 
-The synchronized Inspect environment currently passes **321 tests with eight
+The synchronized Inspect environment currently passes **403 tests with eight
 expected skips**, and current source contains standard `inspect_evals` task
 adapters, BFCL and SWE-bench arms, deterministic oracles, frozen dataset/image
 metadata, append-only scorecards, planning trajectory scorers, a historical
@@ -72,10 +72,18 @@ The 2026-07-15 reconciliation makes the model-evidence boundary explicit:
 - one Qwen 3.5 2B BFCL success and one Qwen2.5 Coder 0.5B database failure are
   diagnostics, not the representative 90% small-model graduation matrix.
 
-The focused current-source audit gate passes 83 tests across planning,
-autocomplete-manifest verification, frozen ordinary-tool tasks, and the BFCL
-adapter. The protected 16-row Celsius sample is narrow untracked evidence and
-is not admitted into the graduation battery.
+The capability-score admission blocker is closed at `f13ecc33`. Static and
+ephemeral capability solvers now record terminal evidence and apply the shared
+scorable-state guard before any task parser or scorer. Timeout, `:error`, and
+`:quiesced` therefore become native errored/unscored samples; the scorecard
+independently reduces them to `solve_timeout`, `run_error`, and
+`run_quiesced`. The explicitly named diagnostic-only raw solver preserves the
+timeout-honesty measurement. Direct BFCL and frozen static composition tests,
+completed controls against their unchanged scorers, and admitted `run_bench`
+terminal fixtures are included in the 403-test complete offline gate.
+
+The protected 16-row Celsius sample is narrow untracked evidence and is not
+admitted into the graduation battery.
 
 Historical stable/display/pin/plan-pilot evidence is classified and hash-backed
 in the runtime-reliability preservation audits. It remains evidence to replay,
@@ -103,7 +111,7 @@ not code to cherry-pick. Training and paid model trials remain paused.
    reviewed framework/task/provider world; deterministic revision, dirty-
    source, installed-origin/version, provider, lock, and native-log checks gate
    task construction and run finalization. The native log carries the admitted
-   source map. Focused proof is 27 tests; the complete offline gate is 321
+   source map. Focused proof is 27 tests; the complete offline gate is 403
    passed/eight skipped.
 2. **Live ownership.** Implement the operator lease, then prove concurrent
    disjoint samples, dynamic CLJ/CLJS discovery, identity-preserving restart,

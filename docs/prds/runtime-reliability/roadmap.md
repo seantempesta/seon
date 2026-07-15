@@ -439,10 +439,15 @@ gate at 25 tests/95 assertions. A clean ACME rebuild remains ordered after the
 current shared runtime owners commit; this evidence does not authorize a mixed
 source restart.
 
-Inspect source/run admission is now content-pinned and required in native run
-metadata; the synchronized offline environment passes 321 tests with eight
-expected skips. This closes source-attribution drift, not lifecycle isolation,
-canonical autocomplete replay/scoring, or the model graduation battery.
+Inspect source/run admission is content-pinned and required in native run
+metadata; the synchronized offline environment passes 403 tests with eight
+expected skips. Commit `f13ecc33` also closes the capability-score admission
+blocker: static and ephemeral capability solvers reject timeout, `:error`, and
+`:quiesced` after recording evidence but before parsing/scoring, the diagnostic
+raw path is explicit, and the scorecard independently classifies all three.
+This closes source-attribution and infrastructure-score contamination, not
+lifecycle isolation, canonical autocomplete replay/scoring, or the model
+graduation battery.
 
 The agentic tool-refinement handback is reconciled in
 [[../inspect-autocomplete-evidence/research/agentic-inspect-autocomplete-reconciliation-2026-07-14]].

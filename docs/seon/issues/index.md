@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (15)
+## Blocker (14)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -27,7 +27,6 @@ See `README.md` for the convention.
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
 | [Prove database workflow answers from retained query evidence](database-workflow-scorer-lacks-query-result-evidence.md) | blocker | agent |
-| [Reject infrastructure closes in every Inspect capability task](inspect-capability-solvers-score-infrastructure-closes.md) | blocker | agent |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
 
 ## Friction (33)
