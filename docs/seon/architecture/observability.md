@@ -64,6 +64,10 @@ flag:
   response model/fingerprint/request identity. The adapter consumes that one
   resolved value without rereading mutable config. Missing response fields stay
   absent; credentials, headers, and signed parameters never enter evidence.
+  Evidence-size policy is read from the config singleton in that same immutable
+  value. An absent policy or rejected optional identity makes formal evidence
+  incomplete without changing the provider request, model output, usage, or
+  successful outcome; rejected bytes never enter an error value.
 
 **Datom vs blob is decided by size, never by kind.** The DB stores projections
 and small values; large text — a prompt, a raw reply, a big eval result —
@@ -247,15 +251,16 @@ path, await the derived `:idle` of the run it woke, return the truthful
 reply plus termination metadata (turns/evals scoped to this request's
 window, closed-reason, timed-out), an ordered `eval_evidence` projection of
 that same window's eval ids, times, sources, success facts, and present
-narration, plus the ordered bounded provider-attempt facts connected to those
-turns. The pure `seon.ai/resolved-config` reconstructs configuration intent at
-each attempt coordinate; stored attempt facts preserve non-derivable response
+narration, the bounded captured database-operation evidence attached to those
+evals, plus the ordered bounded provider-attempt facts connected to those turns.
+The pure `seon.ai/resolved-config` reconstructs configuration intent at each
+attempt coordinate; stored attempt facts preserve non-derivable response
 identity and outcome. A response-time final coordinate is never mislabeled as
 call evidence. Inspect AI copies the projection unchanged and rejects missing
-or drifting transport evidence before capability scoring. Inspect AI drives per-sample
-ephemeral clusters by port through this same production boundary; there is no
-in-process evaluator lifecycle. The answer key never enters the pod — scoring
-stays host-side. Benchmark vocabulary is harness-side only.
+or drifting transport evidence before capability scoring. Inspect AI drives
+per-sample ephemeral clusters by port through this same production boundary;
+there is no in-process evaluator lifecycle. The answer key never enters the pod
+— scoring stays host-side. Benchmark vocabulary is harness-side only.
 
 An explicit `timeout_ms` is a caller-selected experiment bound. When it is
 absent, the door derives its wait duration from the same frozen database run
@@ -266,11 +271,15 @@ whether its source was the request or database; Inspect retains both in the
 native sample metadata. These are derived evidence, not another config value.
 
 The eval projection is derived from the same final immutable database value
-and exact turn-entity set used for the response counts. It never contains eval
-results, printed output, exception stacks, or source dumps unrelated to the
-request. Attribute absence remains absence in the JSON projection. Inspect
-consumes this production response directly; it does not issue arbitrary forms
-through the writer REPL to reconstruct eval rows.
+and exact turn-entity set used for the response counts. General eval results,
+printed output, exception stacks, and unrelated source dumps never enter the
+door. An eval may carry a content-addressed vector of database operations
+captured by the ordinary `seon.db` observer. The final snapshot validates its
+blob size, schema, order, source, and complete coordinate before projecting a
+lossless bounded tagged value; absence or invalid evidence becomes a bounded
+status, never a preview or parser error. Inspect consumes this production
+response directly; it does not issue arbitrary forms through the writer REPL
+to reconstruct eval rows.
 
 Standard Inspect tasks measure the selected model and scorer. Pod-backed Inspect
 tasks measure Seon's production agent/runtime behavior through this door; the
