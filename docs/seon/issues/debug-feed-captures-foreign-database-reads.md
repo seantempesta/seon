@@ -57,3 +57,19 @@ debug-specific cache or another listener.
   serialization, or token estimation for unchanged active units.
 - A relevant transaction updates exactly the affected open debug unit, while
   closed units perform no reads or rendering.
+
+## Production fix — 2026-07-15
+
+The debug feed now declares the database-valued full-render contract and
+passes that exact value through its complete projection and render thunk.
+`seon.agent.debug/ctx-preview` accepts the same closed request value and uses
+it for both context and the cluster configuration/system block, so the final
+prompt cannot silently consult a newer ambient connection. Raw AI and HTML
+debug bodies likewise receive their activation/transition database value from
+the shared view-unit lifecycle.
+
+Focused tests prove explicit frozen system/config selection despite a newer
+ambient database and producer-free closed debug bodies. The issue stays open
+until the top-level coordinated restart repeats the live observation audit and
+shows replayable reads are retained as replayable, unrelated transactions do
+no debug work, and relevant transactions update only the affected unit.

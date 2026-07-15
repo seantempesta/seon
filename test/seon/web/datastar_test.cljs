@@ -239,8 +239,7 @@
           (fn [conn]
             (let [original db/*conn*
                   ai-renders (atom 0)
-                  html-renders (atom 0)
-                  !snapshot (atom {})]
+                  html-renders (atom 0)]
               (set! db/*conn* conn)
               (try
                 (with-redefs
@@ -271,7 +270,7 @@
                    (fn [_]
                      (swap! html-renders inc)
                      [:div "html"])]
-                  (let [projection (@#'debug/debug-projection agent-a !snapshot)
+                  (let [projection (@#'debug/debug-projection @conn agent-a)
                         catalog (:seon.web.debug/catalog projection)
                         exact-unit (some #(when (= -1
                                                     (get (::datastar/coordinate %)
@@ -284,7 +283,7 @@
                                            %)
                                         catalog)]
                     (@#'debug/debug-app-view
-                      agent-a "debug-test-view"
+                      @conn agent-a "debug-test-view"
                       (:seon.web.debug/snapshot projection)
                       catalog #{})
                     (is (= 1 @ai-renders)
@@ -292,7 +291,8 @@
                     (is (zero? @html-renders)
                         "all closed HTML twins remain producer-free stubs")
                     (is (str/includes?
-                          (html/->string (datastar/unit-element exact-unit true))
+                          (html/->string
+                           ((::datastar/producer exact-unit) @conn))
                           "ai")
                         "the exact assembled prompt is available behind one lazy unit")
                     (let [bar (get-in projection
@@ -301,10 +301,10 @@
                              (reduce + 0 (map ::debug/tokens
                                               (::debug/segments bar))))
                           "the visible breakdown sums to the exact prompt total"))
-                    (is (true? (::datastar/view-unit? html-unit))
-                        "exactly the first real HTML twin opts into the lifecycle")
+                    (is (every? ::datastar/view-unit? catalog)
+                        "every debug body uses the shared lifecycle")
                     (@#'debug/debug-app-view
-                     agent-a "debug-test-view"
+                     @conn agent-a "debug-test-view"
                      (:seon.web.debug/snapshot projection)
                      catalog #{(::datastar/token html-unit)})
                     (is (zero? @html-renders)

@@ -99,3 +99,27 @@ reconciliation when source changed after artifact publication; no process was
 started outside the operator. This does not close the issue: the remaining
 debug descriptors and whole-debug projection still own the legacy path named
 above.
+
+## Production migration — 2026-07-15
+
+All production debug descriptors now use the existing
+`seon.web.view-unit` lifecycle. Exact-prompt, raw-block, and every non-canvas
+HTML producer accept the transition's immutable database value; each has a
+stable renderer token, and closed descriptors remain producer-free stubs. The
+debug projection no longer retains a mutable snapshot atom or dereferences the
+ambient connection inside a render thunk. First paint and transaction renders
+thread one database value through context preview, configuration/system text,
+surface discovery, headers, state, turn count, and current-turn usage.
+
+The legacy zero-argument activation branch remains only for non-migrated
+generic test/consumer descriptors; the production debug catalog has no path to
+it. Focused source tests prove that every real debug descriptor opts into the
+shared lifecycle, inactive HTML remains unmaterialized, explicit database
+selection defeats a newer ambient config value, incomplete routing replays the
+captured read (replay-all), equivalent views share one producer/output, and
+first-then-final detach retains then releases the normalized unit state.
+
+This issue remains open for the coordinated live browser/gzip restart gate and
+fresh-full-render versus incremental stable-DOM convergence proof. Those gates
+are intentionally deferred to the top-level integration owner; no pod was
+restarted from this lane.

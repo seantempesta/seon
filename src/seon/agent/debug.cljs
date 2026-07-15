@@ -8,7 +8,8 @@
        system-specific mechanics, NOT the soul/any file), then the
        assembled AI-context via `seon.agent.ctx/render-context` — the SINGLE
        producer the loop's prompt path (`seon.agent.turn/render-prompt`)
-       also routes through, over the SAME unfiltered `@*conn*`. The
+       also routes through, over the SAME unfiltered immutable database
+       value. The
        `:seon.render/text` is byte-identical to what the LLM receives
        (system message + context), with an explicit boundary between
        them. Per-block texts (left pane) lead with the system block;
@@ -38,6 +39,7 @@
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
     [seon.agent.turn :as turn]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
     [seon.error :as error]
@@ -52,6 +54,7 @@
 (schema/register! :seon.agent.debug/request
   [:map
    [:seon.agent/id {:optional true} :seon.agent/id]
+   [:seon.db/db {:optional true} :seon.db/db-val]
    [:seon.render/formats {:optional true}
     [:enum #{:ai} #{:ai :html}]]])
 
@@ -78,15 +81,14 @@
 
 (defn- ctx-preview*
   "The resolved-id body of [[ctx-preview]] — renders the full prompt."
-  [id formats]
-  (let [;; THE SAME db the prompt path renders against — the live cluster
-        ;; conn, UNFILTERED. The loop renders the prompt over `@*conn*`
-        ;; ([[seon.agent.ctx/render-context]] / `render-prompt`); the web UI
-        ;; must use the SAME db value or it would not be byte-identical (and
+  [dbv id formats]
+  (let [;; The same immutable, unfiltered db value supplies every part of
+        ;; this preview. The loop renders the prompt over one `@*conn*`
+        ;; snapshot (`seon.agent.ctx/render-context` / `render-prompt`); the
+        ;; web UI must retain that exact value or it would not be byte-identical (and
         ;; the old per-agent `d/filter` actively DROPPED inbound peer-message
         ;; content whose datom lived in the peer's tx — the web UI lied).
-        db  @db/*conn*
-        ctx {:seon.agent/id id :seon.db/db db}
+        ctx {:seon.agent/id id :seon.db/db dbv}
         ;; Render the requested formats only. The debug page asks for AI here
         ;; and materializes individual HTML twins through view units; callers
         ;; that omit the option retain the original dual-render response.
@@ -98,10 +100,22 @@
         ;; passed, so this returns the cluster's `:seon.config/system-text`
         ;; datom when seeded, else the shipped default — the normal call's
         ;; system message.
-        system        (ai/effective-system-prompt {})
+        configured-system
+        (db/query {:seon.db/db dbv
+                   :seon.db/query
+                   '[:find ?system .
+                     :in $ ?config-id
+                     :where
+                     [?config :seon.config/id ?config-id]
+                     [?config :seon.config/system-text ?system]]
+                   :seon.db/args [config/cluster-config-id]})
+        system        (ai/effective-system-prompt
+                        {:seon.ai/system-prompt
+                         (or configured-system ctx/system-text)})
         ;; The FULL prompt = system + boundary + context, via the SAME fn
         ;; the adapters call so the two debug surfaces can't drift.
-        full-text     (ai/debug-full-prompt {:seon.ai/ctx text})]
+        full-text     (ai/debug-full-prompt {:seon.ai/ctx text
+                                             :seon.ai/system-prompt system})]
     {::ok?                        true
      :seon.render/text            full-text
      :seon.agent.ctx/rendered-blocks
@@ -130,15 +144,16 @@
    `:seon.agent.ctx/rendered-blocks` leads with the `:system` block, then the
    exact ordered context blocks with whichever render formats they declare.
    `:seon.render/token-estimate` counts the WHOLE
-   prompt (system included). Renders against the live `@*conn*` — the SAME
-   unfiltered db value the loop renders the prompt over — so the two are
-   byte-identical (no per-agent `d/filter` divergence). Errors are
+   prompt (system included). An explicit `:seon.db/db` freezes every read;
+   when omitted, one live `@*conn*` snapshot is selected. This is the same
+   unfiltered value the loop renders over, so the two are byte-identical (no
+   per-agent `d/filter` divergence). Errors are
    values: no id and no agent scope returns `::ok? false` plus a
    guiding `::error` — nothing throws."
   {:malli/schema [:=> [:cat :seon.agent.debug/request] :seon.agent.debug/ctx-response]}
-  [{:seon.agent/keys [id] formats :seon.render/formats}]
+  [{:seon.agent/keys [id] dbv :seon.db/db formats :seon.render/formats}]
   (if-let [id (or id (db/current-agent-id))]
-    (ctx-preview* id (or formats #{:ai :html}))
+    (ctx-preview* (or dbv @db/*conn*) id (or formats #{:ai :html}))
     {::ok?   false
      ::error (str "seon.agent.debug/ctx-preview: no agent-id — pass "
                   ":seon.agent/id or call inside (seon.db/with-agent id ...).")}))
