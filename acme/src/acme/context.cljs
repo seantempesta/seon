@@ -14,11 +14,9 @@
    `:canvas` would just be another supporting surface).
 
    So a third party shapes an agent's whole page with ZERO src/seon edits,
-   using two override surfaces:
+   using two extension surfaces:
    - the focal canvas via the pin attr `:seon.render.canvas/content`
-     ([[install-into!]] wires it to `acme.widget/broken-surface` to exercise
-     the calm canvas-hero error path through `acme.overrides`'
-     `error-response`);
+     ([[install-into!]] wires it to `acme.widget/dash`);
    - the supporting surfaces via `seon.agent.ctx/install!` — the SAME primitive
      the core seed uses. Each block's `:seon.render/html` is a qualified
      SYMBOL pointing at one of the Acme surface fns below; a block-html fn
@@ -50,40 +48,31 @@
 
    Uses the Seon override primitive `ctx/install!` (idempotent upsert-by-name).
 
-   Exercises both error seams with one throwing surface
-   (`acme.widget/broken-surface`):
-   - wired onto `:seon.render.canvas/content` → the focal canvas
-     (`seon.render/render-agent-canvas`) throws → the CALM CANVAS-HERO seam
-     `seon.render.canvas/error-response` (acme.overrides override);
-   - installed as the `:acme-broken` block → the slot path (`render`/`slot`)
-     throws → the `seon.render.canvas/error-card` seam (acme.overrides
-     override)."
+   Normal startup installs only healthy downstream renders. Consumers may wire
+   `acme.widget/broken-surface` explicitly when exercising the error-response
+   override; a deliberate failure is a test fixture, not default page state."
   [id]
   (db/with-agent id
-    (fn []
-      (.then
-        ;; Wire the canvas pin (`:seon.render.canvas/content` →
-        ;; render-agent-canvas → error-response) so the focal canvas hero +
-        ;; agent context exercise acme.overrides' error-response override.
+    (fn ^:async install-context []
+      (await (ctx/remove! :acme-broken))
+      ;; Wire the consumer's healthy dashboard into the focal canvas.
+      (await
         (db/transact!
           {:seon.db/tx-data
            [{:seon.agent/id id
-             :seon.render.canvas/content 'acme.widget/broken-surface}]})
-        (fn [_]
-          (ctx/install!
-            [{:seon.agent.ctx/name     :acme-surface
-              :seon.agent.ctx/priority 50
-              :seon.render/html        'acme.context/overlay-surface}
-             ;; The existing Acme dashboard (returns an HTML-response map,
-             ;; the canvas render contract) installed onto the context block
-             ;; `:seon.render/html` slot — does the slot path consume the
-             ;; html-response map contract?
-             {:seon.agent.ctx/name     :acme-widget
-              :seon.agent.ctx/priority 55
-              :seon.render/html        'acme.widget/dash}
-             {:seon.agent.ctx/name     :acme-broken
-              :seon.agent.ctx/priority 60
-              :seon.render/html        'acme.widget/broken-surface}]))))))
+             :seon.render.canvas/content 'acme.widget/dash}]}))
+      (await
+        (ctx/install!
+          [{:seon.agent.ctx/name     :acme-surface
+            :seon.agent.ctx/priority 50
+            :seon.render/html        'acme.context/overlay-surface}
+           ;; The existing Acme dashboard (returns an HTML-response map,
+           ;; the canvas render contract) installed onto the context block
+           ;; `:seon.render/html` slot — does the slot path consume the
+           ;; html-response map contract?
+           {:seon.agent.ctx/name     :acme-widget
+            :seon.agent.ctx/priority 55
+            :seon.render/html        'acme.widget/dash}])))))
 
 (defn ^:async install-all!
   "Install Acme's context blocks into every live agent.

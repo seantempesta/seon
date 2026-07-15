@@ -5,7 +5,8 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [malli.core :as m])
+            [malli.core :as m]
+            [seon.dev.state :as state])
   (:import [java.nio.charset StandardCharsets]
            [java.security MessageDigest]
            [java.time Instant]
@@ -36,6 +37,12 @@
    [:seon.dev.artifact/bootstrap-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
+
+(def ^:private writer-cache-schema
+  [:map
+   [:seon.dev.writer-cache/version [:= 1]]
+   [:seon.dev.writer-cache/input-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.writer-cache/writer-digest [:re #"[0-9a-f]{64}"]]])
 
 (defn- validate-manifest! [manifest]
   (when-not (m/validate artifact-manifest-schema manifest)
@@ -177,15 +184,84 @@
     (println (str "  ● " label " (" elapsed-ms "ms)"))
     result))
 
-(defn- build-source! [config]
+(defn- capture-command! [config argv]
+  (let [result (process/shell {:dir (:seon.dev.config/root config)
+                               :env (:seon.dev.config/environment config)
+                               :out :string
+                               :err :string
+                               :cmd argv})]
+    (str (:out result) "\n" (:err result))))
+
+(defn- build-lock-directory [config]
+  (fs/path (:seon.dev.config/root config) "tmp/seon-artifact-build"))
+
+(defn- writer-cache-path [config]
+  (str (fs/path (build-lock-directory config) "writer.edn")))
+
+(defn- writer-input-digest [config]
+  (let [root (:seon.dev.config/root config)
+        environment (:seon.dev.config/environment config)
+        java-command (get environment "JAVA_CMD" "java")]
+    (digest-values
+      ["writer-cache-version" 1
+       "local-inputs"
+       (digest-paths root ["build.clj"
+                           "deps.edn"
+                           "src"
+                           "reference-code/datahike/src-secondary"])
+       "clojure-cli" (capture-command! config ["clojure" "-Sdescribe"])
+       "writer-classpath" (capture-command! config
+                                             ["clojure" "-Spath" "-M:writer"])
+       "writer-tree" (capture-command! config
+                                        ["clojure" "-Stree" "-M:writer"])
+       "java-command" java-command
+       "java-runtime" (capture-command! config [java-command "-version"])])))
+
+(defn- read-writer-cache [config]
+  (try
+    (let [cache (state/read-edn (writer-cache-path config))]
+      (when (m/validate writer-cache-schema cache) cache))
+    (catch Throwable _ nil)))
+
+(defn- verified-writer-digest [config input-digest]
+  (let [cache (read-writer-cache config)
+        output (:seon.dev.config/writer-output config)]
+    (when (and (= input-digest
+                  (:seon.dev.writer-cache/input-digest cache))
+               (fs/regular-file? output))
+      (try
+        (let [actual (digest-jar output)]
+          (when (= actual (:seon.dev.writer-cache/writer-digest cache)) actual))
+        (catch Throwable _ nil)))))
+
+(defn- ensure-writer! [config]
+  ;; Dependency preparation precedes the fingerprint because a cold git
+  ;; dependency may need prep output before `-Spath` can resolve its basis.
   (run-step! config "prepare writer dependencies"
              ["clojure" "-X:deps" "prep" ":aliases" "[:writer]"])
+  (let [input-digest (writer-input-digest config)]
+    (if-let [writer-digest (verified-writer-digest config input-digest)]
+      (do
+        (println "  ● reuse canonical database server")
+        writer-digest)
+      (do
+        (run-step! config "warm writer classpath" ["clojure" "-P" "-M:writer"])
+        (run-step! config "build canonical database server"
+                   ["clojure" "-T:build" "writer-uber"])
+        (let [writer-digest (digest-jar
+                              (:seon.dev.config/writer-output config))]
+          (state/write-edn!
+            (writer-cache-path config)
+            {:seon.dev.writer-cache/version 1
+             :seon.dev.writer-cache/input-digest input-digest
+             :seon.dev.writer-cache/writer-digest writer-digest})
+          writer-digest)))))
+
+(defn- build-source! [config]
+  (ensure-writer! config)
   (run-step! config "prepare CLJS dependencies"
              ["clojure" "-X:deps" "prep" ":aliases" "[:cljs]"])
-  (run-step! config "warm writer classpath" ["clojure" "-P" "-M:writer"])
   (run-step! config "warm CLJS classpath" ["clojure" "-P" "-M:cljs"])
-  (run-step! config "build canonical database server"
-             ["clojure" "-T:build" "writer-uber"])
   ;; `--preflight` is explicitly the live embedding round-trip gate. Its
   ;; correct master-OFF result is exit 11, not a failed writer artifact.
   (when (get-in config [:seon.dev.config/environment "SEON_EMBED"])
@@ -204,6 +280,17 @@
              [(str (fs/path (:seon.dev.config/root config)
                             "bin/fix-bootstrap-macros"))])
   (run-step! config "build web CSS" ["npm" "run" "css:build"]))
+
+(defn- build-lock-configuration [config]
+  ;; Default and downstream targets intentionally own different lifecycle
+  ;; directories, but a source checkout publishes one writer jar, bootstrap,
+  ;; and CSS output. Derive their build lock from the checkout, not the target.
+  (assoc config :seon.dev.config/process-dir
+         (str (build-lock-directory config))))
+
+(defn- with-build-lock [config build]
+  (state/with-lock (build-lock-configuration config)
+                   :source-artifacts 1800000 build))
 
 (defn- output-manifest [config]
   (let [root (:seon.dev.config/root config)
@@ -256,20 +343,25 @@
   "Build and atomically publish one canonical artifact manifest."
   [config]
   (if (:seon.dev.config/source-checkout? config)
-    (do
-      (build-source! config)
-      (let [previous (read-manifest config)
-            manifest (output-manifest config)
-            changed (cond-> #{}
-                      (not= (:seon.dev.artifact/writer-digest previous)
-                            (:seon.dev.artifact/writer-digest manifest))
-                      (conj :seon.dev.artifact/writer)
+    (with-build-lock
+      config
+      #(do
+         (build-source! config)
+         ;; Keep output validation, hashing, and flavor-manifest publication
+         ;; inside the same lock. A following build may replace the canonical
+         ;; writer/bootstrap/CSS bytes as soon as this publication completes.
+         (let [previous (read-manifest config)
+               manifest (output-manifest config)
+               changed (cond-> #{}
+                         (not= (:seon.dev.artifact/writer-digest previous)
+                               (:seon.dev.artifact/writer-digest manifest))
+                         (conj :seon.dev.artifact/writer)
 
-                      (not= (:seon.dev.artifact/application-digest previous)
-                            (:seon.dev.artifact/application-digest manifest))
-                      (conj :seon.dev.artifact/application))]
-        (atomic-spit! (:seon.dev.config/artifact-manifest config) manifest)
-        (assoc manifest :seon.dev.artifact/changed changed)))
+                         (not= (:seon.dev.artifact/application-digest previous)
+                               (:seon.dev.artifact/application-digest manifest))
+                         (conj :seon.dev.artifact/application))]
+           (atomic-spit! (:seon.dev.config/artifact-manifest config) manifest)
+           (assoc manifest :seon.dev.artifact/changed changed))))
     (let [manifest (or (read-manifest config)
                        (throw (ex-info "Packaged Seon is missing its artifact manifest."
                                        {:seon.dev.artifact/path

@@ -53,3 +53,10 @@ enter compact tool context merely by being public. Focused proof: 66 tests,
 functions and 114 positive tool facts; the exact agent render drops the
 namespace block from 22,106 to 20,406 tokens while omitting the named internal
 operations and retaining the named capabilities.
+
+The complete CLJS checkpoint also found one synthetic typeahead menu fixture
+that still modeled public visibility as sufficient eligibility. Its seeded
+`my.plan/done!` row now carries the same positive agent-facing fact as a real
+offered function; the focused failed-offer suppression behavior again receives
+the expected menu offer without weakening the production filter.
+The complete isolated CLJS checkpoint passed 1,330 tests and 6,344 assertions.

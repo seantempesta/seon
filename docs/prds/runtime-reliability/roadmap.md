@@ -250,6 +250,33 @@ assertions. Both live CLJS classpaths resolve maintained Datahike `6f90b339…`,
 Konserve `df6818d4…`, superv.async `3e6ed755…`, and partial-cps `1e119b03…`;
 both writer artifacts use the same root `:writer` Datahike/Konserve basis.
 
+A later concurrent default restart and ACME start exposed one remaining shared
+source-build boundary: both target-local lifecycle locks could enter the fixed
+`writer-uber`, bootstrap, and CSS outputs at once, and ACME failed copying
+`target/database-server-classes/seon/items.cljs`. The implementation in
+[[research/source-artifact-build-concurrency-2026-07-14]] now brackets the
+complete source artifact transaction, hashing, and flavor-manifest publication
+with one checkout-derived kernel lock. Deterministic cross-target exclusion is
+the local gate. Sequential same-head builds had produced distinct
+timestamp-insensitive jar-content digests (`9c5a36d1…` default and `5247aa97…`
+ACME). The same lock now owns a persisted source/dependency/CLI/JDK fingerprint
+and verifies the canonical jar digest before reuse, so unchanged flavor builds
+invoke `writer-uber` once and publish one writer identity. Deterministic reuse,
+source/dependency/toolchain invalidation, and corrupt-jar recovery are green.
+The live gate is also complete: concurrent default and ACME restarts admitted
+only one `writer-uber`; ACME waited on the checkout lock and reused the verified
+canonical jar. Both targets reached ready and published writer digest
+`80054020…`. Their root and data gzip SSE feeds returned valid Datastar frames,
+both reported healthy instrumentation (801 default, 808 ACME), and ACME's
+normal root now renders its healthy downstream dashboard instead of installing
+the deliberate broken-surface fixture. Current-source MCP calls resolved and
+evaluated `default/root` and `acme/root` independently, and routed CLJ evals to
+both writer processes. The resulting complete regression checkpoint passes
+pod 1,330 tests/6,344 assertions, writer 68/388, and operator 103/606. Its only
+first-pass operator error was a stale generated Claude copy of the maintained
+Datastar skill; the canonical adapter projection repaired it and the repeated
+gate is green.
+
 Inspect remains deliberately on its previously proven installed framework
 build while the mutable source checkout is newer and dirty. Content-pinning
 that source dependency and recording it in run provenance is an open

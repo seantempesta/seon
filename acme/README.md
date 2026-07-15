@@ -30,7 +30,9 @@ the place we iterate on the "consume Seon without forking it" story.
 
 - **Function override** — `acme.overrides` `set!`s
   `seon.render.canvas/error-response` (late-binding through the global
-  var slot) for a calm broken-surface card. No seon-src edit.
+  var slot) for a calm broken-surface card. Normal startup renders the healthy
+  dashboard; explicitly pin `acme.widget/broken-surface` to exercise the error
+  seam. No seon-src edit.
 - **CSS / branding** — `acme/branding/acme.css` (via `SEON_BRAND_CSS`) plus
   `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE`, all set by `bin/acme`.
 

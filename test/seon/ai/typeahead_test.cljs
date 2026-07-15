@@ -411,6 +411,7 @@
                     {:seon.db/tx-data
                      [{:seon.fn/sym      "my.plan/done!"
                        :seon.fn/fn-var?  true
+                       :seon.fn/agent-facing? true
                        :seon.fn/arglists "([{:my.plan/keys [id]}])"}
                       {:seon.eval/agent  [:seon.agent/id a-id]
                        :seon.eval/at     (js/Date. 1000)

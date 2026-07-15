@@ -142,6 +142,25 @@ Inspect-style per-sample token lease: concurrent target-coordinate allocation,
 pinned frozen artifacts, and idempotent token-fenced release remain owned by
 the Inspect issue.
 
+## Default broken surface — 2026-07-14
+
+Server-side gzip SSE proof found that ACME's root route returned a valid
+Datastar frame containing only the deliberate `acme.widget/broken-surface`
+failure. `acme.context/install-into!` installed that fixture both as the focal
+canvas and as an unconditional supporting block for every live agent. That
+made the downstream product's normal page an error demonstration rather than
+a healthy customization example.
+
+Normal ACME startup now pins `acme.widget/dash` and installs only healthy
+supporting surfaces. The throwing renderer and downstream `error-response`
+override remain available for explicit failure tests; they are no longer
+installed as default database state. A source rebuild restarted ACME, removed
+the already persisted `:acme-broken` component through the canonical
+`seon.agent.ctx/remove!` surface, and reached ready beside the default target.
+Server-side gzip SSE proof for both `/agent/root/feed` and `/data/feed`
+returned Datastar frames with no broken-surface or render-error text; the root
+canvas rendered `Acme dashboard` with the downstream supporting surfaces.
+
 ## Owner
 
 The ACME downstream boundary: `bin/acme`, `config/acme.edn`, `acme/`, and the

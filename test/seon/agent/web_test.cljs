@@ -46,7 +46,11 @@
 (def ^:private fixture-dir
   (.resolve npath (str "tmp/web-test-" (.-pid js/process))))
 
-(defonce ^:private !saved-dir (atom nil))
+(defn- storage-view [writable-dir]
+  {:my.blob/writable-dir writable-dir
+   :my.blob/read-only-dirs []})
+
+(defonce ^:private !saved-storage-view (atom nil))
 (defonce ^:private !saved-env (atom nil))
 
 ;; The :public-only baseline every test starts from — the SSRF-safe policy.
@@ -54,14 +58,14 @@
 
 (use-fixtures :once
   {:before (fn []
-             (reset! !saved-dir @blob/!dir)
-             (reset! blob/!dir fixture-dir)
+             (reset! !saved-storage-view @blob/!storage-view)
+             (reset! blob/!storage-view (storage-view fixture-dir))
              (.rmSync nfs fixture-dir #js {:recursive true :force true})
              (reset! !saved-env (aget (.-env js/process) "SEON_WEB"))
              (aset (.-env js/process) "SEON_WEB" "1")
              (reset! int/!policy-override public-only))
    :after  (fn []
-             (reset! blob/!dir @!saved-dir)
+             (reset! blob/!storage-view @!saved-storage-view)
              (.rmSync nfs fixture-dir #js {:recursive true :force true})
              (reset! int/!policy-override nil)
              (if-some [v @!saved-env]

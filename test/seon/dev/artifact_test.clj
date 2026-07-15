@@ -2,7 +2,16 @@
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
             [clojure.test :refer [deftest is]]
-            [seon.dev.artifact :as artifact]))
+            [seon.dev.artifact :as artifact])
+  (:import [java.io FileOutputStream]
+           [java.util.jar JarEntry JarOutputStream]))
+
+(defn- write-test-jar! [path value]
+  (fs/create-dirs (fs/parent path))
+  (with-open [stream (JarOutputStream. (FileOutputStream. (str path)))]
+    (.putNextEntry stream (JarEntry. "example.txt"))
+    (.write stream (.getBytes (str value) "UTF-8"))
+    (.closeEntry stream)))
 
 (deftest artifact-digest-is-content-addressed
   (let [directory (fs/create-temp-dir {:prefix "seon-artifact-test-"})
@@ -59,6 +68,100 @@
                 :seon.dev.config/environment {}}]
     (is (= ["clj" "-M:cljs" "compile" "client"]
            (artifact/cljs-command config "compile" "client")))))
+
+(deftest source-artifact-builds-share-one-checkout-lock
+  (let [directory (fs/create-temp-dir {:prefix "seon-artifact-lock-test-"})
+        root (str directory)
+        default-config {:seon.dev.config/root root
+                        :seon.dev.config/process-dir
+                        (str (fs/path directory "default"))}
+        acme-config {:seon.dev.config/root root
+                     :seon.dev.config/process-dir
+                     (str (fs/path directory "acme"))}
+        acquired (promise)
+        release (promise)
+        second-started (promise)
+        second-entered (promise)]
+    (try
+      (let [first-build
+            (future
+              (#'artifact/with-build-lock
+               default-config
+               #(do (deliver acquired true) @release)))
+            _ (is (= true (deref acquired 2000 ::timeout)))
+            second-build
+            (future
+              (deliver second-started true)
+              (#'artifact/with-build-lock
+               acme-config
+               #(do (deliver second-entered true) true)))]
+        (is (= true (deref second-started 2000 ::timeout)))
+        (Thread/sleep 150)
+        (is (not (realized? second-entered))
+            "a downstream target cannot enter while the default build owns the checkout lock")
+        (deliver release true)
+        (is (= true (deref second-entered 2000 ::timeout)))
+        (is (= true (deref first-build 2000 ::timeout)))
+        (is (= true (deref second-build 2000 ::timeout))))
+      (finally
+        (deliver release true)
+        (fs/delete-tree directory)))))
+
+(deftest canonical-writer-reuses-and-invalidates-verified-output
+  (let [directory (fs/create-temp-dir {:prefix "seon-writer-cache-test-"})
+        root (str directory)
+        source (fs/path directory "src/example.clj")
+        output (str (fs/path directory
+                             "target/seon-database-server-standalone.jar"))
+        base {:seon.dev.config/root root
+              :seon.dev.config/environment {}
+              :seon.dev.config/writer-output output}
+        default-config (assoc base :seon.dev.config/process-dir
+                              (str (fs/path directory "default")))
+        acme-config (assoc base :seon.dev.config/process-dir
+                           (str (fs/path directory "acme")))
+        build-count (atom 0)
+        toolchain (atom "toolchain-a")
+        run-step
+        (fn [_config label _argv]
+          (when (= "build canonical database server" label)
+            (let [generation (swap! build-count inc)]
+              (write-test-jar! output (str "writer-" generation)))))]
+    (try
+      (fs/create-dirs (fs/parent source))
+      (spit (str (fs/path directory "build.clj")) "(ns build)")
+      (spit (str (fs/path directory "deps.edn")) "{}")
+      (spit (str source) "(ns example)")
+      (with-redefs [artifact/capture-command! (fn [_ _] @toolchain)
+                    artifact/run-step! run-step]
+        (let [default-digest (#'artifact/ensure-writer! default-config)
+              acme-digest (#'artifact/ensure-writer! acme-config)]
+          (is (= 1 @build-count)
+              "unchanged downstream build reuses the canonical writer")
+          (is (= default-digest acme-digest)
+              "both target manifests receive one verified writer identity")
+          (is (= default-digest
+                 (:seon.dev.writer-cache/writer-digest
+                   (edn/read-string
+                     (slurp (#'artifact/writer-cache-path acme-config)))))))
+
+        (spit (str source) "(ns example)\n(def changed true)")
+        (#'artifact/ensure-writer! acme-config)
+        (is (= 2 @build-count) "a local writer input change rebuilds")
+
+        (spit (str (fs/path directory "deps.edn"))
+              "{:aliases {:writer {}}}")
+        (#'artifact/ensure-writer! default-config)
+        (is (= 3 @build-count) "a writer dependency change rebuilds")
+
+        (reset! toolchain "toolchain-b")
+        (#'artifact/ensure-writer! acme-config)
+        (is (= 4 @build-count) "a compiler or runtime change rebuilds")
+
+        (spit output "not a jar")
+        (#'artifact/ensure-writer! default-config)
+        (is (= 5 @build-count) "a corrupt cached jar rebuilds"))
+      (finally (fs/delete-tree directory)))))
 
 (deftest legacy-manifests-upgrade-only-as-the-default-flavor
   (let [directory (fs/create-temp-dir {:prefix "seon-legacy-artifact-"})
