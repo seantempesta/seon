@@ -24,7 +24,7 @@ See `README.md` for the convention.
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
 
-## Friction (34)
+## Friction (35)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -36,6 +36,7 @@ See `README.md` for the convention.
 | [Autocomplete datasets and scoring bypass canonical runtime projections](autocomplete-data-quality-pipeline-drift.md) | friction | agent |
 | [Autocomplete worktrees contain unclassified database and model evidence](autocomplete-worktree-evidence-preservation.md) | friction | Core |
 | [Canvas controls hide pending and handler failure](canvas-controls-hide-pending-and-failure.md) | friction | UI |
+| [Coalesce superseded changed-test hook requests](changed-test-hook-backlog-is-not-coalesced.md) | friction | agent |
 | [Config apply rebuilds an unchanged runtime](config-apply-rebuilds-unchanged-runtime.md) | friction | general |
 | [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | friction | agent |
 | [Context block order is static](context-block-order-is-static.md) | friction | agent |
