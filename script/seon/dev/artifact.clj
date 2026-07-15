@@ -12,7 +12,24 @@
            [java.time Instant]
            [java.util.jar JarFile]))
 
-(def artifact-manifest-schema
+(def ^:private artifact-manifest-v3-schema
+  [:map
+   [:seon.dev.artifact/version [:= 3]]
+   [:seon.dev.artifact/published-at :string]
+   [:seon.dev.artifact/flavor
+    [:enum :seon.dev.artifact.flavor/default
+     :seon.dev.artifact.flavor/acme]]
+   [:seon.dev.artifact/client-build-id :string]
+   [:seon.dev.artifact/shadow-cache-root :string]
+   [:seon.dev.artifact/client-output :string]
+   [:seon.dev.artifact/runtime-root :string]
+   [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/bootstrap-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
+
+(def ^:private artifact-manifest-v2-schema
   [:map
    [:seon.dev.artifact/version [:= 2]]
    [:seon.dev.artifact/published-at :string]
@@ -28,7 +45,10 @@
    [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
 
-(def ^:private legacy-artifact-manifest-schema
+(def artifact-manifest-schema
+  [:or artifact-manifest-v3-schema artifact-manifest-v2-schema])
+
+(def ^:private artifact-manifest-v1-schema
   [:map
    [:seon.dev.artifact/version [:= 1]]
    [:seon.dev.artifact/published-at :string]
@@ -122,7 +142,7 @@
   (let [path (:seon.dev.config/artifact-manifest config)]
     (when (fs/regular-file? path)
       (let [manifest (edn/read-string (slurp path))]
-        (if (m/validate legacy-artifact-manifest-schema manifest)
+        (if (m/validate artifact-manifest-v1-schema manifest)
           (if (= :seon.dev.artifact.flavor/default
                  (:seon.dev.config/artifact-flavor config))
             (validate-manifest!
@@ -292,6 +312,43 @@
   (state/with-lock (build-lock-configuration config)
                    :source-artifacts 1800000 build))
 
+(def ^:private runtime-root-links ["src" "test" "guest-cljs" "resources"])
+
+(defn- verify-runtime-root! [runtime-root bootstrap-digest]
+  (let [actual (digest-paths runtime-root ["out/bootstrap"])]
+    (when-not (= bootstrap-digest actual)
+      (throw (ex-info "An immutable runtime root has unexpected bootstrap bytes."
+                      {:seon.dev.artifact/runtime-root (str runtime-root)
+                       :seon.dev.artifact/expected bootstrap-digest
+                       :seon.dev.artifact/actual actual})))
+    (str runtime-root)))
+
+(defn- publish-runtime-root! [config bootstrap-digest]
+  (let [root (fs/path (:seon.dev.config/root config))
+        parent (fs/path root "tmp/seon-runtime-artifacts")
+        runtime-root (fs/path parent bootstrap-digest)]
+    (if (fs/directory? runtime-root)
+      (verify-runtime-root! runtime-root bootstrap-digest)
+      (let [temporary (fs/path parent (str "." bootstrap-digest "."
+                                                (random-uuid) ".tmp"))]
+        (try
+          (fs/create-dirs (fs/path temporary "out"))
+          (fs/copy-tree (fs/path root "out/bootstrap")
+                        (fs/path temporary "out/bootstrap"))
+          ;; The bootstrap is the immutable member fixed in this slice. Keep
+          ;; today's source/assets behavior through explicit development-only
+          ;; links until the downstream package publishes its bounded corpus.
+          (doseq [relative runtime-root-links
+                  :let [source (fs/path root relative)]
+                  :when (fs/exists? source)]
+            (fs/create-sym-link (fs/path temporary relative) source))
+          (verify-runtime-root! temporary bootstrap-digest)
+          (fs/create-dirs parent)
+          (fs/move temporary runtime-root {:atomic-move true})
+          (str runtime-root)
+          (finally
+            (when (fs/exists? temporary) (fs/delete-tree temporary))))))))
+
 (defn- output-manifest [config]
   (let [root (:seon.dev.config/root config)
         writer (:seon.dev.config/writer-output config)
@@ -311,6 +368,7 @@
                                             client-runtime])
           bootstrap-digest (digest-paths root [bootstrap])
           css-digest (digest-paths root [css])
+          runtime-root (publish-runtime-root! config bootstrap-digest)
           application-digest
           (digest-values ["flavor" (:seon.dev.config/artifact-flavor config)
                           "client-build-id"
@@ -323,7 +381,7 @@
                           "bootstrap" bootstrap-digest
                           "css" css-digest])]
       (validate-manifest!
-        {:seon.dev.artifact/version 2
+        {:seon.dev.artifact/version 3
          :seon.dev.artifact/published-at (str (Instant/now))
          :seon.dev.artifact/flavor
          (:seon.dev.config/artifact-flavor config)
@@ -333,6 +391,7 @@
          (:seon.dev.config/shadow-cache-root config)
          :seon.dev.artifact/client-output
          (:seon.dev.config/client-output config)
+         :seon.dev.artifact/runtime-root runtime-root
          :seon.dev.artifact/writer-digest writer-digest
          :seon.dev.artifact/client-digest client-digest
          :seon.dev.artifact/bootstrap-digest bootstrap-digest

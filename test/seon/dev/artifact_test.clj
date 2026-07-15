@@ -163,6 +163,69 @@
         (is (= 5 @build-count) "a corrupt cached jar rebuilds"))
       (finally (fs/delete-tree directory)))))
 
+(deftest sequential-flavors-publish-immutable-bootstrap-roots
+  (let [directory (fs/create-temp-dir {:prefix "seon-bootstrap-root-test-"})
+        source (fs/path directory "out/bootstrap/example.txt")
+        config {:seon.dev.config/root (str directory)}]
+    (try
+      (fs/create-dirs (fs/parent source))
+      (doseq [relative ["src" "test" "resources"]]
+        (fs/create-dirs (fs/path directory relative)))
+      (spit (str source) "default-bootstrap")
+      (let [default-digest (artifact/digest-paths
+                             directory ["out/bootstrap"])
+            default-root (#'artifact/publish-runtime-root!
+                           config default-digest)]
+        (is (= "default-bootstrap"
+               (slurp (str (fs/path default-root
+                                    "out/bootstrap/example.txt")))))
+
+        (spit (str source) "acme-bootstrap")
+        (let [acme-digest (artifact/digest-paths directory ["out/bootstrap"])
+              acme-root (#'artifact/publish-runtime-root! config acme-digest)]
+          (is (not= default-root acme-root))
+          (is (= default-digest
+                 (artifact/digest-paths default-root ["out/bootstrap"])))
+          (is (= acme-digest
+                 (artifact/digest-paths acme-root ["out/bootstrap"])))
+          (is (= "default-bootstrap"
+                 (slurp (str (fs/path default-root
+                                      "out/bootstrap/example.txt"))))
+              "the later ACME publication cannot mutate the default root")
+          (is (= acme-root
+                 (#'artifact/publish-runtime-root! config acme-digest))
+              "an identical bootstrap reuses its verified content address")))
+      (finally (fs/delete-tree directory)))))
+
+(deftest manifest-v3-binds-runtime-root-and-v2-remains-readable
+  (let [directory (fs/create-temp-dir {:prefix "seon-manifest-v3-test-"})
+        path (str (fs/path directory "artifact.edn"))
+        digest (apply str (repeat 64 "a"))
+        config {:seon.dev.config/artifact-manifest path
+                :seon.dev.config/artifact-flavor
+                :seon.dev.artifact.flavor/default}
+        v3 {:seon.dev.artifact/version 3
+            :seon.dev.artifact/published-at "2026-07-14T00:00:00Z"
+            :seon.dev.artifact/flavor :seon.dev.artifact.flavor/default
+            :seon.dev.artifact/client-build-id "client"
+            :seon.dev.artifact/shadow-cache-root "/checkout/.shadow-cljs"
+            :seon.dev.artifact/client-output "/checkout/out/client/main.js"
+            :seon.dev.artifact/runtime-root "/checkout/runtime/content"
+            :seon.dev.artifact/writer-digest digest
+            :seon.dev.artifact/client-digest digest
+            :seon.dev.artifact/bootstrap-digest digest
+            :seon.dev.artifact/css-digest digest
+            :seon.dev.artifact/application-digest digest}]
+    (try
+      (spit path (pr-str v3))
+      (is (= v3 (artifact/read-manifest config)))
+      (let [v2 (-> v3
+                   (assoc :seon.dev.artifact/version 2)
+                   (dissoc :seon.dev.artifact/runtime-root))]
+        (spit path (pr-str v2))
+        (is (= v2 (artifact/read-manifest config))))
+      (finally (fs/delete-tree directory)))))
+
 (deftest legacy-manifests-upgrade-only-as-the-default-flavor
   (let [directory (fs/create-temp-dir {:prefix "seon-legacy-artifact-"})
         path (str (fs/path directory "artifact.edn"))

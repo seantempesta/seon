@@ -32,12 +32,22 @@ operator, compatibility manifest, or one-command release/downstream build.
   when `:seon.dev.config/source-checkout?` is false.
 - The development artifact manifest contains absolute client/cache paths and
   omits release/protocol/SDK/runtime/dependency/license compatibility data.
+- Default and ACME previously published different bootstrap digests while
+  replacing the same live `out/bootstrap` path. The development operator now
+  publishes content-addressed manifest-bound runtime roots; coordinated live
+  proof and the independent packaged form remain in
+  [[shared-bootstrap-output-mutates-running-artifact]].
 - `seon.platform` and `seon.client` read bootstrap, source corpus, and web
   assets from checkout-shaped paths at runtime.
+- The current MCP adapter is itself checkout-owned. CLJS eval requires a Shadow
+  nREPL and CLJ eval requires the development writer `io-prepl`, while the
+  production process boundary deliberately ships neither.
 - Root `LICENSE` is AGPL-3.0 while `package.json` declares ISC.
 
 Full evidence and the proposed artifact boundary are in
 [[../../prds/independent-downstream-distribution/research/independent-acme-distribution-audit-2026-07-14]].
+Current-head reconciliation and parallel implementation order are in
+[[../../prds/independent-downstream-distribution/research/acme-artifact-boundary-reconciliation-2026-07-14]].
 
 ## Owner
 
@@ -53,6 +63,9 @@ no-source acceptance fixture.
   license/source metadata.
 - A clean ACME checkout pins that release and builds/runs/customizes it while
   the Seon source checkout is inaccessible.
+- The no-source development SDK supports cluster-qualified CLJ and CLJS MCP
+  evaluation from the downstream root. Production does not inherit development
+  REPL servers accidentally.
 - Packaged operation starts writer + pod without Clojure CLI, Shadow, a watcher,
   absolute producer paths, or mutable dependency selection.
 - The release binds exact maintained dependency identities and rejects a mixed

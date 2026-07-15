@@ -4,6 +4,7 @@
             [babashka.process :as process]
             [clojure.string :as str]
             [malli.core :as m]
+            [seon.dev.artifact :as artifact]
             [seon.dev.state :as state])
   (:import [java.io RandomAccessFile]
            [java.net HttpURLConnection StandardProtocolFamily URL
@@ -26,6 +27,8 @@
    [:seon.dev.process/dependencies [:vector qualified-keyword?]]
    [:seon.dev.process/readiness qualified-keyword?]
    [:seon.dev.process/ready-timeout-ms [:int {:min 1}]]
+   [:seon.dev.process/bootstrap-digest {:optional true}
+    [:re #"[0-9a-f]{64}"]]
    [:seon.dev.process/artifact-digest :string]])
 
 (def process-record-schema
@@ -155,7 +158,24 @@
   "Derive the complete development process graph from one manifest."
   [config manifest]
   (let [environment (:seon.dev.config/environment config)
+        runtime-root (:seon.dev.artifact/runtime-root manifest)
+        pod-environment (cond-> environment
+                          runtime-root (assoc "SEON_RUNTIME_ROOT" runtime-root))
         java (get environment "JAVA_CMD" "java")
+        pod-spec
+        (cond->
+          {:seon.dev.process/id pod-id
+           :seon.dev.process/argv
+           ["node" (:seon.dev.config/client-output config)]
+           :seon.dev.process/environment pod-environment
+           :seon.dev.process/dependencies [watcher-id writer-id]
+           :seon.dev.process/readiness :seon.dev.process.readiness/pod
+           :seon.dev.process/ready-timeout-ms 120000
+           :seon.dev.process/artifact-digest
+           (:seon.dev.artifact/application-digest manifest)}
+          runtime-root
+          (assoc :seon.dev.process/bootstrap-digest
+                 (:seon.dev.artifact/bootstrap-digest manifest)))
         spec-map
         {watcher-id
      {:seon.dev.process/id watcher-id
@@ -187,15 +207,7 @@
       :seon.dev.process/artifact-digest
       (:seon.dev.artifact/writer-digest manifest)}
 
-     pod-id
-     {:seon.dev.process/id pod-id
-      :seon.dev.process/argv ["node" (:seon.dev.config/client-output config)]
-      :seon.dev.process/environment environment
-      :seon.dev.process/dependencies [watcher-id writer-id]
-      :seon.dev.process/readiness :seon.dev.process.readiness/pod
-      :seon.dev.process/ready-timeout-ms 120000
-      :seon.dev.process/artifact-digest
-         (:seon.dev.artifact/application-digest manifest)}}]
+     pod-id pod-spec}]
     (doseq [spec (vals spec-map)]
       (validate! process-spec-schema spec
                  "The derived process specification is invalid."
@@ -296,10 +308,22 @@
   (let [text (tail-text (:seon.dev.process/log record))]
     (every? #(build-ready? text %) (watcher-build-ids config))))
 
-(defn- pod-ready? [config record]
+(defn- runtime-bootstrap-ready? [spec]
+  (if-let [expected (:seon.dev.process/bootstrap-digest spec)]
+    (let [runtime-root (get-in spec [:seon.dev.process/environment
+                                     "SEON_RUNTIME_ROOT"])]
+      (and runtime-root
+           (fs/directory? (fs/path runtime-root "out/bootstrap"))
+           (try
+             (= expected (artifact/digest-paths runtime-root ["out/bootstrap"]))
+             (catch Throwable _ false))))
+    true))
+
+(defn- pod-ready? [config spec record]
   (let [port-file (:seon.dev.config/http-port-file config)
         log (:seon.dev.process/log record)]
-    (and (fs/regular-file? port-file)
+    (and (runtime-bootstrap-ready? spec)
+         (fs/regular-file? port-file)
          (fs/regular-file? log)
          (str/includes? (tail-text log) "[seon.client] auto-boot ready")
          (some-> (slurp port-file) str/trim parse-long http-ready?))))
@@ -312,7 +336,7 @@
          :seon.dev.process.readiness/process true
          :seon.dev.process.readiness/watcher (watcher-ready? config record)
          :seon.dev.process.readiness/writer (writer-ready? config)
-         :seon.dev.process.readiness/pod (pod-ready? config record)
+         :seon.dev.process.readiness/pod (pod-ready? config spec record)
          false)))
 
 (defn- readiness-failure [config record]
@@ -569,7 +593,9 @@
                                :seon.dev.artifact/client-build-id
                                :seon.dev.artifact/application-digest
                                :seon.dev.artifact/writer-digest
-                               :seon.dev.artifact/client-digest])]
+                               :seon.dev.artifact/client-digest
+                               :seon.dev.artifact/bootstrap-digest
+                               :seon.dev.artifact/runtime-root])]
     {:seon.dev.target/status (cond
                                foreign? :seon.dev.target.status/ownership-conflict
                                all-ready? :seon.dev.target.status/ready
