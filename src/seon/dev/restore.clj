@@ -31,6 +31,41 @@
 (schema/register! ::forced-main-coordinate ::coordinate/coordinate)
 (schema/register! ::forced-main-parent-commit-ids [:set :uuid])
 (schema/register! ::completed-intent-ids [:set ::intent-id])
+(schema/register!
+ ::completion
+ [:map {:closed true}
+  [:seon.db.restore/id ::intent-id]
+  [:seon.db.restore/db-name :keyword]
+  [:seon.db.restore/database-id :uuid]
+  [:seon.db.restore/from-branch :keyword]
+  [:seon.db.restore/from-commit-id :uuid]
+  [:seon.db.restore/from-t :int]
+  [:seon.db.restore/to-branch :keyword]
+  [:seon.db.restore/to-commit-id :uuid]
+  [:seon.db.restore/to-t :int]
+  [:seon.db.restore/forced-commit-id :uuid]
+  [:seon.db.restore/undo-branch :keyword]
+  [:seon.db.restore/target-branch :keyword]
+  [:seon.db.restore/core-overlay-digest {:optional true} :string]
+  [:seon.db.restore/config-overlay-digest {:optional true} :string]])
+(schema/register! ::completion-facts [:vector ::completion])
+(schema/register! ::selected-completion-id ::intent-id)
+(schema/register! ::selected-undo-branch :keyword)
+(schema/register!
+ ::completion-selector
+ [:orn
+  [:by-id
+   [:map {:closed true}
+    [::selected-completion-id ::selected-completion-id]]]
+  [:by-undo-branch
+   [:map {:closed true}
+    [::selected-undo-branch ::selected-undo-branch]]]])
+(schema/register!
+ ::retained-head-observation
+ [:map {:closed true}
+  [::main-coordinate ::main-coordinate]
+  [::branch-heads ::branch-heads]
+  [::completion-facts ::completion-facts]])
 (schema/register! ::admin-result-transport
                   [:= :seon.dev.restore.admin.transport/atomic-edn-file])
 (schema/register! ::admin-result-path ::launch/path)
@@ -57,7 +92,9 @@
   [::consumer-generations ::consumer-generations]
   [::core-overlay-selection ::core-overlay-selection]
   [::config-overlay-selection ::config-overlay-selection]
-  [::reachable-hash-digest ::reachable-hash-digest]])
+  [::reachable-hash-digest ::reachable-hash-digest]
+  [::retained-head-observation {:optional true} ::retained-head-observation]
+  [::completion-selector {:optional true} ::completion-selector]])
 
 (schema/register!
  ::intent
@@ -138,6 +175,131 @@
 (defn- descriptor-coordinate [descriptor]
   (get-in descriptor [::launch/database ::coordinate/coordinate]))
 
+(def ^:private intent-request-keys
+  [::intent-id
+   ::operation
+   ::pre-restore-main-descriptor
+   ::selected-target-descriptor
+   ::expected-branch-roster
+   ::protocol-version
+   ::writer-artifact-digest
+   ::consumer-generations
+   ::core-overlay-selection
+   ::config-overlay-selection
+   ::reachable-hash-digest])
+
+(defn- completion-undo-coordinate [completion]
+  {::coordinate/database-id (:seon.db.restore/database-id completion)
+   ::coordinate/branch (:seon.db.restore/undo-branch completion)
+   ::coordinate/commit-id (:seon.db.restore/from-commit-id completion)
+   ::coordinate/t (:seon.db.restore/from-t completion)})
+
+(defn- completion-target-coordinate [completion]
+  {::coordinate/database-id (:seon.db.restore/database-id completion)
+   ::coordinate/branch (:seon.db.restore/to-branch completion)
+   ::coordinate/commit-id (:seon.db.restore/to-commit-id completion)
+   ::coordinate/t (:seon.db.restore/to-t completion)})
+
+(defn- selected-completions [selector completions]
+  (let [{::keys [selected-completion-id selected-undo-branch]} selector]
+    (filterv
+     (fn [completion]
+       (if selected-completion-id
+         (= selected-completion-id (:seon.db.restore/id completion))
+         (= selected-undo-branch (:seon.db.restore/undo-branch completion))))
+     completions)))
+
+(defn- validate-undo-selection! [request]
+  (let [observation (::retained-head-observation request)
+        selector (::completion-selector request)]
+    (require-consistency!
+     (and observation selector)
+     "Undo requires one exact retained completion observation."
+     {::intent-id (::intent-id request)})
+    (let [completions (::completion-facts observation)
+          matches (selected-completions selector completions)]
+      (require-consistency!
+       (= 1 (count matches))
+       "Undo selection does not resolve exactly one retained completion."
+       {::completion-selector selector
+        :seon.dev.restore/matching-completion-ids
+        (mapv :seon.db.restore/id matches)})
+      (let [completion (first matches)
+            main (descriptor-coordinate
+                  (::pre-restore-main-descriptor request))
+            target (descriptor-coordinate
+                    (::selected-target-descriptor request))
+            observed-main (::main-coordinate observation)
+            heads (::branch-heads observation)
+            expected-target (completion-undo-coordinate completion)
+            new-undo (reserved-branch :undo (::intent-id request))
+            new-target (reserved-branch :target (::intent-id request))
+            expected-roster (conj (set (keys heads)) new-undo new-target)
+            completion-id (:seon.db.restore/id completion)
+            ambiguous-by
+            (->> completions
+                 (remove #(= completion-id (:seon.db.restore/id %)))
+                 (filter #(= expected-target (completion-undo-coordinate %)))
+                 (mapv :seon.db.restore/id))
+            reused-by
+            (->> completions
+                 (remove #(= completion-id (:seon.db.restore/id %)))
+                 (filter #(= expected-target (completion-target-coordinate %)))
+                 (mapv :seon.db.restore/id))]
+        (require-consistency!
+         (and (= main observed-main)
+              (= observed-main (get heads :db)))
+         "Undo did not retain the actual latest observed main head."
+         {::main-coordinate main
+          :seon.dev.restore/observed-main-coordinate observed-main})
+        (require-consistency!
+         (and (every? (fn [[branch point]]
+                        (= branch (::coordinate/branch point)))
+                      heads)
+              (every? #(= (::coordinate/database-id main)
+                           (::coordinate/database-id %))
+                      (vals heads)))
+         "Undo branch observations cross a database or branch attachment."
+         {::branch-heads heads})
+        (require-consistency!
+         (and (= :db (:seon.db.restore/from-branch completion))
+              (= (::coordinate/database-id main)
+                 (:seon.db.restore/database-id completion))
+              (not= :db (:seon.db.restore/undo-branch completion))
+              (not= (:seon.db.restore/undo-branch completion)
+                    (:seon.db.restore/target-branch completion))
+              (not= expected-target (completion-target-coordinate completion)))
+         "Undo completion lineage is inconsistent."
+         {:seon.db.restore/id completion-id})
+        (require-consistency!
+         (and (= expected-target target)
+              (= expected-target
+                 (get heads (::coordinate/branch expected-target))))
+         "Undo target is not the selected completion's exact retained head."
+         {::selected-target-descriptor
+          (::selected-target-descriptor request)
+          :seon.dev.restore/expected-undo-coordinate expected-target})
+        (require-consistency!
+         (= expected-roster (::expected-branch-roster request))
+         "Undo branch roster observation is stale or incomplete."
+         {::expected-branch-roster (::expected-branch-roster request)
+          :seon.dev.restore/observed-post-prepare-roster expected-roster})
+        (require-consistency!
+         (and (not (contains? heads new-undo))
+              (not (contains? heads new-target)))
+         "Undo reserved branches already exist before intent publication."
+         {::undo-branch new-undo ::prepared-target-branch new-target})
+        (require-consistency!
+         (empty? ambiguous-by)
+         "Undo retained head is claimed by more than one completion."
+         {:seon.db.restore/id completion-id
+          :seon.dev.restore/ambiguous-completion-ids ambiguous-by})
+        (require-consistency!
+         (empty? reused-by)
+         "Undo completion has already been consumed by a later completion."
+         {:seon.db.restore/id completion-id
+          :seon.dev.restore/reused-by-completion-ids reused-by})))))
+
 (defn- canonical-digest-data [value]
   (cond
     (map? value)
@@ -161,14 +323,10 @@
     (.update digest bytes)
     (apply str (map #(format "%02x" (bit-and % 0xff)) (.digest digest)))))
 
-(defn derive-intent
-  "Derive one immutable restore intent from exact resolved facts."
-  {:malli/schema [:=> [:cat ::derive-request] ::intent]}
+(defn- derive-intent-value
   [{::keys [intent-id pre-restore-main-descriptor selected-target-descriptor
             expected-branch-roster]
     :as request}]
-  (validate! ::derive-request request
-             "The restore intent request is invalid.")
   (let [main-database (::launch/database pre-restore-main-descriptor)
         target-database (::launch/database selected-target-descriptor)
         main-coordinate (descriptor-coordinate pre-restore-main-descriptor)
@@ -243,6 +401,21 @@
        (assoc intent ::plan-digest (sha-256 intent)))
      "The derived restore intent is invalid.")))
 
+(defn derive-intent
+  "Derive one immutable restore or completion-bound undo intent."
+  {:malli/schema [:=> [:cat ::derive-request] ::intent]}
+  [request]
+  (validate! ::derive-request request
+             "The restore intent request is invalid.")
+  (if (= :seon.dev.restore.operation/undo (::operation request))
+    (validate-undo-selection! request)
+    (require-consistency!
+     (and (nil? (::retained-head-observation request))
+          (nil? (::completion-selector request)))
+     "Ordinary restore does not accept undo completion evidence."
+     {::intent-id (::intent-id request)}))
+  (derive-intent-value (select-keys request intent-request-keys)))
+
 (defn validate-intent
   "Validate one retained intent and all of its derived relationships."
   {:malli/schema [:=> [:cat ::intent] ::intent]}
@@ -253,7 +426,7 @@
                         ::prepared-target-branch ::undo-coordinate
                         ::prepared-target-coordinate])]
     (require-consistency!
-     (= intent (derive-intent request))
+     (= intent (derive-intent-value request))
      "The retained restore intent has inconsistent derived coordinates."
      {::intent-id (::intent-id intent)}))
   intent)

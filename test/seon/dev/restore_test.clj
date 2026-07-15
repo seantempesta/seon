@@ -13,7 +13,9 @@
 (def source-commit #uuid "20000000-0000-0000-0000-000000000001")
 (def target-commit #uuid "30000000-0000-0000-0000-000000000001")
 (def forced-commit #uuid "40000000-0000-0000-0000-000000000001")
+(def latest-commit #uuid "50000000-0000-0000-0000-000000000001")
 (def intent-id "q66ljwup2b5r")
+(def prior-completion-id "priorundo001")
 (def digest (apply str (repeat 64 "a")))
 (def other-digest (apply str (repeat 64 "b")))
 
@@ -28,6 +30,18 @@
    ::coordinate/branch :seon.branch/target
    ::coordinate/commit-id target-commit
    ::coordinate/t 80})
+
+(def latest-source
+  (assoc source
+         ::coordinate/commit-id latest-commit
+         ::coordinate/t 120))
+
+(def prior-undo-branch
+  (keyword "seon.restore.undo" (str "r-" prior-completion-id)))
+(def prior-target-branch
+  (keyword "seon.restore.target" (str "r-" prior-completion-id)))
+(def prior-undo-coordinate
+  (assoc source ::coordinate/branch prior-undo-branch))
 
 (def undo-branch (keyword "seon.restore.undo" (str "r-" intent-id)))
 (def prepared-target-branch
@@ -84,6 +98,38 @@
    {:my.blob/writable-dir "/target/blobs"
     :my.blob/read-only-dirs ["/main/blobs"]}})
 
+(defn- descriptor-at [descriptor point]
+  (-> descriptor
+      (assoc-in [::launch/database ::coordinate/attachment]
+                (coordinate/attachment point))
+      (assoc-in [::launch/database ::coordinate/coordinate] point)))
+
+(def prior-completion
+  {:seon.db.restore/id prior-completion-id
+   :seon.db.restore/db-name :default
+   :seon.db.restore/database-id database-id
+   :seon.db.restore/from-branch :db
+   :seon.db.restore/from-commit-id source-commit
+   :seon.db.restore/from-t 100
+   :seon.db.restore/to-branch :seon.branch/target
+   :seon.db.restore/to-commit-id target-commit
+   :seon.db.restore/to-t 80
+   :seon.db.restore/forced-commit-id forced-commit
+   :seon.db.restore/undo-branch prior-undo-branch
+   :seon.db.restore/target-branch prior-target-branch})
+
+(defn- retained-observation
+  ([] (retained-observation [prior-completion]))
+  ([completions]
+   {::restore/main-coordinate latest-source
+    ::restore/branch-heads
+    {:db latest-source
+     :seon.branch/target target
+     prior-undo-branch prior-undo-coordinate
+     prior-target-branch
+     (assoc target ::coordinate/branch prior-target-branch)}
+    ::restore/completion-facts completions}))
+
 (defn- intent-request []
   {::restore/intent-id intent-id
    ::restore/operation :seon.dev.restore.operation/restore
@@ -102,6 +148,21 @@
 
 (defn- derived-intent []
   (restore/derive-intent (intent-request)))
+
+(defn- undo-intent-request []
+  (let [observation (retained-observation)]
+    (-> (intent-request)
+        (assoc ::restore/operation :seon.dev.restore.operation/undo
+               ::restore/pre-restore-main-descriptor
+               (descriptor-at main-descriptor latest-source)
+               ::restore/selected-target-descriptor
+               (descriptor-at target-descriptor prior-undo-coordinate)
+               ::restore/expected-branch-roster
+               (conj (set (keys (::restore/branch-heads observation)))
+                     undo-branch prepared-target-branch)
+               ::restore/retained-head-observation observation
+               ::restore/completion-selector
+               {::restore/selected-completion-id prior-completion-id}))))
 
 (deftest startup-identity-is-the-exact-frozen-intent-projection
   (let [intent (derived-intent)
@@ -155,19 +216,134 @@
                   [:seon.dev.restore/phase :seon.dev.restore/status
                    :seon.dev.restore/retry-count]))))
 
-(deftest undo-is-the-same-intent-and-command-contract
-  (let [restore-intent (derived-intent)
-        undo-intent
-        (restore/derive-intent
-         (assoc (intent-request) ::restore/operation
-                :seon.dev.restore.operation/undo))]
-    (is (= (dissoc restore-intent ::restore/operation ::restore/plan-digest)
-           (dissoc undo-intent ::restore/operation ::restore/plan-digest)))
+(deftest undo-derives-the-same-transition-from-one-retained-completion
+  (let [undo-intent (restore/derive-intent (undo-intent-request))]
     (is (= :seon.dev.restore.operation/undo
            (::restore/operation undo-intent)))
+    (is (= (descriptor-at main-descriptor latest-source)
+           (::restore/pre-restore-main-descriptor undo-intent)))
+    (is (= (descriptor-at target-descriptor prior-undo-coordinate)
+           (::restore/selected-target-descriptor undo-intent)))
+    (is (= (assoc latest-source ::coordinate/branch undo-branch)
+           (::restore/undo-coordinate undo-intent))
+        "the inverse preserves the actual latest main as redo")
+    (is (not-any? #(contains? undo-intent %)
+                  [::restore/retained-head-observation
+                   ::restore/completion-selector])
+        "selection evidence compiles into the same immutable intent shape")
     (is (= :seon.dev.restore.command/create-undo
            (command undo-intent
-                    (observation undo-intent source {} #{source-commit} #{}))))))
+                    (observation
+                     undo-intent latest-source
+                     (dissoc (::restore/branch-heads (retained-observation)) :db)
+                     #{latest-commit} #{}))))))
+
+(deftest undo-selection-fails-closed-before-intent-publication
+  (testing "an operation keyword cannot relabel an arbitrary retained branch"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"exact retained completion"
+         (restore/derive-intent
+          (assoc (intent-request) ::restore/operation
+                 :seon.dev.restore.operation/undo)))))
+  (testing "id and retained-branch selectors each resolve exactly one fact"
+    (let [request (undo-intent-request)
+          by-branch
+          (assoc request ::restore/completion-selector
+                 {::restore/selected-undo-branch prior-undo-branch})]
+      (is (= (restore/derive-intent request)
+             (restore/derive-intent by-branch)))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"exactly one"
+           (restore/derive-intent
+            (assoc-in
+             by-branch
+             [::restore/retained-head-observation ::restore/completion-facts]
+             [prior-completion
+              (assoc prior-completion :seon.db.restore/id "otherundo001")]))))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"more than one completion"
+           (restore/derive-intent
+            (assoc-in
+             request
+             [::restore/retained-head-observation ::restore/completion-facts]
+             [prior-completion
+              (assoc prior-completion :seon.db.restore/id "otherundo001")]))))))
+  (testing "the target must be the selected fact's exact retained undo head"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"exact retained head"
+         (restore/derive-intent
+          (assoc (undo-intent-request) ::restore/selected-target-descriptor
+                 target-descriptor)))))
+  (testing "completion and branch observations stay in one database lineage"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"completion lineage"
+         (restore/derive-intent
+          (assoc-in
+           (undo-intent-request)
+           [::restore/retained-head-observation ::restore/completion-facts 0
+            :seon.db.restore/database-id]
+           (random-uuid))))))
+  (testing "the actual latest main is retained, including later ordinary work"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"actual latest observed main"
+         (restore/derive-intent
+          (assoc (undo-intent-request) ::restore/pre-restore-main-descriptor
+                 main-descriptor)))))
+  (testing "advanced retained heads and stale rosters are rejected"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"exact retained head"
+         (restore/derive-intent
+          (assoc-in
+           (undo-intent-request)
+           [::restore/retained-head-observation ::restore/branch-heads
+            prior-undo-branch ::coordinate/commit-id]
+           (random-uuid)))))
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"stale or incomplete"
+         (restore/derive-intent
+          (update (undo-intent-request) ::restore/expected-branch-roster
+                  disj prior-target-branch)))))
+  (testing "new reserved names must still be absent at publication"
+    (let [existing
+          (assoc prior-undo-coordinate ::coordinate/branch undo-branch)]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"already exist"
+           (restore/derive-intent
+            (assoc-in
+             (undo-intent-request)
+             [::restore/retained-head-observation ::restore/branch-heads
+              undo-branch]
+             existing))))))
+  (testing "a completion target consumed by a later completion is not reusable"
+    (let [later
+          (assoc prior-completion
+                 :seon.db.restore/id "laterundo001"
+                 :seon.db.restore/from-commit-id latest-commit
+                 :seon.db.restore/from-t 120
+                 :seon.db.restore/to-branch prior-undo-branch
+                 :seon.db.restore/to-commit-id source-commit
+                 :seon.db.restore/to-t 100
+                 :seon.db.restore/forced-commit-id (random-uuid)
+                 :seon.db.restore/undo-branch :seon.restore.undo/r-laterundo001
+                 :seon.db.restore/target-branch
+                 :seon.restore.target/r-laterundo001)]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"already been consumed"
+           (restore/derive-intent
+            (assoc-in
+             (undo-intent-request)
+             [::restore/retained-head-observation ::restore/completion-facts]
+             [prior-completion later])))))))
 
 (deftest intent-is-closed-and-rejects-crossed-or-mutable-data
   (is (thrown? Exception
