@@ -31,9 +31,10 @@
 
 (def ^:private maintained-dependency-schema
   [:map
-   [:seon.dev.dependency/library :symbol]
-   [:seon.dev.dependency/git-url [:re #"https://\S+"]]
-   [:seon.dev.dependency/git-sha [:re #"[0-9a-f]{40}"]]])
+   [:seon.dev.artifact/dependency-library :symbol]
+   [:seon.dev.artifact/dependency-git-url
+    [:re #"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?"]]
+   [:seon.dev.artifact/dependency-git-sha [:re #"[0-9a-f]{40}"]]])
 
 (def ^:private artifact-manifest-v4-schema
   [:map
@@ -141,12 +142,12 @@
 
 (defn- validate-maintained-dependencies! [coordinates]
   (let [expected (mapv first maintained-dependency-selections)
-        actual (mapv :seon.dev.dependency/library coordinates)]
+        actual (mapv :seon.dev.artifact/dependency-library coordinates)]
     (when-not (= expected actual)
       (throw
         (ex-info "The maintained dependency identity set is invalid."
-                 {:seon.dev.dependency/expected expected
-                  :seon.dev.dependency/actual actual})))
+                 {:seon.dev.artifact/dependency-expected expected
+                  :seon.dev.artifact/dependency-actual actual})))
     coordinates))
 
 (defn- git-coordinate! [dependencies library alias dependency-section]
@@ -156,18 +157,20 @@
         git-sha (:git/sha coordinate)]
     (when-not (and (map? coordinate)
                    (string? git-url)
-                   (re-matches #"https://\S+" git-url)
+                   (re-matches
+                     #"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?"
+                     git-url)
                    (string? git-sha)
                    (re-matches #"[0-9a-f]{40}" git-sha))
       (throw
         (ex-info "A maintained dependency lacks an exact public Git coordinate."
-                 {:seon.dev.dependency/library library
-                  :seon.dev.dependency/alias alias
-                  :seon.dev.dependency/section dependency-section
-                  :seon.dev.dependency/coordinate coordinate})))
-    {:seon.dev.dependency/library library
-     :seon.dev.dependency/git-url git-url
-     :seon.dev.dependency/git-sha git-sha}))
+                 {:seon.dev.artifact/dependency-library library
+                  :seon.dev.artifact/dependency-alias alias
+                  :seon.dev.artifact/dependency-section dependency-section
+                  :seon.dev.artifact/dependency-coordinate coordinate})))
+    {:seon.dev.artifact/dependency-library library
+     :seon.dev.artifact/dependency-git-url git-url
+     :seon.dev.artifact/dependency-git-sha git-sha}))
 
 (defn- maintained-dependencies-from [dependencies]
   (mapv
@@ -181,8 +184,8 @@
         (when-not (apply = coordinates)
           (throw
             (ex-info "Maintained dependency aliases select different commits."
-                     {:seon.dev.dependency/library library
-                      :seon.dev.dependency/coordinates coordinates})))
+                     {:seon.dev.artifact/dependency-library library
+                      :seon.dev.artifact/dependency-coordinates coordinates})))
         selected))
     maintained-dependency-selections))
 

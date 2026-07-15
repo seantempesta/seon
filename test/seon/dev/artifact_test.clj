@@ -329,11 +329,11 @@
             'org.replikativ/konserve
             'org.replikativ/proximum
             'thheller/shadow-cljs
-            'org.replikativ/superv.async
+           'org.replikativ/superv.async
             'is.simm/partial-cps]
-           (mapv :seon.dev.dependency/library coordinates)))
+           (mapv :seon.dev.artifact/dependency-library coordinates)))
     (is (every? #(re-matches #"[0-9a-f]{40}"
-                             (:seon.dev.dependency/git-sha %))
+                             (:seon.dev.artifact/dependency-git-sha %))
                 coordinates))
     (is (= coordinates
            (#'artifact/maintained-dependencies-from (maintained-deps))))))
@@ -352,7 +352,18 @@
          (assoc-in (maintained-deps)
                    [:aliases :cljs :extra-deps 'thheller/shadow-cljs]
                    {:git/url "git@github.com:example/shadow-cljs"
-                    :git/sha "abc123"}))))
+                    :git/sha (apply str (repeat 40 "d"))}))))
+  (doseq [url ["https://user@github.com/example/shadow-cljs"
+               "https://github.com/example/shadow-cljs?ref=main"
+               "https://github.com/example/shadow-cljs#main"
+               "https://gitlab.com/example/shadow-cljs"]]
+    (is (thrown-with-msg?
+          Exception #"lacks an exact public Git coordinate"
+          (#'artifact/maintained-dependencies-from
+           (assoc-in (maintained-deps)
+                     [:aliases :cljs :extra-deps 'thheller/shadow-cljs
+                      :git/url]
+                     url)))))
   (is (thrown-with-msg?
         Exception #"select different commits"
         (#'artifact/maintained-dependencies-from
@@ -390,7 +401,7 @@
                     (fn [_ digest] (str "/runtime/" digest))]
         (let [initial (#'artifact/output-manifest config)]
           (swap! dependencies assoc-in
-                 [0 :seon.dev.dependency/git-sha]
+                 [0 :seon.dev.artifact/dependency-git-sha]
                  (apply str (repeat 40 "9")))
           (let [dependency-change (#'artifact/output-manifest config)]
             (is (not= (:seon.dev.artifact/application-digest initial)
@@ -430,7 +441,7 @@
       (is (= v4 (artifact/read-manifest config)))
       (spit path (pr-str (assoc-in v4
                                    [:seon.dev.artifact/maintained-dependencies
-                                    0 :seon.dev.dependency/library]
+                                    0 :seon.dev.artifact/dependency-library]
                                    'wrong/library)))
       (is (thrown-with-msg? Exception #"identity set is invalid"
                             (artifact/read-manifest config)))
