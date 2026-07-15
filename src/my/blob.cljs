@@ -216,21 +216,87 @@
     nil
     (into [writable-dir] read-only-dirs)))
 
+(def ^:private node-publication-effects
+  {::sync-file-descriptor! (fn [fd] (.fsyncSync nfs fd))
+   ::atomic-rename! (fn [from to] (.renameSync nfs from to))})
+
+(defn- sync-directory!
+  "Synchronize a directory entry before publication reports success."
+  [effects dir]
+  (let [fd (.openSync nfs dir "r")]
+    (try
+      ((::sync-file-descriptor! effects) fd)
+      (finally
+        (.closeSync nfs fd)))))
+
+(defn- directory-plan
+  "The nearest existing ancestor and missing directories in creation order."
+  [dir]
+  (loop [candidate (.resolve npath dir)
+         missing ()]
+    (if (.existsSync nfs candidate)
+      {::directory-anchor candidate
+       ::missing-directories (vec missing)}
+      (let [parent (.dirname npath candidate)]
+        (when (= candidate parent)
+          (throw (js/Error. (str "no existing directory ancestor for " dir))))
+        (recur parent (conj missing candidate))))))
+
+(defn- ensure-directory-durable!
+  "Create each missing directory and synchronize every parent entry."
+  [effects dir]
+  (let [{::keys [directory-anchor missing-directories]}
+        (directory-plan dir)
+        anchor-parent (.dirname npath directory-anchor)]
+    ;; If a prior attempt created `directory-anchor` but its parent sync
+    ;; failed, presence alone cannot prove that entry durable. Re-sync the
+    ;; boundary before extending it or accepting it as the requested path.
+    (when-not (= directory-anchor anchor-parent)
+      (sync-directory! effects anchor-parent))
+    (reduce
+      (fn [parent child]
+        (try
+          (.mkdirSync nfs child)
+          (catch :default e
+            (when-not (and (= "EEXIST" (.-code e))
+                           (.. nfs (statSync child) (isDirectory)))
+              (throw e))))
+        (sync-directory! effects parent)
+        child)
+      directory-anchor
+      missing-directories)
+    (.resolve npath dir)))
+
+(defn- sync-published!
+  "Synchronize an existing verified file and its containing directory."
+  [effects path]
+  (let [fd (.openSync nfs path "r")]
+    (try
+      ((::sync-file-descriptor! effects) fd)
+      (finally
+        (.closeSync nfs fd))))
+  (sync-directory! effects (.dirname npath path)))
+
 (defn- publish!
-  "Publish complete bytes to the writable archive by atomic rename."
-  [writable-dir hash content]
+  "Publish complete bytes through file sync, rename, and directory sync."
+  [effects writable-dir hash content]
   (let [path (blob-path writable-dir hash)
         shard (.dirname npath path)
         tmp (.join npath shard (str hash "." (.randomUUID crypto) ".new"))]
     (try
-      (.mkdirSync nfs shard #js {:recursive true})
-      (let [fd (.openSync nfs tmp "wx")]
-        (try
-          (.writeFileSync nfs fd content "utf8")
-          (.fsyncSync nfs fd)
-          (finally
-            (.closeSync nfs fd))))
-      (.renameSync nfs tmp path)
+      (ensure-directory-durable! effects writable-dir)
+      (ensure-directory-durable! effects shard)
+      (if (.existsSync nfs path)
+        (sync-published! effects path)
+        (do
+          (let [fd (.openSync nfs tmp "wx")]
+            (try
+              (.writeFileSync nfs fd content "utf8")
+              ((::sync-file-descriptor! effects) fd)
+              (finally
+                (.closeSync nfs fd))))
+          ((::atomic-rename! effects) tmp path)
+          (sync-directory! effects shard)))
       nil
       (catch :default e
         (or (some-> e .-message) (str e)))
@@ -274,6 +340,42 @@
 
 (declare stat) ; text refuses a binary blob by naming stat's recorded media
 
+(defn- ^:async put-with-publication-effects!
+  "Publish and project content using one immutable filesystem effect map."
+  [{::keys [content media]} effects]
+  (let [hash (sha256 content)
+        toks (tokens/estimate content)
+        {view-ok? ::ok? view ::storage-view view-error ::error}
+        (validated-storage-view)]
+    (if-not view-ok?
+      {::ok? false ::hash hash ::error view-error}
+      (let [existing (resolve-blob view hash)
+            werr (cond
+                   (and existing (false? (::ok? existing))) (::error existing)
+                   ;; A failed directory sync happens after the final pathname
+                   ;; exists. Retry must synchronize that verified writable
+                   ;; file and shard rather than treating presence as durable.
+                   (and existing
+                        (.existsSync nfs
+                                     (blob-path (::writable-dir view) hash)))
+                   (publish! effects (::writable-dir view) hash content)
+                   existing nil
+                   :else (publish! effects (::writable-dir view) hash content))]
+        (if werr
+          {::ok? false ::hash hash ::error werr}
+          (let [{ok? ::db/ok? :as env}
+                (await (db/transact!
+                         {::db/tx-data [(cond-> {::hash   hash
+                                                 ::tokens toks
+                                                 ::at     (js/Date.)}
+                                          media (assoc ::media media))]}))]
+            (if ok?
+              {::ok? true ::hash hash ::tokens toks}
+              {::ok? false
+               ::hash hash
+               ::error (or (some-> (::db/error env) :seon.error/message)
+                           "blob file written but the projection tx was rejected")})))))))
+
 (defn ^{:async true :seon.fn/agent-facing? true} put!
   "Save a long text durably; read it back page by page later.
 
@@ -292,32 +394,8 @@
    store the HASH on your own entity (a ref-by-value pointer); never
    re-carry the content in datoms."
   {:malli/schema [:=> [:cat ::put-request] ::put-response]}
-  [{::keys [content media]}]
-  (let [hash (sha256 content)
-        toks (tokens/estimate content)
-        {view-ok? ::ok? view ::storage-view view-error ::error}
-        (validated-storage-view)]
-    (if-not view-ok?
-      {::ok? false ::hash hash ::error view-error}
-      (let [existing (resolve-blob view hash)
-            werr (cond
-                   (and existing (false? (::ok? existing))) (::error existing)
-                   existing nil
-                   :else (publish! (::writable-dir view) hash content))]
-        (if werr
-          {::ok? false ::hash hash ::error werr}
-          (let [{ok? ::db/ok? :as env}
-                (await (db/transact!
-                         {::db/tx-data [(cond-> {::hash   hash
-                                                 ::tokens toks
-                                                 ::at     (js/Date.)}
-                                          media (assoc ::media media))]}))]
-            (if ok?
-              {::ok? true ::hash hash ::tokens toks}
-              {::ok? false
-               ::hash hash
-               ::error (or (some-> (::db/error env) :seon.error/message)
-                           "blob file written but the projection tx was rejected")})))))))
+  [request]
+  (await (put-with-publication-effects! request node-publication-effects)))
 
 (defn ^:seon.fn/agent-facing? get
   "Fetch a stored text's full content by hash, for use in code.

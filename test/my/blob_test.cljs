@@ -22,6 +22,7 @@
    :memory conn root-set! as db/*conn* (a `binding` would pop at the
    first await — see my.kb-test for the pattern's full rationale)."
   (:require
+    ["node:crypto" :as crypto]
     ["node:fs" :as nfs]
     ["node:path" :as npath]
     [cljs.test :refer [deftest is async use-fixtures]]
@@ -47,6 +48,12 @@
    :my.blob/read-only-dirs (vec read-only-dirs)})
 
 (defonce ^:private !saved-storage-view (atom nil))
+
+(def ^:private put-with-publication-effects!
+  @#'blob/put-with-publication-effects!)
+
+(def ^:private node-publication-effects
+  @#'blob/node-publication-effects)
 
 (use-fixtures :once
   {:before (fn []
@@ -101,6 +108,16 @@
       (.then (fn [_] (done)))
       (.catch (fn [e] (is false (str "threw — " e)) (done)))))
 
+(defn- effects-with
+  "The production publication effects with explicit test replacements."
+  [& replacements]
+  (apply assoc node-publication-effects replacements))
+
+(defn- put-with-effects!
+  "Publish `content` through explicit immutable filesystem effects."
+  [content effects]
+  (put-with-publication-effects! {:my.blob/content content} effects))
+
 ;; ---------------------------------------------------------------------------
 ;; 1. put → stat → text/get roundtrip.
 ;; ---------------------------------------------------------------------------
@@ -148,6 +165,164 @@
                          (is (= 4 (:my.blob/total-lines t)))
                          (is (= 4 (:my.blob/lines-returned t)))
                          (is (str/includes? (:my.blob/content t) "line three"))))))))
+      done)))
+
+(deftest rename-failure-leaves-no-final-path-and-retry-converges
+  (async done
+    (run-test
+      (fn [conn]
+        (let [content "rename failure is retryable"
+              hash (-> (.createHash crypto "sha256")
+                       (.update content "utf8")
+                       (.digest "hex"))
+              shard (.join npath fixture-dir (subs hash 0 2))
+              path (.join npath shard hash)]
+          (-> (put-with-effects!
+                content
+                (effects-with
+                  ::blob/atomic-rename!
+                  (fn [& _]
+                    (throw (js/Error. "injected rename failure")))))
+              (.then (pinned conn
+                       (fn [failed]
+                         (is (false? (:my.blob/ok? failed)))
+                         (is (str/includes? (:my.blob/error failed)
+                                            "injected rename failure"))
+                         (is (not (.existsSync nfs path))
+                             "failure before rename publishes no final path")
+                         (is (or (not (.existsSync nfs shard))
+                                 (empty? (.readdirSync nfs shard)))
+                             "the unique temporary file is reclaimed")
+                         (blob/put! {:my.blob/content content}))))
+              (.then (pinned conn
+                       (fn [retried]
+                         (is (true? (:my.blob/ok? retried)))
+                         (is (= hash (:my.blob/hash retried)))
+                         (is (= content (.readFileSync nfs path "utf8"))
+                             "retry publishes complete hash-verifiable bytes")))))))
+      done)))
+
+(deftest missing-writable-root-sync-failure-precedes-shard-and-retries
+  (async done
+    (run-test
+      (fn [conn]
+        (let [writable-dir (.join npath fixture-dir "new-writable")
+              content "first shard needs its parent directory durable"
+              hash (-> (.createHash crypto "sha256")
+                       (.update content "utf8")
+                       (.digest "hex"))
+              shard (.join npath writable-dir (subs hash 0 2))
+              path (.join npath shard hash)
+              !first-syncs (atom 0)
+              !retry-syncs (atom 0)]
+          (.rmSync nfs writable-dir #js {:recursive true :force true})
+          (reset! blob/!storage-view (storage-view writable-dir))
+          (-> (put-with-effects!
+                content
+                (effects-with
+                  ::blob/sync-file-descriptor!
+                  (fn [fd]
+                    (let [call (swap! !first-syncs inc)]
+                      (if (= 2 call)
+                        (throw (js/Error.
+                                 "injected writable-parent sync failure"))
+                        (.fsyncSync nfs fd))))))
+              (.then (pinned conn
+                       (fn [failed]
+                         (is (= 2 @!first-syncs)
+                             "the new writable root is synced in its parent")
+                         (is (false? (:my.blob/ok? failed)))
+                         (is (str/includes? (:my.blob/error failed)
+                                            "injected writable-parent sync failure"))
+                         (is (not (.existsSync nfs path))
+                             "parent-sync failure precedes temporary bytes")
+                         (is (.existsSync nfs writable-dir)
+                             "the complete writable directory may remain")
+                         (is (not (.existsSync nfs shard))
+                             "the shard is not created past the failed fence")
+                         (put-with-effects!
+                           content
+                           (effects-with
+                             ::blob/sync-file-descriptor!
+                             (fn [fd]
+                               (swap! !retry-syncs inc)
+                               (.fsyncSync nfs fd)))))))
+              (.then (pinned conn
+                       (fn [retried]
+                         (is (true? (:my.blob/ok? retried)))
+                         (is (= 5 @!retry-syncs)
+                             "retry repairs root, creates shard, then publishes")
+                         (is (= content (.readFileSync nfs path "utf8"))))))
+              (.finally
+                (fn []
+                  (reset! blob/!storage-view (storage-view fixture-dir)))))))
+      done)))
+
+(deftest directory-sync-failure-keeps-complete-bytes-and-retry-resyncs
+  (async done
+    (run-test
+      (fn [conn]
+        (let [writable-dir (.join npath fixture-dir "directory-sync-writable")
+              content "rename succeeded but directory sync failed"
+              hash (-> (.createHash crypto "sha256")
+                       (.update content "utf8")
+                       (.digest "hex"))
+              path (.join npath writable-dir (subs hash 0 2) hash)
+              !first-syncs (atom 0)
+              !retry-syncs (atom 0)
+              !retry-renames (atom 0)]
+          (.rmSync nfs writable-dir #js {:recursive true :force true})
+          (.mkdirSync nfs writable-dir #js {:recursive true})
+          (reset! blob/!storage-view (storage-view writable-dir))
+          (-> (put-with-effects!
+                content
+                (effects-with
+                  ::blob/sync-file-descriptor!
+                  (fn [fd]
+                    (let [call (swap! !first-syncs inc)]
+                      (if (= 5 call)
+                        (throw (js/Error.
+                                 "injected directory sync failure"))
+                        (.fsyncSync nfs fd))))))
+              (.then (pinned conn
+                       (fn [failed]
+                         (is (= 5 @!first-syncs)
+                             "publication syncs directory chain, file, then shard")
+                         (is (false? (:my.blob/ok? failed)))
+                         (is (str/includes? (:my.blob/error failed)
+                                            "injected directory sync failure"))
+                         (is (= content (.readFileSync nfs path "utf8"))
+                             "post-rename failure leaves complete final bytes")
+                         (is (false? (:my.blob/exists?
+                                      (blob/stat {:my.blob/hash hash})))
+                             "failed durability does not license the DB projection")
+                         (put-with-effects!
+                           content
+                           (effects-with
+                             ::blob/atomic-rename!
+                             (fn [from to]
+                               (swap! !retry-renames inc)
+                               (.renameSync nfs from to))
+                             ::blob/sync-file-descriptor!
+                             (fn [fd]
+                               (swap! !retry-syncs inc)
+                               (.fsyncSync nfs fd)))))))
+              (.then (pinned conn
+                       (fn [retried]
+                         (is (true? (:my.blob/ok? retried)))
+                         (is (= 4 @!retry-syncs)
+                             "retry re-syncs directories, file, and shard")
+                         (is (zero? @!retry-renames)
+                             "retry never replaces an existing verified blob")
+                         (is (true? (:my.blob/exists?
+                                     (blob/stat {:my.blob/hash hash})))
+                             "projection follows directory-durable retry")
+                         (is (= content
+                                (:my.blob/content
+                                  (blob/get {:my.blob/hash hash})))))))
+              (.finally
+                (fn []
+                  (reset! blob/!storage-view (storage-view fixture-dir)))))))
       done)))
 
 ;; ---------------------------------------------------------------------------

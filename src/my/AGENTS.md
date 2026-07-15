@@ -39,4 +39,7 @@ process-local storage view has a writable archive plus ordered read-only bases;
 normal clusters have no bases, while lifecycle-managed branches use a private
 overlay over the source archive. A single eval form carries only ~2K tokens of
 literal content — `put!` in chunks, then `concat!` the hashes into ONE canonical
-blob.
+blob. A new content address publishes only after every missing archive directory
+entry, its temporary file, and final shard have been fsynced around the atomic
+rename. Retrying an existing verified writable blob re-syncs its directory chain,
+file, and shard without replacing it.
