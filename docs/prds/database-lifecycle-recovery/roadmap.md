@@ -184,7 +184,8 @@ writer proof passes 19 tests/112 assertions across transport, integration, and
 server. The remaining seam is generation-bound process evidence: the pod's
 loopback lifecycle response and the JVM application result must reach the one
 persistent containment owner, then the Babashka operator must reject missing,
-stale, malformed, or incomplete results before it starts a replacement.
+stale, malformed, or incomplete results as a clean shutdown claim and route
+the replacement through the existing unexpected-recovery transaction.
 
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in
