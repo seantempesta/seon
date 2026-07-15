@@ -46,6 +46,14 @@ subagent are never the only record of what remains. Parallel throughput never
 overrides dependency order, one-mechanism ownership, shared-tree safety, or
 the requirement that the top-level agent prove the integrated system.
 
+A build, restart, reset, or live-proof checkpoint is a coordinated source
+freeze for every path included in its artifact digest. Before starting one,
+pause source-editing lanes and wait for their owned files to be coherent; do
+not count the checkpoint if a build input changes before readiness. Release
+the lanes immediately after the checkpoint ends. If an interrupted operator
+leaves a recorded child alive, use `bin/seon down` so the supervisor reaps its
+own processes rather than killing the child directly.
+
 Run the same control loop after every returned lane, material discovery, or
 completed commit:
 
