@@ -57,7 +57,7 @@
 
 (def containment-schema
   [:map {:closed true}
-   [:seon.dev.process.containment/generation uuid?]
+   [:seon.dev.process.containment/generation :uuid]
    [:seon.dev.process.containment/owner-pid pos-int?]
    [:seon.dev.process.containment/owner-start-instant :string]
    [:seon.dev.process.containment/anchor-pid pos-int?]
@@ -1220,7 +1220,7 @@
 
 (def ^:private containment-terminal-schema
   [:map {:closed true}
-   [:seon.dev.process.containment/generation uuid?]
+   [:seon.dev.process.containment/generation :uuid]
    [:seon.dev.process.containment/status
     [:= :seon.dev.process.containment.status/drained]]
    [:seon.dev.process.containment/trigger {:optional true}
@@ -1238,7 +1238,7 @@
      :seon.dev.process.application-capture/invalid-utf8
      :seon.dev.process.application-capture/missing-capture]]
    [:seon.dev.process.application-capture/sha256 {:optional true}
-    [:re #"[0-9a-f]{64}"]]
+    [:re "[0-9a-f]{64}"]]
    [:seon.dev.process.application-capture/bytes {:optional true}
     [:int {:min 0 :max 1048576}]]
    [:seon.dev.process.application-capture/error {:optional true}
@@ -1255,13 +1255,13 @@
    [:seon.dev.process/application-result {:optional true}
     [:or ::runtime.lifecycle/quiesce-response
      ::db.protocol/writer-terminal-result]]
-   [:seon.dev.process/application-error {:optional true} qualified-keyword?]
+   [:seon.dev.process/application-error {:optional true} :qualified-keyword]
    [:seon.dev.process/application-capture {:optional true}
     application-capture-schema]
    [:seon.dev.process/application-error-message {:optional true}
     [:string {:max 4096}]]
    [:seon.dev.process/legacy-retired? {:optional true} :boolean]
-   [:seon.dev.process/reason {:optional true} qualified-keyword?]])
+   [:seon.dev.process/reason {:optional true} :qualified-keyword]])
 
 (def clean-or-force-result-schema
   [:map {:closed true}
