@@ -70,6 +70,18 @@
                  (-> (js/Promise.resolve (body conn))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
+(defn- resolved-request
+  "Attach one config value captured before provider request assembly."
+  [request]
+  (let [database @db/*conn*
+        resolution (ai/resolved-config {:seon.db/db database})]
+    (assoc request :seon.ai/config-resolution resolution)))
+
+(defn- complete
+  "Call the adapter with one config value captured before assembly."
+  [request]
+  (openai/complete (resolved-request request)))
+
 ;; Forward ref — with-env is defined with the other env/fetch helpers
 ;; below, but the provider-pinned pure-shape tests above it use it.
 (declare with-env)
@@ -315,12 +327,95 @@
   (fn [url init]
     (reset! captured {:url     url
                       :auth    (some-> init .-headers (.get "authorization"))
+                      :timeout (some-> init .-headers (.get "x-stainless-timeout"))
                       :signal  (.-signal init)
                       :body    (js->clj (.parse js/JSON (.-body init))
                                         :keywordize-keys true)})
     (js/Promise.resolve
       (js/Response. (sse-stream sse-string)
                     #js{:status 200 :headers #js{"content-type" "text/event-stream"}}))))
+
+(deftest one-resolution-survives-an-ambient-split-read
+  (async done
+    (let [captured (atom nil)
+          extra-a "{:chat_template_kwargs {:enable_thinking false}}"
+          extra-b "{:chat_template_kwargs {:enable_thinking true}}"]
+      (-> (with-conn
+            (fn [conn]
+              (with-env {"MODEL_KEY_A" "secret-a"
+                         "MODEL_KEY_B" "secret-b"
+                         "SEON_AI_API_KEY" nil
+                         "DEEPSEEK_API_KEY" nil}
+                (fn ^:async split-read []
+                  (let [a-result
+                        (await
+                          (db/transact!
+                            {:seon.db/tx-data
+                             [{::ai/id "config"
+                               ::ai/provider :openai-compat
+                               ::ai/model "model-a"
+                               ::ai/base-url "https://a.example/v1"
+                               ::ai/timeout-ms 120000
+                               ::ai/api-key-env "MODEL_KEY_A"
+                               ::ai/temperature 0.1
+                               ::ai/max-tokens 111
+                               ::ai/thinking "minimal"
+                               ::ai/extra-body-edn extra-a}]}))
+                        _ (is (true? (:seon.db/ok? a-result)) "row A lands")
+                        resolution-a
+                        (ai/resolved-config {:seon.db/db @conn})
+                        b-result
+                        (await
+                          (db/transact!
+                            {:seon.db/tx-data
+                             [{::ai/id "config"
+                               ::ai/model "model-b"
+                               ::ai/base-url "https://b.example/v1"
+                               ::ai/timeout-ms 90000
+                               ::ai/api-key-env "MODEL_KEY_B"
+                               ::ai/temperature 0.9
+                               ::ai/max-tokens 999
+                               ::ai/thinking "high"
+                               ::ai/extra-body-edn extra-b}]}))]
+                    (is (true? (:seon.db/ok? b-result)) "ambient row B lands")
+                    (await
+                      (with-fetch
+                        (streaming-fetch captured (sse-completion))
+                        #(openai/complete
+                           {:seon.ai/ctx "split-read"
+                            :seon.ai/config-resolution resolution-a}))))))))
+          (.then
+            (fn [{evidence :seon.ai/config-evidence
+                  error :seon.ai/error}]
+              (is (nil? error))
+              (is (= "https://a.example/v1/chat/completions"
+                     (:url @captured)))
+              (is (= "Bearer secret-a" (:auth @captured)))
+              (is (= {:enable_thinking false}
+                     (get-in @captured [:body :chat_template_kwargs])))
+              (is (= "model-a" (get-in @captured [:body :model])))
+              (is (= 0.1 (get-in @captured [:body :temperature])))
+              (is (= 111 (get-in @captured [:body :max_tokens])))
+              (is (= "minimal" (get-in @captured [:body :reasoning_effort])))
+              (is (= "model-a"
+                     (get-in evidence [:seon.ai/resolved-config
+                                       :seon.ai/model])))
+              (is (= "https://a.example/v1"
+                     (get-in evidence [:seon.ai/resolved-config
+                                       :seon.ai/base-url])))
+              (is (= 120000
+                     (get-in evidence [:seon.ai/resolved-config
+                                       :seon.ai/timeout-ms])))
+              (is (= {:seon.ai/credential-class :configured-env
+                      :seon.ai/api-key-env "MODEL_KEY_A"}
+                     (:seon.ai/credential-source evidence)))
+              (is (= 64
+                     (count (get-in evidence [:seon.ai/resolved-config
+                                              :seon.ai/extra-body-digest]))))
+              (is (not (str/includes? (pr-str evidence) "secret-a"))
+                  "bounded evidence retains no credential bytes")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
 (deftest happy-path-streams-text-and-usage
   (async done
@@ -330,7 +425,7 @@
       (-> (with-conn
             (fn [_conn]
               (with-stubbed (streaming-fetch captured (sse-completion))
-                #(openai/complete {:seon.ai/ctx "hi" :seon.ai/system-prompt "sys"}))))
+                #(complete {:seon.ai/ctx "hi" :seon.ai/system-prompt "sys"}))))
           (.then
             (fn [{:seon.ai/keys [text usage error] :as resp}]
               (is (nil? error))
@@ -360,7 +455,8 @@
                   (.abort controller)
                   (js/Promise.reject (js/DOMException. "aborted" "AbortError")))
                 #((openai/agent-adapter)
-                  {:seon.ai/ctx "hi" :seon.ai/abort-signal signal}))))
+                  (resolved-request
+                    {:seon.ai/ctx "hi" :seon.ai/abort-signal signal})))))
           (.then (fn [{:seon.ai/keys [error]}]
                    (is (true? (:seon.ai/timeout? error)))
                    (is (true? (.-aborted @captured))
@@ -392,7 +488,7 @@
                         (fn [{ok? :seon.db/ok?}]
                           (is (true? ok?))
                           (with-fetch (streaming-fetch captured (sse-completion))
-                            #(openai/complete {:seon.ai/ctx "hi"}))))
+                            #(complete {:seon.ai/ctx "hi"}))))
                       (.then
                         (fn [{:seon.ai/keys [error]}]
                           (is (nil? error))
@@ -412,7 +508,7 @@
       (-> (with-stubbed
             (streaming-fetch captured
                              (sse-completion {:seon_unknown "keepme"} tc))
-            #(openai/complete {:seon.ai/ctx "hi"}))
+            #(complete {:seon.ai/ctx "hi"}))
           (.then
             (fn [{:seon.ai/keys [tool-calls provider-fields error]}]
               (is (nil? error))
@@ -427,7 +523,7 @@
   (async done
     (let [captured (atom nil)]
       (-> (with-stubbed (streaming-fetch captured (sse-completion))
-            #(openai/complete
+            #(complete
                {:seon.ai/ctx        "hi"
                 :seon.ai/extra-body {:chat_template_kwargs {:enable_thinking false}}}))
           (.then
@@ -467,7 +563,7 @@
                       (is (true? ok?) "::extra-body-edn is a storable string attr")
                       ;; NO :seon.ai/extra-body opt — only the row.
                       (with-stubbed (streaming-fetch captured (sse-completion))
-                        #(openai/complete {:seon.ai/ctx "hi"})))))))
+                        #(complete {:seon.ai/ctx "hi"})))))))
           (.then
             (fn [{:seon.ai/keys [error]}]
               (is (nil? error))
@@ -487,7 +583,7 @@
   (async done
     (-> (with-stubbed
           (fn [_ _] (js/Promise.reject (js/TypeError. "fetch failed")))
-          #(openai/complete {:seon.ai/ctx "hi"}))
+          #(complete {:seon.ai/ctx "hi"}))
         (.then
           (fn [{:seon.ai/keys [text error]}]
             (is (= "" text) "errors-as-values — empty text, never a rejection")
@@ -506,7 +602,7 @@
               (js/Response. "bad request"
                             #js{:status 400
                                 :headers #js{"content-type" "application/json"}})))
-          #(openai/complete {:seon.ai/ctx "hi"}))
+          #(complete {:seon.ai/ctx "hi"}))
         (.then
           (fn [{:seon.ai/keys [text error]}]
             (is (= "" text))
@@ -540,7 +636,7 @@
                 (js/Response. "boom"
                               #js{:status 500
                                   :headers #js{"content-type" "application/json"}})))
-            #(openai/complete {:seon.ai/ctx "hi"}))
+            #(complete {:seon.ai/ctx "hi"}))
           (.then
             (fn [{:seon.ai/keys [error]}]
               (is (= 500 (:seon.ai/status error)))
@@ -562,7 +658,7 @@
                             #js{:status 429
                                 :headers #js{"content-type"  "application/json"
                                              "retry-after"   "2"}})))
-          #(openai/complete {:seon.ai/ctx "hi"}))
+          #(complete {:seon.ai/ctx "hi"}))
         (.then
           (fn [{:seon.ai/keys [error]}]
             (is (= 429 (:seon.ai/status error)))
@@ -591,7 +687,7 @@
                                 (swap! called inc)
                                 (js/Promise.resolve
                                   (js/Response. "" #js{:status 200})))
-                    #(openai/complete {:seon.ai/ctx "hi"}))))))
+                    #(complete {:seon.ai/ctx "hi"}))))))
           (.then
             (fn [{:seon.ai/keys [text error]}]
               (is (= "" text) "error envelope, not a throw")
@@ -616,7 +712,7 @@
                       {:seon.db/tx-data
                        [{::ai/id       "config"
                          ::ai/base-url "https://gw.example.com/v1"}]})
-                    (.then (fn [_] (openai/complete {:seon.ai/ctx "hi"}))))))))
+                    (.then (fn [_] (complete {:seon.ai/ctx "hi"}))))))))
         (.then
           (fn [{:seon.ai/keys [text error]}]
             (is (= "" text))
@@ -744,7 +840,7 @@
           _       (.on js/process "unhandledRejection" handler)]
       (-> (with-stubbed
             (fn [_ _] (js/Promise.reject (js/TypeError. "fetch failed")))
-            #(openai/complete {:seon.ai/ctx "hi" :seon.ai/stream? true}))
+            #(complete {:seon.ai/ctx "hi" :seon.ai/stream? true}))
           (.then
             (fn [{:seon.ai/keys [text error]}]
               (is (= "" text) "errors-as-values — empty text, never a rejection")

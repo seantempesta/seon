@@ -14,6 +14,7 @@
     [seon.ai.tokens :as tokens]
     [seon.ai.typeahead :as typeahead]
     [seon.config :as config]
+    [seon.db :as db]
     [seon.schema :as schema]))
 
 ;; The turn boundary has two intentional call shapes: buffered calls pass the
@@ -22,7 +23,10 @@
   [:map
    [:seon.ai/ctx :seon.ai/ctx]
    [:seon.ai/stream? {:optional true} :seon.ai/stream?]
-   [:seon.ai/abort-signal {:optional true} :seon.ai/abort-signal]])
+   [:seon.ai/abort-signal {:optional true} :seon.ai/abort-signal]
+   [:seon.ai/config-resolution
+    {:optional true}
+    :seon.ai/config-resolution]])
 (schema/register! ::arg [:or :string ::request])
 (schema/register! ::llm-fn 'fn?)
 
@@ -47,9 +51,14 @@
 
 (defn adapter
   "The agent adapter for the currently effective provider."
-  {:malli/schema [:=> [:cat] ::llm-fn]}
-  []
-  (case (ai/provider)
+  {:malli/schema
+   [:function
+    [:=> [:cat] ::llm-fn]
+    [:=> [:cat :seon.ai/config-resolution] ::llm-fn]]}
+  ([]
+   ;; Retained for direct operator/debug selection. Provider attempts use the
+   ;; explicit arity below through [[llm-fn]].
+   (case (ai/provider)
     :anthropic
     (if (config/anthropic-api-key)
       (anthropic/agent-adapter)
@@ -73,10 +82,44 @@
     (if (openai/api-key-configured?)
       (openai/agent-adapter)
       stub)))
+  ([resolution]
+   (let [config (:seon.ai/resolved-config resolution)]
+     (case (:seon.ai/provider config)
+       :anthropic
+       (if (config/anthropic-api-key)
+         (anthropic/agent-adapter)
+         stub)
+
+       :diffusiongemma
+       (case (:seon.ai/dg-backend config)
+         :control (if (diffusiongemma/api-configured?)
+                    (diffusiongemma/agent-adapter)
+                    stub)
+         (if (openai/api-key-configured? resolution)
+           (openai/agent-adapter)
+           stub))
+
+       :typeahead
+       (if (diffusiongemma/api-configured?)
+         (typeahead/agent-adapter)
+         stub)
+
+       (if (openai/api-key-configured? resolution)
+         (openai/agent-adapter)
+         stub)))))
 
 (defn llm-fn
   "Build a per-call dispatching agent LLM function."
   {:malli/schema [:=> [:cat] ::llm-fn]}
   []
   (fn [arg]
-    ((adapter) arg)))
+    (let [database @db/*conn*
+          agent-id (db/current-agent-id)
+          resolution (ai/resolved-config
+                       (cond-> {:seon.db/db database}
+                         agent-id (assoc :seon.agent/id agent-id)))
+          request (if (map? arg)
+                    (assoc arg :seon.ai/config-resolution resolution)
+                    {:seon.ai/ctx arg
+                     :seon.ai/config-resolution resolution})]
+      ((adapter resolution) request))))

@@ -30,11 +30,10 @@
    One agent-facing fn: [[agent-adapter]] returns `(fn [ctx-string])`
    compatible with `seon.agent/run-turn-once!`'s `llm-fn`.
 
-   Call settings (model, temperature, max-tokens, thinking,
-   timeout-ms, tools, tool-choice, extra-body) come from the
-   `:seon.ai/config` row, read PER CALL via `seon.ai/current` (C-18 —
-   env-seeded via SEON_AI_*, runtime-tunable by transact). Precedence:
-   explicit request opt > config row > the shipped defaults below.
+   Call settings (model, temperature, max-tokens, thinking, timeout-ms,
+   tools, tool-choice, extra-body) come from one explicit
+   `:seon.ai/config-resolution` value captured before the attempt. The
+   adapter never rereads mutable config while assembling that request.
 
    The `system` role message is the HARDCODED system-specific seon
    mechanics (`seon.agent.ctx/system-text` via
@@ -76,7 +75,10 @@
    [:seon.ai/tool-choice   {:optional true} :seon.ai/tool-choice]
    [:seon.ai/stream?       {:optional true} :seon.ai/stream?]
    [:seon.ai/abort-signal  {:optional true} :seon.ai/abort-signal]
-   [:seon.ai/extra-body    {:optional true} :seon.ai/extra-body]])
+   [:seon.ai/extra-body    {:optional true} :seon.ai/extra-body]
+   [:seon.ai/config-resolution
+    {:optional true}
+    :seon.ai/config-resolution]])
 
 (schema/register!
   :seon.ai.openai-compat/complete-response
@@ -87,7 +89,8 @@
    [:seon.ai/usage                      {:optional true} :seon.ai/usage]
    [:seon.ai/estimated?                 {:optional true} :seon.ai/estimated?]
    [:seon.ai/tool-calls                 {:optional true} :seon.ai/tool-calls]
-   [:seon.ai/provider-fields            {:optional true} :seon.ai/provider-fields]])
+   [:seon.ai/provider-fields            {:optional true} :seon.ai/provider-fields]
+   [:seon.ai/config-evidence {:optional true} :seon.ai/config-evidence]])
 
 ;; agent-adapter request-option overrides (e.g. {:seon.ai/temperature 0.2}).
 (schema/register! :seon.ai.openai-compat/opts :map)
@@ -130,31 +133,15 @@
 ;; :extra-body for a gateway's vendor field.
 
 (defn- openai-compat?
-  "Is this pod's active provider :openai-compat? Read per call
-   (reactive-context) — the SAME request path serves both providers."
-  []
-  (= :openai-compat (ai/provider)))
-
-(defn- endpoint
-  "The base endpoint for this call: the shipped deepseek /v1 root for
-   :deepseek; the config row's :seon.ai/base-url for :openai-compat,
-   with the SEON_AI_BASE_URL env as the pre-sync fallback. nil =
-   :openai-compat selected but unconfigured ([[complete]] returns a
-   legible error envelope). The value may be the /v1 root OR the legacy
-   full chat-completions URL — [[sdk-base-url]] reconciles both."
-  []
-  (if (openai-compat?)
-    (or (:seon.ai/base-url (ai/current))
-        (:seon.ai/base-url (ai/env-row)))
-    default-endpoint))
+  "Whether a resolved request selects the OpenAI-compatible provider."
+  [resolution]
+  (= :openai-compat
+     (get-in resolution [:seon.ai/resolved-config :seon.ai/provider])))
 
 (defn- sdk-base-url
-  "The `/v1` ROOT the SDK appends `/chat/completions` to, derived from
-   [[endpoint]]. Strips a trailing `/chat/completions` or `/completions`
-   off the legacy full-URL form; a value already at the root is used
-   as-is. nil when [[endpoint]] is nil (:openai-compat unconfigured)."
-  []
-  (when-let [url (endpoint)]
+  "The SDK root derived from one resolved endpoint string."
+  [url]
+  (when url
     (cond
       (str/ends-with? url "/chat/completions")
       (subs url 0 (- (count url) (count "/chat/completions")))
@@ -164,25 +151,49 @@
 
       :else url)))
 
-(defn- resolved-api-key
-  "The bearer key for this call, or nil — see the ns doc for the
-   resolution order. Read from process.env at call time; the key value
-   is never transacted."
-  []
-  (let [key-env (or (:seon.ai/api-key-env (ai/current))
-                    (:seon.ai/api-key-env (ai/env-row)))]
-    (or (some-> key-env platform/env-val)
-        (when-not (openai-compat?) (platform/env-val "DEEPSEEK_API_KEY"))
-        (platform/env-val "SEON_AI_API_KEY"))))
+(defn- resolved-credential
+  "Resolve a secret at call time and retain only its non-secret source."
+  [resolution]
+  (let [config (get resolution :seon.ai/resolved-config)
+        compat? (openai-compat? resolution)
+        configured-env (:seon.ai/api-key-env config)
+        candidates (cond-> []
+                     configured-env
+                     (conj [configured-env :configured-env])
+
+                     (not compat?)
+                     (conj ["DEEPSEEK_API_KEY" :provider-default-env])
+
+                     true
+                     (conj ["SEON_AI_API_KEY" :conventional-env]))]
+    (some (fn [[env-name class]]
+            (when-let [secret (platform/env-val env-name)]
+              {::api-key secret
+               :seon.ai/credential-source
+               {:seon.ai/credential-class class
+                :seon.ai/api-key-env env-name}}))
+          candidates)))
 
 (defn api-key-configured?
   "Whether a bearer API key resolves for the ACTIVE provider.
 
    See the ns doc's resolution order. `seon.client/current-llm-fn` uses this
    to fall back to the stub llm-fn when no key is available."
-  {:malli/schema [:=> [:cat] :boolean]}
-  []
-  (boolean (resolved-api-key)))
+  {:malli/schema
+   [:function
+    [:=> [:cat] :boolean]
+    [:=> [:cat :seon.ai/config-resolution] :boolean]]}
+  ([]
+   ;; Direct boot/debug compatibility. Provider attempts call the explicit
+   ;; arity with the immutable resolution captured by dispatch.
+   (let [cfg (ai/current)
+         provider (or (:seon.ai/provider cfg) (ai/provider))
+         defaults (get ai/shipped-defaults provider {})
+         resolution {:seon.ai/resolved-config (merge defaults cfg)
+                     :seon.ai/provenance {:seon.ai/provider :default}}]
+     (boolean (resolved-credential resolution))))
+  ([resolution]
+   (boolean (resolved-credential resolution))))
 
 (defn request-params
   "Build the OpenAI chat-completions request PARAMS as a CLJ map.
@@ -193,19 +204,36 @@
    here — [[complete]] merges it into these params (the SDK's 2nd-arg
    `:body` would REPLACE the body, dropping model/messages).
 
-   Reads the `:seon.ai/config` row PER CALL (`seon.ai/current`);
-   explicit request opts win over the row, the row wins over the
-   shipped defaults. We always request a stream (no `:stream false`)
+   Provider attempts use the explicit resolution arity; the one-arity form
+   captures ambient config only for direct REPL/request-shape inspection.
+   Explicit request opts win over the resolved value. We always request a stream (no `:stream false`)
    and ask for usage on the final chunk via
    `:stream_options {:include_usage true}`. `:tools` / `:tool_choice`
    are included ONLY when present (request opt > config row). Public so
    tests and live debugging can inspect exactly what goes over the
    wire."
-  {:malli/schema [:=> [:cat :seon.ai.openai-compat/complete-request] :map]}
-  [{:seon.ai/keys [ctx model temperature max-tokens tools tool-choice] :as request}]
-  (let [cfg      (ai/current)
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.ai.openai-compat/complete-request] :map]
+    [:=> [:catn [:seon.ai.openai-compat/request
+                 :seon.ai.openai-compat/complete-request]
+                [:seon.ai/config-resolution :seon.ai/config-resolution]]
+     :map]]}
+  ([request]
+   ;; Direct REPL/request-shape inspection retains the ambient convenience
+   ;; arity. Provider attempts always use the explicit resolution arity.
+   (let [cfg (ai/current)
+         provider (or (:seon.ai/provider cfg) (ai/provider))
+         defaults (get ai/shipped-defaults provider {})]
+     (request-params
+       request
+       {:seon.ai/resolved-config (merge defaults cfg)
+        :seon.ai/provenance {:seon.ai/provider :default}})))
+  ([{:seon.ai/keys [ctx model temperature max-tokens tools tool-choice] :as request}
+    resolution]
+  (let [cfg      (:seon.ai/resolved-config resolution)
         thinking (ai/thinking-mode cfg)
-        compat?  (openai-compat?)
+        compat?  (openai-compat? resolution)
         tools*   (or tools (:seon.ai/tools cfg))
         choice*  (or tool-choice (:seon.ai/tool-choice cfg))]
     (cond->
@@ -221,17 +249,15 @@
       (not compat?)      (assoc :thinking {:type (if thinking "enabled" "disabled")})
       (string? thinking) (assoc :reasoning_effort thinking)
       (some? tools*)         (assoc :tools tools*)
-      (some? choice*)        (assoc :tool_choice choice*))))
+      (some? choice*)        (assoc :tool_choice choice*)))))
 
 (defn- request-extra-body
   "The generic extra request fields for this call — `:seon.ai/extra-body`
-   from the request opt (winning), else the config row's data-only door
-   (`seon.ai/config-extra-body` — env SEON_AI_EXTRA_BODY / the row's
-   ::extra-body-edn, the only path that reaches the agent turn loop). nil
-   when neither set (nothing to merge)."
-  [request]
+   from the request opt (winning), else the already resolved config value.
+   nil when neither is set (nothing to merge)."
+  [request resolution]
   (or (:seon.ai/extra-body request)
-      (not-empty (ai/config-extra-body))))
+      (:seon.ai/extra-body resolution)))
 
 (def ^:private known-completion-keys
   "Top-level ChatCompletion keys the adapter consumes directly — the
@@ -424,6 +450,7 @@
      :seon.ai/tool-choice   — \"auto\"|\"none\"|\"required\"|{…}
      :seon.ai/extra-body    — generic extra request fields (e.g. Qwen
                               {:chat_template_kwargs {:enable_thinking false}})
+     :seon.ai/config-resolution — one caller-captured immutable config value
 
    Config gaps (no base-url for :openai-compat, no resolvable API key)
    and network/HTTP failures resolve to `{:seon.ai/text \"\"
@@ -432,30 +459,44 @@
   {:malli/schema [:=> [:cat :seon.ai.openai-compat/complete-request]
                   :seon.ai.openai-compat/complete-response]}
   [request]
-  (let [compat? (openai-compat?)
+  (let [resolution (:seon.ai/config-resolution request)
+        config     (:seon.ai/resolved-config resolution)
+        compat? (openai-compat? resolution)
         label   (if compat? "OpenAI-compat" "DeepSeek")
-        url     (sdk-base-url)
-        key     (resolved-api-key)]
+        url     (sdk-base-url (:seon.ai/base-url config))
+        credential (resolved-credential resolution)
+        key     (::api-key credential)
+        evidence (when resolution
+                   (ai/config-evidence
+                     resolution
+                     (:seon.ai/credential-source credential)))]
     (cond
-      (nil? url)
+      (nil? resolution)
       (config-error
-        label
-        (str ":openai-compat provider selected but no chat-completions URL "
-             "configured — set SEON_AI_BASE_URL (or transact :seon.ai/base-url "
-             "on the :seon.ai/config row) to the gateway's /v1 root, e.g. "
-             "\"https://gw.example.com/v1\" (the legacy full "
-             "/v1/chat/completions URL is also accepted)"))
+        "OpenAI-compatible"
+        "missing :seon.ai/config-resolution — capture one immutable database value and resolve it before calling the provider")
+
+      (nil? url)
+      (assoc (config-error
+               label
+               (str ":openai-compat provider selected but no chat-completions URL "
+                    "configured — set SEON_AI_BASE_URL (or transact :seon.ai/base-url "
+                    "on the :seon.ai/config row) to the gateway's /v1 root, e.g. "
+                    "\"https://gw.example.com/v1\" (the legacy full "
+                    "/v1/chat/completions URL is also accepted)"))
+             :seon.ai/config-evidence evidence)
 
       (nil? key)
-      (config-error
-        label
-        (str label " API key not found in process.env — "
-             (if compat?
-               (str "set SEON_AI_API_KEY, or point :seon.ai/api-key-env "
-                    "(SEON_AI_API_KEY_ENV) at the name of the env var "
-                    "holding the gateway's bearer key")
-               (str "set DEEPSEEK_API_KEY (or SEON_AI_API_KEY, or "
-                    ":seon.ai/api-key-env / SEON_AI_API_KEY_ENV)"))))
+      (assoc (config-error
+               label
+               (str label " API key not found in process.env — "
+                    (if compat?
+                      (str "set SEON_AI_API_KEY, or point :seon.ai/api-key-env "
+                           "(SEON_AI_API_KEY_ENV) at the name of the env var "
+                           "holding the gateway's bearer key")
+                      (str "set DEEPSEEK_API_KEY (or SEON_AI_API_KEY, or "
+                           ":seon.ai/api-key-env / SEON_AI_API_KEY_ENV)"))))
+             :seon.ai/config-evidence evidence)
 
       :else
       ;; The WHOLE build+call rides inside the try — the params build reads
@@ -465,15 +506,15 @@
       ;; a rejection as a :core fault (crashes the dev pod). Same class as the
       ;; stream-until-form! fix (e6295ecd) and the anthropic fix (06615941).
       (try
-        (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
+        (let [ms      (or (:seon.ai/timeout-ms config) default-timeout-ms)
               ^js client (make-client url key ms)
-              extra   (request-extra-body request)
+              extra   (request-extra-body request resolution)
               ;; :extra-body is MERGED into the request PARAMS (1st arg).
               ;; openai-node passes unknown top-level params through
               ;; verbatim. The 2nd-arg RequestOptions :body REPLACES the
               ;; body (does NOT merge) — using it dropped model/messages
               ;; and 400'd every extra-body call (verified live).
-              params  (clj->js (cond-> (request-params request)
+              params  (clj->js (cond-> (request-params request resolution)
                                  (seq extra) (merge extra)))
               ^js completions (.. client -chat -completions)
               stream?  (boolean (:seon.ai/stream? request))
@@ -495,15 +536,18 @@
                 {:seon.ai/text                        text
                  :seon.ai.openai-compat/finish-reason "abort"
                  :seon.ai/usage                       (estimated-usage request text)
-                 :seon.ai/estimated?                  true}
+                 :seon.ai/estimated?                  true
+                 :seon.ai/config-evidence             evidence}
 
                 ;; Natural end before any form completed — fall back to
                 ;; the assembled completion for real usage + full text.
                 :else
-                (parse-completion (await (.finalChatCompletion stream)))))
+                (assoc (parse-completion (await (.finalChatCompletion stream)))
+                       :seon.ai/config-evidence evidence)))
             ;; repl-mode :batch — buffer to the assembled completion.
             (let [completion (await (.finalChatCompletion stream))
-                  result     (parse-completion completion)]
+                  result     (assoc (parse-completion completion)
+                                    :seon.ai/config-evidence evidence)]
               (when-let [err (:seon.ai/error result)]
                 (ai/log-error! label err))
               result)))
@@ -511,7 +555,8 @@
           (let [err (error->envelope label e)]
             (ai/log-error! label err)
             {:seon.ai/text  ""
-             :seon.ai/error err}))))))
+             :seon.ai/error err
+             :seon.ai/config-evidence evidence}))))))
 
 ;; ============================================================
 ;; Adapter for seon.agent.
@@ -533,9 +578,11 @@
   (let [ctx-text (ai/llm-arg->ctx arg)
         stream?  (ai/llm-arg->stream? arg)
         signal   (ai/llm-arg->abort-signal arg)
+        resolution (when (map? arg) (:seon.ai/config-resolution arg))
         resp (await (complete (cond-> (assoc opts :seon.ai/ctx ctx-text)
                                 stream? (assoc :seon.ai/stream? true)
-                                signal (assoc :seon.ai/abort-signal signal))))]
+                                signal (assoc :seon.ai/abort-signal signal)
+                                resolution (assoc :seon.ai/config-resolution resolution))))]
     (cond-> {:text        (:seon.ai/text resp)
              :seon.ai/raw resp}
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))

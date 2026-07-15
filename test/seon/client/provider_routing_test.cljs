@@ -82,7 +82,7 @@
                       (with-redefs [anthropic/agent-adapter (tagging-adapter :anthropic)
                                     openai/agent-adapter     (tagging-adapter :deepseek)
                                     config/anthropic-api-key (fn [] "test-key")
-                                    openai/api-key-configured? (fn [] true)]
+                                    openai/api-key-configured? (constantly true)]
                         (let [llm-fn (dispatch/llm-fn)]
                           ;; Provider resolution proof (no scope = global).
                           (is (= :deepseek (ai/provider))
@@ -129,7 +129,7 @@
                       (with-redefs [anthropic/agent-adapter (tagging-adapter :anthropic)
                                     openai/agent-adapter     (tagging-adapter :deepseek)
                                     config/anthropic-api-key (fn [] "test-key")
-                                    openai/api-key-configured? (fn [] true)]
+                                    openai/api-key-configured? (constantly true)]
                         (db/with-agent "inh-2607011801"
                           (fn []
                             (is (= :anthropic (ai/provider))

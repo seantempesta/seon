@@ -276,6 +276,12 @@
 ;; request-opt-only (inherently per-call; no persisted form yet).
 (schema/register! ::extra-body-edn [:string {:min 1}])
 (schema/register! ::extra-body-digest [:string {:min 64 :max 64}])
+(schema/register! ::credential-class
+  [:enum :configured-env :provider-default-env :conventional-env])
+(schema/register! ::credential-source
+  [:map
+   [::credential-class ::credential-class]
+   [::api-key-env ::api-key-env]])
 
 ;; The RESOLVED LLM config as a VALUE — what an agent runs
 ;; under. NEVER stored (owner correction 2026-07-04, derive-don't-store:
@@ -588,7 +594,14 @@
 (schema/register! ::resolved-config-response
   [:map
    [::resolved-config ::resolved-config]
-   [::provenance      ::provenance]])
+   [::provenance      ::provenance]
+   [::extra-body      {:optional true} ::extra-body]])
+(schema/register! ::config-resolution ::resolved-config-response)
+(schema/register! ::config-evidence
+  [:map
+   [::resolved-config ::resolved-config]
+   [::provenance ::provenance]
+   [::credential-source {:optional true} ::credential-source]])
 
 (defn- extra-body-digest
   "SHA-256 of the exact database-owned EDN bytes when they parse as a map."
@@ -644,12 +657,24 @@
             [::model ::temperature ::max-tokens ::thinking ::timeout-ms
              ::base-url ::api-key-env ::dg-backend])]
       (if-let [[raw src] (pick ::extra-body-edn defaults)]
-        (if-let [digest (extra-body-digest raw)]
-          (-> resolved
-              (assoc-in [::resolved-config ::extra-body-digest] digest)
-              (assoc-in [::provenance ::extra-body-digest] src))
-          resolved)
+        (let [body (try (reader/read-string raw) (catch :default _ nil))]
+          (if-let [digest (and (map? body) (extra-body-digest raw))]
+            (-> resolved
+                (assoc ::extra-body body)
+                (assoc-in [::resolved-config ::extra-body-digest] digest)
+                (assoc-in [::provenance ::extra-body-digest] src))
+            resolved))
         resolved))))
+
+(defn config-evidence
+  "Bounded non-secret evidence for one resolved provider request."
+  {:malli/schema
+   [:=> [:catn [::config-resolution ::config-resolution]
+                 [::credential-source [:maybe ::credential-source]]]
+    ::config-evidence]}
+  [resolution credential-source]
+  (cond-> (select-keys resolution [::resolved-config ::provenance])
+    credential-source (assoc ::credential-source credential-source)))
 
 (defn agent-max-retries
   "The per-agent LLM retry COUNT for agent `id`.

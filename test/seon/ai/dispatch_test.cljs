@@ -10,7 +10,8 @@
     [seon.ai.dispatch :as dispatch]
     [seon.ai.tokens :as tokens]
     [seon.ai.typeahead :as typeahead]
-    [seon.config :as config]))
+    [seon.config :as config]
+    [seon.db :as db]))
 
 (defn- tagged-adapter
   "An adapter function tagged by its constructor's identity."
@@ -34,7 +35,7 @@
     (with-redefs [ai/provider                         (fn [] @!provider)
                   ai/dg-backend                       (fn [] @!backend)
                   config/anthropic-api-key            (fn [] "configured")
-                  openai/api-key-configured?          (fn [] true)
+                  openai/api-key-configured?          (constantly true)
                   diffusiongemma/api-configured?      (fn [] true)
                   anthropic/agent-adapter              (adapter-constructor anthropic-adapter)
                   openai/agent-adapter                 (adapter-constructor openai-adapter)
@@ -63,7 +64,7 @@
     (with-redefs [ai/provider                    (fn [] @!provider)
                   ai/dg-backend                  (fn [] @!backend)
                   config/anthropic-api-key       (fn [] nil)
-                  openai/api-key-configured?     (fn [] false)
+                  openai/api-key-configured?     (constantly false)
                   diffusiongemma/api-configured? (fn [] false)
                   anthropic/agent-adapter         unexpected
                   openai/agent-adapter            unexpected
@@ -86,8 +87,13 @@
 (deftest dispatching-llm-selects-again-for-every-call
   (let [!selected (atom :first)
         !selections (atom [])]
-    (with-redefs [dispatch/adapter
-                  (fn []
+    (with-redefs [db/*conn* (atom nil)
+                  ai/resolved-config
+                  (constantly
+                    {:seon.ai/resolved-config {:seon.ai/provider :deepseek}
+                     :seon.ai/provenance {:seon.ai/provider :default}})
+                  dispatch/adapter
+                  (fn [_resolution]
                     (let [selected @!selected]
                       (swap! !selections conj selected)
                       (tagged-adapter selected)))]
