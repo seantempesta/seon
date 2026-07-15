@@ -23,6 +23,7 @@
     [seon.agent.message.internal :as internal]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.runtime.admission :as admission]
     [seon.schema :as schema]
     [seon.warn :as warn]))
 
@@ -274,16 +275,20 @@
    carries nothing; since every message write routes through here, the
    guard kills the class.
 
-   A message ALWAYS transacts and is delivered — there is no same-turn
-   refusal. Errors are values: if a sibling form in the same turn
+   Closed runtime admission returns the existing DB failure envelope before
+   allocation or transaction. Otherwise a message ALWAYS transacts and is
+   delivered — there is no same-turn refusal. Errors are values: if a sibling form in the same turn
    returned a `{*/ok? false}` envelope the agent may over-claim, but that
    is visible in the transcript and a human follow-up re-wakes the agent.
-   Nothing here blocks a send."
+   Nothing else here blocks a send."
   {:malli/schema [:=> [:cat ::message-request] ::message-response]}
   [{:seon.agent.message/keys [content from to origin]}]
-  (let [agent-id (db/current-agent-id)
-        from     (or from (when agent-id [:seon.agent/id agent-id]))
-        to       (cond
+  (if-not (admission/available?)
+    {:seon.db/ok? false
+     :seon.db/error (:seon/error (admission/unavailable))}
+    (let [agent-id (db/current-agent-id)
+          from     (or from (when agent-id [:seon.agent/id agent-id]))
+          to       (cond
                    (nil? to)             [user-ref]
                    (and (vector? to)
                         (vector? (first to))) to        ; vector of lookup refs
@@ -388,7 +393,7 @@
           {:seon.agent.message/ok?  true
            :seon.agent.message/id   msg-id
            :seon.agent.message/hops hops}
-          env)))))
+          env))))))
 
 ;; ============================================================
 ;; The two agent-facing functions. Thin wrappers over `message!` — `from`

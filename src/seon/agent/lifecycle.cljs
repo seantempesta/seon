@@ -37,6 +37,7 @@
     [seon.agent.run :as run]
     [seon.agent.testrun :as testrun]
     [seon.db :as db]
+    [seon.runtime.admission :as admission]
     [seon.schema :as schema]))
 
 (schema/register! ::note   :string)
@@ -221,16 +222,23 @@
    scope, or no open run."
   {:malli/schema [:=> [:catn] [:or :seon.derive/state :seon.db/transact-response]]}
   []
-  (if-let [id (db/current-agent-id)]
-    (if-let [r (run/current-run {:seon.agent/id id})]
-      (let [env (await (run/resume! {:seon.agent/id     id
-                                     :seon.agent.run/id (:seon.agent.run/id r)}))]
-        (if (:seon.db/ok? env)
-          (do (loop/drive-run! {:seon.agent/id id})
-              :running)
-          env))
-      (no-open-run-error "resume" id))
-    (internal/no-agent-error "resume")))
+  (if-not (admission/available?)
+    {:seon.db/ok? false
+     :seon.db/error (:seon/error (admission/unavailable))}
+    (if-let [id (db/current-agent-id)]
+      (if-let [r (run/current-run {:seon.agent/id id})]
+        (let [env (await (run/resume! {:seon.agent/id     id
+                                       :seon.agent.run/id (:seon.agent.run/id r)}))]
+          (cond
+            (false? (:seon.db/ok? env)) env
+            (not (admission/available?))
+            {:seon.db/ok? false
+             :seon.db/error (:seon/error (admission/unavailable))}
+            :else
+            (do (loop/drive-run! {:seon.agent/id id})
+                :running)))
+        (no-open-run-error "resume" id))
+      (internal/no-agent-error "resume"))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} terminate
   "Kill an agent: set `:seon.agent/terminated-at`, close any open run.

@@ -1,10 +1,10 @@
 """Long-horizon planning as a first-class inspect-ai task.
 
 The headline continuity capability (plan → restart → resume) that no
-`inspect_evals` bench measures without a sandbox. Until now it ran ONLY via
-the python driver (`planning.pod_planning_driver` / `tool_rows.run_tool_row`),
-because a standard inspect solver is single-generation and CANNOT restart the
-pod mid-sample and resume the SAME agent. This wraps that driver in a custom
+`inspect_evals` bench measures without a sandbox. Until now it ran only
+through `planning.pod_planning_driver`, because a standard Inspect solver is
+single-generation and cannot restart the pod mid-sample and resume the SAME
+agent. This wraps that driver in a custom
 `@solver` so the measurement is `inspect eval`-runnable and uniform with its
 siblings (`milestone_lift`, `skill_lift`, `ladder_lift`) — same scorer
 (`planning.planning_scorer`), same two arms.

@@ -10,20 +10,19 @@ tags: [research, agent, milestone, database]
 
 The first development slice is ten deterministic samples. It deliberately
 combines Seon-native workflow tasks with four categories of upstream BFCL. The
-membership is exact below, but the P0 gate is **not yet closed**: three selected
-tool rows still use a legacy Python runner instead of an Inspect `Task`, and the
-database and namespace contracts do not yet have disjoint generated milestone
-and blind variants. The apparent `endpoint="pod"` milestone and planning tasks
+membership is exact below, but the P0 gate is **not yet closed**: the database
+and namespace contracts do not yet have disjoint generated milestone and blind
+variants. The apparent `endpoint="pod"` milestone and planning tasks
 also call `cluster.create_cluster`, which currently returns
 `ClusterLeaseUnavailable`; they are not static-ACME-ready. Individual BFCL
 static-URL samples are useful smokes, but there is no currently available
-seven-sample native suite matching the promised P0 contract.
+ten-sample native suite matching the promised P0 contract. Shell, file, and
+web rows now use [[inspect-tool-row-tasks-2026-07-15]], which requires an
+explicit static target and records its verdict in native Inspect output.
 
 The minimum correction is to strengthen the existing freeze and task
 mechanisms in place:
 
-- expose the already-frozen shell, file, and web rows as Inspect tasks using
-  their existing datasets and outcome scorers;
 - generate goal-stated Seon workflow variants for database and namespace work
   using the existing structured milestone oracles; and
 - record the selected positions for all three tiers in the existing
@@ -119,9 +118,9 @@ Selection is structural rather than cherry-picked:
 | `milestone_lift(milestone="db", endpoint="pod", epochs=1)` | `db` | schema registration; transact; later database query; aggregate; report | `milestone_scorer` / `check_store_recall` | no static-target adapter/evidence projection |
 | `milestone_lift(milestone="namespaces", endpoint="pod", epochs=1)` | `namespaces` | namespace movement; required namespace loading; function definition and in-place update; database sum; composition; report | `milestone_scorer` / `check_ns_movement` | no static-target adapter/evidence projection |
 | `long_term_planning(seed=1, n=1, endpoint="pod", epochs=1)` | `long_term_planning-seed1-000` | durable plan; store first batch; restart; retrieve and resume; verify all steps closed; final report | `planning_scorer` | no owned static restart path/evidence projection |
-| proposed `shell_use(seed=1, positions=[0])` | `shell_use-seed1-000` | inspect several files; shell aggregation; write exact result | `workspace_scorer` | no Inspect task wrapper |
-| proposed `file_edit(seed=1, positions=[3])` | `file_edit-seed1-003` | inspect and edit ClojureScript; parse; behavioral verification | `workspace_scorer` | no Inspect task wrapper |
-| proposed `web_fetch(seed=1, positions=[2])` | `web_fetch-seed1-002` | fetch an index; follow the relevant page; extract and report evidence | `fixture_answer_scorer` | no Inspect task wrapper |
+| `frozen_tool_rows(row="shell_use", seed=1, positions="0", cluster_url=ACME)` | `shell_use-seed1-000` | inspect several files; shell aggregation; write exact result | `workspace_scorer` | yes |
+| `frozen_tool_rows(row="file_edit", seed=1, positions="3", cluster_url=ACME)` | `file_edit-seed1-003` | inspect and edit ClojureScript; parse; behavioral verification | `workspace_scorer` | yes |
+| `frozen_tool_rows(row="web_fetch", seed=1, positions="2", cluster_url=ACME)` | `web_fetch-seed1-002` | fetch an index; follow the relevant page; extract and report evidence | `fixture_answer_scorer` | yes |
 | upstream `bfcl_ast` | `parallel_multiple_29` | parallel calls to multiple functions | upstream `bfcl_scorer` / `ast_match` | yes |
 | upstream `bfcl_ast` | `multiple_66` | select among multiple candidate functions | upstream `bfcl_scorer` / `ast_match` | yes |
 | upstream `bfcl_ast` | `simple_python_189` | one exact function and argument contract | upstream `bfcl_scorer` / `ast_match` | yes |
@@ -134,10 +133,9 @@ database-backed work across an actual restart. A result is not a pass merely
 because the final answer is right: the structured trajectory checks must also
 hold.
 
-The three rows marked not ready are frozen data with real outcome scorers, but
-`seon_inspect.tool_rows` currently invokes them through `run_tool_row`, not an
-Inspect `Task`. They must not appear in a claimed native `.eval` suite until
-that wrapper is replaced by the ordinary Inspect task path.
+The three tool rows are now native Inspect tasks. Their invocation-local
+workspaces, rendered prompts, pod evidence, and outcome scores are proven
+inside `.eval` logs; the superseded bespoke scored runners are removed.
 
 ## Milestone membership
 
@@ -261,42 +259,35 @@ label. A sample with an infrastructure failure receives no capability score.
 
 ## Exact gaps before P0 exit
 
-1. **No native Inspect task for three selected rows.** Shell, file, and web
-   generation and scorers exist, but `run_tool_row` is a bespoke simulation
-   path. Wrap the existing dataset and scorer in one ordinary Inspect task and
-   retire the duplicate run path for scored work.
-2. **No disjoint workflow generator.** `milestone_lift` has one fixed database
+1. **No disjoint workflow generator.** `milestone_lift` has one fixed database
    prompt and one fixed namespace prompt. Add a goal-stated generator whose
    variants preserve the same structured checks: schema registration,
    transaction, later query/aggregate, namespace movement, dependency load,
    in-place function redefinition, composition, and final report.
-3. **No tier-safe positional-subset operation.** The small milestone and blind
+2. **No tier-safe positional-subset operation.** The small milestone and blind
    sets require selection by frozen draw position and stratum inside the
    runner without exposing held-out IDs. Extend `run_split`; do not access its
    private ID method from another driver.
-4. **Generated blind seed has no durable owner.** Resolve it once at formal
+3. **Generated blind seed has no durable owner.** Resolve it once at formal
    open and persist it in native Inspect metadata. Environment variables alone
    cannot reproduce the run.
-5. **P1 identities remain incomplete.** Inspect source is a local mutable path,
+4. **P1 identities remain incomplete.** Inspect source is a local mutable path,
    the `reference-code/inspect-ai` checkout has a modified nested UI worktree,
    and provider/model artifact identities are not yet part of this freeze.
    Dataset membership can be selected now, but comparative claims wait for P1.
-6. **No serial ACME `.eval` covers all ten members.** The seven ready samples
-   can smoke the bridge; the P0 exit run waits for gaps 1–4 so its artifact is
-   not a mixture of Inspect and legacy score records.
+5. **No serial ACME `.eval` covers all ten members.** The seven ready samples
+   can smoke the bridge; the P0 exit run waits for gaps 1–3 so its artifact
+   covers all promised categories.
 
 ## Ordered handoff
 
 1. Add the two generated workflow capability labels and their dev/milestone
    hashes to `evals/datasets.lock` through `seon_inspect.freeze`.
-2. Convert shell/file/web to ordinary Inspect tasks while reusing their current
-   generator and oracle functions; delete the scored legacy path rather than
-   maintaining two runners.
-3. Teach the existing freeze runner to consume the ten-member positional and
+2. Teach the existing freeze runner to consume the ten-member positional and
    stratified projections with tier discipline intact.
-4. Run the focused freeze, canary, milestone, planning, tool-scorer, and BFCL
+3. Run the focused freeze, canary, milestone, planning, tool-scorer, and BFCL
    adapter tests.
-5. Execute the development set once, serially, against ACME and inspect every
+4. Execute the development set once, serially, against ACME and inspect every
    result before proceeding to P1/P2 comparisons.
 
 No broad suite or cluster lifecycle operation was performed for this audit.

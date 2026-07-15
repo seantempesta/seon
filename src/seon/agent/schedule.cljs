@@ -27,6 +27,7 @@
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.derive :as derive]
+    [seon.runtime.admission :as admission]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -288,7 +289,9 @@
    [:seon.agent.schedule/drive! {:optional true} 'fn?]])
 
 (schema/register! ::fire-due-response
-  [:map [:seon.agent.schedule/fired [:vector ::fired-entry]]])
+  [:map
+   [:seon.agent.schedule/fired [:vector ::fired-entry]]
+   [:seon/error {:optional true} :map]])
 
 (defn- minute-of
   "Whole-minute bucket of a Date — its epoch-ms floored to the minute."
@@ -342,17 +345,20 @@
   {:malli/schema [:=> [:cat ::fire-due-request] ::fire-due-response]}
   [{now :seon.agent/now exec-fn! :seon.agent.schedule/exec-fn!
     drive! :seon.agent.schedule/drive!}]
-  (let [ids (db/query {:seon.db/query
-                       '[:find [?id ...]
-                         :where
-                         [?a :seon.agent/id ?id]
-                         [?a :seon.agent/schedules _]]})
-        ;; Piece 2d dials read ONCE per pass (config is boot-stable); the pure
-        ;; breaker check takes them as args.
-        breaker-n  (config/schedule-breaker-crash-count)
-        breaker-w  (config/schedule-breaker-window-ms)]
-    (loop [[id & more] ids
-           fired []]
+  (if-not (admission/available?)
+    {:seon.agent.schedule/fired []
+     :seon/error (:seon/error (admission/unavailable))}
+    (let [ids (db/query {:seon.db/query
+                         '[:find [?id ...]
+                           :where
+                           [?a :seon.agent/id ?id]
+                           [?a :seon.agent/schedules _]]})
+          ;; Piece 2d dials read ONCE per pass (config is boot-stable); the pure
+          ;; breaker check takes them as args.
+          breaker-n  (config/schedule-breaker-crash-count)
+          breaker-w  (config/schedule-breaker-window-ms)]
+      (loop [[id & more] ids
+             fired []]
       (if (nil? id)
         {:seon.agent.schedule/fired fired}
         (let [a-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
@@ -409,10 +415,14 @@
                   ;; RUN the due fns on the just-opened run FIRST (awaited, so
                   ;; the result is in the transcript before the LLM drive renders
                   ;; its prompt), THEN kick the loop (same as a wake).
-                  (when exec-fn!
-                    (await (exec-fn! {:seon.agent/id           id
-                                      :seon.agent.schedule/fns due-fns})))
-                  (when (fn? drive!) (drive! {:seon.agent/id id}))
-                  (recur more
-                         (conj fired {:seon.agent/id     id
-                                      :seon.agent.run/id (:seon.agent.run/id snap)})))))))))))
+                  (if-not (admission/available?)
+                    {:seon.agent.schedule/fired fired
+                     :seon/error (:seon/error (admission/unavailable))}
+                    (do
+                      (when exec-fn!
+                        (await (exec-fn! {:seon.agent/id           id
+                                          :seon.agent.schedule/fns due-fns})))
+                      (when (fn? drive!) (drive! {:seon.agent/id id}))
+                      (recur more
+                             (conj fired {:seon.agent/id     id
+                                          :seon.agent.run/id (:seon.agent.run/id snap)}))))))))))))))

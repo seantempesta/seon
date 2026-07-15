@@ -70,6 +70,7 @@
     [seon.db.id :as db.id]
     [seon.derive :as derive]
     [seon.error :as error]
+    [seon.runtime.admission :as admission]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -438,6 +439,11 @@
    [:map [:seon.agent/id :seon.agent/id]]
    :seon.db/transact-response])
 
+(defn- unavailable-db-response
+  []
+  {:seon.db/ok? false
+   :seon.db/error (:seon/error (admission/unavailable))})
+
 (defn- initial-agent-tx
   "Complete creation facts for one new agent and its home namespace.
 
@@ -679,10 +685,12 @@
    Never invent/guess a child id — read it back."
   {:malli/schema [:=> [:cat ::start-request] ::start-response]}
   [{:seon.agent/keys [purpose default-turn-limit]}]
-  (let [parent-id   (db/current-agent-id)
-        cap         (config/spawn-depth-cap)
-        caller-depth (when parent-id (spawn-depth @db/*conn* parent-id))]
-    (if (and caller-depth (>= caller-depth cap))
+  (if-not (admission/available?)
+    (unavailable-db-response)
+    (let [parent-id    (db/current-agent-id)
+          cap          (config/spawn-depth-cap)
+          caller-depth (when parent-id (spawn-depth @db/*conn* parent-id))]
+      (if (and caller-depth (>= caller-depth cap))
       ;; DEPTH-CAP BACKSTOP (Piece 2): the caller is already at/over the cap —
       ;; refuse as data (never a throw), mint no child. A subagent may not spawn
       ;; subagents; it does the work itself or reports back to its parent.
@@ -693,7 +701,7 @@
              "depth " caller-depth " (cap " cap "); subagents may not spawn "
              "subagents. Do the work yourself, or report back to your parent "
              "and let it delegate.")}}
-      (spawn-child! purpose default-turn-limit parent-id))))
+        (spawn-child! purpose default-turn-limit parent-id)))))
 
 ;; ============================================================
 ;; delegate! — the one-form spawn→message combinator. `start!` is `^:async`,
@@ -740,22 +748,24 @@
   {:malli/schema [:=> [:cat ::delegate-request] ::delegate-response]}
   [{:seon.agent/keys [purpose default-turn-limit]
     content :seon.agent.message/content}]
-  (let [spawn-args (cond-> {}
-                     (some? purpose)            (assoc :seon.agent/purpose purpose)
-                     (some? default-turn-limit) (assoc :seon.agent/default-turn-limit default-turn-limit))
-        res        (await (start! spawn-args))]
-    (if (or (false? (:seon.db/ok? res))
-            (false? (:seon.agent.runtime/resumed? res)))
-      res
-      (let [child-id (:seon.agent/id res)
-            menv     (await (msg/agent child-id content))]
-        (if (false? (:seon.db/ok? menv))
-          (do (js/console.error
-                (str "seon.agent/delegate! spawned " child-id
-                     " but the task message FAILED: "
-                     (:seon.error/message (:seon.db/error menv))))
-              (assoc menv :seon.agent/id child-id))
-          {:seon.agent/id child-id})))))
+  (if-not (admission/available?)
+    (unavailable-db-response)
+    (let [spawn-args (cond-> {}
+                       (some? purpose)            (assoc :seon.agent/purpose purpose)
+                       (some? default-turn-limit) (assoc :seon.agent/default-turn-limit default-turn-limit))
+          res        (await (start! spawn-args))]
+      (if (or (false? (:seon.db/ok? res))
+              (false? (:seon.agent.runtime/resumed? res)))
+        res
+        (let [child-id (:seon.agent/id res)
+              menv     (await (msg/agent child-id content))]
+          (if (false? (:seon.db/ok? menv))
+            (do (js/console.error
+                  (str "seon.agent/delegate! spawned " child-id
+                       " but the task message FAILED: "
+                       (:seon.error/message (:seon.db/error menv))))
+                (assoc menv :seon.agent/id child-id))
+            {:seon.agent/id child-id}))))))
 
 ;; ============================================================
 ;; Process lifecycle. Durable birth is above; these delegate to the one
@@ -768,7 +778,14 @@
    [:=> [:cat :seon.agent.runtime/resume-request]
     :seon.agent.runtime/resume-response]}
   [request]
-  (await (runtime/resume! request)))
+  (if-not (admission/available?)
+    (let [id (:seon.agent/id request)]
+      {:seon.agent/id id
+       :seon.agent.runtime/resumed? false
+       :seon.agent.runtime/error
+       "resume!: runtime program generation is unavailable"
+       :seon/error (:seon/error (admission/unavailable))})
+    (await (runtime/resume! request))))
 
 (defn unhost!
   "Remove an agent's listener, loop input, and runtime advertisement."

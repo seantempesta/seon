@@ -13,6 +13,7 @@
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.repl :as repl]
+    [seon.runtime.admission :as admission]
     [seon.schema :as schema]))
 
 (schema/register! ::wake? [:boolean {:default true}])
@@ -37,7 +38,8 @@
    [:map
     [:seon.agent/id :seon.agent/id]
     [::resumed? [:= false]]
-    [::error ::error]]])
+    [::error ::error]
+    [:seon/error {:optional true} :map]]])
 
 (schema/register! ::unhost-request
   [:map [:seon.agent/id :seon.agent/id]])
@@ -80,34 +82,45 @@
    bookkeeping occurs here."
   {:malli/schema [:=> [:cat ::resume-request] ::resume-response]}
   [{:seon.agent/keys [id] ::keys [llm-fn compile-state]}]
-  (let [entity (db/entity {:seon.db/ref [:seon.agent/id id]})]
-    (cond
-      (nil? entity)
-      {:seon.agent/id id
-       ::resumed? false
-       ::error (str "resume!: no durable agent entity for " id)}
-
-      (some? (:seon.agent/terminated-at entity))
-      (do
-        (unhost! {:seon.agent/id id})
+  (if-not (admission/available?)
+    {:seon.agent/id id
+     ::resumed? false
+     ::error "resume!: runtime program generation is unavailable"
+     :seon/error (:seon/error (admission/unavailable))}
+    (let [entity (db/entity {:seon.db/ref [:seon.agent/id id]})]
+      (cond
+        (nil? entity)
         {:seon.agent/id id
          ::resumed? false
-         ::error (str "resume!: agent " id " is terminated")})
+         ::error (str "resume!: no durable agent entity for " id)}
 
-      :else
-      (let [cs  (or compile-state (await (repl/ensure-bootstrap!)))
-            llm (or llm-fn (ai.dispatch/llm-fn))
-            ns  (home/home-ns id)]
-        (await
-          (db/with-agent id
-            (fn ^:async resume-agent! []
-              (await (seval/setup-agent-ns! cs ns id))
-              (if (wake-armed? id)
-                (loop/install-wake-trigger!
-                  {:seon.agent/id id
-                   :seon.agent/llm-fn llm
-                   :seon.agent/compile-state cs})
-                (loop/uninstall-wake-trigger! {:seon.agent/id id})))))
-        {:seon.agent/id id
-         :seon.agent/ns ns
-         ::resumed? true}))))
+        (some? (:seon.agent/terminated-at entity))
+        (do
+          (unhost! {:seon.agent/id id})
+          {:seon.agent/id id
+           ::resumed? false
+           ::error (str "resume!: agent " id " is terminated")})
+
+        :else
+        (let [cs  (or compile-state (await (repl/ensure-bootstrap!)))
+              llm (or llm-fn (ai.dispatch/llm-fn))
+              ns  (home/home-ns id)]
+          (await
+            (db/with-agent id
+              (fn ^:async resume-agent! []
+                (await (seval/setup-agent-ns! cs ns id))
+                (when (admission/available?)
+                  (if (wake-armed? id)
+                    (loop/install-wake-trigger!
+                      {:seon.agent/id id
+                       :seon.agent/llm-fn llm
+                       :seon.agent/compile-state cs})
+                    (loop/uninstall-wake-trigger! {:seon.agent/id id}))))))
+          (if (admission/available?)
+            {:seon.agent/id id
+             :seon.agent/ns ns
+             ::resumed? true}
+            {:seon.agent/id id
+             ::resumed? false
+             ::error "resume!: runtime program generation became unavailable"
+             :seon/error (:seon/error (admission/unavailable))}))))))

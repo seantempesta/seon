@@ -152,6 +152,19 @@ fail-closed admission and committed-generation reconstruction transition; full
 reconstruction is not a safe recovery primitive before that precondition
 holds.
 
+The agent-side admission cut is implemented against the one runtime gate.
+Messages refuse before identity allocation or durable write; public spawn,
+delegate, and resume refuse before minting or hosting; wake, run-loop,
+re-drive, ticker, and schedule execution check before their owning work and at
+asynchronous continuation boundaries. Refusals reuse typed domain envelopes
+and never record another core fault. Wait, complete, pause, terminate, and
+unhost remain available for diagnosis and drain. Cold boot alone continues to
+call the non-agent-facing `create!`/`mint!` primitives before committed program
+publication; there is no public bypass. Focused proof passes admission 8
+tests/46 assertions, lifecycle 11/75, loop 18/92, and message 14/66 with zero
+failures or errors. Web/readiness and config-free live restart remain part of
+the complete publication graduation proof.
+
 The JVM writer-drain prerequisite is implemented in place. The UDS request
 server admits each decoded request under its existing lifecycle lock, rejects
 later admission once close begins, preserves the complete response for work

@@ -58,6 +58,7 @@
     [seon.log :as seon-log]
     [seon.repl :as repl]
     [seon.repl.internal :as repl-internal]
+    [seon.runtime.admission :as admission]
     [seon.schema :as schema]
     [seon.warn :as warn]))
 
@@ -232,12 +233,18 @@
    final FSM state. Errors are values — never throws into the trigger."
   {:malli/schema [:=> [:catn [:input [:map [:seon.agent/id :seon.agent/id]]]
                              [:run-id :seon.agent.run/id]]
-                  :seon.derive/state]}
+                  [:or
+                   :seon.derive/state
+                   [:map
+                    [::admission/admitted? [:= false]]
+                    [:seon/error :map]]]]}
   [{:seon.agent/keys [id] :as input} run-id]
   (await
     (loop [state :running streak 0]
-      (let [db    @db/*conn*               ; §8a — ONE frozen basis-t per turn
-            event (next-event db id run-id streak)]
+      (if-not (admission/available?)
+        (admission/unavailable)
+        (let [db    @db/*conn*               ; §8a — ONE frozen basis-t per turn
+              event (next-event db id run-id streak)]
         (cond
           (= :turn-ok event)
           (let [beat (await (await-bounded
@@ -265,7 +272,9 @@
                   (transition state :superseded))
 
               :else
-              (let [r      (await (await-bounded
+              (if-not (admission/available?)
+                (admission/unavailable)
+                (let [r (await (await-bounded
                                     "turn/run-turn!"
                                     (turn/run-turn!
                                       (assoc input :seon.agent.run/id run-id :seon.db/db db))))
@@ -281,7 +290,9 @@
                     errored? (or (= :error (:seon.agent.turn/status r))
                                  (false? (:seon.db/ok? r))
                                  (nil? (:seon.agent.turn/id r)))]
-                (if errored?
+                (if-not (admission/available?)
+                  (admission/unavailable)
+                  (if errored?
                   ;; §8c — distinguish LOST AUTHORITY (the turn's leading CAS
                   ;; aborted: open-turn! rejected because the run was
                   ;; superseded/watchdog-closed mid-LLM) from a genuine turn
@@ -319,7 +330,7 @@
                     (recur (transition state :turn-ok)
                            (if (zero? (or (:seon.agent/eval-count r) 0))
                              (inc streak)
-                             0)))))))
+                             0)))))))))
 
           (= :no-forms event)
           (do (log id "halt"
@@ -359,7 +370,7 @@
           ;; FSM state the function moved to.
           :else
           (do (log id "halt" (str "function — " (name event)))
-              (transition state event)))))))
+              (transition state event))))))))
 
 (defn ^:async ^:private renew-current-run!
   "Renew the agent's CURRENT open run's lease — the new message extends both
@@ -413,8 +424,10 @@
   {:malli/schema [:=> [:catn [:input [:map [:seon.agent/id :seon.agent/id]]]] :any]}
   [{:seon.agent/keys [id] :as input}]
   (fn [{:seon.db/keys [db attr-index]}]
-    (let [my-eid  (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
-          inbound (when my-eid
+    (if-not (admission/available?)
+      (admission/unavailable)
+      (let [my-eid  (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
+            inbound (when my-eid
                     (->> (:seon.agent.message/to attr-index)
                          (filter :seon.db/added?)
                          (filter #(message/inbound-msg-datom? db % my-eid))))
@@ -500,7 +513,7 @@
                               (js/console.error
                                 (str "seon.agent.loop: wake loop threw for "
                                      id ": " (or (.-message e) e)))))))
-              0)))))))
+              0))))))))
 
 ;; ============================================================
 ;; Re-drive — RESUME re-enters the loop. The loop EXITS on :pause (the run
@@ -527,7 +540,9 @@
    re-arm) or has no open run."
   {:malli/schema [:=> [:catn [:input [:map [:seon.agent/id :seon.agent/id]]]] :any]}
   [{:seon.agent/keys [id]}]
-  (if-let [input (get @!loop-input id)]
+  (if-not (admission/available?)
+    (admission/unavailable)
+    (if-let [input (get @!loop-input id)]
     (js/setTimeout
       (fn []
         (-> (js/Promise.resolve
@@ -546,7 +561,7 @@
       (str "seon.agent.loop: drive-run! — no live loop input for agent " id
            " (the wake trigger was never armed in this process); cannot "
            "re-drive the resumed run. A hot-reload re-arm or boot installs "
-           "it."))))
+           "it.")))))
 
 ;; ============================================================
 ;; Scheduled-fn execution — the action half of cron. Injected into
@@ -696,8 +711,10 @@
    interval survives. The watchdog rides THIS one ticker — no parallel
    setInterval; the scan core (`run/stale-run-ids`) is a pure fn of (db, now)."
   [now]
-  (-> (js/Promise.resolve
-        (run/close-overdue-runs! {:seon.agent/now now}))
+  (if-not (admission/available?)
+    (js/Promise.resolve (admission/unavailable))
+    (-> (js/Promise.resolve
+          (run/close-overdue-runs! {:seon.agent/now now}))
       (.then (fn [_]
                (run/close-stale-runs!
                  {:seon.agent/now          now
@@ -710,7 +727,7 @@
       (.catch (fn [e]
                 (seon-log/error-console!
                   "seon.agent.loop/run-tick!"
-                  (str "tick failed (timer continues): " (or (.-message e) e)))))))
+                  (str "tick failed (timer continues): " (or (.-message e) e))))))))
 
 (defn install-ticker!
   "Install the ONE periodic ticker (idempotent, single instance).

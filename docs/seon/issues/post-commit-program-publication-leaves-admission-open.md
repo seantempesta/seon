@@ -27,6 +27,15 @@ dependent contracts. The remaining post-commit catch path records the fault but
 does not close agent, eval, schedule, or web-command admission and does not
 reconstruct the committed generation from database facts.
 
+The agent-runtime portion is now cut over to the one admission state. Message
+allocation/write, public spawn/delegate/resume, wake, run-loop continuation,
+re-drive, ticker, and schedule fire refuse with typed unavailable data before
+their owning effect. Repeated refusals record no fault. Drain and diagnosis
+controls remain callable. Focused admission, lifecycle, loop, and message proof
+passes 51 tests/279 assertions. Cold boot's non-agent-facing `create!` and
+`mint!` remain the only pre-publication birth callers; web/readiness and live
+restart evidence are still required before this issue can close.
+
 ## Owner
 
 The one runtime admission and schema/program publication path spanning
