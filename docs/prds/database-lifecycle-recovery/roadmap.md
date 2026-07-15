@@ -217,17 +217,17 @@ never repeats force. The final Slice-2 intent supplies the exact backend
 locator, full expected roster, writer/protocol binding, and one retained
 intent-specific atomic result path. Publication replaces that same path on
 retry; absence remains unknown until a later storage observation proves the
-durable head. The scaffold fails closed on a newly discovered dependency
-blocker: selected Datahike force flushes the prepared Proximum instance while
+durable head. The scaffold originally failed closed on the dependency defect:
+the prior selected Datahike force flushed the prepared Proximum instance while
 labeling its key map as destination branch `:db`; a file-backed one-vector
 fixture reopens with equal EAVT and KNN results but unequal secondary roots.
 Focused admin proof passes 9 tests and 53 assertions; the combined writer-admin
 gate passes 22 tests and 131 assertions, including the real dependency
 falsifier and injected connect, operation, first/second release, post-force
 read-back, invalid-result, and result-loss failures. No public
-restore command may invoke this boundary until Proximum has a guarded,
-idempotent existing-destination force/replace primitive and Datahike consumes
-it through its one `force-branch!` path. Ordinary Proximum `branch!` rejects the
+restore command may invoke this boundary until the now-public guarded
+Proximum/Datahike repair is selected and proven through Seon's exact writer
+artifact and file fixture. Ordinary legacy Proximum `branch!` rejects the
 already-existing live `:db`, and key-map relabeling cannot change the source
 branch recorded in a committed snapshot; the rejected Datahike-only prototype
 and exact dependency contract are retained at
@@ -295,17 +295,18 @@ deletion remains the external operator's durable inverse. No restore-only boot
 path, callback, status, or ambient intent-file reread was added. The
 transaction-coordinate resolver is complete at `b2461d64`, and the fresh
 schema owner now installs the complete restore closure before generator-policy
-publication. The isolated dependency repair now passes its complete focused
-gate: Proximum `fb6572c` provides guarded generation publication and Datahike
-`069a807e` integrates it through the one force path, including legacy-shape
-migration, response-loss retry, stale destination rejection, and cold
-source-branch non-clobber (108 tests/570 assertions across all three Datahike
-index backends). The exact changes are not yet selected dependencies: Proximum
-must first be forward-ported onto upstream `v0.1.26`, given cold Git-dependency
-preparation, published, and consumed by the final public Datahike commit. That
-artifact cutover remains the hard predecessor of the destructive integrated
-gate; therefore no public restore command or destructive default/ACME proof is
-claimed yet. Focused cold-composition proof
+publication. The dependency repair is now published as exact public HTTPS Git
+coordinates: Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6`, Konserve
+`b5c99bc02a7175652a610324215288b78551801f`, and Datahike
+`9ada755087228e10cfb179fa5779ce227a6ed220`. Datahike integrates guarded
+generation publication through the one force path, including legacy-shape
+migration, response-loss retry, stale destination rejection, and cold source-
+branch non-clobber (108 tests/570 assertions across all three index backends);
+its Node gate passes 105/824 after Konserve's idempotent absent-store delete
+correction. The root pin/build-input cutover and cold selected-artifact proof
+remain the hard predecessor of the destructive integrated gate; therefore no
+public restore command or destructive default/ACME proof is claimed yet.
+Focused cold-composition proof
 passes 29 tests/195 assertions, including post-completion crash and idempotent
 retry before exact admission, with zero compile warnings at
 `tmp/test-cljs-20260715-112026-67588.log`; adjacent restore, admission, and

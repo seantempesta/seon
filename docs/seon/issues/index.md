@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (16)
+## Blocker (17)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -25,13 +25,14 @@ See `README.md` for the convention.
 | [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
 | [Keep a stable owner until the pod execution subtree drains](dead-process-group-leader-blocks-safe-subtree-drain.md) | blocker | Core |
 | [Keep restore publication closed through completion](restore-completion-cannot-precede-admission.md) | blocker | Core |
+| [Let the common Inspect pod solver address an existing agent](inspect-pod-solver-cannot-address-existing-agent.md) | blocker | agent |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 | [Make writer drain proof consumable by the operator](planned-restart-cannot-observe-writer-drain-result.md) | blocker | Core |
 | [Prove database workflow answers from retained query evidence](database-workflow-scorer-lacks-query-result-evidence.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
 
-## Friction (34)
+## Friction (35)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -40,6 +41,7 @@ See `README.md` for the convention.
 | [AI and HTML render twins may run one derivation twice](render-twin-runs-function-twice.md) | friction | UI |
 | [AI context is not pure over its database value](ai-context-is-not-pure-over-database-value.md) | friction | agent |
 | [Address-message steps can displace authored plan work](plan-address-step-priority.md) | friction | agent |
+| [Align Datahike HTTP remote connection identity](datahike-http-remote-connection-identity-mismatch.md) | friction | Core |
 | [Autocomplete datasets and scoring bypass canonical runtime projections](autocomplete-data-quality-pipeline-drift.md) | friction | agent |
 | [Autocomplete worktrees contain unclassified database and model evidence](autocomplete-worktree-evidence-preservation.md) | friction | Core |
 | [Canvas controls hide pending and handler failure](canvas-controls-hide-pending-and-failure.md) | friction | UI |

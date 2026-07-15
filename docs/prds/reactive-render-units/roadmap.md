@@ -90,9 +90,10 @@ report. Default-cluster browser and server-side gzip proof remains pending: the
 cluster is currently watcher-only and other active runtime lanes have
 uncommitted source, so this slice did not restart or bypass the operator.
 
-The first reverse-index dependency is now implemented in the maintained
-Datahike fork at `417649383c65e13f15ea41d394fb1ed742477965` and selected by
-both Seon dependency aliases. The new public, pure
+The first reverse-index dependency is retained in the maintained Datahike
+publication descendant `9ada755087228e10cfb179fa5779ce227a6ed220`, selected
+by both Seon dependency aliases in the coordinated root cutover. The public,
+pure
 `datahike.api/query-attribute-dependencies` function returns concrete where
 and literal-pull attributes or conservatively widens to `:all`. The existing
 query result cache delegates to that same function; no second parser was
@@ -218,7 +219,8 @@ evidence is `tmp/test-cljs-20260715-075047-60284.log` and its sibling report.
 3. **Reverse candidate index and focused integration complete; live proof
    pending:** derive the conservative reverse candidate index from runtime-observed
    database read requests. **The Datahike public pure query/find-pull
-   projection is complete at `41764938`;** `seon.db` exposes one attribute-first
+   projection is retained at public descendant `9ada7550`;** `seon.db` exposes
+   one attribute-first
    `seon.db` observation-candidate boundary and derives the reverse index
    inside the existing unit state. Literal query attrs and safe exact index
    prefixes narrow; every unproved operation/range remains broad. Datastar passes the

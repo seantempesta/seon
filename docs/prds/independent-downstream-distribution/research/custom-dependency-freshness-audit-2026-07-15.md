@@ -213,3 +213,28 @@ gh api repos/<fork>/compare/<full-sha>...<upstream-owner>:<branch>
 The GitHub commit requests succeeded for all selected public SHAs. They failed
 for local Datahike `069a807e…` and `eb3e2239…`, confirming those two are not
 yet public. No mutation was required to establish any result.
+
+## Implementation outcome — 2026-07-15
+
+The exact ledger above intentionally preserves the coordinates selected when
+the read-only audit ran. Its ordered repair completed as follows:
+
+1. Konserve `b5c99bc02a7175652a610324215288b78551801f` combines upstream
+   `0.9.359`, the maintained legacy-header reader, and an idempotent sync/async
+   absent Node filestore delete. The latter was discovered by Datahike's tiered
+   Node gate and fixed in the Konserve owner.
+2. Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6` is the public
+   upstream-`v0.1.26` guarded-force descendant with cold Git preparation; its
+   complete proof is 181 tests/9,922 assertions.
+3. Datahike `9ada755087228e10cfb179fa5779ce227a6ed220` composes the current
+   upstream delete/GC changes, maintained fork fixes, protected regression
+   coverage, guarded force, the two exact dependency pins, and declared
+   `src-secondary`. Its focused secondary/versioning proof is 108/570 and its
+   Node gate is 105/824.
+
+All three full SHAs are reachable through their public HTTPS repositories.
+Shadow CLJS `4e72595f…`, superv.async `3e6ed755…`, and partial-cps
+`1e119b03…` remain unchanged as the audit recommended. The unresolved gate is
+no longer publication: it is the atomic Seon root cutover, cold build/artifact
+identity proof, default runtime proof, and explicit downstream admission
+handoff.

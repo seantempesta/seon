@@ -123,15 +123,16 @@ dependency spine and independent evidence consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Closed cold restore composition is complete; destructive proof waits on the frozen dependency set** | Immutable intent, exact writer-admin results, retained blob materialization, completion facts, and split admission are complete. `b2461d64` resolves the original completion coordinate after later writes; `c2b4013d` carries one closed authoritative startup value; `15f97806` composes fresh attach, preserve-only reconstruction, completion, exact admission, and readiness in the existing cold owner | After exact Konserve, Proximum, and Datahike artifacts land, run the isolated destructive restore/crash matrix, then delete intent only from the external operator after durable completion proof |
-| Native secondary force | **The force mechanism is green; dependency freshness/publication is active** | Public Proximum `9846d3e7` is a v0.1.26 descendant with cold prep and 181 tests/9,922 assertions. Datahike `069a807e` proves guarded force in 108 tests/570 assertions, but the freshness audit found missing upstream awaited-delete and GC-safe-point commits that require Konserve 0.9.357+ | Forward-port the maintained Konserve reader onto upstream 0.9.359, then compose current upstream Datahike, protected regression coverage, guarded force, final public coordinates, `src-secondary` Git paths, and artifact-manifest identity before changing Seon's pins |
+| Top-level integration | **Closed cold restore composition is complete; the exact public dependency cutover is active** | Immutable intent, exact writer-admin results, retained blob materialization, completion facts, and split admission are complete. `b2461d64` resolves the original completion coordinate after later writes; `c2b4013d` carries one closed authoritative startup value; `15f97806` composes fresh attach, preserve-only reconstruction, completion, exact admission, and readiness in the existing cold owner | Finish the root pin/build-input cutover to the published compatibility set, prove its cold artifact identity, then run the isolated destructive restore/crash matrix |
+| Native secondary force | **COMPLETE in public dependencies; Seon artifact proof pending** | Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6`, Konserve `b5c99bc02a7175652a610324215288b78551801f`, and Datahike `9ada755087228e10cfb179fa5779ce227a6ed220` are exact public HTTPS coordinates. Proximum passes 181 tests/9,922 assertions; Datahike guarded force passes 108/570 across all index backends and its Node gate passes 105/824. Konserve also makes absent Node filestore deletion idempotent | Remove checkout-local `src-secondary` build inputs, bind the three SHAs into artifact manifest version 4, and prove the selected Seon writer/CLJS closure before destructive restore |
 | Restore inverse/planner | **Completion-derived undo planning is implemented; canonical schema cleanup is active** | `6351790a` makes the existing intent derivation resolve exactly one prior completion, target its exact retained undo head, retain actual latest main as redo, and reject arbitrary, stale, ambiguous, cross-lineage, or consumed selections (10 tests/71 assertions; writer admin 9/53) | Remove the temporary cross-runtime completion-schema duplication by making `seon.db.restore` the one CLJC shape owner, then consume the same transition in destructive restore/undo proof after dependency cutover |
 | Inspect/agent evidence | **Frozen execution evidence is integrated; immutable model-server identity/live admission remain** | `46693087` and `da66936c` reuse exact transaction-origin resolution, validate historical request config and final-snapshot caps, and re-derive adapter plus stream mode from their frozen owners. Focused config/web/retry proof is 20/95, 12/69, and 8/54 | Keep ACME rebuild withheld until dependency handoff; independently bind immutable model-server revision/weights and then run one native admitted sample through the canonical `my.*`/Inspect owners |
 
 Current scheduling card:
 
-1. **Ordered spine:** maintained Konserve 0.9.359 compatibility publication →
-   current Datahike plus crash-safe Proximum guarded force and exact artifact pin
+1. **Ordered spine:** exact root pins/build inputs for public Konserve
+   `b5c99bc0`, Proximum `9846d3e7`, and Datahike `9ada7550` → cold
+   artifact-manifest proof
    → isolated destructive restore using the now-complete cold composition →
    completion-derived undo → ordered multi-form partial-commit proof.
 2. **Parallel lane A:** refine the exact cold runtime composition and its crash
@@ -158,9 +159,9 @@ The ordered top-level sequence is therefore:
 3. **Complete:** schema-before-policy ordering and the existing cold runtime
    composition now keep restore closed through exact completion and admit the
    same prepared generation before autonomy (`15f97806`);
-4. **In progress:** close generation-addressed Proximum publication, migrate
-   retained pre-generation/native-`:main` shapes, consume the primitive through
-   maintained Datahike, and select exact public dependency artifacts;
+4. **In progress:** remove checkout-local dependency inputs and prove the
+   public `9846d3e7`/`b5c99bc0`/`9ada7550` compatibility set through cold
+   preparation, exact dependency trees, stable writer artifact, and manifest;
 5. implement exact retained-head restore and completion-derived undo through the
    same transition, then pass crash cuts and multi-form partial-commit proof;
 6. graduate units 2 and 6 from bounded consumers into their complete acceptance
@@ -183,10 +184,10 @@ boundary before the agentic-tool sample resumes.
 On every lane return, the top-level agent first reviews source and proof,
 updates the owning roadmap, and integrates or rejects the result. It then fills
 the free slot with the earliest dependency-ready row above. The immediate
-refills are Proximum-to-Datahike integration after dependency proof, bootstrap
-schema and cold composition after `client.cljs` ownership clears, retained-head
-planning after cold composition, and then the earliest unit 2/6 consumer of the
-settled lifecycle contract. Findings that do not block those exits are recorded
+refills are destructive restore/crash proof after the public dependency
+artifact freezes, completion-derived undo through the same transition, and
+then the earliest unit 2/6 consumer of the settled lifecycle contract.
+Findings that do not block those exits are recorded
 with evidence and acceptance criteria instead of becoming an unplanned detour.
 
 The portfolio is a rolling queue, not a batch barrier. A lane may begin its
@@ -325,6 +326,13 @@ slice. Live pull recovery, repeated query/pull heap and RSS stabilization, and
 arbitrary JavaScript/native allocation containment remain unit-9/process-
 isolation evidence and are not claimed by these tests.
 
+That paragraph records the bounded test-only slice at the time it ran. The
+current publication descendant is now public at
+`9ada755087228e10cfb179fa5779ce227a6ed220`; it retains the dependency proof,
+current upstream delete/GC fixes, guarded secondary force, and cold
+`src-secondary` availability. Seon's root selection and artifact proof are the
+active gate.
+
 The fresh default cluster rebuilt and returned ready with watcher, writer, and
 pod alive. Live MCP evaluation reached both CLJ and CLJS runtimes. A query with
 `:seon.db/max-results 1` failed as structured `:datahike/budget-exceeded` data
@@ -413,9 +421,12 @@ An ACME restart left the complete `out/test` tree byte-identical at
 files, evaluates both cluster-qualified CLJS roots and both CLJ writers, and
 rejects bare `root` as ambiguous. Focused MCP proof passes 12 tests/44
 assertions and the complete operator checkpoint passes 94 tests/581
-assertions. Both live CLJS classpaths resolve maintained Datahike `6f90b339…`,
-Konserve `df6818d4…`, superv.async `3e6ed755…`, and partial-cps `1e119b03…`;
-both writer artifacts use the same root `:writer` Datahike/Konserve basis.
+assertions. That checkpoint's two live CLJS classpaths resolved maintained
+Datahike `6f90b339…`, Konserve `df6818d4…`, superv.async `3e6ed755…`, and
+partial-cps `1e119b03…`; both writer artifacts used the same root `:writer`
+Datahike/Konserve basis. The next coordinated rebuild must replace the first
+two historical coordinates with public Datahike `9ada7550…` and Konserve
+`b5c99bc0…` in both default and ACME evidence.
 
 A later concurrent default restart and ACME start exposed one remaining shared
 source-build boundary: both target-local lifecycle locks could enter the fixed

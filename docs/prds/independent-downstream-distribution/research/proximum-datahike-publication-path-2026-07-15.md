@@ -265,3 +265,25 @@ mutable dependency resolver.
 These blockers prevent a production pin today, but not continued isolated
 integration testing. Do not update Seon's root pins to local branches or local
 roots as an interim compatibility mechanism.
+
+## Implementation outcome — 2026-07-15
+
+The audit table and blockers above remain the historical input state. The
+publication path completed with these exact public HTTPS Git coordinates:
+
+- Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6`, an upstream-`v0.1.26`
+  descendant with guarded generation publication and cold checked-in-Java
+  preparation;
+- Konserve `b5c99bc02a7175652a610324215288b78551801f`, upstream `0.9.359` plus
+  the legacy-header reader and idempotent absent Node filestore deletion; and
+- Datahike `9ada755087228e10cfb179fa5779ce227a6ed220`, which retains the public
+  query-dependency projection, current upstream awaited-delete/GC safe-point
+  fixes, guarded secondary force, protected regressions, and `src-secondary`
+  in its Git paths.
+
+Public Proximum proof is 181 tests/9,922 assertions. The focused Datahike
+secondary/versioning gate is 108/570 across all three index backends, and its
+Node gate is 105/824 after the Konserve correction. Publication is therefore
+settled; the remaining boundary is Seon's root pin/build-input cutover, cold
+dependency preparation, stable writer digest, version-4 manifest, and selected
+file-backed restore proof.

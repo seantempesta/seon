@@ -9,14 +9,14 @@ tags: [issue, database, flow]
 
 ## Problem
 
-Selected Datahike `417649383c65e13f15ea41d394fb1ed742477965`
+The prior selected Datahike `417649383c65e13f15ea41d394fb1ed742477965`
 `force-branch!` changes the Datahike config branch before `db->stored`, but it
 does not move each live versioned secondary to the destination branch first.
 Proximum therefore syncs the prepared-branch instance again while its returned
 key map is labeled as destination branch `:db`.
 
-Branching first is necessary but is not itself crash-safe. Selected Proximum
-`0.1.25` rejects `branch!` when the destination already exists
+Branching first is necessary but is not itself crash-safe. The prior selected
+Proximum `0.1.25` rejects `branch!` when the destination already exists
 (`proximum.versioning`, lines 83-88), while a post-secondary/pre-primary crash
 necessarily leaves exactly that native destination artifact. Its
 `load-commit` also prefers the snapshot's recorded branch over the requested
@@ -31,17 +31,17 @@ coordinate time, parent, EAVT, declared secondary, and one-hit KNN result, but
 their secondary Merkle roots differ. Seon correctly rejects success as
 `:seon.db.protocol.error/restore-divergence`.
 
-The dependency repair is now implemented in isolated commits, but is not yet a
-selected or publicly reachable Seon dependency. Proximum `fb6572c` supplies
-generation-addressed mmap publication and guarded destination replacement.
-Datahike `069a807e` preflights every secondary before primary publication,
-adopts an already-published generation on retry, migrates the historical
-Datahike `"db"`/native Proximum `:main` shape, and preserves a prepared source
-branch after later destination writes and cold reopen. Its complete focused
-gate passes 108 tests and 570 assertions across `specs`, `clj-pss`, and
-`clj-hht`. The issue remains open until the Proximum change is forward-ported
-onto upstream `v0.1.26`, both exact commits are publicly pinned, and Seon's
-file-backed restore fixture proves the selected artifacts.
+The dependency repair is now publicly reachable at Proximum
+`9846d3e79e1aee48474bc876d3d563d7137209c6` and Datahike
+`9ada755087228e10cfb179fa5779ce227a6ed220`. Proximum supplies generation-
+addressed mmap publication, guarded destination replacement, and cold Git
+preparation on upstream `v0.1.26`. Datahike preflights every secondary before
+primary publication, adopts an already-published generation on retry, migrates
+the historical Datahike `"db"`/native Proximum `:main` shape, and preserves a
+prepared source branch after later destination writes and cold reopen. Its
+complete focused gate passes 108 tests and 570 assertions across `specs`,
+`clj-pss`, and `clj-hht`. The issue remains open only until Seon's cold root
+cutover and file-backed restore fixture prove those selected public artifacts.
 
 ## Owner
 

@@ -31,8 +31,9 @@ or history mechanism. Its size-bounded Transit/base64url continuation seals
 the full coordinate, projection, index, normalized prefix, direction, and
 five-component last datom; malformed, moving, or mismatched continuations fail
 as data before an index read. No retained cursor contains a database value.
-The later reactive unit migration still waits on the shared reverse-candidate
-boundary, currently blocked on a public Datahike query dependency projection.
+The later reactive unit migration consumes the now-public shared reverse-
+candidate dependency projection; its remaining gate is the reactive unit
+composition, not dependency publication.
 
 A read-only 2026-07-14 default-cluster probe observed basis `536870929` and
 15,851 datoms. The initial compressed feed emitted immediately. Slice B now
@@ -69,7 +70,8 @@ checkpoint exposed separate runner defects recorded in
 
 The read-only entity/ref/transaction reconciliation at
 [[research/entity-reference-projection-reconciliation-2026-07-15]] confirms
-that selected Datahike `417649383c65e13f15ea41d394fb1ed742477965`
+that maintained Datahike publication descendant
+`9ada755087228e10cfb179fa5779ce227a6ed220`
 already supplies the bounded EAVT and AVET primitives for the next slice. It
 also found one remaining Slice A pre-read validation gap. That gap is now
 closed: decoded `last` data must decode and re-encode canonically and its
@@ -95,9 +97,8 @@ next consumer slice after the active reactive lane settles.
 
 ## Ordered work
 
-1. **Coordinate and pure lifecycle prerequisites complete:** consume their
-   settled contracts. The later reverse candidate index is separately blocked
-   on a public Datahike query-dependency projection. Mirror exact
+1. **Coordinate, pure lifecycle, and public query-dependency prerequisites
+   complete:** consume their settled contracts. Mirror exact
    persistent-sorted-set `0.4.137` source only before count implementation.
 2. **Cursor Slice A and web Slice B complete:** one database value now flows
    through `/data`, dependency system attrs are classified correctly, and the

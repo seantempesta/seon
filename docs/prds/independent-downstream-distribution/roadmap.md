@@ -43,9 +43,12 @@ Konserve selections to agree; and binds that identity set plus the normalized
 writer digest into application identity. Version 2 and 3 manifests remain
 readable. Publication deliberately fails closed while any required selection
 is Maven/local, has a short SHA or non-HTTPS URL, or differs across aliases.
-Consequently the current Maven Proximum pin cannot produce a version 4
-manifest until the coordinated public-Git dependency cutover lands. This is a
-development artifact identity boundary, not the still-unbuilt relocatable
+The three formerly unsettled dependencies are now public at Proximum
+`9846d3e79e1aee48474bc876d3d563d7137209c6`, Konserve
+`b5c99bc02a7175652a610324215288b78551801f`, and Datahike
+`9ada755087228e10cfb179fa5779ce227a6ed220`; the root cutover and cold version-4
+manifest proof are active. This is a development artifact identity boundary,
+not the still-unbuilt relocatable
 release compatibility manifest with protocol, SDK, npm, license, and SBOM
 metadata.
 
@@ -68,29 +71,25 @@ Implementation waits for the runtime/database contracts named by the
 high-level [[../runtime-reliability/roadmap]] ledger; research and manifest
 specification may proceed independently.
 
-The pending guarded-force dependency publication is reconciled at
+The completed guarded-force dependency publication is reconciled at
 [[research/proximum-datahike-publication-path-2026-07-15]]. The exact
 source-build mechanism is public HTTPS Git dependencies pinned by full SHA,
 followed by a release manifest that binds those SHAs to the standalone writer
-digest. Datahike already supports cold Git preparation, but its final
-integration must expose `src-secondary` through its declared paths. Proximum
-commit `fb6572c…` is local-only, lacks cold Java prep, and is based on upstream
-`v0.1.25`; upstream `v0.1.26`/`c1235796…` already owns the Maven version the
-local commit count would produce. Forward-port, checked-in-Java prep, public
-fork creation, and final public SHAs remain prerequisites to changing Seon's
-production pins. ACME and the current root dependencies remain untouched until
-those immutable coordinates exist.
+digest. Datahike `9ada7550…` exposes `src-secondary` through its declared paths;
+Proximum `9846d3e7…` is the public upstream-`v0.1.26` descendant with guarded
+force and cold checked-in-Java preparation. Root pin/build-input removal, cold
+dependency preparation, and stable writer-manifest evidence remain before the
+ACME admission handoff.
 
 The complete maintained-fork freshness ledger is
 [[research/custom-dependency-freshness-audit-2026-07-15]]. It adds one required
-edge to that publication order: merge upstream Konserve `0.9.359` into the
-legacy-header compatibility fork before merging current Datahike upstream into
-the guarded-force line. Datahike's upstream delete fix requires Konserve
-`>= 0.9.357`, and its concurrent-GC safe-point fix is also absent from the
-current pin. Shadow CLJS, superv.async, and partial-cps are already at the
-intended public maintained revisions. The final root coordinate update remains
-atomic across `:writer` and `:cljs`; ACME inherits that compatibility set and
-must not copy it downstream.
+edge that the published set now satisfies: Konserve `b5c99bc0…` composes
+upstream `0.9.359`, the legacy-header reader, and idempotent absent Node
+filestore deletion before Datahike `9ada7550…` consumes it together with the
+awaited-delete and concurrent-GC safe-point fixes. Shadow CLJS, superv.async,
+and partial-cps remain at the intended public maintained revisions. The root
+coordinate update stays atomic across `:writer` and `:cljs`; ACME inherits
+that compatibility set and must not copy it downstream.
 
 ## Ordered work
 

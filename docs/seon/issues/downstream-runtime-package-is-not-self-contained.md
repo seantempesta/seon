@@ -34,9 +34,9 @@ operator, compatibility manifest, or one-command release/downstream build.
   client/cache paths and omits release/protocol/SDK/runtime/license
   compatibility data. It now binds the exact six maintained public-Git
   dependency coordinates and normalized writer digest into application
-  identity, while retaining version 2/3 read compatibility. Its fail-closed
-  selector intentionally prevents publication until Proximum moves from the
-  current Maven coordinate to the final public Git SHA.
+  identity, while retaining version 2/3 read compatibility. Proximum is now
+  public at `9846d3e79e1aee48474bc876d3d563d7137209c6`; cold version-4 root
+  publication proof is active.
 - Default and ACME previously published different bootstrap digests while
   replacing the same live `out/bootstrap` path. The development operator now
   publishes content-addressed manifest-bound runtime roots; coordinated live
@@ -53,15 +53,13 @@ operator, compatibility manifest, or one-command release/downstream build.
   Exact source is also absent for Clojure, tools.build, superv.async, and
   partial-cps, so the compatibility contract is not grounded in every selected
   implementation.
-- The guarded Proximum force commit `fb6572c…` is local-only, based on upstream
-  `v0.1.25`, and cannot be published as `0.1.26`: upstream tag and Clojars
-  version `0.1.26` already identify different commit `c1235796…`. Proximum also
-  lacks `:deps/prep-lib`, so a cold Git dependency would expose Java source but
-  not its required compiled classes.
-- Datahike's exact Git dependency supports cold Java preparation, but its
-  declared `:paths` omit `src-secondary`. The source writer therefore still
-  copies the adapter from `reference-code/datahike/src-secondary` instead of
-  consuming the exact public dependency closure.
+- Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6` is the public upstream-
+  `v0.1.26` descendant with guarded force and `:deps/prep-lib` compilation of
+  checked-in Java.
+- Datahike `9ada755087228e10cfb179fa5779ce227a6ed220` is public, supports cold
+  Java preparation, declares `src-secondary`, and selects idempotent Konserve
+  `b5c99bc02a7175652a610324215288b78551801f`. Root local-path removal and cold
+  writer/manifest proof remain in progress.
 
 Full evidence and the proposed artifact boundary are in
 [[../../prds/independent-downstream-distribution/research/independent-acme-distribution-audit-2026-07-14]].
