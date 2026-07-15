@@ -168,6 +168,40 @@ current operator's one target/artifact/process graph. Core operator semantics
 remain owned by `script/seon/dev/*`; ACME adapts to them without restoring named
 process commands or a parallel supervisor.
 
+## Historical canvas value blocks current admission — 2026-07-15
+
+The first agentic-suite restart against ACME's retained development database
+booted the writer and pod, replayed all seven agents, and opened port 7994.
+Before readiness could stabilize, the root surface derived an explicit
+`:seon.render.canvas/content` pin as the string `"acme.widget/dash"`. The
+current contract accepts a qualified symbol or literal hiccup, so
+`seon.render.surface` recorded a core fault and the configured crash policy
+terminated the pod. The operator consequently reported a live watcher and
+writer with a dead pod rather than accepting the stale database.
+
+Current `acme.context/install-into!` transacts the qualified symbol
+`'acme.widget/dash`; the mixed-`:or` database bridge stores its `pr-str` and
+decodes it on read. The malformed retained value therefore predates the
+current write contract or was double-encoded by an earlier implementation. It
+must not be coerced at render time: the strict crash is evidence that the
+database is incompatible with current source.
+
+Acceptance for the disposable harness is a scoped `bin/acme` reset followed by
+a fresh boot, exact raw/decoded pin read-back, and a ready dashboard. If the
+fresh database reproduces the string, the active EDN write path is the owner
+and must be fixed before evaluation. A retained production database needs an
+explicit, provenance-bounded reconciliation transaction; absence or an invalid
+value may not be silently rewritten during ordinary boot.
+
+The scoped reset then rebuilt the current writer, ACME client, bootstrap, and
+database and reached ready at port 7994. The fresh root pin reads as raw storage
+string `acme.widget/dash`, decodes to the qualified symbol
+`acme.widget/dash`, and carries distinct string/symbol runtime types at database
+basis 536870934. Both downstream context installs completed. This falsifies a
+current bridge regression and localizes the crash to retained incompatible
+data; the strict admission behavior and explicit reconciliation requirement
+remain correct.
+
 ## Duplicate development-cluster identity — 2026-07-14
 
 The agentic-tool-refinement lane started a current ACME target from a dedicated
