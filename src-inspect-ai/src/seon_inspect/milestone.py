@@ -116,6 +116,90 @@ def _ok_indices(rows: list[dict[str, Any]], pat: str) -> list[int]:
             if r.get("ok") and rx.search(r.get("source") or "")]
 
 
+class EvidenceError(ValueError):
+    """A bounded door evidence value is absent or structurally invalid."""
+
+
+def _decode_evidence_value(node: Any) -> Any:
+    """Decode the door's lossless tagged JSON tree, failing closed."""
+    if not isinstance(node, dict) or not isinstance(node.get("kind"), str):
+        raise EvidenceError("evidence value is not tagged")
+    kind = node["kind"]
+    if kind in {"keyword", "symbol", "scalar"}:
+        if set(node) != {"kind", "value"}:
+            raise EvidenceError("scalar evidence shape is invalid")
+        return node["value"]
+    if kind in {"vector", "list", "set"}:
+        if set(node) != {"kind", "items"} or not isinstance(node["items"], list):
+            raise EvidenceError("collection evidence shape is invalid")
+        return [_decode_evidence_value(item) for item in node["items"]]
+    if kind == "map":
+        if set(node) != {"kind", "entries"} or not isinstance(node["entries"], list):
+            raise EvidenceError("map evidence shape is invalid")
+        result: dict[Any, Any] = {}
+        for entry in node["entries"]:
+            if not isinstance(entry, dict) or set(entry) != {"key", "value"}:
+                raise EvidenceError("map entry evidence shape is invalid")
+            key = _decode_evidence_value(entry["key"])
+            try:
+                duplicate = key in result
+            except TypeError as exc:
+                raise EvidenceError("map evidence key is not scalar") from exc
+            if duplicate:
+                raise EvidenceError("map evidence contains a duplicate key")
+            result[key] = _decode_evidence_value(entry["value"])
+        return result
+    raise EvidenceError(f"unsupported evidence kind {kind!r}")
+
+
+def _coordinate_at_or_before(point: Any, final: Any) -> bool:
+    keys = ("database_id", "branch", "commit_id", "t")
+    return (isinstance(point, dict) and isinstance(final, dict)
+            and all(k in point and k in final for k in keys)
+            and point["database_id"] == final["database_id"]
+            and point["branch"] == final["branch"]
+            and isinstance(point["commit_id"], str)
+            and bool(point["commit_id"])
+            and isinstance(final["commit_id"], str)
+            and bool(final["commit_id"])
+            and isinstance(point["t"], int) and isinstance(final["t"], int)
+            and point["t"] <= final["t"])
+
+
+def _ordered_proof_rows(eval_rows: list[dict[str, Any]],
+                        final_coordinate: Any,
+                        turn_ids: set[str] | None) -> list[dict[str, Any]]:
+    if not isinstance(final_coordinate, dict) or not turn_ids:
+        raise EvidenceError("final coordinate or request turn membership absent")
+    if any(not isinstance(row.get("eval_transaction"), int)
+           or row.get("turn_id") not in turn_ids for row in eval_rows):
+        raise EvidenceError("eval order or request turn membership invalid")
+    ordered = sorted(eval_rows, key=lambda row: row["eval_transaction"])
+    if len({row["eval_transaction"] for row in ordered}) != len(ordered):
+        raise EvidenceError("eval transaction order is not unique")
+    if ordered != eval_rows:
+        raise EvidenceError("eval evidence is not in transaction order")
+    return ordered
+
+
+def _operations(row: dict[str, Any], final_coordinate: dict[str, Any]) -> list[dict[str, Any]]:
+    evidence = row.get("operation_evidence")
+    if not isinstance(evidence, dict) or evidence.get("status") != "inline":
+        raise EvidenceError("operation evidence is absent or not inline")
+    operations = evidence.get("operations")
+    if not isinstance(operations, list):
+        raise EvidenceError("operation vector absent")
+    for position, operation in enumerate(operations):
+        if (not isinstance(operation, dict)
+                or operation.get("position") != position
+                or operation.get("source") != ":seon.db.read.source/captured"
+                or operation.get("coordinate_valid") is not True
+                or not _coordinate_at_or_before(
+                    operation.get("coordinate"), final_coordinate)):
+            raise EvidenceError("operation position/source/coordinate invalid")
+    return operations
+
+
 # ---------------------------------------------------------------------------
 # namespaces milestone — ported from tools/ns-move-oracle.py
 # ---------------------------------------------------------------------------
@@ -196,7 +280,9 @@ def check_ns_movement(eval_rows: list[dict[str, Any]],
 
 def check_store_recall(eval_rows: list[dict[str, Any]],
                        reply: str,
-                       oracle: dict[str, Any] | None = None) -> dict[str, Any]:
+                       oracle: dict[str, Any] | None = None,
+                       final_coordinate: dict[str, Any] | None = None,
+                       turn_ids: set[str] | None = None) -> dict[str, Any]:
     """The `db` milestone oracle: store, then RECALL it in a later eval.
 
     OK iff the retained eval evidence proves the requested workflow shape:
@@ -211,6 +297,7 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
     The reply IS the agent's delivered message/complete content (pod_run
     surfaces it), so the answer check is over the reply text directly.
     """
+    proof_required = bool(oracle)
     oracle = oracle or {}
     identity_attr = oracle.get("identity_attr", ":my.cache/name")
     measure_attr = oracle.get("measure_attr", ":my.cache/weight-kg")
@@ -275,9 +362,62 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
     ])
     answer = _reply_has_number(reply, expected)
 
+    operation_proof = not proof_required
+    if proof_required:
+        try:
+            ordered = _ordered_proof_rows(
+                eval_rows, final_coordinate, turn_ids)
+            tx_row = ordered[transact_idx] if transact_idx is not None else None
+            query_row = ordered[query_idx] if query_idx is not None else None
+            if tx_row is None or query_row is None:
+                raise EvidenceError("source workflow rows absent")
+            tx_ops = _operations(tx_row, final_coordinate or {})
+            query_ops = _operations(query_row, final_coordinate or {})
+            tx_op = next(
+                operation for operation in tx_ops
+                if operation.get("operation") ==
+                ":seon.db.read.operation/transact")
+            query_op = next(
+                operation for operation in query_ops
+                if operation.get("operation") ==
+                ":seon.db.read.operation/query")
+            tx_request = _decode_evidence_value(tx_op.get("request"))
+            tx_result = _decode_evidence_value(tx_op.get("result"))
+            query_request = _decode_evidence_value(query_op.get("request"))
+            query_result = _decode_evidence_value(query_op.get("result"))
+            tx_rows = tx_request.get(":seon.db/tx-data", [])
+            expected_pairs = {
+                (str(record["identity"]), record["measure"])
+                for record in records
+            }
+            actual_pairs = {
+                (str(row.get(identity_attr)), row.get(measure_attr))
+                for row in tx_rows if isinstance(row, dict)
+            }
+            query_form = query_request.get(":seon.db/query", [])
+            query_text = " ".join(str(item) for item in query_form)
+            operation_proof = (
+                tx_op.get("ok") is True
+                and isinstance(tx_result, dict)
+                and tx_result.get(":seon.db/ok?") is True
+                and len(tx_rows) == len(records)
+                and actual_pairs == expected_pairs
+                and query_op.get("ok") is True
+                and measure_attr in query_text
+                and ">" in query_text
+                and _reply_has_number(query_text, threshold)
+                and query_result == expected
+                and tx_op["coordinate"]["t"]
+                <= query_op["coordinate"]["t"]
+                and tx_row["eval_transaction"]
+                < query_row["eval_transaction"])
+        except (EvidenceError, KeyError, StopIteration, TypeError, ValueError):
+            operation_proof = False
+
     checks = {"schema_register": schema_before,
               "transact": transact_idx is not None,
               "query_later": query_idx is not None,
+              "operation_evidence": operation_proof,
               "report_human": bool(report_indices),
               "complete": bool(complete_indices),
               "answer": answer}
@@ -297,7 +437,9 @@ MILESTONE_ORACLES: dict[
 
 def check_milestone(milestone: str, eval_rows: list[dict[str, Any]],
                     reply: str,
-                    oracle: dict[str, Any] | None = None) -> dict[str, Any]:
+                    oracle: dict[str, Any] | None = None,
+                    final_coordinate: dict[str, Any] | None = None,
+                    turn_ids: set[str] | None = None) -> dict[str, Any]:
     """Score a milestone by id; raises on an unknown id (never a silent pass)."""
     try:
         oracle_fn = MILESTONE_ORACLES[milestone]
@@ -306,6 +448,10 @@ def check_milestone(milestone: str, eval_rows: list[dict[str, Any]],
             f"unknown milestone {milestone!r} (known: "
             f"{sorted(MILESTONE_ORACLES)}; the `plan` milestone is "
             "seon_inspect.planning)")
+    if milestone == "db":
+        return oracle_fn(eval_rows, reply, oracle=oracle,
+                         final_coordinate=final_coordinate,
+                         turn_ids=turn_ids)
     return oracle_fn(eval_rows, reply, oracle=oracle)
 
 
@@ -442,8 +588,13 @@ def milestone_scorer() -> Scorer:
     async def score(state: TaskState, target: Target) -> Score:
         import json
         meta = state.metadata or {}
-        res = check_milestone(meta["milestone"], meta["eval_rows"],
-                              state.output.completion, meta.get("oracle"))
+        turns = meta.get("pod_turn_evidence")
+        turn_ids = ({turn.get("turn_id") for turn in turns
+                     if isinstance(turn, dict) and turn.get("turn_id")}
+                    if isinstance(turns, list) else None)
+        res = check_milestone(
+            meta["milestone"], meta["eval_rows"], state.output.completion,
+            meta.get("oracle"), meta.get("pod_database_coordinate"), turn_ids)
         fab = count_fabrication(state.output.completion)
         return Score(
             value=CORRECT if res["ok"] else INCORRECT,

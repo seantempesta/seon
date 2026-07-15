@@ -104,3 +104,42 @@ The exact persistence gate is green: three focused tests, ten assertions. It
 also proves that a publication failure records an eval failure without a blob
 ref and that two equivalent mixed-key/set values constructed in different
 orders produce identical bytes before round-trip.
+
+## Composition-door and scorer checkpoint — 2026-07-15
+
+`POST /agents/run` now derives eval membership and order directly from the
+final immutable database value: the Datalog input is the exact request turn
+entity set, and each row carries its turn identity plus the eval identity
+datom's transaction. A final-snapshot
+`:seon.eval/database-operations-blob` ref is the only authority for reading
+operation bytes. The pulled token projection must be present and no larger
+than the database-configured `:seon.config.render/database-edn-cap` token
+ceiling before disk is touched; read bytes must then satisfy the exact char
+cap and token projection.
+
+Inline evidence is a lossless tagged JSON tree, so namespaced keywords,
+symbols, mixed map keys, lists, vectors, and sets survive the existing JSON
+door without `clj->js` stripping namespaces. Every operation is validated by
+the registered read-observation schema, contiguous position, request turn,
+complete coordinate, captured source, and final attachment. Missing,
+malformed, oversized, token-mismatched, trailing-form, unsupported-runtime,
+or wrong-coordinate evidence emits only a bounded status descriptor; no blob
+content, preview, parser error, or stack enters the response.
+
+The native Inspect bridge already copies `eval_evidence`, `turn_evidence`, and
+the final database coordinate losslessly. The generated database-workflow
+oracle now requires one successful transaction observation with exactly the
+generated facts, a later exact scalar query result on the same attachment,
+transaction-ordered evals belonging to the request turns, and both later
+reports. Prompt arithmetic, failed transaction envelopes, wrong results,
+foreign turns, future/foreign coordinates, absence, and every non-inline
+status fail closed.
+
+Focused gates are green:
+
+- three exact ClojureScript selectors, seventeen assertions; and
+- the two focused Inspect modules, fifty-three tests.
+
+The issue remains open only for the admitted live generated sample and its
+native-log read-back. That proof is the next boundary, not part of this source
+unit.

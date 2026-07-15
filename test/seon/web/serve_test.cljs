@@ -10,7 +10,10 @@
     [cljs.reader :as reader]
     [cljs.test :refer [async deftest is testing]]
     [goog.object :as gobj]
+    [my.blob :as blob]
     [seon.agent.run :as run]
+    [seon.config :as config]
+    [seon.db.coordinate :as coordinate]
     [seon.eval :as seval]
     [seon.runtime.admission :as admission]
     [seon.web.serve :as serve]))
@@ -35,6 +38,12 @@
   (let [first-at (js/Date. 1000)
         second-at (js/Date. 2000)
         outside-at (js/Date. 3000)
+        final-coordinate {::coordinate/database-id
+                          #uuid "00000000-0000-0000-0000-000000000001"
+                          ::coordinate/branch :db
+                          ::coordinate/commit-id
+                          #uuid "00000000-0000-0000-0000-000000000002"
+                          ::coordinate/t 30}
         pulls {100 {:seon.eval/source "(first)"
                     :seon.eval/ok? true}
                101 {:seon.eval/source "(second)"
@@ -42,21 +51,123 @@
                     :seon.eval/narration "kept as bounded data"}
                102 {:seon.eval/source "(outside)"
                     :seon.eval/ok? true}}]
-    (is (= [{:eval_id "eval-a"
+    (is (= [{:eval_id "eval-a" :turn_id "turn-a" :eval_transaction 20
              :at "1970-01-01T00:00:01.000Z"
              :ok true
              :source "(first)"}
-            {:eval_id "eval-b"
+            {:eval_id "eval-b" :turn_id "turn-b" :eval_transaction 21
              :at "1970-01-01T00:00:02.000Z"
              :ok false
              :source "(second)"
              :narration "kept as bounded data"}]
            ((deref #'serve/project-eval-evidence)
-             [[102 12 "eval-c" outside-at]
-              [101 11 "eval-b" second-at]
-              [100 10 "eval-a" first-at]]
+             [[102 12 "turn-c" "eval-c" outside-at 22]
+              [101 11 "turn-b" "eval-b" second-at 21]
+              [100 10 "turn-a" "eval-a" first-at 20]]
              #{10 11}
+             final-coordinate
              #(get pulls %))))))
+
+(def ^:private evidence-coordinate
+  {::coordinate/database-id #uuid "00000000-0000-0000-0000-000000000001"
+   ::coordinate/branch :db
+   ::coordinate/commit-id #uuid "00000000-0000-0000-0000-000000000002"
+   ::coordinate/t 30})
+
+(def ^:private evidence-operations
+  [{:seon.db/read-operation :seon.db.read.operation/transact
+    :seon.db/operation-position 0
+    :seon.db/operation-ok? false
+    :seon.db/operation-coordinate (assoc evidence-coordinate ::coordinate/t 20)
+    :seon.db/read-source :seon.db.read.source/captured
+    :seon.db/read-request {:seon.db/tx-data [{:my.row/id "one"}]}
+    :seon.db/read-result {:seon.db/ok? false}
+    :seon.db/read-replayable? false}
+   {:seon.db/read-operation :seon.db.read.operation/query
+    :seon.db/operation-position 1
+    :seon.db/operation-ok? true
+    :seon.db/operation-coordinate (assoc evidence-coordinate ::coordinate/t 21)
+    :seon.db/read-source :seon.db.read.source/captured
+    :seon.db/read-request {:seon.db/query '[:find (count ?e) . :where [?e]]}
+    :seon.db/read-result 1
+    :seon.db/read-replayable? true}])
+
+(deftest operation-evidence-projection-is-bounded-lossless-and-fail-closed
+  (let [content (pr-str evidence-operations)
+        project (deref #'serve/project-operation-evidence)]
+    (with-redefs [config/database-edn-cap (constantly (inc (count content)))
+                  blob/get (fn [_]
+                             {:my.blob/ok? true
+                              :my.blob/content content
+                              :my.blob/tokens 1})]
+      (let [proof (project {:my.blob/hash "proof" :my.blob/tokens 1}
+                           evidence-coordinate)
+            [tx query] (:operations proof)]
+        (is (= "inline" (:status proof)))
+        (is (= [0 1] (mapv :position (:operations proof))))
+        (is (false? (:ok tx)) "failed transact remains failed")
+        (is (true? (:coordinate_valid query)))
+        (is (= {:kind "scalar" :value 1} (:result query)))
+        (is (= "map" (get-in tx [:request :kind]))
+            "namespaced request data uses the lossless tagged tree")))
+    (with-redefs [config/database-edn-cap (constantly 4)
+                  blob/get (fn [_] (throw (js/Error. "must not read")))]
+      (is (= {:status "oversized" :blob_hash "proof" :tokens 2}
+             (project {:my.blob/hash "proof" :my.blob/tokens 2}
+                      evidence-coordinate))
+          "token projection stops oversized evidence before disk read"))
+    (with-redefs [config/database-edn-cap (constantly 100)
+                  blob/get (constantly {:my.blob/ok? false})]
+      (is (= "missing"
+             (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
+                               evidence-coordinate)))))
+    (is (= {:status "missing"}
+           (project {:my.blob/tokens 1} evidence-coordinate))
+        "an invalid identity is omitted rather than fabricated")
+    (with-redefs [config/database-edn-cap (constantly 100)
+                  blob/get (constantly {:my.blob/ok? true
+                                        :my.blob/content "not-edn )"
+                                        :my.blob/tokens 1})]
+      (is (= "malformed"
+             (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
+                               evidence-coordinate)))))
+    (with-redefs [config/database-edn-cap (constantly 100)
+                  blob/get (constantly {:my.blob/ok? true
+                                        :my.blob/content "[] trailing"
+                                        :my.blob/tokens 1})]
+      (is (= "malformed"
+             (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
+                               evidence-coordinate)))
+          "trailing forms cannot hide behind one valid prefix"))
+    (with-redefs [config/database-edn-cap (constantly 100)
+                  blob/get (constantly {:my.blob/ok? true
+                                        :my.blob/content "[]"
+                                        :my.blob/tokens 2})]
+      (is (= "malformed"
+             (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
+                               evidence-coordinate)))
+          "blob bytes must match the final snapshot's token projection"))
+    (with-redefs [config/database-edn-cap (constantly 4)
+                  blob/get (constantly {:my.blob/ok? true
+                                        :my.blob/content "[12345]"
+                                        :my.blob/tokens 1})]
+      (is (= "oversized"
+             (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
+                               evidence-coordinate)))
+          "pathological token/char mismatch remains status-only"))))
+
+(deftest tagged-evidence-order-is-recursively-stable-and-unsupported-fails
+  (let [project-value (deref #'serve/evidence-json-value)
+        supported? (deref #'serve/supported-evidence-json?)
+        left {:outer #{(array-map :b #{3 2 1} :a {:z 1 :y 2})}}
+        right {:outer #{(array-map :a {:y 2 :z 1} :b #{1 3 2})}}
+        left-json (project-value left)
+        right-json (project-value right)]
+    (is (= left-json right-json)
+        "nested map/set construction order cannot perturb projected bytes")
+    (is (true? (supported? left-json)))
+    (is (false? (supported? (project-value #js {:runtime true})))
+        "runtime values never become inline proof")))
 
 (defn- req-with-origin
   ([origin] (req-with-origin origin nil))

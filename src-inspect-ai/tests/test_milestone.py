@@ -24,6 +24,65 @@ def _ev(*sources_ok):
     return [{"source": s, "ok": ok} for s, ok in sources_ok]
 
 
+def _tag(value):
+    if isinstance(value, dict):
+        return {"kind": "map", "entries": [
+            {"key": _tag(key), "value": _tag(item)}
+            for key, item in value.items()]}
+    if isinstance(value, list):
+        return {"kind": "vector", "items": [_tag(item) for item in value]}
+    if isinstance(value, str) and value.startswith(":"):
+        return {"kind": "keyword", "value": value}
+    return {"kind": "scalar", "value": value}
+
+
+def _operation(position, operation, request, result, t, *, ok=True,
+               coordinate_valid=True):
+    return {"position": position, "operation": operation, "ok": ok,
+            "source": ":seon.db.read.source/captured", "replayable": False,
+            "coordinate_valid": coordinate_valid,
+            "coordinate": {"database_id": "db", "branch": "db",
+                           "commit_id": f"operation-{t}", "t": t},
+            "request": _tag(request), "result": _tag(result)}
+
+
+def _generated_db_proof_rows(oracle):
+    identity = oracle["identity_attr"]
+    measure = oracle["measure_attr"]
+    rows = _ev(
+        (f"(schema/register! {identity} "
+         "[:string {:seon.db/identity true}])", True),
+        (f"(schema/register! {measure} :int)", True),
+        ("(db/transact! [" + " ".join(
+            f"{{{identity} {record['identity']!r} "
+            f"{measure} {record['measure']}}}"
+            for record in oracle["records"]) + "])", True),
+        (f"(db/query '[:find (sum ?v) . :where [?e {measure} ?v] "
+         f"[(> ?v {oracle['threshold']})]])", True),
+        (f"(message/user \"Computed {oracle['answer']}\")", True),
+        (f"(complete \"Computed {oracle['answer']}\")", True),
+    )
+    for index, row in enumerate(rows):
+        row.update(turn_id="store" if index <= 2 else "recall",
+                   eval_transaction=100 + index)
+    tx_data = [{identity: record["identity"], measure: record["measure"]}
+               for record in oracle["records"]]
+    rows[2]["operation_evidence"] = {
+        "status": "inline", "blob_hash": "tx", "operations": [
+            _operation(
+                0, ":seon.db.read.operation/transact",
+                {":seon.db/tx-data": tx_data}, {":seon.db/ok?": True}, 10)]}
+    rows[3]["operation_evidence"] = {
+        "status": "inline", "blob_hash": "query", "operations": [
+            _operation(
+                0, ":seon.db.read.operation/query",
+                {":seon.db/query": [":find", ["sum", "?v"], ".",
+                                     ":where", ["?e", measure, "?v"],
+                                     [">", "?v", oracle["threshold"]]]},
+                oracle["answer"], 20)]}
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # namespaces milestone
 # ---------------------------------------------------------------------------
@@ -164,26 +223,52 @@ def test_generated_database_workflow_uses_structured_oracle():
 
     sample = generate_rows("database_workflow", 1, 1)[0]
     oracle = sample["metadata"]["oracle"]
-    identity = oracle["identity_attr"]
-    measure = oracle["measure_attr"]
-    rows = _ev(
-        (f"(schema/register! {identity} [:string {{:seon.db/identity true}}])", True),
-        (f"(schema/register! {measure} :int)", True),
-        ("(db/transact! ["
-         + " ".join(
-             f"{{{identity} {record['identity']!r} "
-             f"{measure} {record['measure']}}}"
-             for record in oracle["records"])
-         + "])", True),
-        (f"(db/query '[:find (sum ?v) . :where [?e {measure} ?v] "
-         f"[(> ?v {oracle['threshold']})]])", True),
-        (f"(message/user \"Computed {oracle['answer']}\")", True),
-        (f"(complete \"Computed {oracle['answer']}\")", True),
-    )
-    result = check_milestone("db", rows, oracle["answer"], oracle)
+    rows = _generated_db_proof_rows(oracle)
+    final = {"database_id": "db", "branch": "db",
+             "commit_id": "final", "t": 30}
+    result = check_milestone(
+        "db", rows, oracle["answer"], oracle, final, {"store", "recall"})
     assert result["ok"], result["failures"]
     assert all(result["checks"].values())
     assert "schema_register" in result["checks"]
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda rows: rows[3].pop("operation_evidence"),
+        lambda rows: rows[2]["operation_evidence"].update(status="malformed"),
+        lambda rows: rows[3]["operation_evidence"].update(status="oversized"),
+        lambda rows: rows[2]["operation_evidence"]["operations"][0].update(ok=False),
+        lambda rows: rows[2]["operation_evidence"]["operations"][0][
+            "result"]["entries"][0].update(value=_tag(False)),
+        lambda rows: rows[3]["operation_evidence"]["operations"][0].update(
+            coordinate_valid=False),
+        lambda rows: rows[3]["operation_evidence"]["operations"][0][
+            "coordinate"].update(t=31),
+        lambda rows: rows[3]["operation_evidence"]["operations"][0][
+            "coordinate"].pop("commit_id"),
+        lambda rows: rows[3]["operation_evidence"]["operations"][0][
+            "coordinate"].update(database_id="foreign"),
+        lambda rows: rows[3].update(turn_id="foreign-turn"),
+        lambda rows: rows[3]["operation_evidence"]["operations"][0].update(
+            result=_tag(-1)),
+    ],
+)
+def test_generated_database_workflow_fails_closed_without_exact_proof(mutate):
+    import copy
+
+    from seon_inspect.generators import generate_rows
+
+    oracle = generate_rows("database_workflow", 1, 1)[0]["metadata"]["oracle"]
+    rows = copy.deepcopy(_generated_db_proof_rows(oracle))
+    mutate(rows)
+    final = {"database_id": "db", "branch": "db",
+             "commit_id": "final", "t": 30}
+    result = check_milestone(
+        "db", rows, oracle["answer"], oracle, final, {"store", "recall"})
+    assert not result["ok"]
+    assert "operation_evidence" in result["failures"]
 
 
 def test_generated_namespace_workflow_uses_structured_oracle():

@@ -99,7 +99,11 @@ def test_record_result_preserves_database_and_turn_evidence():
                   "commit_id": "commit-1", "t": 536870930}
     turns = [{"turn_id": "turn-1", "prompt": "exact prompt",
               "reply": "raw reply", "rendered_coordinate": coordinate}]
-    evals = [{"eval_id": "eval-1", "source": "(+ 1 2)", "ok": True}]
+    evals = [{"eval_id": "eval-1", "source": "(+ 1 2)", "ok": True,
+              "operation_evidence": {
+                  "status": "inline", "blob_hash": "abc",
+                  "operations": [{"position": 0, "result": {
+                      "kind": "scalar", "value": 3}}]}}]
     state = SimpleNamespace(output=SimpleNamespace(completion=""), metadata={})
 
     _record_result(state, {"reply": "answer",

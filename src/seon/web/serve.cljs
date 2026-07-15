@@ -27,6 +27,7 @@
     [cljs.reader :as reader]
     [clojure.string :as str]
     [goog.object :as gobj]
+    [my.blob :as blob]
     [seon.agent :as agent]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
@@ -490,40 +491,234 @@
           (assoc :capture_error (:seon.agent.debug/error bundle)))))
     turn-ids))
 
+(declare evidence-json-value)
+
+(defn- evidence-order-key [value]
+  (cond
+    (map? value)
+    ["09-map"
+     (->> value
+          (map (fn [[k v]] [(evidence-order-key k) (evidence-order-key v)]))
+          sort vec)]
+
+    (set? value)
+    ["08-set" (->> value (map evidence-order-key) sort vec)]
+
+    (vector? value)
+    ["06-vector" (mapv evidence-order-key value)]
+
+    (list? value)
+    ["07-list" (mapv evidence-order-key value)]
+
+    (nil? value) ["00-nil"]
+    (boolean? value) ["01-boolean" value]
+    (number? value) ["02-number" (pr-str value)]
+    (string? value) ["03-string" value]
+    (keyword? value) ["04-keyword" (str value)]
+    (symbol? value) ["05-symbol" (str value)]
+    :else ["10-unsupported" (pr-str (type value))]))
+
+(defn- evidence-json-value
+  "Lossless JSON-safe tagged projection of one normalized EDN value."
+  [value]
+  (cond
+    (map? value)
+    {:kind "map"
+     :entries
+     (mapv (fn [[k v]]
+             {:key (evidence-json-value k) :value (evidence-json-value v)})
+           (sort-by (fn [[k v]] [(evidence-order-key k)
+                                 (evidence-order-key v)])
+                    value))}
+
+    (set? value)
+    {:kind "set"
+     :items (mapv evidence-json-value (sort-by evidence-order-key value))}
+
+    (vector? value)
+    {:kind "vector" :items (mapv evidence-json-value value)}
+
+    (list? value)
+    {:kind "list" :items (mapv evidence-json-value value)}
+
+    (keyword? value)
+    {:kind "keyword" :value (str value)}
+
+    (symbol? value)
+    {:kind "symbol" :value (str value)}
+
+    (or (nil? value) (boolean? value) (number? value) (string? value))
+    {:kind "scalar" :value value}
+
+    :else
+    {:kind "unsupported"}))
+
+(defn- operation-coordinate-valid? [operation-coordinate final-coordinate]
+  (try
+    (and (map? operation-coordinate)
+         (coordinate/same-attachment? operation-coordinate final-coordinate)
+         (<= (::coordinate/t operation-coordinate)
+             (::coordinate/t final-coordinate)))
+    (catch :default _ false)))
+
+(defn- operation-json [operation final-coordinate]
+  (let [point (:seon.db/operation-coordinate operation)]
+    (cond->
+      {:position (:seon.db/operation-position operation)
+       :operation (str (:seon.db/read-operation operation))
+       :ok (true? (:seon.db/operation-ok? operation))
+       :source (str (:seon.db/read-source operation))
+       :replayable (true? (:seon.db/read-replayable? operation))
+       :coordinate_valid (operation-coordinate-valid? point final-coordinate)
+       :request (evidence-json-value (:seon.db/read-request operation))
+       :result (evidence-json-value (:seon.db/read-result operation))}
+      (map? point) (assoc :coordinate (coordinate-json point)))))
+
+(defn- valid-operation-vector? [operations]
+  (and (vector? operations)
+       (= (mapv :seon.db/operation-position operations)
+          (vec (range (count operations))))
+       (every?
+         (fn [operation]
+           (and (map? operation)
+                (schema/valid-candidate-value?
+                  :seon.db/read-observation operation)
+                (every? #(contains? operation %)
+                        [:seon.db/read-operation
+                         :seon.db/operation-position
+                         :seon.db/operation-ok?
+                         :seon.db/read-source
+                         :seon.db/read-request
+                         :seon.db/read-result
+                         :seon.db/read-replayable?])))
+         operations)))
+
+(defn- supported-evidence-json? [value]
+  (and (map? value)
+       (not= "unsupported" (:kind value))
+       (cond
+         (= "map" (:kind value))
+         (every? (fn [{:keys [key value]}]
+                   (and (supported-evidence-json? key)
+                        (supported-evidence-json? value)))
+                 (:entries value))
+
+         (contains? #{"set" "vector" "list"} (:kind value))
+         (every? supported-evidence-json? (:items value))
+
+         (contains? #{"keyword" "symbol" "scalar"} (:kind value))
+         true
+
+         :else false)))
+
+(defn- project-operation-evidence
+  "Bounded operation proof resolved from one final-snapshot blob ref."
+  [blob-row final-coordinate]
+  (let [hash (:my.blob/hash blob-row)
+        projected-tokens (:my.blob/tokens blob-row)
+        token-ceiling (tokens/chars->tokens (config/database-edn-cap))]
+    (cond
+      (or (not (string? hash)) (not (int? projected-tokens)))
+      (cond-> {:status "missing"}
+        (string? hash) (assoc :blob_hash hash))
+
+      (> projected-tokens token-ceiling)
+      {:status "oversized" :blob_hash hash :tokens projected-tokens}
+
+      :else
+      (let [readback (blob/get {:my.blob/hash hash})]
+        (cond
+          (or
+          (not (true? (:my.blob/ok? readback)))
+          (not (string? (:my.blob/content readback))))
+          {:status "missing" :blob_hash hash :tokens projected-tokens}
+
+          (> (count (:my.blob/content readback)) (config/database-edn-cap))
+          {:status "oversized"
+           :blob_hash hash
+           :chars (count (:my.blob/content readback))
+           :bytes (js/Buffer.byteLength (:my.blob/content readback) "utf8")
+           :tokens projected-tokens}
+
+          :else
+          (let [content (:my.blob/content readback)]
+            (if (not= projected-tokens (:my.blob/tokens readback))
+              {:status "malformed"
+               :blob_hash hash
+               :chars (count content)
+               :bytes (js/Buffer.byteLength content "utf8")
+               :tokens projected-tokens}
+              (try
+              (let [forms (reader/read-string (str "[" content "]"))
+                    operations (when (= 1 (count forms)) (first forms))]
+                (let [projected (when (valid-operation-vector? operations)
+                                  (mapv #(operation-json % final-coordinate)
+                                        operations))]
+                  (if (and projected
+                           (every? #(and (supported-evidence-json? (:request %))
+                                         (supported-evidence-json? (:result %)))
+                                   projected))
+                    {:status "inline"
+                     :blob_hash hash
+                     :chars (count content)
+                     :bytes (js/Buffer.byteLength content "utf8")
+                     :tokens projected-tokens
+                     :operations projected}
+                    {:status "malformed"
+                     :blob_hash hash
+                     :chars (count content)
+                     :bytes (js/Buffer.byteLength content "utf8")
+                     :tokens projected-tokens})))
+              (catch :default _
+                {:status "malformed"
+                 :blob_hash hash
+                 :chars (count content)
+                 :bytes (js/Buffer.byteLength content "utf8")
+                 :tokens projected-tokens})))))))))
+
 (defn- project-eval-evidence
   "Stable external projection of selected eval rows."
-  [rows turn-eids pull-row]
+  [rows turn-eids final-coordinate pull-row]
   (->> rows
        (filter (fn [[_ turn-eid]] (contains? turn-eids turn-eid)))
-       (sort-by (fn [[_ _ id ^js at]] [(.getTime at) id]))
+       (sort-by (fn [[_ _ _ _ _ eval-t]] eval-t))
        (mapv
-         (fn [[eval-eid _ id ^js at]]
+         (fn [[eval-eid _ turn-id id ^js at eval-t]]
            (let [row (pull-row eval-eid)]
              (cond-> {:eval_id id
+                      :turn_id turn-id
+                      :eval_transaction eval-t
                       :at (.toISOString at)
                       :ok (boolean (:seon.eval/ok? row))}
                (contains? row :seon.eval/source)
                (assoc :source (:seon.eval/source row))
                (contains? row :seon.eval/narration)
-               (assoc :narration (:seon.eval/narration row))))))))
+               (assoc :narration (:seon.eval/narration row))
+               (contains? row :seon.eval/database-operations-blob)
+               (assoc :operation_evidence
+                      (project-operation-evidence
+                        (:seon.eval/database-operations-blob row)
+                        final-coordinate))))))))
 
 (defn- eval-evidence
   "Stable external projection of one request window's evaluated forms."
-  [dbv agent-eid turn-eids]
+  [dbv _agent-eid turn-eids]
   (let [rows (db/query {:seon.db/db dbv
-                        :seon.db/query '[:find ?e ?t ?id ?at :in $ ?ag :where
-                                         [?r :seon.agent.run/agent ?ag]
-                                         [?t :seon.agent.turn/run ?r]
+                        :seon.db/query '[:find ?e ?t ?turn-id ?id ?at ?eval-t
+                                         :in $ [?t ...] :where
+                                         [?t :seon.agent.turn/id ?turn-id]
                                          [?t :seon.agent.turn/evals ?e]
-                                         [?e :seon.eval/id ?id]
+                                         [?e :seon.eval/id ?id ?eval-t]
                                          [?e :seon.eval/at ?at]]
-                        :seon.db/args [agent-eid]})]
+                        :seon.db/args [(vec turn-eids)]})]
     (project-eval-evidence
-      rows turn-eids
+      rows turn-eids (db/head-coordinate dbv)
       (fn [eval-eid]
         (db/pull {:seon.db/db dbv
                   :seon.db/pull-pattern
-                  '[:seon.eval/source :seon.eval/ok? :seon.eval/narration]
+                  '[:seon.eval/source :seon.eval/ok? :seon.eval/narration
+                    {:seon.eval/database-operations-blob
+                     [:my.blob/hash :my.blob/tokens]}]
                   :seon.db/ref eval-eid})))))
 
 (defn- ^:async run-agent-task!
