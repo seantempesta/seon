@@ -199,6 +199,18 @@ passes 110 tests. The source design and falsifiers are in
 until the dedicated listener participates in one finalized and reopened native
 `.eval`.
 
+The lane now owns that dedicated 0.5B listener. One exact-path, one-token smoke
+returned the absolute snapshot as response model and the expected MLX
+fingerprint. Two consecutive full observer calls then produced byte-equal
+closed maps over the stable PID/start/argv, serving module and package tuple,
+and the 289,601,531-byte snapshot manifest. No source gap blocks the replay:
+the existing one-shot `run_native_task` invocation selects
+`database_workflow-seed1-000` and supplies an invocation-local callback that
+revalidates the selected process and loopback socket on both observations.
+This remains pre-run evidence, not P0b. The exact callback and post-handoff
+database/read-back sequence are in
+[[research/mlx-live-wiring-audit-2026-07-15]].
+
 The pinned Inspect source audit also identifies seven reusable mechanisms for
 later tool work: database-native namespace exposure, frozen-coordinate
 reconstruction, durable multi-form positions, bounded typed recovery,
@@ -552,6 +564,27 @@ readiness from this paragraph.
   indexer is repaired, and the focused gate proves those four controls expose
   exactly one callable input. Reachability and filesystem policy changes wait
   for their controlled falsifiers.
+- The reachability follow-up reduces those namespace failures to two positive
+  database facts: a persisted home require edge makes a compact card resident,
+  and `:seon.fn/agent-facing? true` makes a function callable inside it. Root
+  already has its `seon.agent` edge but no eligible operation; ordinary agents
+  lack edges to eligible `my.ns` and `my.skills`; ACME points at empty fixture
+  namespaces instead of its eligible product owners. Home requirements are
+  copied at birth, so manifest application does not retrofit an existing agent
+  and every ordinary/ACME before-after row must mint a fresh one. Exact queries
+  and four fixed trajectories are in
+  [[research/namespace-reachability-falsifiers-2026-07-15]].
+- The filesystem follow-up ranks the twelve-function standing surface by
+  likely small-model gain. Its first measured unit converges
+  `read-file`/`view` onto one bounded SHA-bearing read, retains anchored
+  `replace!`/`insert!`, retires the unfenced legacy `edit-file`, and unifies
+  four incompatible result dialects. Existing-target `write-file` then needs
+  the same SHA fence; `file-exists?` and `home-dir` currently erase useful
+  failure or grant facts. Four no-coaching workspace rows freeze the selection
+  and outcome evidence before any source change. The full inventory, schema
+  cost, and task bytes are in
+  [[research/filesystem-surface-audit-2026-07-15]]. These changes remain after
+  the first admitted evidence replay, not an excuse to displace P0b.
 - One OpenAI-compatible attempt now consumes one immutable resolved config
   value. A fake provider call captured config A, transacted ambient config B,
   and retained A for endpoint, credential source, model, sampling, thinking,

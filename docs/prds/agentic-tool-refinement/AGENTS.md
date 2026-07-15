@@ -67,6 +67,14 @@ coordinate. Restart only ACME after that handoff, require ready status, then
 run exactly `database_workflow-seed1-000` through the admitted MLX callback and
 read its finalized native log back.
 
+The lane currently owns a dedicated Qwen2.5 Coder 0.5B listener at PID 36369.
+Its exact-path one-token smoke and two consecutive full observer calls agree on
+the response fingerprint, process identity, and 289,601,531-byte artifact
+manifest. This is readiness evidence only: the PID may disappear, and only the
+callback maps retained around the finalized native sample close P0b. The exact
+invocation-local callback and replay command are in
+[[research/mlx-live-wiring-audit-2026-07-15]].
+
 The current handoff is withheld because a freshness audit rejected the interim
 Datahike candidate: upstream delete/GC fixes require Konserve 0.9.357 or newer,
 and the maintained compatibility patch is being forward-ported to 0.9.359.

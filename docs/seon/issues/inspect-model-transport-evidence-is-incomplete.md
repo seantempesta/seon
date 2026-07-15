@@ -115,6 +115,16 @@ remain insufficient without their manifest and loaded digests. The remaining
 owner is the admitted live replay, not another runner, supervisor, or Datahike
 attempt schema.
 
+The invocation-local wiring is proven separately in
+[[../../prds/agentic-tool-refinement/research/mlx-live-wiring-audit-2026-07-15]].
+The owned dedicated listener returned the exact snapshot path and MLX
+fingerprint in a one-token smoke. Two consecutive full observer calls agreed
+on the PID/start/argv, serving module and packages, and a 289,601,531-byte
+artifact manifest with SHA-256
+`5b5a0fa1a9ffa796bad62edf72813ae5665d29307ef54357441fc76681bbec06`.
+That closes callback feasibility, not this issue: the same maps still need to
+survive around the real sample in its finalized and reopened `.eval`.
+
 ## Acceptance
 
 - Transact AI row A with a distinct endpoint and timeout, retain its complete
