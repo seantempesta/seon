@@ -138,6 +138,19 @@ the free slot with the earliest dependency-ready row above. Findings that do
 not block that row are recorded with evidence and acceptance criteria instead
 of becoming an unplanned detour.
 
+The portfolio is a rolling queue, not a batch barrier. A lane may begin its
+documented refill as soon as its owned paths are committed and the top-level
+review finds no contract conflict; it need not wait for unrelated lanes. The
+top level alone sequences shared integration, starts cross-boundary tests, and
+runs live/destructive proof. This keeps agents productive without allowing
+separately green slices to masquerade as an integrated milestone.
+
+The persistent goal remains the whole unit 1–9 program. After every lane return
+or local commit, reconcile the compact working plan with this section before
+continuing. A deep investigation earns continued critical-path time only while
+it blocks the named exit measure; otherwise preserve its evidence in the
+owning issue/PRD and refill or resume the next dependency-ready boundary.
+
 Immediate unit-0 queue:
 
 1. **Complete:** the documentation hierarchy and practiced REPL-driven

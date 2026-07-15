@@ -46,6 +46,21 @@ subagent are never the only record of what remains. Parallel throughput never
 overrides dependency order, one-mechanism ownership, shared-tree safety, or
 the requirement that the top-level agent prove the integrated system.
 
+Run the same control loop after every returned lane, material discovery, or
+completed commit:
+
+1. compare the result with the persistent goal and the complete program ledger;
+2. update the current chunk's evidence, state, dependency edge, and next exit;
+3. review and integrate or reject the returned claim before building on it;
+4. advance the earliest dependency-ready implementation at the top level; and
+5. refill every other safe slot from the documented queue.
+
+The top-level working plan is a compact projection of that ledger, not a second
+roadmap. Keep it current, with exactly one in-progress critical-path item and
+explicit pending integration/proof boundaries. If the current work cannot be
+traced to one of those exits, stop, record the finding if useful, and resume
+the ordered program.
+
 Do not let a locally interesting defect silently replace the program. Before
 expanding an investigation, name the roadmap exit measure it blocks. If it
 does not block the active slice and can be isolated safely, record it in the
