@@ -63,6 +63,11 @@ Datahike checkout/gitlink/dependency/artifact-manifest coordinate. Restart only
 ACME after that handoff, require ready status, then run exactly
 `database_workflow-seed1-000` and read its finalized native log back.
 
+The current handoff is withheld because a freshness audit rejected the interim
+Datahike candidate: upstream delete/GC fixes require Konserve 0.9.357 or newer,
+and the maintained compatibility patch is being forward-ported to 0.9.359.
+Never pin or rebuild against the interim candidate from this lane.
+
 The multi-form ordering defect is real but queued for P4, not the active gate:
 `:seon.agent.turn/evals` is cardinality-many and its identity datom transaction
 orders separate eval transactions, but the model-facing contract for several

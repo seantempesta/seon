@@ -572,6 +572,12 @@ readiness from this paragraph.
   explicit handoff would build an unreviewed mixed dependency closure. Wait for
   the coordinate handoff and coherent source commits, then restart ACME and
   require ready status.
+- The interim guarded-force Datahike candidate passed its focused integration,
+  but freshness review found upstream delete/GC fixes that require Konserve
+  0.9.357 or newer. The runtime lane rejected that stale candidate and is
+  forward-porting Seon's maintained compatibility patch onto Konserve 0.9.359
+  before rebuilding and publishing the final Datahike descendant. This is a
+  withheld dependency coordinate, not an ACME failure to work around locally.
 - The native milestone task can now enter through common source admission,
   mandatory finalization, and exact before/after operator status. The remaining
   P1a gate is a clean ACME rebuild after concurrent source owners commit; the
