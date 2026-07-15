@@ -75,3 +75,9 @@ the legacy activation path, and the whole-debug projection still captures an
 ambient database value. Full acceptance requires migrating those consumers
 and deleting the superseded path rather than expanding this transitional
 opt-in.
+
+Top-level integration review found that two views sharing one normalized
+subscription initially contributed the same managed serialized element twice
+to that subscription's patch. The transport now deduplicates managed elements
+after consumer fan-in, and the focused lifecycle regression covers that common
+same-subscription case without changing cross-subscription delivery.

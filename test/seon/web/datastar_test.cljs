@@ -429,6 +429,12 @@
                               "one transition distributes identical bytes to both views")
                           (is (str/includes? (first left) "after"))
                           (is (= 2 @renders)))
+                        (is (= ["same-element"]
+                               (@#'datastar/emitted-elements-for-subscription
+                                {view-id ["same-element"]
+                                 other-view-id ["same-element"]}
+                                #{view-id other-view-id}))
+                            "one subscription patches a shared unit once")
                         (swap! datastar/!feeds @#'datastar/detach-view view-id)
                         (is (= #{other-view-id}
                                (get-in @datastar/!feeds

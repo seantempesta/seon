@@ -566,6 +566,14 @@
 
 (declare transition-active-units commit-registry!)
 
+(defn- emitted-elements-for-subscription
+  "Distinct managed elements emitted for one subscription's consumers."
+  [emitted-by-view consumer-view-ids]
+  (into []
+        (comp (mapcat #(get emitted-by-view % []))
+              (distinct))
+        consumer-view-ids))
+
 (defn- broadcast!
   "Transition shared units and each live subscription once, then fan patches."
   [change]
@@ -583,8 +591,8 @@
               elements (::elements transition)
               serialized-elements
               (into (vec (::serialized-elements transition))
-                    (mapcat #(get emitted-by-view % []))
-                    (::consumer-view-ids subscription))
+                    (emitted-elements-for-subscription
+                     emitted-by-view (::consumer-view-ids subscription)))
               event (when (or (seq elements) (seq serialized-elements))
                       (patch-rendered-elements elements serialized-elements))
               render-ms (- (.now js/performance) started)
@@ -1358,7 +1366,7 @@
                                     "unit render failed"))))))))
 
 (defn reconcile-view-catalog!
-  "Replace one open view's trusted catalog and retain only still-present active units.
+  "Replace a view catalog and retain available active units.
 
    Returns the retained active tokens, or the empty set when the view closed
    before reconciliation. Producers are never invoked."
