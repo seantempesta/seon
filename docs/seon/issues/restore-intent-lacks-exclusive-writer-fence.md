@@ -54,7 +54,15 @@ same-`t` completion-coordinate, CLI, and coordinator proof is green at 51 tests
 and 221 assertions.
 
 The issue remains open for an accepted-UDS-write crash-cut falsifier and the
-source-frozen live restore/abort/replan sequence.
+source-frozen live restore/abort/replan sequence. A 2026-07-15 executable
+runbook audit found that the public coordinator still converges every derived
+command in one uninterrupted invocation. Polling and killing a process cannot
+name an exact durable cut and would bypass supervisor ownership. The minimal
+proof support is invocation-local fault injection at the existing derived
+command boundary, with no persisted phase or second coordinator; it must cover
+after intent/before force, after force/before completion, after
+completion/before evidence deletion, and after deletion/before fresh ordinary
+startup.
 
 ## Owner
 

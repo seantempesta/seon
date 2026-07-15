@@ -141,3 +141,16 @@ continues. `sample_active().interrupt(...)` supplies native operator accounting;
 it does not cancel the HTTP request. The cancellation fixture is admissible
 only when one addressed request can close the canonical run fence and propagate
 to the provider's owned abort signal.
+
+A 2026-07-15 pod-death proof audit found a sharper persistence boundary.
+`seon.eval.internal/start-tx-data` and `terminal-tx-data` already describe a
+running receipt, and recovery can interrupt a durable running eval, but
+production `seon.eval/eval-form-entry!` still allocates and records only after
+execution and auto-await settle. A killed unresolved middle form therefore has
+no eval identity to mark interrupted. Current source can prove a committed
+prefix, logged middle start, absent middle/suffix eval and result rows, crashed
+run, interrupted turn, and one recovery anchor without fabrication. The
+stronger acceptance claim requires integrating the existing start receipt into
+the one per-form path before execution and terminal-CASing that same row after
+settlement, using the same future canonical position rather than another
+ordering scheme.

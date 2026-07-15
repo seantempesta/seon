@@ -354,9 +354,14 @@ advanced heads, stale rosters, and occupied reserved branches before intent
 publication. The selection evidence compiles into the unchanged immutable
 intent and existing fact-derived command mechanism; no effect path or public
 destructive command was added. Focused pure proof passes 10 tests/72 assertions
-and adjacent writer-admin proof passes 9/53. The dependency cutover is complete;
-the remaining ordered work is integrated retained-head restore/crash proof,
-then completion-derived undo through the same transition.
+and adjacent writer-admin proof passes 9/53. A 2026-07-15 live-proof audit
+confirmed that this last sentence is still an execution gap: effectful planning
+and CLI dispatch hardcode ordinary branch-name restore, so the pure selector is
+not yet a completion-authorized operator operation. The next ordered unit is
+completion-id plan/apply through the same artifact freeze, confirmation, and
+converge mechanism, followed by invocation-local deterministic cuts at derived
+coordinator commands. Only then can the destructive restore/crash/undo matrix
+run honestly.
 
 The operator restore slice now owns one closed immutable intent and
 derives its next command from the current main coordinate, an explicitly
