@@ -96,6 +96,40 @@
                        [:seon.dev.config/environment "SEON_CONFIG"]))))
       (finally (fs/delete-tree root {:force true})))))
 
+(deftest explicit-config-apply-uses-the-ready-pod-operation
+  (let [configuration {:seon.dev.config/root "/repo"
+                       :seon.dev.config/environment {}}
+        selected      (assoc-in configuration
+                                [:seon.dev.config/environment "SEON_CONFIG"]
+                                "/repo/config/system.edn")
+        calls         (atom [])]
+    (with-redefs-fn
+      {#'cli/select-config (fn [value path]
+                             (swap! calls conj [:select value path])
+                             selected)
+       #'state/with-lock (fn [value owner timeout-ms thunk]
+                           (swap! calls conj [:lock value owner timeout-ms])
+                           (thunk))
+       #'cli/apply-live-config! (fn [value]
+                                  (swap! calls conj [:apply value])
+                                  {:seon.state/ok? true
+                                   :seon.state/changed? false
+                                   :seon.state/operations 0
+                                   :seon.state/basis-t 42})
+       #'cli/print-config-result! (fn [result]
+                                    (swap! calls conj [:print result]))
+       #'cli/reconcile-development!
+       (fn [_] (throw (ex-info "config apply widened into up" {})))}
+      (fn [] (#'cli/config! configuration ["apply" "config/system.edn"])))
+    (is (= [[:select configuration "config/system.edn"]
+            [:lock selected :stack 300000]
+            [:apply selected]
+            [:print {:seon.state/ok? true
+                     :seon.state/changed? false
+                     :seon.state/operations 0
+                     :seon.state/basis-t 42}]]
+           @calls))))
+
 (deftest legacy-database-layout-is-never-silently-replaced
   (let [root (fs/create-temp-dir {:prefix "seon-cli-legacy-db-"})
         cluster (fs/path root "data/clusters/acme")

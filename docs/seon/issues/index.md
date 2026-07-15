@@ -21,7 +21,7 @@ See `README.md` for the convention.
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 
-## Friction (30)
+## Friction (31)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -40,15 +40,16 @@ See `README.md` for the convention.
 | [Database query tuple results are hard for agents to read](database-query-tuple-shape-legibility.md) | friction | agent |
 | [Edit-hook feedback can target a different checkout](worktree-edit-hook-checkout-drift.md) | friction | general |
 | [Embedding boot noise — 232 `:entity-id/missing` errors on fresh seed](embedding-first-write-lookup-noise.md) | friction | agent |
-| [Focused tests expose recovery schema load-order coupling](focused-test-schema-load-order.md) | friction | Core |
 | [Give root a dedicated system layout](root-page-is-an-ordinary-agent-layout.md) | friction | UI |
 | [Idle transcript misreports the mode-specific work budget](configured-turn-limit-masks-mode-specific-budget.md) | friction | agent |
 | [Include new CLJS namespaces in changed-test runtime artifacts](changed-test-new-cljs-namespace-misses-runtime-file.md) | friction | Core |
 | [Inspect live callers use retired cluster lifecycle contracts](inspect-live-cluster-caller-drift.md) | friction | agent |
 | [Keep Datahike system attributes out of the domain navigator](database-browser-misclassifies-datahike-system-attributes.md) | friction | UI |
 | [LoRA audit runner depends on a retired Shadow target and pinned checkout](lora-audit-runner-drift.md) | friction | general |
+| [Make schema hot reload atomic](hot-reload-schema-import-can-partially-fail.md) | friction | agent |
 | [Model can ghost-echo runtime scaffolding into the transcript spine](narration-ghost-echo-not-neutralized.md) | friction | agent |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
+| [Reconcile empty cardinality-many values without metadata-only transactions](reconcile-empty-many-metadata-only-transaction.md) | friction | Core |
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |
 | [Remove undeclared-var warnings from the self-host bootstrap build](bootstrap-analyzer-api-emits-undeclared-var-warnings.md) | friction | agent |
 | [Self-host `cljs.test/is` throws inside a dynamically-evaled `:test` thunk](selfhost-cljs-test-is-thunk-resolution.md) | friction | agent |

@@ -104,3 +104,38 @@
                     (set-config! prev-config)
                     (is false (str "unexpected rejection: " e))
                     (done)))))))
+
+(deftest live-config-apply-is-convergent
+  (async done
+    (let [previous (.. js/globalThis -process -env -SEON_CONFIG)
+          path     (write-manifest! "live-config-apply.edn"
+                                    "{:seon.config/system-text \"live\"}")]
+      (set-config! path)
+      (-> (client/open-agent-conn!)
+          (.then
+            (fn [conn]
+              (-> (client/boot-seed! {:seon.db/conn conn})
+                  (.then
+                    (fn [_]
+                      (client/apply-config!
+                        {:seon.config/manifest
+                         {:seon.config/system-text "live"}
+                         :seon.db/conn conn})))
+                  (.then
+                    (fn [result]
+                      (is (true? (:seon.state/ok? result)))
+                      (client/apply-config!
+                        {:seon.config/manifest
+                         {:seon.config/system-text "live"}
+                         :seon.db/conn conn})))
+                  (.then
+                    (fn [result]
+                      (is (true? (:seon.state/ok? result)))
+                      (is (false? (:seon.state/changed? result))
+                          "the second identical live apply submits no transaction")
+                      (is (zero? (:seon.state/operations result))))))))
+          (.then (fn [_] (set-config! previous) (done)))
+          (.catch (fn [error]
+                    (set-config! previous)
+                    (is false (str "unexpected rejection: " error))
+                    (done)))))))

@@ -24,6 +24,7 @@
     ["node:http" :as http]
     ["node:fs" :as fs]
     ["node:path" :as path]
+    [cljs.reader :as reader]
     [clojure.string :as str]
     [goog.object :as gobj]
     [seon.agent :as agent]
@@ -31,8 +32,10 @@
     [seon.ai.tokens :as tokens]
     [seon.agent.lifecycle :as lifecycle]
     [seon.agent.run :as run]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.derive :as derive]
+    [seon.eval :as seval]
     [seon.log :as log]
     [seon.platform :as platform]
     [seon.repl :as repl]
@@ -174,6 +177,48 @@
       (.catch (fn [err]
                 (log/error-console! "seon.web.serve" "/log body read failed" err)
                 (write-status! res 500 "text/plain; charset=utf-8" (str err))))))
+
+(defn- handle-config-apply!
+  "Apply one operator-selected config manifest through the live pod.
+
+   The request body is the exact EDN operation input
+   `{:seon.config/path <absolute-path>}`. The pod owns Aero resolution and the
+   one `seon.client/apply-config!` database operation; this HTTP boundary only
+   transports the request and its structured result."
+  [req res]
+  (-> (read-body req)
+      (.then
+        (fn [body]
+          (let [request  (reader/read-string body)
+                path     (:seon.config/path request)
+                apply-fn (seval/lookup-value 'seon.client/apply-config!)]
+            (when-not (and (= #{:seon.config/path} (set (keys request)))
+                           (string? path)
+                           (not (str/blank? path)))
+              (throw (ex-info "invalid config apply request"
+                              {:seon.error/kind :user-input})))
+            (when-not apply-fn
+              (throw (ex-info "live config operation is unavailable"
+                              {:seon.error/kind :core})))
+            (apply-fn {:seon.config/manifest
+                       (config/load-manifest-path path)}))))
+      (.then
+        (fn [result]
+          (write-status! res
+                         (if (:seon.state/ok? result) 200 422)
+                         "application/edn; charset=utf-8"
+                         (pr-str result))))
+      (.catch
+        (fn [error]
+          (let [message (or (.-message error) (str error))]
+            ;; Keep the operator boundary structured and bounded: exception
+            ;; objects can print stacks, source, or large analyzer data.
+            (log/error-console! "seon.web.serve" "config apply failed"
+                                {:seon.error/message message})
+          (write-status! res 422 "application/edn; charset=utf-8"
+                         (pr-str {:seon.state/ok? false
+                                  :seon.state/error
+                                  message})))))))
 
 (defn- handle-clear! [req res]
   ;; Retract every :seon.agent.message AND :seon.eval entity for the agent.
@@ -727,6 +772,7 @@
    :seon.web.router/log           handle-log!
    :seon.web.router/complete      handle-complete-agent!
    :seon.web.router/agent-run     handle-agent-run!
+   :seon.web.router/config-apply  handle-config-apply!
    :seon.web.router/same-origin?  same-origin?})
 
 ;; ============================================================

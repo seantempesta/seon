@@ -456,10 +456,13 @@ any durable database mutation and final readiness. A second invocation therefore
 cannot reopen the writer while its database is being replaced.
 
 `SEON_CONFIG` is an operation-scoped boot input, not managed-process identity.
-An explicit config operation restarts the pod through the normal reconciliation
-boundary so the candidate is consumed once; later config-free health checks and
-boots compare only durable runtime environment. The database facts remain the
-authority after the operation completes.
+An explicit config operation requires an already-ready compatible pod and sends
+one immutable resolved candidate through its normal database reconciliation
+boundary. It does not rebuild artifacts or replace watcher, writer, or pod
+processes. A supervisor intent preserves that candidate across recovery until
+the operation reaches a terminal database result; later config-free health
+checks and boots compare only durable runtime environment. The database facts
+remain the authority after the operation completes.
 
 The cluster runtime has one boot entry and a strict durable/runtime split:
 

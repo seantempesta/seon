@@ -63,12 +63,15 @@ facts and blobs remain queryable. Focused config, run, and transcript tests
 pass 41 tests and 174 assertions, and the rebuilt ACME pod reports the exact
 policy datoms through the repository REPL boundary.
 
-Two applications of the same config exposed a separate operator defect: the
-public `config apply` command performs the complete artifact build/restart
-path, and identical source produced different writer/application digests. The
-database policy converged, but the runtime restarted twice. This is recorded
-as [[../../seon/issues/config-apply-rebuilds-unchanged-runtime]] rather than
-being hidden inside evaluation timing.
+The config-apply operator defect is now fixed through one live pod operation
+shared with boot. An already-ready target resolves the selected manifest once
+through the canonical Aero reader and reconciles only routes, skills, and the
+config singleton. The state compiler canonicalizes an empty cardinality-many
+input to database attribute absence while preserving presence-sensitive
+comparison for stored facts. Two unchanged live applies wrote zero operations;
+an intentional policy delta and restoration each wrote two operations; and the
+watcher, writer, and pod PIDs stayed byte-for-byte stable. Evidence and the
+dependency ledger are in [[research/live-config-apply-2026-07-14]].
 
 A subsequent purity probe found that historical result-handle display depends
 on a process-local cache. The target is now explicit and falsifiable: the same

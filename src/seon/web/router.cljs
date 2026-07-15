@@ -8,7 +8,8 @@
    `/agent/{id}`, `/agent/{id}/feed`, `/agent/{id}/call`), and the static
    supplement carries
    the routes NOT yet seeded as datoms (static assets, the secondary POST
-   doors and the flat `/call`). The compiled router is a discardable
+   doors, the loopback operator config door, and the flat `/call`). The
+   compiled router is a discardable
    cache keyed by the exact route projection plus the static supplement
    config. [[attach!]] installs one stable listener on the database connection;
    route transactions reconcile that cache synchronously, while unrelated
@@ -274,7 +275,7 @@
    (serve's handlers) + the directly-required `call` leaf handler."
   [h]
   (let [{::keys [static chat stop resume clear log
-                 complete agent-run]} h]
+                 complete agent-run config-apply]} h]
     [["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/js/{*path}"  {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
 
@@ -293,6 +294,8 @@
      ;; FSM to idle, return the truthful reply + turn/eval metadata as JSON.
      ;; same-origin-gated like the others.
      ["/agents/run"  {:post {:middleware [:seon.route/same-origin] :handler (post-handler agent-run)}}]
+     ["/_seon/operator/config" {:post {:middleware [:seon.route/same-origin]
+                                        :handler (post-handler config-apply)}}]
      ;; The flat `/call` (back-compat this unit) hands the raw (req,res) to the
      ;; unchanged capability gate; the per-agent `/agent/{id}/call` is the
      ;; SEEDED core door (db->routes) → the same gate.
@@ -398,9 +401,10 @@
    cached router from the current route datoms. serve calls this
    at load (re-runs on hot-reload, so the cached router tracks reloaded
    handlers + the latest route datoms). `config` keys:
-   `:seon.web.router/{sse static chat stop resume clear log
-   complete}` (the serve handler fns) + `:seon.web.router/same-origin?` (the
-   predicate). The CORE routes are NOT in `config` — they project from the
+   `:seon.web.router/{static chat stop resume clear log complete agent-run
+   config-apply}` (the serve handler fns) +
+   `:seon.web.router/same-origin?` (the predicate). The CORE routes are NOT in
+   `config` — they project from the
    `:seon.route/*` datoms via [[db->routes]]."
   {:malli/schema [:=> [:catn [::config :map]] :nil]}
   [config]

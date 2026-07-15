@@ -1566,7 +1566,11 @@ or discover archived behavior.
    `bin/seon up` selects the shipped manifest once, and
    `bin/seon config apply <path>` is explicit. Singleton attribute removal now
    uses the exact compiler, and the old config-heal function/transaction are
-   deleted. Remaining: freeze the payload in the supervisor intent.
+   deleted. The explicit command now requires a ready compatible pod and calls
+   the same live reconcile operation as boot without artifact rebuild or
+   process replacement; converged applies write nothing. Remaining: freeze
+   the resolved payload in the supervisor intent rather than selecting it by
+   path at the live boundary.
 3. **Canonical form cut complete:** every schema row now persists the full
    EDN-round-tripping `:seon.schema/form`; runtime function/regex objects are
    rejected as durable definitions, schema source replay and the async self-tee

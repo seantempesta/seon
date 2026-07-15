@@ -2124,6 +2124,44 @@
 (schema/register! ::seeded? [:= true])
 (schema/register! ::boot-seed-request  [:map [:seon.db/conn :seon.db/conn]])
 (schema/register! ::boot-seed-response [:map [::seeded? ::seeded?]])
+(schema/register! ::apply-config-request
+  [:map
+   [:seon.config/manifest :seon.config/manifest]
+   [:seon.db/conn {:optional true} :seon.db/conn]])
+
+(defn ^:async apply-config!
+  "Reconcile one resolved manifest into the config-managed database subset.
+
+   This is the single declarative operation used by cold boot and the live
+   development operator. Routes, skills, and the flattened config singleton
+   land through one provenance-scoped `seon.state/reconcile!`; a converged
+   apply submits no transaction. The manifest is already resolved data, never
+   ambient process state."
+  {:malli/schema [:=> [:cat ::apply-config-request]
+                  :seon.state/reconcile-response]}
+  [{manifest :seon.config/manifest conn :seon.db/conn}]
+  (let [resolved-conn (or conn db/*conn*)
+        singleton    (config/resolve-config-singleton manifest)
+        desired      (-> (vec (config/resolve-routes
+                                (route/core-routes-tx)
+                                manifest))
+                         (into (my.skills/seed-skills-tx-data
+                                 (config/skills-dir manifest)))
+                         (conj singleton))]
+    (await
+      (db/without-agent
+        (fn ^:async apply-unscoped! []
+          (db/with-tx-context
+            {:seon.db/user [:seon.agent/id "root"]
+             :seon.db/process
+             (db.process/lookup-ref :seon.db.process/config)}
+            (fn ^:async reconcile-declarative! []
+              (state/reconcile!
+                {:seon.state/desired desired
+                 :seon.db/managed-scope #{:seon.db.process/config}
+                 :seon.db/managed-identity-attrs
+                 #{:seon.route/name :my.skills/name :seon.config/id}
+                 :seon.db/conn resolved-conn}))))))))
 
 (defn ^:async boot-seed!
   "THE core boot seed — one code path for reconciling a database's managed
@@ -2221,28 +2259,9 @@
               ;; reconcile! never rejects; its error-value is checked + thrown
               ;; (surface-errors-loudly).
               (when manifest
-                (let [singleton (config/resolve-config-singleton manifest)
-                      desired (-> (vec (config/resolve-routes
-                                       (route/core-routes-tx)
-                                       manifest))
-                                (into (my.skills/seed-skills-tx-data
-                                        (config/skills-dir manifest)))
-                                (conj singleton))
-                      recon   (await
-                              (db/with-tx-context
-                                {:seon.db/user [:seon.agent/id "root"]
-                                 :seon.db/process
-                                 (db.process/lookup-ref :seon.db.process/config)}
-                                (fn ^:async reconcile-declarative! []
-                                  (state/reconcile!
-                                    {:seon.state/desired desired
-                                     :seon.db/managed-scope
-                                     #{:seon.db.process/config}
-                                     :seon.db/managed-identity-attrs
-                                     #{:seon.route/name
-                                       :my.skills/name
-                                       :seon.config/id}
-                                     :seon.db/conn conn}))))]
+                (let [recon (await (apply-config!
+                                     {:seon.config/manifest manifest
+                                      :seon.db/conn conn}))]
                 (when (false? (:seon.state/ok? recon))
                   (throw (ex-info
                            (str "boot seed reconcile (routes+skills+config) failed: "

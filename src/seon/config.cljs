@@ -547,6 +547,28 @@
   [path]
   (aero/read-config path {}))
 
+(defn load-manifest-path
+  "Read and validate one explicitly selected manifest path.
+
+   The development operator calls this inside the already-running pod for an
+   explicit config operation. Aero therefore resolves tags, environment
+   overrides, and relative includes through the exact same reader as boot."
+  {:malli/schema [:=> [:catn [::path :string]] :seon.config/manifest]}
+  [path]
+  (let [fs (js/require "fs")]
+    (when-not (try (.existsSync fs path) (catch :default _ false))
+      (throw (ex-info (str "seon.config: selected manifest does not exist: " path)
+                      {:seon.config/path path
+                       :seon.error/kind  :user-input})))
+    (let [raw (read-config-file path)]
+      (if (m/validate :seon.config/manifest raw)
+        raw
+        (throw (ex-info
+                 (str "seon.config: invalid manifest at " path ": "
+                      (m/explain :seon.config/manifest raw))
+                 {:seon.config/path  path
+                  :seon.error/kind   :user-input}))))))
+
 (defn load-manifest
   "Read the explicitly selected `SEON_CONFIG` manifest.
 
@@ -556,19 +578,7 @@
   {:malli/schema [:=> [:cat] [:maybe :seon.config/manifest]]}
   []
   (when-let [path (env "SEON_CONFIG")]
-    (let [fs (js/require "fs")]
-      (when-not (try (.existsSync fs path) (catch :default _ false))
-        (throw (ex-info (str "seon.config: selected manifest does not exist: " path)
-                        {:seon.config/path path
-                         :seon.error/kind  :user-input})))
-      (let [raw (read-config-file path)]
-        (if (m/validate :seon.config/manifest raw)
-          raw
-          (throw (ex-info
-                   (str "seon.config: invalid manifest at " path ": "
-                        (m/explain :seon.config/manifest raw))
-                   {:seon.config/path  path
-                    :seon.error/kind   :user-input})))))))
+    (load-manifest-path path)))
 
 ;;; ============================================================
 ;;; NAMESPACES POLICY — the explicit-listing resolver (#42). The SHIPPED
