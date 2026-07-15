@@ -720,7 +720,7 @@
   ;; contract. This schema stays the discoverable contract; guards enforce.
   {:malli/schema
    [:function
-    [:=> [:cat ::transact-request] ::transact-response]
+    [:=> [:catn [::request ::transact-request]] ::transact-response]
     [:=> [:catn [::conn ::conn] [::tx-data ::tx-data]] ::transact-response]
     [:=> [:catn [::conn ::conn] [::tx-data ::tx-data] [::tx-meta ::tx-meta]]
          ::transact-response]]}
@@ -950,7 +950,7 @@
   ;; (`internal/db-value?`).
   {:malli/schema
    [:function
-    [:=> [:cat [:or ::query-request ::query-form]] :any]
+    [:=> [:catn [::request [:or ::query-request ::query-form]]] :any]
     [:=> [:catn [::query ::query-form]
                 [::rest [:+ :any]]] :any]]}
   [& args]

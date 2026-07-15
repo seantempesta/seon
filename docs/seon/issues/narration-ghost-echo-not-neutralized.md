@@ -58,3 +58,14 @@ the blob hash addresses the exact UTF-8 reply, the debug round trip is
 byte-identical, and only the two real forms create eval/result rows. The
 remaining open work is rendering arbitrary message, masthead, box, and
 readline-shaped narration unambiguously without rewriting it.
+
+An admitted Qwen2.5 Coder 0.5B database sample supplies the smallest-model
+failure shape. Across three raw replies it repeated its own namespace header
+278 times, with no executable form. The forgiving parser correctly retained
+three bounded narration entries with empty source; the run closed `:no-forms`
+without a stack trace or fabricated runtime fact. Source and target identities
+were unchanged, and Inspect score history records the reviewed classification
+`model reasoning failure`. This confirms that exact preservation is correct
+but can still form a model-feedback attractor when narration is reinserted.
+Acceptance still requires an unambiguous structural rendering, not output
+rewriting or a reserved-text blocklist.

@@ -144,11 +144,28 @@ publishes its terminal log, records both observed end identities in that same
 `.eval` through Inspect's public edit API, and retains rejected terminal
 evidence before raising on either drift. `bb.edn` joins the admitted operator
 inputs, and `:quiesced` is classified as infrastructure rather than model
-capability. The focused boundary passes 99 tests. The live ACME run still waits
-for the concurrent lifecycle source set to become coherent; this no longer
-blocks independent harness work. The remaining operator provenance gap is one
+capability. The focused boundary passes 99 tests. A clean ACME restart then
+admitted one Qwen2.5 Coder 0.5B database sample at Seon revision `8bae7ae9`.
+Start/end source and complete static-target identities were equal. The model
+repeated only its namespace header across three turns, produced no executable
+forms, and closed `:no-forms`; the unchanged scorer returned incorrect with no
+fabrication. Human review recorded `model reasoning failure` in Inspect score
+history without changing the score. The retained prompt estimates were 22,191,
+22,864, and 23,530 tokens. Exact evidence is in
+[[research/qwen25-coder-05b-database-diagnostic-2026-07-15]]. The remaining
+operator provenance gap is one
 canonical process/status digest over the full operator closure, recorded in
 [[../../seon/issues/inspect-live-cluster-caller-drift]].
+
+That baseline closed the scheduling gate for the shared callable-contract fix.
+One pure-variadic implementation body no longer overwrites several logical
+Malli arities by vector position; each logical schema owns its argument labels,
+and Clojure's `&` binding marker is never rendered as an argument name. The
+first `query` and `transact!` request inputs are named in their colocated Malli
+schemas. Compact namespace cards, menus, `my.ns/functions`, and autocomplete
+all consume this one projection. The focused projection/bootstrap gate passes
+five tests and 32 assertions; a rebuilt database projection and exact sample
+replay are the remaining live proof for this unit.
 
 Failure review now remains inside the same native Inspect artifact. One
 scorecard operation accepts—but never infers—exactly one frozen taxonomy label,

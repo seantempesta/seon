@@ -450,9 +450,11 @@
                     (is (= (count (filter :seon.fn/sym @core-tx))
                            (count (filter :seon.fn/sym first-tx)))
                         "first boot emits every core fn row")
-                    (is (= (count @schemas-tx)
-                           (count (filter :seon.schema/key first-tx)))
-                        "first boot emits a :seon.schema row per registered schema")
+                    (is (pos? (count @schemas-tx))
+                        "the frozen desired schema population is nonempty")
+                    (is (empty? (filter :seon.schema/key first-tx))
+                        (str "open-agent-conn! already converges the canonical "
+                             "program schemas, so absence from this delta is signal"))
                     (transact-through conn :seon.db.process/boot first-tx)))
                 (.then (fn [_] (client/core-program-tx conn)))
                 (.then

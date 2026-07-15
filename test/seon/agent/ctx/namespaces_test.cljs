@@ -305,6 +305,38 @@
         "compact contracts never depend on the reader's current namespace")
     (is (not-any? #(str/includes? card %) [":=>" ":cat" "…"]))))
 
+(deftest compact-fn-record-uses-logical-arities-over-variadic-body
+  (let [transact (nss/compact-fn-head
+                   {:seon.fn/sym "seon.db/transact!"
+                    :seon.fn/arglists "([& call-args])"
+                    :seon.fn/spec
+                    "[:function [:=> [:catn [:seon.db/request :seon.db/transact-request]] :seon.db/transact-response] [:=> [:catn [:seon.db/conn :seon.db/conn] [:seon.db/tx-data :seon.db/tx-data]] :seon.db/transact-response] [:=> [:catn [:seon.db/conn :seon.db/conn] [:seon.db/tx-data :seon.db/tx-data] [:seon.db/tx-meta :seon.db/tx-meta]] :seon.db/transact-response]]"})
+        query    (nss/compact-fn-head
+                   {:seon.fn/sym "seon.db/query"
+                    :seon.fn/arglists "([& args])"
+                    :seon.fn/spec
+                    "[:function [:=> [:catn [:seon.db/request [:or :seon.db/query-request :seon.db/query-form]]] :any] [:=> [:catn [:seon.db/query :seon.db/query-form] [:seon.db/rest [:+ :any]]] :any]]"})]
+    (testing "one variadic implementation does not overwrite logical labels"
+      (is (str/includes? transact ":seon.db/request :seon.db/transact-request"))
+      (is (str/includes? query ":seon.db/request [:or :seon.db/query-request :seon.db/query-form]"))
+      (is (not (str/includes? transact "&")))
+      (is (not (str/includes? query "&"))))
+    (testing "every logical arity remains complete"
+      (is (= 1 (count (re-seq #" OR " query))))
+      (is (= 2 (count (re-seq #" OR " transact)))))))
+
+(deftest compact-fn-record-keeps-a-sole-variadic-physical-arglist
+  (let [card (nss/compact-fn-head
+               {:seon.fn/sym "my.helper/collect"
+                :seon.fn/arglists "([head & tail])"
+                :seon.fn/spec "[:=> [:cat :string [:* :int]] [:vector :int]]"})]
+    (is (str/includes? card "head :string"))
+    (is (str/includes? card "tail [:* :int]"))
+    (is (not (str/includes? card "&"))
+        "the binding marker is grammar, not an argument name")
+    (is (not (str/includes? card "arg-1"))
+        "a single logical schema still benefits from physical binding names")))
+
 (deftest compact-namespace-card-is-inert-at-the-reply-parser-boundary
   (async done
     (-> (with-seeded

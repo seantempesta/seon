@@ -67,3 +67,19 @@ are SHA-256 `c3626b3a1a564618cc89f8f53b8be34410fcddbd78ec27db530fea67f1075d6e`.
 Capture the first admitted P0 database sample before changing this projection,
 so the baseline remains interpretable. Then fix the one shared owner and rerun
 that exact sample before broad context or model comparisons.
+
+## 2026-07-15 implementation checkpoint
+
+The admitted baseline is retained and classified. `callable-contract` now
+recognizes exactly one physical variadic arglist paired with several logical
+Malli arities and lets those logical schemas own every label. Anonymous first
+inputs for `seon.db/query` and `seon.db/transact!` are named `:seon.db/request`
+at their owning schemas. Ordinary single-schema variadic calls retain their
+physical binding names while the `&` grammar marker is omitted.
+
+The direct live renderer probe produces complete request, positional, and rest
+contracts with no `&` or private accumulator name. Five focused projection,
+indexing, and diagnostic-bootstrap tests pass with 32 assertions. The issue
+remains open only until a clean ACME rebuild reindexes the changed schemas into
+the database and the same immutable compact-card query confirms those stored
+facts.

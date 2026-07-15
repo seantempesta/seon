@@ -635,7 +635,10 @@
   [input arglist]
   (if-not (vector? input)
     []
-    (let [children (vec (or (schema-children input) []))]
+    (let [children (vec (or (schema-children input) []))
+          ;; `&` is Clojure binding grammar, not the name of the following
+          ;; logical Malli input. Preserve the actual rest binding instead.
+          bindings (vec (remove #{'&} arglist))]
       (if (= :catn (first input))
         (mapv (fn [entry]
                 [(if (keyword? (first entry))
@@ -644,7 +647,7 @@
                  (last entry)])
               children)
         (mapv (fn [i schema]
-                [(binding-label (get arglist i) i) schema])
+                [(binding-label (get bindings i) i) schema])
               (range)
               children)))))
 
@@ -673,9 +676,18 @@
 (defn- callable-contract
   "All persisted arities as one inert callable contract."
   [arglists spec]
-  (let [args  (vec (or (parsed-arglists arglists) []))
-        specs (vec (or (arity-specs spec) []))
-        n     (max (count args) (count specs))]
+  (let [physical-args (vec (or (parsed-arglists arglists) []))
+        specs         (vec (or (arity-specs spec) []))
+        ;; A CLJS implementation can use one physical variadic body so Malli
+        ;; can describe several logical call shapes. In that exact case the
+        ;; physical `[& xs]` is implementation data, not an argument list for
+        ;; the first logical arity. The named Malli inputs own every label.
+        args          (if (and (= 1 (count physical-args))
+                               (< 1 (count specs))
+                               (some #{'&} (first physical-args)))
+                        []
+                        physical-args)
+        n             (max (count args) (count specs))]
     (if (zero? n)
       "positional [] -> <return unspecified>"
       (str/join " OR "

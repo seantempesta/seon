@@ -32,6 +32,41 @@ this result.
 
 ## Observed result
 
+The first admitted replay completed against clean Seon revision `8bae7ae9`,
+tree `b81429c4277820c7fca7734f733e1670e8e0354d`. Source admission and the
+complete static-target status were byte-identical before and after the run;
+the target-status SHA-256 is
+`881f5b037616e6ff5ece88eb4b1b72cf90f9237554a93cfcaf17cc20f237e784`.
+The classified native artifact is:
+
+`evals/runs/2026-07-15-p0-db-qwen25coder05b-admitted/inspect-logs/2026-07-15T13-38-57-00-00_milestone-lift_UCXbe7xAkMTSu8ZvC3CHg5.eval`
+
+Its SHA-256 is
+`241a53fe69c2ff5b742c9521c7faeff37b534014cdcd63c1669a6767e6a7133d`.
+Inspect completed successfully in 27,595 ms with no timeout or sample error.
+The database-owned timeout was 1,800,000 ms. The exact absolute model
+snapshot, temperature 0.2, 1,024-token output cap, and disabled thinking were
+retained in sample metadata. The sample produced three turns and three
+successful parser evaluations, then closed `:no-forms`; every evaluation had
+empty source and bounded narration.
+
+The admitted replies were a narrower version of the dirty baseline attractor:
+278 repetitions of the agent's own namespace header across three replies,
+plus two opening code fences and a few truncated lines. Prompt estimates grew
+from 22,191 to 22,864 to 23,530 tokens. The unchanged scorer returned
+incorrect with all six current checks false and zero fabrication signals. A
+human review attached the frozen label `model reasoning failure` through
+Inspect's `ScoreEdit` history without changing the score. This is a valid
+admitted diagnostic, but the open query-result evidence contract still bars
+formal P0b acceptance.
+
+The first attempted admitted command also exposed an operator-boundary trap.
+`SEON_EVAL_RUN_ID` is Inspect bookkeeping, but exporting it process-wide makes
+`bin/acme status` observe a different `SEON_*` environment from the recorded
+processes, correctly making the target not ready. No Seon or Inspect code reads
+that variable. The replay therefore keeps the run id as a Python value rather
+than exporting it into the semantic operator subprocess.
+
 Inspect completed successfully and the sample itself had no infrastructure
 error. Agent `shy-ways-pull` ran for 56,014 ms, produced three replies and
 three evaluation records, then closed `:no-forms`. The unchanged milestone
@@ -109,10 +144,7 @@ input and `bin/acme status --edn` reports ready, run exactly one sample through
 the public admitted boundary:
 
 ```bash
-export SEON_EVAL_RUN_ID=2026-07-15-p0-db-qwen25coder05b-admitted
-
 src-inspect-ai/.venv/bin/python - <<'PY'
-import os
 from pathlib import Path
 
 from seon_inspect.catalog import run_native_task
@@ -120,7 +152,7 @@ from seon_inspect.cluster import static_target_snapshot
 from seon_inspect.tasks.milestone_lift import milestone_lift, task_identity
 
 cluster_url = "http://127.0.0.1:7994/agents/run"
-run_dir = Path("evals/runs") / os.environ["SEON_EVAL_RUN_ID"]
+run_dir = Path("evals/runs/2026-07-15-p0-db-qwen25coder05b-admitted")
 
 logs = run_native_task(
     identity=task_identity("db"),
