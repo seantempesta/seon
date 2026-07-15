@@ -363,6 +363,17 @@ first-pass operator error was a stale generated Claude copy of the maintained
 Datastar skill; the canonical adapter projection repaired it and the repeated
 gate is green.
 
+Commit `8a6ebf60` closes the next observed readiness hole without restarting
+either target. Watcher readiness now hashes the current flavor-owned client
+output plus its Shadow runtime closure against the published client digest, so
+post-publication hot-reload drift degrades status instead of advertising stale
+artifact identity. Structured status exposes the non-secret PID start,
+environment digest, and artifact digest needed for Inspect admission while
+never returning environment values. Root review repeated the focused operator
+gate at 25 tests/95 assertions. A clean ACME rebuild remains ordered after the
+current shared runtime owners commit; this evidence does not authorize a mixed
+source restart.
+
 Inspect source/run admission is now content-pinned and required in native run
 metadata; the synchronized offline environment passes 321 tests with eight
 expected skips. This closes source-attribution drift, not lifecycle isolation,
