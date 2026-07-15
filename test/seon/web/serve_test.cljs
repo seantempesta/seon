@@ -9,8 +9,25 @@
   (:require
     [cljs.test :refer [deftest is testing]]
     [goog.object :as gobj]
+    [seon.agent.run :as run]
     [seon.runtime.admission :as admission]
     [seon.web.serve :as serve]))
+
+(deftest agent-run-timeout-uses-explicit-value-or-run-policy
+  (with-redefs [run/effective-deadline-ms
+                (fn [request]
+                  (is (= {:seon.db/db :frozen-db
+                          :seon.agent/id "agent-1"}
+                         request))
+                  1800000)]
+    (is (= 9000
+           ((deref #'serve/agent-run-timeout-ms)
+            :frozen-db "agent-1" 9000))
+        "an explicit Inspect timeout remains an explicit experiment input")
+    (is (= 1800000
+           ((deref #'serve/agent-run-timeout-ms)
+            :frozen-db "agent-1" nil))
+        "absence derives from the database-backed run owner")))
 
 (deftest eval-evidence-is-request-scoped-and-stably-ordered
   (let [first-at (js/Date. 1000)

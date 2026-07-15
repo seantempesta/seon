@@ -251,6 +251,12 @@ ephemeral clusters by port through this same production boundary; there is no
 in-process evaluator lifecycle. The answer key never enters the pod — scoring
 stays host-side. Benchmark vocabulary is harness-side only.
 
+An explicit `timeout_ms` is a caller-selected experiment bound. When it is
+absent, the door derives its wait duration from the same frozen database run
+policy and optional agent override that `open-run!` uses. The HTTP boundary
+never introduces a shorter literal deadline that can terminate an otherwise
+healthy database-owned run.
+
 The eval projection is derived from the same final immutable database value
 and exact turn-entity set used for the response counts. It never contains eval
 results, printed output, exception stacks, or source dumps unrelated to the

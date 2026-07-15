@@ -10,6 +10,7 @@
     [cljs.test :refer [deftest is async]]
     [datahike.api :as d]
     [seon.agent :as agent]
+    [seon.agent.ctx :as agent-ctx]
     [seon.agent.run :as run]
     [seon.client :as client]
     [seon.db :as db]
@@ -191,6 +192,26 @@
                 (.then (fn [snap]
                          (is (= 3 (:seon.agent.run/turn-limit snap))
                              "turn-limit seeded from :seon.agent/default-turn-limit"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest effective-deadline-ms-follows-database-and-agent-policy
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (let [global (:seon.config.run/deadline-ms
+                           (agent-ctx/run-policy @conn))]
+              (is (= global
+                     (run/effective-deadline-ms {:seon.db/db @conn})))
+              (-> (d/transact!
+                    conn
+                    {:tx-data [{:seon.agent/id a-id
+                                :seon.agent/default-deadline-ms 123456}]})
+                  (.then
+                    (fn [_]
+                      (is (= 123456
+                             (run/effective-deadline-ms
+                               {:seon.db/db @conn :seon.agent/id a-id})))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

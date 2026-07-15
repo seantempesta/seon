@@ -81,10 +81,29 @@ attractor. The open finding is tracked in
 3. Invoke this same native sample through run-level source admission and
    mandatory log finalization. Reject a dirty Seon source identity.
 4. Inspect the resulting prompt/reply/eval bytes before running another
-   sample. Then run a controlled arm changing only the existing transcript
-   `::readline?` policy from true to false. Zero status-line copies would
-   identify the readline as the attractor; copying another tail region would
-   demonstrate broader suffix imitation.
+   sample. Do not call a manifest-only `::readline?` toggle byte-controlled:
+   context blocks are copied when an agent is born, separate agents/clusters
+   change other database facts, and applying another manifest does not rewrite
+   an existing agent. The `:autocomplete` profile is also not a valid arm
+   because it changes several blocks, caps, and cache-boundary assembly.
 5. After one admitted baseline, compare the exact sample across the measured
    shared-schema projection and the next model size. Record outcome and bytes;
    token reduction alone is not success.
+
+## Paired readline experiment prerequisite
+
+The setting is the colocated boolean
+`:seon.agent.ctx.transcript/readline?`, consumed from a render-node patch, then
+the stored transcript block, then its true default. False removes the complete
+live transcript tail: status, namespace cursor, pressure steering when present,
+root telemetry when applicable, and its clock. It is not a clock-only switch.
+
+First prove the mechanical delta by rendering one immutable database value
+twice through the one transcript renderer and asserting that the exact byte
+difference is the returned tail. A scored pair waits for the operator's
+ownership-fenced database fork/lease: two admitted serial native runs must
+share frozen sample membership, source/artifact/model/sampling identity, and
+starting database facts. Their pulled context trees differ only by the false
+attribute, and their retained turn-zero prompt hashes and raw diff prove the
+intervention. If one pair separates, replicate through Inspect epochs; do not
+create another runner or normalize model output.

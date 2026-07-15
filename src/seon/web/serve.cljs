@@ -412,7 +412,15 @@
 ;; again — including across a pod restart (boot re-arms armable agents).
 ;; No Malli schema (opaque node req/res, same as the sibling handlers).
 ;; Body: application/json {"input" str, "timeout_ms" int?, "agent_id" str?}.
+;; An absent request timeout derives from the same database run policy and
+;; optional agent override that open-run! uses; the door owns no second bound.
 ;; ============================================================
+
+(defn- agent-run-timeout-ms [dbv agent-id requested]
+  (or requested
+      (run/effective-deadline-ms
+        (cond-> {:seon.db/db dbv}
+          agent-id (assoc :seon.agent/id agent-id)))))
 
 (defn- latest-run-start-ms
   "Wall-clock ms of the agent's MOST-RECENTLY-STARTED run (open or closed) over
@@ -672,7 +680,9 @@
                (let [parsed     (js->clj (js/JSON.parse body))
                      input      (get parsed "input")
                      agent-id   (get parsed "agent_id")
-                     timeout-ms (or (get parsed "timeout_ms") 300000)]
+                     timeout-ms (agent-run-timeout-ms
+                                  @db/*conn* agent-id
+                                  (get parsed "timeout_ms"))]
                  (run-agent-task! agent-id input timeout-ms))))
       (.then (fn [result]
                (if (:error result)

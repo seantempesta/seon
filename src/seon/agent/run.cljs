@@ -160,6 +160,26 @@
 (schema/register! ::default-turn-limit  [:int {:min 1}])
 (schema/register! ::default-deadline-ms [:int {:min 1}])
 
+(schema/register! ::effective-deadline-request
+  [:map
+   [:seon.db/db :seon.db/db]
+   [:seon.agent/id {:optional true} :string]])
+
+(defn- deadline-ms-from [agent policy]
+  (or (::default-deadline-ms agent)
+      (:seon.agent/default-deadline-ms agent)
+      (:seon.config.run/deadline-ms policy)))
+
+(defn effective-deadline-ms
+  "Effective run deadline duration for an agent and database value."
+  {:malli/schema [:=> [:cat ::effective-deadline-request]
+                  ::default-deadline-ms]}
+  [{:seon.db/keys [db] id :seon.agent/id}]
+  (deadline-ms-from
+    (when id
+      (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
+    (ctx/run-policy db)))
+
 ;; ============================================================
 ;; Reads — sync over the local db value.
 ;; ============================================================
@@ -298,9 +318,7 @@
                              (:seon.config.run/stream-form-limit policy)
                              (:seon.config.run/batch-turn-limit policy)))
             deadline   (or dl (js/Date. (+ (.getTime now)
-                                           (or (::default-deadline-ms a)
-                                               (:seon.agent/default-deadline-ms a)
-                                               (:seon.config.run/deadline-ms policy)))))
+                                           (deadline-ms-from a policy))))
             res
             (await
               (db.id/allocate!

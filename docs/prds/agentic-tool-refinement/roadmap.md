@@ -370,6 +370,11 @@ sample is trustworthy.
   reloads; structured status retained the non-secret artifact/environment
   digests and PID start identity needed to explain the transition. The focused
   operator gate passes 25 tests and 95 assertions.
+- The Inspect composition door no longer substitutes a hardcoded five-minute
+  timeout for the database-owned run deadline. An absent `timeout_ms` follows
+  the same global/agent precedence as `open-run!`; an explicit Inspect value
+  remains part of the experiment. Focused coverage passes 15 tests and 65
+  assertions, and the live ACME database resolves 1,800,000 ms.
 - Infrastructure timeouts and core errors invalidate a sample instead of
   becoming a model score. A no-forms close remains model/runtime evidence.
 - A fresh ordinary ACME agent renders 22,171 total estimated tokens, including
@@ -399,21 +404,25 @@ sample is trustworthy.
 - A planning restart on the static development target must be owned by the
   semantic ACME operator and preserve the same database/agent identity. The
   full parallel solution remains the P1b lease.
-- The 0.5B diagnostic repeated runtime/context narration. Determine whether
-  those bytes come from the model reply, transcript derivation, or both before
-  attributing the failure solely to model scale or schema weight.
+- The 0.5B narration provenance is exact: Qwen creates the first repetition,
+  and correct parser recovery plus durable narration feed it into later turns.
+  A manifest-only `readline?` arm cannot prove a one-byte-factor comparison:
+  fresh agents/clusters change other database facts, while applying a manifest
+  does not rewrite an existing agent's copied context tree. The paired prompt
+  experiment waits for the ownership-fenced fork/lease boundary.
 
 ### Exact next order
 
-1. Commit the operator readiness checkpoint without staging any concurrent
-   lane's files.
+1. Keep the operator/readiness and composition-door checkpoints isolated from
+   concurrent lane files.
 2. When the shared runtime edits converge, restart only ACME and prove a ready,
    ownership-coherent artifact plus clean admitted source.
 3. Run `database_workflow-seed1-000` through common source admission, exact
    operator snapshot, and mandatory finalization. Inspect its prompt, reply,
    eval evidence, database coordinate, model identity, and classification.
-4. If narration repeats, trace its exact database-derived provenance and fix
-   that one owner. Rerun the same sample until the evidence is trustworthy.
+4. Classify any narration repetition using the established raw-reply → parser
+   → stored-eval → transcript trace; do not mutate prompt policy from one
+   uncontrolled sample.
 5. Run the remaining nine frozen members serially, inspecting every `.eval`.
    Only after P0b is recorded may the model matrix or P3 context comparison
    begin.
