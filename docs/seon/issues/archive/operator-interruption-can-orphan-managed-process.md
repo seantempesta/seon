@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, flow, pod, architecture]
 ---
@@ -95,8 +95,18 @@ owned watcher and pod are drained. The focused branch/CLI/process selector
 passes 31 tests/153 assertions. Full evidence and the dependency ledger are in
 [[ordinary-startup-sigint-ownership-2026-07-15]].
 
-The issue remains open until the retained branch transition uses this same
-signal-safe process inverse through its public owner and the branch-create
-interruption acceptance row is proven. CLI/status/MCP exposure and that live
-proof are the next dependency-ordered slice; this ordinary-runtime commit does
-not claim them.
+## Resolution
+
+Resolved by `c95f8e03`. `seon.dev.branch/open!` now registers exact native
+branch acquisition and target-pod spawn in the same monitor-protected ownership
+stack installed by ordinary startup. Reverse unwind drains and proves the pod
+absent before the existing close owner releases and deletes; a created branch
+is claimed, while an adopted branch or converged pod remains resumable.
+
+Real OS-SIGINT proof covers the retained pre-spawn cut, delayed detached
+publication, readiness, converged reuse, and an injected pod-inverse failure.
+The failure retains the real pod record and native branch and sends no
+destructive writer request. The exact branch/CLI/process checkpoint passes 34
+tests/190 assertions. Full evidence is in
+[[retained-branch-sigint-ownership-2026-07-15]]. CLI/status/MCP exposure is the
+next product surface, not part of this resolved ownership defect.
