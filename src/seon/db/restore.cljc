@@ -2,50 +2,14 @@
   "Durable completion facts for one fully verified database restore."
   (:require
    [seon.db.coordinate :as coordinate]
-   [seon.db.id :as db.id]
    [seon.db.protocol :as protocol]
+   [seon.db.restore.schema]
    [seon.launch :as launch]
    [seon.schema :as schema]
    #?@(:cljs [[seon.db :as db]
               [seon.error :as error]])))
 
 ;;; Durable completion fact
-
-(schema/register!
- ::id
- [:and {:seon.db/identity true
-        :seon.db.id/generator :seon.db.id.generator/compact}
-  ::db.id/compact-value])
-(schema/register! ::db-name :keyword)
-(schema/register! ::database-id ::coordinate/database-id)
-(schema/register! ::from-branch :keyword)
-(schema/register! ::from-commit-id :uuid)
-(schema/register! ::from-t :int)
-(schema/register! ::to-branch :keyword)
-(schema/register! ::to-commit-id :uuid)
-(schema/register! ::to-t :int)
-(schema/register! ::forced-commit-id :uuid)
-(schema/register! ::undo-branch :keyword)
-(schema/register! ::target-branch :keyword)
-(schema/register! ::core-overlay-digest :string)
-(schema/register! ::config-overlay-digest :string)
-
-(schema/register! ::completion
-                  [:map {:closed true :seon.db/entity true}
-                   [::id ::id]
-                   [::db-name ::db-name]
-                   [::database-id ::database-id]
-                   [::from-branch ::from-branch]
-                   [::from-commit-id ::from-commit-id]
-                   [::from-t ::from-t]
-                   [::to-branch ::to-branch]
-                   [::to-commit-id ::to-commit-id]
-                   [::to-t ::to-t]
-                   [::forced-commit-id ::forced-commit-id]
-                   [::undo-branch ::undo-branch]
-                   [::target-branch ::target-branch]
-                   [::core-overlay-digest {:optional true} ::core-overlay-digest]
-                   [::config-overlay-digest {:optional true} ::config-overlay-digest]])
 
 (schema/register! ::completion-from-launch-request
                   [:map {:closed true}

@@ -13,6 +13,7 @@
   (:require #?@(:bb [] :default [[hasch.core :as hasch]])
             [malli.core :as m]
             [seon.db.coordinate :as coordinate]
+            [seon.db.restore.schema]
             [seon.schema :as schema]))
 
 ;;; Protocol vocabulary
@@ -357,8 +358,11 @@
   [::success? [:= true]]
   [::database-name ::database-name]
   [::main-coordinate ::main-coordinate]
+  [::main-parent-commit-ids [:set :uuid]]
   [::branch-coordinates ::branch-coordinates]
-  [::branch-roster ::branch-roster]])
+  [::branch-roster ::branch-roster]
+  [::restore-completions [:vector :seon.db.restore/completion]]
+  [::completed-restore-ids [:set :seon.db.restore/id]]])
 (schema/register!
  ::create-branch-response
  [:map {:closed true}

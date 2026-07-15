@@ -4,8 +4,10 @@
             [datahike.api :as d]
             [seon.db.backend :as backend]
             [seon.db.coordinate :as coordinate]
+            [seon.db.datahike.schema :as datahike.schema]
             [seon.db.id :as id]
-            [seon.db.registry :as registry]))
+            [seon.db.registry :as registry]
+            [seon.db.restore :as db.restore]))
 
 (defn- isolate-registry
   [test-fn]
@@ -379,6 +381,63 @@
               {::registry/database-name :registry/unopened-branch}))
           "native roster membership never depends on an open branch route"))))
 
+(deftest lifecycle-observation-reads-complete-durable-restore-facts
+  (let [database-name :registry/restore-observation
+        main (ensure-database!
+              {::registry/database-name database-name
+               ::registry/backend :memory})
+        connection (::registry/conn main)
+        completion-id "restore00001"
+        database-id (::coordinate/database-id
+                     (coordinate/resolved (d/db connection)))
+        completion
+        {::db.restore/id completion-id
+         ::db.restore/db-name database-name
+         ::db.restore/database-id database-id
+         ::db.restore/from-branch :db
+         ::db.restore/from-commit-id (random-uuid)
+         ::db.restore/from-t 536870920
+         ::db.restore/to-branch :seon.branch/retained
+         ::db.restore/to-commit-id (random-uuid)
+         ::db.restore/to-t 536870900
+         ::db.restore/forced-commit-id (random-uuid)
+         ::db.restore/undo-branch :seon.restore.undo/r-restore00001
+         ::db.restore/target-branch :seon.restore.target/r-restore00001}
+        completion-schema
+        (into [:map]
+              (map (fn [attribute] [attribute attribute]))
+              (rest db.restore/completion-attrs))]
+    (d/transact
+     connection
+     (into [{:db/ident ::db.restore/id
+             :db/valueType :db.type/string
+             :db/cardinality :db.cardinality/one
+             :db/unique :db.unique/identity}]
+           (datahike.schema/malli-map->datahike-schema completion-schema)))
+    (d/transact connection [completion])
+    (let [main-db (d/db connection)
+          observation
+          (registry/observe-database-lifecycle
+           {::registry/database-name database-name})]
+      (is (= (set (or (d/parent-commit-ids main-db) []))
+             (::registry/main-parent-commit-ids observation)))
+      (is (= [completion] (::registry/restore-completions observation)))
+      (is (= #{completion-id}
+             (::registry/completed-restore-ids observation)))
+      (let [original-pull d/pull
+            malformed
+            (with-redefs [d/pull
+                          (fn [db pattern lookup-ref]
+                            (assoc (original-pull db pattern lookup-ref)
+                                   ::db.restore/database-id (random-uuid)))]
+              (try
+                (registry/observe-database-lifecycle
+                 {::registry/database-name database-name})
+                nil
+                (catch clojure.lang.ExceptionInfo exception exception)))]
+        (is (= :seon.db.protocol.error/restore-divergence
+               (:seon.error/kind (ex-data malformed))))))))
+
 (deftest lifecycle-observation-fails-closed-on-partial-or-moving-storage
   (let [database-name :registry/lifecycle-observation-failure
         main (ensure-database!
@@ -426,6 +485,20 @@
             (registry/observe-database-lifecycle
              {::registry/database-name database-name})
             nil
+            (catch clojure.lang.ExceptionInfo exception exception)))
+        parent-reads (atom 0)
+        parent-before (random-uuid)
+        parent-after (random-uuid)
+        moved-main-facts
+        (with-redefs [d/parent-commit-ids
+                      (fn [_]
+                        #{(if (= 1 (swap! parent-reads inc))
+                            parent-before
+                            parent-after)})]
+          (try
+            (registry/observe-database-lifecycle
+             {::registry/database-name database-name})
+            nil
             (catch clojure.lang.ExceptionInfo exception exception)))]
     (is (= :seon.db.protocol.error/branch-missing
            (:seon.error/kind (ex-data missing))))
@@ -433,6 +506,8 @@
            (:seon.error/kind (ex-data moved))))
     (is (= :seon.db.protocol.error/stale-target-head
            (:seon.error/kind (ex-data moved-head))))
+    (is (= :seon.db.protocol.error/stale-target-head
+           (:seon.error/kind (ex-data moved-main-facts))))
     (is (= #{:db}
            (set (original-branches connection))))))
 

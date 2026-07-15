@@ -1054,9 +1054,15 @@
     (protocol/success
      {::protocol/database-name database-name
       ::protocol/main-coordinate (::registry/main-coordinate observation)
+      ::protocol/main-parent-commit-ids
+      (::registry/main-parent-commit-ids observation)
       ::protocol/branch-coordinates
       (::registry/branch-coordinates observation)
-      ::protocol/branch-roster (::registry/branch-roster observation)})))
+      ::protocol/branch-roster (::registry/branch-roster observation)
+      ::protocol/restore-completions
+      (::registry/restore-completions observation)
+      ::protocol/completed-restore-ids
+      (::registry/completed-restore-ids observation)})))
 
 (defn- handle-release-database
   [request]

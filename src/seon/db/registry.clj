@@ -35,6 +35,7 @@
             [datahike.index.audit :as index-audit]
             [seon.db.coordinate :as coordinate]
             [seon.db.id :as id]
+            [seon.db.restore :as db.restore]
             [seon.schema :as schema]
             [seon.db.backend :as backend]
             [taoensso.timbre :as log]))
@@ -73,7 +74,10 @@
 (schema/register! ::expected-branch-roster [:set :keyword])
 (schema/register! ::branch-roster [:set :keyword])
 (schema/register! ::main-coordinate ::coordinate)
+(schema/register! ::main-parent-commit-ids [:set :uuid])
 (schema/register! ::branch-coordinates [:map-of :keyword ::coordinate])
+(schema/register! ::restore-completions [:vector ::db.restore/completion])
+(schema/register! ::completed-restore-ids [:set ::db.restore/id])
 (schema/register! ::pre-restore-main-coordinate ::coordinate)
 (schema/register! ::selected-target-coordinate ::coordinate)
 (schema/register! ::prepared-target-coordinate ::coordinate)
@@ -137,8 +141,11 @@
  [:map {:closed true}
   [::database-name ::database-name]
   [::main-coordinate ::main-coordinate]
+  [::main-parent-commit-ids ::main-parent-commit-ids]
   [::branch-coordinates ::branch-coordinates]
-  [::branch-roster ::branch-roster]])
+  [::branch-roster ::branch-roster]
+  [::restore-completions ::restore-completions]
+  [::completed-restore-ids ::completed-restore-ids]])
 
 (schema/register!
  ::create-branch!-request
@@ -627,6 +634,58 @@
                [branch resolved])))
          (sort roster))))
 
+(defn- durable-restore-completions!
+  [database-name main-db main-coordinate]
+  (let [ids (->> (d/q '[:find [?id ...]
+                         :where
+                         [?completion :seon.db.restore/id ?id]]
+                       main-db)
+                 sort
+                 vec)
+        completions
+        (mapv
+         (fn [completion-id]
+           (let [completion
+                 (d/pull main-db db.restore/completion-attrs
+                         [::db.restore/id completion-id])]
+             (when-not
+              (and (schema/valid-candidate-value?
+                    ::db.restore/completion completion)
+                   (= database-name (::db.restore/db-name completion))
+                   (= (::coordinate/database-id main-coordinate)
+                      (::db.restore/database-id completion)))
+               (lifecycle-fail!
+                :seon.db.protocol.error/restore-divergence
+                "A durable restore completion disagrees with the observed main database."
+                {::database-name database-name
+                 ::main-coordinate main-coordinate
+                 :seon.db.restore/id completion-id
+                 :seon.db.restore/completion completion}))
+             completion))
+         ids)]
+    {::main-parent-commit-ids (set (or (d/parent-commit-ids main-db) []))
+     ::restore-completions completions
+     ::completed-restore-ids (set ids)}))
+
+(defn- observe-main-lifecycle-facts!
+  [database-name connection attachment expected-coordinate]
+  (let [main-db (d/branch-as-db connection :db)]
+    (when-not main-db
+      (lifecycle-fail!
+       :seon.db.protocol.error/branch-missing
+       "The main branch disappeared during lifecycle observation."
+       {::database-name database-name}))
+    (let [main-coordinate (coordinate/resolved main-db)]
+      (require-attachment!
+       "Observed main branch" attachment (coordinate/attachment main-coordinate)
+       {::database-name database-name ::main-coordinate main-coordinate})
+      (require-head!
+       :seon.db.protocol.error/stale-target-head
+       "Observed main branch" expected-coordinate main-coordinate
+       {::database-name database-name})
+      (durable-restore-completions!
+       database-name main-db main-coordinate))))
+
 (defn observe-database-lifecycle
   "Observe every exact native branch head from the registered main route."
   {:malli/schema
@@ -648,10 +707,16 @@
               coordinates-before
               (observe-native-branch-coordinates!
                database-name connection attachment roster-before)
+              main-facts-before
+              (observe-main-lifecycle-facts!
+               database-name connection attachment (get coordinates-before :db))
               roster-middle (set (d/branches connection))
               branch-coordinates
               (observe-native-branch-coordinates!
                database-name connection attachment roster-before)
+              main-facts
+              (observe-main-lifecycle-facts!
+               database-name connection attachment (get branch-coordinates :db))
               roster-after (set (d/branches connection))
               main-coordinate (get branch-coordinates :db)]
           (when-not (= roster-before roster-middle roster-after)
@@ -668,6 +733,13 @@
              {::database-name database-name
               ::expected-coordinate coordinates-before
               ::coordinate branch-coordinates}))
+          (when-not (= main-facts-before main-facts)
+            (lifecycle-fail!
+             :seon.db.protocol.error/stale-target-head
+             "Main lifecycle facts changed during lifecycle observation."
+             {::database-name database-name
+              :seon.db.registry/expected-main-lifecycle-facts main-facts-before
+              :seon.db.registry/main-lifecycle-facts main-facts}))
           (when-not (and (contains? roster-before :db)
                          main-coordinate
                          (= roster-before (set (keys branch-coordinates))))
@@ -679,8 +751,11 @@
               ::branch-coordinates branch-coordinates}))
           {::database-name database-name
            ::main-coordinate main-coordinate
+           ::main-parent-commit-ids (::main-parent-commit-ids main-facts)
            ::branch-coordinates branch-coordinates
-           ::branch-roster roster-before})))))
+           ::branch-roster roster-before
+           ::restore-completions (::restore-completions main-facts)
+           ::completed-restore-ids (::completed-restore-ids main-facts)})))))
 
 (defn- datahike-lifecycle-kind
   [throwable]

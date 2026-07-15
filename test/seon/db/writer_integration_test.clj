@@ -341,6 +341,10 @@
                         {::protocol/database-name source-name}))]
             (is (::protocol/success? observation))
             (is (= source-head (::protocol/main-coordinate observation)))
+            (is (= (set (or (d/parent-commit-ids (d/db source-connection)) []))
+                   (::protocol/main-parent-commit-ids observation)))
+            (is (= [] (::protocol/restore-completions observation)))
+            (is (= #{} (::protocol/completed-restore-ids observation)))
             (is (= #{:db branch unopened-branch}
                    (::protocol/branch-roster observation)))
             (is (= (::protocol/branch-roster observation)
