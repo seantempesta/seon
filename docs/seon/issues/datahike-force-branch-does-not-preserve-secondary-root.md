@@ -31,6 +31,18 @@ coordinate time, parent, EAVT, declared secondary, and one-hit KNN result, but
 their secondary Merkle roots differ. Seon correctly rejects success as
 `:seon.db.protocol.error/restore-divergence`.
 
+The dependency repair is now implemented in isolated commits, but is not yet a
+selected or publicly reachable Seon dependency. Proximum `fb6572c` supplies
+generation-addressed mmap publication and guarded destination replacement.
+Datahike `069a807e` preflights every secondary before primary publication,
+adopts an already-published generation on retry, migrates the historical
+Datahike `"db"`/native Proximum `:main` shape, and preserves a prepared source
+branch after later destination writes and cold reopen. Its complete focused
+gate passes 108 tests and 570 assertions across `specs`, `clj-pss`, and
+`clj-hht`. The issue remains open until the Proximum change is forward-ported
+onto upstream `v0.1.26`, both exact commits are publicly pinned, and Seon's
+file-backed restore fixture proves the selected artifacts.
+
 ## Owner
 
 Proximum native versioning first, then Datahike

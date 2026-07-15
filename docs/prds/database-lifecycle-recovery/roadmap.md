@@ -295,9 +295,17 @@ deletion remains the external operator's durable inverse. No restore-only boot
 path, callback, status, or ambient intent-file reread was added. The
 transaction-coordinate resolver is complete at `b2461d64`, and the fresh
 schema owner now installs the complete restore closure before generator-policy
-publication. The Proximum force-secondary repair remains the hard predecessor
-of the destructive integrated gate; therefore no public restore command or
-destructive default/ACME proof is claimed yet. Focused cold-composition proof
+publication. The isolated dependency repair now passes its complete focused
+gate: Proximum `fb6572c` provides guarded generation publication and Datahike
+`069a807e` integrates it through the one force path, including legacy-shape
+migration, response-loss retry, stale destination rejection, and cold
+source-branch non-clobber (108 tests/570 assertions across all three Datahike
+index backends). The exact changes are not yet selected dependencies: Proximum
+must first be forward-ported onto upstream `v0.1.26`, given cold Git-dependency
+preparation, published, and consumed by the final public Datahike commit. That
+artifact cutover remains the hard predecessor of the destructive integrated
+gate; therefore no public restore command or destructive default/ACME proof is
+claimed yet. Focused cold-composition proof
 passes 29 tests/195 assertions, including post-completion crash and idempotent
 retry before exact admission, with zero compile warnings at
 `tmp/test-cljs-20260715-112026-67588.log`; adjacent restore, admission, and
