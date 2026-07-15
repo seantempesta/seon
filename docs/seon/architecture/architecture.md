@@ -25,21 +25,30 @@ prompt is a render of data; the UI is a reactive projection of data. The context
 unit is the **block** (`:seon.agent.ctx/block`); the prompt, an agent’s **view**,
 and the **root agent's** view (`/`) are each a derivation of the same blocks.
 
-It is **dual-runtime**: a CLJ **JVM database server** (the authoritative writer +
-heavy data processing, data-only) and a CLJS **agent and web runtime**, sharing
+It is **dual-runtime**: a CLJ **database authority** (implemented first by one
+JVM Datahike service, authoritative writer + shared indexed reads + heavy data
+processing, data-only) and a CLJS **agent and web runtime**, sharing
 the `.cljc` **schema** layer. The JVM does not carry a second application or
 renderer. The derived-state rule and transition table are CLJS (`seon.derive` /
 `seon.agent.loop`), reached from the device the same way every read is — through
-the database protocol against the replica.
+the database protocol against either a local replica or the authority's exact
+immutable database value.
 
-**Client/server is the shape.** The pod reads a local immutable Datahike replica
-and forwards writes through the database protocol to the single JVM writer. A
-threaded database value is location-agnostic, and the work fence is arbitrated at
-that writer. A replica attaches at one complete
+**Client/server is the shape.** Exactly one authority owns each database's
+ordered writes, immutable indexed values, and shared query computation. The JVM
+service may host many isolated databases and execute their independent reads and
+writes concurrently while preserving one write order per database. Agent
+processes exchange ordinary protocol data rather than rebuilding Datahike
+indexes in every process. A latency-sensitive host may retain one cluster-local
+replica; isolated agent children normally issue direct coordinate-addressed
+queries to the authority. The work fence is arbitrated at that authority. A
+replica or remote query attaches at one complete
 `{database-id, branch, commit-id, t}` coordinate, applies committed transactions
 in order, and repairs a gap without inventing state. Remote attachment,
 bootstrap, state transfer, backfill, cancellation, and retention are owned by a
-future remote-replication PRD; no particular remote algorithm is settled here.
+versioned database protocol whose semantics do not depend on JVM, Bun, Rust, or
+transport. The JVM/Datahike service is the first conforming implementation, not
+the definition of the interface.
 
 ## The core ideas
 
@@ -189,32 +198,38 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **run / turn / derive-state** — the bounded unit of work a trigger opens
   (`seon.agent.run`), the per-iteration value-transform (`seon.agent.loop`), and the
   one projection rule for agent state (`seon.derive`). See [[agent-runtime]].
-- **database server / pod / transaction listener** — the JVM Datahike writer;
-  the Node CLJS agent and web UI runtime; and the
+- **database authority / pod / transaction listener** — the JVM Datahike service;
+  the Bun CLJS agent and web UI runtime; and the
   `listen! → derive → push` role inside the pod.
 
 ## Deployment topology
 
-The normal local cluster has two processes and three logical roles:
+The normal local installation has one database-authority service and one Bun
+pod per active cluster, with three logical roles:
 
-- **JVM database server** — the sole authoritative datahike writer (durable,
-  bitemporal)
-  plus bounded heavy processing (embeddings and indexing). Data only; it never
-  executes agent code or serves a second web application.
-- **Node UI host** — the browser's single front door: a read-only replica + one
+- **JVM database authority** — one service hosts isolated Datahike connections
+  for many cluster databases. Each database has one ordered writer and immutable
+  indexed values; independent databases and reads execute concurrently through
+  bounded fair pools. Identical queries over the same database value share
+  Datahike's result cache and, where proven, one in-flight computation. Data
+  only; it never executes agent code or serves a second web application.
+- **Bun UI host** — the browser's single front door: a read-only replica or
+  direct authority query client + one
   tx-listener that derives every agent’s **view** (including the root agent’s view
   at `/`) from `:seon.agent/ctx`, holds the route table, and streams patches. The
   streamer is a **role, not a process** — any process holding a replica + a
   tx-listener can play it, so the UI-host is relocatable.
-- **Agent execution** — the pod owns the one bounded SCI execution service and
-  agent loops. Per-agent workers or microVMs may later implement the same
-  data-only execution contract; they do not move database authority out of the
-  JVM server.
+- **Agent execution** — active agents may run as separately supervised Bun
+  children for real CPU, heap, cancellation, and crash isolation. They query the
+  authority through ordinary data and never build one Datahike index copy per
+  child. Per-agent workers or microVMs implement the same data-only execution
+  contract; they do not move database authority.
 
-The JVM server is one process. The CLJS pod is the second process and combines
-the UI-host and agent-execution roles. Remote servers, thin clients,
-mobile packaging, and stronger execution isolation are separate target domains,
-not alternate local mechanisms.
+The JVM authority is one process for the installation, not one process per
+cluster. Dormant databases retain durable facts without an active Bun pod or hot
+connection. Remote servers, thin clients, Tauri, mobile packaging, and stronger
+execution isolation consume the same versioned protocol and may implement only
+the capabilities their platform supports.
 
 ### Downstream distribution boundary
 

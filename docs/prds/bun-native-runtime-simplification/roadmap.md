@@ -128,6 +128,11 @@ service capable of owning several database identities could remove one JVM per
 cluster while keeping one Bun child per active cluster. That topology requires a
 separate database-server contract and must preserve single-writer ordering,
 database identity, replay, branch, and failure isolation.
+Its source-grounded target and research order now live in
+[[../database-authority-mesh/roadmap]]. Bun children consume that one protocol;
+they do not create local Datahike caches, replicas, connection leases, or
+subscription mechanisms unless the database-authority research explicitly
+graduates such an owner.
 
 ## Removal laws
 

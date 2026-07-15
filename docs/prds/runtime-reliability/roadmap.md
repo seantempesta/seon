@@ -77,6 +77,14 @@ The full-control removal plan is now carved as
 chunk after runtime/distribution identities settle, not permission to disturb
 the current unit-1 lifecycle checkpoint. Its cutover begins only under an
 explicit all-lane source and lifecycle freeze.
+The connected database-authority target and its source-first unknowns are carved
+in [[../database-authority-mesh/roadmap]]. That research composes Datahike's
+existing database values, weighted transaction-aware query cache, connection
+reference counting, keyed listeners, pod value release, and Konserve lifecycle
+before changing the protocol. The desired end is one JVM service for many
+cluster databases and isolated Bun agent children without copied indexes; no
+agent may implement a parallel cache, lease, coordinate, subscription, or query
+protocol while the identity/lifetime contract remains unsettled.
 
 Parallel work is deliberately bounded:
 
