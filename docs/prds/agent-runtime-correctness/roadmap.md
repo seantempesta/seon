@@ -19,7 +19,11 @@ The runtime has explicit run/turn/eval facts, ordered batch parsing/evaluation,
 durable declaration teeing, errors-as-values at most agent boundaries, one
 retry owner, bounded result admission, query/pull work budgets, restart recovery,
 and one database-backed planning mechanism. Inspect has offline long-term-plan
-arms and the stable autocomplete/plan changes are integrated.
+arms and the stable autocomplete/plan changes are integrated. Program
+admission now refuses new agent work before owning effects and stops an eval
+batch between entries when publication closes; it returns structured
+unavailable data without inventing later eval rows. Hard process death and
+memory containment remain separate open boundaries.
 
 Known gaps remain: batch handling deletes alleged result text before reply-blob
 capture and parsing, so the stored blob is not raw ground truth; a live census
@@ -36,23 +40,31 @@ The selected ClojureScript `1.12.145` source is not yet mirrored exactly. The
 current checkout is useful reference but cannot ground analyzer-boundary
 implementation. Exact Shadow `3.4.10` is already available at release commit
 `d3c04691952aa9ea33f7287ffe9a2b3109c1e510` in the reference checkout's
-history; its parent `2911c908…` is still `3.4.9`.
+history; its parent `2911c908…` is still `3.4.9`. That missing mirror blocks
+the analyzer/async and containment slices, not the independent raw-reply cut,
+whose selected parser is rewrite-clj `1.2.51` and whose storage owner is the
+existing content-addressed blob path.
 
 ## Research evidence
 
 - [[research/agent-runtime-source-audit-2026-07-14]] — dependency ledger,
   live probes, current mechanisms, transition matrix, deletion map, ordered
   slices, and containment decision criteria.
+- [[research/raw-reply-preservation-implementation-audit-2026-07-14]] —
+  implementation-ready raw-evidence boundary, exact dependency ledger,
+  deletion map, deterministic matrix, and live acceptance proof.
 
 ## Ordered work
 
-1. Mirror exact ClojureScript `1.12.145`, read Shadow at its existing exact
-   release commit, preserve raw replies, parse once, and define the ordered batch
-   state
-   transition for complete, incomplete, read-error, eval-error, async, and
-   process-death boundaries.
-2. Make async public-function instrumentation validate the awaited value without
-   leaking Promises or throwing into the loop.
+1. Preserve the exact provider reply through the one blob and one parser,
+   delete the result-claim rewrite and new telemetry writes, and prove that only
+   parsed real forms create ordered eval evidence. Retain the existing
+   admission checks before and between entries.
+2. Mirror exact ClojureScript `1.12.145`, read Shadow at its existing exact
+   release commit, define the remaining incomplete/read/eval/async/process-death
+   transition boundaries, and make async public-function instrumentation
+   validate the awaited value without leaking Promises or throwing into the
+   loop.
 3. Thread cancellation through the existing provider attempt and adapters while
    retaining one retry owner.
 4. Give plan completion schema'd verification evidence and settle authority for
