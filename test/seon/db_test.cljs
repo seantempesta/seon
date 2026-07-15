@@ -147,38 +147,155 @@
                   (is (contains? all :seon.db-test)))))))
       done)))
 
-(deftest database-browser-pages-aevt-with-a-stable-cursor
+(defn- browser-page-request
+  [dbv coordinate index prefix direction limit]
+  {:seon.db/db dbv
+   ::db-browser/database-coordinate coordinate
+   ::db-browser/projection :current
+   ::db-browser/index index
+   ::db-browser/prefix prefix
+   ::db-browser/direction direction
+   ::db-browser/limit limit})
+
+(deftest database-browser-pages-indexes-with-opaque-coordinate-bound-cursors
   (async done
     (with-conn
       (fn [conn]
         (-> (d/transact! conn
-              [{:db/ident :my.browser.test/value
-                :db/cardinality :db.cardinality/one
-                :db/valueType :db.type/string}])
+              (mapv (fn [n] {::name (str "browser-" n) ::rank n})
+                    (range 5)))
             (.then
               (fn [_]
-                (d/transact! conn
-                  (mapv (fn [n] {:my.browser.test/value (str "value-" n)})
-                        (range 5)))))
+                (let [dbv @conn
+                      coordinate (db/head-coordinate dbv)
+                      entity (db/query {::db/db dbv
+                                        ::db/query '[:find ?e . :in $ ?name
+                                                     :where [?e ::name ?name]]
+                                        ::db/args ["browser-0"]})
+                      cases [[:eavt [entity] :forward]
+                             [:eavt [entity] :reverse]
+                             [:aevt [::rank] :forward]
+                             [:aevt [::rank] :reverse]
+                             [:avet [::name] :forward]
+                             [:avet [::name] :reverse]]]
+                  (doseq [[index prefix direction] cases]
+                    (let [request (browser-page-request
+                                    dbv coordinate index prefix direction
+                                    (if (= :eavt index) 1 2))
+                          first-page (db-browser/index-page request)
+                          token (::db-browser/next-cursor first-page)
+                          second-page (db-browser/index-page
+                                        (assoc request ::db-browser/cursor token))
+                          first-rows (::db-browser/rows first-page)
+                          second-rows (::db-browser/rows second-page)]
+                      (is (string? token) (str index " " direction))
+                      (is (= coordinate
+                             (:seon.db.browser.cursor/database-coordinate
+                               (db-browser/decode-cursor token))))
+                      (is (= (if (= :eavt index) 1 2) (count first-rows)))
+                      (is (= (if (= :eavt index) 1 2) (count second-rows)))
+                      (is (empty? (set/intersection (set first-rows)
+                                                    (set second-rows)))))))))))
+      done)))
+
+(deftest database-browser-rejects-malformed-mismatched-and-moving-cursors
+  (async done
+    (with-conn
+      (fn [conn]
+        (-> (d/transact! conn
+              (mapv (fn [n] {::name (str "cursor-" n) ::rank n})
+                    (range 4)))
             (.then
               (fn [_]
-                (let [request {:seon.db/db @conn
-                               ::db-browser/attribute :my.browser.test/value
-                               ::db-browser/limit 2}
-                      first-page (db-browser/attribute-page request)
-                      second-page
-                      (db-browser/attribute-page
-                        (assoc request ::db-browser/cursor
-                               (::db-browser/next-cursor first-page)))
-                      first-entities (mapv ::db-browser/entity
-                                           (::db-browser/rows first-page))
-                      second-entities (mapv ::db-browser/entity
-                                            (::db-browser/rows second-page))]
-                  (is (= 2 (count first-entities)))
-                  (is (= 2 (count second-entities)))
-                  (is (true? (::db-browser/more? first-page)))
-                  (is (empty? (set/intersection (set first-entities)
-                                                (set second-entities)))))))))
+                (let [pinned-db @conn
+                      coordinate (db/head-coordinate pinned-db)
+                      request (browser-page-request
+                                pinned-db coordinate :aevt [::rank] :forward 1)
+                      first-page (db-browser/index-page request)
+                      token (::db-browser/next-cursor first-page)]
+                  (is (= :seon.db.browser.cursor.error/malformed-token
+                         (::db-browser/error
+                           (db-browser/decode-cursor "not+base64"))))
+                  (is (= :seon.db.browser.cursor.error/request-mismatch
+                         (::db-browser/error
+                           (db-browser/index-page
+                             (assoc request
+                               ::db-browser/direction :reverse
+                               ::db-browser/cursor token)))))
+                  (-> (d/transact! conn [{::name "cursor-later" ::rank 9}])
+                      (.then
+                        (fn [_]
+                          (is (= :seon.db.browser.cursor.error/database-coordinate-mismatch
+                                 (::db-browser/error
+                                   (db-browser/index-page
+                                     (assoc request
+                                       :seon.db/db @conn
+                                       ::db-browser/cursor token)))))
+                          (is (= 1
+                                 (count
+                                   (::db-browser/rows
+                                     (db-browser/index-page
+                                       (assoc request ::db-browser/cursor token))))))))))))))
+      done)))
+
+(deftest database-browser-cursors-round-trip-datahike-scalar-boundaries
+  (async done
+    (with-conn
+      (fn [conn]
+        (let [attrs
+              [[:my.browser.scalar/double :db.type/double [1.25 2.5]
+                :seon.db.browser.cursor.value/double]
+               [:my.browser.scalar/uuid :db.type/uuid
+                [(random-uuid) (random-uuid)]
+                :seon.db.browser.cursor.value/uuid]
+               [:my.browser.scalar/instant :db.type/instant
+                [(js/Date. 1000) (js/Date. 2000)]
+                :seon.db.browser.cursor.value/instant]
+               [:my.browser.scalar/bigint :db.type/bigint
+                [(js/BigInt "9007199254740993")
+                 (js/BigInt "9007199254740995")]
+                :seon.db.browser.cursor.value/bigint]
+               [:my.browser.scalar/bytes :db.type/bytes
+                [(js/Uint8Array. #js [1 2 3])
+                 (js/Uint8Array. #js [1 2 4])]
+                :seon.db.browser.cursor.value/bytes]]
+              schema-tx
+              (mapv (fn [[attribute value-type]]
+                      {:db/ident attribute
+                       :db/cardinality :db.cardinality/one
+                       :db/valueType value-type})
+                    attrs)
+              value-tx
+              (mapv
+                (fn [value-index]
+                  (reduce (fn [entity [attribute _ values]]
+                            (assoc entity attribute (nth values value-index)))
+                          {:db/id (str "typed-cursor-value-" value-index)}
+                          attrs))
+                (range 2))]
+          (-> (d/transact! conn schema-tx)
+              (.then (fn [_] (d/transact! conn value-tx)))
+              (.then
+                (fn [_]
+                  (let [dbv @conn
+                        coordinate (db/head-coordinate dbv)]
+                    (doseq [[attribute _ _ expected-tag] attrs]
+                      (let [request (browser-page-request
+                                      dbv coordinate :aevt [attribute] :forward 1)
+                            first-page (db-browser/index-page request)
+                            token (::db-browser/next-cursor first-page)
+                            payload (db-browser/decode-cursor token)
+                            second-page (db-browser/index-page
+                                          (assoc request ::db-browser/cursor token))]
+                        (is (string? token)
+                            (str attribute " first page: " (pr-str first-page)))
+                        (is (= expected-tag
+                               (first
+                                 (get-in payload
+                                   [:seon.db.browser.cursor/last :seon.db/v])))
+                            (str attribute))
+                        (is (= 1 (count (::db-browser/rows second-page)))
+                            (str attribute))))))))))
       done)))
 
 (deftest database-browser-window-participates-in-reactive-read-replay
@@ -192,12 +309,15 @@
                {:my.browser.test/value "first"}])
             (.then
               (fn [_]
-                (let [capture
+                (let [dbv @conn
+                      coordinate (db/head-coordinate dbv)
+                      capture
                       (db/capture-reads
-                        {:seon.db/db @conn
+                        {:seon.db/db dbv
                          :seon.db/thunk
                          #(db-browser/attribute-page
-                            {:seon.db/db @conn
+                            {:seon.db/db dbv
+                             ::db-browser/database-coordinate coordinate
                              ::db-browser/attribute :my.browser.test/value
                              ::db-browser/limit 10})})]
                   (-> (d/transact! conn [{:my.browser.test/value "second"}])
@@ -938,6 +1058,45 @@
                  (-> (db/ensure-provenance! {:seon.db/conn conn})
                      (.then (fn [_] (d/transact! conn history-schema)))
                      (.then (fn [_] conn))))))))
+
+(deftest database-browser-history-cursor-keeps-added-retracted-position
+  (async done
+    (-> (fresh-history-conn)
+        (.then
+          (fn [conn]
+            (-> (db/transact! {::db/tx-data [{::name "history-browser" ::rank 1}]
+                               ::db/conn conn})
+                (.then
+                  (fn [_]
+                    (db/transact! {::db/tx-data [{::name "history-browser" ::rank 2}]
+                                   ::db/conn conn})))
+                (.then
+                  (fn [_]
+                    (let [dbv @conn
+                          coordinate (db/head-coordinate dbv)
+                          request (assoc
+                                    (browser-page-request
+                                      dbv coordinate :aevt [::rank] :forward 1)
+                                    ::db-browser/projection :history)
+                          first-page (db-browser/index-page request)
+                          second-page (db-browser/index-page
+                                        (assoc request ::db-browser/cursor
+                                          (::db-browser/next-cursor first-page)))
+                          third-page (db-browser/index-page
+                                       (assoc request ::db-browser/cursor
+                                         (::db-browser/next-cursor second-page)))
+                          rows (mapcat ::db-browser/rows
+                                      [first-page second-page third-page])]
+                      (is (= [true false true]
+                             (mapv ::db-browser/added? rows)))
+                      (is (= [1 1 2]
+                             (mapv ::db-browser/value rows)))
+                      (is (= 3 (count (set (map (juxt ::db-browser/value
+                                                     ::db-browser/transaction
+                                                     ::db-browser/added?)
+                                               rows)))))))))))
+        (.catch (fn [e] (is false (str "history cursor test rejected — " e))))
+        (.then (fn [_] (done))))))
 
 (deftest as-of-entity+aggregate-see-the-past-frame
   ;; p starts at rank 1 (t1), changes to rank 2 (t2). An as-of-t1 db value must

@@ -18,16 +18,18 @@ The existing page has a cheap shell, the canonical normalized gzip feed,
 installed-schema navigation, bounded AEVT attribute pages, URL-owned view
 state, and exact read-result replay. It has no entity/ref/transaction/
 provenance/history navigation yet, and its whole browser remains one render
-unit. The exposed `[entity value tx]` cursor is neither opaque nor tied to a
-database coordinate.
+unit. The web adapter still uses the superseded raw tuple contract and must be
+migrated in the next slice before the new cursor is user-visible.
 
 The complete `{database-id, branch, commit-id, t}` coordinate, retained-commit
-resolver, and pure shared render-unit lifecycle have now landed. Cursor
-hardening can proceed without the reverse candidate index or count API. A
-continuation freezes the exact point selected by its first page; stale or
-mismatched cursors fail as data before an index read. The later reactive unit
-migration still waits on the shared reverse-candidate boundary, currently
-blocked on a public Datahike query dependency projection.
+resolver, pure shared render-unit lifecycle, and cursor Slice A have now
+landed. `seon.db.browser/index-page` is the one bounded EAVT/AEVT/AVET current
+or history mechanism. Its size-bounded Transit/base64url continuation seals
+the full coordinate, projection, index, normalized prefix, direction, and
+five-component last datom; malformed, moving, or mismatched continuations fail
+as data before an index read. No retained cursor contains a database value.
+The later reactive unit migration still waits on the shared reverse-candidate
+boundary, currently blocked on a public Datahike query dependency projection.
 
 A read-only 2026-07-14 default-cluster probe observed basis `536870929` and
 15,851 datoms. The initial compressed feed emitted immediately, but the
@@ -38,6 +40,15 @@ twice, sharing the foreign-database replay defect already found in debug.
 seek, history, count, coordinate, cursor, unit, deletion, and acceptance
 constraints. Detailed implementation waits on the canonical lifecycle
 coordinate and settled render-unit contract.
+
+The focused Slice A checkpoint passed four tests and 52 assertions with zero
+failures or errors. It covers forward and reverse EAVT/AEVT/AVET paging,
+current and assertion/retraction history positions, malformed/mismatched/
+moving-coordinate failures, immutable continuation replay, and typed double,
+UUID, instant, native BigInt, and bytes boundaries. The checkpoint also found
+that one cardinality-many Datahike CLJS attribute collapses two distinct native
+BigInts above `Number.MAX_SAFE_INTEGER`; that dependency defect is preserved in
+[[datahike-cljs-cardinality-many-collapses-large-bigints]].
 
 ## Research evidence
 
@@ -54,9 +65,10 @@ coordinate and settled render-unit contract.
    settled contracts. The later reverse candidate index is separately blocked
    on a public Datahike query-dependency projection. Mirror exact
    persistent-sorted-set `0.4.137` source only before count implementation.
-2. Harden the current navigator: thread one db value, classify dependency
-   system attrs correctly, and replace the raw tuple with a bounded versioned
-   cursor tied to coordinate/index/prefix/direction.
+2. **Cursor Slice A complete; web Slice B next:** thread one db value through
+   the web adapter, classify dependency system attrs correctly, consume the
+   opaque coordinate-bound cursor, prove current-page parity, then delete the
+   raw tuple parser and superseded adapter contract.
 3. Add bounded EAVT entity/outbound-ref and AVET reverse-ref units, with raw
    rendering only for the already selected bounded value.
 4. Add backward transaction navigation, exact transaction metadata,
