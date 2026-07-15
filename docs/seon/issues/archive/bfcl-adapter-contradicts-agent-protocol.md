@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, capability, research]
 ---
@@ -47,3 +47,12 @@ needed.
 - The identical live Qwen sample produces a form/eval instead of closing from
   repeated formless replies; the exact prompt and replies remain in the native
   Inspect log whether the model's selected call scores correctly or not.
+
+## Resolution
+
+Resolved by `2d68c96e`. The focused adapter suite passes 15 tests against
+BFCL's maintained AST scorer. The identical live ACME `multiple_0` sample
+produced one `complete` form, one recorded eval, close reason `:completed`, and
+score 1.0 in 6,154 ms. Its exact prompt, raw reply, database coordinate, and
+scorer result are retained in
+`evals/runs/2026-07-15-bfcl-native-complete-qwen-smoke/`.
