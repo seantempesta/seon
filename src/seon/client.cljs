@@ -87,6 +87,7 @@
     ;; via eval/lookup-value when render-agent-canvas renders root.
     [seon.render.system]
     [seon.runtime.admission :as admission]
+    [seon.runtime.lifecycle :as runtime.lifecycle]
     ;; Routing-as-data — the `:seon.route/*` schema + the seeded core route
     ;; set; boot-seed! transacts (route/core-routes-tx). Required here so the
     ;; schema register! calls run and the build includes the seed builder.
@@ -2679,23 +2680,6 @@
 
 (schema/register! ::stopped? :boolean)
 (schema/register! ::stop-error :string)
-(schema/register! ::quiesced? :boolean)
-(schema/register! ::quiesce-error :string)
-(schema/register! ::quiesced-run-ids [:vector :seon.agent.run/id])
-(schema/register! ::completed-turn-ids [:vector :string])
-(schema/register! ::errored-turn-ids [:vector :string])
-(schema/register! ::quiesce-runtime-response
-  [:or
-   [:map {:closed true}
-    [::quiesced? [:= true]]
-    [::db.coordinate/coordinate ::db.coordinate/coordinate]
-    [::quiesced-run-ids ::quiesced-run-ids]
-    [::completed-turn-ids ::completed-turn-ids]
-    [::errored-turn-ids ::errored-turn-ids]
-    [::agent-runtime/unhosted-ids ::agent-runtime/unhosted-ids]]
-   [:map {:closed true}
-    [::quiesced? [:= false]]
-    [::quiesce-error ::quiesce-error]]])
 (schema/register! ::stop-runtime-response
   [:or
    [:map {:closed true}
@@ -2871,7 +2855,7 @@
    returns the same typed result. Failures retain the connection, launch
    capability, and cleanup-required occurrence for an explicit retry. The web
    server remains alive so the operator can receive the complete EDN result."
-  {:malli/schema [:=> [:cat] ::quiesce-runtime-response]}
+  {:malli/schema [:=> [:cat] ::runtime.lifecycle/quiesce-response]}
   []
   (let [state @!state
         phase (::runtime-phase state)
