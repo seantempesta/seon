@@ -63,8 +63,7 @@
    :seon.db.browser.cursor.error/unsupported-value
    :seon.db.browser.cursor.error/malformed-token
    :seon.db.browser.cursor.error/invalid-payload
-   :seon.db.browser.cursor.error/request-mismatch
-   :seon.db.browser.cursor.error/database-coordinate-mismatch])
+   :seon.db.browser.cursor.error/request-mismatch])
 (schema/register!
   ::cursor-error
   [:map {:closed true}
@@ -125,6 +124,7 @@
   (let [n (namespace attribute)]
     (or (= "db" n)
         (str/starts-with? n "db.")
+        (= "dh.ref" n)
         (str/starts-with? n "seon."))))
 
 (defn attribute-groups
@@ -349,7 +349,8 @@
 (defn index-page
   "Read one bounded current or history page from EAVT, AEVT, or AVET.
 
-   The supplied DB must resolve to `database-coordinate`. A continuation is
+   The caller supplies a DB already resolved to `database-coordinate`; an
+   as-of DB cannot rederive its containing commit identity. A continuation is
    rejected before any index read unless every request fact matches the facts
    sealed into the token."
   {:malli/schema [:=> [:cat ::page-request] ::page-result]}
@@ -361,19 +362,13 @@
     direction ::direction
     limit ::limit
     cursor-token ::cursor}]
-  (let [actual-coordinate (db/head-coordinate dbv)
-        encoded-prefix (encode-values prefix)
+  (let [encoded-prefix (encode-values prefix)
         payload (when cursor-token (decode-cursor cursor-token))]
     (cond
       (> (count prefix) 4)
       (cursor-error
         :seon.db.browser.cursor.error/request-mismatch
         "An index prefix may contain at most four comparator components.")
-
-      (not= coordinate actual-coordinate)
-      (cursor-error
-        :seon.db.browser.cursor.error/database-coordinate-mismatch
-        "The supplied database value does not resolve to the requested coordinate.")
 
       (::error encoded-prefix)
       encoded-prefix

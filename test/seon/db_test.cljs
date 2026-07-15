@@ -143,7 +143,9 @@
                       all (db-browser/attribute-groups @conn true)]
                   (is (= [:my.browser.test/value]
                          (get domain :my.browser.test)))
+                  (is (nil? (get domain :dh.ref)))
                   (is (nil? (get domain :seon.db-test)))
+                  (is (contains? all :dh.ref))
                   (is (contains? all :seon.db-test)))))))
       done)))
 
@@ -225,11 +227,13 @@
                   (-> (d/transact! conn [{::name "cursor-later" ::rank 9}])
                       (.then
                         (fn [_]
-                          (is (= :seon.db.browser.cursor.error/database-coordinate-mismatch
+                          (is (= :seon.db.browser.cursor.error/request-mismatch
                                  (::db-browser/error
                                    (db-browser/index-page
                                      (assoc request
                                        :seon.db/db @conn
+                                       ::db-browser/database-coordinate
+                                       (db/head-coordinate @conn)
                                        ::db-browser/cursor token)))))
                           (is (= 1
                                  (count

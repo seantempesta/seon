@@ -24,12 +24,13 @@ calls `debug-projection`, whose implementation reads through the ambient
 connection again. The same definition does not accept and thread the
 transaction's `:seon.db/db` into the complete projection.
 
-`seon.web.debug/data-feed-definition` has the same initial-render shape: it
-passes one `@db/*conn*` value into `render-observed`, then calls
-`data-browser-fragment` with a second `@db/*conn*`. Its change transition is
-already correct because it threads the change's explicit `:seon.db/db` into
-the thunk. The shared defect is therefore the initial feed-plan boundary, not
-either page's database projections.
+The `/data` half was resolved in database-browser Slice B on 2026-07-15.
+`seon.web.debug/data-feed-definition` now snapshots `@db/*conn*` once, derives
+the coordinate from that same value, and passes both into
+`render-data-browser`; its focused proof requires every first-paint
+observation to be replayable. The debug feed still has the original
+initial-render shape, so this issue remains open for that owner rather than
+claiming the shared reactive-unit migration is complete.
 
 A read-only CLJS REPL probe against the live default cluster on 2026-07-14
 inspected the one open root-debug subscription. It retained 657 observations:
@@ -48,8 +49,8 @@ debug-specific cache or another listener.
 
 ## Acceptance
 
-- One immutable database value is threaded through debug/data plans and unit
-  producers for a transition.
+- One immutable database value is threaded through the remaining debug plan
+  and unit producers for a transition (`/data` already satisfies this).
 - Replayable query, pull, entity, schema, and index observations remain
   replayable; genuinely lazy, temporal, or unknown operations stay broad.
 - An unrelated transaction invokes zero debug renderers, SCI bodies, Hiccup

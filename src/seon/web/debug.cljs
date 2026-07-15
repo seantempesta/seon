@@ -25,7 +25,6 @@
    every normal page. Raw AI bodies and HTML twins are inactive stubs until the
   operator expands them."
   (:require
-    [cljs.reader :as reader]
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
@@ -697,17 +696,7 @@
   [^js req]
   (let [ns-kw (some-> (query-param req "ns") not-empty keyword)
         attr (some-> (query-param req "attr") not-empty keyword)
-        cursor
-        (try
-          (let [value (some-> (query-param req "cursor")
-                              not-empty
-                              reader/read-string)]
-            (when (and (vector? value)
-                       (= 3 (count value))
-                       (int? (nth value 0))
-                       (int? (nth value 2)))
-              value))
-          (catch :default _ nil))]
+        cursor (some-> (query-param req "cursor") not-empty)]
     {::data-ns      ns-kw
      ::data-attr    attr
      ::data-cursor  cursor
@@ -722,7 +711,7 @@
              data-attr        (conj (str "attr=" (js/encodeURIComponent
                                                    (subs (str data-attr) 1))))
              data-cursor      (conj (str "cursor=" (js/encodeURIComponent
-                                                     (pr-str data-cursor))))
+                                                     data-cursor)))
              data-system?     (conj "system=1"))]
     (if (seq qs) (str "?" (str/join "&" qs)) "")))
 
@@ -785,37 +774,60 @@
                    (str transaction)]]))
           rows)]])
 
+(defn- data-error-panel
+  "Render one typed browser failure without opening an index."
+  [params error]
+  [:div {:class "border border-error/40 bg-base-900 rounded p-2 text-xs font-mono"}
+   [:div {:class "text-error"} "database cursor could not be opened"]
+   [:div {:class "text-text-400 mt-1"}
+    (or (::db-browser/message error)
+        (:seon.error/message error)
+        "unknown database cursor error")]
+   [:a {:href (data-url (assoc params ::data-cursor nil))
+        :class "inline-block mt-2 text-amber-500 hover:text-amber-300"}
+    "← open the current first page"]])
+
+(defn- data-error-fragment
+  "The stable whole-browser morph for a typed cursor failure."
+  [params error]
+  [:div {:id "data-browser" :class "flex flex-col gap-3"}
+   (data-error-panel params error)])
+
 (defn- data-attribute-detail
-  [db attr params]
-  (let [{::db-browser/keys [rows more? next-cursor]}
+  [db coordinate attr params]
+  (let [page
         (db-browser/attribute-page
           (cond-> {:seon.db/db db
+                   ::db-browser/database-coordinate coordinate
                    ::db-browser/attribute attr
                    ::db-browser/limit data-page-size}
             (::data-cursor params)
             (assoc ::db-browser/cursor (::data-cursor params))))]
-    [:div {:class "flex flex-col gap-2"}
-     [:div {:class "flex items-baseline gap-3 text-xs font-mono"}
-      [:span {:class "text-amber-400"} (str attr)]
-      [:span {:class "text-text-500"}
-       (tokens/bounded-pr-str (db-browser/attribute-schema db attr) 60)]]
-     (if (seq rows)
-       (data-row-table rows)
-       [:div {:class "text-text-500 italic text-xs font-mono"}
-        "this installed attribute currently has no datoms"])
-     [:div {:class "flex items-center gap-3 text-xs font-mono"}
-      (when (::data-cursor params)
-        [:a {:href (data-url (assoc params ::data-cursor nil))
-             :class "text-amber-500 hover:text-amber-300"}
-         "← first page"])
-      (when more?
-        [:a {:href (data-url (assoc params ::data-cursor next-cursor))
-             :class "text-amber-500 hover:text-amber-300"}
-         "next page →"])]]))
+    (if (::db-browser/error page)
+      (data-error-panel params page)
+      (let [{::db-browser/keys [rows more? next-cursor]} page]
+        [:div {:class "flex flex-col gap-2"}
+         [:div {:class "flex items-baseline gap-3 text-xs font-mono"}
+          [:span {:class "text-amber-400"} (str attr)]
+          [:span {:class "text-text-500"}
+           (tokens/bounded-pr-str (db-browser/attribute-schema db attr) 60)]]
+         (if (seq rows)
+           (data-row-table rows)
+           [:div {:class "text-text-500 italic text-xs font-mono"}
+            "this installed attribute currently has no datoms"])
+         [:div {:class "flex items-center gap-3 text-xs font-mono"}
+          (when (::data-cursor params)
+            [:a {:href (data-url (assoc params ::data-cursor nil))
+                 :class "text-amber-500 hover:text-amber-300"}
+             "← first page"])
+          (when more?
+            [:a {:href (data-url (assoc params ::data-cursor next-cursor))
+                 :class "text-amber-500 hover:text-amber-300"}
+             "next page →"])]]))))
 
 (defn- data-ns-detail
   "One namespace's installed attributes and an optional bounded attr page."
-  [db ns-kw attributes params]
+  [db coordinate ns-kw attributes params]
   (let [selected (::data-attr params)
         selected (when (some #{selected} attributes) selected)]
     [:div {:class "flex flex-col gap-2"}
@@ -840,12 +852,12 @@
                    (str attribute)]))
            attributes)
      (when selected
-       (data-attribute-detail db selected params))]))
+       (data-attribute-detail db coordinate selected params))]))
 
 (defn- data-browser-fragment
   "The whole /data surface — ONE morph target (`#data-browser`),
    derived 100% from the DB at render time."
-  [db {::keys [data-ns data-system?] :as params}]
+  [db coordinate {::keys [data-ns data-system?] :as params}]
   (let [ns-groups (db-browser/attribute-groups db data-system?)]
     [:div {:id "data-browser" :class "flex flex-col gap-3"}
      [:div {:class "flex items-baseline gap-4 flex-wrap"}
@@ -861,7 +873,7 @@
             :class "text-xs font-mono text-amber-500 hover:text-amber-300"}
         "← all agents"]]]
      (if data-ns
-       (data-ns-detail db data-ns
+       (data-ns-detail db coordinate data-ns
                        (get ns-groups data-ns [])
                        params)
        (data-ns-index ns-groups params))]))
@@ -967,29 +979,57 @@
          ::datastar/dependencies observations
          ::datastar/render-thunk render-debug}))}))
 
+(defn- render-data-browser
+  "Render `/data` and capture reads against the exact same database value."
+  [dbv coordinate params]
+  (datastar/render-observed
+    {:seon.db/db dbv
+     ::datastar/render-thunk
+     #(data-browser-fragment dbv coordinate params)}))
+
 (defn- data-feed-definition
   "One normalized render authority for an exact /data query projection."
-  [params view-id]
-  {:seon.web.feed/key [:seon.web.feed/data
-                       (some-> (::data-ns params) str)
-                       (some-> (::data-attr params) str)
-                       (some-> (::data-cursor params) pr-str)
-                       (::data-system? params)]
-   :seon.web.feed/live? true
-   ::datastar/view-id view-id
-   :seon.web.feed/render-full
-   #(datastar/render-observed
-      {:seon.db/db @db/*conn*
-       ::datastar/render-thunk
-       (fn [] (data-browser-fragment @db/*conn* params))})
-   :seon.web.feed/render-change
-   (fn [{observations ::datastar/dependencies}
-        {dbv :seon.db/db}]
-     (datastar/transition-observed
-      {:seon.db/db dbv
-       ::datastar/dependencies observations
-       ::datastar/render-thunk
-       (fn [] (data-browser-fragment dbv params))}))})
+  [params view-id
+   {dbv :seon.db/db
+    coordinate ::data-database-coordinate
+    error ::data-error
+    live? :seon.web.feed/live?}]
+  (cond->
+    {:seon.web.feed/key [:seon.web.feed/data
+                         (some-> (::data-ns params) str)
+                         (some-> (::data-attr params) str)
+                         (::data-cursor params)
+                         (::data-system? params)]
+     :seon.web.feed/live? live?
+     ::datastar/view-id view-id
+     :seon.web.feed/render-full
+     (cond
+       error
+       (constantly
+         {::datastar/element (data-error-fragment params error)
+          ::datastar/dependencies []})
+
+       live?
+       (fn []
+         (let [snapshot @db/*conn*
+               point (db/head-coordinate snapshot)]
+           (render-data-browser snapshot point params)))
+
+       :else
+       #(render-data-browser dbv coordinate params))
+     :seon.web.feed/render-change
+     (if live?
+       (fn [{observations ::datastar/dependencies}
+            {next-db :seon.db/db}]
+         (let [point (db/head-coordinate next-db)]
+           (datastar/transition-observed
+             {:seon.db/db next-db
+              ::datastar/dependencies observations
+              ::datastar/render-thunk
+              #(data-browser-fragment next-db point params)})))
+       (fn [_subscription _change]
+         {::datastar/elements []}))}
+    coordinate (assoc :seon.web.feed/coordinate coordinate)))
 
 (defn debug-page!
   "GET /agent/<id>/debug — serve a cheap shell with no debug projection.
@@ -1028,11 +1068,41 @@
   (write-status! res 200 "text/html; charset=utf-8"
                  (data-page-html (data-params req) (datastar/new-view-id))))
 
-(defn data-feed!
+(defn ^:async data-feed!
   "GET /data/feed — open the shared gzip Datastar data-browser view."
   {:malli/schema [:=> [:cat ::ring-request] :any]}
   [r]
   (let [params (data-params (:seon.http/node-req r))
         view-id (or (datastar/request-view-id r)
-                    (datastar/new-view-id))]
-    (datastar/open-view-feed! r (data-feed-definition params view-id))))
+                    (datastar/new-view-id))
+        cursor (::data-cursor params)]
+    (if-not cursor
+      (datastar/open-view-feed!
+        r
+        (data-feed-definition
+          params view-id {:seon.web.feed/live? true}))
+      (let [payload (db-browser/decode-cursor cursor)]
+        (if (::db-browser/error payload)
+          (datastar/open-view-feed!
+            r
+            (data-feed-definition
+              params view-id
+              {:seon.web.feed/live? false
+               ::data-error payload}))
+          (let [coordinate
+                (:seon.db.browser.cursor/database-coordinate payload)
+                frozen (await (db/at-coordinate db/*conn* coordinate))]
+            (if (:seon.error/message frozen)
+              (datastar/open-view-feed!
+                r
+                (data-feed-definition
+                  params view-id
+                  {:seon.web.feed/live? false
+                   ::data-error frozen}))
+              (datastar/open-view-feed!
+                r
+                (data-feed-definition
+                  params view-id
+                  {:seon.web.feed/live? false
+                   :seon.db/db frozen
+                   ::data-database-coordinate coordinate})))))))))

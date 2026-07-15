@@ -18,8 +18,11 @@ The existing page has a cheap shell, the canonical normalized gzip feed,
 installed-schema navigation, bounded AEVT attribute pages, URL-owned view
 state, and exact read-result replay. It has no entity/ref/transaction/
 provenance/history navigation yet, and its whole browser remains one render
-unit. The web adapter still uses the superseded raw tuple contract and must be
-migrated in the next slice before the new cursor is user-visible.
+unit. Cursor Slice B has replaced the raw tuple URL contract: continuation
+links and feed keys carry the same opaque token, cursor requests first resolve
+their sealed coordinate through `seon.db/at-coordinate`, and retained pages
+open as frozen non-live feeds while malformed or unavailable points render a
+typed error without an index read.
 
 The complete `{database-id, branch, commit-id, t}` coordinate, retained-commit
 resolver, pure shared render-unit lifecycle, and cursor Slice A have now
@@ -32,10 +35,10 @@ The later reactive unit migration still waits on the shared reverse-candidate
 boundary, currently blocked on a public Datahike query dependency projection.
 
 A read-only 2026-07-14 default-cluster probe observed basis `536870929` and
-15,851 datoms. The initial compressed feed emitted immediately, but the
-default domain navigator incorrectly included selected Datahike's `:dh.ref`
-implicit system schema. Initial read capture also dereferences the replica
-twice, sharing the foreign-database replay defect already found in debug.
+15,851 datoms. The initial compressed feed emitted immediately. Slice B now
+classifies selected Datahike's `:dh.ref` implicit schema as system data and
+captures one immutable database value for `/data` first paint; the debug
+feed's separate foreign-database replay defect remains open.
 [[research/database-browser-source-audit-2026-07-14]] grounds the exact index,
 seek, history, count, coordinate, cursor, unit, deletion, and acceptance
 constraints. Detailed implementation waits on the canonical lifecycle
@@ -49,6 +52,20 @@ UUID, instant, native BigInt, and bytes boundaries. The checkpoint also found
 that one cardinality-many Datahike CLJS attribute collapses two distinct native
 BigInts above `Number.MAX_SAFE_INTEGER`; that dependency defect is preserved in
 [[datahike-cljs-cardinality-many-collapses-large-bigints]].
+
+The focused Slice B checkpoint passed ten tests and 72 assertions with zero
+final failures or errors. The database selectors prove grouping, all current
+and history index orders, coordinate mismatch rejection, scalar boundaries,
+and reactive replay. The web selectors prove an exact opaque feed key, one
+replayable first-paint snapshot, retained-coordinate resolution before a
+frozen feed opens, and malformed-token rendering without database resolution.
+Retained logs are `tmp/test-cljs-data-browser-slice-b-20260715.log` for the
+first eight selectors, `tmp/test-cljs-20260715-024811-61004.log` for the
+corrected retained-point fixture, and
+`tmp/test-cljs-20260715-024825-61613.log` for malformed-token isolation. The
+checkpoint exposed separate runner defects recorded in
+[[test-cljs-multiple-exact-selectors-run-zero-tests]] and
+[[changed-test-interruption-orphans-test-runner]].
 
 ## Research evidence
 
@@ -65,10 +82,10 @@ BigInts above `Number.MAX_SAFE_INTEGER`; that dependency defect is preserved in
    settled contracts. The later reverse candidate index is separately blocked
    on a public Datahike query-dependency projection. Mirror exact
    persistent-sorted-set `0.4.137` source only before count implementation.
-2. **Cursor Slice A complete; web Slice B next:** thread one db value through
-   the web adapter, classify dependency system attrs correctly, consume the
-   opaque coordinate-bound cursor, prove current-page parity, then delete the
-   raw tuple parser and superseded adapter contract.
+2. **Cursor Slice A and web Slice B complete:** one database value now flows
+   through `/data`, dependency system attrs are classified correctly, and the
+   web adapter consumes the opaque coordinate-bound cursor without a second
+   parser or mutable retained database value.
 3. Add bounded EAVT entity/outbound-ref and AVET reverse-ref units, with raw
    rendering only for the already selected bounded value.
 4. Add backward transaction navigation, exact transaction metadata,

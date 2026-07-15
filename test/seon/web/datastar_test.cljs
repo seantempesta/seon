@@ -22,6 +22,7 @@
     [seon.agent.debug :as agent-debug]
     [seon.agent.run :as run]
     [seon.db :as db]
+    [seon.db.browser :as db-browser]
     [seon.db.coordinate :as db.coordinate]
     [seon.render.surface :as surface]
     [seon.ui.agent-view :as agent-view]
@@ -1350,19 +1351,135 @@
       (.emit res "close"))))
 
 (deftest data-feed-key-is-the-exact-query-projection
-  (let [req #js {:url (str "/data?ns=seon.agent&attr=seon.agent%2Fid"
-                           "&cursor=%5B1%20%22root%22%203%5D&system=1")}
+  (let [cursor "opaque_Ab-19"
+        req #js {:url (str "/data?ns=seon.agent&attr=seon.agent%2Fid"
+                           "&cursor=" cursor "&system=1")}
         params (@#'debug/data-params req)
-        feed (@#'debug/data-feed-definition params "data-view")]
+        feed (@#'debug/data-feed-definition
+               params "data-view" {:seon.web.feed/live? true})]
     (is (= {:seon.web.debug/data-ns :seon.agent
             :seon.web.debug/data-attr :seon.agent/id
-            :seon.web.debug/data-cursor [1 "root" 3]
+            :seon.web.debug/data-cursor cursor
             :seon.web.debug/data-system? true}
            params))
     (is (= [:seon.web.feed/data
-            ":seon.agent" ":seon.agent/id" "[1 \"root\" 3]" true]
+            ":seon.agent" ":seon.agent/id" cursor true]
            (:seon.web.feed/key feed)))
     (is (= "data-view" (::datastar/view-id feed)))))
+
+(deftest data-live-feed-captures-one-replayable-snapshot
+  (async done
+    (-> (with-conn
+          []
+          (fn [conn]
+            (let [prior db/*conn*]
+              (set! db/*conn* conn)
+              (try
+                (let [params (@#'debug/data-params #js {:url "/data"})
+                      feed (@#'debug/data-feed-definition
+                             params "live-data" {:seon.web.feed/live? true})
+                      rendered ((:seon.web.feed/render-full feed))
+                      observations (::datastar/dependencies rendered)]
+                  (is (seq observations))
+                  (is (every? :seon.db/read-replayable? observations)
+                      "capture and browser projection share one immutable db value"))
+                (finally (set! db/*conn* prior))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest data-cursor-feed-resolves-the-retained-point-before-opening
+  (async done
+    (let [cursor "opaque-cursor"
+          coordinate historical-point
+          frozen-db {:seon.web.datastar-test/frozen true}
+          opened (atom nil)
+          calls (atom [])
+          prior-at db/at-coordinate
+          prior-decode db-browser/decode-cursor
+          prior-open datastar/open-view-feed!
+          request {:seon.http/node-req
+                   #js {:url (str "/data/feed?ns=seon.agent"
+                                  "&attr=seon.agent%2Fid&cursor=" cursor
+                                  "&view=frozen-data")}
+                   :seon.http/node-res #js {}}]
+      (set! db/at-coordinate
+            (fn
+              ([point]
+               (swap! calls conj [db/*conn* point])
+               (js/Promise.resolve frozen-db))
+              ([conn point]
+               (swap! calls conj [conn point])
+               (js/Promise.resolve frozen-db))))
+      (set! db-browser/decode-cursor
+            (constantly
+              {:seon.db.browser.cursor/version 1
+               :seon.db.browser.cursor/database-coordinate coordinate
+               :seon.db.browser.cursor/projection :current
+               :seon.db.browser.cursor/index :aevt
+               :seon.db.browser.cursor/prefix []
+               :seon.db.browser.cursor/direction :forward
+               :seon.db.browser.cursor/last
+               {:seon.db/e 1
+                :seon.db/a :seon.agent/id
+                :seon.db/v [:seon.db.browser.cursor.value/string "root"]
+                :seon.db/tx 536870913
+                :seon.db/added? true}}))
+      (set! datastar/open-view-feed!
+            (fn
+              ([_ feed]
+               (reset! opened feed)
+               (::datastar/view-id feed))
+              ([_ feed _options]
+               (reset! opened feed)
+               (::datastar/view-id feed))))
+      (-> (debug/data-feed! request)
+          (.then
+            (fn [_]
+              (is (= coordinate (second (first @calls))))
+              (is (= false (:seon.web.feed/live? @opened)))
+              (is (= coordinate (:seon.web.feed/coordinate @opened)))
+              (is (= cursor (nth (:seon.web.feed/key @opened) 3)))
+              (is (= "frozen-data" (::datastar/view-id @opened)))))
+          (.catch (fn [e] (is false (str e))))
+          (.finally
+            (fn []
+              (set! db/at-coordinate prior-at)
+              (set! db-browser/decode-cursor prior-decode)
+              (set! datastar/open-view-feed! prior-open)
+              (done)))))))
+
+(deftest malformed-data-cursor-renders-an-error-without-resolving-a-db
+  (async done
+    (let [resolutions (atom 0)
+          opened (atom nil)
+          prior-at db/at-coordinate
+          prior-open datastar/open-view-feed!
+          request {:seon.http/node-req
+                   #js {:url "/data/feed?cursor=bad%2Btoken&view=bad-data"}
+                   :seon.http/node-res #js {}}]
+      (set! db/at-coordinate
+            (fn [& _]
+              (swap! resolutions inc)
+              (js/Promise.resolve nil)))
+      (set! datastar/open-view-feed!
+            (fn [_ feed]
+              (reset! opened feed)
+              (::datastar/view-id feed)))
+      (-> (debug/data-feed! request)
+          (.then
+            (fn [_]
+              (let [rendered ((:seon.web.feed/render-full @opened))
+                    markup (html/->string (::datastar/element rendered))]
+                (is (zero? @resolutions))
+                (is (= false (:seon.web.feed/live? @opened)))
+                (is (str/includes? markup "data-browser"))
+                (is (str/includes? markup "cursor could not be opened")))))
+          (.catch (fn [e] (is false (str e))))
+          (.finally
+            (fn []
+              (set! db/at-coordinate prior-at)
+              (set! datastar/open-view-feed! prior-open)
+              (done)))))))
 
 (deftest obsolete-subscription-does-not-push-into-a-rebound-view
   (let [pushes (atom 0)
