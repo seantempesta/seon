@@ -76,13 +76,20 @@ with zero failures or errors; the coordinated CLJS checkpoint still must run
 the new exact CLJ-print/CLJS-read UUID regression and the full overlapping
 descriptor/replica/client/blob selector.
 
-The next dependency-ordered slice is the typed operator lifecycle described in
-[[research/operator-descriptor-publication-pod-only-plan-2026-07-15]]. First,
-make the real synchronous Transit UDS call boundary Babashka-loadable; the
-current exact load fails on the JVM-only `AsynchronousCloseException` class.
-Then atomically retain the source descriptor, exact create request, and
-target-private coordinates before asking the writer to create or exactly adopt
-the branch. Validate and retain the returned descriptor before pod publication.
+The real synchronous Transit UDS call boundary is now Babashka-callable without
+a second transport. `seon.db.transport.uds` dynamically resolves the one catch
+class SCI could not analyze while retaining its existing codec, four-byte
+frame, sockets, server, and publisher. Babashka runs the complete focused
+transport namespace at 9 tests/28 assertions, including an exact typed
+create-branch call with UUID coordinates over a bounded local Unix socket. The
+retained JVM transport/writer-integration gate passes 16 tests/93 assertions.
+
+The next dependency-ordered slice is therefore the retained typed operator
+lifecycle described in
+[[research/operator-descriptor-publication-pod-only-plan-2026-07-15]].
+Atomically retain the source descriptor, exact create request, and target-
+private coordinates before asking the writer to create or exactly adopt the
+branch. Validate and retain the returned descriptor before pod publication.
 The descriptor's coordinate is the immutable creation cut, not the current
 target head used by close after branch writes. Close must stop and prove the pod
 absent, read the exact current target head, release and delete with that fence,

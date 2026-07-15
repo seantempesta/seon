@@ -52,6 +52,12 @@
 
 (def ^:private maximum-frame-bytes (* 16 1024 1024))
 (def ^:private subscriber-queue-capacity 16)
+(def ^:private asynchronous-close-class
+  (Class/forName "java.nio.channels.AsynchronousCloseException"))
+
+(defn- asynchronous-close?
+  [throwable]
+  (.isInstance ^Class asynchronous-close-class throwable))
 
 (defn encode
   "Encode one protocol map as Transit JSON bytes."
@@ -129,7 +135,7 @@
 
 (defn call!
   "Send one request and synchronously read one response on an open channel."
-  {:malli/schema [:=> [:cat ::call-input] ::message]}
+  {:malli/schema [:=> [:catn [::call-input ::call-input]] ::message]}
   [{::keys [channel message]}]
   (let [input (Channels/newInputStream ^SocketChannel channel)
         output (Channels/newOutputStream ^SocketChannel channel)]
@@ -212,9 +218,8 @@
                          (.setDaemon worker true)
                          (.start worker))))
                    (recur)))
-               (catch java.nio.channels.AsynchronousCloseException _ nil)
                (catch Throwable throwable
-                 (when-not @closed?
+                 (when-not (or @closed? (asynchronous-close? throwable))
                    (binding [*out* *err*]
                      (println "[database-request] accept loop stopped:"
                               (.getMessage throwable)))))))
@@ -277,9 +282,8 @@
                      (recur)))
                  (recur)))
              (catch InterruptedException _ nil)
-             (catch java.nio.channels.AsynchronousCloseException _ nil)
              (catch Throwable throwable
-               (when-not @closed?
+               (when-not (or @closed? (asynchronous-close? throwable))
                  (binding [*out* *err*]
                    (println "[database-publish] subscriber closed:"
                             (.getMessage throwable)))))
@@ -317,11 +321,11 @@
            (loop []
              (start-subscriber! subscribers closed? (.accept server))
              (recur))
-           (catch java.nio.channels.AsynchronousCloseException _ nil)
            (catch Throwable throwable
-             (binding [*out* *err*]
-               (println "[database-publish] accept loop stopped:"
-                        (.getMessage throwable))))))
+             (when-not (asynchronous-close? throwable)
+               (binding [*out* *err*]
+                 (println "[database-publish] accept loop stopped:"
+                          (.getMessage throwable)))))))
        "database-publish-accept")
       (.setDaemon true)
       (.start))

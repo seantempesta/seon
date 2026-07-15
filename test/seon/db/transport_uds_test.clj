@@ -138,6 +138,52 @@
                         ::protocol/expected-target-head
                         (coordinate/attachment target-head)))))))
 
+(deftest synchronous-call-preserves-complete-lifecycle-values
+  (let [path (socket-path "transport-lifecycle-call")
+        source
+        {::coordinate/database-id
+         #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
+         ::coordinate/branch :db
+         ::coordinate/commit-id
+         #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
+         ::coordinate/t 536870929}
+        target-attachment
+        (assoc (coordinate/attachment source)
+               ::coordinate/branch :experiment/portable-call)
+        request
+        (protocol/create-branch-request
+         {::protocol/source-database-name "default"
+          ::protocol/target-database-name "default-portable-call"
+          ::protocol/source-coordinate source
+          ::protocol/expected-source-head source
+          ::protocol/target-branch :experiment/portable-call})
+        response
+        (protocol/success
+         {::protocol/target-database-name "default-portable-call"
+          ::protocol/target-attachment target-attachment
+          ::protocol/coordinate (merge source target-attachment)
+          ::protocol/backend :file
+          ::protocol/database-path "data/clusters/default/db"
+          ::protocol/created? true
+          ::protocol/adopted? false})
+        seen (atom [])
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/handler (fn [message]
+                          (swap! seen conj message)
+                          response)})]
+    (try
+      (with-open [channel (uds/connect! path)]
+        (let [actual
+              (uds/call! {::uds/channel channel ::uds/message request})]
+          (is (= [request] @seen))
+          (is (= response actual))
+          (is (protocol/valid-response? actual))))
+      (finally
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
 (deftest request-server-delivers-maps-without-interpreting-them
   (let [path (socket-path "transport-request")
         seen (atom [])

@@ -213,8 +213,8 @@ The exact close transition is:
 
 ### Transport prerequisite
 
-The JVM `seon.db.transport.uds` namespace is the byte/framing owner, but an
-exact Babashka load probe currently fails before use:
+The JVM `seon.db.transport.uds` namespace remains the one byte/framing owner.
+The pre-edit Babashka load probe failed before use:
 
 ```clojure
 (require '[seon.db.transport.uds])
@@ -223,11 +223,22 @@ exact Babashka load probe currently fails before use:
 ```
 
 Babashka already loads Transit CLJ `1.0.333` and supports the synchronous Unix
-`SocketChannel` used by readiness probes. Strengthen the real transport owner
-with the minimum reader-conditional portability needed for its existing
-synchronous `connect!`/`call!` boundary, or extract that exact shared boundary
-without duplicating codec or framing. Do not add JSON coercion, shell calls, an
-admin socket, or a second envelope.
+`SocketChannel` used by readiness probes. The cause was narrower than the
+transport: SCI could load the JDK class reflectively but could not resolve
+`java.nio.channels.AsynchronousCloseException` as a catch class while analyzing
+the namespace. The existing owner now resolves that class once through the
+same `Class/forName` compatibility pattern used by the checked-in nREPL Unix
+socket source and classifies it inside the existing broad resource-boundary
+catch. Codec, four-byte frame, sockets, request server, and publisher remain one
+mechanism.
+
+The post-edit Babashka proof loads the owner and runs the complete focused
+transport namespace at 9 tests/28 assertions. Its bounded local UDS fixture
+sends the real closed create-branch request and response through `connect!` and
+`call!`, preserving keyword discriminators and complete UUID coordinates. The
+retained JVM transport plus writer-integration gate passes 16 tests/93
+assertions. No `bb.edn` dependency, JSON coercion, shell call, admin socket, or
+second envelope was added.
 
 ### Interruption prerequisite
 
