@@ -222,16 +222,38 @@ The concrete missing source boundary is tracked in
 [[../../seon/issues/restore-writer-admin-transition-is-unimplemented]].
 
 The first operator-only restore slice now owns one closed immutable intent and
-derives its next command from the current main coordinate, main ancestry,
-reserved branch heads, and completion-fact ids; it persists no phase, status,
-or retry counter. `seon.dev.state` synchronizes the temporary file before
-atomic rename and the parent directory afterward, and conflicting retained
-intent bytes fail closed. Public CLI parsing remains deliberately deferred:
+derives its next command from the current main coordinate, an explicitly
+observed forced-main coordinate, main ancestry, reserved branch heads, and
+completion-fact ids; it persists no phase, status, or retry counter. Target
+source blobs and the main destination archive are frozen through distinct
+pinned launch descriptors so overlay-first lookup cannot be masked by the
+destination; those descriptors also bind the physical backend/path, database
+identity, writer owner, artifact flavor, and exact main/target heads. The
+intent additionally freezes the post-preparation branch roster, protocol
+version, writer artifact digest, and process generations. Its canonical
+SHA-256 plan digest derives from every frozen and deterministic field rather
+than accepting an arbitrary digest-shaped string. This v1 intent explicitly
+preserves both core and config populations; its closed schema rejects ambient
+or requested overlays until the later overlay slice can freeze their exact
+bytes and digests. Intent and completion use the same compact-string identity
+shape. The pure contract lives in the writer-visible `seon.dev.restore` source
+owner; script-only `seon.dev.restore-state` owns fsync publication. The bounded
+admin invocation derives one intent-specific atomic-EDN result destination,
+and passes the canonical fsync-published intent path rather than EDN in process
+arguments. Consumer generations are nonempty and deliberately exclude the
+writer: exact generation-bound writer absence remains coordinator evidence
+rather than semantic intent. `seon.dev.state` synchronizes the temporary file
+before atomic rename and the parent directory afterward, and conflicting
+retained intent bytes fail closed. Public CLI parsing remains deliberately
+deferred:
 the eventual surface is branch-oriented (`cluster restore <retained-branch>`
 and undo selecting a completed restore or retained undo target), but it cannot
 land until writer/status exposes the exact current branch head. The operator
 must never substitute the retained branch's immutable creation coordinate or
-the unpinned default launch descriptor.
+the unpinned default launch descriptor. Slice 3 owns recovery when the guarded
+force committed but its result was lost: until writer/status can recognize and
+publish that exact forced-main coordinate, a changed main without exact
+evidence diagnoses divergence rather than inferring promotion from ancestry.
 
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in

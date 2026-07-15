@@ -3,6 +3,8 @@
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn])
   (:import [java.io RandomAccessFile]
+           [java.nio.channels FileChannel]
+           [java.nio.file OpenOption StandardOpenOption]
            [java.util.concurrent TimeUnit]))
 
 (defn process-start-instant
@@ -28,15 +30,36 @@
   (when (fs/regular-file? path)
     (edn/read-string (slurp (str path)))))
 
+(defn- sync-path! [path options]
+  (with-open [channel
+              (FileChannel/open (fs/path path)
+                                (into-array OpenOption options))]
+    (.force channel true)))
+
 (defn write-edn!
-  "Atomically replace one EDN state record."
+  "Durably replace one EDN state record."
   [path value]
   (let [path (fs/path path)
+        parent (fs/parent path)
         temp (fs/path (str path "." (random-uuid) ".tmp"))]
-    (fs/create-dirs (fs/parent path))
-    (spit (str temp) (str (pr-str value) "\n"))
-    (fs/move temp path {:replace-existing true :atomic-move true})
-    value))
+    (fs/create-dirs parent)
+    (try
+      (spit (str temp) (str (pr-str value) "\n"))
+      (sync-path! temp [StandardOpenOption/WRITE])
+      (fs/move temp path {:replace-existing true :atomic-move true})
+      (sync-path! parent [])
+      value
+      (finally
+        (fs/delete-if-exists temp)))))
+
+(defn delete-edn!
+  "Durably delete one EDN state record when present."
+  [path]
+  (let [path (fs/path path)
+        deleted? (fs/delete-if-exists path)]
+    (when deleted?
+      (sync-path! (fs/parent path) []))
+    (boolean deleted?)))
 
 (defn- try-lock [channel]
   (try
