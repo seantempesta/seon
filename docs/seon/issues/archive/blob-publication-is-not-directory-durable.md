@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, flow]
 ---
@@ -36,11 +36,33 @@ copier or filesystem publisher.
 
 ## Acceptance
 
-- Publication fsyncs the final pathname's containing directory after atomic
-  rename before reporting success.
+- Publication durably creates every missing archive-directory entry, fsyncs the
+  temporary file, atomically renames it, and fsyncs the final shard before
+  reporting success.
 - Injected failure before and after rename leaves either no final pathname or
   complete hash-verifiable content; retry converges idempotently.
-- Restore materialization verifies the final destination by digest after
-  publication and cannot license force without directory-durable success.
+- Any durability failure returns before the database projection transaction;
+  restore materialization must consume this same operation before licensing
+  force rather than interpreting pathname presence itself.
 - Existing `put!`, `get`, `text`, `concat!`, storage-view, and projection
   contracts remain unchanged.
+
+## Resolution
+
+Resolved by `2827e991`. Publication now creates missing writable/archive
+directories one level at a time and fsyncs each parent entry, then performs
+temporary-file fsync, atomic rename, and shard-directory fsync. A retry after
+post-rename failure re-verifies the writable content and fsyncs the existing
+file plus directory chain without renaming it. Any failed fence prevents the
+blob projection transaction.
+
+The focused isolated CLJS gate compiled 510 files with zero warnings and passed
+13 tests/91 assertions with zero failures or errors. It injects failures before
+writable-root durability, before rename, and after rename; proves the only
+remaining pathname is absent or hash-verifiable; and proves retries converge
+without replacing an existing verified blob. Retained evidence is
+`tmp/test-cljs-20260715-100822-31792.log` and its `.report.edn` projection.
+
+Restore materialization itself remains the ordered later Slice 4 consumer in
+the database-lifecycle-recovery roadmap; this resolution closes the publication
+owner it must reuse and does not claim that consumer is already implemented.
