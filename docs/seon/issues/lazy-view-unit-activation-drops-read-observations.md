@@ -49,3 +49,29 @@ transport and socket ownership.
   execution and one observation/output authority.
 - A fresh full render and any incremental activation/update sequence converge
   to the same stable-ID DOM.
+
+## Partial implementation — 2026-07-15
+
+The first non-canvas HTML twin in each real debug catalog now exercises the
+committed `seon.web.view-unit` lifecycle. `handle-view-unit!` snapshots one
+immutable database value, attaches the view as a consumer, captures the
+producer's reads, and returns the retained serialized stable-ID element.
+`broadcast!` advances all shared units once before subscription fan-out and
+distributes the same emitted bytes to every owning view, including views in
+different active-fingerprint subscriptions. Final socket close calls the same
+detach transition and removes the last observations and output.
+
+Focused `seon.web.datastar-test` evidence is 37 tests/198 assertions. The new
+regression proves one producer execution for two distinct subscriptions, both
+consumer ids retained, no producer or output for an unrelated immutable
+snapshot, one serialized update for a relevant snapshot, first-close
+retention, and final-close release. A server-side gzip probe against the live
+default debug feed observed a 24,853-byte initial frame and a successful 200
+`datastar-patch-elements` activation response for the committed unit. No pod
+restart or database write was used for that live proof.
+
+The issue remains open because the other raw/HTML debug descriptors still use
+the legacy activation path, and the whole-debug projection still captures an
+ambient database value. Full acceptance requires migrating those consumers
+and deleting the superseded path rather than expanding this transitional
+opt-in.

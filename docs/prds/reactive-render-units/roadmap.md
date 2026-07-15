@@ -54,10 +54,15 @@ with the exact supplied immutable database value, captures and eagerly replays
 every distinct runtime observation, suppresses equal results and serialized
 output, and removes the complete unit after final close. Retained state is
 closed plain data containing no database value or producer. A focused
-synthetic debug-shaped unit proof passes 1 test/17 assertions. This is the
-dependency-ready kernel only: `seon.web.datastar` and the page-specific
-transitions do not yet consume it, so the production activation bug and false
-declared-attribute veto remain open until the next cutover slice.
+synthetic debug-shaped unit proof passes 1 test/17 assertions. One real
+production consumer now crosses that lifecycle: the first non-canvas HTML twin
+in each debug catalog. Its activation receives one immutable database value,
+captures observed reads, retains one serialized stable-ID element in the
+existing feed registry, shares the derivation across subscription fingerprints,
+transitions once per broadcast, distributes identical bytes to every consumer,
+and releases on final view close. The remaining debug descriptors, whole-debug
+transition, agent/root page transition, and declared-attribute veto are still
+legacy and remain open work.
 
 ## Research evidence
 
@@ -80,10 +85,12 @@ declared-attribute veto remain open until the next cutover slice.
 
 ## Ordered work
 
-1. **Kernel complete:** `seon.web.view-unit` owns pure attach, observed render,
-   replay-all transition, output suppression, detach, and final release, proven
-   with one lazy debug-shaped unit. Next, connect one real lazy debug descriptor
-   to this kernel without adding another registry.
+1. **First production unit complete:** `seon.web.view-unit` owns pure attach,
+   observed render, replay-all transition, output suppression, detach, and final
+   release. `seon.web.datastar` commits one real lazy debug HTML descriptor into
+   that state in its existing registry and fans emitted bytes through the one
+   gzip transport. Next, use this proof to cut one agent/root consumer without
+   retaining its page-specific dependency authority.
 2. Move agent/root onto the same lifecycle; remove declared-attribute vetoes and
    the page-specific dependency map rather than adding an interim routing path.
 3. Derive the conservative reverse candidate index from runtime-observed

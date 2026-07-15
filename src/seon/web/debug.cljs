@@ -308,23 +308,36 @@
              #(raw-block-body !snapshot index block-name)})
           (:block-texts @!snapshot))
         html-defs
-        (keep-indexed
-          (fn [index {selection ::surface/selection
-                      label ::surface/label}]
-            (when (not= "canvas" selection)
-              {::datastar/coordinate
-               {:seon.agent/id agent-id
-                ::debug-format :html
-                ::surface/selection selection}
-               ::datastar/label label
-               ::datastar/order index
-               ::datastar/producer
-               #(surface/materialize-surface
-                  {:seon.db/db @db/*conn*
-                   :seon.agent/id agent-id
-                   ::surface/selection selection
-                   ::surface/face :expanded})}))
-          surface-catalog)]
+        (->> surface-catalog
+             (remove #(= "canvas" (::surface/selection %)))
+             (map-indexed
+              (fn [index {selection ::surface/selection
+                          label ::surface/label}]
+                (cond->
+                 {::datastar/coordinate
+                  {:seon.agent/id agent-id
+                   ::debug-format :html
+                   ::surface/selection selection}
+                  ::datastar/label label
+                  ::datastar/order index
+                  ::datastar/producer
+                  (if (zero? index)
+                    (fn [dbv]
+                      (surface/materialize-surface
+                       {:seon.db/db dbv
+                        :seon.agent/id agent-id
+                        ::surface/selection selection
+                        ::surface/face :expanded}))
+                    #(surface/materialize-surface
+                      {:seon.db/db @db/*conn*
+                       :seon.agent/id agent-id
+                       ::surface/selection selection
+                       ::surface/face :expanded}))}
+                  (zero? index)
+                  (assoc ::datastar/view-unit? true
+                         ::datastar/renderer-token
+                         (str "debug-html-v1:" selection)))))
+             vec)]
     (vec (concat [exact-def] raw-defs html-defs))))
 
 (defn- debug-projection
@@ -354,7 +367,8 @@
      [:summary {:class (str "cursor-pointer select-none text-xs font-mono "
                             "text-text-400 hover:text-text-200 py-0.5")}
       (str (name sec-name) " (" (fmt-int (tokens/estimate sec-text)) " tokens)")]
-     (datastar/unit-element descriptor active?)]))
+     (html/raw
+      (datastar/unit-element-html-in-view view-id descriptor active?))]))
 
 (defn- ai-pane-fragment
   [agent-id view-id {:keys [ai-text block-texts]} catalog active-tokens]
@@ -423,7 +437,9 @@
                                                "font-mono font-semibold text-text-400 "
                                                "hover:text-text-200")}
                          (::datastar/label descriptor)]
-                        (datastar/unit-element descriptor active?)])))
+                        (html/raw
+                         (datastar/unit-element-html-in-view
+                          view-id descriptor active?))])))
               descriptors)
         [:div {:class "text-text-500 italic p-2"}
          "no context block currently declares an HTML twin"])

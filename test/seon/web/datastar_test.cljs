@@ -27,7 +27,8 @@
     [seon.ui.html :as html]
     [seon.web.brand :as brand]
     [seon.web.datastar :as datastar]
-    [seon.web.debug :as debug]))
+    [seon.web.debug :as debug]
+    [seon.web.view-unit :as view-unit]))
 
 (defn- check-property
   "Assert a deterministic test.check property and surface its shrink."
@@ -295,14 +296,152 @@
                              (reduce + 0 (map ::debug/tokens
                                               (::debug/segments bar))))
                           "the visible breakdown sums to the exact prompt total"))
+                    (is (true? (::datastar/view-unit? html-unit))
+                        "exactly the first real HTML twin opts into the lifecycle")
                     (@#'debug/debug-app-view
-                      agent-a "debug-test-view"
-                      (:seon.web.debug/snapshot projection)
-                      catalog #{(::datastar/token html-unit)})
-                    (is (= 1 @html-renders)
-                        "one active HTML twin invokes exactly one selected producer")))
+                     agent-a "debug-test-view"
+                     (:seon.web.debug/snapshot projection)
+                     catalog #{(::datastar/token html-unit)})
+                    (is (zero? @html-renders)
+                        "an active token without committed unit state stays a stub")))
                 (finally
                   (set! db/*conn* original))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest managed-debug-unit-activates-observes-transitions-and-releases
+  (async done
+    (-> (with-conn
+         [agent-a agent-b]
+         (fn [conn]
+           (let [snapshots (atom [])]
+             (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data [{:seon.agent/id agent-a
+                                      :seon.agent/purpose "before"}]})
+                 (.then
+                  (fn [_]
+                    (swap! snapshots conj @conn)
+                    (db/transact!
+                     {:seon.db/conn conn
+                      :seon.db/tx-data [{:seon.agent/id agent-b
+                                         :seon.agent/purpose "unrelated"}]})))
+                 (.then
+                  (fn [_]
+                    (swap! snapshots conj @conn)
+                    (db/transact!
+                     {:seon.db/conn conn
+                      :seon.db/tx-data [{:seon.agent/id agent-a
+                                         :seon.agent/purpose "after"}]})))
+                 (.then
+                  (fn [_]
+                    (conj @snapshots @conn)))
+               (.then
+                (fn [[before unrelated after]]
+                  (let [original-conn db/*conn*
+                        renders (atom 0)
+                        releases (atom 0)
+                        original-detach view-unit/detach-consumer
+                        catalog
+                        (datastar/unit-catalog
+                         [{::datastar/coordinate
+                           {:seon.agent/id agent-a
+                            :seon.web.debug/debug-format :html
+                            :seon.render.surface/selection "context-probe"}
+                           ::datastar/view-unit? true
+                           ::datastar/renderer-token "debug-html-test-v1"
+                           ::datastar/producer
+                           (fn [dbv]
+                             (swap! renders inc)
+                             [:section
+                              (db/query
+                               {:seon.db/db dbv
+                                :seon.db/query
+                                '[:find ?purpose .
+                                  :in $ ?id
+                                  :where
+                                  [?agent :seon.agent/id ?id]
+                                  [?agent :seon.agent/purpose ?purpose]]
+                                :seon.db/args [agent-a]})])}
+                          {::datastar/coordinate
+                           {:seon.agent/id agent-a
+                            :seon.web.debug/debug-format :ai
+                            :seon.agent.ctx/name :legacy-stub}
+                           ::datastar/producer (fn [] [:div "legacy"])}])
+                        descriptor (some #(when (::datastar/view-unit? %) %) catalog)
+                        token (::datastar/token descriptor)
+                        legacy-token (::datastar/token
+                                      (some #(when-not (::datastar/view-unit? %) %)
+                                            catalog))
+                        view-id "managed-debug-view-a"
+                        other-view-id "managed-debug-view-b"
+                        [active-res active] (response-probe)
+                        [other-active-res other-active] (response-probe)]
+                    ;; Unit activation dereferences the selected runtime once.
+                    ;; Pin that boundary to the immutable pre-change value; the
+                    ;; later snapshots are transitioned explicitly below.
+                    (set! db/*conn* (atom before))
+                    (try
+                      (with-redefs
+                       [datastar/!feeds
+                        (atom
+                         (feed-registry
+                          [(test-feed view-id {::datastar/catalog catalog})
+                           (test-feed other-view-id
+                                      {::datastar/catalog catalog
+                                       ::datastar/active-tokens #{legacy-token}})]))
+                        view-unit/detach-consumer
+                        (fn [request]
+                          (let [response (original-detach request)]
+                            (when (::view-unit/released? response)
+                              (swap! releases inc))
+                            response))]
+                        (datastar/handle-view-unit!
+                         (unit-ring-request active-res view-id token "1"))
+                        (datastar/handle-view-unit!
+                         (unit-ring-request other-active-res other-view-id token "1"))
+                        (is (= 200 (::response-status @active)))
+                        (is (= 200 (::response-status @other-active)))
+                        (is (= 1 @renders)
+                            "different subscriptions share one producer result")
+                        (is (str/includes? (::response-body @active) "before")
+                            "activation returns the serialized real unit")
+                        (let [retained (get-in @datastar/!feeds
+                                               [::view-unit/state
+                                                ::view-unit/units token])]
+                          (is (= #{view-id other-view-id}
+                                 (::view-unit/consumers retained)))
+                          (is (= 1 (count (::view-unit/read-observations retained)))
+                              "activation commits the producer query observation")
+                          (is (string? (::view-unit/serialized-element retained))))
+                        (is (empty? (@#'datastar/transition-view-units!
+                                    view-id unrelated)))
+                        (is (= 1 @renders)
+                            "an equal replay skips the producer")
+                        (let [[registry emitted]
+                              (@#'datastar/transition-active-units
+                               @datastar/!feeds after)
+                              left (get emitted view-id)
+                              right (get emitted other-view-id)]
+                          (reset! datastar/!feeds registry)
+                          (is (= 1 (count left)))
+                          (is (= left right)
+                              "one transition distributes identical bytes to both views")
+                          (is (str/includes? (first left) "after"))
+                          (is (= 2 @renders)))
+                        (swap! datastar/!feeds @#'datastar/detach-view view-id)
+                        (is (= #{other-view-id}
+                               (get-in @datastar/!feeds
+                                       [::view-unit/state ::view-unit/units token
+                                        ::view-unit/consumers])))
+                        (is (zero? @releases))
+                        (swap! datastar/!feeds @#'datastar/detach-view other-view-id)
+                        (is (= view-unit/empty-state
+                               (::view-unit/state @datastar/!feeds)))
+                        (is (= 1 @releases)
+                            "final socket close releases shared state"))
+                      (finally
+                        (set! db/*conn* original-conn))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 
