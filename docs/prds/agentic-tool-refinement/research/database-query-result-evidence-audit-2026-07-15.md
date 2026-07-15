@@ -325,3 +325,48 @@ Implement in this dependency order, with one owner per mechanism:
 
 The earliest unsettled contract is closed only by the final admitted native
 artifact. Unit tests alone do not close P0b.
+
+## Coordinate-containment correction — 2026-07-15
+
+The first composition-door implementation did not prove the retained
+operation coordinate. `operation-coordinate-valid?` accepted any complete map
+on the final attachment whose `t` was no later than the final `t`; it never
+resolved the named commit. Replacing a real operation commit with a random,
+unretained UUID therefore left `coordinate_valid` true. A retained sibling or
+later containing commit with the same transaction number had the same defect.
+
+The shortest correction reuses the authoritative original-transaction
+coordinate resolver already owned by `seon.db`; it does not add another
+history walker in the web or Inspect boundary. For every distinct operation
+point, the door supplies the request-scoped final immutable head and the
+operation `t` to `resolve-transaction-coordinate!`, then accepts the point only
+when the writer returns that exact complete coordinate. The writer walks raw
+retained Konserve commits, verifies the frozen head is retained and remains an
+ancestor of current main, skips force/branch metadata commits that repeat a
+transaction number, and returns the unique original commit. A missing commit,
+wrong containing commit, abandoned/non-ancestor head, attachment mismatch,
+ambiguous history, or transport failure becomes one bounded evidence status;
+no operation bytes are admitted to the scorer.
+
+The correction is grounded in:
+
+- Seon `195aef0bc9273d750a33c4fac3c5733fd20ddb9d` before the edit;
+- maintained Datahike `eb3e2239b650635977fdc8e73e7c657b23bf3383`
+  at `reference-code/datahike/`, where `versioning/commit-as-db` resolves a
+  commit key directly and `parent-commit-ids` exposes its retained parents;
+- maintained Konserve `df6818d43ea3363a808cd051c0d68917f1b987a9`
+  at `reference-code/konserve/`, the storage boundary traversed by the writer;
+- `src/seon/db/writer.clj`, whose `stored-ancestor?`,
+  `transaction-origin-candidates`, and
+  `handle-resolve-transaction-coordinate` are the one retained-history owner;
+- `src/seon/db.cljs` and `src/seon/db/replica.cljs`, whose closed async
+  resolver surface returns coordinates or bounded error values; and
+- `test/seon/db/transaction_coordinate_test.clj`, whose real writer-backed
+  fixtures prove valid later-head resolution, repeated-`t` force commits,
+  missing transactions, wrong attachments, and abandoned non-ancestor heads.
+
+The web regression must additionally freeze the exact final coordinate before
+resolution, prove a valid historical operation point projects inline, and
+prove nonexistent, wrong-containing, and non-ancestor points return only a
+bounded non-inline status. The Inspect fixture consumes that status and fails
+closed. The admitted live native artifact remains the program-level exit.

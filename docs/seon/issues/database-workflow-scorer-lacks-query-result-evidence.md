@@ -143,3 +143,22 @@ Focused gates are green:
 The issue remains open only for the admitted live generated sample and its
 native-log read-back. That proof is the next boundary, not part of this source
 unit.
+
+## Coordinate-containment gap — 2026-07-15
+
+The composition checkpoint exposed a retained-history hole before the live
+sample: `coordinate_valid` checked only equal database/branch plus
+`operation-t <= final-t`. A random unretained commit UUID, a wrong containing
+commit with the same transaction number, or an abandoned sibling coordinate
+could therefore be labeled valid without ever resolving the commit.
+
+The fix must reuse `seon.db/resolve-transaction-coordinate!` against the exact
+request-scoped final head and compare its unique returned original coordinate
+with the captured operation point. The writer already owns retained Konserve
+ancestry and the repeated-`t` force-commit distinction; the web boundary must
+not grow a second history validator. Resolution absence, mismatch,
+non-ancestry, ambiguity, or transport failure is a bounded non-inline evidence
+status and the scorer fails closed. Until the focused CLJS and offline
+regressions land, the preceding green checkpoint does not establish coordinate
+containment and the issue remains open for both this correction and the
+admitted native proof.
