@@ -182,7 +182,9 @@
                                 {:tx-data (into (db/malli->datahike-schema
                                                   [::ai/id ::ai/provider ::ai/model
                                                    ::ai/temperature ::ai/max-tokens
-                                                   ::ai/thinking ::ai/timeout-ms])
+                                                   ::ai/thinking ::ai/timeout-ms
+                                                   ::ai/base-url ::ai/api-key-env
+                                                   ::ai/extra-body-edn])
                                                 (db/tx-meta-datahike-schema))})))
                      (.then (fn [_] conn))))))))
 
@@ -277,5 +279,60 @@
                                "a no-override agent = EXACTLY the global row (byte-parity)")
                            (is (= "global-model" (::ai/model none))
                                "an absent agent = the global row")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest resolved-config-time-travels-complete-transport-intent
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (let [extra-a "{:chat_template_kwargs {:enable_thinking false}}"
+                  extra-b "{:chat_template_kwargs {:enable_thinking true}}"]
+              (-> (db/transact!
+                    {:seon.db/tx-data
+                     [{::ai/id "config"
+                       ::ai/provider :openai-compat
+                       ::ai/model "snapshot-a"
+                       ::ai/base-url "http://127.0.0.1:18081/v1"
+                       ::ai/timeout-ms 120000
+                       ::ai/api-key-env "MODEL_KEY_A"
+                       ::ai/extra-body-edn extra-a}]})
+                  (.then
+                    (fn [result]
+                      (is (true? (:seon.db/ok? result)) "row A lands")
+                      (let [db-a @conn]
+                        (-> (db/transact!
+                              {:seon.db/tx-data
+                               [{::ai/id "config"
+                                 ::ai/model "snapshot-b"
+                                 ::ai/base-url "http://127.0.0.1:18082/v1"
+                                 ::ai/timeout-ms 90000
+                                 ::ai/api-key-env "MODEL_KEY_B"
+                                 ::ai/extra-body-edn extra-b}]})
+                            (.then
+                              (fn [result]
+                                (is (true? (:seon.db/ok? result)) "row B lands")
+                                (let [a (ai/resolved-config {:seon.db/db db-a})
+                                      b (ai/resolved-config {:seon.db/db @conn})
+                                      a-config (::ai/resolved-config a)
+                                      b-config (::ai/resolved-config b)
+                                      a-digest (::ai/extra-body-digest a-config)]
+                                  (is (= "snapshot-a" (::ai/model a-config)))
+                                  (is (= "http://127.0.0.1:18081/v1"
+                                         (::ai/base-url a-config)))
+                                  (is (= 120000 (::ai/timeout-ms a-config)))
+                                  (is (= "MODEL_KEY_A" (::ai/api-key-env a-config)))
+                                  (is (= 64 (count a-digest))
+                                      "effective extra-body bytes have a bounded digest")
+                                  (is (= :config-row
+                                         (get-in a [::ai/provenance
+                                                    ::ai/extra-body-digest])))
+                                  (is (= :default
+                                         (get-in a [::ai/provenance
+                                                    ::ai/temperature])))
+                                  (is (= "snapshot-b" (::ai/model b-config)))
+                                  (is (not= a-digest
+                                            (::ai/extra-body-digest b-config))
+                                      "a later config value cannot rewrite historical intent"))))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

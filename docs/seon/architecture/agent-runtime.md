@@ -691,7 +691,7 @@ facts it reads.
 ## Nothing wedges — bounded execution through the one chokepoint
 
 Nothing can permanently wedge the pod. All execution reaches the runtime
-through **one door** (`seon.eval`, the exec service), and four existing
+through **one door** (`seon.eval`, the exec service), and five existing
 mechanisms — extended, never duplicated — make every hang a value:
 
 - **One bound: `race-timeout`.** Every await self-bounds by racing the one
@@ -704,6 +704,12 @@ mechanisms — extended, never duplicated — make every hang a value:
   every provider adapter preserves it, and a known remote job is cancelled
   best-effort. Arbitrary in-process work has no preemptive cancellation on one
   event loop; the next two mechanisms absorb its late settlement.
+- **One immutable config per provider attempt.** The retry thunk captures one
+  database value and complete coordinate, resolves the agent's complete
+  non-secret transport configuration once, and passes that value through
+  dispatch and the adapter without reactive rereads. A later retry may capture
+  a newer value, but both attempts become ordered database facts and any drift
+  invalidates formal capability scoring.
 - **One in-pod reaper: the ticker.** The run deadline + `close-overdue-runs!` on
   the one 30s beat is the outer watchdog; per-await bounds are the inner
   one. There is no second in-pod watchdog, heartbeat service, or in-flight

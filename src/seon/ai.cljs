@@ -5,9 +5,10 @@
    without forking an adapter ns.
 
    One singleton row (identity `::id` = \"config\") carries up to
-   eight attrs: `::provider`, `::model`, `::temperature`,
+   ten attrs: `::provider`, `::model`, `::temperature`,
    `::max-tokens`, `::thinking`, `::timeout-ms`, `::base-url`,
-   `::api-key-env`. Adapters ([[seon.ai.openai-compat]],
+   `::api-key-env`, `::dg-backend`, and `::extra-body-edn`. Adapters
+   ([[seon.ai.openai-compat]],
    [[seon.ai.anthropic]]) read it PER CALL via [[current]] —
    reactive-context: no cached atom, absent row/attr = each adapter's
    shipped defaults, byte-identical wire bodies to the pre-C-18 output.
@@ -44,6 +45,7 @@
    message."
   (:require [clojure.string :as str]
             [cljs.reader :as reader]
+            ["node:crypto" :as node-crypto]
             [seon.agent.ctx :as ctx]
             [seon.config :as config]
             [seon.db :as db]
@@ -273,8 +275,9 @@
 ;; unreachable there (task #30, 2026-06-16). ::tools / ::tool-choice stay
 ;; request-opt-only (inherently per-call; no persisted form yet).
 (schema/register! ::extra-body-edn [:string {:min 1}])
+(schema/register! ::extra-body-digest [:string {:min 64 :max 64}])
 
-;; The RESOLVED five-key LLM config as a VALUE — what an agent runs
+;; The RESOLVED LLM config as a VALUE — what an agent runs
 ;; under. NEVER stored (owner correction 2026-07-04, derive-don't-store:
 ;; the per-turn `llm-*` stamping this shape once fed is deleted);
 ;; [[resolved-config]] derives it from ANY db value on demand — the live
@@ -290,7 +293,12 @@
    [::model       {:optional true} ::model]
    [::temperature {:optional true} ::temperature]
    [::max-tokens  {:optional true} ::max-tokens]
-   [::thinking    {:optional true} ::thinking]])
+   [::thinking    {:optional true} ::thinking]
+   [::timeout-ms  {:optional true} ::timeout-ms]
+   [::base-url    {:optional true} ::base-url]
+   [::api-key-env {:optional true} ::api-key-env]
+   [::dg-backend  {:optional true} ::dg-backend]
+   [::extra-body-digest {:optional true} ::extra-body-digest]])
 
 ;; The SHIPPED per-provider defaults for the `::resolved-config` keys —
 ;; the LAST tier of the ONE resolution chain (request opt → agent
@@ -298,18 +306,21 @@
 ;; default constants FROM here (seon.ai.openai-compat, seon.ai.anthropic)
 ;; and [[resolved-config]] reports them — one map, zero drift.
 ;; :openai-compat shares the deepseek adapter's wire path and fallbacks.
-;; :diffusiongemma ships NONE of the five (the worker owns the weights
-;; and its gen-config caps). Endpoint/timeout/key-env defaults stay
-;; adapter-private — they are not part of the resolved-config surface.
+;; The worker still owns DiffusionGemma weights and generation caps. Material
+;; endpoint/timeout/backend defaults live here too: adapters and historical
+;; resolution must report one value rather than drift independently.
 (def shipped-defaults
   "Per-provider shipped defaults for the `:seon.ai/resolved-config` keys."
   {:deepseek       {::model "deepseek-v4-pro" ::temperature 0.7
-                    ::max-tokens 4096 ::thinking "false"}
+                    ::max-tokens 4096 ::thinking "false"
+                    ::timeout-ms 60000
+                    ::base-url "https://api.deepseek.com/v1"}
    :openai-compat  {::model "deepseek-v4-pro" ::temperature 0.7
-                    ::max-tokens 4096 ::thinking "false"}
+                    ::max-tokens 4096 ::thinking "false"
+                    ::timeout-ms 60000}
    :anthropic      {::model "claude-opus-4-8" ::max-tokens 16000
-                    ::thinking "false"}
-   :diffusiongemma {}})
+                    ::thinking "false" ::timeout-ms 60000}
+   :diffusiongemma {::dg-backend :control}})
 
 ;; The config attrs a row (or the env) may carry — shared shape for
 ;; [[sync-tx-data]]'s two inputs and the row read.
@@ -564,7 +575,12 @@
    [::model       {:optional true} ::source]
    [::temperature {:optional true} ::source]
    [::max-tokens  {:optional true} ::source]
-   [::thinking    {:optional true} ::source]])
+   [::thinking    {:optional true} ::source]
+   [::timeout-ms  {:optional true} ::source]
+   [::base-url    {:optional true} ::source]
+   [::api-key-env {:optional true} ::source]
+   [::dg-backend  {:optional true} ::source]
+   [::extra-body-digest {:optional true} ::source]])
 (schema/register! ::resolved-config-request
   [:map
    [:seon.db/db :seon.db/db-val]
@@ -573,6 +589,15 @@
   [:map
    [::resolved-config ::resolved-config]
    [::provenance      ::provenance]])
+
+(defn- extra-body-digest
+  "SHA-256 of the exact database-owned EDN bytes when they parse as a map."
+  [raw]
+  (let [parsed (try (reader/read-string raw) (catch :default _ nil))]
+    (when (map? parsed)
+      (-> (.createHash node-crypto "sha256")
+          (.update raw "utf8")
+          (.digest "hex")))))
 
 (defn resolved-config
   "The effective LLM config an agent runs under, derived from a db value.
@@ -606,16 +631,25 @@
                       (contains? defaults k)  [(get defaults k)  :default]))
         [prov prov-src] (or (pick ::provider {}) [:deepseek :default])
         defaults  (get shipped-defaults prov {})]
-    (reduce
-      (fn [acc k]
-        (if-let [[v src] (pick k defaults)]
-          (-> acc
-              (assoc-in [::resolved-config k] v)
-              (assoc-in [::provenance k] src))
-          acc))
-      {::resolved-config {::provider prov}
-       ::provenance      {::provider prov-src}}
-      [::model ::temperature ::max-tokens ::thinking])))
+    (let [resolved
+          (reduce
+            (fn [acc k]
+              (if-let [[v src] (pick k defaults)]
+                (-> acc
+                    (assoc-in [::resolved-config k] v)
+                    (assoc-in [::provenance k] src))
+                acc))
+            {::resolved-config {::provider prov}
+             ::provenance      {::provider prov-src}}
+            [::model ::temperature ::max-tokens ::thinking ::timeout-ms
+             ::base-url ::api-key-env ::dg-backend])]
+      (if-let [[raw src] (pick ::extra-body-edn defaults)]
+        (if-let [digest (extra-body-digest raw)]
+          (-> resolved
+              (assoc-in [::resolved-config ::extra-body-digest] digest)
+              (assoc-in [::provenance ::extra-body-digest] src))
+          resolved)
+        resolved))))
 
 (defn agent-max-retries
   "The per-agent LLM retry COUNT for agent `id`.
@@ -696,7 +730,7 @@
   []
   (or (::dg-backend (current))
       (::dg-backend (env-row))
-      :control))
+      (::dg-backend (:diffusiongemma shipped-defaults))))
 
 ;; ============================================================
 ;; Shared system-prompt resolution — request override → the cluster's

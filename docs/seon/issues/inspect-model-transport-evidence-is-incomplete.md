@@ -9,12 +9,13 @@ tags: [issue, agent, database, research]
 
 ## Problem
 
-`POST /agents/run` and the retained Inspect `.eval` project the effective model,
-sampling, and thinking values but omit the OpenAI-compatible base URL and
-adapter timeout. A completed log can therefore name immutable model bytes while
-failing to prove which endpoint served them or which request timeout governed
-the call. That is insufficient provenance for a formal capability result or a
-comparison between model arms.
+`POST /agents/run` and the retained Inspect `.eval` project model intent only
+after a run finishes. They omit the OpenAI-compatible base URL and adapter
+timeout, and the adapter may reread reactive configuration while assembling one
+request. A completed log therefore cannot prove which immutable database value,
+endpoint, model bytes, timeout layers, or response identity governed any
+provider attempt. Final intent is insufficient provenance for a formal
+capability result or comparison between model arms.
 
 ## Evidence
 
@@ -34,23 +35,33 @@ place those values in `/agents/run` evidence. Inspect should preserve the pod's
 projection rather than opening a second database client or inventing another
 configuration authority.
 
+The complete grounded contract is in
+[[../../prds/agentic-tool-refinement/research/model-transport-evidence-audit-2026-07-15]].
+It also finds that retries retain only a count, known response `model` and
+`system_fingerprint` fields are discarded, and the outer attempt cap is
+distinct from the adapter timeout and run deadline.
+
 ## Owner
 
-Strengthen the existing `seon.ai/resolved-config` projection and have the one
-`/agents/run` response owner retain its transport fields from the same immutable
-database value as the reported coordinate. `seon_inspect.solver` remains a
-lossless evidence consumer. Per-call effective evidence must not be inferred
-from current environment state after the run.
+Strengthen the existing `seon.ai/resolved-config` projection, then capture one
+immutable database value and resolved transport value at the existing retry
+thunk for each attempt. Dispatch and adapters consume that value without
+rereads. Ordered bounded attempt facts connect to the turn and flow through the
+one `/agents/run` response; `seon_inspect.solver` remains a lossless evidence
+consumer. Per-call evidence is never inferred from final or current state.
 
 ## Acceptance
 
 - Transact AI row A with a distinct endpoint and timeout, retain its complete
   coordinate, then transact row B with different values.
 - Resolve A through `seon.db/at-coordinate` and prove the effective AI
-  projection returns A's endpoint and timeout, never B's.
-- `/agents/run` reports endpoint, adapter timeout, immutable model identity,
-  and database coordinate from the same effective request configuration, and
-  the Inspect solver retains them unchanged in `.eval` metadata.
+  projection returns A's endpoint, timeout, credential-source name, and
+  extra-body digest, never B's.
+- A fake fetch that transacts B after attempt capture still receives and records
+  only A; no field is reread from B while assembling the request.
+- `/agents/run` reports ordered per-attempt coordinates, endpoints, adapter and
+  outer timeouts, immutable model identity, outcomes, and present response
+  identity; the Inspect solver retains them unchanged in `.eval` metadata.
 - A static admitted run rejects mid-run transport/configuration drift rather
   than treating the final coordinate as proof for every earlier provider call.
 - Missing coordinate fields, wrong attachment, an unretained commit, or absent

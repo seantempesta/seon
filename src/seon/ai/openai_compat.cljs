@@ -101,19 +101,19 @@
 ;; `seon.ai/shipped-defaults` (:deepseek entry — :openai-compat shares
 ;; this wire path and the same fallbacks), so the queryable resolver
 ;; (`seon.ai/resolved-config`) reports exactly what this adapter falls
-;; back to. Endpoint + timeout stay adapter-private.
+;; back to, including endpoint and timeout.
 (def ^:private defaults            (:deepseek ai/shipped-defaults))
 (def ^:private default-model       (:seon.ai/model defaults))
 ;; The /v1 ROOT (not the full chat-completions URL) — the SDK appends
 ;; /chat/completions itself.
-(def ^:private default-endpoint    "https://api.deepseek.com/v1")
+(def ^:private default-endpoint    (:seon.ai/base-url defaults))
 (def ^:private default-temperature (:seon.ai/temperature defaults))
 (def ^:private default-max-tokens  (:seon.ai/max-tokens defaults))
 ;; Wall-clock timeout for the HTTP call. A hung API stops wedging the
 ;; agent loop — turn fails with a timeout error and the next user
 ;; message kicks again. Override via the config row's
 ;; :seon.ai/timeout-ms (SEON_AI_TIMEOUT_MS).
-(def ^:private default-timeout-ms  60000)
+(def ^:private default-timeout-ms  (:seon.ai/timeout-ms defaults))
 
 ;; Thinking mode (deepseek-v4-pro). The API DEFAULTS TO ENABLED, which
 ;; is slow — a long-ctx thinking call can blow past the 60s wall-clock

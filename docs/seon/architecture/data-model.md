@@ -468,6 +468,7 @@ The run model + FSM live in [[agent-runtime]].
 | `:seon.agent.turn/llm-usage` | `:string` | string / one | |
 | `:seon.agent.turn/llm-meta` | `:string` | string / one | optional EDN provider metadata |
 | `:seon.agent.turn/usage-estimated?` | `:boolean` | boolean / one | usage came from the canonical token estimator |
+| `:seon.agent.turn/llm-attempts` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | ordered bounded provider-attempt evidence; absence means no attempt |
 | `:seon.agent.turn/evals` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned evals (cascade-retract) |
 
 The run's `:seon.agent.run/cause` is only the message that opened the run; later
@@ -479,20 +480,30 @@ schedule/internal turns omit it. This is a fact about the runtime's assignment,
 not provenance copied onto arbitrary transactions and not safely inferable from
 the run opener.
 
-**Model config is DERIVED, never stored.** The config an agent runs under is
-a pure function of the db: `seon.ai/resolved-config` takes
-`{:seon.db/db db :seon.agent/id id}` and resolves each of the five keys
-(provider/model/temperature/max-tokens/thinking) through the ONE chain — the
-agent's own override datom → the global `{:seon.ai/id "config"}` row →
-`seon.ai/shipped-defaults` — returning the `:seon.ai/resolved-config` value
+**Model config is DERIVED, never stored.** Configuration intent is a pure
+function of the db: `seon.ai/resolved-config` takes
+`{:seon.db/db db :seon.agent/id id}` and resolves the material behavioral and
+transport keys—provider, model, sampling, output cap, thinking, adapter timeout,
+endpoint, credential-source name, diffusion backend, and effective extra-body
+digest—through the ONE chain: the agent's own override datom → the global
+`{:seon.ai/id "config"}` row → `seon.ai/shipped-defaults`. It returns the
+`:seon.ai/resolved-config` value
 PLUS `:seon.ai/provenance` (per-key `:agent-override`/`:config-row`/
 `:default`, derived by re-walking the chain, not stored). No per-turn
-config datoms exist; datahike is bitemporal, so the config any PAST turn ran
-under is the same fn over that turn's frozen basis:
+resolved-config snapshot exists. Datahike is bitemporal, so intent at a past
+coordinate is the same function over that immutable value:
 `(ai/resolved-config {:seon.db/db (db/at-coordinate rendered-coordinate)
                       :seon.agent/id id})`.
-The `POST /agents/run` door computes `model_config` this way at response
-time; the bench ledger consumes that runtime-derived value.
+
+Intent at the prompt or final-run coordinate does not prove a provider call.
+Every retry attempt therefore records its own complete database coordinate,
+ordinal, normalized non-secret endpoint/config projection, timeout layers,
+outcome, and present response identity as component facts connected to the
+turn. Request fields remain derivable from the attempt coordinate; response
+identity and outcome are non-derivable evidence. `POST /agents/run` projects
+those ordered bounded facts. A compatibility `model_config` may be derived only
+when all attempts agree; drift or missing attempt evidence rejects formal
+capability scoring.
 
 **Per-agent config = intent, one chain.** The agent entity carries optional
 `:seon.ai/agent-provider`/`-model`/`-temperature`/`-max-tokens`/`-thinking`

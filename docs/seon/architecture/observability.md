@@ -58,6 +58,12 @@ flag:
   the run opener because a run can absorb later messages.
 - The existing projections: prompt size (tokens at display), `llm-usage` /
   `llm-meta`, the `:seon.eval` component refs, status, retries.
+- **Provider attempts as facts** — every retry attempt connects to the turn
+  with its ordinal, complete immutable database coordinate, resolved non-secret
+  transport projection, adapter and outer timeout layers, outcome, and present
+  response model/fingerprint/request identity. The adapter consumes that one
+  resolved value without rereading mutable config. Missing response fields stay
+  absent; credentials, headers, and signed parameters never enter evidence.
 
 **Datom vs blob is decided by size, never by kind.** The DB stores projections
 and small values; large text — a prompt, a raw reply, a big eval result —
@@ -241,12 +247,12 @@ path, await the derived `:idle` of the run it woke, return the truthful
 reply plus termination metadata (turns/evals scoped to this request's
 window, closed-reason, timed-out), an ordered `eval_evidence` projection of
 that same window's eval ids, times, sources, success facts, and present
-narration, and `model_config` — the RESOLVED LLM
-config the agent runs under (provider/model/temperature/max-tokens/
-thinking), COMPUTED at response time by the pure resolver
-`seon.ai/resolved-config` (agent overrides → config row → shipped
-defaults; derive-don't-store, [[data-model]] §4.4 — per-turn historical
-exactness is the same resolver over an as-of db). Inspect AI drives per-sample
+narration, plus the ordered bounded provider-attempt facts connected to those
+turns. The pure `seon.ai/resolved-config` reconstructs configuration intent at
+each attempt coordinate; stored attempt facts preserve non-derivable response
+identity and outcome. A response-time final coordinate is never mislabeled as
+call evidence. Inspect AI copies the projection unchanged and rejects missing
+or drifting transport evidence before capability scoring. Inspect AI drives per-sample
 ephemeral clusters by port through this same production boundary; there is no
 in-process evaluator lifecycle. The answer key never enters the pod — scoring
 stays host-side. Benchmark vocabulary is harness-side only.

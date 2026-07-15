@@ -103,7 +103,7 @@
 (def ^:private defaults           (:anthropic ai/shipped-defaults))
 (def ^:private default-model      (:seon.ai/model defaults))
 (def ^:private default-max-tokens (:seon.ai/max-tokens defaults))
-(def ^:private default-timeout-ms 60000)
+(def ^:private default-timeout-ms (:seon.ai/timeout-ms defaults))
 
 (defn- api-key
   "The Anthropic bearer key from `ANTHROPIC_API_KEY` in process.env, or
