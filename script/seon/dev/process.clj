@@ -692,48 +692,68 @@
                (start-owned! id #(spawn-detached! config spec))]
            (wait-ready! config spec started)))))))
 
-(defn- unwind-started! [config ids]
+(defn- unwind-owned! [ownerships]
   (let [failures
         (reduce
-         (fn [acc id]
+         (fn [acc ownership]
            (try
-             (stop! config id)
+             ((:seon.dev.process/release! ownership))
              acc
              (catch Throwable error
-               (conj acc {:seon.dev.process/id id
+               (conj acc {:seon.dev.process/id
+                          (:seon.dev.process/id ownership)
                           :seon.dev.process/message (ex-message error)
                           :seon.dev.process/data (ex-data error)}))))
          []
-         (reverse ids))]
+         (reverse ownerships))]
     (when (seq failures)
       (throw
-       (ex-info "Failed to unwind every process started by this invocation."
+       (ex-info "Failed to unwind every startup resource acquired by this invocation."
                 {:seon.dev.process/unwind-failures failures})))
     nil))
 
 (defn with-startup-ownership
-  "Run one startup transition with signal-safe ownership of new processes."
+  "Run one startup transition with signal-safe ownership of new resources."
   [config transition]
   (let [monitor (Object.)
         state (atom {:seon.dev.process/shutting-down? false
-                     :seon.dev.process/started []})
-        begin-shutdown!
+                     :seon.dev.process/ownerships []
+                     :seon.dev.process/unwind-claimed? false})
+        unwind-result (promise)
+        acquire-owned!
+        (fn acquire-owned!
+          ([id acquire!]
+           (acquire-owned! id acquire! #(stop! config id)))
+          ([id acquire! release!]
+           (locking monitor
+             (when (:seon.dev.process/shutting-down? @state)
+               (throw
+                (ex-info "Seon startup was interrupted before resource acquisition."
+                         {:seon.dev.process/id id})))
+             ;; Acquisition, exact publication, and inverse registration are
+             ;; one phase. Shutdown either closes admission first or waits for
+             ;; a complete identity whose inverse can run.
+             (swap! state update :seon.dev.process/ownerships conj
+                    {:seon.dev.process/id id
+                     :seon.dev.process/release! release!})
+             (acquire!))))
+        claim-unwind!
         #(locking monitor
-           (swap! state assoc :seon.dev.process/shutting-down? true)
-           (:seon.dev.process/started @state))
-        start-owned!
-        (fn [id spawn!]
-          (locking monitor
-            (when (:seon.dev.process/shutting-down? @state)
-              (throw
-               (ex-info "Seon startup was interrupted before process spawn."
-                        {:seon.dev.process/id id})))
-            ;; Publication and ownership are one synchronized phase. A shutdown
-            ;; hook either closes this phase before it begins, or waits until
-            ;; the exact managed record can be drained.
-            (swap! state update :seon.dev.process/started conj id)
-            (spawn!)))
-        unwind! #(unwind-started! config (begin-shutdown!))
+           (let [{:seon.dev.process/keys [unwind-claimed? ownerships]} @state]
+             (swap! state assoc :seon.dev.process/shutting-down? true)
+             (when-not unwind-claimed?
+               (swap! state assoc :seon.dev.process/unwind-claimed? true)
+               ownerships)))
+        unwind!
+        #(if-some [ownerships (claim-unwind!)]
+           (try
+             (unwind-owned! ownerships)
+             (deliver unwind-result {:seon.dev.process/unwound? true})
+             (catch Throwable error
+               (deliver unwind-result {:seon.dev.process/unwind-error error})
+               (throw error)))
+           (when-let [error (:seon.dev.process/unwind-error @unwind-result)]
+             (throw error)))
         runtime (Runtime/getRuntime)
         shutdown-hook
         (Thread.
@@ -749,7 +769,7 @@
          "seon-startup-process-unwind")]
     (.addShutdownHook runtime shutdown-hook)
     (try
-      (transition start-owned!)
+      (transition acquire-owned!)
       (catch Throwable error
         (try
           (unwind!)

@@ -118,11 +118,23 @@ converged writer survives while invocation-owned watcher/pod groups unwind.
 The branch/CLI/process selector passes 31 tests/153 assertions. Evidence is in
 [[research/ordinary-startup-sigint-ownership-2026-07-15]].
 
+Retained branch interruption now consumes that same inverse. The one startup
+ownership monitor retains ordered resource inverses as well as process ids,
+making exact native create publication and detached pod publication indivisible
+with respect to shutdown. Reverse unwind stops and proves the target pod absent
+before the existing close owner reads the current target head and releases and
+deletes. Only a branch actually created by this invocation is claimed; adoption
+and a converged pod remain resumable. A failed pod inverse retains both exact
+identities and admits no destructive writer request. Real OS-SIGINT proof covers
+pre-spawn, delayed spawn publication, readiness, converged reuse, and cleanup
+failure. The branch-only gate passes 4 tests/61 assertions. Evidence is in
+[[research/retained-branch-sigint-ownership-2026-07-15]]. The exact combined
+branch/CLI/process checkpoint passes 34 tests/190 assertions.
+
 The next dependency-ordered slice is public ownership: expose the settled
 internal branch transition through CLI/status/MCP without changing its inverse.
 A real default plus ACME create/write/restart/close checkpoint follows before
-the restart/crash matrix. An unproved branch process inverse continues to
-forbid branch deletion.
+the restart/crash matrix.
 
 The exact dependency/source audit, live probes, transition matrix, and ordered
 implementation slices are in

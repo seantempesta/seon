@@ -345,7 +345,7 @@
                         :seon.dev.process/id])))
         (is (= "injected startup failure"
                (some-> failure ex-cause ex-message)))
-        (is (= "Failed to unwind every process started by this invocation."
+        (is (= "Failed to unwind every startup resource acquired by this invocation."
                (some-> failure .getSuppressed first ex-message)))
         (is (state/process-identity-alive? record)
             "failed cleanup retains the exact retryable managed record"))

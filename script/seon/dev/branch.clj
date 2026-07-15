@@ -398,21 +398,27 @@
     record))
 
 (defn- ensure-created!
-  [lifecycle-path record]
-  (if (::launch-descriptor record)
-    record
-    (let [response
-          (->> (::create-request record)
-               (writer-call! (::source-descriptor record))
-               (require-success! ::protocol/create-branch-response)
-               (require-create-response! record))
-          descriptor (compose-descriptor record)]
-      (write-record!
-       lifecycle-path
-       (assoc record
-              ::phase :seon.dev.branch.phase/branch-retained
-              ::create-response response
-              ::launch-descriptor descriptor)))))
+  ([lifecycle-path record]
+   (ensure-created! lifecycle-path record (constantly nil)))
+  ([lifecycle-path record retain-created!]
+   (if (::launch-descriptor record)
+     record
+     (let [response
+           (->> (::create-request record)
+                (writer-call! (::source-descriptor record))
+                (require-success! ::protocol/create-branch-response)
+                (require-create-response! record))
+           descriptor (compose-descriptor record)
+           created (assoc record
+                          ::phase :seon.dev.branch.phase/branch-retained
+                          ::create-response response
+                          ::launch-descriptor descriptor)]
+       ;; Retain the exact inverse before publishing the post-mutation phase.
+       ;; The surrounding ownership monitor prevents shutdown from observing
+       ;; a created native branch without either this inverse or its record.
+       (when (::protocol/created? response)
+         (retain-created! created))
+       (write-record! lifecycle-path created)))))
 
 (defn- branch-configuration
   [configuration record]
@@ -473,16 +479,19 @@
     response))
 
 (defn- close-record!
-  [configuration lifecycle-path record]
-  (let [closing (write-record!
-                 lifecycle-path
-                 (assoc record
-                        ::desired-state :seon.dev.branch.state/closed
-                        ::phase :seon.dev.branch.phase/stopping-pod))
-        target-config (branch-configuration configuration closing)]
-    (process/stop! target-config process/pod-id)
-    (process-absent! target-config)
-    (let [descriptor (::launch-descriptor closing)
+  ([configuration lifecycle-path record]
+   (close-record! configuration lifecycle-path record false))
+  ([configuration lifecycle-path record pod-absence-proved?]
+   (let [closing (write-record!
+                  lifecycle-path
+                  (assoc record
+                         ::desired-state :seon.dev.branch.state/closed
+                         ::phase :seon.dev.branch.phase/stopping-pod))
+         target-config (branch-configuration configuration closing)]
+     (when-not pod-absence-proved?
+       (process/stop! target-config process/pod-id))
+     (process-absent! target-config)
+     (let [descriptor (::launch-descriptor closing)
           target-database (::launch/database descriptor)
           ensure-request
           (protocol/ensure-database-request
@@ -541,7 +550,7 @@
           (write-record! lifecycle-path closed)
           (cleanup-private! closed)
           (fs/delete-if-exists lifecycle-path)
-          closed)))))
+          closed))))))
 
 (defn open!
   "Retain exact intent, create/adopt one branch, and start only its pod."
@@ -550,41 +559,62 @@
   (validate! ::open-request request "The branch open request is invalid.")
   (let [configuration (::configuration request)
         lifecycle-path (::lifecycle-path request)]
-    (state/with-lock
-     configuration :branch 30000
-     (fn []
-       (let [manifest (source-manifest! configuration)
-             retained (read-record! lifecycle-path)
-             record
-             (if retained
-               (require-retained-request! retained request configuration)
-               (write-record!
-                lifecycle-path
-                (new-intent request
-                            (exact-source-descriptor! configuration))))
-             created (ensure-created! lifecycle-path record)
-             target-config (branch-configuration configuration created)
-             pod (get (process/specs target-config manifest) process/pod-id)
-             converged? (process/converged? target-config pod)]
-         (write-record! lifecycle-path
-                        (assoc created ::phase
-                               :seon.dev.branch.phase/pod-starting))
-         (try
-           (process/ensure! target-config pod)
-           (write-record! lifecycle-path
-                          (assoc created ::phase
-                                 :seon.dev.branch.phase/ready))
-           (catch Throwable throwable
-             (when-not converged?
-               (try
-                 (close-record! configuration lifecycle-path created)
-                 (catch Throwable cleanup
-                   (throw
-                    (ex-info "Branch pod launch and exact cleanup both failed."
-                             {:seon.dev.branch/launch-error (.toString throwable)
-                              :seon.dev.branch/cleanup-error (.toString cleanup)}
-                             cleanup)))))
-             (throw throwable))))))))
+    (process/with-startup-ownership
+     configuration
+     (fn [acquire-owned!]
+       (state/with-lock
+        configuration :branch 30000
+        (fn []
+          (let [manifest (source-manifest! configuration)
+                retained (read-record! lifecycle-path)
+                record
+                (if retained
+                  (require-retained-request! retained request configuration)
+                  (write-record!
+                   lifecycle-path
+                   (new-intent request
+                               (exact-source-descriptor! configuration))))
+                owned-branch (atom nil)
+                {:seon.dev.branch/keys [created target-config pod]}
+                (acquire-owned!
+                 :seon.dev.branch/native-branch
+                 (fn []
+                   (let [created
+                         (ensure-created! lifecycle-path record
+                                          #(reset! owned-branch %))
+                         target-config
+                         (branch-configuration configuration created)
+                         pod
+                         (get (process/specs target-config manifest)
+                              process/pod-id)
+                         converged? (process/converged? target-config pod)]
+                     ;; A converged pod proves this invocation did not acquire
+                     ;; the already-live branch runtime even if retained writer
+                     ;; evidence happens to say how the branch was first made.
+                     (when converged? (reset! owned-branch nil))
+                     {:seon.dev.branch/created created
+                      :seon.dev.branch/target-config target-config
+                      :seon.dev.branch/pod pod}))
+                 (fn []
+                   (when-let [created @owned-branch]
+                     (let [target-config
+                           (branch-configuration configuration created)]
+                       ;; A failed or uncertain pod inverse must retain the
+                       ;; branch. Only exact process absence admits deletion.
+                       (process-absent! target-config)
+                       (close-record! configuration lifecycle-path created
+                                      true)))))]
+            (write-record! lifecycle-path
+                           (assoc created ::phase
+                                  :seon.dev.branch.phase/pod-starting))
+            (process/ensure!
+             target-config pod
+             (fn [id acquire!]
+               (acquire-owned! id acquire!
+                               #(process/stop! target-config id))))
+            (write-record! lifecycle-path
+                           (assoc created ::phase
+                                  :seon.dev.branch.phase/ready)))))))))
 
 (defn close!
   "Stop one retained branch pod and delete its exact current native branch."
