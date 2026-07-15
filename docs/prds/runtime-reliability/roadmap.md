@@ -123,16 +123,17 @@ contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Cut every public shutdown caller over to the frozen clean-or-force contract** | The coordinator now joins generation-matched pod and writer application evidence to exact containment, rejects false absence and malformed targets, correlates HTTP status with its typed body, and shares one absolute deadline through pod -> writer -> watcher. Operator/branch/process proof is 60 tests/327 assertions; the exact portable CLJS proof is 2/18 | Commit the frozen contract, migrate ordinary down/restart/rebuild/reset and retained close/restart/open, then prove one source-frozen clean default restart before crash replacement, restore/undo, or multi-form work |
-| Database lifecycle | **Public caller cutover is the ordered spine; restore/undo research is complete and waits behind live restart proof** | Writer terminal publication, the portable pod lifecycle schema, anchored containment, and closed aggregate evidence are integrated as one component contract. The audit at `ac81c0bd` proves initial writable restores must select exact retained branch heads rather than arbitrary interior `as-of` cuts | Migrate callers without another stop path; prove generation-matched quiescence, exact writer releases, watcher-last absence, and attachment/coordinate continuity; then run unexpected crash replacement and implement retained-head restore/undo |
-| Reactive/database views | **Bounded transition metrics are integrated; remaining consumer migration stays parallel to lifecycle caller work** | `365052f0` lands candidate-only routing; `afc70d3f` proves six retained read shapes; `6760f632` adds bounded unit metrics; `cdc28ac6` defines the exact gzip/feed/browser proof. Root/agent/debug/data still retain page-specific transition paths | Continue pure unit-engine consumer migration and tests, but execute the scripted live browser/feed proof only after unit-1 source and the default runtime are frozen |
+| Top-level integration | **Freeze source, retire the legacy default generation once, then prove a clean second restart** | The frozen coordinator and every ordinary/retained caller are integrated through `27292551`. The combined branch/CLI/process gate is 70 tests/375 assertions; the exact portable CLJS gate is 2/18. Read-only inspection proves the currently running watcher/writer/pod records predate containment, so their first coordinated retirement must honestly classify forced rather than clean | Wait for the active reactive source slice to commit; capture the pre-migration coordinate; run the first migration restart; verify new contained records; run a second restart and require generation-matched pod quiescence, exact writer releases, watcher-last absence, and database attachment/coordinate continuity before crash, restore/undo, or multi-form work |
+| Database lifecycle | **Caller cutover is complete; live migration/restart evidence is the ordered spine** | `48d1fbcc` prevents replacement before lifecycle proof, `bb279aba` routes CLI down/restart/rebuild/reset through the coordinator, and `27292551` routes retained close/restart/open through the same mechanism. The audit at `ac81c0bd` proves initial writable restores must select exact retained branch heads rather than arbitrary interior `as-of` cuts | Prove forced legacy retirement followed by a clean contained restart; then run unexpected crash replacement and implement retained-head restore/undo |
+| Reactive/database views | **Bounded transition metrics are integrated; the last debug/raw consumer migration is active in parallel** | `365052f0` lands candidate-only routing; `afc70d3f` proves six retained read shapes; `6760f632` adds bounded unit metrics; `cdc28ac6` defines the exact gzip/feed/browser proof. The remaining debug projection still reaches ambient database state through `ctx-preview*` | Finish the one explicit-database unit-engine path and delete the ambient legacy projection, but execute live browser/feed proof only after the source-frozen two-restart lifecycle proof |
 | Agent runtime correctness | **Turn-boundary quiescence and exact process containment are settled inputs; production child cutover waits for clean restart** | Receipt/recovery Slice A remains complete at `defb8014`; parent-owned launch capability is defined at `f2c1f1c8`; admission closes at turn boundaries; generation-bound coordinator evidence now prevents crossed pod/process results | After caller and clean-restart proof, start the synthetic disposable-child and hostile hard-containment gate in parallel with crash/restore work; do not production-cut eval sooner |
 
 Current scheduling card:
 
-1. **Ordered spine:** commit the frozen clean-or-force contract → cut ordinary
-   and retained callers over → prove clean default restart → prove unexpected crash
-   replacement → restore/undo → multi-form failure proof.
+1. **Ordered spine:** source freeze → first restart that honestly retires the
+   legacy uncontained generation as forced → verify new contained records →
+   second generation-matched clean restart → unexpected crash replacement →
+   restore/undo → multi-form failure proof.
 2. **Parallel lane A:** migrate remaining root/agent/debug/data consumers onto
    the one reactive unit engine without operating the default cluster.
 3. **Parallel lane B:** strengthen the offline Inspect/autocomplete frozen
@@ -156,11 +157,11 @@ The ordered top-level sequence is therefore:
    integrated through `74bfa7e2`;
 4. **In progress:** ordinary and retained SIGINT ownership, public branch
    lifecycle, anchored containment, generation-matched application evidence,
-   per-generation grace/trigger capture, and the closed clean-or-force
-   coordinator contract are complete at their focused gates. Public CLI and
-   retained-branch callers still bypass that coordinator; migrate all of them,
-   retire the legacy default exactly once, and continue through clean restart,
-   crash, restore/undo, and multi-form proof;
+   per-generation grace/trigger capture, the closed clean-or-force coordinator,
+   and every public CLI/retained caller are complete at their focused and
+   combined gates. Retire the legacy default exactly once, prove the next
+   contained restart clean, and continue through crash, restore/undo, and
+   multi-form proof;
 5. graduate units 2 and 6 from bounded consumers into their complete acceptance
    matrices while starting unit 3/4 only from their settled contracts;
 6. complete canvas, Inspect/autocomplete, and independent artifact consumption
