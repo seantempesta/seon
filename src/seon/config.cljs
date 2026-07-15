@@ -794,7 +794,7 @@
   {:malli/schema
    [:function
     [:=> [:cat] :map]
-    [:=> [:cat 'map?] :map]]}
+    [:=> [:cat :map] :map]]}
   ([]
    (or (when-let [f @!db-config-view] (f))
        (resolve-config-singleton (or (load-manifest) {}))))
@@ -955,7 +955,7 @@
   {:malli/schema
    [:function
     [:=> [:cat] :int]
-    [:=> [:cat 'map?] :int]]}
+    [:=> [:cat :map] :int]]}
   ([]
    (get (render-config) :seon.config.render/database-edn-cap 16384))
   ([database]

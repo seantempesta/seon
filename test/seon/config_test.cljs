@@ -55,6 +55,14 @@
                                         :seon.agent.ctx/priority 100}]}
                      :seon.config/root-context {}}))))
 
+(deftest database-arity-function-schemas-are-pure-data
+  (doseq [v [#'config/config-view #'config/database-edn-cap]]
+    (let [form (:malli/schema (meta v))]
+      (is (some? (m/schema form)))
+      (is (not-any? #(and (seq? %) (= 'quote (first %)))
+                    (tree-seq coll? seq form))
+          "runtime indexing must not receive an unevaluated quoted predicate"))))
+
 (deftest every-config-singleton-attribute-has-a-datahike-shape
   (let [form  (schema/schema-definition :seon.config/singleton)
         attrs (->> (rest form)
