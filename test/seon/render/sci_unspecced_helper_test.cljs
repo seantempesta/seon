@@ -39,18 +39,8 @@
 (def ^:private !schema-state (atom nil))
 
 (use-fixtures :each
-  {:before #(reset! !schema-state
-                    {::forms (schema/snapshot)
-                     ::projection (schema/current-projection)})
-   :after  #(let [{::keys [forms projection]} @!schema-state]
-              (if projection
-                (do
-                  (schema/activate-projection! projection)
-                  (schema/restore! forms))
-                (do
-                  (schema/restore! forms)
-                  (reset! @#'schema/!projection nil)
-                  (schema/relink-registry!))))})
+  {:before #(reset! !schema-state (schema/snapshot-state))
+   :after  #(schema/restore-state! @!schema-state)})
 
 ;; ---------------------------------------------------------------------------
 ;; BUG A — UNSPECCED aliased helper resolves under SCI bounding.

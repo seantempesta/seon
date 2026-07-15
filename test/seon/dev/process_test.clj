@@ -6,7 +6,8 @@
             [seon.dev.artifact :as artifact]
             [seon.dev.process :as process]
             [seon.dev.state :as state])
-  (:import [java.net ServerSocket]))
+  (:import [java.io BufferedReader InputStreamReader]
+           [java.net ServerSocket SocketException]))
 
 (defn- test-config []
   (let [directory (fs/create-temp-dir {:prefix "seon-operator-test-"})]
@@ -225,6 +226,59 @@
       (spit (str log) "[:test] Build completed.\n" :append true)
       (is (process/ready? configuration spec record))
       (finally (fs/delete-tree (:seon.dev.test/directory configuration))))))
+
+(deftest pod-readiness-follows-current-admission-response
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        port-file (str (fs/path directory "pod-port"))
+        configuration (assoc configuration
+                             :seon.dev.config/http-port-file port-file)
+        !status (atom 200)
+        server (ServerSocket. 0)
+        server-loop
+        (future
+          (try
+            (while (not (.isClosed server))
+              (with-open [socket (.accept server)
+                          input (BufferedReader.
+                                  (InputStreamReader.
+                                    (.getInputStream socket) "UTF-8"))
+                          output (.getOutputStream socket)]
+                ;; Consume the request headers; the ready probe sends no body.
+                (loop []
+                  (when-let [line (.readLine input)]
+                    (when-not (str/blank? line) (recur))))
+                (let [status @!status
+                      reason (if (= 200 status) "OK" "Service Unavailable")
+                      body "{}"
+                      response
+                      (str "HTTP/1.1 " status " " reason "\r\n"
+                           "Content-Type: application/edn\r\n"
+                           "Content-Length: " (count body) "\r\n"
+                           "Connection: close\r\n\r\n"
+                           body)]
+                  (.write output (.getBytes response "UTF-8"))
+                  (.flush output))))
+            (catch SocketException _)))
+        port (.getLocalPort server)
+        _ (spit port-file (str port))
+        pid (.pid (java.lang.ProcessHandle/current))
+        record {:seon.dev.process/id process/pod-id
+                :seon.dev.process/pid pid
+                :seon.dev.process/start-instant (state/process-start-instant pid)}
+        spec {:seon.dev.process/id process/pod-id
+              :seon.dev.process/readiness :seon.dev.process.readiness/pod}]
+    (try
+      (is (process/ready? configuration spec record))
+      (reset! !status 503)
+      (is (not (process/ready? configuration spec record))
+          "readiness can close after the process previously became ready")
+      (reset! !status 200)
+      (is (process/ready? configuration spec record))
+      (finally
+        (.close server)
+        @server-loop
+        (fs/delete-tree directory)))))
 
 (deftest acme-watcher-readiness-owns-only-the-acme-client-build
   (let [configuration (test-config)

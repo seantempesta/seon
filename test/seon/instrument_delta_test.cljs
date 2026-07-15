@@ -4,9 +4,11 @@
     [cljs.test :refer [deftest is testing]]
     [goog.object :as gobj]
     [malli.core :as m]
+    [seon.agent.loop :as agent-loop]
     [seon.client :as client]
     [seon.db :as db]
     [seon.instrument :as instrument]
+    [seon.runtime.admission :as admission]
     [seon.schema :as schema]))
 
 (defn probe-a [x] x)
@@ -84,6 +86,25 @@
     (is (= #{'example.compiled 'example.always}
            (reloaded-namespaces message))
         "instrument exactly the namespaces the Shadow Node client reloaded")))
+
+(deftest shadow-publication-closes-before-build-and-does-not-rearm-on-failure
+  (let [!effects (atom [])]
+    (with-redefs [db/attached? (constantly true)
+                  admission/begin-publication!
+                  (fn [] (swap! !effects conj :close) true)
+                  admission/mark-unavailable!
+                  (fn [_] (swap! !effects conj :failed) true)
+                  admission/publish-committed!
+                  (fn []
+                    (swap! !effects conj :publish)
+                    {::admission/published? false})
+                  agent-loop/install-ticker!
+                  (fn [] (swap! !effects conj :ticker))]
+      (is (true? (client/shadow-build-notify! {:type :build-start})))
+      (is (true? (client/shadow-build-notify! {:type :build-failure})))
+      (is (true? (client/shadow-build-notify! {:type :build-complete})))
+      (is (= [:close :failed :publish] @!effects)
+          "a failed generation never rearms autonomous ticker work"))))
 
 (deftest exact-data-and-delta-refresh-only-affected-wrappers
   (let [function-schemas-before (m/function-schemas :cljs)

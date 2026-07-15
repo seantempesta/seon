@@ -41,6 +41,7 @@
     [seon.log :as log]
     [seon.platform :as platform]
     [seon.repl :as repl]
+    [seon.runtime.admission :as admission]
     [seon.schema :as schema]
     [seon.web.router :as router]))
 
@@ -88,6 +89,17 @@
                             "Pragma"        "no-cache"
                             "Expires"       "0"})
   (.end res body))
+
+(defn- handle-readiness!
+  "Report current executable admission; this can turn false after startup."
+  [_req res]
+  (let [ready? (admission/available?)]
+    (write-status!
+      res
+      (if ready? 200 503)
+      "application/edn; charset=utf-8"
+      (pr-str (assoc (admission/state)
+                     :seon.runtime.admission/available? ready?)))))
 
 (defn- serve-static! [res url]
   (if-let [[prefix root] (some (fn [[p r]]
@@ -347,8 +359,14 @@
    adapter and delegates to the single agent-creation transition above."
   {:malli/schema [:=> [:catn [::ring-request ::ring-request]] :any]}
   [ring-request]
-  (handle-create-agent! (:seon.http/node-req ring-request)
-                        (:seon.http/node-res ring-request)))
+  (if (admission/available?)
+    (handle-create-agent! (:seon.http/node-req ring-request)
+                          (:seon.http/node-res ring-request))
+    (write-status!
+      (:seon.http/node-res ring-request)
+      503 "text/plain; charset=utf-8"
+      (get-in (admission/unavailable)
+              [:seon/error :seon.error/message]))))
 
 (defn- handle-complete-agent!
   "POST /agent/<id>/complete — external control: CLOSE the agent's open run
@@ -830,6 +848,7 @@
 ;; handlers are injected here.
 (router/install!
   {:seon.web.router/static        serve-static!
+   :seon.web.router/readiness     handle-readiness!
    :seon.web.router/chat          handle-chat!
    :seon.web.router/stop          handle-stop!
    :seon.web.router/resume        handle-resume!

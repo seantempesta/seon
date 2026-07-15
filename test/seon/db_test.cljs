@@ -338,8 +338,8 @@
   (is (nil? (validate-values! [{::name "Alpha" ::rank 1}]))))
 
 (deftest candidate-value-validation-does-not-require-early-publication
-  (let [before-forms      (schema/snapshot)
-        before-projection (schema/current-projection)
+  (let [before-state      (schema/snapshot-state)
+        before-forms      (schema/snapshot)
         attr              :seon.db-test.candidate/value]
     (try
       ;; Model the live runtime: a committed immutable projection is active,
@@ -354,16 +354,7 @@
                     (catch :default e e))]
         (is (= :seon.db/invalid-value (:seon.db/error (ex-data error)))))
       (finally
-        (if before-projection
-          (do
-            (schema/activate-projection! before-projection)
-            ;; Candidate declarations may legitimately be newer than the
-            ;; committed projection. Restore both halves of that state.
-            (schema/restore! before-forms))
-          (do
-            (schema/restore! before-forms)
-            (reset! @#'schema/!projection nil)
-            (schema/relink-registry!)))))))
+        (schema/restore-state! before-state)))))
 
 (deftest validate-values!-throws-on-bad-value
   (let [ex (try

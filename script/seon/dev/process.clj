@@ -272,7 +272,8 @@
 (defn- http-ready? [port]
   (try
     (let [connection ^HttpURLConnection
-          (.openConnection (URL. (str "http://127.0.0.1:" port "/")))]
+          (.openConnection
+            (URL. (str "http://127.0.0.1:" port "/_seon/ready")))]
       (.setConnectTimeout connection 1000)
       (.setReadTimeout connection 1000)
       (.setInstanceFollowRedirects connection false)
@@ -320,12 +321,9 @@
     true))
 
 (defn- pod-ready? [config spec record]
-  (let [port-file (:seon.dev.config/http-port-file config)
-        log (:seon.dev.process/log record)]
+  (let [port-file (:seon.dev.config/http-port-file config)]
     (and (runtime-bootstrap-ready? spec)
          (fs/regular-file? port-file)
-         (fs/regular-file? log)
-         (str/includes? (tail-text log) "[seon.client] auto-boot ready")
          (some-> (slurp port-file) str/trim parse-long http-ready?))))
 
 (defn ready?
@@ -401,7 +399,7 @@
                         (:seon.dev.config/writer-repl-port config))))))
     :seon.dev.process/pod
     (boolean (when-let [port (:seon.dev.config/http-port config)]
-               (http-ready? port)))
+               (tcp-ready? port)))
     false))
 
 (defn ownership-conflicts

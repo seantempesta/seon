@@ -73,6 +73,7 @@
             [seon.repair :as repair]
             [seon.repair.candidates :as candidates]
             [seon.repl.internal :as internal]
+            [seon.runtime.admission :as admission]
             [seon.schema :as schema]
             [seon.schema.internal :as schema.internal]
             [seon.test.runner :as test-runner]))
@@ -4368,32 +4369,31 @@
               (when (and (::candidate-projection candidate-outcome)
                          (:seon.db/ok? recorded)
                          (::tee-recorded? recorded))
-                (::candidate-projection candidate-outcome))]
+                (::candidate-projection candidate-outcome))
+              publication
+              (cond
+                new-projection
+                (admission/publish-committed!)
+
+                (seq changed-schemas)
+                (do
+                  (schema/restore! schemas-before)
+                  {::admission/published? true})
+
+                :else
+                {::admission/published? true})
+              publication-ok?
+              (true? (::admission/published? publication))]
           ;; A declaration becomes runtime-authoritative only when its schema
           ;; fact landed in the same accepted transaction. record-eval! may
           ;; preserve the transcript by retrying without a broken tee; in that
           ;; recovery case the database did NOT accept the declaration, so the
           ;; collector must roll back instead of leaving a process-only schema.
-          (if new-projection
-            (let [stats
-                  (instrument/instrument-projection-delta!
-                    {::instrument/old-projection old-projection
-                     ::instrument/new-projection new-projection
-                     ::instrument/changed-schema-keys changed-schemas
-                     ::instrument/changed-syms changed-function-syms})]
-              (if (false? (::instrument/ok? stats))
-                (error/record!
-                  {:seon.error/raw
-                   (ex-info
-                     "Accepted program generation could not publish all function contracts"
-                     {:seon.instrument/stats stats})
-                   :seon.error/fault :core})
-                (schema/activate-projection! new-projection)))
-            (when (seq changed-schemas)
-              (schema/restore! schemas-before)))
           ;; Bind only the committed id. A failed recorder leaves no orphaned
           ;; result slot; a rejected allocation candidate is never observable.
-          (when (and (:seon.db/ok? recorded) (::ok? result))
+          (when (and publication-ok?
+                     (:seon.db/ok? recorded)
+                     (::ok? result))
             (let [live-value (if pending?
                                pending-promise
                                (::retained-value recorded))]
@@ -4427,6 +4427,7 @@
           ;; program projection publication both complete.
           (when (and (:seon.db/ok? recorded)
                      (::tee-recorded? recorded)
+                     publication-ok?
                      (::ok? result))
             ;; Phase 4 (mvp-completion-plan 2026-05-27) —
             ;; auto-test-run. After the tee tx, newly-defined tests run once.
@@ -4900,7 +4901,12 @@
                [::run-id :any]]
         :map]}
   [compile-state parsed agent-ns-sym agent-id turn-id run-id]
-  (let [;; §8b WORK FENCE — assert, in ONE atomic tx at the writer, that the
+  (if-not (admission/available?)
+    {:seon.eval/ids []
+     :seon.eval/n-ok 0
+     :seon.eval/n-fail 0
+     :seon/error (:seon/error (admission/unavailable))}
+    (let [;; §8b WORK FENCE — assert, in ONE atomic tx at the writer, that the
         ;; agent STILL owns run-id BEFORE any work. A supersede/watchdog-close
         ;; that landed DURING the LLM call moved/retracted the pointer, so this
         ;; CAS aborts → fence-lost? true → the doseq is skipped (no zombie eval
@@ -4949,7 +4955,8 @@
           recorded)]
     ;; Fence lost ⇒ iterate over nil (zero entries) — the batch is skipped, the
     ;; volatiles stay at their empty seed, and the return below flags :fenced?.
-    (doseq [entry (when-not fence-lost? parsed)]
+    (doseq [entry (when-not fence-lost? parsed)
+            :while (admission/available?)]
       (await
         (run-entry!
           (fn ^:async run-one-entry! []
@@ -4998,7 +5005,7 @@
                     (let [repaired-entries (internal/parse-forms
                                              (:seon.repair/source rep))]
                       (loop [es repaired-entries first? true]
-                        (when (seq es)
+                        (when (and (seq es) (admission/available?))
                           (let [e    (first es)
                                 shape (form-shape (:seon.repl/form e))
                                 note (when first?
@@ -5066,4 +5073,6 @@
     (cond-> {:seon.eval/ids    @eids
              :seon.eval/n-ok   @n-ok
              :seon.eval/n-fail @n-fail}
-      fence-lost? (assoc :seon.eval/fenced? true))))
+      fence-lost? (assoc :seon.eval/fenced? true)
+      (not (admission/available?))
+      (assoc :seon/error (:seon/error (admission/unavailable)))))))

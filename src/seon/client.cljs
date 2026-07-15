@@ -83,6 +83,7 @@
     ;; Required so the build includes it and `system-view`'s symbol resolves
     ;; via eval/lookup-value when render-agent-canvas renders root.
     [seon.render.system]
+    [seon.runtime.admission :as admission]
     ;; Routing-as-data — the `:seon.route/*` schema + the seeded core route
     ;; set; boot-seed! transacts (route/core-routes-tx). Required here so the
     ;; schema register! calls run and the build includes the seed builder.
@@ -302,16 +303,10 @@
   (log/info-console! "seon.client"
                      (str "reload #" (:reload-count @!state)
                           " — booted " (:boot-at @!state)))
-  ;; Hot-reload hygiene: re-install the per-agent wake trigger so
-  ;; tx-listener closures run the just-reloaded code.
-  ;; Async fire-and-forget — logs the re-armed ids / errors.
-  ;; Web feeds re-arm their own shared/lazy listeners from their namespace
-  ;; reload hooks; there is no always-on debug listener here.
-  (rehost-agent-runtimes!)
-  ;; Re-arm the ONE ticker so a hot reload doesn't stack timers and the tick
-  ;; body runs just-reloaded code (idempotent — clears the prior interval).
-  (agent-loop/install-ticker!)
-  (start-heartbeat!))
+  ;; Publication and rehosting belong to shadow-build-notify!, which sees
+  ;; build-start/failure/complete even when this namespace itself did not
+  ;; reload. An after-load hook cannot be the admission owner.
+  nil)
 
 (defn- shadow-reloaded-namespaces
   "Namespace symbols Shadow's Node client loaded for one completed build.
@@ -335,20 +330,37 @@
           sources)))
 
 (defn shadow-build-notify!
-  "Apply exact instrumentation after Shadow loads changed namespaces."
+  "Close on build start; reconstruct and rehost only after a complete build."
   {:malli/schema [:=> [:catn [::message :any]] :boolean]}
   [message]
-  (when (and (= :build-complete (:type message))
-             (db/attached?))
-    (let [namespace-syms (shadow-reloaded-namespaces message)
-          stats
-          (instrument/instrument-namespaces-from-db!
-            {::instrument/db @db/*conn*
-             ::instrument/namespace-syms namespace-syms})]
-      (log/info-console!
-        "seon.client"
-        (str "reload: exact instrumentation "
-             (pr-str (instrumentation-summary stats))))))
+  (when (db/attached?)
+    (case (:type message)
+      :build-start
+      (admission/begin-publication!)
+
+      :build-failure
+      (admission/mark-unavailable!
+        {:seon.error/raw
+         (ex-info "Shadow build failed while runtime publication was closed"
+                  {:seon.client/build-message message})
+         ::admission/reason "Shadow build failed"})
+
+      :build-complete
+      (let [publication (admission/publish-committed!)]
+        (log/info-console!
+          "seon.client"
+          (str "reload: committed publication "
+               (pr-str
+                 (instrumentation-summary
+                   (::admission/instrumentation publication)))))
+        (when (::admission/published? publication)
+          ;; Reinstall listeners/ticker only after the reloaded program is one
+          ;; verified generation. Web feeds re-arm their own lazy listeners.
+          (rehost-agent-runtimes!)
+          (agent-loop/install-ticker!)
+          (start-heartbeat!)))
+
+      nil))
   true)
 
 (defn ^:async mem-db
@@ -2375,16 +2387,25 @@
                         (first resumable-ids)
                         (first all-ids)
                         "root")]
-        (let [replay-stats
+        (let [_
+              (when-not (admission/begin-publication!)
+                (throw
+                  (ex-info "start-runtime!: program publication is already closed"
+                           (admission/state))))
+              replay-stats
               (await (replay-program-graph!
                        {::conn conn
                         ::compile-state compile-state
                         ::agent-id primary}))
               _ (log/info-console! "seon.client/start-runtime!"
                                    (str "replay: " (pr-str replay-stats)))
-              instrument-stats
-              (instrument/instrument-projection!
-                (schema/current-projection))
+              publication (admission/publish-committed!)
+              _ (when-not (::admission/published? publication)
+                  (throw
+                    (ex-info
+                      "start-runtime!: committed program reconstruction failed"
+                      publication)))
+              instrument-stats (::admission/instrumentation publication)
               _ (log/info-console! "seon.client/start-runtime!"
                                    (str "instrumentation: "
                                         ;; The complete result carries Malli's

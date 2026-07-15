@@ -87,37 +87,57 @@
 ;;; Registry Setup
 ;;; ---------------------------------------------------------------------------
 
-;; All registered domain schemas. `defonce` survives namespace reloads.
-(defonce ^:private *schemas (atom {}))
+;; One process-local schema state. Candidate declarations may run ahead of the
+;; active database-derived projection while an eval is being prepared; both
+;; views live in this one atom so projection publication is one Seon-visible
+;; mutation. The projection remains disposable and reconstructable from facts.
+(defonce ^:private !schema-state
+  (atom {:seon.schema.state/candidate-forms {}
+         :seon.schema.state/projection nil}))
 
-;; The one disposable compiled projection of the current database schema facts.
-;; During initial module loading this is nil and register! collects declarations
-;; in `*schemas`; after database reconciliation it is a complete immutable
-;; registry/catalog candidate.
-(defonce ^:private !projection (atom nil))
+(defn- candidate-forms []
+  (:seon.schema.state/candidate-forms @!schema-state))
 
-;; THE one registry seon installs as malli's process-global default: malli's
-;; built-in schemas + seon's mutable `*schemas` (read live on every lookup, so
-;; this single instance always reflects current registrations). A SINGLE
-;; memoized instance — `defonce` survives reloads — so the stomp-guard watch
-;; below can `identical?`-check it cheaply.
-(defonce ^:private seon-registry
+(defn- active-projection []
+  (:seon.schema.state/projection @!schema-state))
+
+(defn- active-forms []
+  (or (:seon.schema.projection/forms (active-projection))
+      (candidate-forms)))
+
+(defn- update-candidate-forms! [f & args]
+  (apply swap! !schema-state update
+         :seon.schema.state/candidate-forms f args))
+
+(defn- candidate-registry []
   (mr/composite-registry
-   (m/default-schemas)
-   (mr/mutable-registry *schemas)))
+    (m/default-schemas)
+    (mr/fast-registry (candidate-forms))))
+
+;; THE one stable registry facade Seon installs as Malli's process-global
+;; default. Once a projection is active it reads only that committed
+;; generation; candidate validation passes [[candidate-registry]] explicitly.
+;; Before first activation it reads module declarations so namespace loading
+;; can bootstrap normally. Normal activation never repoints Malli's default.
+(defonce ^:private seon-registry
+  (let [defaults (mr/fast-registry (m/default-schemas))]
+    (reify
+      mr/Registry
+      (-schema [_ type]
+        (or (mr/-schema defaults type)
+            (get (active-forms) type)))
+      (-schemas [_]
+        (merge (mr/-schemas defaults) (active-forms))))))
 
 (defn relink-registry!
-  "Repoint Malli's convenience default to Seon's current projection.
+  "Repoint Malli's convenience default to Seon's stable registry facade.
 
-   During initial module loading this uses the mutable declaration collector;
-   after database reconciliation it uses the immutable validated candidate.
    The bootstrap load wrapper calls this after Malli bundle loads that reset
-   their own default. The old private-atom watch is deliberately gone."
+   their own default. Normal projection publication does not call this
+   throwable integration boundary."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (mr/set-default-registry!
-    (or (:seon.schema.projection/registry @!projection)
-        seon-registry))
+  (mr/set-default-registry! seon-registry)
   true)
 
 ;; Initialize the global registry once at load time.
@@ -127,13 +147,13 @@
 ;; consistency with :string, :int, etc. The quoted predicate is pure data and
 ;; round-trips through the canonical database schema fact.
 (defonce ^:private _inst-type
-  (swap! *schemas assoc :inst 'inst?))
+  (update-candidate-forms! assoc :inst 'inst?))
 
 ;; :seon.db/lookup-ref-value — the value position in a lookup-ref. Datahike
 ;; accepts strings, uuids, keywords, and ints as unique-attr values.
 (defonce ^:private _lookup-ref-value-type
-  (swap! *schemas assoc :seon.db/lookup-ref-value
-         [:or :string :uuid :keyword :int]))
+  (update-candidate-forms! assoc :seon.db/lookup-ref-value
+                           [:or :string :uuid :keyword :int]))
 
 ;; :seon.db/ref — an intra-DB :db.type/ref. At transact time datahike
 ;; resolves any supported form to an eid: pos-int (existing eid), neg-int
@@ -141,11 +161,11 @@
 ;; attr k). Cross-DB handles are :uuid attrs with :seon.db/ref-to metadata —
 ;; NEVER :seon.db/ref. Reference: docs/prds/datahike-migration/ref-model-research.md.
 (defonce ^:private _ref-type
-  (swap! *schemas assoc :seon.db/ref
-         [:or
-          :int
-          :string
-          [:tuple :keyword :seon.db/lookup-ref-value]]))
+  (update-candidate-forms! assoc :seon.db/ref
+                           [:or
+                            :int
+                            :string
+                            [:tuple :keyword :seon.db/lookup-ref-value]]))
 
 ;; Generated persistent identity syntax is owned by `seon.db.id`, which loads
 ;; before `seon.db` registers slots that refer to `:seon.db/id`.  Keeping an
@@ -158,19 +178,20 @@
 ;; DEFINITION is a recursive, heterogeneous structure —
 ;; genuinely opaque, hence `:any` (the documented third-party-shape exception).
 (defonce ^:private _registry-key-type
-  (swap! *schemas assoc :seon.schema/registry-key :keyword))
+  (update-candidate-forms! assoc :seon.schema/registry-key :keyword))
 (defonce ^:private _definition-type
-  (swap! *schemas assoc :seon.schema/definition :any))
+  (update-candidate-forms! assoc :seon.schema/definition :any))
 (defonce ^:private _value-type
-  (swap! *schemas assoc :seon.schema/value :any))
+  (update-candidate-forms! assoc :seon.schema/value :any))
 (defonce ^:private _explanation-type
-  (swap! *schemas assoc :seon.schema/explanation [:maybe :map]))
+  (update-candidate-forms! assoc :seon.schema/explanation [:maybe :map]))
 (defonce ^:private _namespace-name-type
-  (swap! *schemas assoc :seon.schema/namespace-name :string))
+  (update-candidate-forms! assoc :seon.schema/namespace-name :string))
 (defonce ^:private _kvs-type
-  (swap! *schemas assoc :seon.schema/kvs [:vector :any]))
+  (update-candidate-forms! assoc :seon.schema/kvs [:vector :any]))
 (defonce ^:private _discarded-keys-type
-  (swap! *schemas assoc :seon.schema/discarded-keys [:set :seon.schema/registry-key]))
+  (update-candidate-forms! assoc :seon.schema/discarded-keys
+                           [:set :seon.schema/registry-key]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
@@ -185,7 +206,7 @@
    re-deriving the props lookup."
   {:malli/schema [:=> [:cat :keyword] :boolean]}
   [attr-key]
-  (internal/identity-attr? @*schemas attr-key))
+  (internal/identity-attr? (candidate-forms) attr-key))
 
 (defn ^:seon.fn/agent-facing? enum-members
   "Members of a registered `:enum` attr schema, or an empty vector.
@@ -196,7 +217,7 @@
    (keywords/strings/ints) — a third-party-structure boundary, hence `:any`."
   {:malli/schema [:=> [:cat :keyword] [:vector :any]]}
   [attr-key]
-  (internal/enum-members (get @*schemas attr-key)))
+  (internal/enum-members (get (candidate-forms) attr-key)))
 
 (defn ^:seon.fn/agent-facing? register!
   "Define a new attribute so facts using it can be saved and queried.
@@ -251,9 +272,9 @@
            :seon.schema/key k
            :seon.schema/definition v
            :seon.error/kind :user-input}))))
-  (internal/assert-compilable-schema! @*schemas k v)
-  (internal/assert-non-nilable-value-schema! @*schemas k v)
-  (swap! *schemas assoc k v)
+  (internal/assert-compilable-schema! (candidate-forms) k v)
+  (internal/assert-non-nilable-value-schema! (candidate-forms) k v)
+  (update-candidate-forms! assoc k v)
   k)
 
 (defn form-string
@@ -265,7 +286,7 @@
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]]
                   [:maybe :string]]}
   [k]
-  (some-> (get @*schemas k) pr-str))
+  (some-> (get (candidate-forms) k) pr-str))
 
 (defn build-projection
   "Build and validate one immutable runtime projection.
@@ -356,9 +377,10 @@
    facts. No validation or database read occurs here."
   {:malli/schema [:=> [:catn [::projection :map]] :map]}
   [projection]
-  (reset! *schemas (:seon.schema.projection/forms projection))
-  (reset! !projection projection)
-  (mr/set-default-registry! (:seon.schema.projection/registry projection))
+  (reset! !schema-state
+          {:seon.schema.state/candidate-forms
+           (:seon.schema.projection/forms projection)
+           :seon.schema.state/projection projection})
   projection)
 
 (defn activate!
@@ -372,13 +394,13 @@
   (activate-projection!
     (build-projection
       forms
-      (or (:seon.schema.projection/function-contracts @!projection) {}))))
+      (or (:seon.schema.projection/function-contracts (active-projection)) {}))))
 
 (defn current-projection
   "The active disposable projection, or nil during initial module loading."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
   []
-  @!projection)
+  (active-projection))
 
 (defn entity-catalog
   "Derived renderable entity catalog for the active schema projection.
@@ -388,8 +410,8 @@
    catalog built from canonical database forms. No catalog facts are stored."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (or (:seon.schema.projection/catalog @!projection)
-      (:seon.schema.projection/catalog (build-projection @*schemas))))
+  (or (:seon.schema.projection/catalog (active-projection))
+      (:seon.schema.projection/catalog (build-projection (candidate-forms)))))
 
 (defn current-keys
   "Snapshot of all currently-registered schema keywords.
@@ -398,13 +420,13 @@
    after an eval reveals what the form registered)."
   {:malli/schema [:=> [:cat] [:set :keyword]]}
   []
-  (set (keys @*schemas)))
+  (set (keys (candidate-forms))))
 
 (defn snapshot
   "Immutable `{schema-key form}` snapshot for one eval transition."
   {:malli/schema [:=> [:cat] :map]}
   []
-  @*schemas)
+  (candidate-forms))
 
 (defn changed-keys
   "Schema keys whose canonical form differs from `before`, including new keys."
@@ -413,7 +435,7 @@
   (into #{}
         (keep (fn [[k form]]
                 (when (not= form (get before k ::absent)) k)))
-        @*schemas))
+        (candidate-forms)))
 
 (defn restore!
   "Restore an exact registry snapshot after a failed eval.
@@ -422,7 +444,20 @@
    key-set-only rollback left failed redefinitions live."
   {:malli/schema [:=> [:catn [::before :map]] :nil]}
   [before]
-  (reset! *schemas before)
+  (update-candidate-forms! (constantly before))
+  nil)
+
+(defn ^:no-doc snapshot-state
+  "Capture the exact process-local schema state for isolated test restoration."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  @!schema-state)
+
+(defn ^:no-doc restore-state!
+  "Restore an exact schema-state snapshot captured by [[snapshot-state]]."
+  {:malli/schema [:=> [:catn [::state :any]] :nil]}
+  [state]
+  (reset! !schema-state state)
   nil)
 
 (defn register-all!
@@ -454,19 +489,19 @@
   "A map of all registered domain schemas (Malli's built-ins excluded)."
   {:malli/schema [:=> [:cat] :map]}
   []
-  @*schemas)
+  (candidate-forms))
 
 (defn ^:seon.fn/agent-facing? registered?
   "Check if a schema keyword is registered."
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :boolean]}
   [k]
-  (contains? @*schemas k))
+  (contains? (candidate-forms) k))
 
 (defn ^:seon.fn/agent-facing? schema-definition
   "The raw definition for a registered schema, or nil if not registered."
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
   [k]
-  (get @*schemas k))
+  (get (candidate-forms) k))
 
 (defn valid-candidate-value?
   "True when `value` satisfies `schema-key` in the current candidate.
@@ -479,7 +514,7 @@
                              [::value ::value]]
                   :boolean]}
   [schema-key value]
-  (m/validate schema-key value {:registry seon-registry}))
+  (m/validate schema-key value {:registry (candidate-registry)}))
 
 (defn explain-candidate-value
   "Explain a value rejected by the current declaration candidate.
@@ -490,7 +525,7 @@
                              [::value ::value]]
                   ::explanation]}
   [schema-key value]
-  (m/explain schema-key value {:registry seon-registry}))
+  (m/explain schema-key value {:registry (candidate-registry)}))
 
 (defn ^:seon.fn/agent-facing? schemas-in-namespace
   "The `{keyword definition}` map of schemas registered under `ns-name`.
@@ -500,7 +535,7 @@
   [ns-name]
   (into {}
         (filter (fn [[k _]] (= (namespace k) ns-name)))
-        @*schemas))
+        (candidate-forms)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Development Helpers
@@ -510,7 +545,8 @@
   "Clear all registered schemas; testing only, use with caution."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (reset! *schemas {}))
+  (:seon.schema.state/candidate-forms
+    (update-candidate-forms! (constantly {}))))
 
 (comment
   ;; REPL exploration

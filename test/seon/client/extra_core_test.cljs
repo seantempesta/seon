@@ -24,17 +24,8 @@
 
 (defn- restore-schema-state!
   "Restore the exact collector/projection state that preceded replay."
-  [forms projection]
-  (if projection
-    (do
-      (schema/activate-projection! projection)
-      ;; The declaration candidate may contain later module-load forms that
-      ;; are intentionally absent from the last committed projection.
-      (schema/restore! forms))
-    (do
-      (schema/restore! forms)
-      (reset! @#'schema/!projection nil)
-      (schema/relink-registry!))))
+  [state]
+  (schema/restore-state! state))
 
 ;; ---------------------------------------------------------------------------
 ;; The capability, end-to-end. "An agent owns and evolves its own functions"
@@ -74,9 +65,9 @@
 
 (deftest downstream-fn-is-indexed-and-its-override-flows-through-a-late-bound-caller
   (async done
-    (let [before-extra      @client/!extra-core-vars
-          before-schemas    (schema/snapshot)
-          before-projection (schema/current-projection)]
+    (let [before-extra @client/!extra-core-vars
+          before-state (schema/snapshot-state)
+          before-schemas (schema/snapshot)]
       (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
           (.then
             (fn [res]
@@ -165,7 +156,7 @@
           (.finally
             (fn []
               (reset! client/!extra-core-vars before-extra)
-              (restore-schema-state! before-schemas before-projection)
+              (restore-schema-state! before-state)
               (is (= before-schemas (schema/snapshot))
                   "replay cleanup preserves the exact declaration candidate")))
           (settle! done)))))

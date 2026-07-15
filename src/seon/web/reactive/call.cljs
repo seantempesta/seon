@@ -52,6 +52,7 @@
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.log :as log]
+    [seon.runtime.admission :as admission]
     [seon.web.reactive.transform :as transform]))
 
 ;; ============================================================
@@ -145,7 +146,12 @@
                        [::args [:sequential :any]]]
                   :any]}
   [agent-id fn-sym args]
-  (await
+  (if-not (admission/available?)
+    (let [refusal (admission/unavailable)]
+      {::ok? false
+       ::unavailable? true
+       ::error (get-in refusal [:seon/error :seon.error/message])})
+    (await
     (db/with-agent agent-id
       (fn []
         (db/with-tx-context {:seon.db/user [:seon.agent/id agent-id]
@@ -168,7 +174,7 @@
                       (.then  (fn [v] {::ok? true ::value v}))
                       (.catch (fn [e] {::ok? false ::error (err->msg e)})))
                   (catch :default e
-                    (js/Promise.resolve {::ok? false ::error (err->msg e)})))))))))))
+                    (js/Promise.resolve {::ok? false ::error (err->msg e)}))))))))))))
 
 ;; ============================================================
 ;; HTTP handler — POST /call. Opaque (req,res), like the debug +
@@ -257,7 +263,14 @@
    ;; symbol. NO logic here — extraction only.
    (handle! (:seon.http/node-req r) (:seon.http/node-res r)))
   ([^js req ^js res]
-   (let [fn-str (query-val req "fn")]
+   (if-not (admission/available?)
+     (write-json! res 503
+                  {::ok? false
+                   ::unavailable? true
+                   ::error
+                   (get-in (admission/unavailable)
+                           [:seon/error :seon.error/message])})
+     (let [fn-str (query-val req "fn")]
      (if (str/blank? fn-str)
        (write-json! res 400 {::ok? false
                              ::error "missing 'fn' query param"})
@@ -311,4 +324,4 @@
                  (.catch (fn [e]
                            (log/error-console! "seon.web.reactive.call" "/call threw" e)
                            (write-json! res 500 {::ok?   false
-                                                 ::error (str e)})))))))))))
+                                                 ::error (str e)}))))))))))))

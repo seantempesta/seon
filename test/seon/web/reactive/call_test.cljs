@@ -19,24 +19,15 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.repl :as repl]
+    [seon.runtime.admission :as admission]
     [seon.schema :as schema]
     [seon.web.reactive.call :as call]))
 
 (def ^:private !schema-state (atom nil))
 
 (use-fixtures :each
-  {:before #(reset! !schema-state
-                    {::schema-forms (schema/snapshot)
-                     ::schema-projection (schema/current-projection)})
-   :after  #(let [{::keys [schema-forms schema-projection]} @!schema-state]
-              (if schema-projection
-                (do
-                  (schema/activate-projection! schema-projection)
-                  (schema/restore! schema-forms))
-                (do
-                  (schema/restore! schema-forms)
-                  (reset! @#'schema/!projection nil)
-                  (schema/relink-registry!))))})
+  {:before #(reset! !schema-state (schema/snapshot-state))
+   :after  #(schema/restore-state! @!schema-state)})
 
 ;; A valid 14-char id (`:seon.db/id` is [:string {:min 14 :max 14}]).
 (def ^:private agent-id "tst-2606260000")
@@ -190,6 +181,24 @@
     (is (= 204 (:code @state)))
     (is (true? (:ended? @state)))
     (is (nil? (:body @state)) "the live feed, not a duplicate body, updates UI")))
+
+(deftest unavailable-runtime-refuses-before-capability-or-body-work
+  (let [{state ::state res ::res} (mock-res)]
+    (try
+      (reset! @#'admission/!state
+              {::admission/status :unavailable
+               ::admission/reason "test publication failure"})
+      ;; Deliberately no database connection and no request event API. Reaching
+      ;; capability-check or read-body would throw; a 503 proves the admission
+      ;; refusal owns the earliest boundary.
+      (call/handle! (call-req granted-sym nil) res)
+      (is (= 503 (:code @state)))
+      (is (true? (:ended? @state)))
+      (is (str/includes? (:body @state) "Runtime program generation"))
+      (finally
+        (reset! @#'admission/!state
+                {::admission/status :available
+                 ::admission/generation 0})))))
 
 (defn- with-seeded-conn
   "Open a fresh agent conn, seed!, run `(f conn)` (a Promise), restore *conn*."

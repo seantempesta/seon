@@ -688,6 +688,84 @@
                 (get rejected-counts ::unresolvable-schema 0))))))
 
 #?(:cljs
+   (defn- live-wrapper?
+     "True when the qualified symbol currently carries one Malli wrapper."
+     [sym]
+     (when-let [[ns-sym fn-sym] (qualified-target-parts sym)]
+       (when-let [f (find-js-var ns-sym fn-sym)]
+         (or (some? (gobj/get f "malli$instrument$original"))
+             (and (some? (gobj/get f "malli$instrument$instrumented?"))
+                  (not (-simple-fixed-arity-fn? f))))))))
+
+#?(:cljs
+   (defn reconcile-projection!
+     "Rebuild all committed wrappers behind a closed runtime-admission gate.
+
+      Preparation validates the complete new target population before Malli
+      mutates a var. Reconciliation then unstruments the union of old and new
+      symbols, instruments the complete accepted generation, and verifies both
+      positive and removed/async-skipped wrapper state. The caller owns
+      admission, retry, projection publication, and fault recording."
+     {:malli/schema
+      [:=>
+       [:cat
+        [:map
+         [::old-projection {:optional true} [:maybe :map]]
+         [::new-projection :map]]]
+       :map]}
+     [{::keys [old-projection new-projection]}]
+     (if-not (enabled?)
+       {::enabled? false ::ok? true ::n-unstrumented 0
+        ::n-instrumented 0 ::accepted-syms #{} ::rejected []
+        ::verification-gaps []}
+       (let [registry (:seon.schema.projection/registry new-projection)
+             old-syms
+             (set (keys
+                    (:seon.schema.projection/function-contracts
+                      old-projection)))
+             new-contracts
+             (:seon.schema.projection/function-contracts new-projection)
+             new-syms (set (keys new-contracts))
+             all-syms (into old-syms new-syms)
+             targets
+             (mapv (fn [[sym form]]
+                     {::sym sym ::schema-form form ::registry registry})
+                   new-contracts)
+             {::keys [data accepted-syms rejected] :as prepared}
+             (prepare-targets targets)
+             fatal-rejections
+             (into [] (remove #(= ::skipped (::reason %))) rejected)]
+         (if (seq fatal-rejections)
+           (assoc prepared
+                  ::enabled? true
+                  ::ok? false
+                  ::n-unstrumented 0
+                  ::n-instrumented 0
+                  ::verification-gaps [])
+           (let [old-data (symbol-data all-syms)
+                 _ (when (seq old-data)
+                     (mi/unstrument! {:data old-data}))
+                 _ (when (seq data)
+                     (mi/instrument! {:data data :report ei/report-fn}))
+                 verification-gaps
+                 (into []
+                       (keep
+                         (fn [sym]
+                           (let [expected? (contains? accepted-syms sym)
+                                 actual? (boolean (live-wrapper? sym))]
+                             (when (not= expected? actual?)
+                               {::sym sym
+                                ::expected-wrapped? expected?
+                                ::actual-wrapped? actual?}))))
+                       all-syms)]
+             (assoc prepared
+                    ::enabled? true
+                    ::ok? (empty? verification-gaps)
+                    ::n-unstrumented (count all-syms)
+                    ::n-instrumented (count accepted-syms)
+                    ::verification-gaps verification-gaps)))))))
+
+#?(:cljs
    (defn- program-schema-rows
      "The canonical qualified-symbol/spec rows, in stable order."
      [db]

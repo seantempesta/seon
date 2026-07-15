@@ -6,6 +6,7 @@
     [seon.agent.message]
     [seon.db :as db]
     [seon.route]
+    [seon.runtime.admission :as admission]
     [seon.schema :as schema]
     [seon.test.async :refer [settle!]]
     [seon.web.router :as router]))
@@ -71,6 +72,27 @@
   (let [response (request! "POST" "/_seon/operator/config")]
     (is (= 200 (::response-status response)))
     (is (= "{:seon.state/ok? true}" (::response-body response)))))
+
+(deftest closed-admission-refuses-post-before-the-domain-handler
+  (let [!invocations (atom 0)
+        prior (admission/state)]
+    (try
+      (router/install!
+        {:seon.web.router/config-apply
+         (fn [_request ^js response]
+           (swap! !invocations inc)
+           (.writeHead response 200 #js {"Content-Type" "application/edn"})
+           (.end response "{:seon.state/ok? true}"))
+         :seon.web.router/same-origin? (constantly true)})
+      (reset! @#'admission/!state
+              {::admission/status :unavailable
+               ::admission/reason "injected publication failure"})
+      (let [response (request! "POST" "/_seon/operator/config")]
+        (is (= 503 (::response-status response)))
+        (is (zero? @!invocations)
+            "closed admission reaches neither parsing nor domain work"))
+      (finally
+        (reset! @#'admission/!state prior)))))
 
 (deftest route-facts-update-the-live-router-without-explicit-rebuild
   (async done

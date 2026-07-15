@@ -19,17 +19,52 @@
   (:require
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing]]
+    [malli.core :as m]
+    [malli.registry :as mr]
     [seon.agent]
     [my.plan]
     [seon.schema :as schema]
     [seon.test.runner]))
 
 (defn- unregister! [& ks]
-  (swap! @#'schema/*schemas #(apply dissoc % ks)))
+  (schema/restore! (apply dissoc (schema/snapshot) ks)))
 
 (defn- candidate-catalog []
   (:seon.schema.projection/catalog
     (schema/build-projection (schema/snapshot))))
+
+(deftest activation-publishes-one-state-through-a-stable-default-registry
+  (let [before (schema/snapshot-state)
+        attr :schematest.publication/value
+        setter-calls (atom 0)]
+    (try
+      (schema/relink-registry!)
+      (let [string-projection
+            (schema/build-projection (assoc (schema/snapshot) attr :string))]
+        (schema/activate-projection! string-projection)
+        (schema/register! attr :int)
+        (testing "candidate validation is explicit and does not leak to default"
+          (is (true? (schema/valid-candidate-value? attr 1)))
+          (is (false? (schema/valid-candidate-value? attr "active")))
+          (is (true? (m/validate attr "active")))
+          (is (false? (m/validate attr 1))))
+        (let [int-projection (schema/build-projection (schema/snapshot))]
+          (with-redefs [mr/set-default-registry!
+                        (fn [_]
+                          (swap! setter-calls inc)
+                          true)]
+            (schema/activate-projection! int-projection))
+          (testing "normal activation is one Seon-state publication"
+            (is (zero? @setter-calls))
+            (is (identical? int-projection (schema/current-projection)))
+            (is (identical? (:seon.schema.projection/forms int-projection)
+                            (schema/snapshot))))
+          (testing "the same installed default facade follows the active state"
+            (is (true? (m/validate attr 1)))
+            (is (false? (m/validate attr "retired"))))))
+      (finally
+        (schema/restore-state! before)
+        (schema/relink-registry!)))))
 
 (deftest projection-derives-exact-transitive-schema-dependencies
   (let [forms {:schematest.dependency/leaf :int

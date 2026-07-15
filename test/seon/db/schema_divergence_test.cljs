@@ -32,7 +32,7 @@
   "Drop test keys from the in-memory registry — keeps the process-shared
    registry clean across suite runs."
   [& ks]
-  (swap! @#'schema/*schemas #(apply dissoc % ks)))
+  (schema/restore! (apply dissoc (schema/snapshot) ks)))
 
 (defn- with-conn
   "Fresh :memory conn as ROOT `db/*conn*` for `body` (0-arg → Promise)."

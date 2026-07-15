@@ -55,6 +55,7 @@
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.log :as log]
+    [seon.runtime.admission :as admission]
     ;; Build-inclusion only (no alias): db->routes resolves datastar's core
     ;; handler symbols (`serve-root!`,
     ;; `handle-view-unit!`, `serve-agent-page!`, `open-agent-feed!`) at request time via
@@ -270,11 +271,23 @@
   [f]
   (fn [r] (f (node-req r) (node-res r)) hijacked))
 
+(defn- admitted-post-handler
+  "Refuse state-changing web admission before request parsing or domain work."
+  [f]
+  (fn [r]
+    (if (admission/available?)
+      (f (node-req r) (node-res r))
+      (write-text!
+        (node-res r) 503
+        (get-in (admission/unavailable)
+                [:seon/error :seon.error/message])))
+    hijacked))
+
 (defn- static-supplement
   "The non-core reitit routes, built from the injected handler set `h`
    (serve's handlers) + the directly-required `call` leaf handler."
   [h]
-  (let [{::keys [static chat stop resume clear log
+  (let [{::keys [static readiness chat stop resume clear log
                  complete agent-run config-apply]} h]
     [["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/js/{*path}"  {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
@@ -283,19 +296,23 @@
      ;; rides the same canonical Datastar feed registry as every seeded view.
      ["/data"     {:get {:handler (fn [r] (debug/data-page! (node-req r) (node-res r)) hijacked)}}]
      ["/data/feed" {:get {:handler (fn [r] (debug/data-feed! r) hijacked)}}]
+     ["/_seon/ready" {:get {:handler
+                             (fn [r]
+                               (readiness (node-req r) (node-res r))
+                               hijacked)}}]
 
-     ["/chat"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler chat)}}]
+     ["/chat"        {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler chat)}}]
      ["/stop"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler stop)}}]
-     ["/resume"      {:post {:middleware [:seon.route/same-origin] :handler (post-handler resume)}}]
-     ["/clear"       {:post {:middleware [:seon.route/same-origin] :handler (post-handler clear)}}]
-     ["/log"         {:post {:middleware [:seon.route/same-origin] :handler (post-handler log)}}]
+     ["/resume"      {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler resume)}}]
+     ["/clear"       {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler clear)}}]
+     ["/log"         {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler log)}}]
      ;; The one-shot composition door: start-or-reuse an agent in THE pod's
      ;; own cluster, deliver the input via the real wake path, run its OWN
      ;; FSM to idle, return the truthful reply + turn/eval metadata as JSON.
      ;; same-origin-gated like the others.
-     ["/agents/run"  {:post {:middleware [:seon.route/same-origin] :handler (post-handler agent-run)}}]
+     ["/agents/run"  {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler agent-run)}}]
      ["/_seon/operator/config" {:post {:middleware [:seon.route/same-origin]
-                                        :handler (post-handler config-apply)}}]
+                                        :handler (admitted-post-handler config-apply)}}]
      ;; The flat `/call` (back-compat this unit) hands the raw (req,res) to the
      ;; unchanged capability gate; the per-agent `/agent/{id}/call` is the
      ;; SEEDED core door (db->routes) → the same gate.

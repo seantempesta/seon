@@ -409,8 +409,7 @@
   ;; under an identity attr no marked schema declares — and vanishes
   ;; the moment the kind is marked (registry change, same db value).
   (async done
-    (let [before-forms      (schema/snapshot)
-          before-projection (schema/current-projection)]
+    (let [before-state (schema/snapshot-state)]
       (-> (client/open-agent-conn!)
           (.then
             (fn [conn]
@@ -449,14 +448,7 @@
                                 "marked → vanishes, same db value")))))))))
         (.finally
           (fn []
-            (if before-projection
-              (do
-                (schema/activate-projection! before-projection)
-                (schema/restore! before-forms))
-              (do
-                (schema/restore! before-forms)
-                (reset! @#'schema/!projection nil)
-                (schema/relink-registry!)))))
+            (schema/restore-state! before-state)))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
