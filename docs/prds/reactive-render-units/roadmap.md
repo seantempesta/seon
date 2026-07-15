@@ -101,7 +101,18 @@ value was wrapped in `datalog.parser.type.Constant` and therefore widened
 despite the prior documented cache contract. Focused JVM proof passes, the
 canonical Shadow Node build completes, and the full CLJS Datahike gate passes
 105 tests/825 assertions with zero failures or errors. The next ordered slice
-is the one `seon.db` observation-candidate projection.
+is the attribute-first `seon.db` observation-candidate projection and reverse
+index inside the existing `seon.web.view-unit` state. It can proceed without
+waiting for native branch/restart work: literal query attributes and exact
+index prefixes are settled inputs, while point-entity and comparator-aware
+range narrowing remain conservatively broad. Datastar must pass the complete
+coalesced change and explicitly union renderer-token mismatches before its
+all-unit traversal is removed. The database browser remains a consumer: its
+opaque cursor is validated and resolved before an observed index read, and
+cursor-backed feeds are frozen rather than current-head candidates.
+[[research/reverse-render-unit-candidate-selection-2026-07-15]] records the
+exact state shape, falsifier, file boundary, and implementation dependency
+edges.
 
 ## Research evidence
 
@@ -124,6 +135,9 @@ is the one `seon.db` observation-candidate projection.
 - [[research/agent-header-next-consumer-cutover-audit-2026-07-15]] — exact next
   page consumer, demanded-unit first-paint seam, deletion map, overlap boundary,
   and focused/live acceptance evidence.
+- [[research/reverse-render-unit-candidate-selection-2026-07-15]] — the
+  attribute-first reverse-index slice, opaque-cursor boundary, unrelated-write
+  falsifier, state derivation, and implementation dependency edges.
 
 ## Ordered work
 
@@ -144,12 +158,17 @@ is the one `seon.db` observation-candidate projection.
    routing path.
 3. Derive the conservative reverse candidate index from runtime-observed
    database read requests. **The Datahike public pure query/find-pull
-   projection is complete at `41764938`;** next expose one `seon.db`
-   observation-candidate boundary, then derive the existing unit state's
-   reverse index. Do not duplicate Datahike's parser or ship broad-query as an
-   interim mechanism.
+   projection is complete at `41764938`;** next expose one attribute-first
+   `seon.db` observation-candidate boundary, then derive the reverse index
+   inside the existing unit state. Literal query attrs and safe exact index
+   prefixes narrow; every unproved operation/range remains broad. Pass the
+   complete coalesced change plus explicit renderer-token mismatches into the
+   unit transition before deleting Datastar's all-unit traversal. Do not
+   duplicate Datahike's parser or ship broad-query as an interim mechanism.
    [[research/reverse-candidate-index-dependency-boundary-2026-07-15]] records
-   the coordinated cross-repo cut, deletion boundary, and falsifiable proof.
+   the coordinated cross-repo cut; the now-settled implementation boundary and
+   falsifiable proof are in
+   [[research/reverse-render-unit-candidate-selection-2026-07-15]].
    Exact result equality remains the final authority.
 4. Normalize equivalent subscribers across tabs and prove single execution.
    Add recent-output LRU reuse only if profiling crosses its acceptance gate.
