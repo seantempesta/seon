@@ -3,5 +3,4 @@ __pycache__/
 *.egg-info/
 logs/
 e1_inspect_samples.jsonl
-uv.lock
 .pytest_cache/

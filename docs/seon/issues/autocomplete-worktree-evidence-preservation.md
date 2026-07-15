@@ -92,6 +92,17 @@ commit, tracked change, database/blob path, or live process, and contains only
 a reproducible untracked `node_modules` symlink to the current checkout. Every
 other old checkout remains evidence-blocked. No cleanup was executed.
 
+The later ACME tool-refinement handback narrows one additional worktree.
+`/Users/sean/src/seon-acme-agentic-tool-refinement` is clean at `ecd8d889`, no
+running process names that checkout, and every file under its 30 MB
+`evals/runs/` tree is present byte-for-byte in the current checkout. Its branch
+source is integrated, patch-equivalent, or superseded. It nevertheless retains
+about 238 MB of ignored database state: approximately 226 MB under
+`data/clusters/acme-agentic-tool-refinement` and 15 MB under
+`data/clusters/acme`. Those bytes need a hash-backed duplicate,
+reproducible-discard, or archive/read-back disposition before the worktree is
+removed; the remaining gate is database evidence, not source integration.
+
 The follow-up read-only audit
 [[docs/prds/runtime-reliability/research/legacy-acme-archive-readback-runbook-2026-07-14]]
 captured live database checkpoints through the owning writers without opening a

@@ -27,12 +27,17 @@ exists because a dead eval bundle silently voided a GPU run once
 
 ```bash
 cd src-inspect-ai
-uv venv && uv pip install -e ".[test]"     # or: python -m venv .venv && .venv/bin/pip install -e ".[test]"
+uv sync --extra test
 ```
 
-`inspect-ai` installs from the vendored source `reference-code/inspect-ai`
-(`[tool.uv.sources]`) — the exact dev build everything here was proven against
-(`0.1.dev1+g92dd737b9`; verified on python 3.12 and 3.14). The node eval bundle
+Inspect and Inspect Evals install from the root-selected source checkouts under
+`reference-code/`. `evaluation-sources.lock.json` names their exact Gitlink
+revisions and the exact Python provider version. Before a task constructs or a
+prebuilt task runs, `seon_inspect.source_admission` verifies those revisions,
+the admitted source paths, installed distribution origins/versions, `uv.lock`,
+`evals/datasets.lock`, and the committed Seon harness source. The immutable
+identity map is stored as `seon_source_admission` in the native Inspect log.
+A mismatch fails before model or pod work. The node eval bundle
 must exist: `clj -M:cljs compile worker-oracle-eval` (the liveness gate tells
 you loudly when it doesn't). `bb` must be on PATH.
 
@@ -43,6 +48,8 @@ src/seon_inspect/
   solver.py              pod_run (POST /agents/run) + seon_pod_solver (static
                          URL) + seon_cluster_solver (ephemeral cluster per
                          sample) + timeout_honesty scorer; 422 = AgentRunRefused
+  source_admission.py    selected source/provider/lock admission + required
+                         native `.eval` retention and digest verification
   cluster.py             explicit cluster coordinates, fail-loud pending
                          lease boundary, and writer socket read-back
   oracle_scorers.py      persistent bb+node oracle servers, score_code tier
@@ -94,6 +101,11 @@ next to `datasets.lock`) — never under the package or docs/.
 
 `--model mockllm/model` satisfies eval()'s model requirement and is never
 called — the solvers set completions themselves.
+
+Every accepted `catalog.run_bench` call requires at least one readable native
+Inspect `.eval` log. With `evidence_dir=...`, every log is copied under that
+run's `inspect-logs/` directory and its digest is verified. Missing or failed
+retention rejects finalization; it is never downgraded to a score.
 
 ## Scoring: report BOTH reducers
 

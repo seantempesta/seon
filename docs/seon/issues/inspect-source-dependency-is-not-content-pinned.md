@@ -9,11 +9,11 @@ tags: [issue, agent, research, component]
 
 ## Problem
 
-`src-inspect-ai` describes its vendored Inspect dependency as pinned and proven,
-but `pyproject.toml` and `uv.lock` select a mutable local directory without a
-commit or content digest. The installed virtual environment and the current
-`reference-code/inspect-ai` checkout can therefore run different framework
-code under the same Seon lockfile.
+`src-inspect-ai` originally described its vendored Inspect dependency as pinned
+and proven while `pyproject.toml` and `uv.lock` selected a mutable local
+directory without executable revision/content admission. The installed virtual
+environment and the current `reference-code/inspect-ai` checkout could
+therefore run different framework code under the same Seon lockfile.
 
 This makes a green offline suite ambiguous: it proves the framework already
 installed in `.venv`, not necessarily the source that a fresh `uv sync` would
@@ -21,39 +21,53 @@ install or the source a reviewer reads under `reference-code/`.
 
 ## Evidence
 
-- `src-inspect-ai/pyproject.toml` says the proven build is
-  `0.1.dev1+g92dd737b9` and maps `inspect-ai` to
-  `../reference-code/inspect-ai`.
-- `src-inspect-ai/uv.lock` records only
-  `source = { directory = "../reference-code/inspect-ai" }`; it carries no Git
-  revision or tree digest for that directory.
-- The current `.venv` reports Inspect `0.1.dev1+g92dd737b9` from site-packages.
-- The current referenced checkout is Git commit
-  `05322696a0f784ec399ef6abbafd3d2a250ea9cc` and describes itself as
-  `0.3.246-dirty`. Its `_view/ts-mono` entry is also dirty.
+- `src-inspect-ai/pyproject.toml` maps Inspect and Inspect Evals to the root-
+  selected source checkouts and pins Python OpenAI to `2.45.0`.
+- `src-inspect-ai/uv.lock` records the local source selections but cannot by
+  itself prove which Gitlink revision occupies those directories.
+- After a later synchronization, the current `.venv` reports
+  `0.3.247.dev0+g05322696a.d20260715`, matching the root-selected Inspect
+  Gitlink commit.
+- The referenced checkout remains at Git commit
+  `05322696a0f784ec399ef6abbafd3d2a250ea9cc`; its nested `_view/ts-mono`
+  submodule is checked out at `f3588038…` rather than the parent-selected
+  revision, so whole-checkout cleanliness still fails.
 
 The source/evidence audit sharpened the mismatch beyond Inspect itself:
 
-- the installed `inspect_evals` distribution reports
-  `0.0.1.dev1+unknown.gce900d638`, while the clean inspected checkout is
-  `97c99f5f6507fc5d1449fe3247f267d591f64350` / `v0.14.3`; it is not a
-  declared `src-inspect-ai` dependency despite current catalog/tests importing
-  it;
+- the synchronized `inspect_evals` distribution now reports `0.14.3` from the
+  declared root-selected checkout
+  `97c99f5f6507fc5d1449fe3247f267d591f64350`;
 - the installed Python `openai` provider is `2.45.0`, while `pyproject.toml`
-  declares unbounded `openai`; the current lock has no `openai` package row and
-  does not list it under `seon-inspect`, so the installed provider is not
-  reproducible from that lock; and
+  is now declared exactly and recorded by accepted-run admission; and
 - historical scorecard rows identify a Seon Git SHA and dataset-lock hash but
   not Inspect, Inspect Evals, Python lock/provider, task source, or scorer
-  implementation/config. Copying a native `.eval` log is currently best-effort
-  and silently continues when the copy fails.
+  implementation/config. Historical rows remain historical evidence.
 
 These are distinct from the pod's Node provider SDKs, which are exactly matched
 by npm lock and reference source. A shared provider brand must not collapse
 Python harness provenance into Node runtime provenance.
 
-No environment was synchronized during this audit, so the observed version
-split remains intact evidence rather than an implicit framework upgrade.
+## Implementation checkpoint
+
+The source/run-admission unit is implemented. One reviewed
+`evaluation-sources.lock.json` selects the Inspect and Inspect Evals Gitlink
+revisions, admitted task/scorer paths, exact Python provider, and Python/dataset
+locks. Direct task loading and prebuilt catalog runs verify revision, relevant
+cleanliness, installed source/version, provider, lock digests, and committed
+Seon harness source before model or pod work. The admitted identity map is
+native Inspect metadata, and a missing/unretained `.eval` rejects finalization.
+
+A fresh `uv sync --extra test` synchronized the selected distributions. The
+focused admission/catalog/native-log gate passes 27 tests, including a real
+offline native-log read-back; the complete suite passes 321 tests with eight
+expected skips. Deliberate revision, dirty-source, provider-version, and absent-
+log mismatches fail deterministically.
+
+The issue remains open only for the successor measurement contract to give
+scorecard summaries a stable correlation to the required native log and, after
+the lifecycle lease exists, add its artifact/config identities. The source and
+native-log admission described above is complete.
 
 ## Owner
 

@@ -23,10 +23,11 @@ issue's data gate is satisfied.
 ## Evidence
 
 - `src/seon/repl/autocomplete.cljs` renders serving cards through
-  `seon.agent.ctx.namespaces/compact-fn-head` over as-of `:seon.fn` rows and
-  stamps only a projection Git SHA. Its export does not carry a format/schema
-  version, referenced-schema closure, immutable split manifest, or staged-world
-  verdict.
+  `seon.agent.ctx.namespaces/compact-fn-head` over as-of `:seon.fn` rows and now
+  carries the turn's complete `{database-id, branch, commit-id, t}` coordinate.
+  Its export still lacks a format/schema version, source/config/profile
+  identity, referenced-schema closure, immutable split manifest, content-
+  derived artifact name, rejection rows, and staged-world verdict.
 - `src-needle/src/seon_needle/kt1_envelope.py::compact_card` performs a
   string-aware brace deletion over rendered cards, while
   `src-needle/scripts/kt3_redux.py::render_card` constructs fake `(defn ...)`
@@ -60,15 +61,15 @@ issue's data gate is satisfied.
   consumes the retired pin and obsolete text-card grammar. Its behavior is a
   specification to reproduce through Inspect, not a second scorer to import.
 
-The source/evidence audit inspected the current `export!` row precisely. Its
-metadata contains turn id, agent id, bare basis `t`, a database-name string
-derived from the cluster directory, projection Git SHA, coverage, and optional
-rating. It does not carry the architecture's complete
-`{database-id, branch, commit-id, t}` coordinate, artifact/config/profile and
-renderer identities, tree-dirty/content identity, target projection mode,
-referenced-schema closure, frozen row/split identity, current-world replay
-verdict, or an addressable rejection record. Dated default output filenames
-also make the filesystem path wall-clock-derived rather than content-addressed.
+The source/evidence audit originally observed a bare basis `t`. The database-
+lifecycle coordinate work has superseded that part: metadata now contains the
+complete `{database-id, branch, commit-id, t}` point in addition to turn id,
+agent, database label, projection Git SHA, coverage, and optional rating. It
+still does not carry artifact/config/profile and renderer identities, tree-
+dirty/content identity, target projection mode, referenced-schema closure,
+frozen row/split identity, current-world replay verdict, or an addressable
+rejection record. Dated default output filenames also make the filesystem path
+wall-clock-derived rather than content-addressed.
 
 The historical typeahead corpus has useful prompt/reply blob hashes and
 verbatim sections, but it likewise names only cluster `acme` and reads blobs

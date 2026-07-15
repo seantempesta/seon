@@ -25,7 +25,6 @@ are the CASE-2 / mvm tier — deferred, not faked.
 from __future__ import annotations
 
 import importlib
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -36,6 +35,7 @@ from inspect_ai.solver import Generate, Solver, TaskState, solver
 
 from seon_inspect import cluster as cluster_mod
 from seon_inspect import config
+from seon_inspect import source_admission
 from seon_inspect.solver import seon_cluster_solver, seon_pod_solver
 
 
@@ -120,25 +120,28 @@ def save_eval_logs(logs: Any, evidence_dir: Path) -> list[str]:
     """Copy a run's inspect `.eval` log files into `<evidence_dir>/inspect-logs/`.
 
     Evidence-retention fix (2026-07-04): run dirs under `evals/runs/` must
-    ALWAYS carry the run's own .eval logs — the concurrent-pass web_fetch
-    root-cause was unrecoverable partly because logs lived only under the
-    package's transient logs/ tree. Never raises; returns the copied paths."""
-    out_dir = evidence_dir / "inspect-logs"
-    copied: list[str] = []
-    for log in (logs or []):
-        loc = str(getattr(log, "location", "") or "")
-        src = Path(loc.removeprefix("file://"))
-        try:
-            if src.is_file():
-                out_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, out_dir / src.name)
-                copied.append(str(out_dir / src.name))
-        except Exception:
-            continue
-    return copied
+    carry the run's own `.eval` logs. Missing or uncopyable logs now reject
+    finalization instead of silently accepting an unreproducible score."""
+    manifest = source_admission.finalize_native_logs(
+        logs, evidence_dir=evidence_dir)
+    return [row["retained_path"] for row in manifest]
 
 
-def load_bench_task(name: str, **task_kwargs: Any) -> Task:
+def _bench_identity(name: str, spec: BenchSpec) -> dict[str, str]:
+    return {
+        "name": name,
+        "module": spec.module,
+        "attribute": spec.attr,
+        "kind": spec.kind,
+    }
+
+
+def load_bench_task(
+    name: str,
+    *,
+    _admission: dict[str, Any] | None = None,
+    **task_kwargs: Any,
+) -> Task:
     """Load a standard inspect_evals Task by catalog name (its own dataset+scorer).
 
     Pod-door (case1) benches only; a registered bench of another kind names
@@ -155,6 +158,8 @@ def load_bench_task(name: str, **task_kwargs: Any) -> Task:
             f"{name!r} is a {spec.kind!r} arm, not a pod-door bench — drive "
             "it through its own driver (swebench: tasks/swe_bench_seon.py)."
         )
+    if _admission is None:
+        source_admission.verify_sources(_bench_identity(name, spec))
     defaults = spec.default_task_kwargs
     merged = {**(defaults() if defaults else {}), **task_kwargs}
     return spec.task_fn()(**merged)
@@ -290,6 +295,10 @@ def run_bench(
     blob store under `<evidence_dir>/blobs/e<epoch>/<sample_id>/` before the
     cluster is destroyed — per-execution reply text + transcripts survive.
     """
+    spec = BENCHES.get(name)
+    if spec is None:
+        raise KeyError(f"{name!r} not in the assessed bench registry {sorted(BENCHES)}")
+    admission = source_admission.verify_sources(_bench_identity(name, spec))
     if per_sample_cluster and cluster_url:
         raise ValueError(
             "per_sample_cluster=True mints its own clusters — "
@@ -300,10 +309,9 @@ def run_bench(
             "clusters); a static cluster_url pod is serial by construction "
             "(POD_MAX_SAMPLES) — pass per_sample_cluster=True")
     if task is None:
-        task = load_bench_task(name, **(task_kwargs or {}))
+        task = load_bench_task(name, _admission=admission, **(task_kwargs or {}))
     # Bench-specific solver bridge (bfcl needs text->tool_call); default =
     # swap_generate. An explicit `adapt=` argument overrides the registry.
-    spec = BENCHES.get(name)
     adapt_fn = adapt or (spec.adapter if spec else None) or swap_generate
     bundle_start = None
     if per_sample_cluster:
@@ -333,6 +341,9 @@ def run_bench(
         # mode stays at the per-pod ceiling (1 by construction).
         max_samples = (parallelism if per_sample_cluster
                        else config.POD_MAX_SAMPLES)
+    md = dict(eval_kwargs.pop("metadata", None) or {})
+    md["seon_source_admission"] = admission
+    eval_kwargs["metadata"] = md
     logs = inspect_eval(
         task,
         solver=adapt_fn(task.solver, the_solver),
@@ -342,8 +353,7 @@ def run_bench(
         max_samples=max_samples,
         **eval_kwargs,
     )
-    if evidence_dir is not None:
-        save_eval_logs(logs, evidence_dir)
+    source_admission.finalize_native_logs(logs, evidence_dir=evidence_dir)
     if per_sample_cluster:
         violation = cluster_mod.bundle_violation(bundle_start)
         if violation:

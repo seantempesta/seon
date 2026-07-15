@@ -6,8 +6,9 @@ tags: [prd, agent, research]
 
 # Inspect and autocomplete evidence roadmap
 
-> Detailed source evidence and the implementation/acceptance matrix live in
-> [[research/inspect-autocomplete-source-evidence-audit-2026-07-14]].
+> Detailed source evidence and the current reconciliation/acceptance matrix
+> live in [[research/inspect-autocomplete-source-evidence-audit-2026-07-14]]
+> and [[research/agentic-inspect-autocomplete-reconciliation-2026-07-14]].
 
 ## Outcome
 
@@ -18,27 +19,37 @@ creating a benchmark-only context or runtime.
 
 ## Current state
 
-The installed Inspect environment currently passes **311 tests with eight
+The synchronized Inspect environment currently passes **321 tests with eight
 expected skips**, and current source contains standard `inspect_evals` task
 adapters, BFCL and SWE-bench arms, deterministic oracles, frozen dataset/image
 metadata, append-only scorecards, planning trajectory scorers, a historical
 typeahead replay corpus, and a real as-of ClojureScript autocomplete exporter.
 
+The reviewed ACME lane is handed back and reconciled. Current source retains
+exact database/turn evidence in native Inspect metadata, aligns BFCL with one
+ordinary `complete` form while preserving its upstream scorer, and derives
+agent-callable tools from positive `:seon.fn/agent-facing?` program facts.
+The dedicated worktree has no missing tracked source or run artifact; its
+ignored databases remain a preservation/retirement concern.
+
 These mechanisms are not yet one reproducible evidence path:
 
-- installed Inspect is `0.1.dev1+g92dd737b9`, while the inspected reference
-  checkout is dirty `05322696...` / `0.3.246`; the local-path dependency pins
-  neither, and installed `inspect_evals` also differs from its reference source;
+- source/run admission is implemented: one reviewed lock selects root Gitlink
+  revisions `05322696...` and `97c99f5...`, synchronized installed Inspect and
+  Inspect Evals, exact Python OpenAI `2.45.0`, admitted Python/task/scorer paths,
+  Python/dataset locks, and committed Seon harness source. A mismatch rejects
+  task construction or a prebuilt run before model/pod work;
 - per-sample create/restart/release correctly fail because the operator has no
   ownership-fenced lease; static URL mode is not isolation;
-- scorecard rows omit framework/task/scorer and complete cluster/database
-  source identities, while native `.eval` log retention is best-effort;
-- autocomplete rows use database name + basis `t` + Git SHA rather than the
-  complete coordinate, runtime/config/profile identities, referenced-schema
-  closure, frozen row/split manifest, current-world verdict, and retained
-  rejection rows; and
-- the active ACME tool-refinement lane has not been handed back and remains
-  outside this branch's review or cleanup authority.
+- static runs retain exact turn bytes and complete database coordinates, and
+  every accepted catalog run now requires a readable native `.eval` carrying
+  the complete admitted source map; evidence-directory copies are digest-
+  verified. Scorecard summaries still need a stable correlation to that native
+  authority, and static URL mode is not lifecycle isolation; and
+- autocomplete rows now carry the complete database coordinate but still lack
+  runtime/config/profile identities, artifact/schema version, shared referenced-
+  schema closure, frozen row/split manifest, current-world verdict, content-
+  derived naming, and retained rejection rows.
 
 Historical stable/display/pin/plan-pilot evidence is classified and hash-backed
 in the runtime-reliability preservation audits. It remains evidence to replay,
@@ -46,30 +57,28 @@ not code to cherry-pick. Training and paid model trials remain paused.
 
 ## Dependency order
 
-1. Content-pin Inspect, Inspect Evals, Python provider/task bytes, and run
-   admission/provenance.
+1. Source/run admission is complete. In parallel, freeze the ordinary-work
+   development/milestone/blind battery and define the schema-registered,
+   content-addressed autocomplete manifest.
 2. Publish one token-fenced operator lease returning artifact/config/source and
    dynamic web/CLJ/CLJS/database coordinates.
-3. Migrate live Inspect and typeahead capture off raw writer forms, direct blob
-   paths, private endpoint files, and best-effort evidence finalization.
-4. Produce one schema-registered, content-addressed autocomplete manifest with
-   complete coordinates, explicit projection semantics, schema closure, stable
-   row ids/splits, and retained rejection evidence.
-5. Replay/stage candidates through current render/eval/database boundaries and
-   rebuild layered fair scoring in Inspect.
-6. Review the ACME refinement lane only after explicit handback, commit by
-   commit; land canonical `my.*`/generated-context changes after default proof.
-7. Run deterministic fixtures, offline calibration, local simple-model rungs,
+3. After their respective prerequisites, migrate live Inspect/typeahead callers
+   through the lease while implementing canonical export, replay, and layered
+   scoring through current render/eval/database boundaries.
+4. Run deterministic fixtures, offline calibration, local simple-model rungs,
    then the bounded large-planner/small-executor reference.
-8. Promote/read back accepted old-lane evidence and retire only owner-approved
-   worktrees whose unique evidence no longer depends on them.
+5. In parallel under its own evidence gates, promote/read back accepted old-lane
+   evidence and retire only owner-approved worktrees whose unique evidence no
+   longer depends on them.
 
 ## Ordered work
 
-1. **Source admission.** Make a fresh environment resolve the exact clean
-   reviewed framework/provider/task bytes and reject a mismatch before task
-   construction. Require native Inspect logs and complete provenance for an
-   accepted run.
+1. **Source admission — complete.** A fresh `uv sync --extra test` resolves the
+   reviewed framework/task/provider world; deterministic revision, dirty-
+   source, installed-origin/version, provider, lock, and native-log checks gate
+   task construction and run finalization. The native log carries the admitted
+   source map. Focused proof is 27 tests; the complete offline gate is 321
+   passed/eight skipped.
 2. **Live ownership.** Implement the operator lease, then prove concurrent
    disjoint samples, dynamic CLJ/CLJS discovery, identity-preserving restart,
    cancellation, and token-fenced idempotent cleanup.
@@ -80,9 +89,9 @@ not code to cherry-pick. Training and paid model trials remain paused.
 4. **Replay and scorer.** Stage facts, render through serving, eval through the
    current boundary, derive database outcomes, and port historical fair-scoring,
    LoRA failure, and continuation scanner acceptance cases into Inspect.
-5. **ACME handback.** Record base/tip/evidence, review commits in order, reject
-   benchmark-only context and parallel protocols, prove default, then rebuild
-   and prove ACME.
+5. **Measurement contract.** Freeze representative database, schema, namespace,
+   filesystem/shell/web, plan/restart, recovery, and evidence-report tasks with
+   deterministic development/milestone/blind membership and category floors.
 6. **Model ladder.** Compare large-plan/small-execute, small-alone, large-alone,
    and pretransacted-plan diagnostic arms on read/process/write/restart/report
    tasks. Begin with mocks and local simple models. Change schemas/functions
@@ -91,13 +100,11 @@ not code to cherry-pick. Training and paid model trials remain paused.
 
 ## Parallelizable research
 
-- Source pin/admission and canonical export schema design may proceed in
-  parallel.
-- Durable old-lane packaging/read-back may proceed independently under its
-  existing maintenance/owner gates.
+- Source admission, canonical export, frozen-battery definition, and durable
+  old-lane/database disposition may proceed in parallel.
 - Live caller migration waits for the lease. Scorer migration waits for the
-  canonical export. Model trials wait for source, lease, export, replay, and
-  ACME handback gates.
+  canonical export. Comparative model trials wait for source admission, lease,
+  export, replay/scorer, and frozen-battery gates.
 
 ## Graduation
 

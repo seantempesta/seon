@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "sources": {
+    "inspect_ai": {
+      "distribution": "inspect-ai",
+      "module": "inspect_ai",
+      "path": "reference-code/inspect-ai",
+      "revision": "05322696a0f784ec399ef6abbafd3d2a250ea9cc",
+      "version_contains_revision": true,
+      "admitted_paths": [
+        "pyproject.toml",
+        "requirements.txt",
+        "src/inspect_ai"
+      ],
+      "excluded_dirty_paths": [
+        "src/inspect_ai/_view/ts-mono"
+      ]
+    },
+    "inspect_evals": {
+      "distribution": "inspect-evals",
+      "module": "inspect_evals",
+      "path": "reference-code/inspect-evals",
+      "revision": "97c99f5f6507fc5d1449fe3247f267d591f64350",
+      "installed_version": "0.14.3",
+      "admitted_paths": [
+        "pyproject.toml",
+        "src/inspect_evals"
+      ],
+      "excluded_dirty_paths": []
+    }
+  },
+  "providers": {
+    "openai": {
+      "distribution": "openai",
+      "version": "2.45.0"
+    }
+  },
+  "artifacts": {
+    "python_lock": "src-inspect-ai/uv.lock",
+    "datasets_lock": "evals/datasets.lock"
+  },
+  "seon_admitted_paths": [
+    "src-inspect-ai/pyproject.toml",
+    "src-inspect-ai/uv.lock",
+    "src-inspect-ai/evaluation-sources.lock.json",
+    "src-inspect-ai/src/seon_inspect",
+    "evals/datasets.lock"
+  ]
+}

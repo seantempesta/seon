@@ -2,18 +2,21 @@
 name = "seon-inspect"
 version = "0.1.0"
 description = "Seon benchmarks on the inspect-ai standard harness: cluster pod solver (POST /agents/run), oracle-backed scorers, diffusion measurement tasks"
-requires-python = ">=3.10"
-# inspect-ai: proven against the vendored dev build 0.1.dev1+g92dd737b9
-# (reference-code/inspect-ai). `uv sync` installs it from that source path so
-# the version we run is the version we proved; anyio rides in with it (the
+requires-python = ">=3.11"
+# Inspect and Inspect Evals are selected by root Gitlinks and installed from
+# those source paths. `evaluation-sources.lock.json` plus pre-task admission
+# verifies the revisions, selected-source cleanliness, installed origins,
+# provider version, and lock digests before a task can construct or run.
+# anyio rides in with Inspect (the
 # POD-BACKED solvers use anyio.to_thread + stdlib urllib — no extra HTTP client).
-# openai: required for STANDARD inspect mode against an openai-compatible
+# openai: exactly locked for STANDARD inspect mode against an openai-compatible
 # endpoint (inspect's `openai-api/<svc>/<model>` provider) — the local MLX
 # model server and the Muse gateway. The pod door never needs it; the standard
 # agentic/coding benches (humaneval, mbpp, swe_bench, …) do.
 dependencies = [
     "inspect-ai",
-    "openai",
+    "inspect-evals",
+    "openai==2.45.0",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +24,7 @@ test = ["pytest>=8"]
 
 [tool.uv.sources]
 inspect-ai = { path = "../reference-code/inspect-ai" }
+inspect-evals = { path = "../reference-code/inspect-evals", editable = true }
 
 [build-system]
 requires = ["hatchling"]

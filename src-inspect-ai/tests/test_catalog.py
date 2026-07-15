@@ -10,6 +10,23 @@ class _FakeTask:
     solver = []
 
 
+@pytest.fixture(autouse=True)
+def _admitted_sources(monkeypatch):
+    """Catalog mechanics run under one deterministic admitted source map."""
+    def admit(bench):
+        return {"schema_version": 1, "bench": dict(bench),
+                "sources": {"inspect_ai": {}, "inspect_evals": {}}}
+
+    monkeypatch.setattr(catalog.source_admission, "verify_sources", admit)
+    monkeypatch.setattr(
+        catalog.source_admission,
+        "finalize_native_logs",
+        lambda logs, evidence_dir=None: [
+            {"location": "fake.eval", "sha256": "abc",
+             "retained_path": "fake.eval"}],
+    )
+
+
 def test_bench_registry_is_one_benchspec_surface():
     # ONE registry: adding a bench is one BenchSpec line carrying task ref,
     # arm kind, adapter hook, and default task kwargs (the old three-dict
@@ -57,8 +74,28 @@ def test_run_bench_passes_cluster_url_agnostic(monkeypatch):
     assert captured["solver_kw"]["cluster_url"] == "http://example.test:9999/agents/run"
     assert "SEON_CLUSTER_URL" not in os.environ  # env never shadows config
     assert captured["kw"]["limit"] == 3 and captured["kw"]["epochs"] == 2
+    admitted = captured["kw"]["metadata"]["seon_source_admission"]
+    assert admitted["bench"]["name"] == "gsm8k"
     # per-POD serial ceiling (one cluster = one sample): defaults to config
     assert captured["kw"]["max_samples"] == catalog.config.POD_MAX_SAMPLES == 1
+
+
+def test_run_bench_rejects_source_before_task_construction(monkeypatch):
+    constructed = []
+    monkeypatch.setattr(
+        catalog.source_admission,
+        "verify_sources",
+        lambda bench: (_ for _ in ()).throw(
+            catalog.source_admission.SourceAdmissionError("source mismatch")),
+    )
+    monkeypatch.setattr(
+        catalog, "load_bench_task",
+        lambda *args, **kwargs: constructed.append(True) or _FakeTask(),
+    )
+    with pytest.raises(catalog.source_admission.SourceAdmissionError,
+                       match="source mismatch"):
+        catalog.run_bench("gsm8k")
+    assert constructed == []
 
 
 def test_run_bench_max_samples_overridable(monkeypatch):
