@@ -167,31 +167,143 @@ overlap, misleading envelope, unactionable error, missing fact, plan failure,
 verification failure, sandbox/bridge failure, model reasoning failure, or
 benchmark/scorer failure.
 
-## Ordered work
+## Execution ledger
 
-1. Audit the live ordinary-agent namespace surface by namespace, callable,
-   schema closure, repeated tokens, public/internal eligibility, and normal
-   task category. Preserve full contracts while removing only proven noise or
-   duplication through the one renderer/program graph.
-2. Inventory the installed Inspect and inspect-evals catalogs, exact local
-   model/provider client, and selected sandbox implementation. Freeze small
-   deterministic development, milestone, and blind memberships before tuning.
-3. Establish raw-model and unchanged-Seon baselines with a 4B-or-smaller model,
-   then probe 3B, 2B, 1.5B, and sub-1B models where locally practical.
-4. Compare `:batch` and `:stream` as first-class execution strategies, including
-   task outcome, calls, attempted forms, generated tokens, elapsed time, cache
-   reuse, fabrication, and recovery. Measure transcript decay/plateau schedules
-   from live rendered prompts; never infer success from aggregate token cost.
-5. Cluster failures and change the smallest current owner. Verify through a
-   focused mechanical test, the original live ACME REPL form, and the exact
-   failed Inspect samples.
-6. Compare equal-budget arms: no explicit plan, small-model-authored plan,
-   large planning proposal encoded by the small executor, and the optional
-   pretransacted diagnostic plan. Prove database outcome, provenance,
-   expectation-checked close, report-before-close, and restart resumption.
-7. Freeze the surface, open the blind set once, preserve raw logs, dataset and
-   dependency locks, model/artifact identity, scorecard, classifications, and
-   ACME restart/read-back evidence.
+This ledger is the resumption authority. Work follows dependency gates rather
+than whichever local failure is most interesting. Independent rows may run in
+parallel against the isolated ACME cluster or read-only source, but only one
+row owns a source namespace or cluster lifecycle at a time. Every row begins
+with its dependency ledger and ends with committed evidence in `research/`.
+
+### P0 — Freeze the measurement contract
+
+This is the first blocking unit. Select and record deterministic development,
+milestone, and unopened blind memberships from Inspect and inspect-evals. The
+development slice covers database inspect/query/aggregate, schema
+registration, store/update/retrieve/verify across turns, namespace navigation,
+function composition, filesystem/shell/web work, planning and restart, and a
+final evidence-backed report. Preserve upstream datasets and scorers. Record
+the failure taxonomy, per-category floors, overall 90% graduation target, run
+budget, seed, and serial execution rule.
+
+Exit evidence is one reproducible serial ACME run whose native `.eval` retains
+the selected task identity, exact prompt/reply bytes, Seon database and turn
+coordinates, artifact/config identity, model identity, and classified result.
+
+### P1 — Establish reproducible execution
+
+P1 begins beside P0 and must finish before comparative claims. Content-pin the
+Inspect and inspect-evals sources and record provider and model identities.
+Define the one ownership-fenced operator lease used by future concurrent
+samples; until it exists, scored runs remain serial against the static ACME
+target. Keep native Inspect `.eval` output as the evaluation authority.
+
+Exit evidence is replay of the P0 sample from its recorded identities and
+coordinates, plus cleanup and restart proof without cross-sample state drift.
+
+### P2 — Measure context and model baselines
+
+After P0 membership freezes, two independent measurements proceed in parallel:
+
+- Measure the exact schema closure, definitions, references, repeated bytes,
+  and token contribution in every selected prompt. Design one database-derived
+  structured namespace export with shared schema closure; do not optimize from
+  the aggregate 20,406-token number alone.
+- Verify the installed MLX and Ollama endpoints and exact model artifacts. Run
+  unchanged-Seon baselines across practical sub-1B, 1.5B, 2B, 3B, and
+  4B-or-smaller coding/agentic models. Use Meta Muse or DeepSeek only as a
+  stronger sanity-check and planning baseline. Do not select a preferred small
+  model from one BFCL sample.
+
+Exit evidence is a per-sample context inventory and a comparable raw baseline
+matrix using the frozen development slice.
+
+### P3 — Improve the global context mechanism
+
+P3 consumes P2 measurements. Implement shared schema presentation only when
+it preserves complete function names, named input arguments, output data, and
+the relevant transitive schema closure. Current namespace source remains full;
+required namespaces remain compact and complete. Menus, namespace cards,
+autocomplete, and Inspect consume one structured database-derived export.
+
+In the same unit, prove that an identical database coordinate renders
+byte-identical cacheable context across delay, cache eviction, and pod restart.
+Process-local result handles may not affect historical rendering. Live clock,
+Unix 1/5/15 load averages, and bounded memory belong only in the uncached tail.
+
+Exit evidence is focused mechanical coverage, byte comparison, live ACME REPL
+inspection, and exact reruns of affected P0 samples. Record both token change
+and task outcome; size reduction alone is not success.
+
+### P4 — Compare execution and parser behavior
+
+With P0–P3 stable, compare `:batch` and `:stream` on identical tasks and
+budgets. Measure outcome, calls, attempted and accepted forms, generated
+tokens, elapsed time, cache reuse, fabrication, recovery, and safe early
+cutoff. Explicitly test multiple independent forms in one turn and next-turn
+result visibility.
+
+Exercise malformed delimiters, empty replies, prose adjacent to forms, ghost
+result echoes, large values, and thrown agent mistakes. Recover unambiguous
+prose as comments through the reader rather than regex rewriting. Agent errors
+remain bounded data; core faults still follow the configured crash policy.
+
+Exit evidence is the equal-task batch/stream table, parser fixtures, bounded
+transcripts without stack or source dumps, and the selected default justified
+by outcomes rather than latency alone.
+
+### P5 — Compare planning and transcript policy
+
+Run equal-budget arms with no explicit plan, a small-model-authored database
+plan, a Muse/DeepSeek proposal encoded by the small executor, and an optional
+pretransacted diagnostic plan. Each task proves stored expectations, database
+outcome, provenance, report-before-close, and restart resumption. Retain solid
+plans as ordinary Inspect fixtures.
+
+Measure the configured 50-turn window, 25-turn chunk rotation, 8,192-token
+settled plateau, and 4,096/1,024/512 result decay against these runs. Tune only
+from retrieval, repetition, cache-prefix stability, and completion evidence.
+Evaluate database-changelog block ordering with epochs and hysteresis only
+after byte-identical rendering is proven.
+
+Exit evidence is the planning-arm scorecard, restart read-back, transcript
+schedule comparison, and a database-derived policy recommendation with no
+hardcoded runtime numbers.
+
+### P6 — Refine tools from clustered failures
+
+Cluster frozen-slice failures by the experimental taxonomy. Fix the smallest
+existing owner: namespace requirement, colocated schema, function identity,
+argument name, return envelope, query tuple legibility, overlap, or missing
+capability. Remove or combine functions when that makes the surface more
+discoverable. Add a function only after a frozen task proves the gap. Standing
+context prose changes only when false or when the batch/multi-form experiment
+proves that non-derivable execution semantics are absent.
+
+Each change requires the focused test, original REPL reproduction, exact failed
+Inspect sample, relevant development slice, live ACME proof, issue disposition,
+documentation update, and one coherent commit.
+
+### P7 — Graduate
+
+Freeze the tool and context surface, run the milestone set, then open the blind
+set once. Preserve raw native Inspect artifacts, dependency and dataset locks,
+model and provider identities, context coordinates, scorecard, classifications,
+batch/stream evidence, planning comparison, and restart/read-back proof.
+Graduate only at 90% deterministic success overall with the recorded
+per-category floors and no infrastructure failures counted as model failures.
+Prove both the isolated ACME fresh-checkout path and the default cluster after
+coordinating lifecycle ownership.
+
+### Morning checkpoint
+
+The intended first overnight checkpoint is P0 frozen and run once, P1 identities
+pinned with serial reproducibility recorded, and both P2 inventories complete.
+If those gates finish early, continue through P3 and exact development-slice
+reruns. Do not skip a gate to accumulate broad model runs, redesign unrelated
+tools, run the entire test suite, or chase a failure outside the selected
+sample and its current owner. Record an external discovery as one issue with
+evidence and return to the ledger unless it blocks the active gate.
 
 ## Open blockers
 

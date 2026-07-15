@@ -41,7 +41,12 @@ harness for Seon-native tasks and established benchmarks.
 ## Current checkpoint
 
 Read [[roadmap]] and the current unit's file under `research/`. The initial
-ordinary-agent baseline is 21,839 estimated tokens for the namespaces block
-and under 700 tokens for all other rendered blocks combined. The namespace
-surface is structurally complete but has not yet been audited for necessary
-contracts, repeated referenced schemas, internal callables, or task coverage.
+ordinary-agent baseline was 21,839 estimated tokens for the namespaces block.
+Positive `:seon.fn/agent-facing?` eligibility is now shared by indexing, eval,
+namespace cards, menus, and `my.ns/functions`; the rebuilt ACME database has
+1,034 indexed functions, 114 eligible functions, and a 20,406-token namespace
+block. Schema closure is now the dominant measured weight. Do not resume broad
+surface editing from intuition: first freeze the serial Inspect development
+slice, then measure an exact failed sample and change its smallest current
+owner. The dependency order, parallel lanes, gates, and morning checkpoint are
+maintained in [[roadmap#Execution ledger]].
