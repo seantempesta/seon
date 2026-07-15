@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (8)
+## Blocker (10)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -18,8 +18,10 @@ See `README.md` for the convention.
 | [Capture dependencies when a lazy view unit activates](lazy-view-unit-activation-drops-read-observations.md) | blocker | UI |
 | [Carry one complete database coordinate through the protocol](database-protocol-coordinate-is-incomplete.md) | blocker | Core |
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
+| [Interrupted changed-test hooks can orphan the CLJS runner pipeline](changed-test-interruption-orphans-test-runner.md) | blocker | Core |
 | [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
+| [Multiple exact CLJS selectors can report a false-green zero-test run](test-cljs-multiple-exact-selectors-run-zero-tests.md) | blocker | Core |
 | [Scope the activated schema projection to one database attachment](activated-schema-projection-crosses-database-attachments.md) | blocker | agent |
 | [Unwind managed processes when the operator is interrupted](operator-interruption-can-orphan-managed-process.md) | blocker | Core |
 
