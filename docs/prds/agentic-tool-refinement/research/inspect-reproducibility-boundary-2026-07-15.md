@@ -218,6 +218,16 @@ source since the last artifact publication. The final database coordinate and
 resolved model configuration remain the database-derived config/model
 evidence; a URL alone remains insufficient.
 
+Admission now covers the real maintained runtime build inputs rather than only
+the Python harness: `src`, `script`, `resources`, the ACME overlay, Clojure/npm/
+Shadow build declarations and locks, and the semantic operator/build scripts.
+The selected Git revision/tree identifies committed bytes; the admitted
+pathspec rejects uncommitted build inputs before task construction and the
+milestone recheck rejects a commit or edit during the sample. The first live
+falsification rejected concurrent changes in runtime source as intended. The
+focused gate is 83 tests. This cleanliness fence complements the operator
+artifact snapshot; it does not replace its output digests.
+
 ### R3 — Honest provider and model identity
 
 Owners: `seon.ai`/provider adapter for facts known inside the pod, and the

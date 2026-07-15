@@ -354,12 +354,16 @@ sample is trustworthy.
   cleanliness. Native-log finalization reopens the retained `.eval`, requires
   success, and verifies the exact admission map. Pod `/agents/run` evidence is
   request-scoped and comes from the same final immutable database snapshot.
+- The admitted Seon closure now includes actual runtime build inputs: source,
+  operator scripts, resources, ACME overlay, build declarations, and package
+  locks. A concurrent dirty runtime file or commit rejects the run; the first
+  live preflight did so instead of scoring through mixed watcher bytes.
 - Standard benchmarks and Seon-native tasks now share the admitted evaluator.
   The native path admits before task construction, preserves the task's own
   solver/scorer, enforces serial execution, and makes finalized log read-back
   mandatory. It also records the operator's exact ready target EDN and requires
   byte-identical artifact/process/endpoint identity after the sample. The
-  82-test focused gate includes a real native-log read-back.
+  83-test focused gate includes a real native-log read-back.
 - Infrastructure timeouts and core errors invalidate a sample instead of
   becoming a model score. A no-forms close remains model/runtime evidence.
 - A fresh ordinary ACME agent renders 22,171 total estimated tokens, including

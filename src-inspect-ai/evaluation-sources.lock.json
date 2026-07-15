@@ -43,6 +43,18 @@
     "datasets_lock": "evals/datasets.lock"
   },
   "seon_admitted_paths": [
+    "src",
+    "script",
+    "resources",
+    "acme",
+    "build.clj",
+    "deps.edn",
+    "shadow-cljs.edn",
+    "package.json",
+    "package-lock.json",
+    "bin/seon",
+    "bin/acme",
+    "bin/fix-bootstrap-macros",
     "src-inspect-ai/pyproject.toml",
     "src-inspect-ai/uv.lock",
     "src-inspect-ai/evaluation-sources.lock.json",

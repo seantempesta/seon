@@ -71,6 +71,16 @@ repairs the gap found when those task paths were accidentally swept into an
 unrelated lifecycle commit; direct task invocation no longer bypasses source
 admission.
 
+The Seon side of the same admission is no longer limited to
+`src-inspect-ai`. The lock admits every maintained runtime build-input owner:
+core source, operator scripts, resources, the ACME overlay, Clojure/Shadow/npm
+build declarations and locks, and the semantic build/operator entrypoints.
+The Git tree records committed bytes and the path-limited dirty check rejects
+an uncommitted runtime input before task construction. A live probe
+successfully rejected concurrent runtime edits. Together with the exact
+before/after operator target snapshot, this prevents a clean Python harness
+from scoring an unowned hot-reloaded Seon artifact.
+
 A fresh `uv sync --extra test` synchronized the selected distributions. The
 focused admission/catalog/native-log gate passes 34 tests, including a real
 offline native-log read-back; the complete suite passes 321 tests with eight

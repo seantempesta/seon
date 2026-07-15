@@ -122,6 +122,16 @@ def test_verify_sources_accepts_exact_selected_world(monkeypatch, tmp_path):
     assert len(admitted["source_lock"]["sha256"]) == 64
 
 
+def test_selected_lock_admits_runtime_build_inputs():
+    lock = json.loads(source_admission.DEFAULT_LOCK_PATH.read_text())
+    admitted = set(lock["seon_admitted_paths"])
+    assert {
+        "src", "script", "resources", "acme", "build.clj", "deps.edn",
+        "shadow-cljs.edn", "package.json", "package-lock.json",
+        "bin/seon", "bin/acme", "bin/fix-bootstrap-macros",
+    } <= admitted
+
+
 def test_verify_sources_rejects_revision_mismatch(monkeypatch, tmp_path):
     lock_path = _lock(tmp_path)
     monkeypatch.setattr(source_admission, "_gitlink", lambda *args: "x" * 40)
