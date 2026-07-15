@@ -78,6 +78,10 @@ failures or errors).
   exact SDK/Node cancellation semantics, complete dispatch-provider ownership,
   retry/cancel race matrix, deletion boundary, and two non-overlapping source
   slices.
+- [[research/plan-transition-authority-audit-2026-07-15]] — exact Datahike,
+  Malli, ClojureScript, plan-graph, and runtime-identity grounding; one
+  actor/owner/scope authority; schema'd completion evidence; deterministic
+  authored/addressed/cross-agent/retry/resume matrix; and ordered source slices.
 
 ## Ordered work
 
@@ -102,9 +106,14 @@ failures or errors).
    in `tmp/test-cljs-20260715-022342-27368.log` through
    `tmp/test-cljs-20260715-022853-34911.log` (eight namespaces, 465 assertions,
    zero failures or errors, zero compile warnings).
-4. Give plan completion schema'd verification evidence and settle authority for
-   authored, addressed, cross-agent, retry, and resume transitions through the
-   one `my.plan` mechanism.
+4. **Audit complete; implementation pending:** first route every lifecycle
+   mutation through one actor/owner/scope authority with CAS and complete
+   coordinate fences, make documents scoped and coordinate-bearing, and keep
+   address rows out of authored deletion. Then add registered schema'd
+   verifiers plus one component completion receipt, finish derived address
+   priority, and prove retry/resume interleavings. The focused executable
+   fixture was deferred while PID 44845 owned the canonical CLJS test build;
+   no live proof is claimed because the default cluster was down.
 5. Remove narration/scaffolding ambiguity by fixing the owning context/runtime
    data rather than rewriting replies.
 6. Measure and implement the smallest hard process boundary for arbitrary eval,

@@ -46,12 +46,12 @@ See `README.md` for the convention.
 | [Give root a dedicated system layout](root-page-is-an-ordinary-agent-layout.md) | friction | UI |
 | [Idle transcript misreports the mode-specific work budget](configured-turn-limit-masks-mode-specific-budget.md) | friction | agent |
 | [Include new CLJS namespaces in changed-test runtime artifacts](changed-test-new-cljs-namespace-misses-runtime-file.md) | friction | Core |
-| [Keep Datahike system attributes out of the domain navigator](database-browser-misclassifies-datahike-system-attributes.md) | friction | UI |
 | [LoRA audit runner depends on a retired Shadow target and pinned checkout](lora-audit-runner-drift.md) | friction | general |
 | [Make multi-form eval order a durable database fact](multi-form-eval-order-is-not-durable.md) | friction | agent |
 | [Make schema hot reload atomic](hot-reload-schema-import-can-partially-fail.md) | friction | agent |
 | [Model can ghost-echo runtime scaffolding into the transcript spine](narration-ghost-echo-not-neutralized.md) | friction | agent |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
+| [Plan reconcile scope can delete unseen work](plan-reconcile-scope-can-delete-unseen-work.md) | friction | agent |
 | [Prepare selected git dependencies before test compilation](test-runner-does-not-prepare-selected-git-dependencies.md) | friction | Core |
 | [Preserve distinct large BigInts in cardinality-many attributes](datahike-cljs-cardinality-many-collapses-large-bigints.md) | friction | Core |
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |

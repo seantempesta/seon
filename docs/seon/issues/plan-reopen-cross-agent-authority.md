@@ -21,6 +21,10 @@ Every plan step carries `:my.plan/agent`. `my.plan/reopen!` accepts only
 `:my.plan/completed-at`; it does not compare the current agent context with the
 step owner or require an explicit handoff.
 
+The same issue applies to `active!`, `done!`, `needs!`, `move!`, and `drop!`:
+instrumented `:seon.agent/id` injection fills an absent field but permits an
+explicit caller value, so it cannot serve as authorization proof.
+
 In the plan-preload pilot's organic escalation, root inspected a worker plan
 and successfully called `reopen!` on the worker's verified-done step. The
 research identifies this as an authority mistake: planner/worker separation
@@ -29,8 +33,9 @@ plan transition.
 
 ## Owner
 
-The `my.plan/reopen!` lifecycle boundary and the existing role/capability model
-for cross-agent plan operations.
+The one private `my.plan.internal` transition authority, with actor identity
+owned by the runtime and authority derived from existing ownership,
+escalation, planner, message, and transaction facts.
 
 ## Acceptance
 
@@ -41,3 +46,7 @@ for cross-agent plan operations.
 - Behavioral tests cover worker completion followed by planner reopen,
   authorized correction, and concurrent stale attempts without introducing a
   stored role enum or a second lifecycle path.
+
+A planner may reconcile non-lifecycle fields only inside its exact active
+delegated subtree and escalation episode. The grounded transition matrix is in
+[[docs/prds/agent-runtime-correctness/research/plan-transition-authority-audit-2026-07-15]].

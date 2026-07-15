@@ -38,3 +38,8 @@ message-linked step facts from `seon.agent.message`.
 - Behavioral tests cover a message arriving before and after authored plan
   leaves, including the pilot's address-capture shape. The fix derives from
   existing facts and adds neither a stored priority mirror nor a second queue.
+- Address rows are excluded from authored document deletion and use a
+  maintained schema'd verifier rather than bypassing completion evidence.
+
+The grounded address/reconcile laws are in
+[[docs/prds/agent-runtime-correctness/research/plan-transition-authority-audit-2026-07-15]].

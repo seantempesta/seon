@@ -29,8 +29,9 @@ research records plan integrity `0/1` for that scenario and identifies
 
 ## Owner
 
-The `my.plan/done!` completion transition and the schema-owned representation
-of a falsifiable expectation plus its verification evidence.
+The one private `my.plan.internal` transition authority, `my.plan/done!`, and
+the schema-owned representation of a falsifiable expectation, registered
+verifier, committed evidence refs, and one completion receipt.
 
 ## Acceptance
 
@@ -43,3 +44,9 @@ of a falsifiable expectation plus its verification evidence.
   it once and remains idempotent.
 - The mechanism derives from existing eval/database facts or one schema-owned
   completion record; it does not add a parallel plan ledger.
+- Completion asserts the expected owner, status, verifier, and complete
+  database coordinate; a stale or concurrent attempt returns data and writes
+  nothing.
+
+The grounded authority and evidence shape are specified in
+[[docs/prds/agent-runtime-correctness/research/plan-transition-authority-audit-2026-07-15]].
