@@ -1,6 +1,6 @@
 ---
 type: research
-status: active
+status: completed
 tags: [research, prd, database, capability]
 ---
 
@@ -8,13 +8,14 @@ tags: [research, prd, database, capability]
 
 ## Scope and decision status
 
-This report designs a transport-free capability/session seam around exact
-Datahike database values. It is a decision brief, not a selected architecture.
-No source, test, transport, or lifecycle file was changed.
+This report designed the transport-free capability seam around exact Datahike
+database values. The selected Datahike portion is implemented and graduated;
+Seon sessions, scheduling, and transport remain in their ordered later units.
 
 Selected dependency and first-party seam:
 
-- Datahike `9ada755087228e10cfb179fa5779ce227a6ed220`.
+- Datahike `940810f5`, including graduated exact identity, single-flight, and
+  capability work.
 - `reference-code/datahike/src/datahike/api/specification.cljc` is Datahike's
   declarative semantic API authority.
 - `reference-code/datahike/src/datahike/connector.cljc`, `connections.cljc`,
@@ -23,10 +24,9 @@ Selected dependency and first-party seam:
 - `src/seon/db/protocol.cljc`, `writer.clj`, `replica.cljs`, and `db.cljs` own
   Seon's current protocol, authority policy, local replica, and application API.
 
-The cache identity findings in
-[[datahike-cache-identity-2026-07-15]] are prerequisites: the existing
-`[hash max-tx max-eid]` result-cache key is not exact, and simultaneous
-identical misses are not coalesced.
+The cache identity and single-flight prerequisites in
+[[datahike-cache-identity-2026-07-15]] and
+[[single-flight-proof-2026-07-15]] are graduated dependencies.
 
 ## Result in one paragraph
 
@@ -592,3 +592,40 @@ Internal identity, scheduling, batching, and host implementation can change
 without changing agent data. The costly mistakes would be exposing a
 process-local Datahike handle, promising synchronous remote access, or making
 one authority lock the route through which every query must pass.
+
+## Implemented result
+
+Datahike `940810f5` selected the data-description plus ordinary-function form.
+The public catalog projects only existing API names/categories and concrete
+facts about cancellation, caching, resource limits, host values, and lazy
+results. It does not expose implementation symbols, schemas, routes, sessions,
+or transport fields.
+
+The evidence query follows the same normalization, planning, execution, cache,
+and single-flight path as `q`; ordinary `q` still returns only its value and
+pays no evidence-counter allocation. Evidence calls report whether the result
+was a completed hit, one computed miss, or a joined request, plus invocation-
+local charged work/results. Aggregate cache evidence omits cache keys and
+database objects.
+
+The existing Seon `request-id` is passed unchanged into Datahike. Internally it
+indexes one request attached to shared query work. Canceling it wakes exactly
+that request; only the final request sets the shared cooperative cancellation
+signal. Active duplicates reject and terminal reads remove the ID immediately.
+Seon's existing transaction receipt remains the only durable request record.
+
+The prior callback proposal was improved at the dependency seam. Datahike now
+offers committed reports at durable publication into one demand-opened,
+generation-owned, fixed-capacity source. The offer performs no projection,
+encoding, filtering, callbacks, threads, or network work. Overflow closes the
+source with a replay gap rather than silently dropping. Exact final connection
+release fences and abandons the source, while stale cleanup cannot affect a
+reconnected generation.
+
+The integrated retained proof passes 174 CLJ tests and 759 assertions across
+PSS, HHT, and specs. The maintained Node CLJS suite passes 107 tests and 838
+assertions. One fixture composes discovery, value identity, transaction,
+committed report, query, pull, cancellation, cache/resource evidence, scoped
+release, and connection release, then recursively proves its returned maps
+contain no DB, connection, Datom, callback/function, IDeref, thread, Future,
+Throwable, Promise, or socket value.

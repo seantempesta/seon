@@ -317,7 +317,7 @@ immutable computation for its initiating caller, but cannot repopulate a
 cleared/released cache or remove a newer same-key flight.
 
 The completed-hit path was also kept outside the coordinator before allocating
-the flight key, promise, waiter identity, or delayed attribute-dependency
+the flight key, promise, request identity, or delayed attribute-dependency
 analysis. Coordination cost therefore applies only to cache misses. The
 earlier disposable measurement of about 0.64 microseconds remains directional,
 not a retained cross-SHA benchmark; Unit 4 should measure global-atom admission

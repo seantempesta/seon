@@ -44,9 +44,13 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
   and in-flight state. Stale cleanup cannot address a reconnect generation.
 - Identical cacheable misses single-flight inside Datahike beside the completed
   weighted cache. Different keys, values, and databases remain parallel.
-- One canceled waiter detaches without affecting other waiters. The final
-  waiter sets cooperative cancellation; completed immutable work may still
+- One canceled request detaches without affecting other requests. The final
+  request sets cooperative cancellation; completed immutable work may still
   enter cache under bounded policy.
+- The existing `:seon.db.protocol/request-id` is the one request identity from
+  Bun through Seon and Datahike cancellation. Datahike retains it only while
+  the read is active; Seon's existing transaction receipts remain the sole
+  durable request record.
 - Datahike writes order and may batch per connection. A request receipt is not
   a promise of one distinct commit ID per transaction request.
 - No global authority request FIFO exists. Per-database ready queues are
@@ -79,7 +83,7 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `f8192962` (graduated Units 1–2 atop
+- Datahike `940810f5` (graduated Units 1–3 atop
   `9ada755087228e10cfb179fa5779ce227a6ed220`):
   `db.cljc`, `connections.cljc`, `connector.cljc`, `core.cljc`,
   `writing.cljc`, `writer.cljc`, `query.cljc`, `resource.cljc`,
@@ -158,12 +162,12 @@ assertions across PSS, HHT, and specs. The maintained Node CLJS gate remains
 green at 107 tests and 838 assertions, preserving synchronous semantics.
 
 Remote request cancellation remains a Unit 3 capability concern: the
-transport-free seam must retain each request's waiter identity and call the
+transport-free seam passes the same universal request ID into the
 coordinator's detach operation. Unit 4 admission, rather than single-flight,
 bounds unique-key computation; local synchronous overflow deliberately retains
 Datahike's direct-compute behavior.
 
-### Unit 3 — Datahike capability seam
+### Unit 3 — Datahike capability seam — graduated
 
 Extend `datahike.api.specification` with exact identity, cache evidence,
 cancellation, scoped release, and remote-suitable read capabilities. Keep
@@ -174,6 +178,30 @@ handoff bounded and non-blocking before network or derived work.
 Exit proof: one transport-free in-process fixture acquires, resolves one value,
 queries, pulls, listens, cancels, transacts, reports cache evidence, and releases
 without exposing a DB, connection, callback, thread, Promise, or Future in data.
+
+Graduated evidence: Datahike `940810f5` exposes a bounded namespaced catalog
+using concrete existing API facts, a namespaced committed-value identity, query
+results with per-request cache/resource evidence, cancellation by the existing
+universal request ID, aggregate cache evidence, and exact release evidence.
+Active duplicate request IDs reject; completed reads retain no request record.
+Each request has its own completion so cancellation wakes that caller without
+canceling shared work; the final request sets the existing cooperative query
+signal. Normal `q` remains value-compatible and does not allocate evidence
+counters.
+
+The durable writer now offers committed reports into a demand-opened bounded
+source using only a constant-time generation-fenced atom update before legacy
+listeners. Overflow fails closed, stale generations cannot cross reconnect,
+and final connection release abandons retained reports and removes the source.
+Projection, encoding, filtering, and network work remain outside Datahike's
+writer path.
+
+The integrated CLJ gate passes 174 tests and 759 assertions across PSS, HHT,
+and specs. The maintained Node CLJS gate passes 107 tests and 838 assertions.
+The retained in-process fixture composes capability discovery, connection/value
+ownership, transaction publication, query, pull, cancellation, cache/resource
+evidence, and release while recursively rejecting DBs, connections, Datoms,
+functions, IDeref values, threads, futures, and throwables from returned data.
 
 ### Unit 4 — multi-database authority registry and fair work classes
 
