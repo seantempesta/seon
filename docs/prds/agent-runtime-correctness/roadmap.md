@@ -55,6 +55,20 @@ This is durable receipt groundwork only: no eval has moved to a child, and the
 immutable parent capability plus child launch/kill/reap owner remain dependent
 on the unit-1 process boundary.
 
+The post-ordinary-startup containment reconciliation is complete at
+[[research/parent-capability-child-lifecycle-contract-2026-07-15]]. Commit
+`fbb8c399` settles SIGINT ownership for newly started watcher/writer/pod groups
+and supplies the launch-publication/inverse law. It does not prove that a
+non-detached eval child is absent when the Node pod group leader itself dies,
+and the retained native-branch interruption row is still open. Production
+child source therefore remains dependency-blocked on unit 1's stable child
+backend descriptor plus dead-leader subtree proof. The next implementable
+slice after that gate is one non-production `seon.eval` child-lifecycle adapter
+and synthetic artifact: retain one batch-owned exact `ChildProcess` handle,
+commit a positioned running receipt before dispatch, activate one immutable
+parent task capability, reject child-selected authority, and prove bounded
+TERM/KILL/`close` cleanup without moving application eval.
+
 The exact ClojureScript `1.12.145` source is now available as official tag
 `r1.12.145`, commit `bd23d9a2475d822ea8dfd65deaa6732428b9ed25`, fetched into
 the reference checkout without moving its working tree. Exact Shadow `3.4.10`
@@ -102,6 +116,11 @@ failures or errors).
   `seon.eval` receipt/capability mechanism; exact actor-stamp, CAS, recovery,
   compatibility, denial, and lost-ack laws; and the source boundary that is
   safe before versus dependent on unit-1 process containment.
+- [[research/parent-capability-child-lifecycle-contract-2026-07-15]] — the
+  post-unit-1 reconciliation: one immutable parent capability, exact durable
+  facts versus process-local handles, launch/kill/reap/restart laws, remaining
+  dead-leader subtree dependency, Inspect oracle boundary, and measured source
+  gates for the first non-production child experiment.
 
 ## Ordered work
 
@@ -136,7 +155,7 @@ failures or errors).
    no live proof is claimed because the default cluster was down.
 5. Remove narration/scaffolding ambiguity by fixing the owning context/runtime
    data rather than rewriting replies.
-6. **Audit complete; experiment pending:** implement the non-production
+6. **Audit complete; waiting on the final unit-1 ownership gate:** implement the non-production
    pod-owned disposable-child experiment first. Prove child CPU/heap/external
    memory death, a hard platform memory ceiling, capability refusal, ambient
    filesystem/network/environment/process denial, allowed framed IPC, prompt
@@ -162,6 +181,17 @@ failures or errors).
    child-handle closure, start each form durably, stamp every accepted effect
    from that capability, and acknowledge only committed terminal receipts. A
    killed form becomes interrupted and later forms remain absent.
+   The ordinary-startup half of that dependency is now proven by `fbb8c399`:
+   signal arrival cannot cross detached spawn plus managed-record publication,
+   only newly started processes unwind, and real SIGINT proof passes 31 tests/
+   153 assertions. Do not project that result onto a child after its pod group
+   leader dies. Before this slice edits source, unit 1 must publish the stable
+   child/backend descriptor and prove old-subtree absence across dead leader
+   and retained-branch interruption. Then the exact first slice is private
+   child launch/handle publication plus a synthetic artifact, positioned start
+   receipt, closed frames, parent-stamped read/refused-write probes, bounded
+   TERM/KILL/`close`, and hard-backend hostile-memory proof. Application eval,
+   provider attempts, warm slots, and Inspect model trials stay unchanged.
 7. Integrate Inspect tasks/scorers that falsify each transition, then run paid
    or small-model trials only after deterministic runtime gates pass.
 
