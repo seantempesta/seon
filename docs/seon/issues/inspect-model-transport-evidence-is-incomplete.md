@@ -127,24 +127,22 @@ survive around the real sample in its finalized and reopened `.eval`.
 
 ### Native state wiring gap
 
-A focused native-task falsifier now shows that the model-server start map does
-not reach the solver state that performs capability admission. `run_native_task`
-passes `seon_model_server_identity` as Inspect eval metadata after constructing
-the task, while `require_scorable_pod_state` reads the sample's
-`TaskState.metadata`. In
-`test_completed_default_solver_reaches_the_unchanged_static_scorer`, supplying
-complete inline attempt evidence and the model identity through
-`inspect_eval(metadata=...)` still fails with `model server identity and
-artifact must be maps`: the state-side value is absent. This is a source wiring
-failure, not a model or workspace score.
+The source wiring gap is closed through the existing native runner. Inspect
+initializes `TaskState.metadata` only from `Sample.metadata`; eval metadata is a
+separate log-level channel. `run_native_task` now composes one public Inspect
+setup solver ahead of every task-owned setup. It injects the already validated
+source, static-target, and model-server start maps into each sample state,
+accepts byte-equal preexisting values, and rejects conflicts before task setup
+can act. Caller-supplied eval metadata follows the same exact-equality rule
+rather than being silently overwritten.
 
-The existing native runner and common admission gate remain the owners. Close
-the gap by threading the already validated invocation-local start identity into
-each sample's ordinary state metadata before its solver runs, without adding a
-second runner or weakening fail-closed admission. A focused real-Inspect test
-must then prove that eval-level admission data, sample transport facts, and the
-workspace scorer meet in one state and that the finalized log retains the same
-start identity.
+A focused real-Inspect run proves task-owned setup observes all three maps in
+its original order, complete inline attempt evidence reaches the unchanged
+capability gate and scorer, and the finalized/reopened sample retains the same
+run-level model identity alongside transport evidence. A conflicting sample
+becomes an unscored sample error before its task setup runs. The issue remains
+open only for the admitted live ACME replay and finalized-log read-back; no
+second runner, scorer, or task-specific metadata mutation is required.
 
 ## Acceptance
 

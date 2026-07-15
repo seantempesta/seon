@@ -24,12 +24,13 @@ are the CASE-2 / mvm tier — deferred, not faked.
 
 from __future__ import annotations
 
+import copy
 import importlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from inspect_ai import Task, eval as inspect_eval
+from inspect_ai import Task, eval as inspect_eval, task_with
 from inspect_ai._util.registry import registry_log_name
 from inspect_ai.log import (
     MetadataEdit,
@@ -329,6 +330,44 @@ def _eval_admitted_task(
     return logs
 
 
+def _merge_native_run_metadata(
+    metadata: dict[str, Any] | None,
+    run_metadata: dict[str, Any],
+    *,
+    scope: str,
+) -> dict[str, Any]:
+    """Merge exact run-owned maps without accepting caller contradictions."""
+    merged = copy.deepcopy(metadata or {})
+    for key, value in run_metadata.items():
+        if key in merged and merged[key] != value:
+            raise source_admission.SourceAdmissionError(
+                f"native {scope} metadata conflicts with admitted {key}")
+        merged[key] = copy.deepcopy(value)
+    return merged
+
+
+@solver
+def _native_run_metadata(run_metadata: dict[str, Any]) -> Solver:
+    """Join immutable run admission maps into each native sample state.
+
+    Inspect eval metadata is retained at the log level, while ``TaskState``
+    begins with only ``Sample.metadata``. Native capability admission runs in
+    the sample solver, so the same validated run maps must cross that public
+    boundary explicitly. This setup step runs before task-owned setup so a
+    conflict fails before task setup can act and every later sample step sees
+    the admitted identity. Equal sample values are accepted; conflicting
+    values fail rather than being overwritten.
+    """
+    expected = copy.deepcopy(run_metadata)
+
+    async def solve(state: TaskState, _generate: Generate) -> TaskState:
+        state.metadata = _merge_native_run_metadata(
+            state.metadata, expected, scope="sample")
+        return state
+
+    return solve
+
+
 def run_native_task(
     identity: dict[str, str],
     task_factory: Callable[..., Task],
@@ -358,9 +397,25 @@ def run_native_task(
     model_server_start = cluster_mod.validate_model_server_identity(
         model_server_snapshot())
     task = task_factory(_admission=admission, **(task_kwargs or {}))
-    md = dict(eval_kwargs.pop("metadata", None) or {})
-    md["seon_static_target"] = target_start
-    md["seon_model_server_identity"] = model_server_start
+    run_metadata = {
+        "seon_source_admission": admission,
+        "seon_static_target": target_start,
+        "seon_model_server_identity": model_server_start,
+    }
+    existing_setup = task.setup
+    task_with(
+        task,
+        setup=[
+            _native_run_metadata(run_metadata),
+            *(
+                list(existing_setup)
+                if isinstance(existing_setup, list)
+                else ([existing_setup] if existing_setup is not None else [])
+            ),
+        ],
+    )
+    md = _merge_native_run_metadata(
+        eval_kwargs.pop("metadata", None), run_metadata, scope="eval")
     retained_metadata = {
         "eval": {
             "seon_source_admission": admission,

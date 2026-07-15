@@ -8,6 +8,7 @@ from seon_inspect import catalog
 class _FakeTask:
     """Just enough Task surface for run_bench: a solver chain to swap."""
     solver = []
+    setup = None
 
 
 def _model_server_identity(**overrides):
@@ -194,6 +195,29 @@ def test_run_native_task_requires_model_server_before_construction(monkeypatch):
             target_snapshot=lambda: {"artifact": "stable"},
         )
     assert constructed == []
+
+
+def test_run_native_task_rejects_conflicting_eval_metadata(monkeypatch):
+    admitted = {"bench": {"name": "native"}}
+    evaluated = []
+    monkeypatch.setattr(
+        catalog.source_admission, "verify_sources", lambda _identity: admitted)
+    monkeypatch.setattr(
+        catalog, "inspect_eval", lambda *args, **kwargs: evaluated.append(True))
+
+    with pytest.raises(
+        catalog.source_admission.SourceAdmissionError,
+        match="eval metadata conflicts with admitted seon_static_target",
+    ):
+        catalog.run_native_task(
+            {"name": "native"},
+            lambda **_kwargs: _FakeTask(),
+            target_snapshot=lambda: {"artifact": "stable"},
+            model_server_snapshot=_model_server_identity,
+            metadata={"seon_static_target": {"artifact": "wrong"}},
+        )
+
+    assert evaluated == []
 
 
 def test_run_native_task_rejects_target_drift(monkeypatch):
