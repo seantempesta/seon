@@ -17,6 +17,7 @@
 (schema/register! ::generation :int)
 (schema/register! ::reason :string)
 (schema/register! ::admitted? :boolean)
+(schema/register! ::prepared? :boolean)
 (schema/register! ::published? :boolean)
 (schema/register! ::recovered? :boolean)
 (schema/register! ::detached? :boolean)
@@ -154,7 +155,8 @@
         (swap-vals!
           !state
           (fn [{::keys [status] :as current}]
-            (if (= :publishing status)
+            (if (and (= :publishing status)
+                     (= generation (::prepared-generation current)))
               {::status :available ::generation generation}
               current)))]
     (and (= :publishing (::status before))
@@ -205,33 +207,55 @@
      ::instrumentation stats
      ::generation (:seon.schema.projection/fingerprint projection)}))
 
-(defn publish-committed!
-  "Reconstruct, reconcile, verify, and admit the current committed program.
+(defn- retain-prepared-generation!
+  [generation]
+  (let [[before after]
+        (swap-vals!
+          !state
+          (fn [{::keys [status] :as current}]
+            (if (and (= :publishing status)
+                     (not (contains? current ::prepared-generation)))
+              (assoc current ::prepared-generation generation)
+              current)))]
+    (and (= :publishing (::status before))
+         (not (contains? before ::prepared-generation))
+         (= generation (::prepared-generation after)))))
+
+(defn prepare-committed!
+  "Reconstruct and retain one verified committed projection.
 
    Normal callers acquire publication here. Cold boot may call
    [[begin-publication!]] before replaying stored namespaces, then invoke this
    function while the state is already `:publishing`. One failed attempt is
    recorded once and repaired from a newly frozen current database value. The
-   previous generation is never reopened after a commit."
+   verified projection remains hidden behind `:publishing` until
+   [[admit-prepared!]] receives this function's exact generation."
   {:malli/schema
    [:=> [:cat]
     [:map
-     [::published? :boolean]
+     [::prepared? :boolean]
      [::recovered? :boolean]
      [::generation {:optional true} ::generation]
      [::instrumentation {:optional true} :map]
      [:seon/error {:optional true} :map]]]}
   []
-  (let [owned? (or (= :publishing (::status @!state))
+  (let [current @!state
+        owned? (or (and (= :publishing (::status current))
+                        (not (contains? current ::prepared-generation)))
                    (begin-publication!))]
     (if-not owned?
-      (assoc (unavailable) ::published? false ::recovered? false)
+      (assoc (unavailable) ::prepared? false ::recovered? false)
       (let [old-projection (::previous-projection @!state)]
         (try
           (let [{::keys [generation instrumentation]}
                 (reconcile-committed! @db/*conn* old-projection)]
-            (admit-generation! generation)
-            {::published? true
+            (when-not (retain-prepared-generation! generation)
+              (throw
+                (ex-info
+                  "Verified program generation lost publication ownership"
+                  {::generation generation
+                   ::state (state)})))
+            {::prepared? true
              ::recovered? false
              ::generation generation
              ::instrumentation instrumentation})
@@ -244,8 +268,13 @@
             (try
               (let [{::keys [generation instrumentation]}
                     (reconcile-committed! @db/*conn* old-projection)]
-                (admit-generation! generation)
-                {::published? true
+                (when-not (retain-prepared-generation! generation)
+                  (throw
+                    (ex-info
+                      "Repaired program generation lost publication ownership"
+                      {::generation generation
+                       ::state (state)})))
+                {::prepared? true
                  ::recovered? true
                  ::generation generation
                  ::instrumentation instrumentation})
@@ -257,11 +286,61 @@
                       (str "Committed program reconstruction failed: "
                            (or (.-message repair) (str repair)))]
                   (transition-unavailable! reason generation)
-                  {::published? false
+                  {::prepared? false
                    ::recovered? false
                    ::generation generation
                    :seon/error
                    (:seon/error (unavailable))})))))))))
+
+(defn admit-prepared!
+  "Admit the exact verified projection retained by this publication."
+  {:malli/schema
+   [:=>
+    [:cat
+     [:map
+      [::prepared? :boolean]
+      [::recovered? :boolean]
+      [::generation {:optional true} ::generation]
+      [::instrumentation {:optional true} :map]
+      [:seon/error {:optional true} :map]]]
+    [:map
+     [::published? :boolean]
+     [::recovered? :boolean]
+     [::generation {:optional true} ::generation]
+     [::instrumentation {:optional true} :map]
+     [:seon/error {:optional true} :map]]]}
+  [{::keys [prepared? generation] :as preparation}]
+  (let [publication (-> preparation
+                        (dissoc ::prepared?)
+                        (assoc ::published? false))]
+    (cond
+      (not prepared?)
+      publication
+
+      (and generation (admit-generation! generation))
+      (assoc publication ::published? true)
+
+      :else
+      (assoc publication
+             :seon/error
+             (error/->map
+               (ex-info
+                 "Prepared program generation no longer owns publication"
+                 {::generation generation
+                  ::state (state)}))))))
+
+(defn publish-committed!
+  "Reconstruct, verify, and immediately admit the committed program."
+  {:malli/schema
+   [:=> [:cat]
+    [:map
+     [::published? :boolean]
+     [::recovered? :boolean]
+     [::generation {:optional true} ::generation]
+     [::instrumentation {:optional true} :map]
+     [:seon/error {:optional true} :map]]]}
+  []
+  (admit-prepared! (prepare-committed!)))
 
 (defn detach!
   "Close admission and remove the detached database's live projection.

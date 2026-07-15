@@ -109,6 +109,41 @@
         (is (admission/available?))
         (is (= 42 (:seon.schema.projection/fingerprint @!activated)))))))
 
+(deftest prepared-publication-stays-closed-through-an-injected-completion
+  (let [!effects (atom [])]
+    (with-redefs [db/*conn* (atom ::database)
+                  admission/committed-projection
+                  (fn [_database]
+                    {:seon.schema.projection/fingerprint 42
+                     :seon.schema.projection/function-contracts {}})
+                  schema/current-projection (constantly nil)
+                  schema/activate-projection!
+                  (fn [projection]
+                    (swap! !effects conj :projection-activated)
+                    projection)
+                  instrument/reconcile-projection!
+                  (constantly {::instrument/ok? true})]
+      (let [preparation (admission/prepare-committed!)]
+        (is (true? (::admission/prepared? preparation)))
+        (is (= :publishing (::admission/status (admission/state))))
+        (is (false? (admission/available?))
+            "verified wrappers remain hidden while completion is pending")
+
+        (let [wrong-publication
+              (admission/admit-prepared!
+                (assoc preparation ::admission/generation 43))]
+          (is (false? (::admission/published? wrong-publication)))
+          (is (= :publishing (::admission/status (admission/state))))
+          (is (false? (admission/available?))
+              "a result for another generation cannot open admission"))
+
+        (swap! !effects conj :completion-verified)
+        (let [publication (admission/admit-prepared! preparation)]
+          (is (true? (::admission/published? publication)))
+          (is (= [:projection-activated :completion-verified] @!effects))
+          (is (= 42 (::admission/generation (admission/state))))
+          (is (admission/available?)))))))
+
 (deftest publication-reconciles-from-the-projection-captured-before-replay
   (let [projection-a {:seon.schema.projection/fingerprint 1
                       :seon.schema.projection/function-contracts {}}
