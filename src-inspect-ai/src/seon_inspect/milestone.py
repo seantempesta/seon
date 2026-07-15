@@ -199,41 +199,87 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
                        oracle: dict[str, Any] | None = None) -> dict[str, Any]:
     """The `db` milestone oracle: store, then RECALL it in a later eval.
 
-    OK iff store-then-recall actually happened:
-      - transact       an ok `db/transact!` ran at some eval index T;
-      - query_later    an ok `db/query` ran at an eval index > T (recall from
-                       the db, not re-derived from the prompt);
-      - answer         the delivered reply states the recalled total 59.5
-                       (42.5 + 17.0, the two caches strictly heavier than
-                       10 kg).
+    OK iff the retained eval evidence proves the requested workflow shape:
+      - schema_register both declared schemas have the requested types and the
+                        identity is unique, before storage;
+      - transact       one ok transaction source contains every requested row;
+      - query_later    a later ok query names the measure, strict predicate,
+                       and threshold;
+      - report_human   a later human report states the answer;
+      - complete       a later completion states the answer; and
+      - answer         the delivered reply states the answer.
     The reply IS the agent's delivered message/complete content (pod_run
     surfaces it), so the answer check is over the reply text directly.
     """
     oracle = oracle or {}
     identity_attr = oracle.get("identity_attr", ":my.cache/name")
     measure_attr = oracle.get("measure_attr", ":my.cache/weight-kg")
+    records = oracle.get("records", [
+        {"identity": "KESTREL", "measure": 42.5},
+        {"identity": "MARMOT", "measure": 17.0},
+        {"identity": "TERN", "measure": 8.25},
+        {"identity": "PLOVER", "measure": 3.75},
+    ])
+    threshold = str(oracle.get("threshold", "10"))
     expected = oracle.get("answer", "59.5")
-    regs = _ok_indices(
-        eval_rows,
-        rf"register!\s+(?:{re.escape(identity_attr)}|{re.escape(measure_attr)})")
-    tx = [i for i in _ok_indices(
-        eval_rows, r"db/transact!|seon\.db/transact!")
-          if measure_attr in (eval_rows[i].get("source") or "")]
+    identity_regs = _ok_indices(
+        eval_rows, rf"register!\s+{re.escape(identity_attr)}")
+    measure_regs = _ok_indices(
+        eval_rows, rf"register!\s+{re.escape(measure_attr)}")
+    identity_schema = [
+        i for i in identity_regs
+        if (":string" in (eval_rows[i].get("source") or "")
+            and re.search(
+                r":seon\.db/identity\s+true|:db\.unique/identity",
+                eval_rows[i].get("source") or ""))
+    ]
+    measure_schema = [
+        i for i in measure_regs
+        if ":int" in (eval_rows[i].get("source") or "")
+    ]
+    tx = []
+    for i in _ok_indices(eval_rows, r"db/transact!|seon\.db/transact!"):
+        source = eval_rows[i].get("source") or ""
+        complete = (identity_attr in source and measure_attr in source
+                    and all(str(record["identity"]) in source
+                            and _reply_has_number(
+                                source, str(record["measure"]))
+                            for record in records))
+        if complete:
+            tx.append(i)
     transact_idx = tx[0] if tx else None
     query_idx = None
     if transact_idx is not None:
         later = [i for i in _ok_indices(eval_rows, r"db/query|seon\.db/query")
                  if (i > transact_idx
-                     and measure_attr in (eval_rows[i].get("source") or ""))]
+                     and measure_attr in (eval_rows[i].get("source") or "")
+                     and ">" in (eval_rows[i].get("source") or "")
+                     and _reply_has_number(
+                         eval_rows[i].get("source") or "", threshold))]
         query_idx = later[0] if later else None
-    schema_idx = regs[0] if regs else None
+    schema_indices = identity_schema + measure_schema
+    schema_before = (bool(identity_schema) and bool(measure_schema)
+                     and transact_idx is not None
+                     and max(schema_indices) < transact_idx)
+    report_indices = ([] if query_idx is None else [
+        i for i in _ok_indices(
+            eval_rows, r"(?:seon\.agent\.)?message/user")
+        if (i > query_idx and _reply_has_number(
+            eval_rows[i].get("source") or "", expected))
+    ])
+    complete_indices = ([] if query_idx is None else [
+        i for i in _ok_indices(
+            eval_rows, r"(?:seon\.agent\.lifecycle/)?complete\b")
+        if (i > query_idx and _reply_has_number(
+            eval_rows[i].get("source") or "", expected))
+    ])
     answer = _reply_has_number(reply, expected)
 
-    checks = {"schema_register": (schema_idx is not None
-                                  and (transact_idx is None
-                                       or schema_idx < transact_idx)),
+    checks = {"schema_register": schema_before,
               "transact": transact_idx is not None,
               "query_later": query_idx is not None,
+              "report_human": bool(report_indices),
+              "complete": bool(complete_indices),
               "answer": answer}
     failures = [k for k, v in checks.items() if not v]
     return {"ok": not failures, "checks": checks, "failures": failures,

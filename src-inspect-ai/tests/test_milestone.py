@@ -100,10 +100,17 @@ def test_ns_movement_report_values_needs_both_numbers():
 # ---------------------------------------------------------------------------
 
 _DB_GOOD_ROWS = _ev(
-    ("(schema/register! :my.cache/weight-kg :double)", True),
-    ("(db/transact! [{:my.cache/name \"KESTREL\" :my.cache/weight-kg 42.5}])", True),
+    ("(schema/register! :my.cache/name "
+     "[:string {:seon.db/identity true}])", True),
+    ("(schema/register! :my.cache/weight-kg :int)", True),
+    ("(db/transact! [{:my.cache/name \"KESTREL\" :my.cache/weight-kg 42.5} "
+     "{:my.cache/name \"MARMOT\" :my.cache/weight-kg 17.0} "
+     "{:my.cache/name \"TERN\" :my.cache/weight-kg 8.25} "
+     "{:my.cache/name \"PLOVER\" :my.cache/weight-kg 3.75}])", True),
     ("(db/query '[:find (sum ?w) . :where [?e :my.cache/weight-kg ?w] [(> ?w 10)]])",
      True),
+    ("(message/user \"The recalled total is 59.5\")", True),
+    ("(complete \"The recalled total is 59.5\")", True),
 )
 _DB_GOOD_REPLY = "The total weight of caches over 10 kg is 59.5 kg."
 
@@ -111,7 +118,7 @@ _DB_GOOD_REPLY = "The total weight of caches over 10 kg is 59.5 kg."
 def test_store_recall_good():
     r = check_store_recall(_DB_GOOD_ROWS, _DB_GOOD_REPLY)
     assert r["ok"], r["failures"]
-    assert r["transact_idx"] == 1 and r["query_idx"] == 2
+    assert r["transact_idx"] == 2 and r["query_idx"] == 3
 
 
 def test_store_recall_query_before_transact_fails():
@@ -130,6 +137,28 @@ def test_store_recall_answer_absent_fails():
         _DB_GOOD_ROWS, "I stored the caches.")["failures"]
 
 
+@pytest.mark.parametrize(
+    ("rows", "failed_check"),
+    [
+        (_DB_GOOD_ROWS[1:], "schema_register"),
+        (_DB_GOOD_ROWS[:2]
+         + _ev(("(db/transact! [{:my.cache/name \"KESTREL\" "
+                ":my.cache/weight-kg 42.5}])", True))
+         + _DB_GOOD_ROWS[3:], "transact"),
+        (_DB_GOOD_ROWS[:3]
+         + _ev(("(db/query '[:find (sum ?w) . :where "
+                "[?e :my.cache/weight-kg ?w] [(> ?w 9)]])", True))
+         + _DB_GOOD_ROWS[4:], "query_later"),
+        (_DB_GOOD_ROWS[:4] + _DB_GOOD_ROWS[5:], "report_human"),
+        (_DB_GOOD_ROWS[:-1], "complete"),
+    ],
+)
+def test_store_recall_rejects_partial_workflow(rows, failed_check):
+    result = check_store_recall(rows, _DB_GOOD_REPLY)
+    assert not result["ok"]
+    assert failed_check in result["failures"]
+
+
 def test_generated_database_workflow_uses_structured_oracle():
     from seon_inspect.generators import generate_rows
 
@@ -140,8 +169,16 @@ def test_generated_database_workflow_uses_structured_oracle():
     rows = _ev(
         (f"(schema/register! {identity} [:string {{:seon.db/identity true}}])", True),
         (f"(schema/register! {measure} :int)", True),
-        (f"(db/transact! [{{{identity} \"a\" {measure} 12}}])", True),
-        (f"(db/query '[:find (sum ?v) . :where [?e {measure} ?v]])", True),
+        ("(db/transact! ["
+         + " ".join(
+             f"{{{identity} {record['identity']!r} "
+             f"{measure} {record['measure']}}}"
+             for record in oracle["records"])
+         + "])", True),
+        (f"(db/query '[:find (sum ?v) . :where [?e {measure} ?v] "
+         f"[(> ?v {oracle['threshold']})]])", True),
+        (f"(message/user \"Computed {oracle['answer']}\")", True),
+        (f"(complete \"Computed {oracle['answer']}\")", True),
     )
     result = check_milestone("db", rows, oracle["answer"], oracle)
     assert result["ok"], result["failures"]

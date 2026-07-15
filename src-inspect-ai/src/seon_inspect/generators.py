@@ -635,6 +635,11 @@ def _database_workflow(rng: random.Random) -> dict[str, Any]:
         "oracle": {
             "identity_attr": identity_attr,
             "measure_attr": measure_attr,
+            "records": [
+                {"identity": label, "measure": value}
+                for label, value in zip(labels, values)
+            ],
+            "threshold": threshold,
             "answer": str(answer),
         },
         "target": str(answer),

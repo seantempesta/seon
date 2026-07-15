@@ -14,11 +14,11 @@
       "canary_guid": "SEON-CANARY-782255ca-10da-4731-b411-83a25f610f6f",
       "dev_n": 1,
       "dev_seed": 1,
-      "dev_sha256": "5b8b7d1573ad1f6f8d377635efa87900ea667cde1cfee323d5b76ff6754cee8e",
+      "dev_sha256": "07734536f8dfc9e052e2f5cccf66f71df31ab854f58171f90da2d1563d383848",
       "epochs": 1,
       "generator": "seon_inspect.generators:database_workflow",
       "milestone_seed": 2,
-      "milestone_sha256": "03e76adf9b8864562fd7767648283c07ed55696b5bdb12d63f302c3ec74780f5",
+      "milestone_sha256": "381cd461e0c547d380190c0fa06692202ba17e1999ec1a6939cd42d25e39f386",
       "status": "generated",
       "test_seed": "fresh-per-draw"
     },

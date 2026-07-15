@@ -169,6 +169,17 @@ database model value. The prior local Qwen 3.5 2B quant has vanished and is
 replaced in the candidate matrix by the complete revision-pinned BF16 snapshot.
 Exact evidence and order remain in [[research/local-model-serving-inventory-2026-07-15]].
 
+The frozen database-workflow scorer no longer accepts a token-level sketch of
+the task. Its host-only oracle metadata now retains the five records and
+threshold while leaving sample id and prompt bytes unchanged. Correctness
+requires both typed schema registrations (including unique identity), all five
+records in one transaction, a later strict-threshold query, and separate human
+and completion reports containing 327. The focused freeze/oracle/native-run
+gate passes 151 tests. A diagnostic sample may now run, but formal P0b
+acceptance still needs bounded retained proof that the reported value came from
+the actual query result; that remaining contract is recorded in
+[[../../seon/issues/database-workflow-scorer-lacks-query-result-evidence]].
+
 A subsequent purity probe found that historical result-handle display depends
 on a process-local cache. The target is now explicit and falsifiable: the same
 agent and resolved database coordinate regenerate a byte-identical cacheable
