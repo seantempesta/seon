@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, web]
 ---
@@ -49,3 +49,13 @@ The one cursor and bounded index projection in `seon.db.browser`.
   five-component history paging remains disjoint and bounded.
 - The version-1 opaque cursor remains the sole continuation mechanism; no
   signature, server-side registry, cache, or fallback-to-first-page is added.
+
+## Resolution
+
+`seon.db.browser` now reconstructs and re-encodes every cursor boundary scalar,
+rejects noncanonical encodings, and compares the ordered boundary prefix with
+the sealed prefix before selecting the immutable projection or reading an
+index. The focused projection checkpoint passed four tests and 25 assertions
+with zero failures or errors, including zero-read doubles for noncanonical and
+prefix-inconsistent boundaries. The retained log is
+`tmp/test-cljs-20260715-092419-25639.log`.

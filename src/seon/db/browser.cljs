@@ -18,6 +18,8 @@
 (schema/register! ::value :any)
 (schema/register! ::transaction :int)
 (schema/register! ::added? :boolean)
+(schema/register! ::reference? :boolean)
+(schema/register! ::target-entity :int)
 (schema/register! ::projection [:enum :current :history])
 (schema/register! ::direction [:enum :forward :reverse])
 (schema/register! ::cursor-token :string)
@@ -88,6 +90,35 @@
    [::more? ::more?]
    [::next-cursor {:optional true} ::cursor-token]])
 (schema/register! ::page-result [:or ::page ::cursor-error])
+(schema/register!
+  ::fact
+  [:map {:closed true}
+   [::entity ::entity]
+   [::attribute ::attribute]
+   [::value ::value]
+   [::transaction ::transaction]
+   [::added? ::added?]
+   [::reference? ::reference?]])
+(schema/register! ::facts [:vector ::fact])
+(schema/register!
+  ::fact-page
+  [:map {:closed true}
+   [::facts ::facts]
+   [::more? ::more?]
+   [::next-cursor {:optional true} ::cursor-token]])
+(schema/register!
+  ::projection-error-kind
+  [:enum
+   :seon.db.browser.projection.error/unknown-attribute
+   :seon.db.browser.projection.error/not-reference])
+(schema/register!
+  ::projection-error
+  [:map {:closed true}
+   [::error ::projection-error-kind]
+   [::message :string]])
+(schema/register!
+  ::fact-page-result
+  [:or ::fact-page ::cursor-error ::projection-error])
 (schema/register! ::attribute-groups
                   [:map-of :keyword [:vector :qualified-keyword]])
 (schema/register!
@@ -107,6 +138,23 @@
    [:seon.db/db :seon.db/db-val]
    [::database-coordinate :seon.db.coordinate/coordinate]
    [::attribute ::attribute]
+   [::limit ::limit]
+   [::cursor {:optional true} ::cursor-token]])
+(schema/register!
+  ::entity-page-request
+  [:map {:closed true}
+   [:seon.db/db :seon.db/db-val]
+   [::database-coordinate :seon.db.coordinate/coordinate]
+   [::entity ::entity]
+   [::limit ::limit]
+   [::cursor {:optional true} ::cursor-token]])
+(schema/register!
+  ::reverse-reference-page-request
+  [:map {:closed true}
+   [:seon.db/db :seon.db/db-val]
+   [::database-coordinate :seon.db.coordinate/coordinate]
+   [::attribute ::attribute]
+   [::target-entity ::target-entity]
    [::limit ::limit]
    [::cursor {:optional true} ::cursor-token]])
 
@@ -293,12 +341,28 @@
   (let [value (decode-value (:seon.db/v encoded-datom))]
     (if (::error value)
       value
-      (ordered-components
-        index
-        {:seon.db/e (:seon.db/e encoded-datom)
-         :seon.db/a (:seon.db/a encoded-datom)
-         :seon.db/v value
-         :seon.db/tx (:seon.db/tx encoded-datom)}))))
+      (let [datom {:seon.db/e (:seon.db/e encoded-datom)
+                   :seon.db/a (:seon.db/a encoded-datom)
+                   :seon.db/v value
+                   :seon.db/tx (:seon.db/tx encoded-datom)
+                   :seon.db/added? (:seon.db/added? encoded-datom)}]
+        (if (= encoded-datom (encode-datom datom))
+          (ordered-components index datom)
+          (cursor-error
+            :seon.db.browser.cursor.error/invalid-payload
+            "The cursor boundary is not canonically encoded."))))))
+
+(defn- validated-cursor-boundary [index encoded-prefix encoded-datom]
+  (let [boundary (cursor-components index encoded-datom)]
+    (if (::error boundary)
+      boundary
+      (let [encoded-boundary (encode-values boundary)]
+        (if (= encoded-prefix
+               (subvec encoded-boundary 0 (count encoded-prefix)))
+          boundary
+          (cursor-error
+            :seon.db.browser.cursor.error/request-mismatch
+            "The cursor boundary does not belong to the sealed index prefix."))))))
 
 (defn- same-datom? [encoded datom]
   (= encoded (encode-datom datom)))
@@ -386,7 +450,7 @@
       :else
       (let [last-datom (:seon.db.browser.cursor/last payload)
             boundary (if last-datom
-                       (cursor-components index last-datom)
+                       (validated-cursor-boundary index encoded-prefix last-datom)
                        prefix)]
         (if (::error boundary)
           boundary
@@ -435,3 +499,79 @@
              ::direction :forward
              ::limit limit}
       cursor (assoc ::cursor cursor))))
+
+(defn- fact-page [page reference-attributes]
+  (if (::error page)
+    page
+    (cond-> {::facts
+             (mapv (fn [fact-row]
+                     (assoc fact-row ::reference?
+                            (contains? reference-attributes (::attribute fact-row))))
+                   (::rows page))
+             ::more? (::more? page)}
+      (::next-cursor page) (assoc ::next-cursor (::next-cursor page)))))
+
+(defn- installed-reference-attributes [dbv]
+  (into #{}
+        (keep (fn [[attribute schema-facts]]
+                (when (= :db.type/ref (:db/valueType schema-facts))
+                  attribute)))
+        (db/installed-schema dbv)))
+
+(defn entity-page
+  "Read one bounded current EAVT fact page for an entity."
+  {:malli/schema [:=> [:cat ::entity-page-request] ::fact-page-result]}
+  [{dbv :seon.db/db
+    coordinate ::database-coordinate
+    entity ::entity
+    limit ::limit
+    cursor ::cursor}]
+  (let [page
+        (index-page
+          (cond-> {:seon.db/db dbv
+                   ::database-coordinate coordinate
+                   ::projection :current
+                   ::index :eavt
+                   ::prefix [entity]
+                   ::direction :forward
+                   ::limit limit}
+            cursor (assoc ::cursor cursor)))]
+    (fact-page page
+               (if (seq (::rows page))
+                 (installed-reference-attributes dbv)
+                 #{}))))
+
+(defn reverse-reference-page
+  "Read one bounded current AVET page for an incoming reference."
+  {:malli/schema
+   [:=> [:cat ::reverse-reference-page-request] ::fact-page-result]}
+  [{dbv :seon.db/db
+    coordinate ::database-coordinate
+    attribute ::attribute
+    target-entity ::target-entity
+    limit ::limit
+    cursor ::cursor}]
+  (let [schema-facts (attribute-schema dbv attribute)]
+    (cond
+      (nil? schema-facts)
+      (cursor-error
+        :seon.db.browser.projection.error/unknown-attribute
+        "The reverse-reference attribute is not installed in this database.")
+
+      (not= :db.type/ref (:db/valueType schema-facts))
+      (cursor-error
+        :seon.db.browser.projection.error/not-reference
+        "The reverse-reference projection requires a reference attribute.")
+
+      :else
+      (fact-page
+        (index-page
+          (cond-> {:seon.db/db dbv
+                   ::database-coordinate coordinate
+                   ::projection :current
+                   ::index :avet
+                   ::prefix [attribute target-entity]
+                   ::direction :forward
+                   ::limit limit}
+            cursor (assoc ::cursor cursor)))
+        #{attribute}))))

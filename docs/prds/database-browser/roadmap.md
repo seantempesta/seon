@@ -71,14 +71,15 @@ The read-only entity/ref/transaction reconciliation at
 [[research/entity-reference-projection-reconciliation-2026-07-15]] confirms
 that selected Datahike `417649383c65e13f15ea41d394fb1ed742477965`
 already supplies the bounded EAVT and AVET primitives for the next slice. It
-also found one remaining Slice A pre-read validation gap: decoded `last` data
-is not proven canonical and prefix-consistent before the index seek. The defect
-and zero-read acceptance are recorded in
-[[../../seon/issues/database-browser-cursor-boundary-is-not-pre-read-validated]].
-The earliest source-disjoint executable work is therefore cursor-boundary
-hardening plus pure entity/outbound-ref/reverse-ref projections in
-`seon.db.browser` and a new focused test namespace. It requires no web,
-reactive-unit, feed, route, pod, or ACME edit.
+also found one remaining Slice A pre-read validation gap. That gap is now
+closed: decoded `last` data must decode and re-encode canonically and its
+selected-index boundary must begin with the sealed prefix before any read.
+The same database owner now exposes pure bounded current EAVT entity facts and
+AVET reverse-reference facts; reference shape is derived from installed schema,
+not inferred from eid-like scalar values. The focused checkpoint passed four
+tests and 25 assertions with zero failures or errors; its retained log is
+`tmp/test-cljs-20260715-092419-25639.log`. Web/unit composition remains the
+next consumer slice after the active reactive lane settles.
 
 ## Research evidence
 
@@ -102,11 +103,11 @@ reactive-unit, feed, route, pod, or ACME edit.
    through `/data`, dependency system attrs are classified correctly, and the
    web adapter consumes the opaque coordinate-bound cursor without a second
    parser or mutable retained database value.
-3. First harden canonical/prefix-consistent cursor boundaries before any index
-   read. Then add pure bounded EAVT entity/outbound-ref and AVET reverse-ref
-   projections in the database owner. Compose them as units only after the
-   active reactive lane settles; raw rendering uses only the already selected
-   bounded value.
+3. **Pure entity/reference projections complete:** cursor boundaries are
+   canonical and prefix-consistent before every read; bounded EAVT entity facts
+   and AVET reverse-reference facts share the one cursor mechanism. Compose
+   them as units only after the active reactive lane settles; raw rendering
+   uses only the already selected bounded value.
 4. Add backward transaction navigation, exact transaction metadata,
    user/process provenance, and a closed capped effective-datom unit.
 5. Add five-component assertion/retraction history and frozen as-of links;
