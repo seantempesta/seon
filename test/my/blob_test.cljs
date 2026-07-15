@@ -16,9 +16,9 @@
         hash both return error envelopes (get/text/concat!, naming the
         offending hash) or exists? false (stat); nothing throws.
 
-   Hermetic: blobs go to a pid-scoped tmp dir (my.blob/!dir is re-pointed
-   for the run and restored after — a shared dir would let a concurrent
-   suite skew the file-count assertions), and every test gets a fresh
+   Hermetic: the blob storage view uses a pid-scoped writable dir for the run
+   and is restored after — a shared dir would let a concurrent suite skew the
+   file-count assertions — and every test gets a fresh
    :memory conn root-set! as db/*conn* (a `binding` would pop at the
    first await — see my.kb-test for the pattern's full rationale)."
   (:require
@@ -39,15 +39,22 @@
 (def ^:private fixture-dir
   (.resolve npath (str "tmp/blob-test-" (.-pid js/process))))
 
-(defonce ^:private !saved-dir (atom nil))
+(def ^:private absent-hash (apply str (repeat 64 "0")))
+
+(defn- storage-view
+  [writable-dir & read-only-dirs]
+  {:my.blob/writable-dir writable-dir
+   :my.blob/read-only-dirs (vec read-only-dirs)})
+
+(defonce ^:private !saved-storage-view (atom nil))
 
 (use-fixtures :once
   {:before (fn []
-             (reset! !saved-dir @blob/!dir)
-             (reset! blob/!dir fixture-dir)
+             (reset! !saved-storage-view @blob/!storage-view)
+             (reset! blob/!storage-view (storage-view fixture-dir))
              (.rmSync nfs fixture-dir #js {:recursive true :force true}))
    :after  (fn []
-             (reset! blob/!dir @!saved-dir)
+             (reset! blob/!storage-view @!saved-storage-view)
              (.rmSync nfs fixture-dir #js {:recursive true :force true}))})
 
 (defn- fresh-conn
@@ -116,6 +123,12 @@
                        (is (.existsSync nfs (.join npath fixture-dir
                                                    (subs hash 0 2) hash))
                            "file lands at <dir>/<first-2-of-hash>/<hash>")
+                       (is (= [hash]
+                              (vec (.readdirSync
+                                     nfs
+                                     (.join npath fixture-dir
+                                            (subs hash 0 2)))))
+                           "atomic publication leaves no .new file")
                        ;; stat — the datom projection, no disk
                        (let [s (blob/stat {:my.blob/hash hash})]
                          (is (true? (:my.blob/ok? s)))
@@ -138,7 +151,85 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
-;; 2. Idempotent double-put — one file, one datom row.
+;; 2. Storage view — writable overlay + ordered read-only bases.
+;; ---------------------------------------------------------------------------
+
+(deftest storage-view-reads-base-without-copying-it
+  (async done
+    (run-test
+      (fn [conn]
+        (let [base-dir (.join npath fixture-dir "base")
+              overlay-dir (.join npath fixture-dir "overlay")
+              content "source-era blob"]
+          (reset! blob/!storage-view (storage-view base-dir))
+          (-> (blob/put! {:my.blob/content content})
+              (.then (pinned conn
+                       (fn [{hash :my.blob/hash}]
+                         (reset! blob/!storage-view
+                                 (storage-view overlay-dir base-dir))
+                         (let [read (blob/get {:my.blob/hash hash})]
+                           (is (true? (:my.blob/ok? read)))
+                           (is (= content (:my.blob/content read))
+                               "overlay miss falls through to the source base"))
+                         (blob/put! {:my.blob/content content}))))
+              (.then (pinned conn
+                       (fn [{hash :my.blob/hash ok? :my.blob/ok?}]
+                         (is (true? ok?))
+                         (is (not (.existsSync
+                                    nfs
+                                    (.join npath overlay-dir
+                                           (subs hash 0 2) hash)))
+                             "existing base content dedupes without an overlay copy"))))
+              (.finally
+                (fn []
+                  (reset! blob/!storage-view (storage-view fixture-dir)))))))
+      done)))
+
+(deftest corrupt-overlay-does-not-fall-through-to-a-valid-base
+  (async done
+    (run-test
+      (fn [conn]
+        (let [base-dir (.join npath fixture-dir "corrupt-base")
+              overlay-dir (.join npath fixture-dir "corrupt-overlay")
+              content "valid source bytes"]
+          (reset! blob/!storage-view (storage-view base-dir))
+          (-> (blob/put! {:my.blob/content content})
+              (.then (pinned conn
+                       (fn [{hash :my.blob/hash}]
+                         (let [overlay-path (.join npath overlay-dir
+                                                   (subs hash 0 2) hash)]
+                           (.mkdirSync nfs (.dirname npath overlay-path)
+                                       #js {:recursive true})
+                           (.writeFileSync nfs overlay-path "wrong bytes" "utf8")
+                           (reset! blob/!storage-view
+                                   (storage-view overlay-dir base-dir))
+                           (let [read (blob/get {:my.blob/hash hash})]
+                             (is (false? (:my.blob/ok? read)))
+                             (is (str/includes? (:my.blob/error read)
+                                                "integrity failure")
+                                 "corruption is loud instead of hidden by fallback"))))))
+              (.finally
+                (fn []
+                  (reset! blob/!storage-view (storage-view fixture-dir)))))))
+      done)))
+
+(deftest storage-view-rejects-overlapping-directories
+  (async done
+    (run-test
+      (fn [_conn]
+        (reset! blob/!storage-view (storage-view fixture-dir fixture-dir))
+        (try
+          (let [read (blob/get {:my.blob/hash absent-hash})]
+            (is (false? (:my.blob/ok? read)))
+            (is (str/includes? (:my.blob/error read) "must be distinct")
+                "one directory cannot be both writable and read-only"))
+          (finally
+            (reset! blob/!storage-view (storage-view fixture-dir))))
+        js/undefined)
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; 3. Idempotent double-put — one file, one datom row.
 ;; ---------------------------------------------------------------------------
 
 (deftest double-put-is-idempotent
@@ -167,7 +258,7 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
-;; 3. Paging honesty — window math + the default cap.
+;; 4. Paging honesty — window math + the default cap.
 ;; ---------------------------------------------------------------------------
 
 (deftest text-pages-with-honest-totals
@@ -231,7 +322,7 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
-;; 4. concat! — chunked put!s assemble into ONE canonical blob.
+;; 5. concat! — chunked put!s assemble into ONE canonical blob.
 ;; ---------------------------------------------------------------------------
 
 (def ^:private chunk-1 "part one line 1\npart one line 2\n")
@@ -293,10 +384,8 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
-;; 5. Errors are values — absent + malformed hashes.
+;; 6. Errors are values — absent + malformed hashes.
 ;; ---------------------------------------------------------------------------
-
-(def ^:private absent-hash (apply str (repeat 64 "0")))
 
 (deftest missing-and-malformed-hashes-are-error-values
   (async done

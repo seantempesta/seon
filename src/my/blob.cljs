@@ -8,9 +8,10 @@
 
    A blob's name IS its SHA-256 content hash: writes are idempotent,
    identical content dedupes for free, and the hash on a datom is a
-   durable pointer that survives restarts. Files live under the cluster
-   dir (`<cluster>/blobs/<first-2-of-hash>/<hash>`), beside the store
-   they annotate. No GC — content-addressed blobs are append-only.
+   durable pointer that survives restarts. Files live in one storage view:
+   a writable cluster directory followed by ordered read-only bases. A normal
+   cluster has no bases; a branch can write an overlay while reading its source
+   archive. No GC — content-addressed blobs are append-only.
 
    Errors are VALUES: every function returns a map with `:my.blob/ok?`;
    a missing or malformed hash is a guiding error map, never a throw.
@@ -49,6 +50,13 @@
 (schema/register! ::ok?     :boolean)
 (schema/register! ::error   :string)
 (schema/register! ::exists? :boolean)
+(schema/register! ::directory [:string {:min 1}])
+(schema/register! ::writable-dir ::directory)
+(schema/register! ::read-only-dirs [:vector ::directory])
+(schema/register! ::storage-view
+  [:map
+   [::writable-dir ::writable-dir]
+   [::read-only-dirs ::read-only-dirs]])
 
 ;; text paging — 1-based line window + honest totals (the fs precedent).
 (schema/register! ::from-line      :int)
@@ -118,14 +126,16 @@
    [::media   {:optional true} ::media]
    [::at      {:optional true} ::at]])
 
-;;; LOCATION — blobs live beside the cluster store they annotate. An atom
-;;; so an isolated harness (a hermetic test, bin/acme) can point it at its
-;;; own dir; the live pod never changes it.
+;;; LOCATION — one writable archive plus ordered read-only bases. This is
+;;; process-local launch data. The atom remains the explicit hermetic-test
+;;; seam; the live pod does not mutate it.
 
-(defonce !dir
-  (atom (str (or (platform/env-val "SEON_CLUSTER_DIR")
-                 "data/clusters/default")
-             "/blobs")))
+(defonce !storage-view
+  (atom {::writable-dir
+         (str (or (platform/env-val "SEON_CLUSTER_DIR")
+                  "data/clusters/default")
+              "/blobs")
+         ::read-only-dirs []}))
 
 (def default-max-lines
   "Default [[text]] page size — a blob can be huge and the page renders
@@ -139,10 +149,29 @@
       (.update s "utf8")
       (.digest "hex")))
 
+(defn- validated-storage-view
+  "The normalized storage view, or an errors-as-data envelope."
+  []
+  (let [view @!storage-view]
+    (if-not (schema/valid-candidate-value? ::storage-view view)
+      {::ok? false
+       ::error (str "invalid blob storage view — expected "
+                    "{:my.blob/writable-dir string "
+                    ":my.blob/read-only-dirs [string …]}")}
+      (let [writable-dir (.resolve npath (::writable-dir view))
+            read-only-dirs (mapv #(.resolve npath %) (::read-only-dirs view))
+            all-dirs (into [writable-dir] read-only-dirs)]
+        (if (= (count all-dirs) (count (distinct all-dirs)))
+          {::ok? true
+           ::storage-view {::writable-dir writable-dir
+                           ::read-only-dirs read-only-dirs}}
+          {::ok? false
+           ::error "invalid blob storage view — every directory must be distinct"})))))
+
 (defn- blob-path
-  "Absolute file path for `hash`: `<dir>/<first-2-of-hash>/<hash>`."
-  [hash]
-  (.resolve npath (.join npath @!dir (subs hash 0 2) hash)))
+  "Absolute path for `hash` below one archive directory."
+  [dir hash]
+  (.resolve npath (.join npath dir (subs hash 0 2) hash)))
 
 (defn- valid-hash?
   "True iff `hash` is a well-formed sha-256 hex string (64 lowercase hex)."
@@ -164,6 +193,56 @@
    ::hash  hash
    ::error (str "no blob stored under " hash
                 " — (my.blob/stat {:my.blob/hash …}) checks the DB projection")})
+
+(defn- read-path
+  "Read and verify one existing content-addressed path."
+  [hash path]
+  (try
+    (let [content (.readFileSync nfs path "utf8")
+          actual (sha256 content)]
+      (if (= hash actual)
+        {::ok? true ::hash hash ::content content}
+        {::ok? false
+         ::hash hash
+         ::error (str "blob integrity failure under " hash
+                      " — stored bytes hash to " actual)}))
+    (catch :default e
+      {::ok? false
+       ::hash hash
+       ::error (or (some-> e .-message) (str e))})))
+
+(defn- resolve-blob
+  "Read the first existing path in overlay-to-base order."
+  [{::keys [writable-dir read-only-dirs]} hash]
+  (reduce
+    (fn [_ dir]
+      (let [path (blob-path dir hash)]
+        (when (.existsSync nfs path)
+          (reduced (read-path hash path)))))
+    nil
+    (into [writable-dir] read-only-dirs)))
+
+(defn- publish!
+  "Publish complete bytes to the writable archive by atomic rename."
+  [writable-dir hash content]
+  (let [path (blob-path writable-dir hash)
+        shard (.dirname npath path)
+        tmp (.join npath shard (str hash "." (.randomUUID crypto) ".new"))]
+    (try
+      (.mkdirSync nfs shard #js {:recursive true})
+      (let [fd (.openSync nfs tmp "wx")]
+        (try
+          (.writeFileSync nfs fd content "utf8")
+          (.fsyncSync nfs fd)
+          (finally
+            (.closeSync nfs fd))))
+      (.renameSync nfs tmp path)
+      nil
+      (catch :default e
+        (or (some-> e .-message) (str e)))
+      (finally
+        (when (.existsSync nfs tmp)
+          (.unlinkSync nfs tmp))))))
 
 (defn- text-content?
   "Whether `content` reads as text rather than binary — a COMPUTED sniff.
@@ -201,7 +280,7 @@
 
 (declare stat) ; text refuses a binary blob by naming stat's recorded media
 
-(defn ^:async put!
+(defn ^{:async true :seon.fn/agent-facing? true} put!
   "Save a long text durably; read it back page by page later.
 
    Persists `:my.blob/content` content-addressed and records its DB
@@ -220,31 +299,33 @@
    re-carry the content in datoms."
   {:malli/schema [:=> [:cat ::put-request] ::put-response]}
   [{::keys [content media]}]
-  (let [hash  (sha256 content)
-        path  (blob-path hash)
-        toks  (tokens/estimate content)
-        werr  (try
-                (when-not (.existsSync nfs path)
-                  (.mkdirSync nfs (.dirname npath path) #js {:recursive true})
-                  (.writeFileSync nfs path content "utf8"))
-                nil
-                (catch :default e (or (some-> e .-message) (str e))))]
-    (if werr
-      {::ok? false ::hash hash ::error werr}
-      (let [{ok? ::db/ok? :as env}
-            (await (db/transact!
-                     {::db/tx-data [(cond-> {::hash   hash
-                                             ::tokens toks
-                                             ::at     (js/Date.)}
-                                      media (assoc ::media media))]}))]
-        (if ok?
-          {::ok? true ::hash hash ::tokens toks}
-          {::ok?   false
-           ::hash  hash
-           ::error (or (some-> (::db/error env) :seon.error/message)
-                       "blob file written but the projection tx was rejected")})))))
+  (let [hash (sha256 content)
+        toks (tokens/estimate content)
+        {view-ok? ::ok? view ::storage-view view-error ::error}
+        (validated-storage-view)]
+    (if-not view-ok?
+      {::ok? false ::hash hash ::error view-error}
+      (let [existing (resolve-blob view hash)
+            werr (cond
+                   (and existing (false? (::ok? existing))) (::error existing)
+                   existing nil
+                   :else (publish! (::writable-dir view) hash content))]
+        (if werr
+          {::ok? false ::hash hash ::error werr}
+          (let [{ok? ::db/ok? :as env}
+                (await (db/transact!
+                         {::db/tx-data [(cond-> {::hash   hash
+                                                 ::tokens toks
+                                                 ::at     (js/Date.)}
+                                          media (assoc ::media media))]}))]
+            (if ok?
+              {::ok? true ::hash hash ::tokens toks}
+              {::ok? false
+               ::hash hash
+               ::error (or (some-> (::db/error env) :seon.error/message)
+                           "blob file written but the projection tx was rejected")})))))))
 
-(defn get
+(defn ^:seon.fn/agent-facing? get
   "Fetch a stored text's full content by hash, for use in code.
 
    Sync, for CODE, never for your reply:
@@ -255,19 +336,25 @@
   {:malli/schema [:=> [:cat ::get-request] ::get-response]}
   [{::keys [hash]}]
   (cond
-    (not (valid-hash? hash))            (bad-hash hash)
-    (not (.existsSync nfs (blob-path hash))) (not-found hash)
-    :else
-    (try
-      (let [content (.readFileSync nfs (blob-path hash) "utf8")]
-        {::ok?     true
-         ::hash    hash
-         ::content content
-         ::tokens  (tokens/estimate content)})
-      (catch :default e
-        {::ok? false ::hash hash ::error (or (some-> e .-message) (str e))}))))
+    (not (valid-hash? hash))
+    (bad-hash hash)
 
-(defn ^:async concat!
+    :else
+    (let [{view-ok? ::ok? view ::storage-view view-error ::error}
+          (validated-storage-view)]
+      (if-not view-ok?
+        {::ok? false ::hash hash ::error view-error}
+        (if-let [{read-ok? ::ok? content ::content :as result}
+                 (resolve-blob view hash)]
+          (if read-ok?
+            {::ok? true
+             ::hash hash
+             ::content content
+             ::tokens (tokens/estimate content)}
+            result)
+          (not-found hash))))))
+
+(defn ^{:async true :seon.fn/agent-facing? true} concat!
   "Join stored blobs, in order, into ONE new canonical blob.
 
    Takes `:my.blob/hashes` — existing put! hashes, in order — reads
@@ -285,7 +372,7 @@
       (await (put! (cond-> {::content (apply str (map ::content reads))}
                      media (assoc ::media media)))))))
 
-(defn text
+(defn ^:seon.fn/agent-facing? text
   "Read a stored blob page by page, as a bounded line window.
 
    Sync, with honest totals, never the whole document at once.
@@ -323,7 +410,7 @@
               ::tokens (::tokens env)}
              (page-lines (::content env) from-line max-lines)))))
 
-(defn stat
+(defn ^:seon.fn/agent-facing? stat
   "Check whether a blob exists, and its size, without reading it.
 
    The blob's DB projection — exists?, tokens, media, at; no disk

@@ -57,6 +57,60 @@
                    (registry/release-database!
                     {::registry/database-name database-name})))))))
 
+(deftest release-failure-remains-visible-and-retains-registry-identity
+  (let [database-name :registry/release-failure
+        entry
+        (ensure-database!
+         {::registry/database-name database-name
+          ::registry/backend :memory})
+        failure
+        (with-redefs [d/release
+                      (fn [_]
+                        (throw (ex-info "injected release failure"
+                                        {:registry-test/failure true})))]
+          (registry/release-database!
+           {::registry/database-name database-name}))
+        retry
+        (registry/release-database!
+         {::registry/database-name database-name})
+        listed
+        (first
+         (filter #(= database-name (::registry/database-name %))
+                 (::registry/databases (registry/list-databases {}))))]
+    (is (false? (::registry/released? failure)))
+    (is (re-find #"injected release failure"
+                 (::registry/release-error failure)))
+    (is (= failure retry)
+        "the same process cannot reclassify an unproved release as success")
+    (is (identical? (::registry/conn entry)
+                    (::registry/conn
+                     (registry/lookup-connection
+                      {::registry/database-name database-name})))
+        "the registry retains the exact failed identity for diagnosis")
+    (is (= (::registry/release-error failure)
+           (::registry/release-error listed)))))
+
+(deftest delete-refuses-to-run-after-release-failure
+  (let [database-name :registry/delete-release-failure
+        deleted? (atom false)]
+    (ensure-database!
+     {::registry/database-name database-name
+      ::registry/backend :memory})
+    (let [result
+          (with-redefs [d/release
+                        (fn [_]
+                          (throw (ex-info "cannot prove release" {})))
+                        d/delete-database
+                        (fn [_]
+                          (reset! deleted? true))]
+            (registry/delete-database!
+             {::registry/database-name database-name}))]
+      (is (false? (::registry/released? result)))
+      (is (false? (::registry/deleted? result)))
+      (is (false? @deleted?)
+          "destructive deletion cannot follow an unproved release")
+      (is (re-find #"cannot prove release" (::registry/error result))))))
+
 (deftest initial-schema-is-installed-before-connection-publication
   (let [database-name :registry/initial-schema
         declaration {:db/ident :registry.initial/id

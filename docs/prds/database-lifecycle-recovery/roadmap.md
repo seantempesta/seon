@@ -145,7 +145,41 @@ writer and pod agreed on default head
 `6a56e85d-cd67-5c5a-a2cb-5f1aeb6ef905`/`536870974`, and live schema read-back
 showed the expected string, UUID, long, string, and ref signatures with
 `request-id` as a unique identity. Post-commit schema/program publication
-admission is the remaining candidate boundary.
+admission is the remaining candidate boundary. Its implementation audit found
+one hard predecessor: exact wrapper preparation still accepts an incomplete
+multi-arity contract, after which Malli unstrument can destroy an uncovered
+live arity. Enforce live/schema arity parity before mutation, then add the one
+fail-closed admission and committed-generation reconstruction transition; full
+reconstruction is not a safe recovery primitive before that precondition
+holds.
+
+The JVM writer-drain prerequisite is implemented in place. The UDS request
+server admits each decoded request under its existing lifecycle lock, rejects
+later admission once close begins, preserves the complete response for work
+already admitted, and joins every accept/connection thread before returning.
+Registry release now trusts maintained Datahike's awaited shutdown result:
+success removes the entry, while failure retains the exact database identity
+and error and cannot be reclassified as success inside that process. Deletion
+stops at an unproved release, and writer/server stop project all failures as
+`stopped? false`; the JVM shutdown hook emits the same result. A pre-edit
+executable probe had shown the old false success and discarded identity. The
+focused transport/registry/writer/server gate passes 17 tests/87 assertions,
+and the complete writer checkpoint passes 62/360. Clean agent-turn quiescence
+and operator coordination remain the next lifecycle boundary.
+
+The first branch-local blob prerequisite is implemented independently of
+native branch attachment. `my.blob` now consumes one validated process-local
+storage view with one writable directory and ordered read-only bases. Writes
+publish a unique temporary file through fsync plus atomic rename; reads search
+overlay-to-base, recompute SHA-256, and refuse corrupt bytes instead of hiding
+them through fallback. The five public blob functions and the database
+projection are unchanged. Focused proof passes 10 tests/65 assertions; the
+combined blob/turn/retry/loop/autocomplete gate compiles with zero warnings and
+passes 43/245. A live default-cluster probe read source bytes through an empty
+overlay without copying them, then placed corrupt bytes in the overlay and
+received a false integrity envelope naming the actual digest. Supplying the
+storage view from a branch launch descriptor, overlay release, promotion
+materialization, and retention remain later lifecycle slices.
 
 ## Research evidence
 
@@ -157,6 +191,9 @@ admission is the remaining candidate boundary.
   overlays, integrity, non-autonomous runtime, and promotion materialization.
 - [[research/quiesced-restart-restore-undo-audit-2026-07-14]] — planned drain,
   unexpected recovery, immutable restore intent, promotion, and undo.
+- [[research/post-commit-program-admission-audit-2026-07-14]] — exact
+  publication failure paths, runtime admission gates, partial Malli mutation,
+  committed-generation reconstruction, readiness, and ordered proof.
 - [[research/config-schema-runtime-restoration-2026-07-12]],
   [[research/malli-runtime-schema-authority-audit-2026-07-13]], and
   [[research/db-protocol-cut-implementation-audit-2026-07-13]] — historical

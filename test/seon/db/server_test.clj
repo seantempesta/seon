@@ -2,6 +2,8 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
+            [datahike.api :as d]
+            [seon.db.registry :as registry]
             [seon.db.server :as server])
   (:import [java.io PushbackReader]
            [java.net InetAddress Socket]))
@@ -34,4 +36,34 @@
       (finally
         (server/stop! runtime)
         (is (not (.exists port-file)))
+        (doseq [file (reverse (file-seq directory))] (.delete file))))))
+
+(deftest server-stop-does-not-claim-success-after-writer-release-failure
+  (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
+        directory (.toFile (java.nio.file.Files/createTempDirectory
+                            "seon-writer-stop" (make-array java.nio.file.attribute.FileAttribute 0)))
+        database-name (str "server-release-failure-" (random-uuid))
+        request-socket (io/file directory "request.sock")
+        publish-socket (io/file directory "publish.sock")
+        runtime
+        (server/start! ["--backend" "memory"
+                        "--db-name" database-name
+                        "--req-sock" (.getPath request-socket)
+                        "--pub-sock" (.getPath publish-socket)])]
+    (try
+      (let [result
+            (with-redefs [d/release
+                          (fn [_]
+                            (throw (ex-info "server release failed" {})))]
+              (server/stop! runtime))
+            failure (first (::server/release-failures result))]
+        (is (false? (::server/stopped? result)))
+        (is (= (keyword database-name)
+               (::registry/database-name failure)))
+        (is (false? (::registry/released? failure)))
+        (is (re-find #"server release failed"
+                     (::registry/release-error failure))))
+      (finally
+        (registry/restore-registry! {::registry/snapshot snapshot})
+        (server/stop! runtime)
         (doseq [file (reverse (file-seq directory))] (.delete file))))))

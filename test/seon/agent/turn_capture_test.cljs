@@ -16,8 +16,8 @@
      4. `agent-debug/turn-diff` — lineage-safe t delta + prompt drift summary
         between two captured turns.
 
-   Hermetic: blobs go to a pid-scoped tmp dir (my.blob/!dir re-pointed
-   and restored), and each test runs on a fresh :memory conn root-set!
+   Hermetic: blobs use a pid-scoped writable storage view (re-pointed and
+   restored), and each test runs on a fresh :memory conn root-set!
    as db/*conn* (set!, not binding — CLJS dynamic bindings don't survive
    await; see my.blob-test)."
   (:require
@@ -47,15 +47,17 @@
 (def ^:private fixture-dir
   (.resolve npath (str "tmp/turn-capture-test-" (.-pid js/process))))
 
-(defonce ^:private !saved-dir (atom nil))
+(defonce ^:private !saved-storage-view (atom nil))
 
 (use-fixtures :once
   {:before (fn []
-             (reset! !saved-dir @blob/!dir)
-             (reset! blob/!dir fixture-dir)
+             (reset! !saved-storage-view @blob/!storage-view)
+             (reset! blob/!storage-view
+                     {:my.blob/writable-dir fixture-dir
+                      :my.blob/read-only-dirs []})
              (.rmSync nfs fixture-dir #js {:recursive true :force true}))
    :after  (fn []
-             (reset! blob/!dir @!saved-dir)
+             (reset! blob/!storage-view @!saved-storage-view)
              (.rmSync nfs fixture-dir #js {:recursive true :force true}))})
 
 (defn- with-conn

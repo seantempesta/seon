@@ -64,7 +64,14 @@
   [::publisher ::publisher]
   [::database-name ::database-name]])
 (schema/register! ::stopped? :boolean)
-(schema/register! ::stop-response [:map [::stopped? ::stopped?]])
+(schema/register!
+ ::release-failures
+ [:vector :seon.db.registry/release-database!-response])
+(schema/register!
+ ::stop-response
+ [:map
+  [::stopped? ::stopped?]
+  [::release-failures {:optional true} ::release-failures]])
 (schema/register! ::database-initialized? :boolean)
 (schema/register!
  ::initialize-request
@@ -961,21 +968,30 @@
          ::publisher publisher
          ::database-name database-name})
       (catch Throwable throwable
-        (try
-          (registry/release-database!
-           {::registry/database-name (keyword database-name)})
-          (catch Throwable _))
-        (uds/close-publisher! publisher)
-        (throw throwable)))))
+        (let [release
+              (registry/release-database!
+               {::registry/database-name (keyword database-name)})]
+          (uds/close-publisher! publisher)
+          (if (::registry/release-error release)
+            (throw
+             (ex-info "Writer start failed and database release was unproved."
+                      {::release-failures [release]
+                       ::start-error (.toString throwable)}
+                      throwable))
+            (throw throwable)))))))
 
 (defn stop!
-  "Close one writer server and release every registered database."
+  "Close one writer server and report every unproved database release."
   {:malli/schema [:=> [:catn [::server ::server]] ::stop-response]}
   [server]
   (uds/close-request-server! (::request-server server))
-  (let [{::registry/keys [databases]} (registry/list-databases {})]
-    (doseq [{::registry/keys [database-name]} databases]
-      (registry/release-database!
-       {::registry/database-name database-name})))
-  (uds/close-publisher! (::publisher server))
-  {::stopped? true})
+  (let [{::registry/keys [databases]} (registry/list-databases {})
+        releases
+        (mapv (fn [{::registry/keys [database-name]}]
+                (registry/release-database!
+                 {::registry/database-name database-name}))
+              databases)
+        failures (filterv (comp not ::registry/released?) releases)]
+    (uds/close-publisher! (::publisher server))
+    (cond-> {::stopped? (empty? failures)}
+      (seq failures) (assoc ::release-failures failures))))

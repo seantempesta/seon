@@ -13,7 +13,11 @@
 
 (defn- socket-path
   [label]
-  (str "/tmp/seon-writer-" label "-" (random-uuid) ".sock"))
+  (let [directory (File. "tmp")]
+    (.mkdirs directory)
+    (.getAbsolutePath
+     (File. directory
+            (str "seon-writer-" label "-" (random-uuid) ".sock")))))
 
 (defn- dependencies
   []
@@ -35,6 +39,44 @@
 (defn- call!
   [channel request]
   (uds/call! {::uds/channel channel ::uds/message request}))
+
+(deftest writer-stop-surfaces-release-failure-and-retains-database-identity
+  (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
+        database-name (str "writer-release-failure-" (random-uuid))
+        database-keyword (keyword database-name)
+        request-path (socket-path "release-failure-request")
+        publish-path (socket-path "release-failure-publish")
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})]
+    (try
+      (let [result
+            (with-redefs [d/release
+                          (fn [_]
+                            (throw (ex-info "writer release failed" {})))]
+              (writer/stop! server))
+            failure (first (::writer/release-failures result))
+            retained
+            (first
+             (filter #(= database-keyword (::registry/database-name %))
+                     (::registry/databases (registry/list-databases {}))))]
+        (is (false? (::writer/stopped? result)))
+        (is (= database-keyword (::registry/database-name failure)))
+        (is (false? (::registry/released? failure)))
+        (is (re-find #"writer release failed"
+                     (::registry/release-error failure)))
+        (is (= (::registry/release-error failure)
+               (::registry/release-error retained))
+            "the failed database identity remains inspectable"))
+      (finally
+        (registry/restore-registry! {::registry/snapshot snapshot})
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
 
 (deftest existing-database-must-already-match-the-protocol-candidate
   (doseq [[label initial-tx]

@@ -42,15 +42,17 @@
 (def ^:private fixture-dir
   (.resolve npath (str "tmp/autocomplete-test-" (.-pid js/process))))
 
-(defonce ^:private !saved-dir (atom nil))
+(defonce ^:private !saved-storage-view (atom nil))
 
 (use-fixtures :once
   {:before (fn []
-             (reset! !saved-dir @blob/!dir)
-             (reset! blob/!dir (str fixture-dir "/blobs"))
+             (reset! !saved-storage-view @blob/!storage-view)
+             (reset! blob/!storage-view
+                     {:my.blob/writable-dir (str fixture-dir "/blobs")
+                      :my.blob/read-only-dirs []})
              (.rmSync nfs fixture-dir #js {:recursive true :force true}))
    :after  (fn []
-             (reset! blob/!dir @!saved-dir)
+             (reset! blob/!storage-view @!saved-storage-view)
              (.rmSync nfs fixture-dir #js {:recursive true :force true}))})
 
 (defn- with-conn

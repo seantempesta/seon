@@ -169,12 +169,15 @@ pull-first as described in [[context]].
 `my.blob` is a content-addressed append-only file tier beside the cluster
 database. A blob name is the SHA-256 hash of its bytes; the database projection
 stores hash, estimated tokens, media hint, and recorded time. Reads offer bounded
-line windows and honest totals; full retrieval is explicit.
+line windows and honest totals; full retrieval is explicit. One process-local
+storage view supplies a writable directory followed by ordered read-only bases.
+A normal cluster has no bases. A lifecycle-managed branch writes its private
+overlay while reading the source archive, and every read verifies that the bytes
+still hash to their name.
 
 The target does not claim zstd compression, garbage collection, remote
-placement, branch overlays, or promotion. Those policies belong to a dedicated
-blob-lifecycle PRD if measurement justifies them. See [[data-model]] and
-[[observability]].
+placement, or promotion materialization. Those policies belong to the database
+and blob lifecycle PRDs. See [[data-model]] and [[observability]].
 
 ## Errors and bounds
 

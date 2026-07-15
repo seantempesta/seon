@@ -415,6 +415,57 @@
      {:schema function-schema :ns ns-sym :name fn-sym}))
 
 #?(:cljs
+   (defn- live-arity-profile
+     "Exact callable arities advertised by one original CLJS function."
+     [f]
+     (let [max-fixed (gobj/get f "cljs$lang$maxFixedArity")
+           variadic? (fn? (gobj/get f "cljs$core$IFn$_invoke$arity$variadic"))
+           fixed-arities
+           (if (number? max-fixed)
+             (into (sorted-set)
+                   (filter
+                     (fn [arity]
+                       (fn? (gobj/get
+                              f
+                              (str "cljs$core$IFn$_invoke$arity$" arity)))))
+                   (range (inc max-fixed)))
+             (sorted-set (.-length f)))]
+       (cond-> {::fixed-arities fixed-arities}
+         variadic?
+         (assoc ::variadic {::min max-fixed})))))
+
+#?(:cljs
+   (defn- schema-arity-profile
+     "Exact fixed and ranged arities described by a compiled function schema."
+     [function-schema]
+     (let [infos (mapv m/-function-info
+                       (m/-function-schema-arities function-schema))
+           fixed-arities
+           (into (sorted-set)
+                 (keep (fn [{:keys [arity]}]
+                         (when (int? arity) arity)))
+                 infos)
+           variadic-info (some #(when (= :varargs (:arity %)) %) infos)]
+       (cond-> {::fixed-arities fixed-arities}
+         variadic-info
+         (assoc ::variadic
+                (cond-> {::min (:min variadic-info)}
+                  (some? (:max variadic-info))
+                  (assoc ::max (:max variadic-info))))))))
+
+#?(:cljs
+   (defn- arity-mismatch
+     "A structured live/schema arity mismatch, or nil when they are exact."
+     [sym the-fn function-schema]
+     (let [live-profile (live-arity-profile the-fn)
+           schema-profile (schema-arity-profile function-schema)]
+       (when-not (= live-profile schema-profile)
+         {::sym sym
+          ::reason ::arity-mismatch
+          ::live-arities live-profile
+          ::schema-arities schema-profile}))))
+
+#?(:cljs
    (defn- prepare-target
      "Compile one Seon target into Malli data or a namespaced rejection."
      [{::keys [sym schema-form registry]}]
@@ -430,20 +481,24 @@
              (let [async? (async-fn? the-fn)]
                (if (async-unwrappable? async? the-fn schema-form)
                  {::sym sym ::reason ::skipped}
-                 (let [compiled
-                       (if (and (-arrow-schema? schema-form options)
-                                (-simple-fixed-arity-fn? the-fn))
-                         (injecting-fschema schema-form sym options)
-                         ;; Malli's CLJS multi-arity surgery calls `rest` on
-                         ;; the `:function` FORM (`-arity->schema`), so this
-                         ;; entry must remain the raw form. Compile it first
-                         ;; to reject unresolved contracts before mutation.
-                         (do (m/function-schema schema-form options)
-                             schema-form))]
-                   {::sym sym
-                    ::ns ns-sym
-                    ::name fn-sym
-                    ::entry (malli-entry ns-sym fn-sym compiled)})))
+                 (let [function-schema (m/function-schema schema-form options)]
+                   (if-let [mismatch
+                            (arity-mismatch sym the-fn function-schema)]
+                     mismatch
+                     (let [compiled
+                           (if (and (-arrow-schema? schema-form options)
+                                    (-simple-fixed-arity-fn? the-fn))
+                             (injecting-fschema schema-form sym options)
+                             ;; Malli's CLJS multi-arity surgery calls `rest`
+                             ;; on the `:function` FORM (`-arity->schema`), so
+                             ;; this entry must remain the raw form. The
+                             ;; compiled object above proves both resolution
+                             ;; and exact live/schema arity parity first.
+                             schema-form)]
+                       {::sym sym
+                        ::ns ns-sym
+                        ::name fn-sym
+                        ::entry (malli-entry ns-sym fn-sym compiled)})))))
              (catch :default _
                {::sym sym ::reason ::unresolvable-schema}))))
        {::sym sym ::reason ::invalid-symbol})))
@@ -481,7 +536,9 @@
         ::rejected (into []
                          (comp
                            (filter ::reason)
-                           (map #(select-keys % [::sym ::reason])))
+                           (map #(select-keys % [::sym ::reason
+                                                 ::live-arities
+                                                 ::schema-arities])))
                          prepared)})))
 
 #?(:cljs
@@ -516,14 +573,26 @@
        :map]}
      [targets]
      (if-not (enabled?)
-       {::enabled? false ::n-instrumented 0 ::accepted-syms #{} ::rejected []}
+       {::enabled? false ::ok? true ::n-instrumented 0
+        ::accepted-syms #{} ::rejected []}
        (let [{::keys [data accepted-syms rejected] :as prepared}
-             (prepare-targets targets)]
-         (when (seq data)
-           (mi/instrument! {:data data :report ei/report-fn}))
-         (assoc prepared
-                ::enabled? true
-                ::n-instrumented (count accepted-syms))))))
+             (prepare-targets targets)
+             fatal-rejections (remove #(= ::skipped (::reason %)) rejected)]
+         ;; Malli mutates each target as it walks `:data`. Reject the complete
+         ;; candidate before that walk so one invalid arity contract cannot
+         ;; leave an earlier target wrapped and a later target corrupted.
+         (if (seq fatal-rejections)
+           (assoc prepared
+                  ::enabled? true
+                  ::ok? false
+                  ::n-instrumented 0)
+           (do
+             (when (seq data)
+               (mi/instrument! {:data data :report ei/report-fn}))
+             (assoc prepared
+                    ::enabled? true
+                    ::ok? true
+                    ::n-instrumented (count accepted-syms))))))))
 
 #?(:cljs
    (defn instrument-delta!

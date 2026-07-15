@@ -38,20 +38,22 @@
     [seon.warn :as warn]))
 
 ;; run-turn!'s ALWAYS-ON blob capture must not write into the live
-;; cluster's blob dir from a hermetic test — repoint my.blob/!dir at a
+;; cluster's blob dir from a hermetic test — repoint the storage view at a
 ;; pid-scoped tmp dir for this ns and restore after.
 (def ^:private blob-fixture-dir (str "tmp/loop-test-blobs-" (.-pid js/process)))
 
-(defonce ^:private !saved-blob-dir (atom nil))
+(defonce ^:private !saved-blob-storage-view (atom nil))
 
 (def ^:private agent-id "AGTlooprun0001")          ; 14 chars (:seon.db/id)
 
 (use-fixtures :once
   {:before (fn []
-             (reset! !saved-blob-dir @blob/!dir)
-             (reset! blob/!dir blob-fixture-dir))
+             (reset! !saved-blob-storage-view @blob/!storage-view)
+             (reset! blob/!storage-view
+                     {:my.blob/writable-dir blob-fixture-dir
+                      :my.blob/read-only-dirs []}))
    :after  (fn []
-             (reset! blob/!dir @!saved-blob-dir)
+             (reset! blob/!storage-view @!saved-blob-storage-view)
              (-> (js/require "node:fs")
                  (.rmSync blob-fixture-dir #js {:recursive true :force true})))})
 

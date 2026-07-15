@@ -38,6 +38,7 @@
  [:map
   [::channel ::channel]
   [::connections ::connections]
+  [::worker ::worker]
   [::closed? ::closed?]])
 (schema/register!
  ::request-server-input
@@ -135,6 +136,42 @@
     (write-frame! output message)
     (read-frame input)))
 
+(defn- admit-request!
+  "Mark one decoded request as admitted while the server remains open."
+  [connections closed? channel]
+  (locking connections
+    (when (and (not @closed?) (contains? @connections channel))
+      (swap! connections assoc-in [channel ::active?] true)
+      true)))
+
+(defn- finish-request!
+  "Finish one response and report whether this connection may read again."
+  [connections closed? channel]
+  (locking connections
+    (when-not @closed?
+      (swap! connections assoc-in [channel ::active?] false)
+      true)))
+
+(defn- serve-connection!
+  "Serve admitted requests on one connection until EOF or lifecycle close."
+  [connections closed? channel input output handler]
+  (try
+    (loop []
+      (when-let [request (read-frame input)]
+        (when (admit-request! connections closed? channel)
+          (write-frame! output (handler request))
+          (when (finish-request! connections closed? channel)
+            (recur)))))
+    (catch Throwable throwable
+      (when-not @closed?
+        (binding [*out* *err*]
+          (println "[database-request] connection closed:"
+                   (.getMessage throwable)))))
+    (finally
+      (locking connections
+        (swap! connections dissoc channel))
+      (try (.close ^SocketChannel channel) (catch Throwable _)))))
+
 (defn start-request-server!
   "Start a concurrent request server whose handler maps request to response."
   {:malli/schema [:=> [:cat ::request-server-input] ::request-server]}
@@ -144,70 +181,75 @@
         (UnixDomainSocketAddress/of ^String socket-path)
         ^ServerSocketChannel server
         (ServerSocketChannel/open StandardProtocolFamily/UNIX)
-        connections (atom #{})
+        ;; {channel {::worker Thread ::active? boolean}}. A request is admitted
+        ;; only when its decoded frame changes `::active?` under this atom's
+        ;; lock. Close shuts idle readers to unblock them, leaves active
+        ;; responses intact, and joins every admitted connection worker.
+        connections (atom {})
         closed? (atom false)]
     (.bind server address)
-    (doto
-      (Thread.
-       ^Runnable
-       (fn []
-         (try
-           (loop []
-             (let [channel (.accept server)
-                   input (Channels/newInputStream channel)
-                   output (Channels/newOutputStream channel)]
-               (locking connections
-                 (if @closed?
-                   (try (.close ^SocketChannel channel) (catch Throwable _))
-                   (do
-                     (swap! connections conj channel)
-                     (doto
+    (let [accept-worker
+          (Thread.
+           ^Runnable
+           (fn []
+             (try
+               (loop []
+                 (let [channel (.accept server)
+                       input (Channels/newInputStream channel)
+                       output (Channels/newOutputStream channel)
+                       worker
                        (Thread.
                         ^Runnable
-                        (fn []
-                          (try
-                            (loop []
-                              (when-let [request (read-frame input)]
-                                (write-frame! output (handler request))
-                                (recur)))
-                            (catch Throwable throwable
-                              (when-not @closed?
-                                (binding [*out* *err*]
-                                  (println
-                                   "[database-request] connection closed:"
-                                   (.getMessage throwable)))))
-                            (finally
-                              (swap! connections disj channel)
-                              (try (.close ^SocketChannel channel)
-                                   (catch Throwable _)))))
-                        "database-request-connection")
-                       (.setDaemon true)
-                       (.start))))))
-             (recur))
-           (catch java.nio.channels.AsynchronousCloseException _ nil)
-           (catch Throwable throwable
-             (binding [*out* *err*]
-               (println "[database-request] accept loop stopped:"
-                        (.getMessage throwable))))))
-       "database-request-accept")
-      (.setDaemon true)
-      (.start))
-    {::channel server ::connections connections ::closed? closed?}))
+                        #(serve-connection! connections closed? channel input
+                                            output handler)
+                        "database-request-connection")]
+                   (locking connections
+                     (if @closed?
+                       (try (.close ^SocketChannel channel) (catch Throwable _))
+                       (do
+                         (swap! connections assoc channel
+                                {::worker worker ::active? false})
+                         (.setDaemon worker true)
+                         (.start worker))))
+                   (recur)))
+               (catch java.nio.channels.AsynchronousCloseException _ nil)
+               (catch Throwable throwable
+                 (when-not @closed?
+                   (binding [*out* *err*]
+                     (println "[database-request] accept loop stopped:"
+                              (.getMessage throwable)))))))
+           "database-request-accept")]
+      (.setDaemon accept-worker true)
+      (.start accept-worker)
+      {::channel server
+       ::connections connections
+       ::worker accept-worker
+       ::closed? closed?})))
 
 (defn close-request-server!
-  "Close one request-server socket."
+  "Close request admission and join every admitted connection worker."
   {:malli/schema [:=> [:catn [::request-server ::request-server]]
                   ::nil-result]}
   [request-server]
   (let [connections (::connections request-server)
-        closed? (::closed? request-server)]
-    (locking connections
-      (reset! closed? true)
-      (try (.close ^ServerSocketChannel (::channel request-server))
-           (catch Throwable _))
-      (doseq [connection @connections]
-        (try (.close ^SocketChannel connection) (catch Throwable _)))
-      (reset! connections #{})))
+        closed? (::closed? request-server)
+        accept-worker ^Thread (::worker request-server)
+        workers
+        (locking connections
+          (reset! closed? true)
+          (try (.close ^ServerSocketChannel (::channel request-server))
+               (catch Throwable _))
+          (let [entries (vals @connections)]
+            ;; Idle workers may be blocked in read-frame; close only those
+            ;; channels. An active handler keeps its channel until its complete
+            ;; response is flushed, then exits because admission is closed.
+            (doseq [[channel {::keys [active?]}] @connections
+                    :when (not active?)]
+              (try (.close ^SocketChannel channel) (catch Throwable _)))
+            (mapv ::worker entries)))]
+    (.join accept-worker)
+    (doseq [^Thread worker workers]
+      (.join worker)))
   nil)
 
 (defn- close-subscriber!

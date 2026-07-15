@@ -35,7 +35,12 @@
   [::repl-server {:optional true} ::repl-server]
   [::repl-port-file {:optional true} ::repl-port-file]])
 (schema/register! ::stopped? :boolean)
-(schema/register! ::stop-response [:map [::stopped? ::stopped?]])
+(schema/register! ::release-failures :seon.db.writer/release-failures)
+(schema/register!
+ ::stop-response
+ [:map
+  [::stopped? ::stopped?]
+  [::release-failures {:optional true} ::release-failures]])
 
 (defn- parse-arguments
   [arguments]
@@ -159,7 +164,7 @@
              ::repl-port-file resolved-repl-port-file))))
 
 (defn stop!
-  "Stop one database server and release its live resources."
+  "Stop one database server and surface every unproved release."
   {:malli/schema [:=> [:catn [::server ::server]] ::stop-response]}
   [server]
   (when-let [repl-server (::repl-server server)]
@@ -167,8 +172,10 @@
          (catch Throwable _)))
   (when-let [port-file (::repl-port-file server)]
     (try (.delete (io/file port-file)) (catch Throwable _)))
-  (writer/stop! (::writer-server server))
-  {::stopped? true})
+  (let [result (writer/stop! (::writer-server server))]
+    (cond-> {::stopped? (::writer/stopped? result)}
+      (seq (::writer/release-failures result))
+      (assoc ::release-failures (::writer/release-failures result)))))
 
 (defn -main
   "Run the database process or its optional embedding preflight."
@@ -183,7 +190,16 @@
           (Thread.
            ^Runnable
            (fn []
-             (try (stop! server) (catch Throwable _)))
+             (try
+               (let [result (stop! server)]
+                 (when-not (::stopped? result)
+                   (binding [*out* *err*]
+                     (println "[database] shutdown incomplete:"
+                              (pr-str result)))))
+               (catch Throwable throwable
+                 (binding [*out* *err*]
+                   (println "[database] shutdown failed:"
+                            (.toString throwable))))))
            "seon-database-shutdown")]
       (.addShutdownHook (Runtime/getRuntime) shutdown-hook)
       (.. (Thread/currentThread) join))))

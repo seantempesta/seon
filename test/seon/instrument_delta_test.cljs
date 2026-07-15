@@ -11,10 +11,29 @@
 
 (defn probe-a [x] x)
 (defn probe-b [x] x)
+(defn probe-multi
+  ([x] x)
+  ([x y] [x y]))
+(defn probe-variadic
+  ([x] [x])
+  ([x y & more] (into [x y] more)))
 
 (def ^:private a-sym 'seon.instrument-delta-test/probe-a)
 (def ^:private b-sym 'seon.instrument-delta-test/probe-b)
+(def ^:private multi-sym 'seon.instrument-delta-test/probe-multi)
+(def ^:private variadic-sym 'seon.instrument-delta-test/probe-variadic)
 (def ^:private target-syms #{a-sym b-sym})
+(def ^:private multi-target-syms #{multi-sym variadic-sym})
+
+(def ^:private multi-form
+  [:function
+   [:=> [:cat :int] :int]
+   [:=> [:cat :int :int] [:tuple :int :int]]])
+
+(def ^:private variadic-form
+  [:function
+   [:=> [:cat :int] [:vector :int]]
+   [:=> [:cat :int :int [:* :int]] [:vector :int]]])
 
 (defn- target [sym schema-form]
   {::instrument/sym sym ::instrument/schema-form schema-form})
@@ -32,6 +51,13 @@
   (let [ns-object (js/goog.getObjectByName
                     (cljs.core/munge (namespace sym)) js/goog.global)]
     (gobj/set ns-object (cljs.core/munge (name sym)) f)))
+
+(defn- fixed-accessor [sym arity]
+  (gobj/get (live-fn sym)
+            (str "cljs$core$IFn$_invoke$arity$" arity)))
+
+(defn- variadic-accessor [sym]
+  (gobj/get (live-fn sym) "cljs$core$IFn$_invoke$arity$variadic"))
 
 (deftest node-reload-selection-retains-the-replaced-namespaces
   (let [reloaded-namespaces (deref #'client/shadow-reloaded-namespaces)
@@ -126,6 +152,115 @@
       (instrument/instrument-delta!
         {::instrument/changed-syms #{a-sym}
          ::instrument/targets []}))))
+
+(deftest arity-mismatch-rejects-before-cold-or-delta-mutation
+  (let [incomplete-form [:=> [:cat :int] :int]
+        instrumented? (atom false)]
+    (try
+      (testing "one bad cold candidate prevents every Malli mutation"
+        (let [a-before (live-fn a-sym)
+              multi-before (live-fn multi-sym)
+              multi-arity-1-before (fixed-accessor multi-sym 1)
+              multi-arity-2-before (fixed-accessor multi-sym 2)
+              result
+              (instrument/instrument-targets!
+                [(target a-sym [:=> [:cat :int] :int])
+                 (target multi-sym incomplete-form)])]
+          (when (instrument/enabled?)
+            (is (false? (::instrument/ok? result)))
+            (is (= 0 (::instrument/n-instrumented result)))
+            (is (= ::instrument/arity-mismatch
+                   (-> result ::instrument/rejected first
+                       ::instrument/reason)))
+            (is (identical? a-before (live-fn a-sym)))
+            (is (identical? multi-before (live-fn multi-sym)))
+            (is (identical? multi-arity-1-before
+                            (fixed-accessor multi-sym 1)))
+            (is (identical? multi-arity-2-before
+                            (fixed-accessor multi-sym 2))))))
+
+      (testing "incomplete fixed and variadic replacements preserve wrappers"
+        (let [initial
+              (instrument/instrument-targets!
+                [(target multi-sym multi-form)
+                 (target variadic-sym variadic-form)])]
+          (when (instrument/enabled?)
+            (is (true? (::instrument/ok? initial)))
+            (reset! instrumented? true)
+            (let [multi-before (live-fn multi-sym)
+                  multi-arity-1-before (fixed-accessor multi-sym 1)
+                  multi-arity-2-before (fixed-accessor multi-sym 2)
+                  variadic-before (live-fn variadic-sym)
+                  variadic-arity-1-before (fixed-accessor variadic-sym 1)
+                  variadic-before* (variadic-accessor variadic-sym)
+                  result
+                  (instrument/instrument-delta!
+                    {::instrument/changed-syms #{multi-sym variadic-sym}
+                     ::instrument/targets
+                     [(target multi-sym incomplete-form)
+                      (target variadic-sym incomplete-form)]})]
+              (is (false? (::instrument/ok? result)))
+              (is (= 0 (::instrument/n-unstrumented result)))
+              (is (= 0 (::instrument/n-instrumented result)))
+              (is (= #{multi-sym variadic-sym}
+                     (into #{} (map ::instrument/sym)
+                           (::instrument/rejected result))))
+              (is (every? #(= ::instrument/arity-mismatch
+                              (::instrument/reason %))
+                          (::instrument/rejected result)))
+              (is (identical? multi-before (live-fn multi-sym)))
+              (is (identical? multi-arity-1-before
+                              (fixed-accessor multi-sym 1)))
+              (is (identical? multi-arity-2-before
+                              (fixed-accessor multi-sym 2)))
+              (is (identical? variadic-before (live-fn variadic-sym)))
+              (is (identical? variadic-arity-1-before
+                              (fixed-accessor variadic-sym 1)))
+              (is (identical? variadic-before*
+                              (variadic-accessor variadic-sym)))
+              (is (= [1 2] (probe-multi 1 2)))
+              (is (= [1 2 3] (probe-variadic 1 2 3)))
+              (is (trapped? #(probe-multi "wrong")))
+              (is (trapped? #(probe-variadic "wrong")))))))
+      (finally
+        (when @instrumented?
+          (instrument/instrument-delta!
+            {::instrument/changed-syms multi-target-syms
+             ::instrument/targets []}))))))
+
+(deftest complete-fixed-and-variadic-contracts-survive-reinstrumentation
+  (when (instrument/enabled?)
+    (let [initial
+          (instrument/instrument-targets!
+            [(target multi-sym multi-form)
+             (target variadic-sym variadic-form)])]
+      (is (true? (::instrument/ok? initial)))
+      (when (::instrument/ok? initial)
+        (try
+          (dotimes [_ 3]
+            (let [result
+                  (instrument/instrument-delta!
+                    {::instrument/changed-syms multi-target-syms
+                     ::instrument/targets
+                     [(target multi-sym multi-form)
+                      (target variadic-sym variadic-form)]})]
+              (is (true? (::instrument/ok? result)))
+              (is (= 2 (::instrument/n-unstrumented result)))
+              (is (= 2 (::instrument/n-instrumented result)))
+              (is (fn? (fixed-accessor multi-sym 1)))
+              (is (fn? (fixed-accessor multi-sym 2)))
+              (is (fn? (fixed-accessor variadic-sym 1)))
+              (is (fn? (variadic-accessor variadic-sym)))
+              (is (= 1 (probe-multi 1)))
+              (is (= [1 2] (probe-multi 1 2)))
+              (is (= [1] (probe-variadic 1)))
+              (is (= [1 2 3 4] (probe-variadic 1 2 3 4)))
+              (is (trapped? #(probe-multi "wrong")))
+              (is (trapped? #(probe-variadic "wrong")))))
+          (finally
+            (instrument/instrument-delta!
+              {::instrument/changed-syms multi-target-syms
+               ::instrument/targets []})))))))
 
 (deftest schema-change-refreshes-only-transitive-function-dependents
   (let [a-form [:=> [:cat :instrumenttest.contract/root]

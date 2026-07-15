@@ -34,6 +34,9 @@ listing through the one compact-card renderer), `skills` (imported skill
 facts), and `blob` (the content-addressed
 disk tier — SHA-256-named files under `<cluster>/blobs/`, paged reads; see
 `docs/seon/architecture/observability.md`). `my.blob` IS required into the
-boot build (`client.cljs`) and aliased as `blob` in `home-requires`. A
-single eval form carries only ~2K tokens of literal content — `put!` in
-chunks, then `concat!` the hashes into ONE canonical blob.
+boot build (`client.cljs`) and aliased as `blob` in `home-requires`. Its one
+process-local storage view has a writable archive plus ordered read-only bases;
+normal clusters have no bases, while lifecycle-managed branches use a private
+overlay over the source archive. A single eval form carries only ~2K tokens of
+literal content — `put!` in chunks, then `concat!` the hashes into ONE canonical
+blob.

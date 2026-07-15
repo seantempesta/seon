@@ -10,7 +10,10 @@
 
 (defn- socket-path
   [label]
-  (str "/tmp/seon-" label "-" (random-uuid) ".sock"))
+  (let [directory (File. "tmp")]
+    (.mkdirs directory)
+    (.getAbsolutePath
+     (File. directory (str "seon-" label "-" (random-uuid) ".sock")))))
 
 (defn- wait-for-subscriber!
   [publisher]
@@ -96,6 +99,40 @@
           (is (= {::protocol/success? true ::protocol/pong? true}
                  response))))
       (finally
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest request-server-close-drains-admitted-work-and-rejects-later-admission
+  (let [path (socket-path "transport-drain")
+        request {:transport-drain/request "accepted"}
+        entered (promise)
+        release-handler (promise)
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/handler
+          (fn [message]
+            (deliver entered message)
+            @release-handler
+            {:transport-drain/response "committed"})})
+        client
+        (future
+          (with-open [channel (uds/connect! path)]
+            (uds/call! {::uds/channel channel ::uds/message request})))]
+    (try
+      (is (= request (deref entered 2000 ::handler-not-entered)))
+      (let [close (future (uds/close-request-server! server))]
+        (is (= ::still-draining (deref close 100 ::still-draining))
+            "close waits for the admitted handler")
+        (deliver release-handler true)
+        (is (= {:transport-drain/response "committed"}
+               (deref client 2000 ::client-timeout))
+            "the admitted response is delivered before its connection closes")
+        (is (nil? (deref close 2000 ::close-timeout)))
+        (is (thrown? Throwable (uds/connect! path))
+            "a closed request server accepts no later connection"))
+      (finally
+        (deliver release-handler true)
         (uds/close-request-server! server)
         (.delete (File. path))))))
 

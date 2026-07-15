@@ -15,8 +15,10 @@
 
    `ensure-database!` on an existing database-name returns the same entry (identical?
    conn). `release-database!` on an absent name is a no-op returning
-   `{::released? false}`. `delete-database!` additionally deletes the durable
-   database. Concurrent ensures on the same name race exactly once —
+   `{::released? false}`. A failed release retains the registered identity and
+   its failure; the same process never reclassifies unproved exclusive release
+   as success. `delete-database!` additionally deletes the durable database.
+   Concurrent ensures on the same name race exactly once —
    losers see the winner's conn.
 
    Connection setup is an explicit dependency of `ensure-database!`, not a global
@@ -36,6 +38,7 @@
 (schema/register! ::backend :seon.db.backend/backend)
 (schema/register! ::path :seon.db.backend/path)
 (schema/register! ::initial-tx :seon.db.backend/initial-tx)
+(schema/register! ::release-error :string)
 
 ;; A live conn is an opaque clojure.lang.IAtom2 (datahike connection
 ;; type). We don't constrain its shape; the registry hands it out as-is.
@@ -45,7 +48,8 @@
                   [:map
                    [::conn ::conn]
                    [::backend ::backend]
-                   [::path {:optional true} ::path]])
+                   [::path {:optional true} ::path]
+                   [::release-error {:optional true} ::release-error]])
 
 (schema/register! ::ensure-database!-request
                   [:map
@@ -58,7 +62,10 @@
 (schema/register! ::ensure-database!-response ::entry)
 
 (schema/register! ::release-database!-response
-                  [:map [::released? :boolean]])
+                  [:map
+                   [::database-name ::database-name]
+                   [::released? :boolean]
+                   [::release-error {:optional true} ::release-error]])
 
 (schema/register! ::delete-database!-response
                   [:map
@@ -90,7 +97,8 @@
                   [:map
                    [::database-name ::database-name]
                    [::backend ::backend]
-                   [::path {:optional true} ::path]])
+                   [::path {:optional true} ::path]
+                   [::release-error {:optional true} ::release-error]])
 
 (schema/register! ::list-databases-request [:map])
 (schema/register! ::list-databases-response
@@ -133,10 +141,11 @@
 
 (defn- summary
   "Public view of an entry, sans live conn."
-  [database-name {::keys [backend path]}]
+  [database-name {::keys [backend path release-error]}]
   (cond-> {::database-name database-name
            ::backend backend}
-    path (assoc ::path path)))
+    path (assoc ::path path)
+    release-error (assoc ::release-error release-error)))
 
 (defn- create-entry!
   "Build a datahike cfg, ensure the db exists, connect, return the
@@ -205,17 +214,33 @@
   "Release the registered conn for `database-name` and drop the entry.
    Does NOT delete on-disk data — callers control persistence.
    Idempotent: releasing an absent name returns `{::released? false}`
-   without throwing."
+   without throwing.
+
+   A Datahike release failure is terminal for this process: retain the entry
+   and error so lifecycle callers cannot mistake an already-invalid connection
+   for proved exclusive release on retry."
   {:malli/schema [:=> [:cat [:map [::database-name ::database-name]]]
                   ::release-database!-response]}
   [{::keys [database-name]}]
   (locking !registry
-    (if-let [{::keys [conn]} (get @!registry database-name)]
-      (do
-        (try (d/release conn) (catch Throwable _))
-        (swap! !registry dissoc database-name)
-        {::released? true})
-      {::released? false})))
+    (if-let [{::keys [conn release-error]} (get @!registry database-name)]
+      (if release-error
+        {::database-name database-name
+         ::released? false
+         ::release-error release-error}
+        (try
+          (d/release conn)
+          (swap! !registry dissoc database-name)
+          {::database-name database-name ::released? true}
+          (catch Throwable throwable
+            (let [message (.toString throwable)]
+              (log/error throwable "release-database!: connection release failed"
+                         {::database-name database-name})
+              (swap! !registry assoc-in [database-name ::release-error] message)
+              {::database-name database-name
+               ::released? false
+               ::release-error message}))))
+      {::database-name database-name ::released? false})))
 
 (defn delete-database!
   "Release `database-name`'s conn, drop its entry, and DELETE its database.
@@ -232,19 +257,23 @@
   [{::keys [database-name]}]
   (locking !registry
     (if-let [{::keys [backend path]} (get @!registry database-name)]
-      (let [{::keys [released?]} (release-database! {::database-name database-name})
-            cfg (backend/datahike-config
-                 (cond-> {:seon.db.backend/database-name database-name
-                          :seon.db.backend/backend backend}
-                   path (assoc :seon.db.backend/path path)))]
-        (try
-          (d/delete-database cfg)
-          {::released? released? ::deleted? true}
-          (catch Throwable t
-            (log/warn t "delete-database!: delete-database failed after remove"
-                      {::database-name database-name ::path path})
-            {::released? released? ::deleted? false
-             ::error (str (.getMessage t))})))
+      (let [{::keys [released? release-error]}
+            (release-database! {::database-name database-name})]
+        (if-not released?
+          {::released? false ::deleted? false
+           ::error (or release-error "database connection was not released")}
+          (let [cfg (backend/datahike-config
+                     (cond-> {:seon.db.backend/database-name database-name
+                              :seon.db.backend/backend backend}
+                       path (assoc :seon.db.backend/path path)))]
+            (try
+              (d/delete-database cfg)
+              {::released? true ::deleted? true}
+              (catch Throwable t
+                (log/warn t "delete-database!: delete-database failed after remove"
+                          {::database-name database-name ::path path})
+                {::released? true ::deleted? false
+                 ::error (str (.getMessage t))})))))
       {::released? false ::deleted? false})))
 
 (defn- fork-verify!

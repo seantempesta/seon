@@ -1611,6 +1611,12 @@ or discover archived behavior.
    Delta replacement compiles completely before var surgery, so one rejected
    target leaves the prior wrappers untouched, and omitted spec/schema-error
    facts become explicit retractions rather than surviving identity upserts.
+   Candidate preparation now proves exact live/contract fixed and variadic
+   arity parity before either cold or delta Malli mutation. A mismatch aborts
+   the complete candidate with structured live/schema profiles; focused proof
+   covers cold all-or-nothing behavior, identity-preserving rejection of
+   incomplete two-arity and variadic contracts, and three complete
+   unstrument/reinstrument cycles (7 tests, 116 assertions).
    The immutable candidate now also owns every parsed/validated function
    contract and its exact schema-reference index. Cold publication consumes
    that data directly, and schema/function deltas use the old/new indexes with
