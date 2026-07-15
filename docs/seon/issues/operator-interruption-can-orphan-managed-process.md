@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: blocker
 tags: [issue, flow, pod, architecture]
 ---
@@ -70,9 +70,10 @@ second supervisor or PID registry.
   unwind before exact target attachment release/delete; uncertain process
   cleanup prevents destructive branch deletion.
 
-## Resolution
+## Ordinary-startup progress
 
-Resolved on 2026-07-15 by the one `seon.dev.process` startup transition. The
+The ordinary startup boundary was fixed on 2026-07-15 in the one
+`seon.dev.process` startup transition. The
 ordinary reconcile installs one invocation-scoped JVM shutdown hook before any
 build or spawn. A synchronized phase makes ownership publication and the real
 detached spawn indivisible with respect to shutdown: the hook either closes
@@ -93,3 +94,9 @@ before owner exit `130`; a converged writer remains alive while the invocation-
 owned watcher and pod are drained. The focused branch/CLI/process selector
 passes 31 tests/153 assertions. Full evidence and the dependency ledger are in
 [[ordinary-startup-sigint-ownership-2026-07-15]].
+
+The issue remains open until the retained branch transition uses this same
+signal-safe process inverse through its public owner and the branch-create
+interruption acceptance row is proven. CLI/status/MCP exposure and that live
+proof are the next dependency-ordered slice; this ordinary-runtime commit does
+not claim them.
