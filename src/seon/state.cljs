@@ -171,6 +171,19 @@
   (= (normalize-current-value db-value installed attr current)
      (normalize-desired-value db-value installed attr desired)))
 
+(defn- canonical-desired-entity
+  "Express one desired map in database terms.
+
+   Datahike has no empty cardinality-many datom: an empty collection means the
+   attribute is absent. Remove only those impossible presences up front so the
+   remaining map-presence comparisons continue to carry their full signal."
+  [installed entity]
+  (into {}
+        (remove (fn [[attr value]]
+                  (and (cardinality-many? installed attr)
+                       (empty? value))))
+        entity))
+
 (defn- desired-validation-error
   [desired identity-attrs]
   (let [identities (mapv desired-identity desired)
@@ -241,6 +254,7 @@
 (defn- compile-reconcile-tx
   [db-value desired scope identity-attrs]
   (let [installed       (db/installed-schema db-value)
+        desired         (mapv #(canonical-desired-entity installed %) desired)
         identities      (mapv desired-identity desired)
         desired-set     (set identities)
         managed         (db/managed-identities

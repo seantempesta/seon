@@ -48,17 +48,29 @@
 
 (defn- request!
   "Dispatch one synthetic GET and return its response observations."
-  [path]
-  (let [[response observed] (response-probe)
-        request #js {:url path :method "GET" :headers #js {}}]
-    (router/handle-request request response)
-    @observed))
+  ([path] (request! "GET" path))
+  ([method path]
+   (let [[response observed] (response-probe)
+         request #js {:url path :method method :headers #js {}}]
+     (router/handle-request request response)
+     @observed)))
 
 (defn- cached-ring-handler
   "The current compiled handler identity, used to prove cache reuse."
   []
   (let [state-atom @#'router/!router-state]
     (:seon.web.router/ring-handler @state-atom)))
+
+(deftest operator-config-route-reaches-the-injected-live-operation
+  (router/install!
+    {:seon.web.router/config-apply
+     (fn [_request ^js response]
+       (.writeHead response 200 #js {"Content-Type" "application/edn"})
+       (.end response "{:seon.state/ok? true}"))
+     :seon.web.router/same-origin? (constantly true)})
+  (let [response (request! "POST" "/_seon/operator/config")]
+    (is (= 200 (::response-status response)))
+    (is (= "{:seon.state/ok? true}" (::response-body response)))))
 
 (deftest route-facts-update-the-live-router-without-explicit-rebuild
   (async done

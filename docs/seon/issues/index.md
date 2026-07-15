@@ -36,12 +36,12 @@ See `README.md` for the convention.
 | [Database query tuple results are hard for agents to read](database-query-tuple-shape-legibility.md) | friction | agent |
 | [Edit-hook feedback can target a different checkout](worktree-edit-hook-checkout-drift.md) | friction | general |
 | [Embedding boot noise — 232 `:entity-id/missing` errors on fresh seed](embedding-first-write-lookup-noise.md) | friction | agent |
-| [Focused tests expose recovery schema load-order coupling](focused-test-schema-load-order.md) | friction | Core |
 | [Idle transcript misreports the mode-specific work budget](configured-turn-limit-masks-mode-specific-budget.md) | friction | agent |
 | [Inspect live callers use retired cluster lifecycle contracts](inspect-live-cluster-caller-drift.md) | friction | agent |
 | [LoRA audit runner depends on a retired Shadow target and pinned checkout](lora-audit-runner-drift.md) | friction | general |
 | [Model can ghost-echo runtime scaffolding into the transcript spine](narration-ghost-echo-not-neutralized.md) | friction | agent |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
+| [Reconcile empty cardinality-many values without metadata-only transactions](reconcile-empty-many-metadata-only-transaction.md) | friction | Core |
 | [Self-host `cljs.test/is` throws inside a dynamically-evaled `:test` thunk](selfhost-cljs-test-is-thunk-resolution.md) | friction | agent |
 | [Shadow deps-mode declarations imply inactive build paths](shadow-deps-mode-declaration-drift.md) | friction | docs |
 | [Transcript decay does not bound total context](transcript-decay-does-not-bound-total-context.md) | friction | agent |

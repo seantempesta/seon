@@ -246,6 +246,47 @@
                     (is false (str "unexpected rejection: " e))
                     (done)))))))
 
+(deftest reconcile-empty-many-is-equivalent-to-absent
+  (async done
+    (let [!conn (atom nil)
+          request
+          (fn [conn]
+            {:seon.state/desired
+             [{:seon.state.scratch.a/id "empty-many"
+               :seon.state.scratch.a/tags #{}}]
+             :seon.db/managed-scope #{:seon.db.process/boot}
+             :seon.db/managed-identity-attrs
+             #{:seon.state.scratch.a/id}
+             :seon.db/conn conn})]
+      (-> (scratch-conn)
+          (.then
+            (fn [conn]
+              (reset! !conn conn)
+              (db/with-tx-context
+                {:seon.db/user [:seon.agent/id "root"]
+                 :seon.db/process
+                 [:seon.db.process/id :seon.db.process/boot]}
+                (fn [] (state/reconcile! (request conn))))))
+          (.then
+            (fn [first-result]
+              (is (true? (:seon.state/changed? first-result)))
+              ;; The identity lands, while Datahike correctly omits the empty
+              ;; cardinality-many attribute.
+              (is (not (contains?
+                         (db/entity @@!conn
+                                    [:seon.state.scratch.a/id "empty-many"])
+                         :seon.state.scratch.a/tags)))
+              (state/reconcile! (request @!conn))))
+          (.then
+            (fn [again]
+              (is (true? (:seon.state/ok? again)))
+              (is (false? (:seon.state/changed? again)))
+              (is (zero? (:seon.state/operations again)))
+              (done)))
+          (.catch (fn [error]
+                    (is false (str "unexpected rejection: " error))
+                    (done)))))))
+
 (deftest reconcile-rejects-identity-less-desired-map
   ;; A desired map carrying NO :db.unique/identity attr would allocate a fresh
   ;; eid every run (duplicate forever). reconcile! refuses such a set as a

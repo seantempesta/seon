@@ -2,6 +2,7 @@
   "The single desired-state operator for a Seon source checkout."
   (:require [babashka.fs :as fs]
             [babashka.process :as shell]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [seon.dev.artifact :as artifact]
             [seon.dev.config :as config]
@@ -167,6 +168,48 @@
                (reconcile-development! configuration)))]
     (print-ready! target open?)))
 
+(defn- apply-live-config!
+  "Send one explicit manifest operation to an already-ready compatible pod."
+  [configuration]
+  (let [manifest (artifact/read-manifest configuration)
+        target   (when manifest (process/status configuration manifest))
+        path     (get-in configuration
+                         [:seon.dev.config/environment "SEON_CONFIG"])]
+    (when-not (= :seon.dev.target.status/ready
+                 (:seon.dev.target/status target))
+      (throw (ex-info "Config apply requires a ready Seon target."
+                      {:seon.dev.target/status
+                       (:seon.dev.target/status target)})))
+    (when-not path
+      (throw (ex-info "Config apply requires an explicit manifest path." {})))
+    (let [request (pr-str {:seon.config/path path})
+          result  (shell/sh
+                    {:continue true :out :string :err :string
+                     :cmd ["curl" "--fail-with-body" "--silent" "--show-error"
+                           "--request" "POST"
+                           "--header" "Content-Type: application/edn"
+                           "--data-binary" request
+                           (str (:seon.dev.target/url target)
+                                "/_seon/operator/config")]})
+          response (when-not (str/blank? (:out result))
+                     (try (edn/read-string (:out result))
+                          (catch Exception _ nil)))]
+      (when-not (and (zero? (:exit result))
+                     (true? (:seon.state/ok? response)))
+        (throw (ex-info "Live config apply failed."
+                        {:seon.dev.config/path path
+                         :seon.dev.config/exit (:exit result)
+                         :seon.dev.config/response response
+                         :seon.dev.config/error (str/trim (:err result))})))
+      response)))
+
+(defn- print-config-result! [result]
+  (println "")
+  (println "◆ Config applied")
+  (println (str "  changed: " (:seon.state/changed? result)))
+  (println (str "  operations: " (:seon.state/operations result)))
+  (println (str "  basis-t: " (:seon.state/basis-t result))))
+
 (defn- config! [configuration arguments]
   (when-not (and (= "apply" (first arguments))
                  (second arguments)
@@ -174,9 +217,9 @@
     (throw (ex-info "Use `config apply <manifest-path>`."
                     {:seon.dev.cli/arguments (vec arguments)})))
   (let [configuration (select-config configuration (second arguments))
-        target (state/with-lock configuration :stack 1800000
-                                #(reconcile-development! configuration))]
-    (print-ready! target false)))
+        result (state/with-lock configuration :stack 300000
+                                #(apply-live-config! configuration))]
+    (print-config-result! result)))
 
 (defn- status-value [configuration]
   (let [foreign (process/ownership-conflicts configuration)]

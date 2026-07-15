@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, test, runtime]
 ---
@@ -36,3 +36,11 @@ shapes in `seon.db.id`.
 - Focused router selection reaches and passes its requested test.
 - Stored identity attributes remain owned and registered by their domain
   namespaces; no duplicate identity schema is introduced.
+
+## Resolution
+
+Resolved by `aa6737cb`. Recovery response collections now use `:string` for
+agent-id values and the shared `seon.db.id/compact-value` for run/turn-id
+values, without duplicating any stored identity schema. The previously blocked
+focused router test passed 1 test/2 assertions, and the recovery namespace
+passed 2 tests/29 assertions.
