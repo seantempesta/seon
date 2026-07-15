@@ -127,8 +127,19 @@
                              "processes/legacy-containment-grace.edn")]
     (try
       (state/write-edn! record-path legacy-record)
-      (is (= 2500 (get-in (process/read-process configuration id)
-                          [:seon.dev.process/containment grace-key])))
+      (let [decoded (process/read-process configuration id)
+            containment (:seon.dev.process/containment decoded)
+            terminal
+            {:generation
+             (str (:seon.dev.process.containment/generation containment))
+             :status "drained"
+             :anchor_exit -9}]
+        (is (= 2500 (get containment grace-key)))
+        (is (#'process/matching-terminal? containment terminal))
+        (is (not (contains? (#'process/normalized-terminal
+                             containment terminal)
+                            :seon.dev.process.containment/trigger))
+            "historical absence remains visible in returned evidence"))
       (is (thrown? clojure.lang.ExceptionInfo
                    (#'process/write-process! configuration id legacy-record))
           "new publications remain strict")

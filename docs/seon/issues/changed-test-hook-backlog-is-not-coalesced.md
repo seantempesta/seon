@@ -33,6 +33,14 @@ minutes), so every hook process waits independently. The current edit-hook
 boundary has no one-slot pending request, path union, generation, or
 supersession check.
 
+A later 2026-07-15 ACME record-migration edit reproduced the user-visible
+wedge. The patch bytes were already written, but its edit hook remained behind
+the shared lock for more than two minutes while the process census showed many
+older requests, including waits of 5–16 minutes. The top-level agent had to
+terminate only its blocked hook cell and invoke the one focused process test
+directly. This demonstrates that the backlog blocks patch completion itself,
+not merely delayed advisory reporting.
+
 ## Owner
 
 The existing changed-test hook/operator boundary. Keep the one selector, file

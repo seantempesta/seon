@@ -465,6 +465,11 @@ therefore either prevents the spawn or waits until its exact identity can be
 drained in reverse dependency order. A converged process from an earlier
 invocation remains alive. A failed inverse retains its exact managed record and
 is reported rather than allowing startup or destructive cleanup to graduate.
+Managed-record schema evolution derives historical control defaults only while
+reading an attribute whose absence names the older shape; current publications
+remain strict. Historical terminal evidence is never backfilled: a newly added
+field that was not observed remains absent in the returned result even when the
+older complete terminal shape is sufficient to finish cleanup.
 Atomic owner-PID locks serialize each process, while one lifecycle lock spans
 multi-process restart and named-cluster reset transitions from teardown through
 any durable database mutation and final readiness. A second invocation therefore

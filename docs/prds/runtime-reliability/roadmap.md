@@ -167,6 +167,16 @@ The ordered top-level sequence is therefore:
 7. run unit 9's destructive, browser, performance, simultaneous-cluster, and
    authorized legacy-worktree cleanup matrix last.
 
+The first ACME checkpoint after per-generation grace/trigger publication found
+two real historical-shape boundaries. Pre-change managed records omitted the
+new grace attribute, and pre-change terminal results omitted the new trigger.
+The operator now derives the historical 2,500 ms control value only at record
+read, keeps current writes strict, accepts the otherwise exact old terminal,
+and preserves trigger absence in returned evidence. The actual stale ACME pod
+then drained through `bin/acme down`; the full process namespace passes 34
+tests/175 assertions. Source commit and clean restart evidence close this
+boundary before the agentic-tool sample resumes.
+
 On every lane return, the top-level agent first reviews source and proof,
 updates the owning roadmap, and integrates or rejects the result. It then fills
 the free slot with the earliest dependency-ready row above. The immediate

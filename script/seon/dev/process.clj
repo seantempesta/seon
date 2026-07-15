@@ -9,8 +9,10 @@
             [seon.dev.artifact :as artifact]
             [seon.dev.state :as state]
             [seon.db.protocol :as db.protocol]
-            [seon.launch :as launch])
-  (:import [java.io PushbackReader RandomAccessFile StringReader]
+            [seon.launch :as launch]
+            [seon.runtime.lifecycle :as runtime.lifecycle])
+  (:import [java.io ByteArrayOutputStream PushbackReader RandomAccessFile
+            StringReader]
            [java.net HttpURLConnection StandardProtocolFamily URL
             UnixDomainSocketAddress]
            [java.nio ByteBuffer]
@@ -886,19 +888,23 @@
   (and (= (str (:seon.dev.process.containment/generation containment))
           (:generation result))
        (= "drained" (:status result))
-       (contains? #{"requested" "workload-exit"} (:trigger result))
+       (or (not (contains? result :trigger))
+           (contains? #{"requested" "workload-exit"} (:trigger result)))
        (= -9 (:anchor_exit result))))
 
 (defn- normalized-terminal [containment result]
-  {:seon.dev.process.containment/generation
-   (:seon.dev.process.containment/generation containment)
-   :seon.dev.process.containment/status
-   :seon.dev.process.containment.status/drained
-   :seon.dev.process.containment/trigger
-   (case (:trigger result)
-     "requested" :seon.dev.process.containment.trigger/requested
-     "workload-exit" :seon.dev.process.containment.trigger/workload-exit)
-   :seon.dev.process.containment/anchor-exit (:anchor_exit result)})
+  (cond->
+   {:seon.dev.process.containment/generation
+    (:seon.dev.process.containment/generation containment)
+    :seon.dev.process.containment/status
+    :seon.dev.process.containment.status/drained
+    :seon.dev.process.containment/anchor-exit (:anchor_exit result)}
+    (contains? result :trigger)
+    (assoc :seon.dev.process.containment/trigger
+           (case (:trigger result)
+             "requested" :seon.dev.process.containment.trigger/requested
+             "workload-exit"
+             :seon.dev.process.containment.trigger/workload-exit))))
 
 (defn- read-single-edn [text]
   (with-open [reader (PushbackReader. (StringReader. text))]
@@ -1113,6 +1119,195 @@
       (when-not (accepting-unmanaged? config id)
         (clear-readiness! config id))
       result)))
+
+(def ^:private quiesce-path "/_seon/operator/quiesce")
+(def ^:private lifecycle-response-limit (* 1024 1024))
+(def ^:private default-turn-timeout-ms 900000)
+(def ^:private lifecycle-reserve-ms 120000)
+
+(defn- monotonic-ms [] (quot (System/nanoTime) 1000000))
+
+(defn- selected-turn-timeout-ms [config]
+  (let [configured
+        (some-> (get-in config [:seon.dev.config/environment
+                                "SEON_TURN_TIMEOUT_MS"])
+                parse-long)]
+    (if (and configured (pos-int? configured))
+      configured
+      default-turn-timeout-ms)))
+
+(defn- remaining-ms [deadline]
+  (max 0 (- deadline (monotonic-ms))))
+
+(defn- read-bounded-text [stream]
+  (when stream
+    (with-open [input stream
+                output (ByteArrayOutputStream.)]
+      (let [buffer (byte-array 8192)]
+        (loop [total 0]
+          (let [read (.read input buffer)]
+            (when (pos? read)
+              (let [next-total (+ total read)]
+                (when (> next-total lifecycle-response-limit)
+                  (throw (ex-info "The lifecycle response exceeded its bound."
+                                  {:seon.dev.process/response-bytes
+                                   next-total})))
+                (.write output buffer 0 read)
+                (recur next-total)))))
+        (.toString output StandardCharsets/UTF_8)))))
+
+(defn- pod-port-file [config]
+  (or (get-in config [:seon.dev.config/launch-descriptor
+                      ::launch/process ::launch/http-port-file])
+      (:seon.dev.config/http-port-file config)))
+
+(defn- bounded-quiesce-post! [config deadline]
+  (let [port-file (pod-port-file config)
+        port (when (and port-file (fs/regular-file? port-file))
+               (some-> (slurp port-file) str/trim parse-long))]
+    (when-not (pos-int? port)
+      (throw (ex-info "The managed pod has no descriptor-owned HTTP port."
+                      {:seon.dev.process/http-port-file port-file})))
+    (let [remaining (remaining-ms deadline)]
+      (when-not (pos? remaining)
+        (throw (ex-info "The lifecycle response deadline expired."
+                        {:seon.dev.process/deadline-ms deadline})))
+      (let [connection ^HttpURLConnection
+            (.openConnection
+             (URL. (str "http://127.0.0.1:" port quiesce-path)))]
+        (try
+          (.setRequestMethod connection "POST")
+          (.setConnectTimeout connection (int (min 1000 remaining)))
+          (.setReadTimeout connection (int (min Integer/MAX_VALUE remaining)))
+          (.setInstanceFollowRedirects connection false)
+          (.setDoOutput connection true)
+          (.setFixedLengthStreamingMode connection 0)
+          (.setRequestProperty connection "Content-Type"
+                               "application/edn; charset=utf-8")
+          (.setRequestProperty connection "Accept" "application/edn")
+          (with-open [output (.getOutputStream connection)] (.flush output))
+          (let [status (.getResponseCode connection)
+                stream (if (< status 400)
+                         (.getInputStream connection)
+                         (.getErrorStream connection))
+                text (or (read-bounded-text stream) "")
+                value (read-single-edn text)]
+            (when-not (contains? #{200 409 500 503} status)
+              (throw (ex-info "The lifecycle endpoint returned an invalid status."
+                              {:seon.dev.process/http-status status})))
+            (when-not (m/validate ::runtime.lifecycle/quiesce-response value)
+              (throw (ex-info "The lifecycle endpoint returned invalid data."
+                              {:seon.dev.process/http-status status
+                               :seon.dev.process/response value})))
+            value)
+          (finally (.disconnect connection)))))))
+
+(defn- pod-application-evidence [config record deadline]
+  (if-not (containment-live? record)
+    {:seon.dev.process/application-error
+     :seon.dev.process.application-error/ownership-changed}
+    (try
+      (let [first-response (bounded-quiesce-post! config deadline)
+            response
+            (if (and (false? (:seon.client/quiesced? first-response))
+                     (containment-live? record)
+                     (pos? (remaining-ms deadline)))
+              (bounded-quiesce-post! config deadline)
+              first-response)]
+        {:seon.dev.process/application-result response})
+      (catch Throwable error
+        {:seon.dev.process/application-error
+         :seon.dev.process.application-error/quiesce-failed
+         :seon.dev.process/application-error-message
+         (subs (str error) 0 (min 4096 (count (str error))))}))))
+
+(defn- clean-writer-result? [result]
+  (let [application (:seon.dev.process/application-result result)
+        response (:seon.db.terminal/stop-response application)]
+    (and (true? (:seon.db.terminal/completed? application))
+         (true? (:seon.db.server/stopped? response))
+         (every? :seon.db.registry/released?
+                 (:seon.db.server/release-results response)))))
+
+(defn- classify-stop-result [id stop-result application-evidence]
+  (if-not stop-result
+    {:seon.dev.process/id id
+     :seon.dev.process/classification
+     :seon.dev.process.classification/absent}
+    (let [result (merge stop-result application-evidence)
+          trigger (get-in result [:seon.dev.process/terminal
+                                  :seon.dev.process.containment/trigger])
+          clean?
+          (and (= :seon.dev.process.containment.trigger/requested trigger)
+               (case id
+                 :seon.dev.process/watcher true
+                 :seon.dev.process/pod
+                 (true? (get-in result [:seon.dev.process/application-result
+                                        :seon.client/quiesced?]))
+                 :seon.dev.process/writer (clean-writer-result? result)
+                 false))]
+      (cond->
+        (assoc result :seon.dev.process/classification
+               (if clean?
+                 :seon.dev.process.classification/clean
+                 :seon.dev.process.classification/forced))
+        (not clean?)
+        (assoc :seon.dev.process/reason
+               (cond
+                 (:seon.dev.process/legacy-retired? result)
+                 :seon.dev.process.reason/legacy-retirement
+                 (= :seon.dev.process.containment.trigger/workload-exit trigger)
+                 :seon.dev.process.reason/unexpected-exit
+                 (:seon.dev.process/application-error result)
+                 (:seon.dev.process/application-error result)
+                 :else :seon.dev.process.reason/incomplete-application))))))
+
+(defn- stop-selected! [configuration deadline ordered]
+  (loop [remaining ordered
+         results []]
+    (if-let [id (first remaining)]
+      (let [result
+            (try
+              (let [record (read-process configuration id)
+                    application-evidence
+                    (when (and (= pod-id id) record)
+                      (pod-application-evidence configuration record deadline))
+                    stop-result (stop! configuration id)]
+                (classify-stop-result id stop-result application-evidence))
+              (catch Throwable error
+                (throw
+                 (ex-info
+                  "A managed process could not prove containment absence."
+                  (assoc (ex-data error)
+                         :seon.dev.process/classification
+                         :seon.dev.process.classification/containment-uncertain
+                         :seon.dev.process/results results
+                         :seon.dev.process/id id)
+                  error))))]
+        (recur (next remaining) (conj results result)))
+      results)))
+
+(defn clean-or-force!
+  "Stop selected processes in dependency-safe order with honest evidence."
+  [{:seon.dev.process/keys [configuration operation targets]}]
+  (let [deadline (+ (monotonic-ms)
+                    (selected-turn-timeout-ms configuration)
+                    lifecycle-reserve-ms)
+        selected (set targets)
+        ordered (filterv selected [pod-id writer-id watcher-id])
+        results (stop-selected! configuration deadline ordered)
+        classifications (set (map :seon.dev.process/classification results))
+        classification
+        (cond
+          (contains? classifications :seon.dev.process.classification/forced)
+          :seon.dev.process.classification/forced
+          (= #{:seon.dev.process.classification/absent} classifications)
+          :seon.dev.process.classification/absent
+          :else :seon.dev.process.classification/clean)]
+    {:seon.dev.process/operation operation
+     :seon.dev.process/classification classification
+     :seon.dev.process/deadline-ms deadline
+     :seon.dev.process/results results}))
 
 (defn ensure!
   "Reconcile one process to its exact argv, environment, artifact, and health."
