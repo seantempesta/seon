@@ -217,9 +217,11 @@ of `swap_generate`: a 3-step chain that keeps the bench's OWN scorer and swaps
 only the generate —
 
 1. `bfcl_prompt` renders the sample's candidate function schemas + the request
-   into the prompt, asking for the call(s) as a single **JSON array**, and states
-   every check the scorer makes (exact function/param names, all required params,
-   no extras, JSON types, one call for simple/multiple & all for parallel).
+   into the prompt, asking for one native `(complete "<JSON array>")` form, and
+   states every check the scorer makes (exact function/param names, all required
+   params, no extras, JSON types, one call for simple/multiple & all for
+   parallel). The candidate functions are specifications, not executable Seon
+   functions; the prompt explicitly says not to invoke them.
 2. the pod solver drives `/agents/run` unchanged.
 3. `bfcl_parse` extracts the JSON call(s) from the reply and appends a
    `ChatMessageAssistant` carrying the synthesized `ToolCall`s. A reply with no
@@ -236,26 +238,33 @@ adapter is selected by bench name — no extra argument. NO DeepSeek non-think
 anchor exists (no door-fitting agentic bench has one) → band the number against
 the PUBLIC BFCL leaderboard in the row notes, never a fabricated anchor column.
 
-**Why JSON and not a native Clojure form — the 2026-07-05 surface A/B.** The
-JSON contract asks for a foreign surface (our agents emit Clojure forms as
-their native output), a possible confound that could UNDERSTATE tool-calling.
-We reworked the adapter to ask for the call as a Clojure form
-(`(fn {:kw v})`) — a small no-dep s-expr reader mapping Clojure literals onto
-the native types `ast_match` compares — and A/B'd it on the SAME frozen 10 dev
-samples, k=1 (evidence + the frozen form adapter: `evals/runs/
-2026-07-05-bfcl-ast-dev-form/`; ledger row `2026-07-05:bfcl_ast:dev:k1:
-form-surface`). Result: form **.600** vs JSON **.700** — the confound
-hypothesis was NOT supported. 9/10 samples scored identically; the one flip
-(`multiple_168`) REGRESSED, and the mechanism is the finding: told to "emit a
-Clojure form the way you invoke a verb at your REPL", the agent tried to
-EVALUATE the (undefined) candidate function, errored, and looped to the
-turn-limit with an empty reply. A text form is caught between two chairs — not
-clean text like JSON, not a real executable verb. **JSON stays the shipped
-adapter.** The evidence points past text surfaces entirely: the truly native
-path is **eval-native** — register the BFCL candidates as real stub verbs so
-the agent's normal call SUCCEEDS and the call is read off the runtime (no text
-parse). That is a separate owner decision (more integration), noted in
-`docs/prds/agent-ctx/coordination.md`, not built here.
+**Native lifecycle form, JSON value.** The 2026-07-05 surface A/B asked agents
+to invoke candidates as Clojure functions (`(fn {:kw v})`). It scored **.600**
+versus bare JSON's **.700** because those candidate symbols did not exist in
+Seon's program graph; the adapter turned a non-exec AST task into guaranteed
+undefined-function errors. Bare JSON was also invalid under Seon's stable
+system contract: every reply is an executable form and repeated formless
+replies close `:no-forms`.
+
+The maintained bridge now composes the two real contracts instead of choosing
+between them. The agent executes Seon's existing lifecycle function once:
+
+```clojure
+(complete "[{\"name\":\"f\",\"arguments\":{...}}]")
+```
+
+`complete` closes the run and delivers the JSON string through the ordinary
+message path. `/agents/run` returns that unescaped JSON value, and `bfcl_parse`
+maps it onto Inspect's `ToolCall` without another literal parser. On the exact
+Qwen 3.5 2B `multiple_0` failure, this changed four formless turns / zero evals /
+`:no-forms` / score 0 into one turn / one eval / `:completed` / score 1.0. The
+native log is under
+`evals/runs/2026-07-15-bfcl-native-complete-qwen-smoke/`.
+
+A future eval-native integration may register external candidates as temporary
+real program facts and capture their calls from the database. That is useful
+for executable third-party tools, but it is not required to score BFCL's
+non-executable AST subset and must not become a second function registry.
 
 ## Frozen splits — `evals/datasets.lock` (dev / milestone / test)
 

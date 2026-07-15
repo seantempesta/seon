@@ -1,4 +1,4 @@
-"""BFCL single-turn AST subset over the pod door — the text->tool_call bridge.
+"""BFCL single-turn AST subset over the pod door — native completion bridge.
 
 BFCL (Berkeley Function-Calling Leaderboard) is THE canonical established
 tool-calling bench. Its V1 single-turn non-live non-exec categories are scored
@@ -18,8 +18,9 @@ OpenAI-style `tool_calls`. So we swap the bench's solver (never its scorer) for
 a three-step chain that IS the FC path's text equivalent:
 
   1. `bfcl_prompt`  — render the sample's candidate function schemas + the
-                      user request into the prompt, asking for the call(s) as
-                      a single JSON array. STATES every check the scorer makes
+                      user request into the prompt, asking the agent to pass a
+                      JSON call array to Seon's real `complete` function.
+                      STATES every check the scorer makes
                       (exact function/param names, all required params, no
                       extra params, JSON types, one call for simple/multiple &
                       all calls for parallel) — the load-bearing "every scorer
@@ -35,12 +36,16 @@ a three-step chain that IS the FC path's text equivalent:
                       HARNESS/adapter quality signal (fix the bridge), distinct
                       from a MODEL MISS (a parseable but wrong call).
 
-JSON, not an s-expr, is the wire form: `json.loads` yields native
-ints/floats/strings/lists/bools/dicts that map straight onto `ToolCall.
-arguments` with zero type translation, which is exactly what the AST matcher's
-type rules compare against. The pod emitting JSON-as-text is trivial; the
-Clojure-natural s-expr would need a second parser and a keyword/type mapping
-for no gain.
+The model-facing answer is one native Clojure form:
+
+    (complete "[{\"name\":\"f\",\"arguments\":{...}}]")
+
+`complete` closes the run and delivers its string through the ordinary message
+path, so `/agents/run` returns only the unescaped JSON value. `json.loads` then
+yields the native Python values BFCL compares. This avoids the contradictory
+old contract (the Seon system requires executable forms while the task demanded
+bare JSON and said not to execute anything) without inventing a second parser
+or asking the agent to invoke candidate names that are not real Seon functions.
 
 Scope = the PYTHON single-turn AST categories only (simple_python, multiple,
 parallel, parallel_multiple) — one uniform set of type rules (python allows int
@@ -116,7 +121,7 @@ def _render_function(tool: dict[str, Any]) -> str:
 
 def render_bfcl_prompt(question: str, tools: list[dict[str, Any]],
                        matching: str) -> str:
-    """The pod prompt: candidate functions + request + the JSON-call contract.
+    """The pod prompt: candidates + request + native `complete` contract.
 
     `matching` is the category's matching function ("simple" | "multiple" |
     "parallel") — it fixes the call-count contract the scorer enforces:
@@ -127,20 +132,24 @@ def render_bfcl_prompt(question: str, tools: list[dict[str, Any]],
     catalog = "\n\n".join(_render_function(t) for t in tools)
     if matching == "parallel":
         count_rule = (
-            "This request may require SEVERAL function calls. Emit one JSON "
-            "object per call the request implies (there can be more than one).")
+            "This request may require SEVERAL function calls. Put one JSON "
+            "object per call the request implies into the array (there can be "
+            "more than one).")
     else:
         count_rule = (
             "Choose the single correct function and emit EXACTLY ONE call.")
     return (
         "You are given a set of candidate functions and a user request. Decide "
-        "which function(s) to call and with what arguments to satisfy the "
-        "request. Do NOT execute anything or explain — only report the call(s).\n\n"
+        "which function(s) should be called and with what arguments. Report "
+        "the call specification through Seon's existing `complete` lifecycle "
+        "function; do not invoke the candidate functions themselves.\n\n"
         "Candidate functions:\n\n"
         f"{catalog}\n\n"
         f"User request:\n{question}\n\n"
-        "Reply with ONLY a JSON array of call objects, each shaped "
-        '{\"name\": \"<function name>\", \"arguments\": {<arg name>: <value>}}. '
+        "Your entire reply must be ONE executable Clojure form shaped:\n"
+        '    (complete "[{\\"name\\":\\"<function name>\\",'
+        '\\"arguments\\":{<escaped JSON arguments>}}]")\n'
+        "The string passed to `complete` is a JSON array of call objects. "
         "Rules the answer must satisfy:\n"
         "- Use the EXACT function name and parameter names from the schema "
         "above (no renaming, no extra parameters).\n"
@@ -149,8 +158,9 @@ def render_bfcl_prompt(question: str, tools: list[dict[str, Any]],
         "- Give each argument its schema JSON type (integer, number/float, "
         "string, boolean, array, object) — a value taken from the request.\n"
         f"- {count_rule}\n"
-        "- Output the JSON array and nothing else (no prose, no code fence "
-        "needed)."
+        "- Escape every double quote inside the Clojure string with `\\\"`.\n"
+        "- Output only the single `(complete \"...\")` form: no prose, code "
+        "fence, predicted result, or candidate-function invocation."
     )
 
 

@@ -1,4 +1,4 @@
-"""Offline proof for the BFCL AST text->tool_call bridge.
+"""Offline proof for the BFCL AST native-completion bridge.
 
 No cluster, no network: the adapter's prompt render + reply parse are exercised
 directly, and the synthesized `ToolCall`s are fed to the REAL bfcl `ast_match`
@@ -95,7 +95,8 @@ def test_render_states_the_contract():
     assert "radius" in prompt               # parameter name
     assert "integer" in prompt              # its type
     assert "required" in prompt.lower()     # required-param rule
-    assert "JSON array" in prompt           # the answer shape
+    assert '(complete "[' in prompt         # native answer form
+    assert "do not invoke the candidate" in prompt
     assert "EXACTLY ONE" in prompt          # simple/multiple count rule
     assert "circle radius 5" in prompt      # the original request survives
 
@@ -157,7 +158,7 @@ def test_bfcl_prompt_rewrites_user_prompt():
     state = _state_with_reply("")
     anyio.run(_run_solver, bfcl_prompt(), state)
     assert "circle_area" in state.user_prompt.text
-    assert "JSON array" in state.user_prompt.text
+    assert '(complete "[' in state.user_prompt.text
 
 
 async def _run_solver(solver, state):

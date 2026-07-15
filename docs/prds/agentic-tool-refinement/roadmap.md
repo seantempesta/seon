@@ -14,7 +14,7 @@ Inspect AI suite with at least 90% deterministic success overall, explicit
 per-category floors, honest infrastructure-failure accounting, and durable
 restart/read-back evidence.
 
-## Current position — 2026-07-14
+## Current position — 2026-07-15
 
 The lane began on a dedicated branch/worktree, but shared-checkout work is now
 the repository default and its committed gains are reconciled into the main
@@ -27,14 +27,11 @@ its renderer and synthetic-card implementations are rejected.
 The isolated ACME checkout initially failed because pinned submodules and the
 locked npm closure were absent. After initializing the selected dependency
 sources and running `npm ci`, the current writer, `acme-client`, bootstrap,
-CSS, watcher, writer, and pod built successfully. The ordinary `acme/root`
-MCP coordinate then selected an older checkout's live pod. A custom
-`SEON_CLUSTER_DIR` previously changed only the database path while retaining
-ACME's shared sockets, process records, logs, and HTTP port file. `bin/acme`
-now derives all of those coordinates from the selected cluster basename while
-preserving the ordinary `acme` paths. The lane is live and operator-ready as
-`acme-agentic-tool-refinement` at port 8094; its writer, pod, sockets, logs,
-and process records are disjoint from every other checkout.
+CSS, watcher, writer, and pod built successfully. Worktree-specific operation
+was retired after its committed source gains were reconciled. The lane now
+uses the ordinary `acme` target from the shared checkout at port 7994; its
+artifact flavor, database, process records, sockets, and logs remain isolated
+from the default cluster without introducing another checkout or supervisor.
 
 The first fresh ordinary-agent render is the current baseline:
 
@@ -59,6 +56,18 @@ used the wrong JSON function identity and the next three were empty, converting
 the prior opaque `:no-forms` score into actionable model/context/parser
 evidence. The dependency ledger and proof are in
 [[research/turn-evidence-retention-2026-07-15]].
+
+That evidence exposed a benchmark-adapter contradiction rather than a model
+selection failure. BFCL demanded bare JSON and said not to execute anything,
+while Seon's stable system context requires every answer to be an executable
+Clojure form. The adapter now asks for one existing lifecycle call whose string
+argument is the JSON call array. On the identical `multiple_0` sample, Qwen 3.5
+2B emitted one valid `complete` form, the runtime recorded one eval and closed
+`:completed`, and BFCL's unchanged AST scorer returned 1.0 in seven seconds.
+The exact one-turn evidence is in
+[[research/bfcl-native-completion-2026-07-15]]. This proves the 24k-token prompt
+did not prevent this selection; namespace weight remains an independent audit
+for tasks that actually navigate or compose Seon functions.
 
 The first policy unit now resolves run ceilings through one config manifest
 section and persists three scalar singleton facts. The live isolated database
