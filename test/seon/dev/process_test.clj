@@ -1,6 +1,7 @@
 (ns seon.dev.process-test
   (:require [babashka.fs :as fs]
             [babashka.process :as shell]
+            [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is run-tests testing]]
@@ -30,6 +31,72 @@
    :seon.dev.process/readiness :seon.dev.process.readiness/process
    :seon.dev.process/ready-timeout-ms 5000
    :seon.dev.process/artifact-digest "test-artifact"})
+
+(defn- live-probe-record [configuration record]
+  (let [pid (.pid (java.lang.ProcessHandle/current))
+        start (state/process-start-instant pid)
+        generation (random-uuid)
+        adoption
+        (str (fs/path (:seon.dev.test/directory configuration)
+                      (str generation ".adopted")))]
+    (spit adoption
+          (str "{\"generation\":\"" generation
+               "\",\"status\":\"adopted\"}"))
+    (assoc record
+           :seon.dev.process/containment
+           {:seon.dev.process.containment/generation generation
+            :seon.dev.process.containment/owner-pid pid
+            :seon.dev.process.containment/owner-start-instant start
+            :seon.dev.process.containment/anchor-pid pid
+            :seon.dev.process.containment/anchor-start-instant start
+            :seon.dev.process.containment/process-group pid
+            :seon.dev.process.containment/workload-pid pid
+            :seon.dev.process.containment/workload-start-instant start
+            :seon.dev.process.containment/control-socket
+            (str (fs/path (:seon.dev.test/directory configuration)
+                          (str generation ".sock")))
+            :seon.dev.process.containment/adoption-path adoption
+            :seon.dev.process.containment/result-path
+            (str (fs/path (:seon.dev.test/directory configuration)
+                          (str generation ".result")))})))
+
+(defn- hard-clean-containment-fixture! [record]
+  (when-let [containment (:seon.dev.process/containment record)]
+    (let [identity
+          (fn [role]
+            {:seon.dev.process/pid
+             (get containment (keyword "seon.dev.process.containment"
+                                       (str (name role) "-pid")))
+             :seon.dev.process/start-instant
+             (get containment (keyword "seon.dev.process.containment"
+                                       (str (name role) "-start-instant")))})
+          anchor (identity :anchor)
+          owner (identity :owner)
+          workload (identity :workload)]
+      (when (state/process-identity-alive? anchor)
+        (shell/sh {:continue true
+                   :cmd ["/bin/kill" "-KILL" "--"
+                         (str "-" (:seon.dev.process/pid anchor))]}))
+      (when (state/process-identity-alive? owner)
+        (shell/sh {:continue true
+                   :cmd ["/bin/kill" "-KILL"
+                         (str (:seon.dev.process/pid owner))]}))
+      (when (state/process-identity-alive? workload)
+        (shell/sh {:continue true
+                   :cmd ["/bin/kill" "-KILL"
+                         (str (:seon.dev.process/pid workload))]}))
+      (loop [remaining 500]
+        (when (and (pos? remaining)
+                   (some state/process-identity-alive?
+                         (map identity [:owner :anchor :workload])))
+          (Thread/sleep 10)
+          (recur (dec remaining))))
+      (let [alive (mapv (comp boolean state/process-identity-alive? identity)
+                        [:owner :anchor :workload])]
+        (when-let [path
+                   (:seon.dev.process.containment/control-socket containment)]
+          (fs/delete-if-exists path))
+        alive))))
 
 (defn- with-default-launch-descriptor [target]
   (dev-config/select-launch-descriptor
@@ -395,8 +462,13 @@
         (is (= (:seon.dev.process/pid first-record)
                (:seon.dev.process/pid second-record)))
         (is (state/process-identity-alive? first-record))
-        (is (= (:seon.dev.process/pid first-record)
-               (:seon.dev.process/process-group first-record)))
+        (is (not= (:seon.dev.process/pid first-record)
+                  (:seon.dev.process/process-group first-record))
+            "the persistent owner remains outside the anchored group")
+        (is (= (:seon.dev.process/process-group first-record)
+               (get-in first-record
+                       [:seon.dev.process/containment
+                        :seon.dev.process.containment/anchor-pid])))
         (is (= (:seon.dev.process/pid first-record)
                (:seon.dev.process/pid ambient-record))
             "ambient operator variables do not restart the managed process")
@@ -410,6 +482,174 @@
           (is (= (:seon.dev.process/pid first-record)
                  (some-> (:out result) str/trim parse-long)))))
       (finally (cleanup! configuration [id])))))
+
+(deftest publication-cuts-drain-the-unadopted-generation
+  (doseq [cut [:before-record :after-record-before-adopt]]
+    (let [configuration (test-config)
+          id (keyword "seon.dev.process" (name cut))
+          spec (harmless-spec id ["sleep" "300"])
+          launch (atom nil)
+          abort @#'process/abort-unpublished-containment!
+          write @#'process/write-process!
+          adopt @#'process/adopt-containment!]
+      (try
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (with-redefs-fn
+                       {#'process/abort-unpublished-containment!
+                        (fn [selected value]
+                          (reset! launch value)
+                          (abort selected value))
+                        #'process/write-process!
+                        (if (= cut :before-record)
+                          (fn [_ _ _]
+                            (throw (ex-info "injected record failure" {})))
+                          write)
+                        #'process/adopt-containment!
+                        (if (= cut :after-record-before-adopt)
+                          (fn [_]
+                            (throw (ex-info "injected adoption failure" {})))
+                          adopt)}
+                       #(process/ensure! configuration spec))))
+        (is (some? @launch) "the helper published one exact generation")
+        (is (not-any? some?
+                      (map (comp state/process-start-instant @launch)
+                           [:owner_pid :anchor_pid :workload_pid]))
+            "every unadopted process is absent before failure returns")
+        (is (nil? (process/read-process configuration id)))
+        (finally
+          (when @launch
+            (hard-clean-containment-fixture!
+             {:seon.dev.process/containment
+               {:seon.dev.process.containment/owner-pid
+               (:owner_pid @launch)
+               :seon.dev.process.containment/anchor-pid
+               (:anchor_pid @launch)
+               :seon.dev.process.containment/anchor-start-instant
+               (state/process-start-instant (:anchor_pid @launch))
+               :seon.dev.process.containment/workload-pid
+               (:workload_pid @launch)
+               :seon.dev.process.containment/workload-start-instant
+               (state/process-start-instant (:workload_pid @launch))
+               :seon.dev.process.containment/control-socket
+               (:control_socket @launch)
+               :seon.dev.process.containment/owner-start-instant
+               (state/process-start-instant (:owner_pid @launch))}}))
+          (fs/delete-tree (:seon.dev.test/directory configuration)
+                          {:force true}))))))
+
+(deftest owner-failure-during-adoption-reaps-the-anchor
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        generation (str (random-uuid))
+        descriptor (str (fs/path directory "descriptor.json"))
+        control (str (fs/path directory "control.sock"))
+        result (str (fs/path directory "result.json"))
+        launch (atom nil)
+        helper (str (fs/path (:seon.dev.config/root configuration)
+                             "script/seon/dev/detach.py"))]
+    (try
+      (fs/create-dirs (fs/parent control))
+      (let [started
+            (shell/sh
+             {:continue true :out :string :err :string
+              :cmd ["python3" helper "launch"
+                    (:seon.dev.config/root configuration)
+                    (str (fs/path directory "failure.log")) generation
+                    descriptor control result
+                    "sleep" "300"]})
+            published (json/parse-string (str/trim (:out started)) true)
+            identities
+            (mapv (fn [key]
+                    (let [pid (get published key)]
+                      {:seon.dev.process/pid pid
+                       :seon.dev.process/start-instant
+                       (state/process-start-instant pid)}))
+                  [:owner_pid :anchor_pid :workload_pid])]
+        (reset! launch published)
+        (is (zero? (:exit started)))
+        (fs/create-dirs (:adoption_path published))
+        (is (not= (str "adopted " generation)
+                  (#'process/socket-line! control
+                                           (str "adopt " generation))))
+        (loop [remaining 500]
+          (when (and (pos? remaining) (not (fs/regular-file? result)))
+            (Thread/sleep 10)
+            (recur (dec remaining))))
+        (loop [remaining 500]
+          (when (and (pos? remaining)
+                     (some state/process-identity-alive? identities))
+            (Thread/sleep 10)
+            (recur (dec remaining))))
+        (let [terminal (json/parse-string (slurp result) true)]
+          (is (= {:generation generation :status "drained" :anchor_exit -9}
+                 terminal))
+          (is (not-any? state/process-identity-alive? identities))
+          (is (not (fs/exists? control)))))
+      (finally
+        (when @launch
+          (hard-clean-containment-fixture!
+           {:seon.dev.process/containment
+            {:seon.dev.process.containment/owner-pid (:owner_pid @launch)
+             :seon.dev.process.containment/owner-start-instant
+             (state/process-start-instant (:owner_pid @launch))
+             :seon.dev.process.containment/anchor-pid (:anchor_pid @launch)
+             :seon.dev.process.containment/anchor-start-instant
+             (state/process-start-instant (:anchor_pid @launch))
+             :seon.dev.process.containment/workload-pid
+             (:workload_pid @launch)
+             :seon.dev.process.containment/workload-start-instant
+             (state/process-start-instant (:workload_pid @launch))
+             :seon.dev.process.containment/control-socket control}}))
+        (fs/delete-if-exists control)
+        (fs/delete-tree directory {:force true})))))
+
+(deftest owner-term-before-adoption-drains-its-owned-generation
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        generation (str (random-uuid))
+        control (str (fs/path (:seon.dev.config/root configuration)
+                              "tmp" "seon-containment"
+                              (str generation ".sock")))
+        result (str (fs/path directory "term-result.json"))
+        helper (str (fs/path (:seon.dev.config/root configuration)
+                             "script/seon/dev/detach.py"))]
+    (try
+      (fs/create-dirs (fs/parent control))
+      (let [started
+            (shell/sh
+             {:continue true :out :string :err :string
+              :cmd ["python3" helper "launch"
+                    (:seon.dev.config/root configuration)
+                    (str (fs/path directory "term.log")) generation
+                    (str (fs/path directory "term-descriptor.json"))
+                    control result "sleep" "300"]})
+            published (json/parse-string (str/trim (:out started)) true)
+            identities
+            (mapv (fn [key]
+                    (let [pid (get published key)]
+                      {:seon.dev.process/pid pid
+                       :seon.dev.process/start-instant
+                       (state/process-start-instant pid)}))
+                  [:owner_pid :anchor_pid :workload_pid])]
+        (is (zero? (:exit started)))
+        (shell/sh {:cmd ["/bin/kill" "-TERM"
+                         (str (:owner_pid published))]})
+        (loop [remaining 500]
+          (when (and (pos? remaining) (not (fs/regular-file? result)))
+            (Thread/sleep 10)
+            (recur (dec remaining))))
+        (loop [remaining 500]
+          (when (and (pos? remaining)
+                     (some state/process-identity-alive? identities))
+            (Thread/sleep 10)
+            (recur (dec remaining))))
+        (is (= {:generation generation :status "drained" :anchor_exit -9}
+               (json/parse-string (slurp result) true)))
+        (is (not-any? state/process-identity-alive? identities))
+        (is (not (fs/exists? control))))
+      (finally
+        (fs/delete-if-exists control)
+        (fs/delete-tree directory {:force true})))))
 
 (deftest stop-drains-descendants
   (let [configuration (test-config)
@@ -432,6 +672,194 @@
           (is (nil? (state/process-start-instant child)))))
       (finally (cleanup! configuration [id])))))
 
+(deftest workload-receives-term-before-anchor-escalation
+  (let [configuration (test-config)
+        id :seon.dev.process/term-delivery
+        directory (:seon.dev.test/directory configuration)
+        ready-file (str (fs/path directory "term-ready"))
+        term-file (str (fs/path directory "term-received"))
+        source
+        (str "import signal,sys,time\n"
+             "term,ready=sys.argv[1],sys.argv[2]\n"
+             "def on_term(signum,frame):\n"
+             " open(term,'w').write('TERM')\n"
+             " raise SystemExit(0)\n"
+             "signal.signal(signal.SIGTERM,on_term)\n"
+             "open(ready,'w').write('ready')\n"
+             "while True: time.sleep(1)\n")
+        spec (harmless-spec id ["python3" "-c" source
+                                term-file ready-file])]
+    (try
+      (process/ensure! configuration spec)
+      (loop [remaining 100]
+        (when (and (pos? remaining) (not (fs/regular-file? ready-file)))
+          (Thread/sleep 10)
+          (recur (dec remaining))))
+      (is (fs/regular-file? ready-file))
+      (process/stop! configuration id)
+      (is (= "TERM" (slurp term-file))
+          "the workload inherits SIG_DFL and runs its graceful TERM handler")
+      (finally (cleanup! configuration [id])))))
+
+(deftest dead-workload-drains-a-term-ignoring-descendant-before-replacement
+  (let [configuration (test-config)
+        id :seon.dev.process/dead-workload
+        child-file (str (fs/path (:seon.dev.test/directory configuration)
+                                 "term-ignoring-child"))
+        spec (harmless-spec
+              id ["bash" "-c"
+                  (str "trap '' TERM; sleep 300 & child=$!; echo $child > "
+                       child-file "; wait $child")])]
+    (try
+      (let [record (process/ensure! configuration spec)
+            containment (:seon.dev.process/containment record)
+            workload (:seon.dev.process.containment/workload-pid containment)]
+        (loop [remaining 100]
+          (when (and (pos? remaining) (not (fs/regular-file? child-file)))
+            (Thread/sleep 10)
+            (recur (dec remaining))))
+        (let [child (parse-long (str/trim (slurp child-file)))]
+          (shell/sh {:cmd ["/bin/kill" "-KILL" (str workload)]})
+          (loop [remaining 500]
+            (when (and (pos? remaining)
+                       (not (fs/regular-file?
+                             (:seon.dev.process.containment/result-path
+                              containment))))
+              (Thread/sleep 10)
+              (recur (dec remaining))))
+          (process/stop! configuration id)
+          (is (nil? (state/process-start-instant child))
+              "the final anchored KILL removes the TERM-ignoring child")
+          (is (nil? (process/read-process configuration id)))
+          (let [replacement (process/ensure!
+                             configuration
+                             (assoc spec :seon.dev.process/argv
+                                    ["sleep" "300"]))]
+            (is (not= (:seon.dev.process/pid record)
+                      (:seon.dev.process/pid replacement))
+                "replacement starts only after the terminal result"))))
+      (finally (cleanup! configuration [id])))))
+
+(deftest missing-owner-result-is-containment-uncertain
+  (let [configuration (test-config)
+        id :seon.dev.process/missing-result
+        spec (harmless-spec id ["sleep" "300"])
+        fixture (atom nil)]
+    (try
+      (let [record (process/ensure! configuration spec)
+            containment (:seon.dev.process/containment record)
+            owner (:seon.dev.process.containment/owner-pid containment)
+            anchor (:seon.dev.process.containment/anchor-pid containment)]
+        (reset! fixture record)
+        (shell/sh {:cmd ["/bin/kill" "-KILL" (str owner)]})
+        (loop [remaining 500]
+          (when (and (pos? remaining)
+                     (some? (state/process-start-instant anchor)))
+            (Thread/sleep 10)
+            (recur (dec remaining))))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"disappeared without a terminal result"
+             (process/stop! configuration id)))
+        (is (some? (process/read-process configuration id)))
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (process/ensure! configuration spec))))
+      (finally
+        (when @fixture
+          (is (not-any? true? (hard-clean-containment-fixture! @fixture))
+              "the failure fixture leaves no containment process alive"))
+        (fs/delete-tree (:seon.dev.test/directory configuration)
+                        {:force true})))))
+
+(deftest individually-killed-anchor-never-publishes-false-drained-evidence
+  (let [configuration (test-config)
+        id :seon.dev.process/missing-anchor
+        spec (harmless-spec id ["sleep" "300"])
+        fixture (atom nil)]
+    (try
+      (let [record (process/ensure! configuration spec)
+            containment (:seon.dev.process/containment record)
+            anchor (:seon.dev.process.containment/anchor-pid containment)
+            owner-identity
+            {:seon.dev.process/pid
+             (:seon.dev.process.containment/owner-pid containment)
+             :seon.dev.process/start-instant
+             (:seon.dev.process.containment/owner-start-instant containment)}
+            workload-identity
+            {:seon.dev.process/pid
+             (:seon.dev.process.containment/workload-pid containment)
+             :seon.dev.process/start-instant
+             (:seon.dev.process.containment/workload-start-instant containment)}]
+        (reset! fixture record)
+        (shell/sh {:cmd ["/bin/kill" "-KILL" (str anchor)]})
+        (loop [remaining 500]
+          (when (and (pos? remaining)
+                     (state/process-identity-alive? owner-identity))
+            (Thread/sleep 10)
+            (recur (dec remaining))))
+        (is (not (state/process-identity-alive? owner-identity)))
+        (is (state/process-identity-alive? workload-identity)
+            "anchor death alone does not prove or silently lose the workload")
+        (is (not (fs/exists?
+                  (:seon.dev.process.containment/result-path containment))))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"disappeared without a terminal result"
+             (process/stop! configuration id)))
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (process/ensure! configuration spec))))
+      (finally
+        (when @fixture
+          (is (not-any? true? (hard-clean-containment-fixture! @fixture))
+              "the external anchor-death fixture is fully cleaned"))
+        (fs/delete-tree (:seon.dev.test/directory configuration)
+                        {:force true})))))
+
+(deftest live-legacy-group-retires-with-its-child-before-upgrade
+  (let [configuration (test-config)
+        id :seon.dev.process/legacy
+        directory (:seon.dev.test/directory configuration)
+        child-file (str (fs/path directory "legacy-child"))
+        legacy (shell/process
+                {:out :discard :err :discard
+                 :cmd ["python3" "-c"
+                       (str "import os,subprocess,time\n"
+                            "os.setsid()\n"
+                            "c=subprocess.Popen(['sleep','300'])\n"
+                            "open(" (pr-str child-file)
+                            ",'w').write(str(c.pid))\n"
+                            "time.sleep(300)\n")]})
+        pid (.pid ^java.lang.Process (:proc legacy))
+        file (fs/path (:seon.dev.config/process-dir configuration)
+                      "processes/legacy.edn")]
+    (try
+      (loop [remaining 100]
+        (when (and (pos? remaining) (not (fs/regular-file? child-file)))
+          (Thread/sleep 10)
+          (recur (dec remaining))))
+      (let [child (parse-long (str/trim (slurp child-file)))
+            start (state/process-start-instant pid)]
+        (state/write-edn!
+         file
+         {:seon.dev.process/id id
+          :seon.dev.process/pid pid
+          :seon.dev.process/start-instant start
+          :seon.dev.process/process-group pid
+          :seon.dev.process/argv ["legacy"]
+          :seon.dev.process/environment-digest (apply str (repeat 64 "0"))
+          :seon.dev.process/artifact-digest "legacy"
+          :seon.dev.process/target :seon.dev.target/development
+          :seon.dev.process/started-at "legacy"
+          :seon.dev.process/log (str (fs/path directory "legacy.log"))})
+        (process/stop! configuration id)
+        (is (nil? (state/process-start-instant pid)))
+        (is (nil? (state/process-start-instant child)))
+        (is (nil? (process/read-process configuration id))))
+      (finally
+        (when (.isAlive ^java.lang.Process (:proc legacy))
+          (.destroyForcibly ^java.lang.Process (:proc legacy)))
+        (fs/delete-tree directory {:force true})))))
+
 (deftest reused-pid-is-never-signaled
   (let [configuration (test-config)
         id :seon.dev.process/stale
@@ -453,8 +881,13 @@
               :seon.dev.process/log
               (str (fs/path (:seon.dev.test/directory configuration)
                             "stale.log"))})
-      (process/stop! configuration id)
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"cannot be retired safely"
+           (process/stop! configuration id)))
       (is (.isAlive ^java.lang.Process (:proc innocent)))
+      (is (some? (process/read-process configuration id))
+          "uncertain legacy evidence is retained and blocks replacement")
       (finally
         (.destroyForcibly ^java.lang.Process (:proc innocent))
         (fs/delete-tree (:seon.dev.test/directory configuration))))))
@@ -519,10 +952,13 @@
                :seon.dev.artifact.flavor/default)
         log (fs/path (:seon.dev.test/directory configuration) "watcher.log")
         pid (.pid (java.lang.ProcessHandle/current))
-        record {:seon.dev.process/id process/watcher-id
-                :seon.dev.process/pid pid
-                :seon.dev.process/start-instant (state/process-start-instant pid)
-                :seon.dev.process/log (str log)}
+        record (live-probe-record
+                configuration
+                {:seon.dev.process/id process/watcher-id
+                 :seon.dev.process/pid pid
+                 :seon.dev.process/start-instant
+                 (state/process-start-instant pid)
+                 :seon.dev.process/log (str log)})
         spec {:seon.dev.process/id process/watcher-id
               :seon.dev.process/readiness :seon.dev.process.readiness/watcher}]
     (try
@@ -581,9 +1017,12 @@
         port (.getLocalPort server)
         _ (spit port-file (str port))
         pid (.pid (java.lang.ProcessHandle/current))
-        record {:seon.dev.process/id process/pod-id
-                :seon.dev.process/pid pid
-                :seon.dev.process/start-instant (state/process-start-instant pid)}
+        record (live-probe-record
+                configuration
+                {:seon.dev.process/id process/pod-id
+                 :seon.dev.process/pid pid
+                 :seon.dev.process/start-instant
+                 (state/process-start-instant pid)})
         spec {:seon.dev.process/id process/pod-id
               :seon.dev.process/readiness :seon.dev.process.readiness/pod}]
     (try
@@ -607,10 +1046,13 @@
                :seon.dev.artifact.flavor/acme)
         log (fs/path (:seon.dev.test/directory configuration) "watcher.log")
         pid (.pid (java.lang.ProcessHandle/current))
-        record {:seon.dev.process/id process/watcher-id
-                :seon.dev.process/pid pid
-                :seon.dev.process/start-instant (state/process-start-instant pid)
-                :seon.dev.process/log (str log)}
+        record (live-probe-record
+                configuration
+                {:seon.dev.process/id process/watcher-id
+                 :seon.dev.process/pid pid
+                 :seon.dev.process/start-instant
+                 (state/process-start-instant pid)
+                 :seon.dev.process/log (str log)})
         spec {:seon.dev.process/id process/watcher-id
               :seon.dev.process/readiness :seon.dev.process.readiness/watcher}]
     (try
@@ -639,10 +1081,13 @@
                (str (fs/path directory "shadow-acme")))
         log (fs/path directory "watcher.log")
         pid (.pid (java.lang.ProcessHandle/current))
-        record {:seon.dev.process/id process/watcher-id
-                :seon.dev.process/pid pid
-                :seon.dev.process/start-instant (state/process-start-instant pid)
-                :seon.dev.process/log (str log)}]
+        record (live-probe-record
+                configuration
+                {:seon.dev.process/id process/watcher-id
+                 :seon.dev.process/pid pid
+                 :seon.dev.process/start-instant
+                 (state/process-start-instant pid)
+                 :seon.dev.process/log (str log)})]
     (try
       (fs/create-dirs (fs/parent output))
       (fs/create-dirs (fs/parent runtime))
@@ -1000,11 +1445,14 @@
           "dependency rejection occurs before pod publication")
       (let [dependency-ready? (atom true)
             pid (.pid (java.lang.ProcessHandle/current))
-            record {:seon.dev.process/id process/pod-id
-                    :seon.dev.process/pid pid
-                    :seon.dev.process/start-instant
-                    (state/process-start-instant pid)
-                    :seon.dev.process/artifact-digest "application"}]
+            record
+            (live-probe-record
+             branch-config
+             {:seon.dev.process/id process/pod-id
+              :seon.dev.process/pid pid
+              :seon.dev.process/start-instant
+              (state/process-start-instant pid)
+              :seon.dev.process/artifact-digest "application"})]
         (with-redefs-fn
           {#'process/read-process
            (fn [_ selected-id]

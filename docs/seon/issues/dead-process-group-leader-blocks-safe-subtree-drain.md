@@ -35,6 +35,29 @@ Java descendant enumeration and `ps` are snapshots, not stable handles.
 The complete source audit, rejected alternatives, and ordered implementation
 slice are in [[dead-leader-process-subtree-containment-2026-07-15]].
 
+The generic operator mechanism is now implemented in the existing process
+owner. `detach.py` retains an outside owner plus a session-leading anchor;
+Clojure atomically publishes the complete generation before acknowledging its
+adoption. TERM is ignored only across the owner's anchor-spawn/cleanup-owner
+registration cut, and the anchor resets that inherited disposition before it
+starts the workload. A real workload handler proves it receives TERM before
+the anchor escalates. The anchor alone sends TERM and the final KILL to its
+pinned group, and the owner reaps it before publishing the matching drained
+result. Focused
+real-process proof covers pre-record and post-record/pre-adopt failure, owner
+TERM before adoption, ordinary stop, workload death with a TERM-ignoring child,
+missing owner result, individually killed anchor without false drained evidence,
+startup SIGINT, converged reuse, and one-time retirement of a live legacy leader
+plus child. The combined process/branch/CLI gate passes 48 tests and 282
+assertions.
+
+The issue remains open until the coordinated default crash/restart checkpoint
+proves the new generation on the real pod and the database recovery consumer
+lands. The current pre-containment default PIDs are intentionally untouched by
+this isolated lane; the next operator restart retires each exact live legacy
+leader with one immediate group KILL, observes group absence without another
+signal, and only then starts the anchored replacement.
+
 ## Owner
 
 The one managed-process transition in `script/seon/dev/process.clj` and the

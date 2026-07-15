@@ -2,6 +2,7 @@
   "Process graph, identity, readiness, and drain mechanics for Seon."
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
+            [cheshire.core :as json]
             [clojure.string :as str]
             [malli.core :as m]
             [seon.dev.artifact :as artifact]
@@ -10,6 +11,7 @@
   (:import [java.io RandomAccessFile]
            [java.net HttpURLConnection StandardProtocolFamily URL
             UnixDomainSocketAddress]
+           [java.nio ByteBuffer]
            [java.nio.channels SocketChannel]
            [java.time Instant]
            [java.security MessageDigest]
@@ -45,6 +47,20 @@
     [:re #"[0-9a-f]{64}"]]
    [:seon.dev.process/artifact-digest :string]])
 
+(def containment-schema
+  [:map {:closed true}
+   [:seon.dev.process.containment/generation uuid?]
+   [:seon.dev.process.containment/owner-pid pos-int?]
+   [:seon.dev.process.containment/owner-start-instant :string]
+   [:seon.dev.process.containment/anchor-pid pos-int?]
+   [:seon.dev.process.containment/anchor-start-instant :string]
+   [:seon.dev.process.containment/process-group pos-int?]
+   [:seon.dev.process.containment/workload-pid pos-int?]
+   [:seon.dev.process.containment/workload-start-instant :string]
+   [:seon.dev.process.containment/control-socket :string]
+   [:seon.dev.process.containment/adoption-path :string]
+   [:seon.dev.process.containment/result-path :string]])
+
 (def process-record-schema
   [:map
    [:seon.dev.process/id qualified-keyword?]
@@ -56,7 +72,8 @@
    [:seon.dev.process/artifact-digest :string]
    [:seon.dev.process/target qualified-keyword?]
    [:seon.dev.process/started-at :string]
-   [:seon.dev.process/log :string]])
+   [:seon.dev.process/log :string]
+   [:seon.dev.process/containment {:optional true} containment-schema]])
 
 (defn- validate! [schema value message explanation-key]
   (when-not (m/validate schema value)
@@ -329,9 +346,8 @@
     :else :seon.dev.process.status/dead))
 
 (defn- group-command [signal pid]
-  ;; Runtime shutdown has already terminated Babashka's future executor, so
-  ;; cleanup hooks cannot safely reach `babashka.process/sh`. The direct JDK
-  ;; boundary is synchronous, bounded, and needs no process-local executor.
+  ;; This boundary exists only to retire a live exact pre-containment record.
+  ;; Every new generation drains through its retained anchor instead.
   (let [argv ["/bin/kill" signal "--" (str "-" pid)]
         builder (doto (ProcessBuilder. ^java.util.List argv)
                   (.redirectOutput java.lang.ProcessBuilder$Redirect/DISCARD)
@@ -339,8 +355,39 @@
         child (.start builder)]
     {:exit (.waitFor child)}))
 
-(defn- group-alive? [pid]
+(defn- group-present? [pid]
   (zero? (:exit (group-command "-0" pid))))
+
+(defn- containment-identity [containment role]
+  {:seon.dev.process/pid
+   (get containment (keyword "seon.dev.process.containment"
+                             (str (name role) "-pid")))
+   :seon.dev.process/start-instant
+   (get containment (keyword "seon.dev.process.containment"
+                             (str (name role) "-start-instant")))})
+
+(defn- containment-live? [record]
+  (when-let [containment (:seon.dev.process/containment record)]
+    (let [adoption
+          (try
+            (json/parse-string
+             (slurp (:seon.dev.process.containment/adoption-path containment))
+             true)
+            (catch Throwable _ nil))]
+      (and (= (str (:seon.dev.process.containment/generation containment))
+              (:generation adoption))
+           (= "adopted" (:status adoption))
+           (= (:seon.dev.process/pid record)
+              (:seon.dev.process.containment/owner-pid containment))
+           (= (:seon.dev.process/start-instant record)
+              (:seon.dev.process.containment/owner-start-instant containment))
+           (= (:seon.dev.process.containment/anchor-pid containment)
+              (:seon.dev.process.containment/process-group containment))
+           (every? state/process-identity-alive?
+                   (map #(containment-identity containment %)
+                        [:owner :anchor :workload]))
+           (not (fs/exists?
+                 (:seon.dev.process.containment/result-path containment)))))))
 
 (defn- writer-ready? [config]
   (let [socket (:seon.dev.config/request-socket config)]
@@ -430,6 +477,7 @@
   "Probe readiness for the current process lifetime."
   [config spec record]
   (and (= :seon.dev.process.status/alive (process-status record))
+       (containment-live? record)
        (case (:seon.dev.process/readiness spec)
          :seon.dev.process.readiness/process true
          :seon.dev.process.readiness/watcher
@@ -572,47 +620,111 @@
   (doseq [path (readiness-paths config id)]
     (fs/create-dirs (fs/parent path))))
 
+(declare abort-unpublished-containment! adopt-containment!)
+
 (defn- spawn-detached! [config spec]
   (let [id (:seon.dev.process/id spec)
         instance (str (random-uuid))
+        generation (random-uuid)
         log (log-file config id instance)
+        containment-dir
+        (fs/path (fs/parent (state-file config id)) "containment"
+                 (id-name id) (str generation))
+        descriptor-path (str (fs/path containment-dir "descriptor.json"))
+        control-socket
+        (str (fs/path (:seon.dev.config/root config) "tmp" "seon-containment"
+                      (str generation ".sock")))
+        result-path (str (fs/path containment-dir "result.json"))
         helper (str (fs/path (:seon.dev.config/root config)
                              "script/seon/dev/detach.py"))
-        argv (into ["python3" helper (:seon.dev.config/root config) (str log)]
+        _ (do (fs/create-dirs containment-dir)
+              (fs/create-dirs (fs/parent control-socket)))
+        argv (into ["python3" helper "launch"
+                    (:seon.dev.config/root config) (str log) (str generation)
+                    descriptor-path control-socket result-path]
                    (:seon.dev.process/argv spec))
         result (process/sh {:continue true
                             :out :string
                             :err :string
                             :env (:seon.dev.process/environment spec)
                             :cmd argv})
-        pid (some-> (:out result) str/trim parse-long)]
-    (when-not (and (zero? (:exit result)) pid)
-      (throw (ex-info "Failed to launch a detached Seon process."
-                      {:seon.dev.process/id id
-                       :seon.dev.process/error (str/trim (:err result))})))
-    (let [start-instant
-          (loop [attempt 0]
-            (or (state/process-start-instant pid)
-                (when (< attempt 50)
-                  (Thread/sleep 10)
-                  (recur (inc attempt)))))]
-      (when-not start-instant
-        (throw (ex-info "Process exited before its identity was recorded."
-                        {:seon.dev.process/id id :seon.dev.process/pid pid})))
-      (write-process!
-        config id
-        {:seon.dev.process/id id
-         :seon.dev.process/pid pid
-         :seon.dev.process/start-instant start-instant
-         :seon.dev.process/process-group pid
-         :seon.dev.process/argv (:seon.dev.process/argv spec)
-         :seon.dev.process/environment-digest
-         (environment-digest (:seon.dev.process/environment spec))
-         :seon.dev.process/artifact-digest
-         (:seon.dev.process/artifact-digest spec)
-         :seon.dev.process/target :seon.dev.target/development
-         :seon.dev.process/started-at (str (Instant/now))
-         :seon.dev.process/log (str log)}))))
+        launch-result
+        (when (zero? (:exit result))
+          (try (json/parse-string (str/trim (:out result)) true)
+               (catch Throwable _ nil)))
+        owner-pid (:owner_pid launch-result)
+        anchor-pid (:anchor_pid launch-result)
+        workload-pid (:workload_pid launch-result)
+        process-group (:process_group launch-result)
+        adoption-path (:adoption_path launch-result)]
+    (try
+      (when-not (and launch-result
+                     (= (str generation) (:generation launch-result))
+                     (every? pos-int?
+                             [owner-pid anchor-pid workload-pid process-group])
+                     (= anchor-pid process-group)
+                     (= control-socket (:control_socket launch-result))
+                     (= result-path (:result_path launch-result))
+                     (string? adoption-path))
+        (throw (ex-info "Failed to launch a detached Seon process."
+                        {:seon.dev.process/id id
+                         :seon.dev.process/error (str/trim (:err result))})))
+      (let [start-instants
+            (loop [attempt 0]
+              (let [values (mapv state/process-start-instant
+                                 [owner-pid anchor-pid workload-pid])]
+                (if (every? string? values)
+                  values
+                  (when (< attempt 50)
+                    (Thread/sleep 10)
+                    (recur (inc attempt))))))]
+        (when-not start-instants
+          (throw
+           (ex-info "Containment exited before its identity was recorded."
+                    {:seon.dev.process/id id
+                     :seon.dev.process/owner-pid owner-pid
+                     :seon.dev.process/anchor-pid anchor-pid
+                     :seon.dev.process/workload-pid workload-pid})))
+        (let [[owner-start anchor-start workload-start] start-instants
+              record
+              {:seon.dev.process/id id
+               :seon.dev.process/pid owner-pid
+               :seon.dev.process/start-instant owner-start
+               :seon.dev.process/process-group process-group
+               :seon.dev.process/argv (:seon.dev.process/argv spec)
+               :seon.dev.process/environment-digest
+               (environment-digest (:seon.dev.process/environment spec))
+               :seon.dev.process/artifact-digest
+               (:seon.dev.process/artifact-digest spec)
+               :seon.dev.process/target :seon.dev.target/development
+               :seon.dev.process/started-at (str (Instant/now))
+               :seon.dev.process/log (str log)
+               :seon.dev.process/containment
+               {:seon.dev.process.containment/generation generation
+                :seon.dev.process.containment/owner-pid owner-pid
+                :seon.dev.process.containment/owner-start-instant owner-start
+                :seon.dev.process.containment/anchor-pid anchor-pid
+                :seon.dev.process.containment/anchor-start-instant anchor-start
+                :seon.dev.process.containment/process-group process-group
+                :seon.dev.process.containment/workload-pid workload-pid
+                :seon.dev.process.containment/workload-start-instant
+                workload-start
+                :seon.dev.process.containment/control-socket control-socket
+                :seon.dev.process.containment/adoption-path adoption-path
+                :seon.dev.process.containment/result-path result-path}}]
+          (write-process! config id record)
+          (adopt-containment! record)
+          record))
+      (catch Throwable error
+        (when launch-result
+          (abort-unpublished-containment! id launch-result)
+          (when (= (str generation)
+                   (some-> (read-process config id)
+                           :seon.dev.process/containment
+                           :seon.dev.process.containment/generation str))
+            (clear-process! config id))
+          (fs/delete-tree containment-dir {:force true}))
+        (throw error)))))
 
 (defn- same-process-spec? [spec record]
   (and (= (:seon.dev.process/argv spec) (:seon.dev.process/argv record))
@@ -686,44 +798,196 @@
              :seon.dev.process/recorded-artifact-digest
              (:seon.dev.process/artifact-digest record)))))
 
-(defn- drain-group! [id pid]
-  (when (and pid (group-alive? pid))
-    (group-command "-TERM" pid)
-    (loop [remaining 25]
-      (when (and (pos? remaining) (group-alive? pid))
-        (Thread/sleep 100)
+(defn- socket-line! [path request]
+  (let [deadline (+ (System/currentTimeMillis) 2000)
+        address (UnixDomainSocketAddress/of path)]
+    (with-open [channel (SocketChannel/open StandardProtocolFamily/UNIX)]
+      (.configureBlocking channel false)
+      (.connect channel address)
+      (loop []
+        (when-not (.finishConnect channel)
+          (when (>= (System/currentTimeMillis) deadline)
+            (throw (ex-info "Timed out connecting to containment owner."
+                            {:seon.dev.process.containment/control-socket path})))
+          (Thread/sleep 10)
+          (recur)))
+      (let [output (ByteBuffer/wrap
+                    (.getBytes (str request "\n") StandardCharsets/UTF_8))]
+        (loop []
+          (when (.hasRemaining output)
+            (.write channel output)
+            (when (>= (System/currentTimeMillis) deadline)
+              (throw (ex-info "Timed out writing to containment owner."
+                              {:seon.dev.process.containment/control-socket path})))
+            (recur))))
+      (let [input (ByteBuffer/allocate 512)]
+        (loop []
+          (let [read (.read channel input)]
+            (cond
+              (pos? read)
+              (let [text (String. (.array input) 0 (.position input)
+                                  StandardCharsets/UTF_8)]
+                (if (str/includes? text "\n")
+                  (first (str/split-lines text))
+                  (recur)))
+              (neg? read) nil
+              (>= (System/currentTimeMillis) deadline)
+              (throw (ex-info "Timed out awaiting containment acknowledgement."
+                              {:seon.dev.process.containment/control-socket path}))
+              :else (do (Thread/sleep 10) (recur)))))))))
+
+(defn- terminal-result [containment]
+  (let [path (:seon.dev.process.containment/result-path containment)]
+    (when (and path (fs/regular-file? path))
+      (try (json/parse-string (slurp path) true)
+           (catch Throwable _ nil)))))
+
+(defn- matching-terminal? [containment result]
+  (and (= (str (:seon.dev.process.containment/generation containment))
+          (:generation result))
+       (= "drained" (:status result))
+       (= -9 (:anchor_exit result))))
+
+(defn- await-terminal! [record]
+  (let [containment (:seon.dev.process/containment record)
+        deadline (+ (System/currentTimeMillis) 20000)]
+    (loop []
+      (let [result (terminal-result containment)
+            owner-alive? (state/process-identity-alive?
+                          (containment-identity containment :owner))]
+        (cond
+          (and (matching-terminal? containment result) (not owner-alive?)) result
+          (>= (System/currentTimeMillis) deadline)
+          (throw
+           (ex-info "Containment drain did not produce a matching terminal result."
+                    {:seon.dev.process/status
+                     :seon.dev.process.status/containment-uncertain
+                     :seon.dev.process/id (:seon.dev.process/id record)
+                     :seon.dev.process/containment containment
+                     :seon.dev.process/terminal-result result}))
+          :else (do (Thread/sleep 25) (recur)))))))
+
+(defn- adopt-containment! [record]
+  (let [containment (:seon.dev.process/containment record)
+        generation
+        (str (:seon.dev.process.containment/generation containment))
+        response
+        (socket-line!
+         (:seon.dev.process.containment/control-socket containment)
+         (str "adopt " generation))]
+    (when-not (= (str "adopted " generation) response)
+      (throw
+       (ex-info "Containment owner rejected managed-record adoption."
+                {:seon.dev.process/id (:seon.dev.process/id record)
+                 :seon.dev.process/response response})))
+    (when-not (containment-live? record)
+      (throw
+       (ex-info "Containment adoption was not published for this generation."
+                {:seon.dev.process/id (:seon.dev.process/id record)
+                 :seon.dev.process/containment containment})))
+    record))
+
+(defn- abort-unpublished-containment! [id launch-result]
+  (let [generation (parse-uuid (:generation launch-result))
+        owner-pid (:owner_pid launch-result)
+        owner-start (state/process-start-instant owner-pid)
+        containment
+        {:seon.dev.process.containment/generation generation
+         :seon.dev.process.containment/owner-pid owner-pid
+         :seon.dev.process.containment/owner-start-instant owner-start
+         :seon.dev.process.containment/control-socket
+         (:control_socket launch-result)
+         :seon.dev.process.containment/result-path (:result_path launch-result)}
+        record {:seon.dev.process/id id
+                :seon.dev.process/containment containment}]
+    (when owner-start
+      (try
+        (socket-line! (:seon.dev.process.containment/control-socket containment)
+                      (str "drain " generation))
+        (catch Throwable _)))
+    (await-terminal! record)))
+
+(defn- drain-containment! [record]
+  (let [containment (:seon.dev.process/containment record)
+        existing (terminal-result containment)]
+    (when-not containment
+      (throw
+       (ex-info "Managed process has no generation-bound containment owner."
+                {:seon.dev.process/status
+                 :seon.dev.process.status/containment-uncertain
+                 :seon.dev.process/id (:seon.dev.process/id record)})))
+    (if (matching-terminal? containment existing)
+      (await-terminal! record)
+      (do
+        (when-not (state/process-identity-alive?
+                   (containment-identity containment :owner))
+          (throw
+           (ex-info "Containment owner disappeared without a terminal result."
+                    {:seon.dev.process/status
+                     :seon.dev.process.status/containment-uncertain
+                     :seon.dev.process/id (:seon.dev.process/id record)
+                     :seon.dev.process/containment containment})))
+        (let [generation
+              (str (:seon.dev.process.containment/generation containment))
+              response
+              (socket-line!
+               (:seon.dev.process.containment/control-socket containment)
+               (str "drain " generation))]
+          (when-not (= (str "accepted " generation) response)
+            (throw
+             (ex-info "Containment owner rejected the drain generation."
+                      {:seon.dev.process/status
+                       :seon.dev.process.status/containment-uncertain
+                       :seon.dev.process/id (:seon.dev.process/id record)
+                       :seon.dev.process/response response}))))
+        (await-terminal! record)))))
+
+(defn- retire-live-legacy! [record]
+  (let [pid (:seon.dev.process/pid record)
+        group (:seon.dev.process/process-group record)]
+    (when-not (and (= pid group)
+                   (state/process-identity-alive? record))
+      (throw
+       (ex-info "A legacy process record cannot be retired safely."
+                {:seon.dev.process/status
+                 :seon.dev.process.status/containment-uncertain
+                 :seon.dev.process/id (:seon.dev.process/id record)
+                 :seon.dev.process/pid pid
+                 :seon.dev.process/process-group group})))
+    ;; The exact live session leader pins this legacy PGID. Use one immediate
+    ;; hard inverse; a grace interval could let the leader exit and make a
+    ;; later numeric group signal ambiguous.
+    (when-not (zero? (:exit (group-command "-KILL" group)))
+      (throw
+       (ex-info "The live legacy process group rejected retirement."
+                {:seon.dev.process/status
+                 :seon.dev.process.status/containment-uncertain
+                 :seon.dev.process/id (:seon.dev.process/id record)
+                 :seon.dev.process/process-group group})))
+    (loop [remaining 500]
+      (when (and (group-present? group) (pos? remaining))
+        (Thread/sleep 10)
         (recur (dec remaining))))
-    (when (group-alive? pid)
-      (group-command "-KILL" pid)
-      (loop [remaining 50]
-        (when (and (pos? remaining) (group-alive? pid))
-          (Thread/sleep 100)
-          (recur (dec remaining)))))
-    (when (group-alive? pid)
-      (throw (ex-info "A Seon process group survived SIGKILL."
-                      {:seon.dev.process/id id
-                       :seon.dev.process/process-group pid})))))
+    (when (group-present? group)
+      (throw
+       (ex-info "The legacy process group did not become absent after retirement."
+                {:seon.dev.process/status
+                 :seon.dev.process.status/containment-uncertain
+                 :seon.dev.process/id (:seon.dev.process/id record)})))))
 
 (defn stop!
-  "Drain one exact managed process group and clear its state."
+  "Drain one exact containment generation and clear its state."
   [config id]
-  (let [record (read-process config id)
-        status (process-status record)
-        pid (:seon.dev.process/process-group record)]
-    (case status
-      :seon.dev.process.status/absent nil
-      :seon.dev.process.status/reused (clear-process! config id)
-      :seon.dev.process.status/dead
-      (if (and pid (group-alive? pid))
-        (throw (ex-info
-                 "Refusing to signal a process group whose recorded leader is dead."
-                 {:seon.dev.process/id id
-                  :seon.dev.process/process-group pid}))
-        (clear-process! config id))
-      :seon.dev.process.status/alive
-      (do
-        (drain-group! id pid)
-        (clear-process! config id)))
+  (let [record (read-process config id)]
+    (when record
+      (if (:seon.dev.process/containment record)
+        (drain-containment! record)
+        (retire-live-legacy! record))
+      (clear-process! config id)
+      (when-let [result-path
+                 (get-in record [:seon.dev.process/containment
+                                 :seon.dev.process.containment/result-path])]
+        (fs/delete-tree (fs/parent result-path) {:force true})))
     ;; A missing/reused state record is not authority over a live listener.
     ;; Preserve its breadcrumb so the next reconciliation can report the
     ;; ownership conflict instead of unlinking evidence it does not own.
@@ -902,6 +1166,22 @@
           (.removeShutdownHook runtime shutdown-hook)
           (catch IllegalStateException _))))))
 
+(defn- reported-process-status [record]
+  (let [recorded (process-status record)
+        containment (:seon.dev.process/containment record)]
+    (cond
+      (nil? record) recorded
+      (nil? containment)
+      (if (= :seon.dev.process.status/alive recorded)
+        :seon.dev.process.status/legacy-live
+        :seon.dev.process.status/containment-uncertain)
+      (containment-live? record) :seon.dev.process.status/alive
+      (and (matching-terminal? containment (terminal-result containment))
+           (not (state/process-identity-alive?
+                 (containment-identity containment :owner))))
+      :seon.dev.process.status/drained
+      :else :seon.dev.process.status/containment-uncertain)))
+
 (defn status
   "Derive process and application health from live probes."
   [config manifest]
@@ -920,9 +1200,10 @@
                            foreign? (and (not= :seon.dev.process.status/alive
                                                recorded-state)
                                          (accepting-unmanaged? config id))
-                           process-state (if foreign?
-                                           :seon.dev.process.status/foreign
-                                           recorded-state)]
+                           process-state
+                           (if foreign?
+                             :seon.dev.process.status/foreign
+                             (reported-process-status record))]
                        [id (cond->
                              {:seon.dev.process/status process-state
                               :seon.dev.process/ready?
