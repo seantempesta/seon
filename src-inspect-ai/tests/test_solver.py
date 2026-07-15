@@ -104,11 +104,13 @@ def test_record_result_preserves_database_and_turn_evidence():
                   "status": "inline", "blob_hash": "abc",
                   "operations": [{"position": 0, "result": {
                       "kind": "scalar", "value": 3}}]}}]
+    transport = _model_transport_evidence(coordinate)
     state = SimpleNamespace(output=SimpleNamespace(completion=""), metadata={})
 
     _record_result(state, {"reply": "answer",
                            "database_coordinate": coordinate,
                            "turn_evidence": turns,
+                           "model_transport_evidence": transport,
                            "eval_evidence": evals,
                            "effective_timeout_ms": 1800000,
                            "timeout_source": "database"})
@@ -116,6 +118,7 @@ def test_record_result_preserves_database_and_turn_evidence():
     assert state.output.completion == "answer"
     assert state.metadata["pod_database_coordinate"] == coordinate
     assert state.metadata["pod_turn_evidence"] == turns
+    assert state.metadata["pod_model_transport_evidence"] == transport
     assert state.metadata["pod_eval_evidence"] == evals
     assert state.metadata["pod_effective_timeout_ms"] == 1800000
     assert state.metadata["pod_timeout_source"] == "database"
@@ -125,9 +128,94 @@ def test_record_result_preserves_database_and_turn_evidence():
     _record_result(incomplete, {"reply": "legacy"})
     assert "pod_database_coordinate" not in incomplete.metadata
     assert "pod_turn_evidence" not in incomplete.metadata
+    assert "pod_model_transport_evidence" not in incomplete.metadata
     assert "pod_eval_evidence" not in incomplete.metadata
     assert "pod_effective_timeout_ms" not in incomplete.metadata
     assert "pod_timeout_source" not in incomplete.metadata
+
+
+def _model_transport_evidence(coordinate=None):
+    coordinate = coordinate or {
+        "database_id": "db-1", "branch": "db",
+        "commit_id": "attempt-1", "t": 20}
+    attempt = {
+        "turn_id": "turn-1", "ordinal": 0,
+        "coordinate": coordinate, "coordinate_valid": True,
+        "provider": "deepseek", "adapter": "openai-compat",
+        "requested_model": "small-model", "temperature": 0.0,
+        "max_tokens": 512,
+        "endpoint": "http://127.0.0.1:8080/v1",
+        "adapter_timeout_ms": 30000, "outer_timeout_ms": 45000,
+        "stream": False, "credential_class": "environment",
+        "outcome": "success"}
+    return {"status": "inline", "transport_drift": False,
+            "turns": [{"turn_id": "turn-1", "attempts": [attempt]}]}
+
+
+def _admitted_state(evidence=None):
+    final = {"database_id": "db-1", "branch": "db",
+             "commit_id": "final", "t": 30}
+    return SimpleNamespace(metadata={
+        "seon_source_admission": {"revision": "admitted"},
+        "pod_timed_out": False, "pod_closed_reason": ":completed",
+        "pod_database_coordinate": final,
+        "pod_turn_evidence": [{"turn_id": "turn-1"}],
+        "pod_model_transport_evidence": (
+            evidence if evidence is not None
+            else _model_transport_evidence())})
+
+
+def test_admitted_model_transport_evidence_is_scorable():
+    state = _admitted_state()
+    assert require_scorable_pod_state(state) is state
+
+
+def _add_retry(metadata, *, t, drift=False):
+    import copy
+
+    attempts = metadata["pod_model_transport_evidence"]["turns"][0][
+        "attempts"]
+    attempts[0]["outcome"] = "provider-error"
+    retry = copy.deepcopy(attempts[0])
+    retry.update(ordinal=1, outcome="success")
+    retry["coordinate"] = {**retry["coordinate"],
+                           "commit_id": "attempt-2", "t": t}
+    if drift:
+        retry["max_tokens"] = 1024
+    attempts.append(retry)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda metadata: metadata.pop("pod_model_transport_evidence"),
+        lambda metadata: metadata["pod_model_transport_evidence"].update(
+            status="malformed"),
+        lambda metadata: metadata["pod_model_transport_evidence"].update(
+            transport_drift=True),
+        lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
+            "attempts"][0]["coordinate"].update(database_id="foreign"),
+        lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
+            "attempts"][0].pop("requested_model"),
+        lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
+            "attempts"][0].update(ordinal=1),
+        lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
+            "attempts"][0].update(outcome="provider-error"),
+        lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
+            "attempts"][0].update(evidence_error="identity invalid"),
+        lambda metadata: _add_retry(metadata, t=19),
+        lambda metadata: _add_retry(metadata, t=21, drift=True),
+    ],
+)
+def test_admitted_model_transport_evidence_fails_closed(mutate):
+    import copy
+
+    state = _admitted_state()
+    state.metadata = copy.deepcopy(state.metadata)
+    mutate(state.metadata)
+    with pytest.raises(PodRunInfrastructureError,
+                       match="model transport|OpenAI-compatible"):
+        require_scorable_pod_state(state)
 
 
 @pytest.mark.parametrize(

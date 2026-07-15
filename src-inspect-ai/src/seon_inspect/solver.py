@@ -141,6 +141,9 @@ def _record_result(state: TaskState, result: dict) -> TaskState:
         state.metadata["pod_database_coordinate"] = result["database_coordinate"]
     if "turn_evidence" in result:
         state.metadata["pod_turn_evidence"] = result["turn_evidence"]
+    if "model_transport_evidence" in result:
+        state.metadata["pod_model_transport_evidence"] = result[
+            "model_transport_evidence"]
     if "eval_evidence" in result:
         state.metadata["pod_eval_evidence"] = result["eval_evidence"]
     if "effective_timeout_ms" in result:
@@ -151,6 +154,125 @@ def _record_result(state: TaskState, result: dict) -> TaskState:
     if result.get("evidence_blobs") is not None:
         state.metadata["pod_evidence_blobs"] = result["evidence_blobs"]
     return state
+
+
+def _coordinate_at_or_before(point: object, final: object) -> bool:
+    keys = ("database_id", "branch", "commit_id", "t")
+    return (isinstance(point, dict) and isinstance(final, dict)
+            and all(key in point and key in final for key in keys)
+            and point["database_id"] == final["database_id"]
+            and point["branch"] == final["branch"]
+            and isinstance(point["commit_id"], str)
+            and bool(point["commit_id"])
+            and isinstance(final["commit_id"], str)
+            and bool(final["commit_id"])
+            and isinstance(point["t"], int)
+            and not isinstance(point["t"], bool)
+            and isinstance(final["t"], int)
+            and not isinstance(final["t"], bool)
+            and point["t"] <= final["t"])
+
+
+def _require_model_transport_evidence(metadata: dict) -> None:
+    """Fail closed on incomplete or inconsistent admitted provider proof."""
+    evidence = metadata.get("pod_model_transport_evidence")
+    final = metadata.get("pod_database_coordinate")
+    turn_evidence = metadata.get("pod_turn_evidence")
+    if (not isinstance(evidence, dict)
+            or evidence.get("status") != "inline"
+            or evidence.get("transport_drift") is not False
+            or not isinstance(turn_evidence, list)
+            or not turn_evidence):
+        raise PodRunInfrastructureError(
+            "admitted pod run lacks inline model transport evidence")
+
+    expected_turn_ids = [
+        turn.get("turn_id") if isinstance(turn, dict) else None
+        for turn in turn_evidence]
+    turns = evidence.get("turns")
+    if (not isinstance(turns, list) or not turns
+            or [turn.get("turn_id") if isinstance(turn, dict) else None
+                for turn in turns] != expected_turn_ids
+            or any(not isinstance(turn_id, str) or not turn_id
+                   for turn_id in expected_turn_ids)
+            or len(set(expected_turn_ids)) != len(expected_turn_ids)):
+        raise PodRunInfrastructureError(
+            "admitted model transport turn membership/order is invalid")
+
+    comparable_keys = (
+        "provider", "adapter", "requested_model", "temperature",
+        "max_tokens", "thinking", "endpoint", "adapter_timeout_ms",
+        "outer_timeout_ms", "stream", "extra_body_digest", "dg_backend",
+        "api_key_env")
+    configurations = []
+    attempt_ts = []
+    outcomes = {"success", "provider-error", "adapter-timeout",
+                "outer-timeout"}
+    for turn_id, turn in zip(expected_turn_ids, turns, strict=True):
+        attempts = turn.get("attempts") if isinstance(turn, dict) else None
+        if not isinstance(attempts, list) or not attempts:
+            raise PodRunInfrastructureError(
+                "admitted model transport attempt sequence is absent")
+        for ordinal, attempt in enumerate(attempts):
+            required = {
+                "turn_id", "ordinal", "coordinate", "coordinate_valid",
+                "provider", "adapter", "requested_model",
+                "outer_timeout_ms", "stream",
+                "outcome"}
+            if (not isinstance(attempt, dict)
+                    or not required.issubset(attempt)
+                    or attempt.get("turn_id") != turn_id
+                    or attempt.get("ordinal") != ordinal
+                    or attempt.get("coordinate_valid") is not True
+                    or not _coordinate_at_or_before(
+                        attempt.get("coordinate"), final)
+                    or "evidence_error" in attempt
+                    or not isinstance(attempt.get("provider"), str)
+                    or not attempt["provider"]
+                    or not isinstance(attempt.get("adapter"), str)
+                    or not attempt["adapter"]
+                    or not isinstance(attempt.get("requested_model"), str)
+                    or not attempt["requested_model"]
+                    or ("temperature" in attempt
+                        and (isinstance(attempt["temperature"], bool)
+                             or not isinstance(
+                                 attempt["temperature"], (int, float))))
+                    or ("max_tokens" in attempt
+                        and (isinstance(attempt["max_tokens"], bool)
+                             or not isinstance(attempt["max_tokens"], int)
+                             or attempt["max_tokens"] <= 0))
+                    or ("thinking" in attempt
+                        and (not isinstance(attempt["thinking"], str)
+                             or not attempt["thinking"]))
+                    or isinstance(attempt.get("outer_timeout_ms"), bool)
+                    or not isinstance(attempt.get("outer_timeout_ms"), int)
+                    or attempt["outer_timeout_ms"] <= 0
+                    or not isinstance(attempt.get("stream"), bool)
+                    or attempt.get("outcome") not in outcomes):
+                raise PodRunInfrastructureError(
+                    "admitted model transport attempt is malformed")
+            if attempt["adapter"] == "openai-compat" and (
+                    not isinstance(attempt.get("endpoint"), str)
+                    or not attempt["endpoint"]
+                    or isinstance(attempt.get("adapter_timeout_ms"), bool)
+                    or not isinstance(attempt.get("adapter_timeout_ms"), int)
+                    or attempt["adapter_timeout_ms"] <= 0):
+                raise PodRunInfrastructureError(
+                    "admitted OpenAI-compatible transport identity is absent")
+            configurations.append(tuple(
+                (key, attempt[key]) for key in comparable_keys if key in attempt))
+            attempt_ts.append(attempt["coordinate"]["t"])
+        if ([attempt.get("outcome") for attempt in attempts].count("success")
+                != 1 or attempts[-1].get("outcome") != "success"):
+            raise PodRunInfrastructureError(
+                "admitted model transport outcome sequence is inconsistent")
+
+    if attempt_ts != sorted(attempt_ts):
+        raise PodRunInfrastructureError(
+            "admitted model transport coordinates are out of order")
+    if len(set(configurations)) != 1:
+        raise PodRunInfrastructureError(
+            "admitted model transport configuration drifted during the run")
 
 
 def require_scorable_pod_state(state: TaskState) -> TaskState:
@@ -166,6 +288,8 @@ def require_scorable_pod_state(state: TaskState) -> TaskState:
     if closed_reason == ":quiesced":
         raise PodRunInfrastructureError(
             "pod quiesced during the run; model capability was not scored")
+    if "seon_source_admission" in metadata:
+        _require_model_transport_evidence(metadata)
     return state
 
 

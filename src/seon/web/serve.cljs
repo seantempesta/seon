@@ -561,6 +561,306 @@
              (::coordinate/t final-coordinate)))
     (catch :default _ false)))
 
+(defn- coordinate-origin-validator
+  "Memoized exact transaction-origin proof against one frozen final head."
+  [final-coordinate resolve-coordinate!]
+  (let [!resolved-by-t (atom {})]
+    (fn [point]
+      (if-not (operation-coordinate-valid? point final-coordinate)
+        (js/Promise.resolve false)
+        (let [transaction-id (::coordinate/t point)
+              resolution
+              (or (get @!resolved-by-t transaction-id)
+                  (let [pending
+                        (-> (resolve-coordinate!
+                              {::db/head-coordinate final-coordinate
+                               ::db/transaction-id transaction-id})
+                            js/Promise.resolve)]
+                    (get (swap! !resolved-by-t
+                                #(if (contains? % transaction-id)
+                                   %
+                                   (assoc % transaction-id pending)))
+                         transaction-id)))]
+          (.then resolution #(= point %)))))))
+
+(def ^:private attempt-pull-pattern
+  '[:seon.ai.attempt/ordinal
+    :seon.ai.attempt/database-id
+    :seon.ai.attempt/branch
+    :seon.ai.attempt/commit-id
+    :seon.ai.attempt/t
+    :seon.ai.attempt/provider
+    :seon.ai.attempt/adapter
+    :seon.ai.attempt/requested-model
+    :seon.ai.attempt/temperature
+    :seon.ai.attempt/max-tokens
+    :seon.ai.attempt/thinking
+    :seon.ai.attempt/endpoint
+    :seon.ai.attempt/adapter-timeout-ms
+    :seon.ai.attempt/outer-timeout-ms
+    :seon.ai.attempt/stream?
+    :seon.ai.attempt/extra-body-digest
+    :seon.ai.attempt/dg-backend
+    :seon.ai.attempt/api-key-env
+    :seon.ai.attempt/credential-class
+    :seon.ai.attempt/outcome
+    :seon.ai.attempt/error-status
+    :seon.ai.attempt/response-model
+    :seon.ai.attempt/system-fingerprint
+    :seon.ai.attempt/request-id
+    :seon.ai.attempt/evidence-error])
+
+(def ^:private required-attempt-attrs
+  #{:seon.ai.attempt/ordinal
+    :seon.ai.attempt/database-id
+    :seon.ai.attempt/branch
+    :seon.ai.attempt/commit-id
+    :seon.ai.attempt/t
+    :seon.ai.attempt/provider
+    :seon.ai.attempt/adapter
+    :seon.ai.attempt/outer-timeout-ms
+    :seon.ai.attempt/stream?
+    :seon.ai.attempt/outcome})
+
+(defn- attempt-coordinate [attempt]
+  {::coordinate/database-id (:seon.ai.attempt/database-id attempt)
+   ::coordinate/branch (:seon.ai.attempt/branch attempt)
+   ::coordinate/commit-id (:seon.ai.attempt/commit-id attempt)
+   ::coordinate/t (:seon.ai.attempt/t attempt)})
+
+(defn- attempt-json
+  [turn-id attempt final-coordinate historical-config-valid?]
+  (let [point (attempt-coordinate attempt)]
+    (cond->
+      {:turn_id turn-id
+       :ordinal (:seon.ai.attempt/ordinal attempt)
+       :coordinate (coordinate-json point)
+       :coordinate_valid
+       (and historical-config-valid?
+            (operation-coordinate-valid? point final-coordinate))
+       :provider (name (:seon.ai.attempt/provider attempt))
+       :adapter (name (:seon.ai.attempt/adapter attempt))
+       :outer_timeout_ms (:seon.ai.attempt/outer-timeout-ms attempt)
+       :stream (:seon.ai.attempt/stream? attempt)
+       :outcome (name (:seon.ai.attempt/outcome attempt))}
+      (contains? attempt :seon.ai.attempt/requested-model)
+      (assoc :requested_model (:seon.ai.attempt/requested-model attempt))
+      (contains? attempt :seon.ai.attempt/temperature)
+      (assoc :temperature (:seon.ai.attempt/temperature attempt))
+      (contains? attempt :seon.ai.attempt/max-tokens)
+      (assoc :max_tokens (:seon.ai.attempt/max-tokens attempt))
+      (contains? attempt :seon.ai.attempt/thinking)
+      (assoc :thinking (:seon.ai.attempt/thinking attempt))
+      (contains? attempt :seon.ai.attempt/endpoint)
+      (assoc :endpoint (:seon.ai.attempt/endpoint attempt))
+      (contains? attempt :seon.ai.attempt/adapter-timeout-ms)
+      (assoc :adapter_timeout_ms
+             (:seon.ai.attempt/adapter-timeout-ms attempt))
+      (contains? attempt :seon.ai.attempt/extra-body-digest)
+      (assoc :extra_body_digest
+             (:seon.ai.attempt/extra-body-digest attempt))
+      (contains? attempt :seon.ai.attempt/dg-backend)
+      (assoc :dg_backend (name (:seon.ai.attempt/dg-backend attempt)))
+      (contains? attempt :seon.ai.attempt/api-key-env)
+      (assoc :api_key_env (:seon.ai.attempt/api-key-env attempt))
+      (contains? attempt :seon.ai.attempt/credential-class)
+      (assoc :credential_class
+             (name (:seon.ai.attempt/credential-class attempt)))
+      (contains? attempt :seon.ai.attempt/error-status)
+      (assoc :error_status (:seon.ai.attempt/error-status attempt))
+      (contains? attempt :seon.ai.attempt/response-model)
+      (assoc :response_model (:seon.ai.attempt/response-model attempt))
+      (contains? attempt :seon.ai.attempt/system-fingerprint)
+      (assoc :system_fingerprint
+             (:seon.ai.attempt/system-fingerprint attempt))
+      (contains? attempt :seon.ai.attempt/request-id)
+      (assoc :request_id (:seon.ai.attempt/request-id attempt))
+      (contains? attempt :seon.ai.attempt/evidence-error)
+      (assoc :evidence_error (:seon.ai.attempt/evidence-error attempt)))))
+
+(def ^:private comparable-attempt-keys
+  [:provider :adapter :requested_model :temperature :max_tokens :thinking
+   :endpoint :adapter_timeout_ms :outer_timeout_ms :stream
+   :extra_body_digest :dg_backend :api_key_env])
+
+(def ^:private attempt-config-attr-pairs
+  [[:seon.ai/provider :seon.ai.attempt/provider]
+   [:seon.ai/model :seon.ai.attempt/requested-model]
+   [:seon.ai/temperature :seon.ai.attempt/temperature]
+   [:seon.ai/max-tokens :seon.ai.attempt/max-tokens]
+   [:seon.ai/thinking :seon.ai.attempt/thinking]
+   [:seon.ai/timeout-ms :seon.ai.attempt/adapter-timeout-ms]
+   [:seon.ai/extra-body-digest :seon.ai.attempt/extra-body-digest]
+   [:seon.ai/dg-backend :seon.ai.attempt/dg-backend]
+   [:seon.ai/api-key-env :seon.ai.attempt/api-key-env]])
+
+(defn- resolved-attempt-config
+  [config]
+  (let [provider (:seon.ai/provider config)
+        endpoint-required? (contains? #{:deepseek :openai-compat} provider)
+        endpoint (when endpoint-required?
+                   (when-let [cap
+                              (:seon.config.model-transport/endpoint-cap config)]
+                     (some-> (:seon.ai/base-url config)
+                             (ai/openai-request-endpoint cap))))]
+    (when (and (or (not endpoint-required?) (string? endpoint))
+               (schema/valid-candidate-value? :seon.ai/resolved-config config))
+      (cond->
+        (into {}
+              (keep (fn [[config-attr attempt-attr]]
+                      (when (contains? config config-attr)
+                        [attempt-attr (get config config-attr)])))
+              attempt-config-attr-pairs)
+        endpoint-required?
+        (assoc :seon.ai.attempt/endpoint endpoint)))))
+
+(def ^:private response-identity-attempt-attrs
+  [:seon.ai.attempt/response-model
+   :seon.ai.attempt/system-fingerprint
+   :seon.ai.attempt/request-id
+   :seon.ai.attempt/evidence-error])
+
+(defn- response-identity-valid?
+  [attempt resolved-config]
+  (let [cap (:seon.config.model-transport/response-identity-cap
+              resolved-config)
+        present (select-keys attempt response-identity-attempt-attrs)]
+    (if (contains? resolved-config
+                   :seon.config.model-transport/response-identity-cap)
+      (and (int? cap)
+           (pos? cap)
+           (every? (fn [[_ value]]
+                     (and (string? value) (<= (count value) cap)))
+                   present))
+      (empty? present))))
+
+(defn- attempt-config-matches?
+  [attempt expected]
+  (and (map? expected)
+       (= (select-keys attempt
+                       (conj (set (map second attempt-config-attr-pairs))
+                             :seon.ai.attempt/endpoint))
+          expected)))
+
+(defn- ^:async historical-attempt-config-valid?
+  [conn agent-id attempt]
+  (let [historical (await (db/at-coordinate conn (attempt-coordinate attempt)))]
+    (when (schema/valid-candidate-value? :seon.db/db-val historical)
+      (let [resolved (:seon.ai/resolved-config
+                       (ai/resolved-config
+                         {:seon.db/db historical :seon.agent/id agent-id}))]
+        (and (response-identity-valid? attempt resolved)
+             (attempt-config-matches?
+               attempt (resolved-attempt-config resolved)))))))
+
+(defn- project-model-transport-rows
+  "Pure bounded projection over rows selected from one final database value."
+  [turn-rows rows final-coordinate pull-row historical-valid? cap]
+  (let [attempt-eids-by-turn
+        (reduce (fn [grouped [turn-eid attempt-eid]]
+                  (update grouped turn-eid conj attempt-eid))
+                {} rows)
+        valid-row? (fn [attempt]
+                     (and (every? #(contains? attempt %)
+                                  required-attempt-attrs)
+                          (schema/valid-candidate-value?
+                            :seon.ai.attempt/entity attempt)))
+        ordered? (fn [attempts]
+                   (= (mapv :seon.ai.attempt/ordinal attempts)
+                      (vec (range (count attempts)))))
+        raw-turns
+        (mapv (fn [[turn-eid turn-id]]
+                (let [attempt-eids
+                      (->> (get attempt-eids-by-turn turn-eid [])
+                           (sort-by (comp :seon.ai.attempt/ordinal pull-row))
+                           vec)
+                      attempts (mapv pull-row attempt-eids)]
+                  {:turn_id turn-id
+                   :valid (and (ordered? attempts)
+                               (every? valid-row? attempts))
+                   :attempts attempts
+                   :attempt-eids attempt-eids}))
+              (map (fn [[turn-eid turn-id & _]] [turn-eid turn-id]) turn-rows))
+        attempts (mapcat :attempts raw-turns)]
+    (cond
+      (empty? attempts)
+      {:status "absent"}
+
+      (not-every? :valid raw-turns)
+      {:status "malformed"}
+
+      :else
+      (let [projected-turns
+            (mapv (fn [{:keys [turn_id attempts attempt-eids]}]
+                    {:turn_id turn_id
+                     :attempts
+                     (mapv (fn [attempt-eid attempt]
+                             (attempt-json
+                               turn_id attempt final-coordinate
+                               (true? (historical-valid? attempt-eid))))
+                           attempt-eids attempts)})
+                  raw-turns)
+            projected-attempts (mapcat :attempts projected-turns)
+            drift? (> (count
+                        (distinct
+                          (map #(select-keys % comparable-attempt-keys)
+                               projected-attempts)))
+                      1)
+            content (pr-str projected-turns)
+            chars (count content)
+            projected-tokens (tokens/estimate content)]
+        (if (> chars cap)
+          {:status "oversized"
+           :chars chars
+           :tokens projected-tokens}
+          {:status "inline"
+           :chars chars
+           :tokens projected-tokens
+           :transport_drift drift?
+           :turns projected-turns})))))
+
+(defn- ^:async project-model-transport-evidence
+  "Bounded ordered provider-attempt proof from the run's final database value."
+  [conn dbv agent-id turn-rows origin-valid?]
+  (let [turn-eids (mapv first turn-rows)
+        rows (if (seq turn-eids)
+               (db/query {:seon.db/db dbv
+                          :seon.db/query
+                          '[:find ?turn ?attempt
+                            :in $ [?turn ...] :where
+                            [?turn :seon.agent.turn/llm-attempts ?attempt]]
+                          :seon.db/args [turn-eids]})
+               [])
+        attempts (into {}
+                       (map (fn [[_ attempt-eid]]
+                              [attempt-eid
+                               (db/pull
+                                 {:seon.db/db dbv
+                                  :seon.db/pull-pattern attempt-pull-pattern
+                                  :seon.db/ref attempt-eid})]))
+                       rows)
+        historical-validity
+        (into {}
+              (map (fn [[attempt-eid valid?]] [attempt-eid valid?]))
+              (await
+                (js/Promise.all
+                  (clj->js
+                    (mapv (fn [[attempt-eid attempt]]
+                            (-> (js/Promise.all
+                                  #js [(origin-valid?
+                                         (attempt-coordinate attempt))
+                                       (historical-attempt-config-valid?
+                                         conn agent-id attempt)])
+                                (.then (fn [validities]
+                                         [attempt-eid
+                                          (every? true? validities)]))))
+                          attempts)))))]
+    (project-model-transport-rows
+      turn-rows rows (db/head-coordinate dbv)
+      #(get attempts %)
+      #(get historical-validity % false)
+      (config/database-edn-cap))))
+
 (defn- operation-json [operation final-coordinate]
   (let [point (:seon.db/operation-coordinate operation)]
     (cond->
@@ -674,7 +974,34 @@
                  :blob_hash hash
                  :chars (count content)
                  :bytes (js/Buffer.byteLength content "utf8")
-                 :tokens projected-tokens})))))))))
+                :tokens projected-tokens})))))))))
+
+(defn- json-coordinate->coordinate [point]
+  (try
+    {::coordinate/database-id (uuid (:database_id point))
+     ::coordinate/branch (keyword (:branch point))
+     ::coordinate/commit-id (uuid (:commit_id point))
+     ::coordinate/t (:t point)}
+    (catch :default _ nil)))
+
+(defn- ^:async require-exact-operation-origins
+  [proof origin-valid?]
+  (if-not (= "inline" (:status proof))
+    proof
+    (let [validities
+          (await
+            (js/Promise.all
+              (clj->js
+                (mapv (fn [operation]
+                        (origin-valid?
+                          (json-coordinate->coordinate
+                            (:coordinate operation))))
+                      (:operations proof)))))]
+      (if (every? true? validities)
+        proof
+        (-> proof
+            (assoc :status "malformed")
+            (dissoc :operations))))))
 
 (defn- project-eval-evidence
   "Stable external projection of selected eval rows."
@@ -700,9 +1027,9 @@
                         (:seon.eval/database-operations-blob row)
                         final-coordinate))))))))
 
-(defn- eval-evidence
+(defn- ^:async eval-evidence
   "Stable external projection of one request window's evaluated forms."
-  [dbv _agent-eid turn-eids]
+  [dbv _agent-eid turn-eids origin-valid?]
   (let [rows (db/query {:seon.db/db dbv
                         :seon.db/query '[:find ?e ?t ?turn-id ?id ?at ?eval-t
                                          :in $ [?t ...] :where
@@ -711,15 +1038,40 @@
                                          [?e :seon.eval/id ?id ?eval-t]
                                          [?e :seon.eval/at ?at]]
                         :seon.db/args [(vec turn-eids)]})]
-    (project-eval-evidence
-      rows turn-eids (db/head-coordinate dbv)
-      (fn [eval-eid]
-        (db/pull {:seon.db/db dbv
-                  :seon.db/pull-pattern
-                  '[:seon.eval/source :seon.eval/ok? :seon.eval/narration
-                    {:seon.eval/database-operations-blob
-                     [:my.blob/hash :my.blob/tokens]}]
-                  :seon.db/ref eval-eid})))))
+    (let [projected
+          (project-eval-evidence
+            rows turn-eids (db/head-coordinate dbv)
+            (fn [eval-eid]
+              (db/pull {:seon.db/db dbv
+                        :seon.db/pull-pattern
+                        '[:seon.eval/source :seon.eval/ok? :seon.eval/narration
+                          {:seon.eval/database-operations-blob
+                           [:my.blob/hash :my.blob/tokens]}]
+                        :seon.db/ref eval-eid})))]
+      (vec
+        (await
+          (js/Promise.all
+            (clj->js
+              (mapv (fn [row]
+                      (if (contains? row :operation_evidence)
+                        (-> (require-exact-operation-origins
+                              (:operation_evidence row) origin-valid?)
+                            (.then #(assoc row :operation_evidence %)))
+                        (js/Promise.resolve row)))
+                    projected))))))))
+
+(defn- model-config-json [resolved-config]
+  (let [{:seon.ai/keys [provider model temperature max-tokens thinking]}
+        resolved-config]
+    (cond-> {:provider (name provider)}
+      (contains? resolved-config :seon.ai/model)
+      (assoc :model model)
+      (contains? resolved-config :seon.ai/temperature)
+      (assoc :temperature temperature)
+      (contains? resolved-config :seon.ai/max-tokens)
+      (assoc :max_tokens max-tokens)
+      (contains? resolved-config :seon.ai/thinking)
+      (assoc :thinking thinking))))
 
 (defn- ^:async run-agent-task!
   "Drive ONE task through an agent in the pod's own cluster to completion.
@@ -820,7 +1172,14 @@
                                                     [(.getTime at) id])))
                           turn-eids (into #{} (map first) turn-rows)
                           turn-ids  (mapv second turn-rows)
-                          eval-rows (eval-evidence db agent-eid turn-eids)
+                          final-coordinate (db/head-coordinate db)
+                          origin-valid?
+                          (coordinate-origin-validator
+                            final-coordinate
+                            db/resolve-transaction-coordinate!)
+                          eval-rows (await
+                                      (eval-evidence
+                                        db agent-eid turn-eids origin-valid?))
                           ;; Model config — COMPUTED at response time by the
                           ;; ONE resolver (seon.ai/resolved-config), a pure fn
                           ;; of this poll's db snapshot: the agent's own
@@ -831,17 +1190,11 @@
                           ;; just-finished run; per-turn historical exactness
                           ;; is the same resolver over (db/as-of db <turn's
                           ;; rendered-as-of>) — see the resolver docstring.
-                          model-cfg (let [{:seon.ai/keys [resolved-config]}
-                                          (ai/resolved-config
-                                            {:seon.db/db db :seon.agent/id aid})
-                                          {:seon.ai/keys [provider model temperature
-                                                          max-tokens thinking]}
-                                          resolved-config]
-                                      (cond-> {:provider (name provider)}
-                                        model       (assoc :model model)
-                                        temperature (assoc :temperature temperature)
-                                        max-tokens  (assoc :max_tokens max-tokens)
-                                        thinking    (assoc :thinking thinking)))
+                          model-cfg
+                          (model-config-json
+                            (:seon.ai/resolved-config
+                              (ai/resolved-config
+                                {:seon.db/db db :seon.agent/id aid})))
                           reply     (->> (db/query {:seon.db/db db
                                                     :seon.db/query '[:find ?f ?to ?at ?c :where
                                                                      [?m :seon.agent.message/from ?f]
@@ -859,8 +1212,12 @@
                                :evals (count eval-rows)
                                :reply (or reply "") :elapsed_ms elapsed
                                :database_coordinate
-                               (coordinate-json (db/head-coordinate db))
+                               (coordinate-json final-coordinate)
                                :turn_evidence (turn-evidence turn-ids)
+                               :model_transport_evidence
+                               (await
+                                 (project-model-transport-evidence
+                                   conn db aid turn-rows origin-valid?))
                                :eval_evidence eval-rows
                                ;; always present — the resolver always resolves
                                ;; (worst case: all shipped defaults).

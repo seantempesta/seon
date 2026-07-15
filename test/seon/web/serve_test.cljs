@@ -156,6 +156,51 @@
                                evidence-coordinate)))
           "pathological token/char mismatch remains status-only"))))
 
+(deftest exact-transaction-origin-is-deduplicated-and-fails-closed
+  (async done
+    (let [!calls (atom 0)
+          point (assoc evidence-coordinate ::coordinate/t 20)
+          sibling (assoc point ::coordinate/commit-id
+                         #uuid "00000000-0000-0000-0000-000000000099")
+          validate-origin
+          ((deref #'serve/coordinate-origin-validator)
+           evidence-coordinate
+           (fn [{:seon.db/keys [head-coordinate transaction-id]}]
+             (swap! !calls inc)
+             (is (= evidence-coordinate head-coordinate))
+             (is (= 20 transaction-id))
+             (js/Promise.resolve point)))
+          proof {:status "inline"
+                 :operations [{:coordinate_valid true
+                               :coordinate
+                               {:database_id
+                                (str (::coordinate/database-id point))
+                                :branch "db"
+                                :commit_id
+                                (str (::coordinate/commit-id point))
+                                :t 20}}]}]
+      (-> (js/Promise.all
+            #js [(validate-origin point)
+                 (validate-origin point)
+                 (validate-origin sibling)])
+          (.then
+            (fn [validities]
+              (is (= [true true false] (vec validities)))
+              (is (= 1 @!calls)
+                  "one final head and transaction t resolve only once")
+              ((deref #'serve/require-exact-operation-origins)
+               proof (constantly (js/Promise.resolve false)))))
+          (.then
+            (fn [rejected]
+              (is (= "malformed" (:status rejected)))
+              (is (not (contains? rejected :operations))
+                  "wrong containing/nonancestor proof never remains inline")
+              (done)))
+          (.catch
+            (fn [error]
+              (is false (str error))
+              (done)))))))
+
 (deftest tagged-evidence-order-is-recursively-stable-and-unsupported-fails
   (let [project-value (deref #'serve/evidence-json-value)
         supported? (deref #'serve/supported-evidence-json?)
@@ -168,6 +213,113 @@
     (is (true? (supported? left-json)))
     (is (false? (supported? (project-value #js {:runtime true})))
         "runtime values never become inline proof")))
+
+(defn- model-attempt
+  [ordinal t]
+  {:seon.ai.attempt/ordinal ordinal
+   :seon.ai.attempt/database-id (::coordinate/database-id evidence-coordinate)
+   :seon.ai.attempt/branch (::coordinate/branch evidence-coordinate)
+   :seon.ai.attempt/commit-id (::coordinate/commit-id evidence-coordinate)
+   :seon.ai.attempt/t t
+   :seon.ai.attempt/provider :deepseek
+   :seon.ai.attempt/adapter :openai-compat
+   :seon.ai.attempt/requested-model "small-model"
+   :seon.ai.attempt/temperature 0.0
+   :seon.ai.attempt/max-tokens 512
+   :seon.ai.attempt/endpoint "http://127.0.0.1:8080/v1/chat/completions"
+   :seon.ai.attempt/adapter-timeout-ms 30000
+   :seon.ai.attempt/outer-timeout-ms 45000
+   :seon.ai.attempt/stream? false
+   :seon.ai.attempt/credential-class :configured-env
+   :seon.ai.attempt/outcome (if (zero? ordinal) :provider-error :success)})
+
+(deftest model-transport-evidence-is-final-snapshot-ordered-and-bounded
+  (let [project (deref #'serve/project-model-transport-rows)
+        attempts {101 (model-attempt 1 21)
+                  100 (model-attempt 0 20)}
+        proof (project [[10 "turn-a"]] [[10 101] [10 100]]
+                       evidence-coordinate #(get attempts %) (constantly true)
+                       10000)
+        projected (:attempts (first (:turns proof)))
+        foreign-proof
+        (project
+          [[10 "turn-a"]] [[10 100]] evidence-coordinate
+          (fn [_]
+            (assoc (model-attempt 0 20)
+                   :seon.ai.attempt/database-id
+                   #uuid "00000000-0000-0000-0000-000000000099"))
+          (constantly true) 10000)
+        unretained-proof
+        (project [[10 "turn-a"]] [[10 100]] evidence-coordinate
+                 (fn [_] (model-attempt 0 20)) (constantly false) 10000)
+        expected-config
+        {:seon.ai.attempt/provider :deepseek
+         :seon.ai.attempt/requested-model "small-model"
+         :seon.ai.attempt/temperature 0.0
+         :seon.ai.attempt/max-tokens 512
+         :seon.ai.attempt/endpoint
+         "http://127.0.0.1:8080/v1/chat/completions"
+         :seon.ai.attempt/adapter-timeout-ms 30000}]
+    (is (= "inline" (:status proof)))
+    (is (= [0 1] (mapv :ordinal projected)))
+    (is (= 0.0 (:temperature (first projected)))
+        "present zero sampling configuration survives projection")
+    (is (false? (:transport_drift proof)))
+    (is (every? true? (map :coordinate_valid projected)))
+    (is (= "malformed"
+           (:status (project [[10 "turn-a"]] [[10 100]] evidence-coordinate
+                             (fn [_] (model-attempt 1 20)) (constantly true)
+                             10000)))
+        "a missing ordinal zero fails closed without projecting a row")
+    (is (false? (get-in foreign-proof
+                        [:turns 0 :attempts 0 :coordinate_valid]))
+        "foreign attachment evidence remains explicit and rejectable")
+    (is (false? (get-in unretained-proof
+                        [:turns 0 :attempts 0 :coordinate_valid]))
+        "an unretained historical commit fails exact coordinate validation")
+    (is (true? ((deref #'serve/attempt-config-matches?)
+                (model-attempt 0 20) expected-config))
+        "optional thinking remains absent on both stored and resolved config")
+    (is (false? ((deref #'serve/attempt-config-matches?)
+                 (assoc (model-attempt 0 20)
+                        :seon.ai.attempt/max-tokens 1024)
+                 expected-config))
+        "stored request facts cannot disagree with historical resolution")
+    (is (= "oversized"
+           (:status (project [[10 "turn-a"]] [[10 100]] evidence-coordinate
+                             (fn [_] (model-attempt 0 20)) (constantly true)
+                             4)))
+        "the database-backed evidence cap governs the response")
+    (is (= {:status "absent"}
+           (project [[10 "turn-a"]] [] evidence-coordinate (constantly nil)
+                    (constantly false) 10000))
+        "absence stays distinguishable from an empty successful proof")))
+
+(deftest historical-identity-caps-and-compatibility-config-preserve-absence
+  (let [identity-valid? (deref #'serve/response-identity-valid?)
+        project-config (deref #'serve/model-config-json)
+        cap-config {:seon.config.model-transport/response-identity-cap 4}]
+    (is (true? (identity-valid? {} {})))
+    (is (false? (identity-valid?
+                  {:seon.ai.attempt/response-model "m"} {}))
+        "identity evidence is impossible when the historical cap is absent")
+    (is (true? (identity-valid?
+                 {:seon.ai.attempt/response-model "1234"} cap-config)))
+    (is (false? (identity-valid?
+                  {:seon.ai.attempt/response-model "12345"} cap-config)))
+    (is (false? (identity-valid?
+                  {:seon.ai.attempt/evidence-error "12345"} cap-config))
+        "bounded generic evidence errors obey the same historical cap")
+    (is (= {:provider "deepseek"
+            :temperature 0.0
+            :thinking false}
+           (project-config {:seon.ai/provider :deepseek
+                            :seon.ai/temperature 0.0
+                            :seon.ai/thinking false}))
+        "present zero and false-like values never disappear by truthiness")
+    (is (= {:provider "deepseek"}
+           (project-config {:seon.ai/provider :deepseek}))
+        "absent optional compatibility fields remain absent")))
 
 (defn- req-with-origin
   ([origin] (req-with-origin origin nil))
