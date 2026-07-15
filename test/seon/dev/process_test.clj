@@ -100,6 +100,42 @@
           (fs/delete-if-exists path))
         alive))))
 
+(deftest legacy-containment-grace-is-derived-only-while-reading
+  (let [configuration (test-config)
+        id :seon.dev.process/legacy-containment-grace
+        pid (.pid (java.lang.ProcessHandle/current))
+        start (state/process-start-instant pid)
+        record
+        (live-probe-record
+         configuration
+         {:seon.dev.process/id id
+          :seon.dev.process/pid pid
+          :seon.dev.process/start-instant start
+          :seon.dev.process/process-group pid
+          :seon.dev.process/argv ["legacy"]
+          :seon.dev.process/environment-digest (apply str (repeat 64 "0"))
+          :seon.dev.process/artifact-digest "legacy"
+          :seon.dev.process/target :seon.dev.target/development
+          :seon.dev.process/started-at "legacy"
+          :seon.dev.process/log
+          (str (fs/path (:seon.dev.test/directory configuration)
+                        "legacy.log"))})
+        grace-key :seon.dev.process.containment/shutdown-grace-ms
+        legacy-record (update record :seon.dev.process/containment
+                              dissoc grace-key)
+        record-path (fs/path (:seon.dev.config/process-dir configuration)
+                             "processes/legacy-containment-grace.edn")]
+    (try
+      (state/write-edn! record-path legacy-record)
+      (is (= 2500 (get-in (process/read-process configuration id)
+                          [:seon.dev.process/containment grace-key])))
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (#'process/write-process! configuration id legacy-record))
+          "new publications remain strict")
+      (finally
+        (fs/delete-tree (:seon.dev.test/directory configuration)
+                        {:force true})))))
+
 (defn- with-default-launch-descriptor [target]
   (dev-config/select-launch-descriptor
    target
@@ -717,7 +753,9 @@
         (str "import os,signal,sys,time\n"
              "ready=sys.argv[1]\n"
              "def on_term(signum,frame):\n"
-             " open(os.environ['SEON_APPLICATION_RESULT_PATH'],'w').write('{:ok true}\\n')\n"
+             " generation=os.environ['SEON_PROCESS_GENERATION']\n"
+             " value='{:seon.db.terminal/generation \\\"'+generation+'\\\" :seon.db.terminal/process :seon.dev.process/writer :seon.db.terminal/completed? true :seon.db.terminal/stop-response {:seon.db.server/stopped? true :seon.db.server/release-results []}}\\n'\n"
+             " open(os.environ['SEON_APPLICATION_RESULT_PATH'],'w').write(value)\n"
              " raise SystemExit(0)\n"
              "signal.signal(signal.SIGTERM,on_term)\n"
              "open(ready,'w').write('ready')\n"
@@ -733,15 +771,63 @@
         (is (string?
              (:seon.dev.process.containment/application-result-path
               containment)))
-        (let [terminal (#'process/drain-containment! record)
-              capture (:application_result terminal)]
-          (is (= "requested" (:trigger terminal)))
-          (is (= "captured" (:status capture)))
-          (is (= "{:ok true}\n" (:edn capture)))
-          (is (re-matches #"[0-9a-f]{64}" (:sha256 capture))))
-        (process/stop! configuration id)
+        (let [result (process/stop! configuration id)]
+          (is (= :seon.dev.process.containment.trigger/requested
+                 (get-in result
+                         [:seon.dev.process/terminal
+                          :seon.dev.process.containment/trigger])))
+          (is (= (str (:seon.dev.process.containment/generation containment))
+                 (get-in result
+                         [:seon.dev.process/application-result
+                          :seon.db.terminal/generation])))
+          (is (true?
+               (get-in result
+                       [:seon.dev.process/application-result
+                        :seon.db.terminal/stop-response
+                        :seon.db.server/stopped?]))))
         (is (nil? (process/read-process configuration id))))
       (finally (cleanup! configuration [id])))))
+
+(deftest writer-application-evidence-fails-closed-at-every-inner-cut
+  (let [generation (random-uuid)
+        containment
+        {:seon.dev.process.containment/generation generation
+         :seon.dev.process.containment/application-result-path
+         "application.edn"}
+        terminal-value
+        (fn [selected-generation]
+          {:seon.db.terminal/generation (str selected-generation)
+           :seon.db.terminal/process :seon.dev.process/writer
+           :seon.db.terminal/completed? true
+           :seon.db.terminal/stop-response
+           {:seon.db.server/stopped? true
+            :seon.db.server/release-results []}})
+        capture
+        (fn [text]
+          {:application_result
+           {:status "captured"
+            :edn text
+            :sha256 (#'process/sha256-text text)}})
+        application-error
+        (fn [terminal]
+          (:seon.dev.process/application-error
+           (#'process/writer-application-evidence containment terminal)))]
+    (is (= :seon.dev.process.application-error/missing-capture
+           (application-error {})))
+    (is (= :seon.dev.process.application-error/missing
+           (application-error {:application_result {:status "missing"}})))
+    (is (= :seon.dev.process.application-error/digest-mismatch
+           (application-error
+            {:application_result
+             {:status "captured" :edn "{}" :sha256 "crossed"}})))
+    (is (= :seon.dev.process.application-error/invalid-schema
+           (application-error (capture "{}"))))
+    (is (= :seon.dev.process.application-error/generation-mismatch
+           (application-error (capture (pr-str (terminal-value
+                                                (random-uuid)))))))
+    (is (= :seon.dev.process.application-error/malformed-edn
+           (application-error
+            (capture (str (pr-str (terminal-value generation)) " {}")))))))
 
 (deftest dead-workload-drains-a-term-ignoring-descendant-before-replacement
   (let [configuration (test-config)

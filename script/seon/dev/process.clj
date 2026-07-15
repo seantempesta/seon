@@ -3,12 +3,14 @@
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
             [cheshire.core :as json]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [malli.core :as m]
             [seon.dev.artifact :as artifact]
             [seon.dev.state :as state]
+            [seon.db.protocol :as db.protocol]
             [seon.launch :as launch])
-  (:import [java.io RandomAccessFile]
+  (:import [java.io PushbackReader RandomAccessFile StringReader]
            [java.net HttpURLConnection StandardProtocolFamily URL
             UnixDomainSocketAddress]
            [java.nio ByteBuffer]
@@ -21,6 +23,8 @@
 (def writer-id :seon.dev.process/writer)
 (def pod-id :seon.dev.process/pod)
 (def target-processes [watcher-id writer-id pod-id])
+
+(def ^:private legacy-containment-shutdown-grace-ms 2500)
 
 (def ^:private unpublished-client-digest
   "unpublished-client-watcher-flush")
@@ -129,11 +133,19 @@
     (str (fs/path process-dir
                   "processes" (str (id-name id) ".edn")))))
 
+(defn- decode-process-record [record]
+  (let [containment (:seon.dev.process/containment record)
+        grace-key :seon.dev.process.containment/shutdown-grace-ms]
+    (if (and (map? containment) (not (contains? containment grace-key)))
+      (assoc-in record [:seon.dev.process/containment grace-key]
+                legacy-containment-shutdown-grace-ms)
+      record)))
+
 (defn read-process
   "Read one atomically published managed-process record."
   [config id]
   (when-let [record (state/read-edn (state-file config id))]
-    (validate! process-record-schema record
+    (validate! process-record-schema (decode-process-record record)
                "A managed-process state record is invalid."
                :seon.dev.process/explanation)))
 
@@ -877,6 +889,69 @@
        (contains? #{"requested" "workload-exit"} (:trigger result))
        (= -9 (:anchor_exit result))))
 
+(defn- normalized-terminal [containment result]
+  {:seon.dev.process.containment/generation
+   (:seon.dev.process.containment/generation containment)
+   :seon.dev.process.containment/status
+   :seon.dev.process.containment.status/drained
+   :seon.dev.process.containment/trigger
+   (case (:trigger result)
+     "requested" :seon.dev.process.containment.trigger/requested
+     "workload-exit" :seon.dev.process.containment.trigger/workload-exit)
+   :seon.dev.process.containment/anchor-exit (:anchor_exit result)})
+
+(defn- read-single-edn [text]
+  (with-open [reader (PushbackReader. (StringReader. text))]
+    (let [eof (Object.)
+          options {:eof eof
+                   :readers {}
+                   :default
+                   (fn [tag _]
+                     (throw (ex-info "Tagged literals are not terminal data."
+                                     {:seon.dev.process/tag tag})))}
+          value (edn/read options reader)]
+      (when (identical? eof value)
+        (throw (ex-info "The application terminal result is blank." {})))
+      (when-not (identical? eof (edn/read options reader))
+        (throw (ex-info "The application terminal result has trailing data."
+                        {})))
+      value)))
+
+(defn- writer-application-evidence [containment terminal]
+  (when (:seon.dev.process.containment/application-result-path containment)
+    (let [capture (:application_result terminal)
+          capture-status (:status capture)]
+      (if-not (= "captured" capture-status)
+        {:seon.dev.process/application-error
+         (keyword "seon.dev.process.application-error"
+                  (or capture-status "missing-capture"))}
+        (let [text (:edn capture)
+              digest (:sha256 capture)]
+          (cond
+            (not= digest (sha256-text text))
+            {:seon.dev.process/application-error
+             :seon.dev.process.application-error/digest-mismatch}
+
+            :else
+            (try
+              (let [value (read-single-edn text)
+                    generation
+                    (str (:seon.dev.process.containment/generation containment))]
+                (cond
+                  (not (db.protocol/valid-writer-terminal-result? value))
+                  {:seon.dev.process/application-error
+                   :seon.dev.process.application-error/invalid-schema}
+
+                  (not= generation (:seon.db.terminal/generation value))
+                  {:seon.dev.process/application-error
+                   :seon.dev.process.application-error/generation-mismatch}
+
+                  :else
+                  {:seon.dev.process/application-result value}))
+              (catch Throwable _
+                {:seon.dev.process/application-error
+                 :seon.dev.process.application-error/malformed-edn}))))))))
+
 (defn- await-terminal! [record]
   (let [containment (:seon.dev.process/containment record)
         deadline (+ (System/currentTimeMillis)
@@ -1010,24 +1085,34 @@
                  :seon.dev.process/id (:seon.dev.process/id record)})))))
 
 (defn stop!
-  "Drain one exact containment generation and clear its state."
+  "Drain one exact containment generation and return its terminal evidence."
   [config id]
   (let [record (read-process config id)]
-    (when record
-      (if (:seon.dev.process/containment record)
-        (drain-containment! record)
-        (retire-live-legacy! record))
-      (clear-process! config id)
-      (when-let [result-path
-                 (get-in record [:seon.dev.process/containment
-                                 :seon.dev.process.containment/result-path])]
-        (fs/delete-tree (fs/parent result-path) {:force true})))
-    ;; A missing/reused state record is not authority over a live listener.
-    ;; Preserve its breadcrumb so the next reconciliation can report the
-    ;; ownership conflict instead of unlinking evidence it does not own.
-    (when-not (accepting-unmanaged? config id)
-      (clear-readiness! config id))
-    nil))
+    (let [result
+          (when record
+            (if-let [containment (:seon.dev.process/containment record)]
+              (let [terminal (drain-containment! record)]
+                (merge
+                 {:seon.dev.process/id id
+                  :seon.dev.process/terminal
+                  (normalized-terminal containment terminal)}
+                 (writer-application-evidence containment terminal)))
+              (do
+                (retire-live-legacy! record)
+                {:seon.dev.process/id id
+                 :seon.dev.process/legacy-retired? true})))]
+      (when record
+        (clear-process! config id)
+        (when-let [result-path
+                   (get-in record [:seon.dev.process/containment
+                                   :seon.dev.process.containment/result-path])]
+          (fs/delete-tree (fs/parent result-path) {:force true})))
+      ;; A missing/reused state record is not authority over a live listener.
+      ;; Preserve its breadcrumb so the next reconciliation can report the
+      ;; ownership conflict instead of unlinking evidence it does not own.
+      (when-not (accepting-unmanaged? config id)
+        (clear-readiness! config id))
+      result)))
 
 (defn ensure!
   "Reconcile one process to its exact argv, environment, artifact, and health."
