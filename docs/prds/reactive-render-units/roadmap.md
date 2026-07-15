@@ -90,6 +90,19 @@ report. Default-cluster browser and server-side gzip proof remains pending: the
 cluster is currently watcher-only and other active runtime lanes have
 uncommitted source, so this slice did not restart or bypass the operator.
 
+The first reverse-index dependency is now implemented in the maintained
+Datahike fork at `417649383c65e13f15ea41d394fb1ed742477965` and selected by
+both Seon dependency aliases. The new public, pure
+`datahike.api/query-attribute-dependencies` function returns concrete where
+and literal-pull attributes or conservatively widens to `:all`. The existing
+query result cache delegates to that same function; no second parser was
+introduced. This also fixes literal pull dependency extraction, whose parser
+value was wrapped in `datalog.parser.type.Constant` and therefore widened
+despite the prior documented cache contract. Focused JVM proof passes, the
+canonical Shadow Node build completes, and the full CLJS Datahike gate passes
+105 tests/825 assertions with zero failures or errors. The next ordered slice
+is the one `seon.db` observation-candidate projection.
+
 ## Research evidence
 
 - [[research/reactive-render-source-audit-2026-07-14]] — current dependency
@@ -130,10 +143,11 @@ uncommitted source, so this slice did not restart or bypass the operator.
    remaining page-specific dependency map rather than adding an interim
    routing path.
 3. Derive the conservative reverse candidate index from runtime-observed
-   database read requests. This is dependency-blocked on promoting the selected
-   Datahike fork's private conservative query/find-pull projection into one
-   public pure API, then exposing one `seon.db` observation-candidate boundary;
-   do not duplicate its parser or ship broad-query as an interim mechanism.
+   database read requests. **The Datahike public pure query/find-pull
+   projection is complete at `41764938`;** next expose one `seon.db`
+   observation-candidate boundary, then derive the existing unit state's
+   reverse index. Do not duplicate Datahike's parser or ship broad-query as an
+   interim mechanism.
    [[research/reverse-candidate-index-dependency-boundary-2026-07-15]] records
    the coordinated cross-repo cut, deletion boundary, and falsifiable proof.
    Exact result equality remains the final authority.

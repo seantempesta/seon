@@ -140,9 +140,12 @@ observation whenever the coordinate changes.
 ## Ordered handoff
 
 1. Finish the current owner of dirty `src/seon/db.cljs`; do not overlap it.
-2. Implement and test the public pure projection in the clean Datahike fork,
-   commit it there, and select that exact SHA in both Seon aliases plus the
-   reference gitlink.
+2. **Complete:** the public pure projection is committed in the maintained
+   Datahike fork at `417649383c65e13f15ea41d394fb1ed742477965`; both Seon
+   aliases and the reference gitlink select that exact commit. The result cache
+   consumes the public function, literal pull `Constant` wrappers are handled,
+   focused JVM proof passes, and the canonical Shadow Node gate passes 105
+   tests/825 assertions.
 3. Add the one `seon.db` observation candidate API and direct tests.
 4. Add the `view-unit` reverse index, complete-change transition, and generated
    replay-all soundness proof.
