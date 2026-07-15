@@ -1,6 +1,6 @@
 ---
 type: issue
-status: archived
+status: resolved
 severity: friction
 tags: [issue, agent, capability, schema]
 ---
