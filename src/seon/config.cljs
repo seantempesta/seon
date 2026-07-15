@@ -119,6 +119,20 @@
 ;; TOKEN cap (not chars — the auto-run family is token-denominated) for ONE
 ;; current-ns auto-run render fn's ai output (seon.agent.ctx.render-fns).
 (schema/register! :seon.config.render/render-fn-token-cap :seon.config/cap)
+;; MODEL-TRANSPORT evidence bounds are cluster policy, not provider selection.
+;; They therefore live on the `:seon.config` singleton instead of the separate
+;; `:seon.ai/config` row. Policy values live only in selected manifests;
+;; absence remains absence in a config-free historical database.
+(schema/register! :seon.config.model-transport/response-identity-cap
+  [:int {:min 1}])
+(schema/register! :seon.config.model-transport/endpoint-cap
+  [:int {:min 1}])
+(schema/register! :seon.config/model-transport
+  [:map
+   [:seon.config.model-transport/response-identity-cap
+    {:optional true} :seon.config.model-transport/response-identity-cap]
+   [:seon.config.model-transport/endpoint-cap
+    {:optional true} :seon.config.model-transport/endpoint-cap]])
 ;; EXPLICIT-CHARACTER knobs (transcript-render redesign) — for content the
 ;; agent edits byte-exactly. Every DEFAULT reproduces today's bytes, so an
 ;; absent section / `{}` boot is byte-identical.
@@ -384,6 +398,10 @@
    [:seon.config.run/batch-turn-limit  {:optional true} :seon.config.run/batch-turn-limit]
    [:seon.config.run/stream-form-limit {:optional true} :seon.config.run/stream-form-limit]
    [:seon.config.run/deadline-ms       {:optional true} :seon.config.run/deadline-ms]
+   [:seon.config.model-transport/response-identity-cap
+    {:optional true} :seon.config.model-transport/response-identity-cap]
+   [:seon.config.model-transport/endpoint-cap
+    {:optional true} :seon.config.model-transport/endpoint-cap]
    [:seon.config/current-ns         {:optional true} :seon.config/current-ns]
    [:seon.config/on-core-error      {:optional true} :seon.config/on-core-error]
    [:seon.config/spawn-depth-cap    {:optional true} :seon.config/spawn-depth-cap]
@@ -452,6 +470,7 @@
    [:seon.config/skills        {:optional true} :seon.config/skills-spec]
    [:seon.config/repl-mode     {:optional true} :seon.config/repl-mode]
    [:seon.config/run           {:optional true} :seon.config/run]
+   [:seon.config/model-transport {:optional true} :seon.config/model-transport]
    [:seon.config/namespaces    {:optional true} :seon.config/namespaces-spec]
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render        {:optional true} :seon.config/render]
@@ -687,6 +706,7 @@
   [manifest]
   (let [r   (get manifest :seon.config/render {})
         run (merge (default-run-policy) (get manifest :seon.config/run {}))
+        transport (get manifest :seon.config/model-transport {})
         rep (get manifest :seon.config/repair {})
         web (get manifest :seon.config/web {})
         nsp (resolve-namespaces manifest)]
@@ -745,6 +765,12 @@
              (get-in manifest [:seon.config/schedule-breaker :seon.config.breaker/window-ms] 1800000)}
       (contains? manifest :seon.config/system-text)
       (assoc :seon.config/system-text (:seon.config/system-text manifest))
+      (contains? transport :seon.config.model-transport/response-identity-cap)
+      (assoc :seon.config.model-transport/response-identity-cap
+             (:seon.config.model-transport/response-identity-cap transport))
+      (contains? transport :seon.config.model-transport/endpoint-cap)
+      (assoc :seon.config.model-transport/endpoint-cap
+             (:seon.config.model-transport/endpoint-cap transport))
       (contains? manifest :seon.config/context-profiles)
       (assoc :seon.config/context-profiles (:seon.config/context-profiles manifest))
       (contains? manifest :seon.config/skills)

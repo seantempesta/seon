@@ -93,6 +93,7 @@
    [:seon.ai/response-model             {:optional true} :seon.ai/response-model]
    [:seon.ai/system-fingerprint         {:optional true} :seon.ai/system-fingerprint]
    [:seon.ai/request-id                 {:optional true} :seon.ai/request-id]
+   [:seon.ai/evidence-error             {:optional true} :seon.ai/evidence-error]
    [:seon.ai/config-evidence {:optional true} :seon.ai/config-evidence]])
 
 ;; agent-adapter request-option overrides (e.g. {:seon.ai/temperature 0.2}).
@@ -254,17 +255,22 @@
    REMAINDER is preserved as :seon.ai/provider-fields (#25)."
   #{:choices :usage :id :object :created :model :system_fingerprint})
 
-(defn- validated-response-identity
-  "Validate one optional provider identity without echoing invalid bytes."
-  [schema-key label value]
+(defn- response-identity-result
+  "Retain one bounded identity or return a generic bounded marker."
+  [resolution schema-key label value]
   (when (some? value)
-    (if (schema/valid-candidate-value? schema-key value)
-      value
-      (throw
-        (ex-info (str "OpenAI-compatible response " label
-                      " is invalid or exceeds the evidence bound.")
-                 {:seon.error/kind :user-input
-                  :seon.ai/response-identity? true})))))
+    (let [cap (get-in resolution
+                      [:seon.ai/resolved-config
+                       :seon.config.model-transport/response-identity-cap])]
+      (cond
+        (nil? cap) nil
+        (and (schema/valid-candidate-value? schema-key value)
+             (<= (count value) cap)) {::identity-value value}
+        :else
+        {::identity-error
+         (ai/bounded-evidence-error
+           (str "Provider response " label " exceeds its evidence bound.")
+           cap)}))))
 
 (defn parse-completion
   "Map an assembled OpenAI ChatCompletion OBJECT to a complete-response.
@@ -280,23 +286,32 @@
    retain their bounded identities when present; the
    unrecognized top-level fields → `:seon.ai/provider-fields` (omitted
    when empty — optional-is-absent). Public for tests."
-  {:malli/schema [:=> [:catn [:seon.ai.openai-compat/completion :any]]
+  {:malli/schema [:=> [:catn [:seon.ai.openai-compat/completion :any]
+                             [:seon.ai/config-resolution
+                              :seon.ai/config-resolution]]
                   :seon.ai.openai-compat/complete-response]}
-  [completion]
+  [completion resolution]
   (let [body       (js->clj completion :keywordize-keys true)
         choice     (-> body :choices first)
         message    (:message choice)
         msg        (:content message)
         reasoning  (:reasoning_content message)
         tool-calls (:tool_calls message)
-        response-model
-        (validated-response-identity :seon.ai/response-model "model" (:model body))
-        fingerprint
-        (validated-response-identity :seon.ai/system-fingerprint
-                                     "system fingerprint"
-                                     (:system_fingerprint body))
-        request-id
-        (validated-response-identity :seon.ai/request-id "request id" (:id body))
+        model-result
+        (response-identity-result resolution :seon.ai/response-model
+                                  "model identity" (:model body))
+        fingerprint-result
+        (response-identity-result resolution :seon.ai/system-fingerprint
+                                  "system fingerprint"
+                                  (:system_fingerprint body))
+        request-id-result
+        (response-identity-result resolution :seon.ai/request-id
+                                  "request identity" (:id body))
+        response-model (::identity-value model-result)
+        fingerprint (::identity-value fingerprint-result)
+        request-id (::identity-value request-id-result)
+        evidence-error (some ::identity-error
+                             [model-result fingerprint-result request-id-result])
         extras     (apply dissoc body known-completion-keys)]
     ;; Diagnosis evidence, not behavior (downstream ask 20): a
     ;; thinking-mode completion can land EVERY token in
@@ -317,6 +332,7 @@
       response-model (assoc :seon.ai/response-model response-model)
       fingerprint (assoc :seon.ai/system-fingerprint fingerprint)
       request-id (assoc :seon.ai/request-id request-id)
+      evidence-error (assoc :seon.ai/evidence-error evidence-error)
       (seq extras)          (assoc :seon.ai/provider-fields extras))))
 
 (defn- config-error
@@ -354,11 +370,7 @@
         ra (assoc :seon.ai/retry-after-ms ra)))
 
     :else
-    (if (:seon.ai/response-identity? (ex-data e))
-      {:seon.ai/msg (str label " response identity failed evidence validation")
-       :seon.ai/evidence-error
-       "Provider response identity is invalid or exceeds the evidence bound."}
-      {:seon.ai/msg (str label " call failed: " (error/->message e))})))
+    {:seon.ai/msg (str label " call failed: " (error/->message e))}))
 
 (def ^:dynamic *fetch*
   "Test seam ONLY. When bound to a fetch fn, [[make-client]] hands it to
@@ -561,11 +573,12 @@
                 ;; Natural end before any form completed — fall back to
                 ;; the assembled completion for real usage + full text.
                 :else
-                (assoc (parse-completion (await (.finalChatCompletion stream)))
+                (assoc (parse-completion (await (.finalChatCompletion stream))
+                                         resolution)
                        :seon.ai/config-evidence evidence)))
             ;; repl-mode :batch — buffer to the assembled completion.
             (let [completion (await (.finalChatCompletion stream))
-                  result     (assoc (parse-completion completion)
+                  result     (assoc (parse-completion completion resolution)
                                     :seon.ai/config-evidence evidence)]
               (when-let [err (:seon.ai/error result)]
                 (ai/log-error! label err))

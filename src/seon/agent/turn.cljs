@@ -144,7 +144,7 @@
 (schema/register! :seon.ai.attempt/response-model :seon.ai/response-model)
 (schema/register! :seon.ai.attempt/system-fingerprint :seon.ai/system-fingerprint)
 (schema/register! :seon.ai.attempt/request-id :seon.ai/request-id)
-(schema/register! :seon.ai.attempt/evidence-error [:string {:min 1 :max 512}])
+(schema/register! :seon.ai.attempt/evidence-error [:string {:min 1}])
 (schema/register! :seon.ai.attempt/entity
   [:map {:seon.db/entity true}
    [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
@@ -583,7 +583,18 @@
         endpoint-result
         (when (contains? #{:deepseek :openai-compat}
                          (:seon.ai/provider config))
-          (some-> (:seon.ai/base-url config) ai/openai-request-endpoint))
+          (when-let [endpoint-cap
+                     (:seon.config.model-transport/endpoint-cap config)]
+            (some-> (:seon.ai/base-url config)
+                    (ai/openai-request-endpoint endpoint-cap))))
+        response-identity-cap
+        (:seon.config.model-transport/response-identity-cap config)
+        evidence-error
+        (when response-identity-cap
+          (some-> (or (when (map? endpoint-result) (:seon.ai/msg endpoint-result))
+                      (:seon.ai/evidence-error raw)
+                      (get-in response [:seon.ai/error :seon.ai/evidence-error]))
+                  (ai/bounded-evidence-error response-identity-cap)))
         adapter (or (:seon.ai/adapter response) (resolved-adapter config))
         status (get-in response [:seon.ai/error :seon.ai/status])]
     (cond->
@@ -607,8 +618,8 @@
       (assoc :seon.ai.attempt/thinking (:seon.ai/thinking config))
       (string? endpoint-result)
       (assoc :seon.ai.attempt/endpoint endpoint-result)
-      (map? endpoint-result)
-      (assoc :seon.ai.attempt/evidence-error (:seon.ai/msg endpoint-result))
+      evidence-error
+      (assoc :seon.ai.attempt/evidence-error evidence-error)
       (:seon.ai/timeout-ms config)
       (assoc :seon.ai.attempt/adapter-timeout-ms (:seon.ai/timeout-ms config))
       (:seon.ai/extra-body-digest config)
@@ -623,9 +634,6 @@
              (:seon.ai/credential-class credential))
       status
       (assoc :seon.ai.attempt/error-status status)
-      (get-in response [:seon.ai/error :seon.ai/evidence-error])
-      (assoc :seon.ai.attempt/evidence-error
-             (get-in response [:seon.ai/error :seon.ai/evidence-error]))
       (:seon.ai/response-model raw)
       (assoc :seon.ai.attempt/response-model (:seon.ai/response-model raw))
       (:seon.ai/system-fingerprint raw)

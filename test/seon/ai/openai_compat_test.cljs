@@ -34,6 +34,9 @@
     [seon.agent.message]
     [seon.db :as db]))
 
+(def ^:private response-cap 64)
+(def ^:private endpoint-cap 256)
+
 ;; ============================================================
 ;; Conn helpers — fresh :memory conn carrying the :seon.ai/config
 ;; attrs, bound as the ROOT db/*conn* so request-params' per-call
@@ -57,8 +60,18 @@
                                                    ::ai/temperature ::ai/max-tokens
                                                    ::ai/thinking ::ai/timeout-ms
                                                    ::ai/base-url ::ai/api-key-env
-                                                   ::ai/extra-body-edn])
+                                                   ::ai/extra-body-edn
+                                                   :seon.config/id
+                                                   :seon.config.model-transport/response-identity-cap
+                                                   :seon.config.model-transport/endpoint-cap])
                                                 (db/tx-meta-datahike-schema))})))
+                     (.then (fn [_]
+                              (d/transact!
+                                conn
+                                {:tx-data
+                                 [{:seon.config/id "cluster"
+                                   :seon.config.model-transport/response-identity-cap response-cap
+                                   :seon.config.model-transport/endpoint-cap endpoint-cap}]})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-conn
@@ -81,6 +94,16 @@
   "Call the adapter with one config value captured before assembly."
   [request]
   (openai/complete (resolved-request request)))
+
+(def ^:private evidence-resolution
+  {:seon.ai/resolved-config
+   {:seon.ai/provider :deepseek
+    :seon.config.model-transport/response-identity-cap response-cap
+    :seon.config.model-transport/endpoint-cap endpoint-cap}
+   :seon.ai/provenance
+   {:seon.ai/provider :default
+    :seon.config.model-transport/response-identity-cap :config-row
+    :seon.config.model-transport/endpoint-cap :config-row}})
 
 ;; Forward ref — with-env is defined with the other env/fetch helpers
 ;; below, but the provider-pinned pure-shape tests above it use it.
@@ -333,7 +356,8 @@
               :model "response-model-a"
               :system_fingerprint "fp-transport-a"
               :choices #js[#js{:message #js{:content "ok"}
-                                :finish_reason "stop"}]})]
+                                :finish_reason "stop"}]}
+          evidence-resolution)]
     (is (= "response-model-a" (:seon.ai/response-model response)))
     (is (= "fp-transport-a" (:seon.ai/system-fingerprint response)))
     (is (= "req-transport-1" (:seon.ai/request-id response)))
@@ -344,7 +368,8 @@
   (let [response
         (openai/parse-completion
           #js{:choices #js[#js{:message #js{:content "ok"}
-                                :finish_reason "stop"}]})]
+                                :finish_reason "stop"}]}
+          evidence-resolution)]
     (is (not (contains? response :seon.ai/response-model)))
     (is (not (contains? response :seon.ai/system-fingerprint)))
     (is (not (contains? response :seon.ai/request-id)))))
@@ -352,10 +377,12 @@
 (deftest endpoint-evidence-normalizes-and-redacts-url-secrets
   (is (= "https://gateway.example/v1/chat/completions"
          (ai/openai-request-endpoint
-           "https://user:password@gateway.example/v1?signature=secret#fragment")))
+           "https://user:password@gateway.example/v1?signature=secret#fragment"
+           endpoint-cap)))
   (is (= "https://gateway.example/v1/chat/completions"
          (ai/openai-request-endpoint
-           "https://gateway.example/v1/chat/completions?signature=secret"))))
+           "https://gateway.example/v1/chat/completions?signature=secret"
+           endpoint-cap))))
 
 (defn- streaming-fetch
   "An injected fetch that records [url init] into `captured` and returns
@@ -397,7 +424,10 @@
                                ::ai/temperature 0.1
                                ::ai/max-tokens 111
                                ::ai/thinking "minimal"
-                               ::ai/extra-body-edn extra-a}]}))
+                               ::ai/extra-body-edn extra-a}
+                              {:seon.config/id "cluster"
+                               :seon.config.model-transport/response-identity-cap 16
+                               :seon.config.model-transport/endpoint-cap 128}]}))
                         _ (is (true? (:seon.db/ok? a-result)) "row A lands")
                         resolution-a
                         (ai/resolved-config {:seon.db/db @conn})
@@ -413,17 +443,36 @@
                                ::ai/temperature 0.9
                                ::ai/max-tokens 999
                                ::ai/thinking "high"
-                               ::ai/extra-body-edn extra-b}]}))]
+                               ::ai/extra-body-edn extra-b}
+                              {:seon.config/id "cluster"
+                               :seon.config.model-transport/response-identity-cap 3
+                               :seon.config.model-transport/endpoint-cap 5}]}))]
                     (is (true? (:seon.db/ok? b-result)) "ambient row B lands")
+                    (is (string?
+                          (ai/openai-request-endpoint
+                            "https://a.example/v1"
+                            (get-in resolution-a
+                                    [:seon.ai/resolved-config
+                                     :seon.config.model-transport/endpoint-cap])))
+                        "A's endpoint cap admits A's normalized endpoint")
+                    (is (map?
+                          (ai/openai-request-endpoint
+                            "https://a.example/v1"
+                            (get-in (ai/resolved-config {:seon.db/db @conn})
+                                    [:seon.ai/resolved-config
+                                     :seon.config.model-transport/endpoint-cap])))
+                        "ambient B's smaller cap cannot rewrite A's decision")
                     (await
                       (with-fetch
-                        (streaming-fetch captured (sse-completion))
+                        (streaming-fetch
+                          captured
+                          (sse-completion {:model "response-a"} nil))
                         #(openai/complete
                            {:seon.ai/ctx "split-read"
                             :seon.ai/config-resolution resolution-a}))))))))
           (.then
             (fn [{evidence :seon.ai/config-evidence
-                  error :seon.ai/error}]
+                  error :seon.ai/error :as response}]
               (is (nil? error))
               (is (= "https://a.example/v1/chat/completions"
                      (:url @captured)))
@@ -437,6 +486,12 @@
               (is (= "model-a"
                      (get-in evidence [:seon.ai/resolved-config
                                        :seon.ai/model])))
+              (is (= 16
+                     (get-in evidence
+                             [:seon.ai/resolved-config
+                              :seon.config.model-transport/response-identity-cap])))
+              (is (= "response-a" (:seon.ai/response-model response))
+                  "response validation uses A's cap, never ambient B's cap")
               (is (= "https://a.example/v1"
                      (get-in evidence [:seon.ai/resolved-config
                                        :seon.ai/base-url])))
@@ -482,10 +537,41 @@
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
-(deftest oversized-response-identity-resolves-to-provider-error
+(deftest config-free-history-keeps-the-call-and-omits-identity-evidence
+  (async done
+    (let [captured (atom nil)]
+      (-> (with-conn
+            (fn [_conn]
+              (-> (db/transact!
+                    {:seon.db/tx-data
+                     [[:db.fn/retractEntity [:seon.config/id "cluster"]]]})
+                  (.then
+                    (fn [{ok? :seon.db/ok?}]
+                      (is (true? ok?) "historical config has no cap datoms")
+                      (with-stubbed
+                        (streaming-fetch captured
+                                         (sse-completion
+                                           {:model "unbounded-history-model"
+                                            :system_fingerprint "history-fp"}
+                                           nil))
+                        #(complete {:seon.ai/ctx "historical"})))))))
+          (.then
+            (fn [response]
+              (is (= "hi" (:seon.ai/text response)))
+              (is (nil? (:seon.ai/error response)))
+              (is (not (contains? response :seon.ai/response-model)))
+              (is (not (contains? response :seon.ai/system-fingerprint)))
+              (is (not (contains? response :seon.ai/request-id)))
+              (is (not (contains? response :seon.ai/evidence-error)))
+              (is (str/ends-with? (:url @captured) "/chat/completions")
+                  "absence changes evidence only, never provider transport")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest oversized-response-identity-omits-only-rejected-evidence
   (async done
     (let [captured (atom nil)
-          oversized-model (apply str (repeat 513 "m"))]
+          oversized-model (apply str (repeat (inc response-cap) "m"))]
       (-> (with-conn
             (fn [_conn]
               (with-stubbed
@@ -497,12 +583,15 @@
                 #(complete {:seon.ai/ctx "hi"}))))
           (.then
             (fn [response]
-              (is (= "" (:seon.ai/text response)))
-              (is (map? (:seon.ai/error response))
-                  "invalid evidence is an adapter error value, not a rejection")
-              (is (= "Provider response identity is invalid or exceeds the evidence bound."
-                     (get-in response [:seon.ai/error :seon.ai/evidence-error])))
+              (is (= "hi" (:seon.ai/text response))
+                  "evidence rejection never discards valid model output")
+              (is (nil? (:seon.ai/error response))
+                  "evidence rejection does not relabel provider success")
+              (is (string? (:seon.ai/evidence-error response)))
+              (is (<= (count (:seon.ai/evidence-error response)) response-cap))
               (is (not (contains? response :seon.ai/response-model)))
+              (is (= "fp-present" (:seon.ai/system-fingerprint response))
+                  "other independently valid identities survive")
               (is (not (str/includes? (pr-str response) oversized-model))
                   "the bounded error never echoes the oversized identity")))
           (.then (fn [_] (done)))

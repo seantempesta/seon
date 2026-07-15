@@ -167,6 +167,9 @@
 ;; transacted on a FRESH :memory conn (never the live agent conn).
 ;; ============================================================
 
+(def ^:private fixture-response-cap 61)
+(def ^:private fixture-endpoint-cap 251)
+
 (defn- fresh-conn
   []
   (let [cfg {:store              {:backend :memory :id (random-uuid)}
@@ -184,8 +187,20 @@
                                                    ::ai/temperature ::ai/max-tokens
                                                    ::ai/thinking ::ai/timeout-ms
                                                    ::ai/base-url ::ai/api-key-env
-                                                   ::ai/extra-body-edn])
+                                                   ::ai/extra-body-edn
+                                                   :seon.config/id
+                                                   :seon.config.model-transport/response-identity-cap
+                                                   :seon.config.model-transport/endpoint-cap])
                                                 (db/tx-meta-datahike-schema))})))
+                     (.then (fn [_]
+                              (d/transact!
+                                conn
+                                {:tx-data
+                                 [{:seon.config/id "cluster"
+                                   :seon.config.model-transport/response-identity-cap
+                                   fixture-response-cap
+                                   :seon.config.model-transport/endpoint-cap
+                                   fixture-endpoint-cap}]})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-conn
@@ -296,7 +311,10 @@
                        ::ai/base-url "http://127.0.0.1:18081/v1"
                        ::ai/timeout-ms 120000
                        ::ai/api-key-env "MODEL_KEY_A"
-                       ::ai/extra-body-edn extra-a}]})
+                       ::ai/extra-body-edn extra-a}
+                      {:seon.config/id "cluster"
+                       :seon.config.model-transport/response-identity-cap 31
+                       :seon.config.model-transport/endpoint-cap 101}]})
                   (.then
                     (fn [result]
                       (is (true? (:seon.db/ok? result)) "row A lands")
@@ -308,7 +326,10 @@
                                  ::ai/base-url "http://127.0.0.1:18082/v1"
                                  ::ai/timeout-ms 90000
                                  ::ai/api-key-env "MODEL_KEY_B"
-                                 ::ai/extra-body-edn extra-b}]})
+                                 ::ai/extra-body-edn extra-b}
+                                {:seon.config/id "cluster"
+                                 :seon.config.model-transport/response-identity-cap 47
+                                 :seon.config.model-transport/endpoint-cap 103}]})
                             (.then
                               (fn [result]
                                 (is (true? (:seon.db/ok? result)) "row B lands")
@@ -322,6 +343,15 @@
                                          (::ai/base-url a-config)))
                                   (is (= 120000 (::ai/timeout-ms a-config)))
                                   (is (= "MODEL_KEY_A" (::ai/api-key-env a-config)))
+                                  (is (= 31
+                                         (:seon.config.model-transport/response-identity-cap
+                                           a-config)))
+                                  (is (= 101
+                                         (:seon.config.model-transport/endpoint-cap
+                                           a-config)))
+                                  (is (= :config-row
+                                         (get-in a [::ai/provenance
+                                                    :seon.config.model-transport/response-identity-cap])))
                                   (is (= 64 (count a-digest))
                                       "effective extra-body bytes have a bounded digest")
                                   (is (= :config-row
@@ -331,6 +361,9 @@
                                          (get-in a [::ai/provenance
                                                     ::ai/temperature])))
                                   (is (= "snapshot-b" (::ai/model b-config)))
+                                  (is (= 47
+                                         (:seon.config.model-transport/response-identity-cap
+                                           b-config)))
                                   (is (not= a-digest
                                             (::ai/extra-body-digest b-config))
                                       "a later config value cannot rewrite historical intent"))))))))))))

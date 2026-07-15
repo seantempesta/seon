@@ -77,6 +77,9 @@
 ;; Stub LLM responses + the call harness.
 ;; ---------------------------------------------------------------------------
 
+(def ^:private evidence-cap 80)
+(def ^:private endpoint-cap 256)
+
 (defn- transport-failure []
   {:text ""
    :seon.ai/error {:seon.ai/msg        "DeepSeek fetch failed: fetch failed"
@@ -114,7 +117,10 @@
                 {:seon.db/tx-data
                  [(cond-> {:seon.agent/id agent-id}
                     max-retries
-                    (assoc :seon.ai/agent-max-retries max-retries))]}))]
+                    (assoc :seon.ai/agent-max-retries max-retries))
+                  {:seon.config/id "cluster"
+                   :seon.config.model-transport/response-identity-cap evidence-cap
+                   :seon.config.model-transport/endpoint-cap endpoint-cap}]}))]
     (when-not (:seon.db/ok? env)
       (throw (ex-info "agent-retry-test: seed transact failed" env)))
     (await
@@ -316,21 +322,22 @@
     (run-test
       (fn ^:async run []
         (let [message
-              "Provider response identity is invalid or exceeds the evidence bound."
+              (str "Provider response identity exceeded the configured evidence bound; "
+                   "these rejected bytes must never reach the attempt fact.")
               result
               (await
                 (ask! "AGTeviderror01"
                       (counting-llm-fn
                         (atom 0)
                         [{:text ""
-                          :seon.ai/error
-                          {:seon.ai/msg "response identity validation failed"
-                           :seon.ai/evidence-error message}}])
+                          :seon.ai/raw {:seon.ai/evidence-error message}}])
                       0))
               [attempt] (persisted-attempts (:seon.agent.turn/id result))]
-          (is (= :provider-error (:seon.ai.attempt/outcome attempt)))
-          (is (= message (:seon.ai.attempt/evidence-error attempt)))
-          (is (< (count (:seon.ai.attempt/evidence-error attempt)) 512))))
+          (is (= :success (:seon.ai.attempt/outcome attempt)))
+          (is (= (subs message 0 evidence-cap)
+                 (:seon.ai.attempt/evidence-error attempt)))
+          (is (= evidence-cap
+                 (count (:seon.ai.attempt/evidence-error attempt))))))
       done)))
 
 (deftest attempt-timeout-aborts-provider-and-never-retries

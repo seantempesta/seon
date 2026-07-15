@@ -34,6 +34,9 @@
                      :seon.config/run           {:seon.config.run/batch-turn-limit 100
                                                  :seon.config.run/stream-form-limit 300
                                                  :seon.config.run/deadline-ms 1800000}
+                     :seon.config/model-transport
+                     {:seon.config.model-transport/response-identity-cap 53
+                      :seon.config.model-transport/endpoint-cap 257}
                      :seon.config/agent-context
                      {:seon.agent/ctx [{:seon.agent.ctx/name :transcript
                                         :seon.agent.ctx/priority 100}]}})))
@@ -337,6 +340,9 @@
       (is (= 100       (:seon.config.run/batch-turn-limit s)))
       (is (= 300       (:seon.config.run/stream-form-limit s)))
       (is (= 1800000   (:seon.config.run/deadline-ms s)))
+      (is (not (contains? s
+                          :seon.config.model-transport/response-identity-cap))
+          "config-free history preserves absence")
       (is (= :symbols  (:seon.config.repair/level s)))
       (is (= :public-only (:seon.agent.web/policy s)))
       (is (= 1         (:seon.config/spawn-depth-cap s)))
@@ -357,6 +363,9 @@
                :seon.config/run {:seon.config.run/batch-turn-limit 7
                                  :seon.config.run/stream-form-limit 19
                                  :seon.config.run/deadline-ms 123456}
+               :seon.config/model-transport
+               {:seon.config.model-transport/response-identity-cap 17
+                :seon.config.model-transport/endpoint-cap 29}
                :seon.config/on-core-error :log
                :seon.config/system-text "you are a helpful agent"
                :seon.config/skills skills
@@ -366,6 +375,8 @@
       (is (= 7 (:seon.config.run/batch-turn-limit s)))
       (is (= 19 (:seon.config.run/stream-form-limit s)))
       (is (= 123456 (:seon.config.run/deadline-ms s)))
+      (is (= 17 (:seon.config.model-transport/response-identity-cap s)))
+      (is (= 29 (:seon.config.model-transport/endpoint-cap s)))
       (is (= :log (:seon.config/on-core-error s)))
       (is (= "you are a helpful agent" (:seon.config/system-text s)))
       (is (= skills (:seon.config/skills s)))
@@ -425,6 +436,8 @@
                :seon.config/on-core-error :seon.config/spawn-depth-cap
                :seon.config/always :seon.config/system-text
                :seon.config.render/eval-cap :seon.config.render/database-edn-cap
+               :seon.config.model-transport/response-identity-cap
+               :seon.config.model-transport/endpoint-cap
                :seon.config.render/value-width :seon.config.render/line-numbers
                :seon.config.repair/level :seon.config.repair/classes
                :seon.agent.web/policy :seon.agent.web/allowed-domains
@@ -460,6 +473,9 @@
                             :seon.config/run {:seon.config.run/batch-turn-limit 17
                                               :seon.config.run/stream-form-limit 51
                                               :seon.config.run/deadline-ms 654321}
+                            :seon.config/model-transport
+                            {:seon.config.model-transport/response-identity-cap 23
+                             :seon.config.model-transport/endpoint-cap 47}
                             :seon.config/on-core-error :log
                             :seon.config/repair {:seon.config.repair/classes {:foo false}}
                             :seon.config/web {:seon.agent.web/policy :allowlist
@@ -479,6 +495,12 @@
                       (try
                         ;; scalar caps + dials read from the datom
                         (is (= 4321 (config/eval-render-cap)))
+                        (is (= 23
+                               (:seon.config.model-transport/response-identity-cap
+                                 (config/config-view))))
+                        (is (= 47
+                               (:seon.config.model-transport/endpoint-cap
+                                 (config/config-view))))
                         (is (= {:seon.config.run/batch-turn-limit 17
                                 :seon.config.run/stream-form-limit 51
                                 :seon.config.run/deadline-ms 654321}

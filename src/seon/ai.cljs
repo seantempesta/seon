@@ -60,12 +60,12 @@
 
 (schema/register! ::text :string)
 (schema/register! ::model :string)
-(schema/register! ::response-model [:string {:min 1 :max 512}])
-(schema/register! ::system-fingerprint [:string {:min 1 :max 512}])
-(schema/register! ::request-id [:string {:min 1 :max 512}])
+(schema/register! ::response-model [:string {:min 1}])
+(schema/register! ::system-fingerprint [:string {:min 1}])
+(schema/register! ::request-id [:string {:min 1}])
 (schema/register! ::adapter
   [:enum :openai-compat :anthropic :diffusiongemma :typeahead :stub])
-(schema/register! ::endpoint [:string {:min 1 :max 2048}])
+(schema/register! ::endpoint [:string {:min 1}])
 (schema/register! ::temperature :double)
 (schema/register! ::max-tokens :int)
 (schema/register! ::system-prompt :string)
@@ -90,7 +90,7 @@
 ;; negative). Present ONLY when the provider sent the header on a
 ;; retryable HTTP-status error; the agent turn loop's backoff honors it.
 (schema/register! ::retry-after-ms :int)
-(schema/register! ::evidence-error [:string {:min 1 :max 512}])
+(schema/register! ::evidence-error [:string {:min 1}])
 
 ;; Tool/function-calling + extra-request + provider-metadata vocabulary
 ;; (SDK migration, 2026-06-16). These ride third-party-shaped maps: the
@@ -132,9 +132,11 @@
 
 (defn openai-request-endpoint
   "The redacted normalized chat-completions endpoint for evidence."
-  {:malli/schema [:=> [:catn [::base-url ::base-url]]
+  {:malli/schema [:=> [:catn [::base-url ::base-url]
+                             [:seon.config.model-transport/endpoint-cap
+                              :seon.config.model-transport/endpoint-cap]]
                   [:or ::endpoint ::endpoint-error]]}
-  [url]
+  [url endpoint-cap]
   (try
     (let [parsed (js/URL. url)
           path (.-pathname parsed)
@@ -151,7 +153,10 @@
           (str (str/replace root-path #"/+$" "") "/chat/completions")]
       ;; URL.origin intentionally excludes userinfo; query and fragment are
       ;; excluded by reconstructing from protocol/host/pathname only.
-      (str (.-protocol parsed) "//" (.-host parsed) endpoint-path))
+      (let [endpoint (str (.-protocol parsed) "//" (.-host parsed) endpoint-path)]
+        (if (<= (count endpoint) endpoint-cap)
+          endpoint
+          {::msg "The normalized OpenAI endpoint exceeds the evidence bound."})))
     (catch :default _
       {::msg "The configured OpenAI endpoint is not a valid URL."})))
 
@@ -351,6 +356,10 @@
    [::base-url    {:optional true} ::base-url]
    [::api-key-env {:optional true} ::api-key-env]
    [::dg-backend  {:optional true} ::dg-backend]
+   [:seon.config.model-transport/response-identity-cap
+    {:optional true} :seon.config.model-transport/response-identity-cap]
+   [:seon.config.model-transport/endpoint-cap
+    {:optional true} :seon.config.model-transport/endpoint-cap]
    [::extra-body-digest {:optional true} ::extra-body-digest]])
 
 ;; The SHIPPED per-provider defaults for the `::resolved-config` keys —
@@ -633,6 +642,8 @@
    [::base-url    {:optional true} ::source]
    [::api-key-env {:optional true} ::source]
    [::dg-backend  {:optional true} ::source]
+   [:seon.config.model-transport/response-identity-cap {:optional true} ::source]
+   [:seon.config.model-transport/endpoint-cap {:optional true} ::source]
    [::extra-body-digest {:optional true} ::source]])
 (schema/register! ::resolved-config-request
   [:map
@@ -659,6 +670,24 @@
           (.update raw "utf8")
           (.digest "hex")))))
 
+(def ^:private model-transport-cap-attrs
+  [:seon.config.model-transport/response-identity-cap
+   :seon.config.model-transport/endpoint-cap])
+
+(defn- model-transport-cap-resolution
+  "Model-transport caps and provenance from one immutable database value."
+  [database]
+  (let [installed (db/installed-schema database)
+        entity (when (contains? installed :seon.config/id)
+                 (db/entity {:seon.db/db database
+                             :seon.db/ref [:seon.config/id
+                                           config/cluster-config-id]}))]
+    (into {}
+          (keep (fn [attr]
+                  (when (and entity (contains? entity attr))
+                    [attr [(get entity attr) :config-row]])))
+          model-transport-cap-attrs)))
+
 (defn resolved-config
   "The effective LLM config an agent runs under, derived from a db value.
 
@@ -684,6 +713,7 @@
   [{db :seon.db/db id :seon.agent/id}]
   (let [overrides (agent-override-values db id)
         row-cfg   (global-config db)
+        transport-caps (model-transport-cap-resolution db)
         pick      (fn [k defaults]
                     (cond
                       (contains? overrides k) [(get overrides k) :agent-override]
@@ -702,7 +732,15 @@
             {::resolved-config {::provider prov}
              ::provenance      {::provider prov-src}}
             [::model ::temperature ::max-tokens ::thinking ::timeout-ms
-             ::base-url ::api-key-env ::dg-backend])]
+             ::base-url ::api-key-env ::dg-backend])
+          resolved
+          (reduce-kv
+            (fn [acc attr [value source]]
+              (-> acc
+                  (assoc-in [::resolved-config attr] value)
+                  (assoc-in [::provenance attr] source)))
+            resolved
+            transport-caps)]
       (if-let [[raw src] (pick ::extra-body-edn defaults)]
         (let [body (try (reader/read-string raw) (catch :default _ nil))]
           (if-let [digest (and (map? body) (extra-body-digest raw))]
@@ -712,6 +750,16 @@
                 (assoc-in [::provenance ::extra-body-digest] src))
             resolved))
         resolved))))
+
+(defn bounded-evidence-error
+  "Bound an evidence error using one resolved positive cap."
+  {:malli/schema
+   [:=> [:catn [::message ::evidence-error]
+                 [:seon.config.model-transport/response-identity-cap
+                  :seon.config.model-transport/response-identity-cap]]
+    ::evidence-error]}
+  [message response-identity-cap]
+  (subs message 0 (min response-identity-cap (count message))))
 
 (defn config-evidence
   "Bounded non-secret evidence for one resolved provider request."

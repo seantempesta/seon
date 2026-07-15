@@ -59,6 +59,16 @@
   :seon.config.run/deadline-ms
   #long #or [#env SEON_RUN_DEADLINE_MS 1800000]}
 
+ ;; ── MODEL-TRANSPORT EVIDENCE BOUNDS — immutable cluster policy.
+ ;; These cap non-secret provider identities and normalized endpoint evidence;
+ ;; they do not limit model output or alter provider request bytes. Aero owns
+ ;; each optional environment override before the resolved value becomes data.
+ :seon.config/model-transport
+ {:seon.config.model-transport/response-identity-cap
+  #long #or [#env SEON_MODEL_RESPONSE_IDENTITY_CAP 512]
+  :seon.config.model-transport/endpoint-cap
+  #long #or [#env SEON_MODEL_ENDPOINT_CAP 2048]}
+
  ;; ── RENDER BOUNDS — the GLOBAL, process-wide value/eval/message DISPLAY caps
  ;; (#46). A proper config (not scattered env reads): each cap is a plain literal
  ;; here, read by seon.config's database-edn-cap / eval-render-cap / value-* etc.
