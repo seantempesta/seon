@@ -92,3 +92,7 @@ def test_run_native_task_retains_log_with_exact_admission(monkeypatch, tmp_path)
     native = read_eval_log(str(retained))
     assert native.status == "success"
     assert native.eval.metadata["seon_source_admission"] == identity
+    assert native.metadata["seon_source_admission_end"] == identity
+    assert native.metadata["seon_static_target_end"] == {
+        "artifact": "stable"}
+    assert native.log_updates[-1].provenance.author == "seon_inspect.catalog"

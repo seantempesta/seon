@@ -102,9 +102,11 @@ def test_run_native_task_admits_before_construction_and_finalizes(monkeypatch):
     captured = {}
     admitted = {"schema_version": 2, "bench": {"name": "native"}}
 
+    admissions = iter([admitted, admitted])
+
     def admit(identity):
         captured["identity"] = identity
-        return admitted
+        return next(admissions)
 
     def factory(**kwargs):
         captured["factory_kwargs"] = kwargs
@@ -116,6 +118,9 @@ def test_run_native_task_admits_before_construction_and_finalizes(monkeypatch):
 
     monkeypatch.setattr(catalog.source_admission, "verify_sources", admit)
     monkeypatch.setattr(catalog, "inspect_eval", inspect)
+    monkeypatch.setattr(catalog, "edit_eval_log",
+                        lambda log, edits, provenance: log)
+    monkeypatch.setattr(catalog, "write_eval_log", lambda log: None)
     catalog.run_native_task(
         {"name": "native"}, factory,
         task_kwargs={"cluster_url": "http://example.test/agents/run"},
@@ -147,10 +152,14 @@ def test_run_native_task_rejects_before_construction(monkeypatch):
 
 def test_run_native_task_rejects_target_drift(monkeypatch):
     finalized = []
-    monkeypatch.setattr(
-        catalog.source_admission, "verify_sources",
-        lambda identity: {"bench": identity})
-    monkeypatch.setattr(catalog, "inspect_eval", lambda *args, **kwargs: ["log"])
+    admitted = {"bench": {"name": "native"}}
+    monkeypatch.setattr(catalog.source_admission, "verify_sources",
+                        lambda identity: admitted)
+    log = type("Log", (), {"location": "run.eval"})()
+    monkeypatch.setattr(catalog, "inspect_eval", lambda *args, **kwargs: [log])
+    monkeypatch.setattr(catalog, "edit_eval_log",
+                        lambda value, edits, provenance: value)
+    monkeypatch.setattr(catalog, "write_eval_log", lambda value: None)
     monkeypatch.setattr(
         catalog.source_admission, "finalize_native_logs",
         lambda *args, **kwargs: finalized.append((args, kwargs)))
@@ -161,7 +170,75 @@ def test_run_native_task_rejects_target_drift(monkeypatch):
             lambda **kwargs: _FakeTask(),
             target_snapshot=lambda: next(snapshots),
         )
-    assert finalized == []
+    assert len(finalized) == 1
+    assert finalized[0][0] == ([log],)
+    assert finalized[0][1]["require_success"] is False
+
+
+def test_run_native_task_rejects_source_drift_and_retains_log(monkeypatch):
+    finalized = []
+    admissions = iter([
+        {"bench": {"name": "native"}, "tree": "before"},
+        {"bench": {"name": "native"}, "tree": "after"},
+    ])
+    log = type("Log", (), {"location": "run.eval"})()
+
+    monkeypatch.setattr(catalog.source_admission, "verify_sources",
+                        lambda identity: next(admissions))
+    monkeypatch.setattr(catalog, "inspect_eval", lambda *args, **kwargs: [log])
+    monkeypatch.setattr(catalog, "edit_eval_log",
+                        lambda value, edits, provenance: value)
+    monkeypatch.setattr(catalog, "write_eval_log", lambda value: None)
+    monkeypatch.setattr(
+        catalog.source_admission, "finalize_native_logs",
+        lambda *args, **kwargs: finalized.append((args, kwargs)))
+
+    with pytest.raises(RuntimeError, match="source identity changed"):
+        catalog.run_native_task(
+            {"name": "native"},
+            lambda **kwargs: _FakeTask(),
+            target_snapshot=lambda: {"artifact": "stable"},
+        )
+
+    assert finalized[0][0] == ([log],)
+    assert finalized[0][1]["require_success"] is False
+
+
+def test_run_native_task_retains_end_source_and_target(monkeypatch):
+    admitted = {"bench": {"name": "native"}, "tree": "same"}
+    admissions = iter([admitted, admitted])
+    snapshots = iter([{"artifact": "stable"}, {"artifact": "stable"}])
+    log = type("Log", (), {"location": "run.eval"})()
+    edited = type("Log", (), {"location": "run.eval"})()
+    captured = {}
+
+    monkeypatch.setattr(catalog.source_admission, "verify_sources",
+                        lambda identity: next(admissions))
+    monkeypatch.setattr(catalog, "inspect_eval",
+                        lambda *args, **kwargs: [log])
+
+    def edit(value, edits, provenance):
+        captured["metadata"] = edits[0].metadata_set
+        captured["provenance"] = provenance
+        return edited
+
+    monkeypatch.setattr(catalog, "edit_eval_log", edit)
+    monkeypatch.setattr(catalog, "write_eval_log",
+                        lambda value: captured.setdefault("written", value))
+
+    result = catalog.run_native_task(
+        {"name": "native"},
+        lambda **kwargs: _FakeTask(),
+        target_snapshot=lambda: next(snapshots),
+    )
+
+    assert result == [edited]
+    assert captured["metadata"] == {
+        "seon_source_admission_end": admitted,
+        "seon_static_target_end": {"artifact": "stable"},
+    }
+    assert captured["provenance"].author == "seon_inspect.catalog"
+    assert captured["written"] is edited
 
 
 def test_admitted_run_retains_new_cancelled_log_then_reraises(

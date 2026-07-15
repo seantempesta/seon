@@ -142,6 +142,22 @@ recognizes the ready status and URL by text inside retained EDN; replace that
 with semantic operator data parsing before treating malformed or adversarial
 status output as covered.
 
+The admitted static path now also closes the process-local before/after
+evidence gap. `run_native_task` reruns the complete selected-source admission
+after Inspect returns, snapshots the target again, writes both end identities
+into the original `.eval` through Inspect's public log-edit API, and only then
+permits finalization. Source or target drift retains the terminal log as
+rejected evidence before raising. `bb.edn` is admitted because `bin/seon`
+executes Babashka through that task manifest. A remaining operator-owned gap
+is that process records and status do not carry one canonical operator-source
+digest spanning `bb.edn`, `bin/seon`, `script/`, `src/seon/launch.cljc`, and
+the Babashka runtime identity. A target started by transient operator bytes
+can therefore later look ready after the checkout converges. The operator
+closure digest—not another Inspect-side path list—is the acceptance owner.
+Likewise `.env.acme` is still sourced as executable shell; it must eventually
+be parsed through the existing configuration-data boundary without admitting
+credential bytes into evaluation evidence.
+
 A generated-workflow probe exposed one remaining static-path contradiction.
 `planning.fetch_eval_rows` still sent a raw sentinel-printing form to the
 writer socket, but the writer now speaks io-prepl event maps. The query reached

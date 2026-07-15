@@ -137,6 +137,19 @@ an intentional policy delta and restoration each wrote two operations; and the
 watcher, writer, and pod PIDs stayed byte-for-byte stable. Evidence and the
 dependency ledger are in [[research/live-config-apply-2026-07-14]].
 
+The first admitted database-workflow sample is now gated on a symmetric run
+identity rather than a start-only assertion. The common native Inspect door
+rechecks the complete selected-source admission and static target after Inspect
+publishes its terminal log, records both observed end identities in that same
+`.eval` through Inspect's public edit API, and retains rejected terminal
+evidence before raising on either drift. `bb.edn` joins the admitted operator
+inputs, and `:quiesced` is classified as infrastructure rather than model
+capability. The focused boundary passes 99 tests. The live ACME run still waits
+for the concurrent lifecycle source set to become coherent; this no longer
+blocks independent harness work. The remaining operator provenance gap is one
+canonical process/status digest over the full operator closure, recorded in
+[[../../seon/issues/inspect-live-cluster-caller-drift]].
+
 A subsequent purity probe found that historical result-handle display depends
 on a process-local cache. The target is now explicit and falsifiable: the same
 agent and resolved database coordinate regenerate a byte-identical cacheable

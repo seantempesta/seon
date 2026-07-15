@@ -123,6 +123,7 @@ def test_record_result_preserves_database_and_turn_evidence():
     [
         {"pod_timed_out": True, "pod_closed_reason": "timeout"},
         {"pod_timed_out": False, "pod_closed_reason": ":error"},
+        {"pod_timed_out": False, "pod_closed_reason": ":quiesced"},
     ],
 )
 def test_unscorable_pod_close_is_infrastructure(metadata):

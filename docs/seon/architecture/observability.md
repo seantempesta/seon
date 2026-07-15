@@ -269,6 +269,14 @@ through the writer REPL to reconstruct eval rows.
 Standard Inspect tasks measure the selected model and scorer. Pod-backed Inspect
 tasks measure Seon's production agent/runtime behavior through this door; the
 two claims are reported separately and no duplicate evaluator is created.
+Every admitted live run retains both its opening and closing source admission
+plus the operator-owned target identity in the native `.eval`. The closing
+observations are written before evidence finalization. A changed source or
+target makes the run rejected infrastructure evidence while preserving the
+terminal bytes; it never becomes a capability score. The target identity
+includes one canonical digest of the operator closure and runtime that started
+the processes, so a checkout that later converges cannot make transient launch
+bytes appear reproducible.
 Long-term planning is a pod-backed Inspect task: one ephemeral cluster spans
 multiple interactions and a pod restart, then host-side scoring reads the
 resulting plan and eval facts. Offline good/bad fixtures exercise the same

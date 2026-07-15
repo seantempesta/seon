@@ -49,6 +49,7 @@
     "config",
     "seon-skills",
     "acme",
+    "bb.edn",
     "build.clj",
     "deps.edn",
     "shadow-cljs.edn",

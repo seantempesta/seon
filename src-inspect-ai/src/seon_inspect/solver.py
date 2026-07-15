@@ -150,14 +150,18 @@ def _record_result(state: TaskState, result: dict) -> TaskState:
 
 
 def require_scorable_pod_state(state: TaskState) -> TaskState:
-    """Reject timeout and core-error closes before a task's scorer runs."""
+    """Reject infrastructure closes before a task's scorer runs."""
     metadata = state.metadata or {}
     if metadata.get("pod_timed_out"):
         raise PodRunInfrastructureError(
             "pod timed out; model capability was not scored")
-    if str(metadata.get("pod_closed_reason") or "") == ":error":
+    closed_reason = str(metadata.get("pod_closed_reason") or "")
+    if closed_reason == ":error":
         raise PodRunInfrastructureError(
             "pod closed with a core error; model capability was not scored")
+    if closed_reason == ":quiesced":
+        raise PodRunInfrastructureError(
+            "pod quiesced during the run; model capability was not scored")
     return state
 
 

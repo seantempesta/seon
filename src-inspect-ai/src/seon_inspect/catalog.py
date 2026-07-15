@@ -31,7 +31,13 @@ from typing import Any, Callable, Sequence
 
 from inspect_ai import Task, eval as inspect_eval
 from inspect_ai._util.registry import registry_log_name
-from inspect_ai.log import list_eval_logs
+from inspect_ai.log import (
+    MetadataEdit,
+    ProvenanceData,
+    edit_eval_log,
+    list_eval_logs,
+    write_eval_log,
+)
 from inspect_ai.solver import Generate, Solver, TaskState, solver
 
 from seon_inspect import cluster as cluster_mod
@@ -253,7 +259,7 @@ def _eval_admitted_task(
     *,
     solver_override: Solver | Sequence[Solver] | None = None,
     evidence_dir: Path | None = None,
-    before_finalize: Callable[[], None] | None = None,
+    before_finalize: Callable[[list[Any]], list[Any]] | None = None,
     **eval_kwargs: Any,
 ):
     """Execute and finalize one already-admitted Task through Inspect."""
@@ -285,7 +291,19 @@ def _eval_admitted_task(
             )
         raise
     if before_finalize is not None:
-        before_finalize()
+        try:
+            logs = before_finalize(logs)
+        except BaseException:
+            # Inspect has already published terminal evidence. A post-run
+            # admission/target failure contaminates the capability result,
+            # but must not erase the bytes that prove why it was rejected.
+            source_admission.finalize_native_logs(
+                logs,
+                evidence_dir=evidence_dir,
+                expected_admission=admission,
+                require_success=False,
+            )
+            raise
     if not logs:
         terminal_logs = sorted(listed_logs(log_dir) - listed_before)
         if terminal_logs:
@@ -332,9 +350,29 @@ def run_native_task(
     md = dict(eval_kwargs.pop("metadata", None) or {})
     md["seon_static_target"] = target_start
 
-    def verify_static_target() -> None:
-        if target_snapshot() != target_start:
+    def verify_run_end(logs: list[Any]) -> list[Any]:
+        admission_end = source_admission.verify_sources(identity)
+        target_end = target_snapshot()
+        edited_logs = []
+        for log in logs:
+            edited = edit_eval_log(
+                log,
+                [MetadataEdit(metadata_set={
+                    "seon_source_admission_end": admission_end,
+                    "seon_static_target_end": target_end,
+                })],
+                ProvenanceData(
+                    author="seon_inspect.catalog",
+                    reason="Retain the post-run source and target identity",
+                ),
+            )
+            write_eval_log(edited)
+            edited_logs.append(edited)
+        if admission_end != admission:
+            raise RuntimeError("source identity changed during native run")
+        if target_end != target_start:
             raise RuntimeError("static target identity changed during native run")
+        return edited_logs
 
     return _eval_admitted_task(
         task,
@@ -342,7 +380,7 @@ def run_native_task(
         evidence_dir=evidence_dir,
         max_samples=config.POD_MAX_SAMPLES,
         metadata=md,
-        before_finalize=verify_static_target,
+        before_finalize=verify_run_end,
         **eval_kwargs,
     )
 

@@ -127,7 +127,7 @@ def test_selected_lock_admits_runtime_build_inputs():
     admitted = set(lock["seon_admitted_paths"])
     assert {
         "src", "script", "resources", "config", "seon-skills", "acme",
-        "build.clj", "deps.edn",
+        "bb.edn", "build.clj", "deps.edn",
         "shadow-cljs.edn", "package.json", "package-lock.json",
         "bin/seon", "bin/acme", "bin/fix-bootstrap-macros",
     } <= admitted
