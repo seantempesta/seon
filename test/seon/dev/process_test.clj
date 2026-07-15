@@ -435,6 +435,117 @@
         (when @foreign (hard-clean-containment-fixture! @foreign))
         (fs/delete-tree directory {:force true})))))
 
+(defn- restore-admin-probe-record
+  [configuration]
+  (let [pid (.pid (java.lang.ProcessHandle/current))]
+    (live-probe-record
+     configuration
+     {:seon.dev.process/id process/restore-admin-id
+      :seon.dev.process/pid pid
+      :seon.dev.process/start-instant (state/process-start-instant pid)
+      :seon.dev.process/process-group pid
+      :seon.dev.process/argv ["restore-admin-probe"]
+      :seon.dev.process/environment-digest (apply str (repeat 64 "0"))
+      :seon.dev.process/artifact-digest "restore-admin-probe"
+      :seon.dev.process/target :seon.dev.target/development
+      :seon.dev.process/started-at "restore-admin-probe"
+      :seon.dev.process/log
+      (str (fs/path (:seon.dev.test/directory configuration)
+                    "restore-admin-probe.log"))})))
+
+(deftest restore-admin-absence-is-an-observational-fail-closed-projection
+  (let [directory (str (fs/create-temp-dir {:prefix "seon-admin-absence-"}))
+        configuration (signal-fixture-config directory)
+        request {:seon.dev.process/configuration configuration
+                 :seon.dev.process/lock-timeout-ms 1000}
+        live (restore-admin-probe-record configuration)
+        containment (:seon.dev.process/containment live)
+        adoption (:seon.dev.process.containment/adoption-path containment)
+        terminal (:seon.dev.process.containment/result-path containment)
+        dead-pid 99999999
+        dead-start "1970-01-01T00:00:00Z"
+        dead
+        (-> live
+            (assoc :seon.dev.process/pid dead-pid
+                   :seon.dev.process/start-instant dead-start
+                   :seon.dev.process/process-group dead-pid)
+            (assoc-in [:seon.dev.process/containment
+                       :seon.dev.process.containment/owner-pid] dead-pid)
+            (assoc-in [:seon.dev.process/containment
+                       :seon.dev.process.containment/owner-start-instant]
+                      dead-start)
+            (assoc-in [:seon.dev.process/containment
+                       :seon.dev.process.containment/anchor-pid] dead-pid)
+            (assoc-in [:seon.dev.process/containment
+                       :seon.dev.process.containment/anchor-start-instant]
+                      dead-start)
+            (assoc-in [:seon.dev.process/containment
+                       :seon.dev.process.containment/process-group] dead-pid)
+            (assoc-in [:seon.dev.process/containment
+                       :seon.dev.process.containment/workload-pid] dead-pid)
+            (assoc-in [:seon.dev.process/containment
+                       :seon.dev.process.containment/workload-start-instant]
+                      dead-start))
+        observe
+        (fn [record]
+          (with-redefs [process/read-process (fn [_ _] record)]
+            (process/restore-admin-absence! request)))]
+    (try
+      (let [absent (observe nil)]
+        (is (m/validate process/restore-admin-absence-result-schema absent))
+        (is (= :seon.dev.process.status/absent
+               (:seon.dev.process/status absent)))
+        (is (true? (:seon.dev.process/absent? absent))))
+      (let [present (observe live)]
+        (is (m/validate process/restore-admin-absence-result-schema present))
+        (is (= :seon.dev.process.status/alive
+               (:seon.dev.process/status present)))
+        (is (false? (:seon.dev.process/absent? present)))
+        (is (= (:seon.dev.process.containment/generation containment)
+               (:seon.dev.process.containment/generation present))))
+      (fs/delete-if-exists adoption)
+      (is (= :seon.dev.process.status/adoptable
+             (:seon.dev.process/status (observe live))))
+      (spit terminal
+            (json/generate-string
+             {:generation
+              (str (:seon.dev.process.containment/generation containment))
+              :status "drained"
+              :trigger "workload-exit"
+              :anchor_exit -9}))
+      (let [drained (observe dead)]
+        (is (= :seon.dev.process.status/drained
+               (:seon.dev.process/status drained)))
+        (is (false? (:seon.dev.process/absent? drained)))
+        (is (= :seon.dev.process.containment.trigger/workload-exit
+               (get-in drained [:seon.dev.process/terminal
+                                :seon.dev.process.containment/trigger]))))
+      (is (= :seon.dev.process.status/foreign-one-shot
+             (:seon.dev.process/status
+              (observe (assoc live :seon.dev.process/id process/pod-id)))))
+      (fs/delete-if-exists terminal)
+      (is (= :seon.dev.process.status/containment-uncertain
+             (:seon.dev.process/status (observe dead))))
+      (finally
+        (fs/delete-tree directory {:force true})))))
+
+(deftest restore-admin-absence-returns-typed-uncertainty-for-unreadable-state
+  (let [directory (str (fs/create-temp-dir {:prefix "seon-admin-uncertain-"}))
+        configuration (signal-fixture-config directory)
+        result
+        (with-redefs [process/read-process
+                      (fn [& _] (throw (ex-info "invalid record" {})))]
+          (process/restore-admin-absence!
+           {:seon.dev.process/configuration configuration
+            :seon.dev.process/lock-timeout-ms 1000}))]
+    (try
+      (is (m/validate process/restore-admin-absence-result-schema result))
+      (is (= :seon.dev.process.status/containment-uncertain
+             (:seon.dev.process/status result)))
+      (is (false? (:seon.dev.process/absent? result)))
+      (finally
+        (fs/delete-tree directory {:force true})))))
+
 (defn- signal-fixture-specs [configuration cut]
   (let [delay #(if (= cut %) "300" "0")
         watcher-digest (artifact/current-client-digest configuration)]

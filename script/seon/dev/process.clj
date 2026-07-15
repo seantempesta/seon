@@ -1325,6 +1325,38 @@
    [:seon.dev.process/application-result-path :string]
    [:seon.dev.process/terminal containment-terminal-schema]])
 
+(def restore-admin-absence-request-schema
+  [:map {:closed true}
+   [:seon.dev.process/configuration config/configuration-schema]
+   [:seon.dev.process/lock-timeout-ms [:int {:min 1 :max 60000}]]])
+
+(def restore-admin-absence-result-schema
+  [:or
+   [:map {:closed true}
+    [:seon.dev.process/id [:= restore-admin-id]]
+    [:seon.dev.process/absent? [:= true]]
+    [:seon.dev.process/status [:= :seon.dev.process.status/absent]]]
+   [:map {:closed true}
+    [:seon.dev.process/id [:= restore-admin-id]]
+    [:seon.dev.process/absent? [:= false]]
+    [:seon.dev.process/status
+     [:enum :seon.dev.process.status/alive
+      :seon.dev.process.status/adoptable]]
+    [:seon.dev.process.containment/generation :uuid]]
+   [:map {:closed true}
+    [:seon.dev.process/id [:= restore-admin-id]]
+    [:seon.dev.process/absent? [:= false]]
+    [:seon.dev.process/status [:= :seon.dev.process.status/drained]]
+    [:seon.dev.process.containment/generation :uuid]
+    [:seon.dev.process/terminal containment-terminal-schema]]
+   [:map {:closed true}
+    [:seon.dev.process/id [:= restore-admin-id]]
+    [:seon.dev.process/absent? [:= false]]
+    [:seon.dev.process/status
+     [:enum :seon.dev.process.status/foreign-one-shot
+      :seon.dev.process.status/containment-uncertain]]
+    [:seon.dev.process.containment/generation {:optional true} :uuid]]])
+
 (def ^:private stop-result-schema
   [:map {:closed true}
    [:seon.dev.process/id (into [:enum] target-processes)]
@@ -1689,6 +1721,72 @@
               {:seon.dev.process/status
                :seon.dev.process.status/foreign-one-shot
                :seon.dev.process/id restore-admin-id}))))
+
+(defn- restore-admin-record-status
+  [record]
+  (if-not record
+    {:seon.dev.process/id restore-admin-id
+     :seon.dev.process/absent? true
+     :seon.dev.process/status :seon.dev.process.status/absent}
+    (let [containment (:seon.dev.process/containment record)
+          structural?
+          (and (= restore-admin-id (:seon.dev.process/id record))
+               containment
+               (= (:seon.dev.process/pid record)
+                  (:seon.dev.process.containment/owner-pid containment))
+               (= (:seon.dev.process/start-instant record)
+                  (:seon.dev.process.containment/owner-start-instant
+                   containment))
+               (= (:seon.dev.process.containment/anchor-pid containment)
+                  (:seon.dev.process.containment/process-group containment)))
+          terminal (when containment (terminal-result containment))
+          matching-terminal (and containment
+                                 (matching-terminal? containment terminal))
+          owner-alive?
+          (and containment
+               (state/process-identity-alive?
+                (containment-identity containment :owner)))
+          status
+          (cond
+            (not structural?) :seon.dev.process.status/foreign-one-shot
+            (and matching-terminal (not owner-alive?))
+            :seon.dev.process.status/drained
+            (containment-live? record) :seon.dev.process.status/alive
+            (and owner-alive?
+                 (not (matching-adoption? containment))
+                 (not matching-terminal))
+            :seon.dev.process.status/adoptable
+            :else :seon.dev.process.status/containment-uncertain)]
+      (cond->
+       {:seon.dev.process/id restore-admin-id
+        :seon.dev.process/absent? false
+        :seon.dev.process/status status}
+        containment
+        (assoc :seon.dev.process.containment/generation
+               (:seon.dev.process.containment/generation containment))
+        (= :seon.dev.process.status/drained status)
+        (assoc :seon.dev.process/terminal
+               (normalized-terminal containment terminal))))))
+
+(defn restore-admin-absence!
+  "Observe exact restore-admin absence without mutating containment."
+  {:malli/schema
+   [:=> [:cat restore-admin-absence-request-schema]
+    restore-admin-absence-result-schema]}
+  [{:seon.dev.process/keys [configuration lock-timeout-ms] :as request}]
+  (validate! restore-admin-absence-request-schema request
+             "The restore-admin absence request is invalid."
+             :seon.dev.process/explanation)
+  (try
+    (state/with-lock
+     configuration :restore-admin lock-timeout-ms
+     #(restore-admin-record-status
+       (read-process configuration restore-admin-id)))
+    (catch Throwable _
+      {:seon.dev.process/id restore-admin-id
+       :seon.dev.process/absent? false
+       :seon.dev.process/status
+       :seon.dev.process.status/containment-uncertain})))
 
 (defn contained-one-shot!
   "Run or resume the one generation-bound restore-admin process."
