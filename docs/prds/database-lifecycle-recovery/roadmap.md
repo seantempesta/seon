@@ -257,15 +257,18 @@ The independent Slice-5 completion-fact owner is complete in
 thirteen architecture payload attributes, with only the core/config overlay
 digests optional. After schemas are preinstalled, one root/boot-provenanced,
 whole-head-fenced `seon.db/transact!` records the fact and proves the exact
-entity plus identity-datom transaction on read-back. An equal retry while that
-transaction remains head performs no write; a same-id value conflict fails
-closed. Focused fresh-Datahike proof passes 5 tests and 31 assertions. A later-
-head retry also fails closed for now: the public CLJS database surface cannot
-yet resolve the completion transaction to its original containing commit, and
-substituting the later head would be false evidence. The ordered integration
-slice must add one canonical writer-backed transaction-coordinate resolver,
-complete the Proximum-then-Datahike secondary force contract, then compose
-forced-main result,
+entity plus identity-datom transaction on read-back. An equal retry performs no
+write; a same-id value conflict fails closed. Focused fresh-Datahike proof
+passes 5 tests and 31 assertions. Commit `b2461d64` closes the later-head retry
+gap through one canonical writer-backed transaction-coordinate resolver: it
+walks raw immutable main-branch commit ancestry, skips force commits that
+repeat a parent's transaction id, requires exactly one original ordinary
+commit, and returns that original coordinate without another transaction.
+Branch aliases, abandoned or unavailable history, attachment mismatch,
+absence, and ambiguity fail closed. Resolver and replay proof passes 6 tests/33
+assertions, Transit proof passes 10/32, and the CLJS restore retry passes 6/34
+with zero warnings. The ordered integration slice must complete the Proximum-
+then-Datahike secondary force contract, then compose forced-main result,
 blob proof, cold reconstruction, completion, exact admission, readiness, and
 intent deletion. It must not add shadow completion metadata or another restore
 state machine.
@@ -284,8 +287,9 @@ closed, exact intent/admin/blob validation, preserve-only reconstruction,
 `admit-prepared!` of that same generation. Autonomy and readiness start last;
 intent deletion remains the external operator's durable inverse. No restore-
 only boot path, callback, status, or ambient intent-file reread is permitted.
-The transaction-coordinate resolver and Proximum force-secondary repair remain
-hard predecessors of the destructive integrated gate.
+The transaction-coordinate resolver is complete at `b2461d64`; the Proximum
+force-secondary repair remains the hard predecessor of the destructive
+integrated gate.
 
 The first operator-only restore slice now owns one closed immutable intent and
 derives its next command from the current main coordinate, an explicitly
