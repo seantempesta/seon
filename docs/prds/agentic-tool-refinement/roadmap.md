@@ -448,6 +448,13 @@ paragraph.
   23,201 prompt tokens over three turns. Parser recovery stayed bounded. The
   run is deliberately **not accepted** because Inspect reported dirty Seon
   source and the direct task invocation bypassed run-level admission.
+- Failed eval diagnostics now retain the database-configured 1,500-character
+  component cap under no flag, `full?`, escape-clipping, or both. Successful
+  authored/citable content keeps its existing release behavior. A 100K
+  malformed line is windowed around its exact parse coordinate before render;
+  raw replies and error evidence remain separate and exact. This closes the
+  context-amplification defect exposed while using small-model failures as
+  diagnostic signal without changing the core-error escalation dial.
 
 ### Current blockers
 

@@ -161,6 +161,16 @@ an unlimited number of individually small stubs is still unbounded context.
 Likewise, transcript clipping is a final guardrail; functions return bounded,
 structured, drillable values and errors before rendering.
 
+Failure diagnostics retain the database-configured eval cap at every display
+site. `:seon.render/full?` and the agent's escape-clipping policy may release
+successful authored source and stdout, while `full?` may release a successful
+citable result; neither flag releases failed source, captured stdout, Malli
+diagnostics, read errors, or runtime errors. Large parse failures window the
+source excerpt around the exact reported coordinate before the transcript
+renderer applies that same cap. Exact raw replies and error evidence remain
+separate database/blob facts, so bounded agent context never weakens forensic
+capture.
+
 ## The REPL mode is a datom — and it teaches its own grammar
 
 `:seon.config/repl-mode` selects `:batch` or `:stream` as database state.

@@ -36,6 +36,7 @@
     [seon.agent.ctx.transcript :as transcript]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.eval :as seval]
     [seon.render :as render]
     [seon.schema :as schema]
     [seon.test-seed :as test-seed]))
@@ -1111,6 +1112,111 @@
         ":seon.render/full? on the eval row renders the result WHOLE")
     (is (str/includes? whole big)
         "the full value is present uncut in the row")))
+
+(def ^:private eval-render-flag-cases
+  [{:seon.render/full? false
+    :seon.agent.ctx/escape-clipping? false}
+   {:seon.render/full? true
+    :seon.agent.ctx/escape-clipping? false}
+   {:seon.render/full? false
+    :seon.agent.ctx/escape-clipping? true}
+   {:seon.render/full? true
+    :seon.agent.ctx/escape-clipping? true}])
+
+(defn- render-flag-cases [row]
+  (mapv #(ctx/format-eval-row (merge row %)) eval-render-flag-cases))
+
+(deftest failed-eval-hard-cap-ignores-full-and-escape-flags
+  (let [source (str (apply str (repeat 100000 "s")) "SOURCE-TAIL")
+        stdout (str (apply str (repeat 100000 "o")) "STDOUT-TAIL")
+        error  (seval/render-error-string
+                 {:seon.error/message
+                  (str "ordinary runtime failure "
+                       (apply str (repeat 100000 "e"))
+                       "ERROR-TAIL")
+                  :seon.error/stack "STACK-SECRET"})
+        rows   (render-flag-cases
+                 {:seon.eval/id "EvFailedCap"
+                  :seon.eval/ok? false
+                  :seon.eval/source source
+                  :seon.eval/output stdout
+                  :seon.eval/error error})]
+    (is (apply = rows)
+        "no/full/escape/both render byte-identical bounded failure rows")
+    (is (str/includes? (first rows) "TRUNCATED"))
+    (is (not (str/includes? error "STACK-SECRET"))
+        "the agent-facing failure value drops the raw runtime stack")
+    (doseq [tail ["SOURCE-TAIL" "STDOUT-TAIL" "ERROR-TAIL"]]
+      (is (not (str/includes? (first rows) tail))
+          (str tail " remains behind the hard cap")))))
+
+(deftest failed-malli-diagnostic-hard-cap-ignores-render-flags
+  (let [got-tail "MALLI-GOT-TAIL"
+        error-data
+        (pr-str
+          {:seon.error/kind :seon.error.kind/malli-instrument-input
+           :seon.error.malli/fn-sym 'my.probe/f
+           :seon.error.malli/expected ":int"
+           :seon.error.malli/got-edn
+           (str (apply str (repeat 100000 "m")) got-tail)
+           :seon.error.malli/got-type "string"})
+        rows (render-flag-cases
+               {:seon.eval/id "EvMalliCap"
+                :seon.eval/ok? false
+                :seon.eval/source "(my.probe/f bad)"
+                :seon.eval/error-data error-data})]
+    (is (apply = rows)
+        "Malli diagnostics cannot be released by either rendering flag")
+    (is (str/includes? (first rows) "malli/instrument-input"))
+    (is (str/includes? (first rows) "TRUNCATED"))
+    (is (not (str/includes? (first rows) got-tail)))))
+
+(deftest large-read-error-is-windowed-before-the-transcript-hard-cap
+  (let [source (str (apply str (repeat 100000 "x")) "]")
+        raw    "Unmatched delimiter: ] [at line 1, column 100001]"
+        error  (seval/read-error-message raw source)
+        lines  (str/split-lines error)
+        rows   (render-flag-cases
+                 {:seon.eval/id "EvReadCap"
+                  :seon.eval/ok? false
+                  :seon.eval/source source
+                  :seon.eval/error error})]
+    (is (< (count error) (* 3 (config/eval-render-cap)))
+        "the producer never duplicates the whole malformed line + caret")
+    (is (every? #(<= (count %) (+ 4 (config/eval-render-cap))) lines)
+        "every producer line is independently bounded")
+    (is (str/includes? error "line 1, col 100001")
+        "the exact parse coordinate survives excerpting")
+    (is (apply = rows)
+        "read diagnostics stay byte-identical under no/full/escape/both")
+    (is (str/includes? (first rows) "TRUNCATED"))))
+
+(deftest successful-eval-retains-authored-full-and-escape-semantics
+  (let [source-tail "SUCCESS-SOURCE-TAIL"
+        stdout-tail "SUCCESS-STDOUT-TAIL"
+        result-tail "SUCCESS-RESULT-TAIL"
+        source (str (apply str (repeat 100000 "s")) source-tail)
+        stdout (str (apply str (repeat 100000 "o")) stdout-tail)
+        result (str (apply str (repeat 20000 "r")) result-tail)
+        [bounded full escape both]
+        (render-flag-cases
+          {:seon.eval/id "EvSuccessFlags"
+           :seon.eval/ok? true
+           :seon.eval/source source
+           :seon.eval/output stdout
+           :seon.eval/result-edn (pr-str result)})]
+    (is (every? #(not (str/includes? bounded %))
+                [source-tail stdout-tail result-tail]))
+    (is (every? #(str/includes? full %)
+                [source-tail stdout-tail result-tail])
+        "full? still releases every successful authored/citable component")
+    (is (every? #(str/includes? escape %)
+                [source-tail stdout-tail])
+        "escape-clipping still releases successful authored source/stdout")
+    (is (not (str/includes? escape result-tail))
+        "escape-clipping does not release the independently aged result")
+    (is (every? #(str/includes? both %)
+                [source-tail stdout-tail result-tail]))))
 
 (deftest eval-row-clip-marker-is-tokens-not-chars
   ;; The `(N of M)` handle marker must speak the SAME unit as the inline

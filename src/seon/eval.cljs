@@ -2444,15 +2444,41 @@
             ;; rewrite-clj line/col are 1-based.
             src-ln  (when (and (pos? line-no) (<= line-no (count lines)))
                       (nth lines (dec line-no)))
-            caret   (when (and src-ln (pos? col-no))
-                      (str (apply str (repeat (dec col-no) " ")) "^"))
+            ;; A malformed one-line reply can be hundreds of thousands of
+            ;; characters. Window the excerpt around the reported column with
+            ;; the SAME configured eval-display bound the transcript uses, so
+            ;; constructing the guidance never duplicates the full line into
+            ;; both source + caret strings. The exact coordinate remains in
+            ;; the headline; raw reply bytes remain in the turn blob.
+            limit   (config/eval-render-cap)
+            caret-i (when (and src-ln (pos? col-no))
+                      (min (count src-ln) (dec col-no)))
+            window-size (max 1 (- limit 2))
+            start   (when src-ln
+                      (-> (or caret-i 0)
+                          (- (quot window-size 2))
+                          (max 0)
+                          (min (max 0 (- (count src-ln) window-size)))))
+            end     (when src-ln (min (count src-ln) (+ start window-size)))
+            prefix? (and start (pos? start))
+            suffix? (and end (< end (count src-ln)))
+            excerpt (when src-ln
+                      (str (when prefix? "…")
+                           (subs src-ln start end)
+                           (when suffix? "…")))
+            caret   (when (some? caret-i)
+                      (str (apply str
+                                  (repeat (+ (- caret-i start)
+                                             (if prefix? 1 0))
+                                          " "))
+                           "^"))
             ;; The leading token of the raw message ("Unmatched delimiter:
             ;; ]") — keep it; it names the closer.
             headline (-> (str raw)
                          (str/replace #"\s*\[at line \d+,?\s*column \d+\]\s*$" ""))]
         (str "READ ERROR — this form did not parse, so it DEFINED NOTHING.\n"
              headline " at line " line-no ", col " col-no ":\n"
-             (when src-ln (str "    " src-ln "\n"))
+             (when excerpt (str "    " excerpt "\n"))
              (when caret  (str "    " caret "\n"))
              instruction)))))
 
@@ -3295,8 +3321,11 @@
         (assoc ::retained-value (::value result)))
       (do
         (js/console.error "[seon.eval/record-eval!] tx FAILED:"
-                          (-> primary :seon.db/error :seon.error/message)
-                          "— source:" source)
+                          (cap-edn
+                            (-> primary :seon.db/error :seon.error/message)
+                            (config/eval-render-cap))
+                          "— source:"
+                          (cap-edn source (config/eval-render-cap)))
         (if (and (seq tee) (not (unsafe-to-reallocate? primary)))
           (let [fallback (await (allocate-record! []))]
             (if (:seon.db/ok? fallback)

@@ -141,9 +141,9 @@
 
 ;; ============================================================
 ;; Config-driven agent-init — agent-level composer attrs.
-;;   ::escape-clipping? (#43) — WIRED (CP-5): default true frees the small
-;;                     eval source/stdout/error + message caps (render full);
-;;                     the result-body decay still governs the citable value.
+;;   ::escape-clipping? (#43) — WIRED (CP-5): default true frees successful
+;;                     eval source/stdout caps; failed diagnostics retain the
+;;                     hard eval cap and result decay governs citable values.
 ;;   ::cache-breakpoint — WIRED (render-context-ai reads it; replaces the
 ;;                        stable-priority-max const).
 ;;
@@ -158,7 +158,7 @@
 
 (schema/register! ::capability   [:enum :grep :exec :http])          ; PARKED — register-once enum
 (schema/register! ::capabilities [:vector {:default [:grep]} ::capability]) ; PARKED (phase-2 enforcement)
-(schema/register! ::escape-clipping? [:boolean {:default true}])     ; #43 — WIRED (CP-5): frees the small caps
+(schema/register! ::escape-clipping? [:boolean {:default true}])     ; #43 — successful authored small components
 (schema/register! ::cache-breakpoint [:int {:default 20 :min 0}])    ; WIRED — priority ≤ this = cached prefix
 
 ;; ============================================================
@@ -427,19 +427,13 @@
     (catch :default _ "UTC")))
 
 (defn escape-clipping?
-  "Whether this agent's blocks render FULL past the per-value cap.
+  "Whether this agent's successful authored eval components render in full.
 
    The per-value clip
    cap (#43) — READ off the agent entity's `:seon.agent.ctx/escape-clipping?`
    datom (reactive config-on-record, CP-3 move 8), the sole source. Absent →
-   the schema default `true`.
-
-   CP-3 PARITY NOTE: this reader is the wired READ; today blocks are NOT
-   escape-clipped (the per-value clip gate [[clip-or-full]] still fires for
-   unflagged content). Routing this flag into `:seon.render/full?` is the #43
-   INTENDED behavior change — deferred to CP-5, which only has to flip the
-   DEFAULT/config, since the read already lands here. So CP-3 keeps bytes
-   identical: the value is read, not yet applied at the clip."
+   the schema default `true`. Failed source, stdout, and diagnostics never use
+   this escape; they retain the configured hard eval cap."
   {:malli/schema [:function
                   [:=> [:cat] :boolean]
                   [:=> [:catn [::agent-id [:maybe :string]]] :boolean]]}
@@ -836,17 +830,17 @@
          ;; → false → byte-identical to today's clipped render.
          full?       (boolean full?)
          ;; CP-5 escape-clipping (#43, owner: "render the blocks in full"):
-         ;; when the agent's `:seon.agent.ctx/escape-clipping?` is on (default
-         ;; true), the SMALL fixed caps (echoed source, stdout, error bodies at
-         ;; `eval-render-cap` 1500) are freed — those components render WHOLE.
-         ;; The citable RESULT BODY is NOT freed here: it stays governed by the
-         ;; age-decay `result-body-cap` (the "start larger, shrink over time"
-         ;; safety net that keeps full rendering bounded), so escape-clipping
-         ;; and the decay are COMPLEMENTARY, not in conflict.
+         ;; successful authored source/stdout may render whole when the agent's
+         ;; `:seon.agent.ctx/escape-clipping?` is on (default true). A FAILED
+         ;; eval is diagnostic data, not authored content: its source, stdout,
+         ;; Malli body, and ordinary/read/runtime error ALWAYS keep the hard
+         ;; `eval-render-cap`, under both escape-clipping and
+         ;; `:seon.render/full?`. The citable successful RESULT BODY remains
+         ;; governed independently by the age-decay `result-body-cap`.
          escape?     (if (some? escape-override)
                        (boolean escape-override)
                        (escape-clipping?))
-         small-full? (or full? escape?)
+         small-full? (and ok? (or full? escape?))
          ;; Echoed source + stdout + error/guidance bodies cap at the
          ;; smaller `eval-render-cap` (1500); only the citable result
          ;; body below gets its age-decayed `result-body-cap`.
