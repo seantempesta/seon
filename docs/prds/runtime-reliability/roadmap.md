@@ -123,10 +123,10 @@ contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | Review returned slices, preserve the full ledger, and integrate branch launch/runtime ownership without outrunning its lifecycle proofs | Integration and design judgment cannot be delegated; typed native create/release/delete is settled at `f34b7bda` + `989b6ed3` | Review non-autonomous launch, then branch-qualified replica/operator ownership and restart/crash proof |
-| Database lifecycle | **Non-autonomous launch/stop under integration:** make attachment distinct from activation, publish an honest runtime phase, suppress replay writes during validation, and unwind feeds, agents, replica, and Datahike ownership through one retryable stop | Native create/adopt/release/delete, honest cleanup, bounded equality, and physical-fork deletion are green at 76 tests/456 assertions; the current slice consumes those settled writer-local contracts | Review and falsify this slice, then implement branch-qualified replica/operator launch, restart/crash recovery, restore/undo, and multi-form proof in that order |
-| Reactive render units | **Reverse candidate index in progress:** ordinary and global headers now share demanded render units at `1ec738e2` + `498d4245`; derive conservative candidates from captured database read requests before cutting over another consumer | The kernel, live debug consumer, both headers, cross-agent sharing, and same-subscription framing are settled; the candidate index is internal to that one lifecycle and assumes no unsettled lifecycle contract | Prove unrelated writes invoke zero unit work and unknown reads widen conservatively, then continue bounded agent/root consumers or hand the settled unit/cursor contract to unit 3 |
-| Agent runtime correctness | **Canonical seed/projection proof in progress:** async instrumentation is integrated at `d809866c`; fresh isolated evidence falsified the process-global-leak premise and instead shows the test seed retains `my.*` function specs while filtering out their referenced `:seon.schema` declarations | The Promise-aware fixed/variadic/multi-arity owner is green at 77 assertions; the active lane is proving a dependency-closed committed projection before choosing the smallest fixture or lifecycle repair | Prove the current-ns test from a dependency-closed canonical seed and attachment-scoped projection lifecycle, then assign complete-form/process-death containment and consume the settled boundary in unit 7 |
+| Top-level integration | Review returned slices, preserve the full ledger, and integrate branch-qualified launch ownership without outrunning lifecycle proof | Integration and design judgment cannot be delegated; typed native create/release/delete, attachment-scoped projection, and non-autonomous pod lifecycle are settled at `f34b7bda`, `81129753`, and `e0bd14b6` | Review the branch-qualified replica/operator audit, then integrate its smallest launch-descriptor slice and restart/crash proof |
+| Database lifecycle | **Branch-qualified replica/operator audit in progress:** reconcile one launch descriptor across writer attachment, replica feed, pod capability, supervisor, MCP ports, and blob storage view | Non-autonomous start/stop now reconstructs without autonomous writes and retries every ordered inverse; the combined lifecycle/admission/instrumentation gate is green at 38 tests/316 assertions | Implement the reviewed branch-qualified launch slice, then restart/crash recovery, restore/undo, and multi-form proof in that order |
+| Reactive/database views | **Cursor Slice A in progress; reverse index dependency recorded:** implement the pure opaque coordinate-bound cursor in `seon.db.browser` while the render-unit index waits on a public Datahike query-dependency projection | Both headers and the shared unit lifecycle are settled; cursor hardening consumes only the complete coordinate and bounded Datahike indexes, so it does not assume the blocked reactive index | Prove bounded current/history cursor semantics, then cut the existing `/data` adapter; separately coordinate the Datahike projection API before implementing reverse selection |
+| Agent runtime correctness | **Provider-cancellation audit in progress:** attachment-scoped projection is integrated at `81129753`, and unit 6 now grounds cancellation through the existing provider attempt/adapters without adding a retry owner | Dependency-complete fixtures and A→B publication/detach are green at 14 tests/77 assertions; async contracts remain green at 77 assertions | Review and implement the smallest cancellation slice, then settle plan evidence/authority and hard process-death containment before unit 7 trials |
 
 The ordered top-level sequence is therefore:
 
@@ -146,11 +146,12 @@ The ordered top-level sequence is therefore:
 On every lane return, the top-level agent first reviews source and proof,
 updates the owning roadmap, and integrates or rejects the result. It then fills
 the free slot with the earliest dependency-ready row above. The immediate
-refills are branch-qualified replica/operator ownership after non-autonomous
-launch, bounded agent/root consumers after the conservative reverse candidate
-index, and complete-form/process-death containment after dependency-closed
-projection proof. Findings that do not block those exits are recorded with
-evidence and acceptance criteria instead of becoming an unplanned detour.
+refills are branch-qualified replica/operator ownership after the launch audit,
+the existing `/data` adapter after opaque cursor Slice A, the coordinated
+Datahike projection API before reverse unit selection, and provider cancellation
+before plan authority and hard process-death containment. Findings that do not
+block those exits are recorded with evidence and acceptance criteria instead of
+becoming an unplanned detour.
 
 The portfolio is a rolling queue, not a batch barrier. A lane may begin its
 documented refill as soon as its owned paths are committed and the top-level
