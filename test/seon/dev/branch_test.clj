@@ -425,6 +425,9 @@
          ::branch/http-port 0
          ::branch/http-port-file http-port-file
          ::branch/writable-blob-dir writable-blob-dir}
+        stop-request
+        {::branch/configuration source-config
+         ::branch/lifecycle-path lifecycle-path}
         handler
         (fn [message]
           (swap! requests conj message)
@@ -583,6 +586,82 @@
                    #{process/pod-id}]
                   [:ensure process/pod-id]]
                  @process-events)))
+        (reset! target-head advanced-head)
+        (let [current (branch/current-descriptor! stop-request)]
+          (is (= advanced-head
+                 (get-in current
+                         [::launch/database ::coordinate/coordinate])))
+          (is (= fork-head
+                 (get-in (state/read-edn lifecycle-path)
+                         [::branch/launch-descriptor ::launch/database
+                          ::coordinate/coordinate]))
+              "fresh observation does not rewrite the immutable launch cut"))
+        (reset! branch-exists? false)
+        (is (thrown-with-msg?
+             Exception #"rejected a branch lifecycle request"
+             (branch/current-descriptor! stop-request)))
+        (reset! branch-exists? true)
+        (reset! target-head (assoc advanced-head ::coordinate/branch :stale))
+        (is (thrown-with-msg?
+             Exception #"different target attachment"
+             (branch/current-descriptor! stop-request)))
+        (reset! target-head advanced-head)
+
+        (doseq [path [process-dir log-dir writable-blob-dir]]
+          (fs/create-dirs path))
+        (spit http-port-file "7891\n")
+        (reset! process-events [])
+        (reset! stop-classification :seon.dev.process.classification/clean)
+        (let [stopped (branch/stop! stop-request)]
+          (is (= :seon.dev.branch.state/open (::branch/desired-state stopped)))
+          (is (= :seon.dev.branch.phase/branch-retained (::branch/phase stopped)))
+          (is (= :seon.dev.process.classification/clean
+                 (get-in stopped
+                         [::branch/stop-result
+                          :seon.dev.process/classification])))
+          (is @branch-exists?)
+          (is (fs/exists? lifecycle-path))
+          (is (every? fs/exists?
+                      [process-dir log-dir http-port-file writable-blob-dir])
+              "retained stop preserves pod files and branch blob evidence")
+          (is (= stopped (branch/stop! stop-request))
+              "a proved retained stop is an idempotent durable observation")
+          (is (= [[:clean-or-force
+                   :seon.dev.process.operation/retained-restart
+                   #{process/pod-id}]]
+                 @process-events)
+              "an idempotent stop does not invoke containment again"))
+
+        (reset! stop-classification :seon.dev.process.classification/absent)
+        (branch/open! request)
+        (reset! process-events [])
+        (reset! stop-classification
+                :seon.dev.process.classification/containment-uncertain)
+        (is (thrown-with-msg?
+             Exception #"retained pod containment uncertainty"
+             (branch/stop! stop-request)))
+        (let [retained (state/read-edn lifecycle-path)]
+          (is (= :seon.dev.branch.state/open (::branch/desired-state retained)))
+          (is (= :seon.dev.branch.phase/stopping-pod (::branch/phase retained)))
+          (is (nil? (::branch/stop-result retained)))
+          (is @branch-exists?))
+        (reset! stop-classification :seon.dev.process.classification/forced)
+        (let [recovered (branch/stop! stop-request)]
+          (is (= :seon.dev.branch.phase/branch-retained
+                 (::branch/phase recovered)))
+          (is (= :seon.dev.process.classification/forced
+                 (get-in recovered
+                         [::branch/stop-result
+                          :seon.dev.process/classification])))
+          (is @branch-exists?)
+          (is (fs/exists? lifecycle-path))
+          (is (every? fs/exists?
+                      [process-dir log-dir http-port-file writable-blob-dir]))
+          (is (= recovered (branch/stop! stop-request))
+              "a proved forced stop also returns its durable evidence")
+          (is (= 2 (count @process-events))
+              "forced-stop retry does not invoke containment a third time"))
+        (reset! target-head fork-head)
         (reset! process-events [])
         (reset! stop-classification
                 :seon.dev.process.classification/containment-uncertain)
@@ -729,6 +808,9 @@
           (is (= [protocol/ensure-database-operation
                   protocol/create-branch-operation
                   protocol/create-branch-operation
+                  protocol/ensure-database-operation
+                  protocol/ensure-database-operation
+                  protocol/ensure-database-operation
                   protocol/ensure-database-operation
                   protocol/release-database-operation
                   protocol/delete-branch-operation]

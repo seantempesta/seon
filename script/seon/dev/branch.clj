@@ -548,6 +548,23 @@
   [configuration record]
   (config/select-launch-descriptor configuration (::launch-descriptor record)))
 
+(defn- retained-open-record!
+  [configuration lifecycle-path]
+  (let [record
+        (or (read-record! lifecycle-path)
+            (throw (ex-info "No retained branch intent exists."
+                            {::lifecycle-path lifecycle-path})))
+        retained-request
+        (merge {::configuration configuration
+                ::lifecycle-path lifecycle-path}
+               (::target-private record))
+        record (require-retained-request! record retained-request configuration)]
+    (when-not (::launch-descriptor record)
+      (throw (ex-info "The retained branch has no published attachment."
+                      {::lifecycle-path lifecycle-path
+                       ::phase (::phase record)})))
+    record))
+
 (defn- process-absent!
   [configuration]
   (when (or (process/read-process configuration process/pod-id)
@@ -604,6 +621,27 @@
                       {:seon.dev.branch/target-database target-database
                        :seon.dev.branch/ensure-response ensured})))
     ensured))
+
+(defn- current-target-descriptor!
+  [record]
+  (let [descriptor (::launch-descriptor record)
+        target-database (::launch/database descriptor)
+        ensure-request
+        (protocol/ensure-database-request
+         (cond-> {::protocol/database-name
+                  (::protocol/database-name target-database)
+                  ::protocol/backend (::protocol/backend target-database)
+                  ::coordinate/attachment
+                  (::coordinate/attachment target-database)}
+           (::protocol/database-path target-database)
+           (assoc ::protocol/database-path
+                  (::protocol/database-path target-database))))
+        ensured
+        (require-target-ensure!
+         target-database (writer-call! descriptor ensure-request))]
+    (launch/with-coordinate
+     {::launch/descriptor descriptor
+      ::coordinate/coordinate (::coordinate/coordinate ensured)})))
 
 (defn- require-target-response!
   [schema-key target-database response]
@@ -767,6 +805,53 @@
        (state/with-lock
         configuration :branch 30000
         #(open-under-lock! request acquire-owned! nil false))))))
+
+(defn current-descriptor!
+  "Read the retained branch's exact current descriptor from the writer."
+  {:malli/schema [:=> [:cat ::close-request] ::launch/descriptor]}
+  [request]
+  (validate! ::close-request request
+             "The retained branch descriptor request is invalid.")
+  (let [configuration (::configuration request)
+        lifecycle-path (::lifecycle-path request)]
+    (state/with-lock
+     configuration :branch 30000
+     #(current-target-descriptor!
+       (retained-open-record! configuration lifecycle-path)))))
+
+(defn stop!
+  "Stop one retained pod while preserving its open branch and record."
+  {:malli/schema [:=> [:cat ::close-request] ::record]}
+  [request]
+  (validate! ::close-request request
+             "The retained branch stop request is invalid.")
+  (let [configuration (::configuration request)
+        lifecycle-path (::lifecycle-path request)]
+    (state/with-lock
+     configuration :branch 30000
+     (fn []
+       (let [record (retained-open-record! configuration lifecycle-path)
+             target-config (branch-configuration configuration record)
+             stopped
+             (cond
+               (and (= :seon.dev.branch.phase/branch-retained (::phase record))
+                    (::stop-result record))
+               record
+
+               (and (= :seon.dev.branch.phase/stopping-pod (::phase record))
+                    (::stop-result record))
+               record
+
+               :else
+               (stop-retained-pod!
+                lifecycle-path record target-config
+                :seon.dev.process.operation/retained-restart))]
+         (process-absent! target-config)
+         (if (= :seon.dev.branch.phase/branch-retained (::phase stopped))
+           stopped
+           (write-record!
+            lifecycle-path
+            (assoc stopped ::phase :seon.dev.branch.phase/branch-retained))))))))
 
 (defn close!
   "Stop one retained branch pod and delete its exact current native branch."
