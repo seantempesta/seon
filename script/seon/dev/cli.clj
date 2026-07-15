@@ -9,6 +9,8 @@
             [seon.dev.config :as config]
             [seon.dev.changed-test :as changed-test]
             [seon.dev.process :as process]
+            [seon.dev.restore :as restore]
+            [seon.dev.restore-state :as restore-state]
             [seon.dev.skills :as skills]
             [seon.dev.state :as state]
             [seon.launch :as launch]))
@@ -50,6 +52,34 @@
          :seon.dev.target/database-path
          (str (fs/path (:seon.dev.config/cluster-dir configuration) "db"))})))
   configuration)
+
+(defn- retained-restore-intent [configuration]
+  (let [cluster-dir (:seon.dev.config/cluster-dir configuration)
+        path (restore/intent-path cluster-dir)]
+    (when (fs/regular-file? path)
+      (restore-state/read-intent! cluster-dir))))
+
+(defn- require-no-retained-restore! [configuration operation]
+  (when-let [intent (retained-restore-intent configuration)]
+    (throw
+     (ex-info
+      "A retained restore intent must converge or be explicitly aborted first."
+      {:seon.dev.cli/operation operation
+       :seon.dev.restore/intent-id (:seon.dev.restore/intent-id intent)})))
+  configuration)
+
+(defn- resume-retained-restore! [configuration]
+  (when-let [intent (retained-restore-intent configuration)]
+    (let [target-branch
+          (get-in intent [:seon.dev.restore/selected-target-descriptor
+                          :seon.launch/database
+                          :seon.db.coordinate/coordinate
+                          :seon.db.coordinate/branch])]
+      (println (str "▶ resume retained restore "
+                    (:seon.dev.restore/intent-id intent)))
+      (restore-state/resume!
+       {::restore-state/configuration configuration
+        ::restore-state/branch-name (name target-branch)}))))
 
 (defn- reconcile-development!
   ([configuration] (reconcile-development! configuration []))
@@ -214,8 +244,12 @@
   (let [{:seon.dev.start/keys [open? config-path]}
         (parse-start-options arguments)
         configuration (select-config configuration config-path)
-        target (state/with-lock configuration :stack 1800000
-                                #(reconcile-development! configuration))]
+        target
+        (state/with-lock
+         configuration :stack 1800000
+         #(do
+            (resume-retained-restore! configuration)
+            (reconcile-development! configuration)))]
     (print-ready! target open?)))
 
 (defn- down! [configuration arguments]
@@ -225,8 +259,10 @@
   (let [result
         (state/with-lock
          configuration :stack 300000
-         #(stop-development! configuration
-                             :seon.dev.process.operation/down))]
+         #(do
+            (require-no-retained-restore! configuration :down)
+            (stop-development! configuration
+                               :seon.dev.process.operation/down)))]
     (println "○ Seon is down")
     (print-stop-evidence! "  " result)))
 
@@ -237,10 +273,14 @@
         target
         (state/with-lock
           configuration :stack 1800000
-          #(let [stopped
-                 (stop-development!
-                  configuration :seon.dev.process.operation/restart)]
-             (reconcile-development! configuration [stopped])))]
+          #(if (retained-restore-intent configuration)
+             (do
+               (resume-retained-restore! configuration)
+               (reconcile-development! configuration))
+             (let [stopped
+                   (stop-development!
+                    configuration :seon.dev.process.operation/restart)]
+               (reconcile-development! configuration [stopped]))))]
     (print-ready! target open?)))
 
 (defn- apply-live-config!
@@ -292,14 +332,20 @@
     (throw (ex-info "Use `config apply <manifest-path>`."
                     {:seon.dev.cli/arguments (vec arguments)})))
   (let [configuration (select-config configuration (second arguments))
-        result (state/with-lock configuration :stack 300000
-                                #(apply-live-config! configuration))]
+        result
+        (state/with-lock
+         configuration :stack 300000
+         #(do
+            (require-no-retained-restore! configuration :config-apply)
+            (apply-live-config! configuration)))]
     (print-config-result! result)))
 
 (defn- status-value [configuration]
-  (let [foreign (process/ownership-conflicts configuration)]
-    (cond->
-     (if-let [legacy (legacy-database-path configuration)]
+  (let [foreign (process/ownership-conflicts configuration)
+        retained (retained-restore-intent configuration)
+        base
+        (cond->
+         (if-let [legacy (legacy-database-path configuration)]
       (cond->
         {:seon.dev.target/name :seon.dev.target/development
          :seon.dev.target/status :seon.dev.target.status/ownership-conflict
@@ -325,8 +371,19 @@
          (str (fs/path (:seon.dev.config/cluster-dir configuration) "db"))
          :seon.dev.target/failure :seon.dev.target.failure/missing-artifact}
         (seq foreign) (assoc :seon.dev.target/foreign-processes foreign))))
-     (:seon.dev.config/launch-descriptor configuration)
-     (assoc :seon.dev.target/branches (branch/inventory configuration)))))
+         (:seon.dev.config/launch-descriptor configuration)
+         (assoc :seon.dev.target/branches (branch/inventory configuration)))]
+    (cond-> base
+      retained
+      (assoc :seon.dev.target/status
+             (if (= :seon.dev.target.status/ownership-conflict
+                    (:seon.dev.target/status base))
+               :seon.dev.target.status/ownership-conflict
+               :seon.dev.target.status/degraded)
+             :seon.dev.target/maintenance
+             :seon.dev.target.maintenance/restore
+             :seon.dev.restore/intent-id
+             (::restore/intent-id retained)))))
 
 (defn- status! [configuration arguments]
   (let [edn? (= ["--edn"] (vec arguments))]
@@ -402,7 +459,11 @@
           (throw (ex-info "`branch open` takes one name."
                           {:seon.dev.cli/arguments (vec arguments)})))
         (print-branch-result!
-         (branch/open! (branch-request configuration name))))
+         (state/with-lock
+          configuration :stack 1800000
+          #(do
+             (require-no-retained-restore! configuration :branch-open)
+             (branch/open! (branch-request configuration name))))))
 
       "restart"
       (do
@@ -410,7 +471,11 @@
           (throw (ex-info "`branch restart` takes one name."
                           {:seon.dev.cli/arguments (vec arguments)})))
         (print-branch-result!
-         (branch/restart! (branch-request configuration name))))
+         (state/with-lock
+          configuration :stack 1800000
+          #(do
+             (require-no-retained-restore! configuration :branch-restart)
+             (branch/restart! (branch-request configuration name))))))
 
       "close"
       (do
@@ -419,9 +484,13 @@
                           {:seon.dev.cli/arguments (vec arguments)})))
         (let [open-request (branch-request configuration name)]
           (print-branch-result!
-           (branch/close! {::branch/configuration configuration
-                           ::branch/lifecycle-path
-                           (::branch/lifecycle-path open-request)}))))
+           (state/with-lock
+            configuration :stack 1800000
+            #(do
+               (require-no-retained-restore! configuration :branch-close)
+               (branch/close! {::branch/configuration configuration
+                               ::branch/lifecycle-path
+                               (::branch/lifecycle-path open-request)}))))))
 
       "status"
       (let [edn? (= ["--edn"] (vec options))]
@@ -545,6 +614,7 @@
           (state/with-lock
            configuration :stack 1800000
            #(let [_ (assert-current-database-layout! configuration)
+                  _ (require-no-retained-restore! configuration :cluster-reset)
                   database
                   (fs/path (:seon.dev.config/cluster-dir configuration) "db")
                   stopped
@@ -559,10 +629,132 @@
         (print-stop-evidence! "  " result))
       (println (str "● cluster " cluster-name " reset and ready")))))
 
+(def ^:private restore-plan-byte-limit 1048576)
+
+(defn- read-restore-plan! [path]
+  (when-not (and (fs/regular-file? path)
+                 (<= (fs/size path) restore-plan-byte-limit))
+    (throw (ex-info "The restore plan file is absent or exceeds its byte bound."
+                    {:seon.dev.cli/path path
+                     :seon.dev.cli/max-bytes restore-plan-byte-limit})))
+  (edn/read-string (slurp path)))
+
+(defn- read-console-confirmation! [expected]
+  (if-let [console (System/console)]
+    (let [actual (.readLine console "%s" (to-array [(str expected "\n> ")]))]
+      (when-not (= expected actual)
+        (throw (ex-info "The typed restore confirmation did not match exactly."
+                        {:seon.error/kind
+                         :seon.dev.restore.error/confirmation-mismatch})))
+      actual)
+    (throw
+     (ex-info
+      "Interactive restore requires a real console; use --plan and --apply-plan for automation."
+      {:seon.error/kind :seon.dev.restore.error/console-required}))))
+
+(defn- print-restore-result! [branch-name result]
+  (println (str "● restored retained branch " branch-name))
+  (println (str "  intent: " (:seon.dev.restore/intent-id result)))
+  (println (str "  coordinate: "
+                (pr-str (::restore-state/restored-coordinate result))))
+  (println (str "  admin: "
+                (name (::restore-state/admin-outcome result)))))
+
+(defn- apply-restore-plan!
+  [configuration branch-name plan confirmation]
+  (state/with-lock
+   configuration :stack 1800000
+   #(restore-state/apply!
+     {::restore-state/configuration configuration
+      ::restore-state/branch-name branch-name
+      ::restore/plan plan
+      ::restore/confirmation-text confirmation})))
+
+(defn- abort-restore!
+  [configuration branch-name confirmation]
+  (state/with-lock
+   configuration :stack 1800000
+   #(restore-state/abort!
+     {::restore-state/configuration configuration
+      ::restore-state/branch-name branch-name
+      ::restore/confirmation-text confirmation})))
+
+(defn- retained-abort-confirmation [configuration]
+  (let [intent
+        (restore-state/read-intent!
+         (:seon.dev.config/cluster-dir configuration))]
+    (restore/confirmation-text
+     {::restore/intent intent
+      ::restore/confirmation-action
+      :seon.dev.restore.confirmation/abort})))
+
+(defn- restore-cluster! [configuration arguments]
+  (let [branch-name (first arguments)
+        options (vec (rest arguments))]
+    (when-not branch-name
+      (throw (ex-info "`cluster restore` requires one retained branch name."
+                      {:seon.dev.cli/arguments (vec arguments)})))
+    (cond
+      (= ["--plan" "--edn"] options)
+      (prn
+       (state/with-lock
+        configuration :stack 1800000
+        #(restore-state/plan!
+          {::restore-state/configuration configuration
+           ::restore-state/branch-name branch-name})))
+
+      (empty? options)
+      (let [plan
+            (state/with-lock
+             configuration :stack 1800000
+             #(restore-state/plan!
+               {::restore-state/configuration configuration
+                ::restore-state/branch-name branch-name}))
+            confirmation (::restore/confirmation-text plan)]
+        (println (pr-str plan))
+        (read-console-confirmation! confirmation)
+        (print-restore-result!
+         branch-name
+         (apply-restore-plan!
+          configuration branch-name plan confirmation)))
+
+      (and (= 4 (count options))
+           (= "--apply-plan" (nth options 0))
+           (= "--confirm" (nth options 2)))
+      (let [plan (read-restore-plan! (nth options 1))
+            confirmation (nth options 3)]
+        (print-restore-result!
+         branch-name
+         (apply-restore-plan!
+          configuration branch-name plan confirmation)))
+
+      (= ["--abort"] options)
+      (let [confirmation
+            (state/with-lock
+             configuration :stack 1800000
+             #(retained-abort-confirmation configuration))]
+        (read-console-confirmation! confirmation)
+        (println
+         (pr-str (abort-restore!
+                  configuration branch-name confirmation))))
+
+      (and (= 3 (count options))
+           (= ["--abort" "--confirm"] (subvec options 0 2)))
+      (println
+       (pr-str (abort-restore!
+                configuration branch-name (nth options 2))))
+
+      :else
+      (throw
+       (ex-info
+        "Choose interactive restore, --plan --edn, --apply-plan PATH --confirm TEXT, or --abort --confirm TEXT."
+        {:seon.dev.cli/arguments (vec arguments)})))))
+
 (defn- cluster! [configuration arguments]
   (case (first arguments)
     "reset" (reset-cluster! configuration (rest arguments))
-    (throw (ex-info "The supported cluster transition is `cluster reset <name>`."
+    "restore" (restore-cluster! configuration (rest arguments))
+    (throw (ex-info "Choose `cluster reset <name>` or `cluster restore <retained-branch>`."
                     {:seon.dev.cli/arguments (vec arguments)}))))
 
 (defn- pod-test-arguments [arguments]
@@ -645,7 +837,8 @@
          "  test changed --path PATH...  run affected tests from the warm graph\n"
          "  test pod|database|operator|all [selector]\n"
          "  skills sync|check        generate or verify tool-facing skill adapters\n"
-         "  cluster reset <name>     drain and reset one named database\n")))
+         "  cluster reset <name>     drain and reset one named database\n"
+         "  cluster restore <branch> restore one exact retained branch head\n")))
 
 (defn -main
   "Run one Seon operator command."

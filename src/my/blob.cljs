@@ -130,25 +130,6 @@
    [::target-coordinate ::target-coordinate]])
 
 (schema/register!
-  ::retained-observation-success
-  [:map {:closed true}
-   [::ok? [:= true]]
-   [::target-coordinate ::target-coordinate]
-   [::reachable-hash-digest ::reachable-hash-digest]
-   [::hash-count ::hash-count]])
-
-(schema/register!
-  ::retained-observation-failure
-  [:map {:closed true}
-   [::ok? [:= false]]
-   [::target-coordinate ::target-coordinate]
-   [::error ::error]])
-
-(schema/register!
-  ::retained-observation-result
-  [:or ::retained-observation-success ::retained-observation-failure])
-
-(schema/register!
   ::intent-materialization-request
   [:map {:closed true}
    [::target-database ::target-database]

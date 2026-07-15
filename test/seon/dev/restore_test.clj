@@ -214,7 +214,7 @@
      :seon.db.restore/target-branch (::restore/prepared-target-branch intent)}))
 
 (defn- observation
-  [_intent main heads parents completions transaction-ts]
+  [_intent main heads parents completions completion-index]
   {::restore/main-coordinate main
    ::restore/main-parent-commit-ids parents
    ::restore/branch-heads
@@ -222,7 +222,14 @@
    ::restore/completed-intent-ids
    (set (map :seon.db.restore/id completions))
    ::restore/completion-facts completions
-   ::restore/completion-transaction-ts transaction-ts})
+   ::restore/completion-coordinates
+   (into {}
+         (map (fn [[completion-id value]]
+                [completion-id
+                 (if (int? value)
+                   (assoc main ::coordinate/t value)
+                   value)]))
+         completion-index)})
 
 (defn- command [intent observation]
   (::restore/command
@@ -770,7 +777,7 @@
       (fn []
         (is (= :seon.db.restore-admin.outcome/applied
                (::restore-state/admin-outcome
-                (restore-state/restore!
+                (restore-state/resume!
                  {::restore-state/configuration configuration
                   ::restore-state/branch-name "target"}))))))
     (is (= [:prepare-observation-writer
@@ -781,6 +788,7 @@
             [:require :seon.dev.restore.command/create-undo]
             [:create :undo]
             [:create :target]
+            :stop-retained
             :stop-main
             :admin
             :start-writer
@@ -793,7 +801,7 @@
             [:delete "/admin.edn"]
             [:delete (str (:seon.dev.config/cluster-dir configuration)
                           "/lifecycle/restore-blobs-" intent-id ".edn")]
-            [:ensure [process/writer-id process/pod-id]]]
+            [:ensure [process/watcher-id process/writer-id process/pod-id]]]
            @calls))))
 
 (deftest stale-managed-records-drain-before-restore-replacement
@@ -838,12 +846,171 @@
           prepared-target-branch (::restore/prepared-target-coordinate intent)}
          ::protocol/completed-restore-ids #{intent-id}
          ::protocol/restore-completions [completion]
-         ::protocol/restore-completion-transaction-ts {intent-id 102}}
+         ::protocol/restore-completion-coordinates {intent-id current}}
         observation (#'restore-state/lifecycle->observation intent lifecycle)]
     (is (m/validate ::restore/observation observation))
     (is (= #{forced-commit} (::restore/main-parent-commit-ids observation)))
-    (is (= {intent-id 102}
-           (::restore/completion-transaction-ts observation)))))
+    (is (= {intent-id current}
+           (::restore/completion-coordinates observation)))))
+
+(deftest completion-admission-requires-the-exact-commit-coordinate
+  (let [intent (derived-intent)
+        completion (completion-fact intent forced-commit)
+        current (assoc source
+                       ::coordinate/commit-id completion-commit
+                       ::coordinate/t 102)
+        other-force-at-same-t
+        (assoc current ::coordinate/commit-id (random-uuid))
+        observed
+        (observation
+         intent current
+         {undo-branch (::restore/undo-coordinate intent)
+          prepared-target-branch (::restore/prepared-target-coordinate intent)}
+         #{forced-commit} [completion]
+         {intent-id other-force-at-same-t})]
+    (is (= :seon.dev.restore.command/diagnose-divergence
+           (command intent observed)))))
+
+(deftest plan-is-read-only-and-returns-one-exact-confirmation
+  (let [configuration (config/load! (System/getProperty "user.dir"))
+        intent (derived-intent)
+        calls (atom [])
+        plan
+        (with-redefs-fn
+          {#'restore-state/retained-intent (constantly nil)
+           #'restore-state/require-manifest! (constantly artifact-identity)
+           #'artifact/current-output-digests (constantly artifact-identity)
+           #'restore-state/derive-intent!
+           (fn [& _]
+             (swap! calls conj :derive)
+             intent)
+           #'restore-state/publish-intent!
+           (fn [& _]
+             (throw (ex-info "plan attempted publication" {})))}
+          #(restore-state/plan!
+            {::restore-state/configuration configuration
+             ::restore-state/branch-name "target"}))]
+    (is (= [:derive] @calls))
+    (is (= intent (::restore/intent plan)))
+    (is (= (restore/confirmation-text
+            {::restore/intent intent
+             ::restore/confirmation-action
+             :seon.dev.restore.confirmation/apply})
+           (::restore/confirmation-text plan)))))
+
+(deftest apply-rejects-wrong-or-stale-authority-before-publication
+  (let [configuration (config/load! (System/getProperty "user.dir"))
+        intent (derived-intent)
+        plan {::restore/intent intent
+              ::restore/confirmation-text
+              (restore/confirmation-text
+               {::restore/intent intent
+                ::restore/confirmation-action
+                :seon.dev.restore.confirmation/apply})}
+        calls (atom [])
+        base-redefs
+        {#'restore-state/require-selected-branch! (fn [_ _ value] value)
+         #'restore-state/retained-intent (constantly nil)
+         #'restore-state/require-manifest! (constantly artifact-identity)
+         #'artifact/current-output-digests (constantly artifact-identity)
+         #'restore-state/publish-intent!
+         (fn [request]
+           (swap! calls conj [:publish (::restore/intent request)]))
+         #'restore-state/resume!
+         (fn [_]
+           (swap! calls conj :resume)
+           {::restore/intent-id intent-id
+            ::restore-state/restored-coordinate source
+            ::restore-state/admin-outcome
+            :seon.db.restore-admin.outcome/applied
+            ::restore-state/transitions []})}]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"does not exactly authorize"
+         (restore-state/apply!
+          {::restore-state/configuration configuration
+           ::restore-state/branch-name "target"
+           ::restore/plan plan
+           ::restore/confirmation-text "wrong"})))
+    (is (empty? @calls))
+    (let [stale (restore/derive-intent
+                 (assoc (intent-request)
+                        ::restore/reachable-hash-digest other-digest))]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"became stale"
+           (with-redefs-fn
+             (assoc base-redefs #'restore-state/derive-intent!
+                    (fn [& _] stale))
+             #(restore-state/apply!
+               {::restore-state/configuration configuration
+                ::restore-state/branch-name "target"
+                ::restore/plan plan
+                ::restore/confirmation-text
+                (::restore/confirmation-text plan)})))))
+    (is (empty? @calls))
+    (with-redefs-fn
+      (assoc base-redefs #'restore-state/derive-intent!
+             (fn [& _] intent))
+      #(restore-state/apply!
+        {::restore-state/configuration configuration
+         ::restore-state/branch-name "target"
+         ::restore/plan plan
+         ::restore/confirmation-text (::restore/confirmation-text plan)}))
+    (is (= [[:publish intent] :resume] @calls))))
+
+(deftest abort-deletes-only-preparation-free-authority-and-intent-last
+  (let [configuration (config/load! (System/getProperty "user.dir"))
+        intent (derived-intent)
+        confirmation
+        (restore/confirmation-text
+         {::restore/intent intent
+          ::restore/confirmation-action
+          :seon.dev.restore.confirmation/abort})
+        safe-observation (observation intent source {} #{} [] {})
+        calls (atom [])
+        invocation {::restore/admin-result-path "/admin.edn"}
+        redefs
+        {#'restore-state/retained-intent (constantly intent)
+         #'restore-state/require-selected-branch! (fn [_ _ value] value)
+         #'restore-state/admin-invocation (fn [& _] invocation)
+         #'restore-state/require-no-admin-result!
+         (fn [_] (swap! calls conj :admin-result-absent))
+         #'restore-state/require-admin-absent!
+         (fn [_] (swap! calls conj :admin-process-absent))
+         #'restore-state/matching-restore-pod-record (constantly nil)
+         #'restore-state/observe-restore! (fn [& _] safe-observation)
+         #'state/delete-edn! (fn [path] (swap! calls conj [:delete path]))}
+        result
+        (with-redefs-fn
+          redefs
+          #(restore-state/abort!
+            {::restore-state/configuration configuration
+             ::restore-state/branch-name "target"
+             ::restore/confirmation-text confirmation}))]
+    (is (true? (::restore-state/aborted? result)))
+    (is (= [[:delete (str (:seon.dev.config/cluster-dir configuration)
+                          "/lifecycle/restore-blobs-" intent-id ".edn")]
+            :admin-result-absent
+            :admin-process-absent
+            [:delete (restore/intent-path
+                      (:seon.dev.config/cluster-dir configuration))]]
+           (subvec (vec @calls) 2)))
+    (reset! calls [])
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"forbids abort"
+         (with-redefs-fn
+           (assoc redefs #'restore-state/observe-restore!
+                  (fn [& _]
+                    (observation intent source
+                                 {undo-branch (::restore/undo-coordinate intent)}
+                                 #{} [] {})))
+           #(restore-state/abort!
+             {::restore-state/configuration configuration
+              ::restore-state/branch-name "target"
+              ::restore/confirmation-text confirmation}))))
+    (is (not-any? #(and (vector? %) (= :delete (first %))) @calls))))
 
 (deftest admin-result-is-associated-with-the-exact-retained-intent
   (let [intent (derived-intent)

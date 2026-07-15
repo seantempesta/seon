@@ -50,6 +50,41 @@
         (is (not= digest (artifact/current-client-digest config))))
       (finally (fs/delete-tree directory)))))
 
+(deftest current-output-identity-rehashes-every-runtime-component
+  (let [component (atom {:writer (apply str (repeat 64 "a"))
+                         :client (apply str (repeat 64 "b"))
+                         :bootstrap (apply str (repeat 64 "c"))
+                         :css (apply str (repeat 64 "d"))})
+        config {:seon.dev.config/root "/repo"
+                :seon.dev.config/artifact-flavor
+                :seon.dev.artifact.flavor/default
+                :seon.dev.config/client-build-id "client"
+                :seon.dev.config/client-output "/repo/out/client/main.js"
+                :seon.dev.config/shadow-cache-root "/repo/.shadow-cljs"}
+        observe
+        #(with-redefs-fn
+           {#'artifact/current-writer-digest (fn [_] (:writer @component))
+            #'artifact/current-client-digest (fn [_] (:client @component))
+            #'artifact/maintained-dependencies (constantly [])
+            #'artifact/digest-paths
+            (fn [_ paths]
+              (case (first paths)
+                "out/bootstrap" (:bootstrap @component)
+                "resources/public/css/output.css" (:css @component)))}
+           (fn [] (artifact/current-output-digests config)))]
+    (let [initial (observe)]
+      (is (= (select-keys @component [:writer :client :bootstrap :css])
+             {:writer (:seon.dev.artifact/writer-digest initial)
+              :client (:seon.dev.artifact/client-digest initial)
+              :bootstrap (:seon.dev.artifact/bootstrap-digest initial)
+              :css (:seon.dev.artifact/css-digest initial)}))
+      (swap! component assoc :css (apply str (repeat 64 "e")))
+      (let [changed (observe)]
+        (is (not= (:seon.dev.artifact/css-digest initial)
+                  (:seon.dev.artifact/css-digest changed)))
+        (is (not= (:seon.dev.artifact/application-digest initial)
+                  (:seon.dev.artifact/application-digest changed)))))))
+
 (deftest cljs-build-command-is-structured
   (let [plain {:seon.dev.config/environment {}}
         extended {:seon.dev.config/environment

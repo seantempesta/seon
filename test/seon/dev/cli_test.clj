@@ -7,6 +7,8 @@
             [seon.dev.branch :as branch]
             [seon.dev.cli :as cli]
             [seon.dev.process :as process]
+            [seon.dev.restore :as restore]
+            [seon.dev.restore-state :as restore-state]
             [seon.dev.state :as state]))
 
 (defn- stop-result
@@ -383,6 +385,26 @@
            #(#'cli/restart! configuration []))))
     (is (false? @reconciled?))))
 
+(deftest restart-resumes-retained-restore-before-ordinary-reconcile
+  (let [configuration {:seon.dev.config/cluster-name "default"}
+        calls (atom [])
+        intent {:seon.dev.restore/intent-id "retained01"}]
+    (with-redefs-fn
+      {#'cli/select-config (fn [selected _] selected)
+       #'state/with-lock (fn [_ _ _ transition] (transition))
+       #'cli/retained-restore-intent (constantly intent)
+       #'cli/resume-retained-restore!
+       (fn [selected] (swap! calls conj [:resume selected]))
+       #'cli/stop-development!
+       (fn [& _] (swap! calls conj :unexpected-stop))
+       #'cli/reconcile-development!
+       (fn [selected]
+         (swap! calls conj [:reconcile selected])
+         {:seon.dev.target/status :seon.dev.target.status/ready})
+       #'cli/print-ready! (fn [& _] nil)}
+      (fn [] (#'cli/restart! configuration [])))
+    (is (= [[:resume configuration] [:reconcile configuration]] @calls))))
+
 (deftest branch-commands-call-only-the-retained-lifecycle-owner
   (let [configuration {:seon.dev.config/launch-descriptor :source}
         open-request {::branch/configuration configuration
@@ -450,6 +472,25 @@
         (is (= retained
                (:seon.dev.target/branches
                 (#'cli/status-value configuration))))))))
+
+(deftest retained-restore-makes-ordinary-status-explicitly-degraded
+  (let [configuration {:seon.dev.config/launch-descriptor :source
+                       :seon.dev.config/cluster-dir "/cluster"
+                       :seon.dev.config/cluster-name "default"}
+        intent-id "restoretest01"]
+    (with-redefs-fn
+      {#'process/ownership-conflicts (constantly [])
+       #'artifact/read-manifest (constantly nil)
+       #'branch/inventory (constantly [])
+       #'cli/retained-restore-intent
+       (constantly {::restore/intent-id intent-id})}
+      (fn []
+        (let [status (#'cli/status-value configuration)]
+          (is (= :seon.dev.target.status/degraded
+                 (:seon.dev.target/status status)))
+          (is (= :seon.dev.target.maintenance/restore
+                 (:seon.dev.target/maintenance status)))
+          (is (= intent-id (:seon.dev.restore/intent-id status))))))))
 
 (deftest config-is-implicit-only-for-a-fresh-database
   (let [root (fs/create-temp-dir {:prefix "seon-cli-config-"})
@@ -610,3 +651,174 @@
       (is (fs/exists? (fs/path database "old.ksv")))
       (is (false? @reconciled?))
       (finally (fs/delete-tree root {:force true})))))
+
+(deftest cluster-restore-runs-under-the-stack-lock
+  (let [configuration {:seon.dev.config/cluster-name "default"}
+        calls (atom [])
+        plan {::restore/confirmation-text "EXACT CONFIRMATION"}
+        result
+        {:seon.dev.restore/intent-id "restoretest01"
+         ::restore-state/restored-coordinate
+         {:seon.db.coordinate/database-id (random-uuid)
+          :seon.db.coordinate/branch :db
+          :seon.db.coordinate/commit-id (random-uuid)
+          :seon.db.coordinate/t 42}
+         ::restore-state/admin-outcome
+         :seon.db.restore-admin.outcome/applied
+         ::restore-state/transitions []}]
+    (with-redefs-fn
+      {#'state/with-lock
+       (fn [selected owner timeout transition]
+         (swap! calls conj [:lock selected owner timeout])
+         (transition))
+       #'restore-state/plan!
+       (fn [request]
+         (swap! calls conj [:plan request])
+         plan)
+       #'cli/read-console-confirmation!
+       (fn [expected]
+         (swap! calls conj [:console expected])
+         expected)
+       #'restore-state/apply!
+       (fn [request]
+         (swap! calls conj [:apply request])
+         result)}
+      (fn []
+        (is (str/includes?
+             (with-out-str (#'cli/restore-cluster! configuration ["target"]))
+             "restored retained branch target"))))
+    (is (= [[:lock configuration :stack 1800000]
+            [:plan {::restore-state/configuration configuration
+                    ::restore-state/branch-name "target"}]
+            [:console "EXACT CONFIRMATION"]
+            [:lock configuration :stack 1800000]
+            [:apply {::restore-state/configuration configuration
+                     ::restore-state/branch-name "target"
+                     ::restore/plan plan
+                     ::restore/confirmation-text "EXACT CONFIRMATION"}]]
+           @calls))
+    (is (thrown? Exception
+                 (#'cli/restore-cluster! configuration [])))
+    (is (thrown? Exception
+                 (#'cli/restore-cluster! configuration ["a" "b"])))))
+
+(deftest restore-cli-separates-plan-apply-and-abort-authority
+  (let [root (fs/create-temp-dir {:prefix "seon-cli-restore-plan-"})
+        plan-path (str (fs/path root "plan.edn"))
+        configuration {:seon.dev.config/cluster-name "default"}
+        plan {::restore/confirmation-text "EXACT"}
+        result
+        {:seon.dev.restore/intent-id "restoretest01"
+         ::restore-state/restored-coordinate
+         {:seon.db.coordinate/database-id (random-uuid)
+          :seon.db.coordinate/branch :db
+          :seon.db.coordinate/commit-id (random-uuid)
+          :seon.db.coordinate/t 42}
+         ::restore-state/admin-outcome
+         :seon.db.restore-admin.outcome/applied
+         ::restore-state/transitions []}
+        calls (atom [])]
+    (try
+      (spit plan-path (pr-str plan))
+      (with-redefs-fn
+        {#'state/with-lock (fn [_ _ _ transition] (transition))
+         #'restore-state/plan! (constantly plan)}
+        (fn []
+          (is (= (str (pr-str plan) "\n")
+                 (with-out-str
+                   (#'cli/restore-cluster!
+                    configuration ["target" "--plan" "--edn"]))))))
+      (with-redefs-fn
+        {#'state/with-lock (fn [_ _ _ transition] (transition))
+         #'restore-state/plan! (constantly plan)
+         #'cli/read-console-confirmation!
+         (fn [_]
+           (throw (ex-info "no console" {})))
+         #'restore-state/apply!
+         (fn [_] (swap! calls conj :unexpected-apply))}
+        (fn []
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo
+               #"no console"
+               (#'cli/restore-cluster! configuration ["target"])))))
+      (is (empty? @calls))
+      (with-redefs-fn
+        {#'state/with-lock (fn [_ _ _ transition] (transition))
+         #'restore-state/apply!
+         (fn [request]
+           (swap! calls conj [:apply request])
+           result)}
+        (fn []
+          (#'cli/restore-cluster!
+           configuration
+           ["target" "--apply-plan" plan-path "--confirm" "EXACT"])))
+      (is (= [[:apply {::restore-state/configuration configuration
+                       ::restore-state/branch-name "target"
+                       ::restore/plan plan
+                       ::restore/confirmation-text "EXACT"}]]
+             @calls))
+      (reset! calls [])
+      (with-redefs-fn
+        {#'state/with-lock (fn [_ _ _ transition] (transition))
+         #'restore-state/abort!
+         (fn [request]
+           (swap! calls conj [:abort request])
+           {:seon.dev.restore/intent-id "restoretest01"
+            :seon.dev.restore/plan-digest (apply str (repeat 64 "a"))
+            ::restore-state/aborted? true
+            ::restore-state/prior-main-coordinate
+            (::restore-state/restored-coordinate result)
+            ::restore-state/current-main-coordinate
+            (::restore-state/restored-coordinate result)
+            ::restore-state/selected-target-coordinate
+            (assoc (::restore-state/restored-coordinate result)
+                   :seon.db.coordinate/branch :seon.branch/target)})}
+        (fn []
+          (#'cli/restore-cluster!
+           configuration ["target" "--abort" "--confirm" "ABORT"])))
+      (is (= [[:abort {::restore-state/configuration configuration
+                       ::restore-state/branch-name "target"
+                       ::restore/confirmation-text "ABORT"}]]
+             @calls))
+      (finally (fs/delete-tree root {:force true})))))
+
+(deftest mutating-branch-commands-share-the-restore-stack-lock
+  (let [configuration {:cluster :default}
+        calls (atom [])
+        request {::branch/lifecycle-path "/branch.edn"}]
+    (with-redefs-fn
+      {#'cli/branch-request (fn [_ _] request)
+       #'state/with-lock
+       (fn [selected owner timeout transition]
+         (swap! calls conj [:lock selected owner timeout])
+         (transition))
+       #'branch/open! (fn [_] (swap! calls conj :open) {})
+       #'branch/restart! (fn [_] (swap! calls conj :restart) {})
+       #'branch/close! (fn [_] (swap! calls conj :close) {})
+       #'cli/print-branch-result! (constantly nil)}
+      (fn []
+        (#'cli/branch! configuration ["open" "proof"])
+        (#'cli/branch! configuration ["restart" "proof"])
+        (#'cli/branch! configuration ["close" "proof"])))
+    (is (= [[:lock configuration :stack 1800000] :open
+            [:lock configuration :stack 1800000] :restart
+            [:lock configuration :stack 1800000] :close]
+           @calls))))
+
+(deftest retained-restore-blocks-competing-branch-mutation
+  (let [configuration {:cluster :default}
+        called? (atom false)]
+    (is
+     (thrown-with-msg?
+      clojure.lang.ExceptionInfo
+      #"retained restore"
+      (with-redefs-fn
+        {#'cli/branch-request
+         (fn [_ _] {::branch/lifecycle-path "/branch.edn"})
+         #'state/with-lock (fn [_ _ _ transition] (transition))
+         #'cli/require-no-retained-restore!
+         (fn [& _]
+           (throw (ex-info "retained restore blocks mutation" {})))
+         #'branch/open! (fn [_] (reset! called? true))}
+        #(#'cli/branch! configuration ["open" "proof"]))))
+    (is (false? @called?))))

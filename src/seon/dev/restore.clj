@@ -40,8 +40,8 @@
 (schema/register! ::main-parent-commit-ids [:set :uuid])
 (schema/register! ::completed-intent-ids [:set ::intent-id])
 (schema/register! ::completion-facts [:vector ::db.restore/completion])
-(schema/register! ::completion-transaction-ts
-                  [:map-of ::intent-id ::coordinate/t])
+(schema/register! ::completion-coordinates
+                  [:map-of ::intent-id ::coordinate/coordinate])
 (schema/register! ::selected-completion-id ::intent-id)
 (schema/register! ::selected-undo-branch :keyword)
 (schema/register!
@@ -155,7 +155,7 @@
   [::branch-heads ::branch-heads]
   [::completed-intent-ids ::completed-intent-ids]
   [::completion-facts ::completion-facts]
-  [::completion-transaction-ts ::completion-transaction-ts]])
+  [::completion-coordinates ::completion-coordinates]])
 
 (schema/register!
  ::admin-invocation-request
@@ -661,7 +661,7 @@
         completions (::completion-facts observation)
         observed-completion-ids (completion-ids completions)
         completed-intent-ids (::completed-intent-ids observation)
-        completion-transaction-ts (::completion-transaction-ts observation)
+        completion-coordinates (::completion-coordinates observation)
         expected-roster (::expected-branch-roster intent)
         undo-branch (::undo-branch intent)
         prepared-target-branch (::prepared-target-branch intent)
@@ -694,11 +694,11 @@
              (count (set observed-completion-ids)))
           (= completed-intent-ids (set observed-completion-ids))
           (= completed-intent-ids
-             (set (keys completion-transaction-ts))))
-     "Restore completion facts and transaction evidence disagree."
+             (set (keys completion-coordinates))))
+     "Restore completion facts and exact coordinate evidence disagree."
      {::completed-intent-ids completed-intent-ids
       :seon.dev.restore/completion-fact-ids observed-completion-ids
-      ::completion-transaction-ts completion-transaction-ts})
+      ::completion-coordinates completion-coordinates})
     (require-consistency!
      (every?
       (fn [completion]
@@ -709,11 +709,16 @@
      {::intent-id (::intent-id intent)
       ::completion-facts completions})
     (require-consistency!
-     (every? #(<= % (::coordinate/t main))
-             (vals completion-transaction-ts))
-     "A restore completion transaction is later than the observed main head."
+     (every? (fn [completion-coordinate]
+               (and (= database-id
+                       (::coordinate/database-id completion-coordinate))
+                    (= :db (::coordinate/branch completion-coordinate))
+                    (<= (::coordinate/t completion-coordinate)
+                        (::coordinate/t main))))
+             (vals completion-coordinates))
+     "A restore completion coordinate crosses main or is later than its head."
      {::main-coordinate main
-      ::completion-transaction-ts completion-transaction-ts})
+      ::completion-coordinates completion-coordinates})
     observation))
 
 (defn next-command
@@ -744,8 +749,8 @@
         (filterv #(= intent-id (::db.restore/id %))
                  (::completion-facts observation))
         completion (first matching-completions)
-        completion-transaction-t
-        (get (::completion-transaction-ts observation) intent-id)
+        completion-coordinate
+        (get (::completion-coordinates observation) intent-id)
         completion-forced-commit-id
         (::db.restore/forced-commit-id completion)
         completion-current?
@@ -753,7 +758,7 @@
              (= completion
                 (expected-completion-with-forced-commit
                  intent completion-forced-commit-id))
-             (= completion-transaction-t (::coordinate/t main))
+             (= completion-coordinate main)
              (= #{completion-forced-commit-id} main-parents))
         reserved-heads-converged?
         (and (= undo undo-head) (= target target-head))

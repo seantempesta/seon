@@ -6,6 +6,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [malli.core :as m]
+            [seon.dev.config :as config]
             [seon.dev.state :as state])
   (:import [java.nio.charset StandardCharsets]
            [java.security MessageDigest]
@@ -246,6 +247,56 @@
         (with-open [stream (.getInputStream jar entry)]
           (update-stream! digest stream))))
     (bytes->hex (.digest digest))))
+
+(defn current-writer-digest
+  "Read the canonical semantic digest of the writer artifact on disk."
+  {:malli/schema
+   [:=> [:cat config/configuration-schema] [:re #"[0-9a-f]{64}"]]}
+  [config]
+  (let [path (:seon.dev.config/writer-output config)]
+    (when-not (fs/regular-file? path)
+      (throw (ex-info "The canonical writer artifact is absent."
+                      {:seon.dev.artifact/path path})))
+    (digest-jar path)))
+
+(def current-output-digests-schema
+  [:map {:closed true}
+   [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/bootstrap-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
+
+(defn current-output-digests
+  "Hash every output that contributes to the application artifact identity."
+  {:malli/schema
+   [:=> [:cat config/configuration-schema] current-output-digests-schema]}
+  [config]
+  (let [root (:seon.dev.config/root config)
+        writer-digest (current-writer-digest config)
+        maintained-dependencies (maintained-dependencies root)
+        client-digest (current-client-digest config)
+        bootstrap-digest (digest-paths root ["out/bootstrap"])
+        css-digest (digest-paths root ["resources/public/css/output.css"])
+        application-digest
+        (digest-values ["flavor" (:seon.dev.config/artifact-flavor config)
+                        "client-build-id"
+                        (:seon.dev.config/client-build-id config)
+                        "client-output"
+                        (:seon.dev.config/client-output config)
+                        "shadow-cache-root"
+                        (:seon.dev.config/shadow-cache-root config)
+                        "writer" writer-digest
+                        "maintained-dependencies"
+                        (pr-str maintained-dependencies)
+                        "client" client-digest
+                        "bootstrap" bootstrap-digest
+                        "css" css-digest])]
+    {:seon.dev.artifact/writer-digest writer-digest
+     :seon.dev.artifact/client-digest client-digest
+     :seon.dev.artifact/bootstrap-digest bootstrap-digest
+     :seon.dev.artifact/css-digest css-digest
+     :seon.dev.artifact/application-digest application-digest}))
 
 (defn read-manifest
   "Read the last atomically published artifact manifest."

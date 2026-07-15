@@ -17,6 +17,24 @@
 (schema/register! :my.blob/target-coordinate ::coordinate/coordinate)
 (schema/register! :my.blob/reachable-hash-digest :my.blob/digest)
 (schema/register! :my.blob/hash-count [:int {:min 0}])
+(schema/register! :my.blob/error [:string {:min 1 :max 1024}])
+(schema/register!
+ :my.blob/retained-observation-success
+ [:map {:closed true}
+  [:my.blob/ok? [:= true]]
+  [:my.blob/target-coordinate :my.blob/target-coordinate]
+  [:my.blob/reachable-hash-digest :my.blob/reachable-hash-digest]
+  [:my.blob/hash-count :my.blob/hash-count]])
+(schema/register!
+ :my.blob/retained-observation-failure
+ [:map {:closed true}
+  [:my.blob/ok? [:= false]]
+  [:my.blob/target-coordinate :my.blob/target-coordinate]
+  [:my.blob/error :my.blob/error]])
+(schema/register!
+ :my.blob/retained-observation-result
+ [:or :my.blob/retained-observation-success
+  :my.blob/retained-observation-failure])
 (schema/register! :my.blob/verified-count [:int {:min 0}])
 (schema/register! :my.blob/newly-materialized-count [:int {:min 0}])
 (schema/register! :my.blob/repaired-count [:int {:min 0}])
