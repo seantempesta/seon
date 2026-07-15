@@ -5,21 +5,22 @@ severity: friction
 tags: [issue, agent, component, database, research]
 ---
 
-# Inspect live callers use retired cluster lifecycle contracts
+# Give Inspect live callers an ownership-fenced cluster lease
 
 ## Problem
 
-Inspect's offline harness is current, but its live cluster callers still invoke
-removed `bin/seon`/`bin/acme` operations and connect through hard-coded ports.
-A green offline suite therefore does not prove that pod-backed CLJ, CLJS,
-typeahead, restart, or multi-cluster evaluation can run safely.
+Inspect's unsafe retired cluster operations are removed. Lease-dependent entry
+points now fail before subprocess or model work, and static consumers require
+explicit operator-derived coordinates. The operator still exposes no
+ownership-fenced per-sample lease, so a green offline suite cannot prove that
+isolated restart, cleanup, or multi-cluster evaluation can run safely.
 
 This blocks live Inspect and paid/model acceptance work. It does not block the
 offline Inspect suite or ordinary default-cluster development.
 
 ## Evidence
 
-The dependency/Shadow/MCP audit found:
+The original dependency/Shadow/MCP audit found:
 
 - `src-inspect-ai/src/seon_inspect/cluster.py` invokes removed `bench-bundle`,
   `cluster create`, `cluster destroy`, and per-pod restart operations, and
@@ -30,6 +31,13 @@ The dependency/Shadow/MCP audit found:
   cluster layout directly;
 - associated docstrings and runbooks describe the same retired supervisor,
   frozen-bundle, registry, and port behavior.
+
+Those bullets are historical evidence for the completed fail-closed migration,
+not current call paths. `cluster.py` now rejects lease-dependent create, fork,
+restart, release, and bundle preparation. `typeahead_corpus.py` requires
+explicit coordinates and an injected fenced restart. `bench_common.py`'s
+fixed port belongs to its container-internal SWE/terminal-bench topology, not
+the host per-sample lease.
 
 The 2026-07-14 lane-integration audit re-ran the complete offline Inspect
 suite: 314 tests passed with eight expected environment-gated skips in 7.86
@@ -151,10 +159,11 @@ live consumers after the current operator boundary exists.
 
 ## Owner
 
-`src-inspect-ai/src/seon_inspect/cluster.py`, `bench_common.py`,
-`typeahead_corpus.py`, and their tests/runbooks, consuming the one structured
-operator lifecycle/lease/artifact contract rather than owning a parallel
-supervisor.
+`seon.dev.config`, `seon.dev.state`, `seon.dev.process`, and `seon.dev.cli` own
+the operator lease. `src-inspect-ai/src/seon_inspect/cluster.py` is its direct
+lifecycle consumer. Planning consumes that cluster object; typeahead consumes
+explicit lease coordinates and a fenced restart; `bench_common.py` retains its
+separate container-internal topology.
 
 ## Acceptance
 

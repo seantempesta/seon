@@ -267,8 +267,10 @@ Acceptance evidence:
 ### R4 — One operator lease, then caller migration
 
 Operator owner: extend `bin/seon`'s current config, artifact manifest, process
-records, locks, and status projection. Inspect owner: consume the returned
-lease in `cluster.py`, `bench_common.py`, and `typeahead_corpus.py`.
+records, locks, and status projection. Inspect's direct lifecycle owner is
+`cluster.py`; planning consumes its cluster object. Typeahead consumes explicit
+lease coordinates and an injected fenced restart. `bench_common.py`'s fixed
+port is container-internal topology, not a host lease caller.
 
 The lease record contains a random unguessable owner token, lease id, allocated
 cluster/database identity, immutable artifact manifest and config digest,
@@ -277,6 +279,24 @@ cancellation state. Token-fenced create, status, restart, and idempotent release
 execute under the existing operator locks. Release stops only matching
 PID/start identities and preserves evidence coordinates before removing
 ephemeral files. A stale or foreign owner fails closed.
+
+The committed typed native-branch lifecycle is a prerequisite, not this lease.
+Its protocol fences create/release/delete by source and target coordinates,
+attachment, and expected heads inside the running writer registry. It has no
+lease id/token, request idempotency key, artifact/config/process identity,
+expiry, cancellation, status, or restart transition; its route is process-local
+and must be adopted after writer restart. The current operator still derives
+one target, uses fixed process record coordinates, and labels process records
+as the development target.
+
+The smallest independent operator slice is lease authority as data: closed
+request/record/result schemas, cryptographic owner token, a base-operator
+allocator lock, immutable artifact/config binding, collision-free per-lease
+coordinates, token-fenced status, and idempotent release state. It must not
+claim active cluster creation until the in-progress branch-qualified,
+non-autonomous pod launch descriptor lands. The later integration composes
+typed branch create, leased pod-only launch, status/restart, pod stop, and typed
+branch release/delete before migrating `cluster.py`.
 
 Do not let Python derive process directories, ports, Shadow caches, artifact
 paths, or database directories. `cluster.py` becomes a typed consumer of the

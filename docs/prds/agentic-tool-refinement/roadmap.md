@@ -192,11 +192,11 @@ coordinates, artifact/config identity, model identity, and classified result.
 
 P0 is split into two gates. P0a freezes membership, scorers, floors, and
 failure classification without running the suite. P0b is the first complete
-serial run and depends on the static-target portion of P1. The existing
-`endpoint="pod"` milestone and planning adapters are not runnable: they call
-`cluster.create_cluster`, whose current contract deliberately returns
-`ClusterLeaseUnavailable`. Do not treat task construction or a legacy Python
-row run as P0b evidence.
+serial run and depends on the static-target portion of P1. Native milestone
+tasks are runnable serially through the admitted static target. Planning and
+per-sample paths remain fail-closed at `ClusterLeaseUnavailable` until the
+operator lease exists. Do not treat task construction or a legacy Python row
+run as P0b evidence.
 
 ### P1 — Establish reproducible execution
 
