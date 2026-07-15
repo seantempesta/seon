@@ -428,11 +428,21 @@
 (defn- stop-retained-pods! [configuration]
   (mapv
    (fn [retained]
-     (branch/stop!
-      {::branch/configuration configuration
-       ::branch/lifecycle-path (::branch/lifecycle-path retained)}))
-   (filter #(= :seon.dev.branch.state/open (::branch/desired-state %))
-           (branch/inventory configuration))))
+     (if (= :seon.dev.branch.state/open (::branch/desired-state retained))
+       (branch/stop!
+        {::branch/configuration configuration
+         ::branch/lifecycle-path (::branch/lifecycle-path retained)})
+       (when-let [descriptor (::branch/launch-descriptor retained)]
+         ;; A closed lifecycle record should already own process absence. The
+         ;; exact descriptor still lets restore fail closed and drain a stale
+         ;; retained pod rather than trusting desired state as live evidence.
+         (process/clean-or-force!
+          {:seon.dev.process/configuration
+           (config/select-launch-descriptor configuration descriptor)
+           :seon.dev.process/operation
+           :seon.dev.process.operation/restore
+           :seon.dev.process/targets #{process/pod-id}}))))
+   (branch/inventory configuration)))
 
 (defn- stop-main-consumers! [configuration operation]
   (process/clean-or-force!

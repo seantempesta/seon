@@ -6,6 +6,7 @@
             [seon.db.protocol :as protocol]
             [seon.db.restore-admin :as restore-admin]
             [seon.dev.artifact :as artifact]
+            [seon.dev.branch :as branch]
             [seon.dev.config :as config]
             [seon.dev.process :as process]
             [seon.dev.restore :as restore]
@@ -828,6 +829,38 @@
     (is (= [[:clean #{process/writer-id process/pod-id}]
             [:ensure process/writer-id]
             [:ensure process/pod-id]]
+           @calls))))
+
+(deftest retained-pod-absence-does-not-trust-closed-desired-state
+  (let [configuration (config/load! (System/getProperty "user.dir"))
+        closed-descriptor target-descriptor
+        calls (atom [])]
+    (with-redefs-fn
+      {#'branch/inventory
+       (fn [_]
+         [{::branch/desired-state :seon.dev.branch.state/open
+           ::branch/lifecycle-path "/open.edn"}
+          {::branch/desired-state :seon.dev.branch.state/closed
+           ::branch/lifecycle-path "/closed.edn"
+           ::branch/launch-descriptor closed-descriptor}])
+       #'branch/stop!
+       (fn [request] (swap! calls conj [:branch-stop request]))
+       #'config/select-launch-descriptor
+       (fn [_ descriptor]
+         (swap! calls conj [:select descriptor])
+         :closed-config)
+       #'process/clean-or-force!
+       (fn [request] (swap! calls conj [:process-stop request]))}
+      #(#'restore-state/stop-retained-pods! configuration))
+    (is (= [[:branch-stop
+             {::branch/configuration configuration
+              ::branch/lifecycle-path "/open.edn"}]
+            [:select closed-descriptor]
+            [:process-stop
+             {:seon.dev.process/configuration :closed-config
+              :seon.dev.process/operation
+              :seon.dev.process.operation/restore
+              :seon.dev.process/targets #{process/pod-id}}]]
            @calls))))
 
 (deftest lifecycle-adapter-carries-completion-head-evidence
