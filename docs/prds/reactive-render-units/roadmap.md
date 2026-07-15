@@ -64,6 +64,15 @@ and releases on final view close. The remaining debug descriptors, whole-debug
 transition, agent/root page transition, and declared-attribute veto are still
 legacy and remain open work.
 
+The next bounded page consumer is now source-grounded in
+[[research/agent-header-next-consumer-cutover-audit-2026-07-15]]. The ordinary
+agent header is the smallest always-demanded stable-ID unit and can delete its
+page-specific captured-observation branch without taking on surface selection
+or root-layout work. Before that cut, the integration lane must land the
+same-subscription framing regression exposed by the first consumer: two views
+sharing both a normalized subscription and one unit receive one managed target
+per event, while both sockets still receive the event.
+
 ## Research evidence
 
 - [[research/reactive-render-source-audit-2026-07-14]] — current dependency
@@ -82,6 +91,9 @@ legacy and remain open work.
 - [[research/reactive-unit-database-browser-reconciliation-2026-07-14]] —
   current coordinate reconciliation, smallest dependency-ready unit slice,
   database-browser consumer boundary, and falsifiable proof.
+- [[research/agent-header-next-consumer-cutover-audit-2026-07-15]] — exact next
+  page consumer, demanded-unit first-paint seam, deletion map, overlap boundary,
+  and focused/live acceptance evidence.
 
 ## Ordered work
 
@@ -89,10 +101,13 @@ legacy and remain open work.
    observed render, replay-all transition, output suppression, detach, and final
    release. `seon.web.datastar` commits one real lazy debug HTML descriptor into
    that state in its existing registry and fans emitted bytes through the one
-   gzip transport. Next, use this proof to cut one agent/root consumer without
-   retaining its page-specific dependency authority.
-2. Move agent/root onto the same lifecycle; remove declared-attribute vetoes and
-   the page-specific dependency map rather than adding an interim routing path.
+   gzip transport. Land the same-subscription managed-element framing
+   regression discovered during integration review.
+2. Add one generic always-demanded attachment/first-paint seam and cut the
+   ordinary agent header onto it. Delete its declared-attribute veto, captured
+   observation keys, and transition branch in the same slice. Then continue
+   agent/root units onto the lifecycle and remove the remaining page-specific
+   dependency map rather than adding an interim routing path.
 3. Derive the conservative reverse candidate index from runtime-observed
    database read requests. Exact result equality remains the final authority.
 4. Normalize equivalent subscribers across tabs and prove single execution.
