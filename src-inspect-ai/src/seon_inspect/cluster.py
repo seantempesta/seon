@@ -264,15 +264,16 @@ def _sha256(value: Any, label: str) -> str:
     return value
 
 
-def _request_endpoint(value: Any) -> str:
+def _request_endpoint(value: Any, *, openai_compatible: bool) -> str:
     endpoint = _nonempty_string(value, "model server endpoint").rstrip("/")
     parsed = urlsplit(endpoint)
     if (parsed.scheme not in {"http", "https"} or not parsed.hostname
             or parsed.username is not None or parsed.password is not None
-            or parsed.query or parsed.fragment
-            or not parsed.path.endswith("/chat/completions")):
+            or parsed.query or parsed.fragment):
+        raise ValueError("model server endpoint must be a credential-free HTTP URL")
+    if openai_compatible and not parsed.path.endswith("/chat/completions"):
         raise ValueError(
-            "model server endpoint must be the credential-free chat-completions URL")
+            "local model endpoint must be the exact chat-completions URL")
     return endpoint
 
 
@@ -294,7 +295,8 @@ def validate_model_server_identity(identity: Any) -> dict[str, Any]:
     if identity["schema_version"] != 1:
         raise ValueError("unsupported model server identity schema")
     _nonempty_string(identity["implementation"], "model server implementation")
-    endpoint = _request_endpoint(identity["endpoint"])
+    endpoint = _request_endpoint(
+        identity["endpoint"], openai_compatible=mechanism != "externally-mutable")
 
     if mechanism != "externally-mutable":
         process = _closed_map(identity["process"], _MODEL_PROCESS_KEYS,

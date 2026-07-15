@@ -103,7 +103,9 @@ the pre-task admitted identity and its end recheck.
 The host snapshot is a closed, non-secret map with these semantic fields:
 
 - schema version and serving implementation;
-- exact credential-free chat-completions request endpoint;
+- exact credential-free request endpoint; local MLX/Ollama identities require
+  the full chat-completions URL while externally mutable diagnostics retain
+  their provider's actual HTTP path;
 - executable/module content digest and package versions;
 - managed PID and process start instant, plus a digest of the exact argument
   vector rather than an unbounded command string;

@@ -183,6 +183,7 @@ def _model_server_identity(mechanism="huggingface-snapshot"):
     if mechanism == "externally-mutable":
         identity.pop("process")
         identity.pop("runtime")
+        identity["endpoint"] = "https://api.example.test/v1/messages"
     return identity
 
 

@@ -127,6 +127,16 @@ def test_model_server_identity_rejects_open_or_mislabeled_mlx_map():
     with pytest.raises(ValueError, match="closed map"):
         cl.validate_model_server_identity({**identity, "unexpected": True})
 
+    external = {
+        "schema_version": 1,
+        "implementation": "remote-api",
+        "endpoint": "https://api.example.test/v1/messages",
+        "artifact": {"mechanism": "externally-mutable",
+                     "request_model": "remote-model"},
+        "response": {},
+    }
+    assert cl.validate_model_server_identity(external) == external
+
 
 def test_mlx_snapshot_rejects_wrong_or_changing_process(tmp_path):
     revision = "a" * 40
