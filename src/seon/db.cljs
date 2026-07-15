@@ -290,6 +290,13 @@
    [::added? :boolean]])
 
 (schema/register! ::datoms [:vector ::datom])
+(schema/register! ::changed-attrs [:set :qualified-keyword])
+(schema/register!
+  ::candidate-change
+  [:map {:closed true}
+   [::changed-attrs ::changed-attrs]
+   [::attr-index
+    [:map-of :qualified-keyword [:vector ::datom]]]])
 
 (schema/register!
   ::handler-input
@@ -496,6 +503,18 @@
    [::db ::db-val]
    [::read-observation ::read-observation]])
 (schema/register! ::read-observation-changed? :boolean)
+(schema/register! ::read-candidate-broad? :boolean)
+(schema/register! ::read-candidate-attributes
+  [:set :qualified-keyword])
+(schema/register!
+  ::read-candidate
+  [:map {:closed true}
+   [::read-candidate-broad? ::read-candidate-broad?]
+   [::read-candidate-attributes ::read-candidate-attributes]])
+(schema/register!
+  ::read-observation-candidate-request
+  [:map {:closed true}
+   [::read-observation ::read-observation]])
 
 (defn with-agent
   "Establish an agent-id scope for the dynamic extent of `f`.
@@ -1708,6 +1727,69 @@
   (when-let [validator (get replayable-read-request-validators operation)]
     ((force validator) request)))
 
+(defn- replayable-observation-request
+  "Return one safe denormalized request, or nil when replay must widen."
+  [{::keys [read-operation read-source read-request read-result
+            read-replayable?]}]
+  (when (and read-replayable?
+             (= :seon.db.read.source/captured read-source)
+             (contains? replayable-read-operations read-operation)
+             (valid-replay-request? read-operation read-request)
+             (internal/normalized-read-value? read-request)
+             (internal/normalized-read-value? read-result))
+    (let [[request request-safe?]
+          (internal/denormalize-read-value read-request)]
+      (when request-safe? request))))
+
+(def ^:private broad-read-candidate
+  {::read-candidate-broad? true
+   ::read-candidate-attributes #{}})
+
+(defn- attribute-read-candidate
+  [attributes]
+  {::read-candidate-broad? false
+   ::read-candidate-attributes attributes})
+
+(defn- exact-index-attribute
+  "Return the attribute from one exact AEVT/AVET prefix, or nil."
+  [request exact?]
+  (let [attribute (first (::components request))]
+    (when (and exact?
+               (contains? #{:aevt :avet} (::index request))
+               (qualified-keyword? attribute))
+      attribute)))
+
+(defn read-observation-candidate
+  "Project one captured read into conservative attribute routing data.
+
+   Literal query attributes and exact AEVT/AVET prefixes narrow to concrete
+   attributes. Every unsafe, opaque, or unproved observation remains broad.
+   Exact replay remains the final invalidation authority."
+  {:malli/schema [:=> [:cat ::read-observation-candidate-request]
+                  ::read-candidate]}
+  [{observation ::read-observation}]
+  (if-let [request (replayable-observation-request observation)]
+    (case (::read-operation observation)
+      :seon.db.read.operation/query
+      (let [attributes (d/query-attribute-dependencies (::query request))]
+        (if (and (set? attributes)
+                 (every? qualified-keyword? attributes))
+          (attribute-read-candidate attributes)
+          broad-read-candidate))
+
+      :seon.db.read.operation/index-datoms
+      (if-let [attribute (exact-index-attribute request (not (::seek? request)))]
+        (attribute-read-candidate #{attribute})
+        broad-read-candidate)
+
+      :seon.db.read.operation/rseek-datoms
+      (if-let [attribute (exact-index-attribute request (::index-prefix? request))]
+        (attribute-read-candidate #{attribute})
+        broad-read-candidate)
+
+      broad-read-candidate)
+    broad-read-candidate))
+
 (defn- replay-read-result
   "Replay one known semantic read without recording another observation."
   [db operation request]
@@ -1757,28 +1839,18 @@
   {:malli/schema [:=> [:cat ::read-observation-changed-request]
                   ::read-observation-changed?]}
   [{::keys [db read-observation]}]
-  (let [{::keys [read-operation read-source read-request read-result
-                 read-replayable?]} read-observation]
-    (if-not (and read-replayable?
-                 (= :seon.db.read.source/captured read-source)
-                 (contains? replayable-read-operations read-operation)
-                 (valid-replay-request? read-operation read-request)
-                 (internal/normalized-read-value? read-request)
-                 (internal/normalized-read-value? read-result))
-      true
-      (let [[request request-safe?]
-            (internal/denormalize-read-value read-request)]
-        (if-not request-safe?
-          true
-          (try
-            (let [current-result
-                  (replay-read-result db read-operation request)
-                  [normalized-current current-safe?]
-                  (internal/normalize-read-value db current-result)]
-              (or (not current-safe?)
-                  (not= read-result normalized-current)))
-            (catch :default _
-              true)))))))
+  (let [{::keys [read-operation read-result]} read-observation]
+    (if-let [request (replayable-observation-request read-observation)]
+      (try
+        (let [current-result
+              (replay-read-result db read-operation request)
+              [normalized-current current-safe?]
+              (internal/normalize-read-value db current-result)]
+          (or (not current-safe?)
+              (not= read-result normalized-current)))
+        (catch :default _
+          true))
+      true)))
 
 ;; ---------------------------------------------------------------------------
 ;; Listeners

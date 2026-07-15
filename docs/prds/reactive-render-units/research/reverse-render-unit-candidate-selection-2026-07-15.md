@@ -300,18 +300,69 @@ falsifier and implementation boundary without invalidating that gate.
    `41764938`, selected by both Seon runtime aliases.
 2. **Already complete:** complete database coordinates and opaque browser
    cursors, including retained-point resolution for cursor feeds.
-3. **Next dependency-ready slice:** implement the pure `seon.db` candidate
-   projection and attribute-first `view-unit` reverse index with focused oracle
-   tests.
-4. Integrate the complete coalesced change and explicit renderer-token mismatch
-   into Datastar, replacing only the active-unit all-traversal. Do not delete
-   page-specific transitions for consumers that have not migrated yet.
-5. At the next coordinated default-cluster checkpoint, collect browser,
+3. **Complete:** the pure `seon.db` candidate projection and attribute-first
+   `view-unit` reverse index pass their focused exact oracle tests.
+4. **Complete:** Datastar consumes the complete coalesced routing projection,
+   unions explicit renderer-token mismatches, advances noncandidates, and
+   reduces exact replay only over candidates. Page-specific transitions for
+   consumers that have not migrated remain intact.
+5. **Next dependency-ready slice:** at the next coordinated default-cluster
+   checkpoint, collect browser,
    server-side gzip, sharing, unrelated-write, and final-release evidence.
 6. Only after the attribute-first oracle is green, refine point-entity and safe
    exact-prefix/range descriptors when profiling proves remaining replay cost.
 7. Continue consumer migration and delete declared-attribute/page-specific
    invalidation only as each consumer crosses the one lifecycle.
+
+## Implementation checkpoint — 2026-07-15
+
+Slice A is implemented and proven in the existing owners without crossing into
+Datastar integration:
+
+- `seon.db/read-observation-candidate` shares the exact replay-admission
+  boundary with `read-observation-changed?`, delegates literal-query analysis
+  to Datahike's public projection, narrows exact AEVT/AVET prefixes, and widens
+  every other read;
+- `seon.web.view-unit` derives broad and per-attribute token buckets inside its
+  one retained state, reindexes on a producer transition, removes every bucket
+  on final release, and selects from exact complete routing evidence;
+- Datastar validates that projection and fails open to every active unit when
+  coalesced routing evidence is absent or malformed; and
+- focused tests cover literal/dynamic queries, exact/seek index reads,
+  attribute selection, fail-open selection, and exact reverse-index cleanup.
+
+The executable dependency probe returned
+`{:literal #{:example/value}, :dynamic :all}` from the pinned public Datahike
+function. `git diff --check` is clean, and static lint found no new structural
+finding beyond its existing inability to resolve Datahike's generated public
+API vars. The exact focused gate requested, matched, and executed all 11 test
+vars across `seon.db.read-observer-test` and `seon.web.view-unit-test`: 11 tests
+and 116 assertions passed with zero failures or errors. The retained evidence
+is `tmp/test-cljs-20260715-043626-48898.log` and its sibling report.
+
+The gate first exposed a malformed internal call: `unit-candidate` passed a
+captured observation directly to the public map-in function, so its request
+destructured to nil and widened. The corrected owner wraps the observation in
+the required `:seon.db/read-observation` request; the cold first attachment now
+lands immediately in both literal-attribute buckets. No Datahike warm-up,
+validator warm-up, cache, or special-case was added.
+
+Slice B now passes the complete change through Datastar's existing transition
+owner. It validates the closed routing projection, fails open to all active
+tokens when that evidence is incomplete, unions renderer-token mismatches,
+advances noncandidate coordinates without touching their retained derivation,
+and reduces exact replay over candidates only. The focused integration law
+proves an unrelated attribute performs zero replay, producer, serialization,
+or emission work; incomplete evidence performs one conservative replay; and a
+related complete change replays and renders the one shared unit once before
+distributing identical bytes to both consumers.
+
+The smallest combined exact gate requested, matched, and executed all three
+new boundary tests across the database observer, view-unit, and Datastar
+namespaces: 3 tests and 45 assertions passed with zero failures or errors.
+Evidence is retained at `tmp/test-cljs-20260715-045642-83341.log` and its
+sibling report. Live default-cluster gzip/browser evidence remains the next
+ordered boundary; no page-specific transition was removed in this slice.
 
 This ordering advances unit 2 without assuming unit-1 native branch/restart
 contracts or the later root/debug/data consumer lifecycle. The pure candidate

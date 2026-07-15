@@ -594,8 +594,8 @@
   "Transition shared units and each live subscription once, then fan patches."
   [change]
   (let [emitted-by-view
-        (if-let [dbv (:seon.db/db change)]
-          (commit-registry! #(transition-active-units % dbv))
+        (if (:seon.db/db change)
+          (commit-registry! #(transition-active-units % change))
           {})]
    (doseq [[subscription-key subscription] (::subscriptions @!feeds)
            :when (::live? subscription)]
@@ -1334,34 +1334,73 @@
 
 (defn- transition-active-units
   "Pure registry transition plus emitted serialized elements by consumer."
-  [registry dbv]
+  [registry change]
   (let [initial (or (::view-unit/state registry) view-unit/empty-state)
+        dbv (:seon.db/db change)
+        database-coordinate (db.coordinate/resolved dbv)
+        routing-change (select-keys change
+                                    [:seon.db/changed-attrs
+                                     :seon.db/attr-index])
+        all-tokens (into #{} (keys (::view-unit/units initial)))
+        attribute-candidates
+        (if (schema/valid-candidate-value? :seon.db/candidate-change
+                                           routing-change)
+          (view-unit/candidate-tokens
+           {::view-unit/state initial
+            ::view-unit/change routing-change})
+          all-tokens)
+        descriptors
+        (into {}
+              (keep (fn [[token unit]]
+                      (let [descriptor
+                            (descriptor-for-unit
+                             registry token (::view-unit/consumers unit))]
+                        (when (and descriptor (::view-unit? descriptor))
+                          [token descriptor]))))
+              (::view-unit/units initial))
+        renderer-candidates
+        (into #{}
+              (keep (fn [[token descriptor]]
+                      (when (not= (or (::renderer-token descriptor) token)
+                                   (get-in initial
+                                           [::view-unit/units token
+                                            ::view-unit/renderer-token]))
+                        token)))
+              descriptors)
+        candidate-tokens
+        (set/intersection (into attribute-candidates renderer-candidates)
+                          (into #{} (keys descriptors)))
+        noncandidate-tokens
+        (set/difference (into #{} (keys descriptors)) candidate-tokens)
+        advanced
+        (view-unit/advance-database-coordinate
+         {::view-unit/state initial
+          ::view-unit/tokens noncandidate-tokens
+          ::view-unit/database-coordinate database-coordinate})
         [state emitted]
         (reduce
-         (fn [[state emitted] [token unit]]
-           (let [consumers (::view-unit/consumers unit)
-                 descriptor (descriptor-for-unit registry token consumers)]
-             (if (and descriptor (::view-unit? descriptor))
-               (let [transition
-                     (view-unit/transition-unit
-                      {::view-unit/state state
-                       ::view-unit/token token
-                       :seon.db/db dbv
-                       ::view-unit/database-coordinate
-                       (db.coordinate/resolved dbv)
-                       ::view-unit/renderer-token
-                       (or (::renderer-token descriptor) token)
-                       ::view-unit/producer
-                       #(managed-active-unit descriptor %)})
-                     serialized (::view-unit/serialized-element transition)]
-                 [(::view-unit/state transition)
-                  (if (::view-unit/emitted? transition)
-                    (reduce #(update %1 %2 (fnil conj []) serialized)
-                            emitted consumers)
-                    emitted)])
-               [state emitted])))
-         [initial {}]
-         (::view-unit/units initial))]
+         (fn [[state emitted] token]
+           (let [unit (get-in state [::view-unit/units token])
+                 consumers (::view-unit/consumers unit)
+                 descriptor (get descriptors token)
+                 transition
+                 (view-unit/transition-unit
+                  {::view-unit/state state
+                   ::view-unit/token token
+                   :seon.db/db dbv
+                   ::view-unit/database-coordinate database-coordinate
+                   ::view-unit/renderer-token
+                   (or (::renderer-token descriptor) token)
+                   ::view-unit/producer
+                   #(managed-active-unit descriptor %)})
+                 serialized (::view-unit/serialized-element transition)]
+             [(::view-unit/state transition)
+              (if (::view-unit/emitted? transition)
+                (reduce #(update %1 %2 (fnil conj []) serialized)
+                        emitted consumers)
+                emitted)]))
+         [advanced {}]
+         candidate-tokens)]
     [(assoc registry ::view-unit/state state) emitted]))
 
 (defn- commit-registry!
@@ -1376,7 +1415,9 @@
 (defn- transition-view-units!
   "Advance all shared units once and return elements emitted for `view-id`."
   [view-id dbv]
-  (get (commit-registry! #(transition-active-units % dbv)) view-id []))
+  (get (commit-registry!
+        #(transition-active-units % {:seon.db/db dbv}))
+       view-id []))
 
 (defn- write-unit-response!
   "Finish one unit-control response with explicit status and content type."

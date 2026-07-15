@@ -114,6 +114,37 @@ cursor-backed feeds are frozen rather than current-head candidates.
 exact state shape, falsifier, file boundary, and implementation dependency
 edges.
 
+The next pure slice is now implemented and passes its focused Slice A gate.
+`seon.db/read-observation-candidate` delegates literal-query projection to the
+pinned Datahike function and retains broad fallback for every unsafe or
+unproved read. `seon.web.view-unit` derives broad and per-attribute reverse
+buckets in its existing state, selects from a complete coalesced change with a
+caller-owned fail-open fallback, atomically reindexes a rerendered unit, and
+removes every entry on final release. Focused projection and lifecycle tests
+pass.
+The executable JVM dependency probe distinguishes literal attributes from a
+dynamic attribute position, while static diff/lint review is clean apart from
+the known generated-Datahike-API lint blind spot. The exact CLJS gate requested,
+matched, and executed 11 selectors across the focused read-observer and
+view-unit namespaces: 11 tests and 116 assertions pass with zero failures or
+errors. Its cold first-attachment case caught and now pins the public map-in
+request envelope; no dependency or validator warm-up masks the boundary.
+
+Slice B is also implemented in the existing Datastar transition owner. The
+complete coalesced routing projection is validated before selection;
+incomplete evidence fails open, renderer-token mismatches are unioned
+explicitly, and noncandidate coordinates advance without replay or retained
+derivation changes. Datastar now reduces only the resulting candidates rather
+than traversing every active unit through exact replay. The smallest combined
+exact gate requested, matched, and executed all three new boundary tests: 3
+tests and 45 assertions pass with zero failures or errors. It proves an
+unrelated attribute performs zero replay, producer, serialization, and emission
+work; incomplete evidence performs one conservative replay; and a related
+complete change replays and renders one shared unit once before identical
+fanout. Retained evidence is
+`tmp/test-cljs-20260715-045642-83341.log`. Live default-cluster gzip/browser
+proof and the broader replay-all soundness oracle remain open graduation work.
+
 ## Research evidence
 
 - [[research/reactive-render-source-audit-2026-07-14]] — current dependency
@@ -156,14 +187,15 @@ edges.
    evidence. Continue agent/root units onto the lifecycle and remove the
    remaining page-specific dependency map rather than adding an interim
    routing path.
-3. Derive the conservative reverse candidate index from runtime-observed
+3. **Reverse candidate index and focused integration complete; live proof
+   pending:** derive the conservative reverse candidate index from runtime-observed
    database read requests. **The Datahike public pure query/find-pull
-   projection is complete at `41764938`;** next expose one attribute-first
-   `seon.db` observation-candidate boundary, then derive the reverse index
+   projection is complete at `41764938`;** `seon.db` exposes one attribute-first
+   `seon.db` observation-candidate boundary and derives the reverse index
    inside the existing unit state. Literal query attrs and safe exact index
-   prefixes narrow; every unproved operation/range remains broad. Pass the
+   prefixes narrow; every unproved operation/range remains broad. Datastar passes the
    complete coalesced change plus explicit renderer-token mismatches into the
-   unit transition before deleting Datastar's all-unit traversal. Do not
+   unit transition and no longer crosses exact replay for every active unit. Do not
    duplicate Datahike's parser or ship broad-query as an interim mechanism.
    [[research/reverse-candidate-index-dependency-boundary-2026-07-15]] records
    the coordinated cross-repo cut; the now-settled implementation boundary and

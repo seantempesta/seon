@@ -168,3 +168,53 @@
                       (is (= unit/empty-state (::unit/state final-close))
                           "final close drops consumers, observations, and output"))))))))
         (settle! done))))
+
+(deftest literal-query-units-derive-and-clean-reverse-attribute-buckets
+  (async done
+    (-> (fresh-conn)
+        (.then
+         (fn [conn]
+           (let [dbv @conn
+                 coordinate {:seon.web.debug/agent-id "root"
+                             :seon.web.debug/unit :query-only}
+                 attached
+                 (unit/attach-consumer
+                  {::unit/state unit/empty-state
+                   ::unit/coordinate coordinate
+                   ::unit/consumer-id "tab-a"
+                   :seon.db/db dbv
+                   ::unit/database-coordinate (db.coordinate/resolved dbv)
+                   ::unit/renderer-token "query-v1"
+                   ::unit/producer
+                   (fn [value]
+                     [:section {:id "query-only"} (debug-value value)])})
+                 token (::unit/token attached)
+                 state (::unit/state attached)
+                 complete-change
+                 (fn [attributes]
+                   {:seon.db/changed-attrs attributes
+                    :seon.db/attr-index
+                    (into {} (map #(vector % []) attributes))})]
+             (is (= #{token}
+                    (get-in state [::unit/tokens-by-attribute ::id])))
+             (is (= #{token}
+                    (get-in state [::unit/tokens-by-attribute ::value])))
+             (is (empty? (::unit/broad-tokens state)))
+             (is (= #{}
+                    (unit/candidate-tokens
+                     {::unit/state state
+                      ::unit/change (complete-change #{::unrelated})}))
+                 "an unrelated attribute selects no query unit")
+             (is (= #{token}
+                    (unit/candidate-tokens
+                     {::unit/state state
+                      ::unit/change (complete-change #{::value})})))
+             (let [detached
+                   (unit/detach-consumer
+                    {::unit/state state
+                     ::unit/token token
+                     ::unit/consumer-id "tab-a"})]
+               (is (true? (::unit/released? detached)))
+               (is (= unit/empty-state (::unit/state detached))
+                   "final release removes units and every reverse bucket")))))
+        (settle! done))))

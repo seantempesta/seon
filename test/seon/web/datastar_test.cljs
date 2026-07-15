@@ -345,8 +345,12 @@
                 (fn [[before unrelated after]]
                   (let [original-conn db/*conn*
                         renders (atom 0)
+                        replays (atom 0)
+                        serializations (atom 0)
                         releases (atom 0)
                         original-detach view-unit/detach-consumer
+                        original-replay db/read-observation-changed?
+                        original-serialization html/->string
                         catalog
                         (datastar/unit-catalog
                          [{::datastar/coordinate
@@ -400,7 +404,15 @@
                           (let [response (original-detach request)]
                             (when (::view-unit/released? response)
                               (swap! releases inc))
-                            response))]
+                            response))
+                        db/read-observation-changed?
+                        (fn [request]
+                          (swap! replays inc)
+                          (original-replay request))
+                        html/->string
+                        (fn [element]
+                          (swap! serializations inc)
+                          (original-serialization element))]
                         (datastar/handle-view-unit!
                          (unit-ring-request active-res view-id token "1"))
                         (datastar/handle-view-unit!
@@ -419,13 +431,37 @@
                           (is (= 1 (count (::view-unit/read-observations retained)))
                               "activation commits the producer query observation")
                           (is (string? (::view-unit/serialized-element retained))))
+                        (reset! replays 0)
+                        (reset! serializations 0)
                         (is (empty? (@#'datastar/transition-view-units!
                                     view-id unrelated)))
+                        (is (= 1 @replays)
+                            "incomplete routing evidence fails open to replay")
                         (is (= 1 @renders)
                             "an equal replay skips the producer")
+                        (reset! replays 0)
                         (let [[registry emitted]
                               (@#'datastar/transition-active-units
-                               @datastar/!feeds after)
+                               @datastar/!feeds
+                               {:seon.db/db unrelated
+                                :seon.db/changed-attrs #{:example/unrelated}
+                                :seon.db/attr-index {}})]
+                          (reset! datastar/!feeds registry)
+                          (is (empty? emitted)
+                              "an unrelated attribute emits no unit")
+                          (is (zero? @replays)
+                              "an unrelated attribute performs no exact replay")
+                          (is (= 1 @renders)
+                              "an unrelated attribute performs no producer work")
+                          (is (zero? @serializations)
+                              "an unrelated attribute performs no serialization"))
+                        (let [[registry emitted]
+                              (@#'datastar/transition-active-units
+                               @datastar/!feeds
+                               {:seon.db/db after
+                                :seon.db/changed-attrs
+                                #{:seon.agent/purpose}
+                                :seon.db/attr-index {}})
                               left (get emitted view-id)
                               right (get emitted other-view-id)]
                           (reset! datastar/!feeds registry)
@@ -433,6 +469,8 @@
                           (is (= left right)
                               "one transition distributes identical bytes to both views")
                           (is (str/includes? (first left) "after"))
+                          (is (= 1 @replays)
+                              "a related complete change replays one shared unit")
                           (is (= 2 @renders)))
                         (is (= ["same-element"]
                                (@#'datastar/emitted-elements-for-subscription

@@ -85,6 +85,10 @@
     {:seon.db/db db-value
      :seon.db/read-observation observation}))
 
+(defn- candidate [observation]
+  (db/read-observation-candidate
+    {:seon.db/read-observation observation}))
+
 (defn- runtime-handle?
   "True when normalized output retained a DB handle or lazy Entity."
   [value]
@@ -509,6 +513,96 @@
                             non-replayable-events)})]
               (is (every? true? (:seon.db/result replay))
                   "foreign, lazy, temporal, unknown, and malformed reads miss")
+              (is (every? :seon.db/read-candidate-broad?
+                          (map candidate non-replayable-events))
+                  "the same unsafe admission boundary widens routing")
               (is (empty? (:seon.db/read-observations replay))
                   "conservative misses do not invoke public read paths"))))
+        (settle! done))))
+
+(deftest observation-candidates-narrow-only-proved-attribute-reads
+  (async done
+    (-> (fresh-seeded)
+        (.then
+          (fn [{db-value :db}]
+            (let [literal-query
+                  (capture-event
+                    db-value :seon.db.read.operation/query
+                    #(helper-query db-value "child"))
+                  dynamic-query
+                  (capture-event
+                    db-value :seon.db.read.operation/query
+                    #(db/query
+                       {:seon.db/db db-value
+                        :seon.db/query
+                        '[:find ?value
+                          :in $ ?attribute
+                          :where [?entity ?attribute ?value]]
+                        :seon.db/args [::value]}))
+                  exact-prefix
+                  (capture-event
+                    db-value :seon.db.read.operation/index-datoms
+                    #(db/index-datoms
+                       {:seon.db/db db-value
+                        :seon.db/index :aevt
+                        :seon.db/components [::value]
+                        :seon.db/index-limit 10
+                        :seon.db/seek? false}))
+                  seek-range
+                  (capture-event
+                    db-value :seon.db.read.operation/index-datoms
+                    #(db/index-datoms
+                       {:seon.db/db db-value
+                        :seon.db/index :aevt
+                        :seon.db/components [::value]
+                        :seon.db/index-limit 10
+                        :seon.db/seek? true}))
+                  reverse-prefix
+                  (capture-event
+                    db-value :seon.db.read.operation/rseek-datoms
+                    #(db/rseek-datoms
+                       {:seon.db/db db-value
+                        :seon.db/index :avet
+                        :seon.db/components [::value]
+                        :seon.db/index-limit 10
+                        :seon.db/index-prefix? true}))
+                  reverse-range
+                  (capture-event
+                    db-value :seon.db.read.operation/rseek-datoms
+                    #(db/rseek-datoms
+                       {:seon.db/db db-value
+                        :seon.db/index :avet
+                        :seon.db/components [::value]
+                        :seon.db/index-limit 10
+                        :seon.db/index-prefix? false}))
+                  literal-candidate (candidate literal-query)]
+              (is (false? (:seon.db/read-candidate-broad?
+                            literal-candidate)))
+              (is (= #{::id ::value ::at ::token}
+                     (:seon.db/read-candidate-attributes
+                       literal-candidate))
+                  "Datahike projects every literal query attribute")
+              (is (= {:seon.db/read-candidate-broad? false
+                      :seon.db/read-candidate-attributes #{::value}}
+                     (candidate exact-prefix))
+                  "an exact AEVT attribute prefix owns one bucket")
+              (is (= {:seon.db/read-candidate-broad? false
+                      :seon.db/read-candidate-attributes #{::value}}
+                     (candidate reverse-prefix))
+                  "an exact reverse AVET prefix owns one bucket")
+              (is (true? (:seon.db/read-candidate-broad?
+                           (candidate dynamic-query)))
+                  "a variable attribute position widens")
+              (is (true? (:seon.db/read-candidate-broad?
+                           (candidate seek-range)))
+                  "a comparator range remains broad")
+              (is (true? (:seon.db/read-candidate-broad?
+                           (candidate reverse-range)))
+                  "an unbounded reverse range remains broad")
+              (is (true? (:seon.db/read-candidate-broad?
+                           (candidate
+                             (assoc literal-query
+                                    :seon.db/read-source
+                                    :seon.db.read.source/foreign))))
+                  "foreign observations cannot authorize narrowing"))))
         (settle! done))))

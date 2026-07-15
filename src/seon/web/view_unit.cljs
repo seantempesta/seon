@@ -32,7 +32,28 @@
   [::read-observations :seon.db/read-observations]
   [::serialized-element ::serialized-element]])
 (schema/register! ::units [:map-of ::token ::unit])
-(schema/register! ::state [:map {:closed true} [::units ::units]])
+(schema/register! ::broad-tokens [:set ::token])
+(schema/register! ::tokens-by-attribute
+  [:map-of :qualified-keyword [:set ::token]])
+(schema/register!
+ ::state
+ [:map {:closed true}
+  [::units ::units]
+  [::broad-tokens ::broad-tokens]
+  [::tokens-by-attribute ::tokens-by-attribute]])
+(schema/register!
+ ::candidate-tokens-request
+ [:map {:closed true}
+  [::state ::state]
+  [::change :seon.db/candidate-change]])
+(schema/register! ::candidate-tokens [:set ::token])
+(schema/register! ::tokens [:set ::token])
+(schema/register!
+ ::advance-request
+ [:map {:closed true}
+  [::state ::state]
+  [::tokens ::tokens]
+  [::database-coordinate ::database-coordinate]])
 (schema/register!
  ::attach-request
  [:map {:closed true}
@@ -73,7 +94,9 @@
 
 (def empty-state
   "The plain, process-local value from which one feed owner starts."
-  {::units {}})
+  {::units {}
+   ::broad-tokens #{}
+   ::tokens-by-attribute {}})
 
 (defn- canonical-keyword
   "A keyword's exact namespace and name, without printed-form ambiguity."
@@ -116,6 +139,107 @@
   "Return one active unit's retained plain data, or nil."
   [state token]
   (get-in state [::units token]))
+
+(defn- unit-candidate
+  "Derive one unit's routing projection from its retained observations."
+  [unit]
+  (let [observations (::read-observations unit)
+        candidates
+        (map #(db/read-observation-candidate
+               {:seon.db/read-observation %})
+             observations)]
+    (if (or (empty? observations)
+            (some :seon.db/read-candidate-broad? candidates))
+      {:seon.db/read-candidate-broad? true
+       :seon.db/read-candidate-attributes #{}}
+      {:seon.db/read-candidate-broad? false
+       :seon.db/read-candidate-attributes
+       (into #{} (mapcat :seon.db/read-candidate-attributes) candidates)})))
+
+(defn- index-unit
+  "Add one retained unit to the reverse routing buckets."
+  [state token unit]
+  (let [{broad? :seon.db/read-candidate-broad?
+         attributes :seon.db/read-candidate-attributes}
+        (unit-candidate unit)]
+    (if broad?
+      (update state ::broad-tokens conj token)
+      (reduce (fn [indexed attribute]
+                (update-in indexed
+                           [::tokens-by-attribute attribute]
+                           (fnil conj #{}) token))
+              state
+              attributes))))
+
+(defn- remove-token
+  "Remove one token from a set-valued map entry, dropping empty entries."
+  [entries entry token]
+  (let [remaining (disj (get entries entry #{}) token)]
+    (if (empty? remaining)
+      (dissoc entries entry)
+      (assoc entries entry remaining))))
+
+(defn- unindex-unit
+  "Remove one retained unit from every reverse routing bucket it owns."
+  [state token unit]
+  (let [{broad? :seon.db/read-candidate-broad?
+         attributes :seon.db/read-candidate-attributes}
+        (unit-candidate unit)]
+    (if broad?
+      (update state ::broad-tokens disj token)
+      (update state ::tokens-by-attribute
+              (fn [entries]
+                (reduce #(remove-token %1 %2 token)
+                        entries
+                        attributes))))))
+
+(defn- replace-unit
+  "Atomically replace one unit and its derived reverse routing entries."
+  [state token unit]
+  (let [without-prior
+        (if-let [prior (active-unit state token)]
+          (-> state
+              (unindex-unit token prior)
+              (update ::units dissoc token))
+          state)]
+    (-> without-prior
+        (assoc-in [::units token] unit)
+        (index-unit token unit))))
+
+(defn candidate-tokens
+  "Select active tokens from complete coalesced database routing evidence.
+
+   Selection unions broad units with buckets named by both changed-attribute
+   projections. The caller owns validation and fail-open behavior for an
+   incomplete change; exact replay decides whether a candidate changed."
+  {:malli/schema [:=> [:cat ::candidate-tokens-request] ::candidate-tokens]}
+  [{state ::state change ::change}]
+  (let [changed-attrs (:seon.db/changed-attrs change)
+        attr-index (:seon.db/attr-index change)
+        valid? (and (set? changed-attrs)
+                    (every? qualified-keyword? changed-attrs)
+                    (map? attr-index)
+                    (every? qualified-keyword? (keys attr-index)))]
+    (if-not valid?
+      (into #{} (keys (::units state)))
+      (reduce (fn [tokens attribute]
+                (into tokens
+                      (get-in state [::tokens-by-attribute attribute] #{})))
+              (::broad-tokens state)
+              (into changed-attrs (keys attr-index))))))
+
+(defn advance-database-coordinate
+  "Advance selected active units without touching their retained derivations."
+  {:malli/schema [:=> [:cat ::advance-request] ::state]}
+  [{state ::state tokens ::tokens database-coordinate ::database-coordinate}]
+  (reduce (fn [advanced token]
+            (if (active-unit advanced token)
+              (assoc-in advanced
+                        [::units token ::database-coordinate]
+                        database-coordinate)
+              advanced))
+          state
+          tokens))
 
 (defn- derive-unit
   "Run one producer against exactly `dbv` and retain only replayable data."
@@ -171,7 +295,7 @@
               serialized (::serialized-element derived)
               emitted? (not= serialized (::serialized-element unit))
               next-unit (merge unit derived)]
-          (cond-> {::state (assoc-in state [::units token] next-unit)
+          (cond-> {::state (replace-unit state token next-unit)
                    ::token token
                    ::rendered? true
                    ::emitted? emitted?
@@ -228,7 +352,7 @@
             unit (assoc derived
                         ::coordinate coordinate
                         ::consumers #{consumer-id})]
-        {::state (assoc-in state [::units token] unit)
+        {::state (replace-unit state token unit)
          ::token token
          ::rendered? true
          ::emitted? true
@@ -243,7 +367,9 @@
     (let [remaining (disj (::consumers unit) consumer-id)
           released? (empty? remaining)]
       {::state (if released?
-                 (update state ::units dissoc token)
+                 (-> state
+                     (unindex-unit token unit)
+                     (update ::units dissoc token))
                  (assoc-in state [::units token ::consumers] remaining))
        ::token token
        ::rendered? false
