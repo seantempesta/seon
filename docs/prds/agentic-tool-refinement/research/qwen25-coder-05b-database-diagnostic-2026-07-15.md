@@ -90,6 +90,60 @@ attractor. The open finding is tracked in
    shared-schema projection and the next model size. Record outcome and bytes;
    token reduction alone is not success.
 
+## Admitted replay command
+
+The current committed catalog, cluster, milestone, admission, and native-log
+path passes 87 focused tests. Once `git status --short` has no admitted runtime
+input and `bin/acme status --edn` reports ready, run exactly one sample through
+the public admitted boundary:
+
+```bash
+export SEON_EVAL_RUN_ID=2026-07-15-p0-db-qwen25coder05b-admitted
+
+src-inspect-ai/.venv/bin/python - <<'PY'
+import os
+from pathlib import Path
+
+from seon_inspect.catalog import run_native_task
+from seon_inspect.cluster import static_target_snapshot
+from seon_inspect.tasks.milestone_lift import milestone_lift, task_identity
+
+cluster_url = "http://127.0.0.1:7994/agents/run"
+run_dir = Path("evals/runs") / os.environ["SEON_EVAL_RUN_ID"]
+
+logs = run_native_task(
+    identity=task_identity("db"),
+    task_factory=milestone_lift,
+    task_kwargs={
+        "milestone": "db",
+        "endpoint": "pod",
+        "epochs": 1,
+        "seed": 1,
+        "positions": [0],
+        "cluster_url": cluster_url,
+    },
+    target_snapshot=lambda: static_target_snapshot(
+        cluster_url, ["bin/acme", "status", "--edn"]),
+    evidence_dir=run_dir,
+    log_dir=str(run_dir / "native-logs"),
+    model="mockllm/model",
+    display="plain",
+)
+
+for log in logs:
+    print(log.location)
+PY
+```
+
+`mockllm/model` is Inspect's inert model identity; the solver does not call it.
+The real model is derived inside ACME and retained as `pod_model_config`. A
+database REPL query immediately before this handoff resolved the intended
+Qwen2.5 Coder 0.5B provider/model, temperature 0.2, 1,024 maximum output tokens,
+thinking disabled, batch mode, and a 1,800,000 ms run deadline. The checked-in
+`.env.acme` currently names `typeahead`, but `seon.ai/sync!` is seed-once: the
+configured database row owns subsequent restarts. Re-query after restart and
+reject the run if those database-derived values change.
+
 ## Paired readline experiment prerequisite
 
 The setting is the colocated boolean
