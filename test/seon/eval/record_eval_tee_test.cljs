@@ -195,7 +195,8 @@
 
 (deftest omitted-optional-function-facts-become-explicit-retractions
   (let [query-rows #{["probe.user/f" :seon.fn/spec]
-                     ["probe.user/f" :seon.fn/schema-error]}
+                     ["probe.user/f" :seon.fn/schema-error]
+                     ["probe.user/f" :seon.fn/agent-facing?]}
         retractions
         (with-redefs [db/query (fn [& _] query-rows)]
           ((deref #'seval/omitted-fn-projection-retractions)
@@ -205,18 +206,22 @@
     (is (= #{[:db.fn/retractAttribute
               [:seon.fn/sym "probe.user/f"] :seon.fn/spec]
              [:db.fn/retractAttribute
-              [:seon.fn/sym "probe.user/f"] :seon.fn/schema-error]}
+              [:seon.fn/sym "probe.user/f"] :seon.fn/schema-error]
+             [:db.fn/retractAttribute
+              [:seon.fn/sym "probe.user/f"] :seon.fn/agent-facing?]}
            (set retractions))))
   (testing "an asserted replacement is retained while only omissions retract"
     (let [retractions
           (with-redefs [db/query
                         (fn [& _]
                           #{["probe.user/f" :seon.fn/spec]
-                            ["probe.user/f" :seon.fn/schema-error]})]
+                            ["probe.user/f" :seon.fn/schema-error]
+                            ["probe.user/f" :seon.fn/agent-facing?]})]
             ((deref #'seval/omitted-fn-projection-retractions)
               ::db
               [{:seon.fn/sym "probe.user/f"
                 :seon.fn/source "(defn f [x] x)"
+                :seon.fn/agent-facing? true
                 :seon.fn/spec "[:=> [:cat :int] :int]"}]))]
       (is (= [[:db.fn/retractAttribute
                [:seon.fn/sym "probe.user/f"] :seon.fn/schema-error]]
@@ -723,6 +728,36 @@
                       (is (= ["probe.teefn/tee-probe-fn"]
                              (mapv :seon.fn/sym (filter :seon.fn/sym tee))))
                       (is (= [] (vec (filter :seon.test/sym tee))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest agent-facing-metadata-tees-as-positive-presence
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (seval/eval cs "(ns probe.teeeligibility)"
+                            {:seon.eval/starting-ns 'cljs.user
+                             :seon.eval/analyze-deps? false})
+                (.then
+                  (fn [_]
+                    (tee-for cs 'probe.teeeligibility
+                             "(defn ^:seon.fn/agent-facing? eligible [x] x)")))
+                (.then
+                  (fn [tee]
+                    (let [row (first (filter :seon.fn/sym tee))]
+                      (is (= "probe.teeeligibility/eligible" (:seon.fn/sym row)))
+                      (is (true? (:seon.fn/agent-facing? row))
+                          "positive source metadata enters the ordinary fn row"))))
+                (.then
+                  (fn [_]
+                    (tee-for cs 'probe.teeeligibility
+                             "(defn eligible [x] (inc x))")))
+                (.then
+                  (fn [tee]
+                    (let [row (first (filter :seon.fn/sym tee))]
+                      (is (not (contains? row :seon.fn/agent-facing?))
+                          "removing source metadata produces absence for retraction")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

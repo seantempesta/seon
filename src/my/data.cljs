@@ -55,7 +55,7 @@
 (schema/register! ::group-request
   [:map [:seon.items/items :seon.items/items] [::group-key ::group-key] [::key ::key]])
 
-(defn rows
+(defn ^:seon.fn/agent-facing? rows
   "Fetch every entity carrying `attr` as self-describing maps.
 
    Attribute-presence as DATA — there are no kinds; you find a set by the
@@ -76,7 +76,7 @@
      :seon.items/items items
      :seon.items/count (count items)}))
 
-(defn sum-by
+(defn ^:seon.fn/agent-facing? sum-by
   "Total a numeric `key` across the given item maps.
 
    Reduces over MAPS, so the datalog `(sum ?x)`/`:with` dedup collapse
@@ -91,7 +91,7 @@
   [{::keys [key] :seon.items/keys [items]}]
   (reduce + 0 (keep key items)))
 
-(defn max-by
+(defn ^:seon.fn/agent-facing? max-by
   "Find the item map whose `key` is largest; the row, not the value.
 
    So 'which one is biggest' is one call, not a `(max ?x)`+rejoin. Ties:
@@ -107,7 +107,7 @@
     (reduce (fn [best it] (if (> (key it) (key best)) it best))
             (first items) (rest items))))
 
-(defn group-sum
+(defn ^:seon.fn/agent-facing? group-sum
   "Sum a numeric field per group, one total row per group value.
 
    Sums `key` per distinct `group-key` value into a `:seon.items/*`

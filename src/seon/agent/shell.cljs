@@ -239,7 +239,7 @@
         env))
     env))
 
-(defn grants
+(defn ^:seon.fn/agent-facing? grants
   "Report whether the host granted shell access (`SEON_SHELL`).
 
    The grant is host-owned and read live from the env — nothing inside
@@ -249,7 +249,7 @@
   []
   {:seon.agent.shell/granted? (in/granted?)})
 
-(defn ^:async run
+(defn ^{:async true :seon.fn/agent-facing? true} run
   "Run a command; returns its exit code and full output as data.
 
    The command is argv (`::cmd` + `::args`), never a shell string.
@@ -331,7 +331,7 @@
       (in/fail (str "unexpected error in seon.agent.shell/run: "
                     (or (some-> e .-message) (str e)))))))
 
-(defn ^:async py-run
+(defn ^{:async true :seon.fn/agent-facing? true} py-run
   "Run Python source code; returns its exit code and output as data.
 
    Ships the source via stdin (`python3 -`).
@@ -364,7 +364,7 @@
 ;; allowlist as run; the job table is volatile (lost on pod restart).
 ;; ============================================================
 
-(defn run-bg!
+(defn ^:seon.fn/agent-facing? run-bg!
   "Spawn a command in the BACKGROUND; return its :seon.agent.shell/job-id.
 
    The job-id arrives in THIS call's result — launch, end your turn, then
@@ -435,7 +435,7 @@
   (and (some? j)
        (= (:seon.agent.shell/agent-id j) (db/current-agent-id))))
 
-(defn list-jobs
+(defn ^:seon.fn/agent-facing? list-jobs
   "List your background jobs, newest first.
 
    Scoped to the CURRENT agent (the reactive :seon.agent/id filter): background
@@ -451,7 +451,7 @@
                                (sort-by #(- (.getTime (:seon.agent.shell/started-at %))))
                                (mapv job-summary))})
 
-(defn job-status
+(defn ^:seon.fn/agent-facing? job-status
   "Report a background job's state, runtime, and pending-output sizes.
 
    :seon.agent.shell/state is :running / :exited / :stopped;
@@ -482,7 +482,7 @@
         (assoc :seon.agent.testrun/result parsed)))
     (in/unknown-job job-id)))
 
-(defn job-output
+(defn ^:seon.fn/agent-facing? job-output
   "Read a background job's captured output, full or only-new.
 
    Reads the chosen :seon.agent.shell/stream (:out default / :err) as an
@@ -514,7 +514,7 @@
         (assoc :seon.agent.shell/exit (:seon.agent.shell/exit j))))
     (in/unknown-job job-id)))
 
-(defn job-stop!
+(defn ^:seon.fn/agent-facing? job-stop!
   "SIGTERM a running background job; return its new state.
 
    Idempotent — a job already :exited / :stopped is left as-is. The

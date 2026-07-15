@@ -744,13 +744,15 @@
                        :seon.db/pull-pattern
                        '[{:seon.fn/_ns     [:seon.fn/sym :seon.fn/arglists
                                             :seon.fn/doc :seon.fn/spec
-                                            :seon.fn/private?]
+                                            :seon.fn/private?
+                                            :seon.fn/agent-facing?]
                           :seon.schema/_ns [:seon.schema/key :seon.schema/form]}]})
             schemas (->> (:seon.schema/_ns pull)
                          (filter (fn [{:seon.schema/keys [key]}]
                                    (= (namespace key) ns-str)))
                          (sort-by (comp str :seon.schema/key)))
             fns     (->> (:seon.fn/_ns pull)
+                         (filter :seon.fn/agent-facing?)
                          (remove :seon.fn/private?)
                          (sort-by :seon.fn/sym))
             reg-lines (map compact-schema-line schemas)

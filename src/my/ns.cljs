@@ -33,7 +33,7 @@
    [::error {:optional true} ::error]
    [::hint  {:optional true} ::hint]])
 
-(defn functions
+(defn ^:seon.fn/agent-facing? functions
   "List the functions a namespace defines — name, doc, and args.
 
    Answers \"what can I call in X?\" for ANY indexed namespace (seon.*,

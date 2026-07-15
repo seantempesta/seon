@@ -32,6 +32,11 @@ protected implementation or invent a second tool protocol.
 - Exact contracts remain colocated with code and enter context through the
   program graph. This document owns namespace purpose and boundary, not a
   signature copy that can drift.
+- Agent-callable eligibility is explicit colocated function metadata, persisted
+  as the optional positive `:seon.fn/agent-facing?` program fact. Public source
+  remains indexed for inspection, but compact cards and function menus include
+  only eligible, non-private functions with complete schemas. Redefinition
+  without the metadata retracts stale eligibility.
 
 ## Two layers
 

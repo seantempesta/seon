@@ -52,7 +52,7 @@
     (str fn-name ": agent " (pr-str id) " has no open run to act on "
          "(it is not currently running).")}})
 
-(defn ^:async wait
+(defn ^{:async true :seon.fn/agent-facing? true} wait
   "Park the calling agent: close the open run `:waited`, derive `:idle`.
 
    `:idle` is the single wakeable parked state (a new message opens a fresh
@@ -116,7 +116,7 @@
              "STOP without claiming success, `pause` or report your honest "
              "status with (message/user \"…\") — those are not gated.")}})))
 
-(defn ^:async complete
+(defn ^{:async true :seon.fn/agent-facing? true} complete
   "Finish the calling agent's work; close the open run `:completed`.
 
    Derived `:idle` (a new message opens a fresh run). The `result` string is
@@ -193,7 +193,7 @@
        (no-open-run-error "complete" id))
      (internal/no-agent-error "complete"))))
 
-(defn ^:async pause
+(defn ^{:async true :seon.fn/agent-facing? true} pause
   "Hold the calling agent WITHOUT killing it; stamps its run `paused-at`.
 
    Derived `:paused`; banks the remaining wall-clock budget. `resume`
@@ -209,7 +209,7 @@
       (no-open-run-error "pause" id))
     (internal/no-agent-error "pause")))
 
-(defn ^:async resume
+(defn ^{:async true :seon.fn/agent-facing? true} resume
   "Wake a paused run: clear `paused-at` and re-enter the drive loop.
 
    Derived `:running`; re-extend the
@@ -232,7 +232,7 @@
       (no-open-run-error "resume" id))
     (internal/no-agent-error "resume")))
 
-(defn ^:async terminate
+(defn ^{:async true :seon.fn/agent-facing? true} terminate
   "Kill an agent: set `:seon.agent/terminated-at`, close any open run.
 
    Presence ⇒ derived `:terminated`, the one UNWAKEABLE state; the open run

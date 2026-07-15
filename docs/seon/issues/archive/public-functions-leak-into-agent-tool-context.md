@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: friction
 tags: [issue, agent, capability, schema]
 ---
@@ -40,3 +40,13 @@ eligibility from that one fact rather than from a local symbol list.
   deterministic, and database-derived.
 - No renderer blocklist, namespace-specific exception map, or second registry
   is introduced.
+
+## Resolution
+
+Resolved on the runtime-reliability branch. Colocated positive metadata now
+round-trips through analyzer indexing, boot reconciliation, and eval tee
+redefinition. Namespace cards and function menus query the same program fact.
+Exact protected inventories cover `seon.db` and `seon.schema`, including
+positive and negative eligibility, so a public implementation function cannot
+enter compact tool context merely by being public. Focused proof: 66 tests,
+319 assertions, zero failures.

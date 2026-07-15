@@ -559,6 +559,7 @@
    :seon.fn/arglists
    :seon.fn/doc
    :seon.fn/private?
+   :seon.fn/agent-facing?
    :seon.fn/spec
    :seon.fn/schema-error
    :seon.fn/created-at
@@ -1475,6 +1476,8 @@
                :seon.fn/doc        (or (:doc m) "")
                :seon.fn/private?   (boolean (:private m))
                :seon.fn/created-at now}
+        (true? (:seon.fn/agent-facing? m))
+        (assoc :seon.fn/agent-facing? true)
         ;; PRESENT ⇒ specced (exact contract in corpus); ABSENT ⇒ unspecced.
         (some? spec) (assoc :seon.fn/spec spec)))))
 
@@ -1863,9 +1866,10 @@
    DRIFT-HEALING is uniform across every compiled row: a stored row re-emits
    whenever ANY freshly-derived field differs from what the store holds —
    `:seon.ns/source`, schema source/generator policy, and for `:seon.fn` rows
-   the WHOLE derived set (source, spec, doc, arglists,
-   private?). Identity upsert re-asserts changed datoms in place; an optional
-   fn spec or schema generator policy that DISAPPEARED is explicitly retracted
+   the WHOLE derived set (source, spec, doc, arglists, private?, and positive
+   agent-facing eligibility). Identity upsert re-asserts changed datoms in place;
+   an optional fn spec, eligibility fact, or schema generator policy that
+   DISAPPEARED is explicitly retracted
    (upsert cannot remove a datom). Replacements and removals are guarded by
    the CURRENT `:source` datom's transaction: only a declaration whose current
    source was written by the boot process is managed. An
@@ -1897,7 +1901,8 @@
                      :seon.fn/spec     (get row :seon.fn/spec "")
                      :seon.fn/doc      (:seon.fn/doc row)
                      :seon.fn/arglists (:seon.fn/arglists row)
-                     :seon.fn/private? (:seon.fn/private? row)})
+                     :seon.fn/private? (:seon.fn/private? row)
+                     :seon.fn/agent-facing? (true? (:seon.fn/agent-facing? row))})
         no-generator :seon.db.id.generator/absent
         schema-fields
         (fn [row]
@@ -1905,20 +1910,22 @@
            :seon.db.id/generator
            (get row :seon.db.id/generator no-generator)})
         have-fns  (into {}
-                        (map (fn [[sym src spec doc args priv]]
+                        (map (fn [[sym src spec doc args priv agent-facing?]]
                                [sym {:seon.fn/source   src
                                      :seon.fn/spec     spec
                                      :seon.fn/doc      doc
                                      :seon.fn/arglists args
-                                     :seon.fn/private? priv}]))
-                        (d/q '[:find ?sym ?src ?spec ?doc ?args ?priv
+                                     :seon.fn/private? priv
+                                     :seon.fn/agent-facing? agent-facing?}]))
+                        (d/q '[:find ?sym ?src ?spec ?doc ?args ?priv ?agent-facing
                                :where
                                [?f :seon.fn/sym ?sym]
                                [?f :seon.fn/source ?src]
                                [(get-else $ ?f :seon.fn/spec "") ?spec]
                                [(get-else $ ?f :seon.fn/doc "") ?doc]
                                [(get-else $ ?f :seon.fn/arglists "") ?args]
-                               [(get-else $ ?f :seon.fn/private? false) ?priv]]
+                               [(get-else $ ?f :seon.fn/private? false) ?priv]
+                               [(get-else $ ?f :seon.fn/agent-facing? false) ?agent-facing]]
                              db))
         ;; The core-claimed syms — rows whose :source datom's tx carries the
         ;; boot-index provenance. Only these may be drift-overwritten.
@@ -2003,20 +2010,26 @@
                                      (not (contains? core-schema-keys
                                                      (:seon.schema/key row)))))))
                          all))
-        ;; A drifted fn row whose FRESH derivation is unspecced while the
-        ;; stored row carries a spec: identity upsert re-asserts the other
-        ;; fields but can't REMOVE a datom — retract the stale spec
-        ;; explicitly so PRESENT ⇒ specced stays honest.
+        ;; Drifted optional facts need explicit retractions: identity upsert
+        ;; cannot remove a spec or positive eligibility fact by omission.
         field-retracts
         (into []
-              (keep
+              (mapcat
                 (fn [row]
                   (if-some [sym (:seon.fn/sym row)]
-                    (let [stored-spec (get-in have-fns [sym :seon.fn/spec])]
-                      (when (and (not (contains? row :seon.fn/spec))
-                                 (seq stored-spec))
-                        [:db/retract [:seon.fn/sym sym]
-                         :seon.fn/spec stored-spec]))
+                    (let [stored-spec (get-in have-fns [sym :seon.fn/spec])
+                          stored-agent-facing?
+                          (get-in have-fns [sym :seon.fn/agent-facing?])]
+                      (cond-> []
+                        (and (not (contains? row :seon.fn/spec))
+                             (seq stored-spec))
+                        (conj [:db/retract [:seon.fn/sym sym]
+                               :seon.fn/spec stored-spec])
+
+                        (and stored-agent-facing?
+                             (not (contains? row :seon.fn/agent-facing?)))
+                        (conj [:db/retract [:seon.fn/sym sym]
+                               :seon.fn/agent-facing? true])))
                     (when-some [schema-key (:seon.schema/key row)]
                       (let [stored-generator
                             (get-in have-schs
@@ -2024,8 +2037,8 @@
                         (when (and (not= no-generator stored-generator)
                                    (not (contains? row
                                                    :seon.db.id/generator)))
-                          [:db/retract [:seon.schema/key schema-key]
-                           :seon.db.id/generator stored-generator]))))))
+                          [[:db/retract [:seon.schema/key schema-key]
+                            :seon.db.id/generator stored-generator]]))))))
               kept)
         ;; `:seon.ns/require-edges` COMPONENT rows can't ride the plain
         ;; identity upsert: cardinality-many component maps have no

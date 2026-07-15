@@ -36,7 +36,7 @@
 ;; {ns-sym → {def-sym → digest-hash}}. The digest is a single int
 ;; produced by `var-digest` covering the semantically-load-bearing
 ;; subset of the var-map (`:fn-var`, `:arglists`, `:doc`, `:private`,
-;; `:malli/schema`). Re-defs change the digest even when the keyset
+;; `:malli/schema`, `:seon.fn/agent-facing?`). Re-defs change the digest even when the keyset
 ;; doesn't, which is what `defs-since` needs to detect (B1).
 (schema/register! ::defs-snapshot [:map-of :symbol [:map-of :symbol :int]])
 
@@ -57,6 +57,9 @@
                    [::arglists :string]
                    [::doc :string]
                    [::private? :boolean]
+                   ;; Positive capability declaration. ABSENT means the
+                   ;; function remains program data but is not an agent tool.
+                   [::agent-facing? {:optional true} [:= true]]
                    ;; `::spec` = `(pr-str (m/form <:malli/schema>))` when
                    ;; present and parseable; ABSENT = unspecced (or the
                    ;; schema failed to parse — caller stamps schema-error).
@@ -83,6 +86,7 @@
            (:doc m)
            (:private m)
            (:malli/schema m)
+           (:seon.fn/agent-facing? m)
            ;; `:test` meta — cljs.test/deftest puts the test body fn
            ;; here. Each eval makes a fresh fn object → fresh identity-
            ;; hash. Including it means re-deftest tees a fresh
@@ -344,7 +348,8 @@
 (defn var-projection
   "Persistable subset of an analyzer var-map for `:seon.fn` storage.
    Maps analyzer keys (`:fn-var`, `:arglists`, `:meta {:doc ...}`,
-   `:meta {:private ...}`, `:meta {:malli/schema ...}`) to the v1.md
+   `:meta {:private ...}`, `:meta {:malli/schema ...}` and positive
+   `:meta {:seon.fn/agent-facing? true}`) to the v1.md
    §2.2 `:seon.fn/*` attr shapes (`:fn-var?`, `:arglists` pr-str'd,
    `:doc`, `:private?`, `:spec`).
 
@@ -373,4 +378,5 @@
              ::arglists  (pr-str al)
              ::doc       (or (:doc meta) "")
              ::private?  (boolean (:private meta))}
+      (true? (:seon.fn/agent-facing? meta)) (assoc ::agent-facing? true)
       (some? spec) (assoc ::spec spec))))

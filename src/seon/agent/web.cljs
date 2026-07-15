@@ -199,7 +199,7 @@
 ;; is host-owned config the agent CANNOT widen at runtime).
 ;; ============================================================
 
-(defn grants
+(defn ^:seon.fn/agent-facing? grants
   "What web access do I have? The SEON_WEB grant, reachability, search.
 
    Returns the live truth every function enforces: `:seon.agent.web/enabled?`
@@ -270,7 +270,7 @@
              ::cached?        true}
       (::title e) (assoc ::title (::title e)))))
 
-(defn ^:async fetch
+(defn ^{:async true :seon.fn/agent-facing? true} fetch
   "Fetch a web page as markdown: a preview now, the full text as a blob.
 
    The request map's keys live in THIS ns: the URL key is
@@ -404,7 +404,7 @@
        "there are NO ::url values to fetch. Rephrase toward a concrete "
        "fact-lookup query (or retry) if you need citable web sources."))
 
-(defn ^:async search
+(defn ^{:async true :seon.fn/agent-facing? true} search
   "Search the web; ranked result rows plus a grounded answer.
 
    The request map's keys live in THIS ns: :seon.agent.web/query (required,

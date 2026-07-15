@@ -275,7 +275,7 @@
 
 ;; --- Public API
 
-(defn ^:async step!
+(defn ^{:async true :seon.fn/agent-facing? true} step!
   "Add a new step to the plan.
 
    Mints one `:open` step (a blank title is refused). Omit
@@ -323,7 +323,7 @@
               id (get-in env [::db.id/ids ::id])]
           (internal/write-result "step!" id env))))))
 
-(defn ^:async plan!
+(defn ^{:async true :seon.fn/agent-facing? true} plan!
   "Create your plan ONCE: goal, pace, nested steps, and deps.
 
    CREATE only — author the whole tree in ONE call. To REVISE it later use
@@ -404,7 +404,7 @@
                        (get-in env
                                [:seon.db/error :seon.error/message])))))))))))
 
-(defn ^:async active!
+(defn ^{:async true :seon.fn/agent-facing? true} active!
   "Mark a plan step `:active`, the one you are working on now.
 
    The active step is your rendered position anchor. One position at a
@@ -432,7 +432,7 @@
                              (remove #{id} others))}))
              (internal/write-result "active!" id))))))
 
-(defn ^:async done!
+(defn ^{:async true :seon.fn/agent-facing? true} done!
   "Record that a plan step is finished and complete.
 
    VERIFY the step's `::expect` first — done means the outcome holds, not
@@ -453,7 +453,7 @@
                                         ::completed-at (js/Date.)}]}))
            (internal/write-result "done!" id)))))
 
-(defn ^:async reopen!
+(defn ^{:async true :seon.fn/agent-facing? true} reopen!
   "Flip a done/blocked step back to open; retract its `::completed-at`.
 
    Absent means absent — nil is never stored."
@@ -472,7 +472,7 @@
                       [:db/retract [::id id] ::completed-at]]}))
            (internal/write-result "reopen!" id)))))
 
-(defn ^:async needs!
+(defn ^{:async true :seon.fn/agent-facing? true} needs!
   "Add dependency edges; a step is ready only when its needs are done.
 
    Each `:on` ref becomes a `::needs` edge. Cardinality-many. Remove one via
@@ -498,7 +498,7 @@
                          (mapv (fn [ref] [:db/add [::id id] ::needs ref]) on)}))
                (internal/write-result "needs!" id)))))))
 
-(defn ^:async move!
+(defn ^{:async true :seon.fn/agent-facing? true} move!
   "Move a step under a new parent step.
 
    `:parent` is cardinality-one, so the new parent replaces the old.
@@ -521,7 +521,7 @@
           (->> (await (db/transact! {:seon.db/tx-data [{::id id ::parent parent}]}))
                (internal/write-result "move!" id)))))))
 
-(defn ^:async drop!
+(defn ^{:async true :seon.fn/agent-facing? true} drop!
   "Delete a step and its whole subtree from the plan.
 
    Retracts the step and every descendant, without marking anything
@@ -534,7 +534,7 @@
     (internal/check-request-keys "drop!" request ::id-request)
     (await (internal/retract-subtree! id))))
 
-(defn ^:async reconcile!
+(defn ^{:async true :seon.fn/agent-facing? true} reconcile!
   "Revise your existing OPEN plan from ONE edited whole-plan document.
 
    This is the UPDATE door (`plan!` is create-once). Pass `:my.plan/tree` —
@@ -633,7 +633,7 @@
                              (get-in env [:seon.db/error
                                           :seon.error/message])))))))))))))
 
-(defn next
+(defn ^:seon.fn/agent-facing? next
   "Get the next plan steps to work on.
 
    Your focus queue: READY leaves (open, unblocked), oldest first. Omit
@@ -648,7 +648,7 @@
         []))
     []))
 
-(defn tree
+(defn ^:seon.fn/agent-facing? tree
   "Get the whole plan as nested EDN, the structural read for re-planning.
 
    Children under `:my.plan/_parent`, dep ids inline. {::root id} → that
@@ -666,7 +666,7 @@
                 [])
               []))))
 
-(defn document
+(defn ^:seon.fn/agent-facing? document
   "Get your open plan as one document to edit and `reconcile!`.
 
    `tree`'s nested shape (children under `:my.plan/_parent`, dep ids
@@ -678,7 +678,7 @@
   [request]
   (internal/prune-done (tree request)))
 
-(defn status
+(defn ^:seon.fn/agent-facing? status
   "Check one step's status: done, blocked, ready, and progress.
 
    Derived view — done? (subtree complete), blocked? (stored :blocked OR an unmet need),
@@ -688,7 +688,7 @@
   [{::keys [id]}]
   (internal/status-view @db/*conn* id))
 
-(defn list-open
+(defn ^:seon.fn/agent-facing? list-open
   "List unfinished steps (open, active, blocked), oldest first.
 
    Per agent: omit `:seon.agent/id` and the boundary fills in YOU; {::all? true}

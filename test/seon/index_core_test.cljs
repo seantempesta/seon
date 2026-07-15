@@ -126,6 +126,15 @@
 (defn- by-sym [tx sym]
   (first (filter #(= sym (:seon.fn/sym %)) tx)))
 
+(defn- agent-facing-syms
+  "Agent-facing function symbols indexed for namespace `ns-name`."
+  [tx ns-name]
+  (into #{}
+        (comp (filter #(= true (:seon.fn/agent-facing? %)))
+              (map :seon.fn/sym)
+              (filter #(str/starts-with? % (str ns-name "/"))))
+        tx))
+
 (defn- arity-count
   "Number of arity arg-vectors recovered in a parsed arglists string, e.g.
    \"([req] [db eid])\" → 2. Counts opening `[` — robust to the exact arg
@@ -173,8 +182,45 @@
     (is (some? (:seon.fn/spec register))
         "register! is specced (spec-everything) → :seon.fn/spec present")
     ;; and it still gets real source (file-read, not stub).
-    (is (str/starts-with? (:seon.fn/source register) "(defn register!")
-        "register! gets REAL source (file-read, not stub)")))
+    (is (and (str/starts-with? (:seon.fn/source register) "(defn")
+             (str/includes? (:seon.fn/source register) "register!"))
+        "register! gets REAL source (file-read, not stub)")
+    (is (true? (:seon.fn/agent-facing? query))
+        "query carries the positive colocated capability fact")
+    (is (true? (:seon.fn/agent-facing? register))
+        "register! carries the positive colocated capability fact")
+    (is (not (contains? (by-sym tx "seon.db/listen!")
+                        :seon.fn/agent-facing?))
+        "a public implementation function remains indexed but unmarked")))
+
+(deftest protected-tool-inventory-is-explicit
+  (let [tx @core-tx]
+    (is (= #{"seon.db/current-agent-id"
+             "seon.db/cas-assert"
+             "seon.db/transact!"
+             "seon.db/query"
+             "seon.db/index-datoms"
+             "seon.db/rseek-datoms"
+             "seon.db/installed-schema"
+             "seon.db/pull"
+             "seon.db/entity"
+             "seon.db/history"
+             "seon.db/as-of"
+             "seon.db/at-coordinate"
+             "seon.db/since"
+             "seon.db/head-coordinate"
+             "seon.db/basis-t"}
+           (agent-facing-syms tx "seon.db"))
+        "seon.db exposes only the deliberate database toolkit")
+    (is (= #{"seon.schema/identity-attr?"
+             "seon.schema/enum-members"
+             "seon.schema/register!"
+             "seon.schema/registered-schemas"
+             "seon.schema/registered?"
+             "seon.schema/schema-definition"
+             "seon.schema/schemas-in-namespace"}
+           (agent-facing-syms tx "seon.schema"))
+        "seon.schema excludes projection and eval-validation internals")))
 
 (deftest real-arglists-not-mangled
   ;; The parser recovers arglists from the REAL source, not the
@@ -630,7 +676,8 @@
           done*    (fn [] (restore!) (done))
           target   "seon.schema/register!"
           stale    "[:=> [:cat :seon.stale/req] :seon.stale/resp]"
-          guarded  "seon.db/transact!"]
+          guarded  "seon.db/transact!"
+          internal "seon.db/listen!"]
      (-> (client/open-agent-conn!)
         (.then
           (fn [conn]
@@ -648,6 +695,11 @@
                          (transact-through conn :seon.db.process/boot
                                       [{:seon.fn/sym  target
                                         :seon.fn/spec stale}])))
+                ;; Forge stale positive eligibility onto an implementation fn.
+                (.then (fn [_]
+                         (transact-through conn :seon.db.process/boot
+                                      [{:seon.fn/sym internal
+                                        :seon.fn/agent-facing? true}])))
                 (.then (fn [_]
                          (transact-through conn :seon.db.process/boot
                                       [[:db/retractEntity [:seon.fn/sym guarded]]])))
@@ -675,6 +727,10 @@
                       ;; (b) GUARD
                       (is (nil? (fresh-fn guarded tx))
                           "a REPL-authored row with a core sym is NEVER re-emitted over")
+                      (is (some #(= % [:db/retract [:seon.fn/sym internal]
+                                       :seon.fn/agent-facing? true])
+                                tx)
+                          "removing source eligibility explicitly retracts the stale fact")
                       ;; (c) RETRACT — dynamic: any unspecced fn in the fresh
                       ;; index (private helpers are indexed, so one exists).
                       (if-some [unspecced (:seon.fn/sym

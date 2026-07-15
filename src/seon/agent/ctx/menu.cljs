@@ -222,11 +222,11 @@
           refers)))
 
 (defn- public-fn-row
-  "The `:seon.fn` program-graph row for full-sym string `s` when it is a
-   PUBLIC fn var (indexed, `:seon.fn/fn-var?`, not private) — else nil."
+  "The `:seon.fn` row for `s` when it declares an agent-facing public fn."
   [db s]
   (let [e (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.fn/sym s]})]
-    (when (and e (:seon.fn/fn-var? e) (not (:seon.fn/private? e)))
+    (when (and e (:seon.fn/fn-var? e) (:seon.fn/agent-facing? e)
+               (not (:seon.fn/private? e)))
       e)))
 
 (defn- ranked-functions
@@ -345,7 +345,7 @@
       #{})))
 
 (defn- ns-public-specced-fns
-  "`[full-sym-str fn-row]` pairs for ns `ns-kw`'s PUBLIC SPECCED fns in
+  "`[full-sym-str fn-row]` pairs for an ns's agent-facing specced fns in
    `db`, fn-name order. [] when the ns is unindexed."
   [db ns-kw]
   (->> (db/query {:seon.db/db db
@@ -354,9 +354,11 @@
                                    :where
                                    [?ns :seon.ns/name ?nsname]
                                    [?e :seon.fn/ns ?ns]
-                                   [?e :seon.fn/fn-var? true]]
+                                   [?e :seon.fn/fn-var? true]
+                                   [?e :seon.fn/agent-facing? true]]
                   :seon.db/args [ns-kw]})
-       (map #(db/pull db [:seon.fn/sym :seon.fn/private? :seon.fn/spec
+       (map #(db/pull db [:seon.fn/sym :seon.fn/private?
+                          :seon.fn/agent-facing? :seon.fn/spec
                           :seon.fn/arglists :seon.fn/doc] %))
        (filter (fn [row] (and (not (:seon.fn/private? row))
                               (:seon.fn/spec row)

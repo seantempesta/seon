@@ -380,7 +380,7 @@
   []
   (internal/current-tx-context))
 
-(defn current-agent-id
+(defn ^:seon.fn/agent-facing? current-agent-id
   "The active agent-id (string), or nil outside a [[with-agent]] scope.
    Fiber-local across awaits. The standard accessor for any code that
    needs to know whose universe it's running in.
@@ -561,7 +561,7 @@
 (schema/register! ::cas-value :any)   ; lookup-ref, eid, or ANY scalar value
 (schema/register! ::cas-op    [:vector :any])
 
-(defn cas-assert
+(defn ^:seon.fn/agent-facing? cas-assert
   "Build a no-op compare-and-swap op asserting `ref`'s `attr` is `value`.
 
    Pure DATA; `old == new == value`. LEAD a work-tx with this and the tx
@@ -585,7 +585,7 @@
   [ref attr value]
   [:db.fn/cas ref attr value value])
 
-(defn ^:async transact!
+(defn ^{:async true :seon.fn/agent-facing? true} transact!
   "Save records to the database, persisting new facts durably.
 
    Commits `::db/tx-data` (entity maps and/or tx ops) through the one
@@ -845,7 +845,7 @@
         result true))
     result))
 
-(defn query
+(defn ^:seon.fn/agent-facing? query
   "Ask the database a question: find, count, or sum stored facts.
 
    Runs a Datalog query and returns the result set. Two call shapes:
@@ -968,7 +968,7 @@
          (take limit)
          (mapv internal/datom->map))))
 
-(defn index-datoms
+(defn ^:seon.fn/agent-facing? index-datoms
   "Read at most `:seon.db/index-limit` datoms from one database index.
 
    `:seon.db/components` are the ordinary Datahike index components.
@@ -1011,7 +1011,7 @@
                rows)]
     (vec (take limit rows))))
 
-(defn rseek-datoms
+(defn ^:seon.fn/agent-facing? rseek-datoms
   "Read at most `:seon.db/index-limit` datoms descending from an index key.
 
    This is the bounded public face of Datahike's lazy `rseek-datoms`: results
@@ -1040,7 +1040,7 @@
         (try (dbi/-schema db) (catch :default _ nil)))
       {}))
 
-(defn installed-schema
+(defn ^:seon.fn/agent-facing? installed-schema
   "The datahike schema map actually INSTALLED on `db`.
 
    Attrs the conn has seen, keyed by ident keyword. FilteredDB-safe and nil-safe.
@@ -1324,7 +1324,7 @@
         result true))
     result))
 
-(defn pull
+(defn ^:seon.fn/agent-facing? pull
   "Pull an entity by ref using a pull pattern (sync).
 
    Returns the pulled map, or nil if the ref doesn't resolve.
@@ -1433,7 +1433,7 @@
         captures :seon.db.read.operation/entity db {::ref ref} result true))
     result))
 
-(defn entity
+(defn ^:seon.fn/agent-facing? entity
   "Fetch one stored record by its id, with all its fields.
 
    Looks up an entity by eid or lookup-ref, as a plain map (sync).
@@ -1480,7 +1480,7 @@
 ;; A datahike time-point: a tx-id (int), or a Date/txInstant (`inst?`).
 (schema/register! ::time-point [:or :int 'inst?])
 
-(defn history
+(defn ^:seon.fn/agent-facing? history
   "A db value spanning ALL of time — assertions and retractions.
 
    Every datom ever, not just the now-true view. Read it with a 5-tuple `:where` so the tx and
@@ -1503,7 +1503,7 @@
          captures :seon.db.read.operation/history db {} result false))
      result)))
 
-(defn as-of
+(defn ^:seon.fn/agent-facing? as-of
   "A db value as it was AT `t` — time-travel for reads.
 
    `t` is a tx-id, Date, or txInstant. query/pull/entity against it see only what was true then:
@@ -1526,7 +1526,7 @@
 
 (schema/register! ::at-coordinate-response [:or ::db-val ::error])
 
-(defn ^:async at-coordinate
+(defn ^{:async true :seon.fn/agent-facing? true} at-coordinate
   "Resolve an exact immutable historical database value.
 
    A complete coordinate pins both the containing Datahike commit and the
@@ -1591,7 +1591,7 @@
      (catch :default e
        (error/->map e)))))
 
-(defn since
+(defn ^:seon.fn/agent-facing? since
   "The complement of [[as-of]] — a db value of datoms added after `t`.
 
    Diff \"what changed since\" a tx you remembered:
@@ -1628,7 +1628,7 @@
     (dbi/-time-point db)
     (dbi/-max-tx db)))
 
-(defn head-coordinate
+(defn ^:seon.fn/agent-facing? head-coordinate
   "The complete coordinate of one committed database value.
 
    Omit db to identify the current immutable head. Temporal `as-of` wrappers
@@ -1640,7 +1640,7 @@
   ([] (head-coordinate @(internal/resolve-conn *conn*)))
   ([db] (db.coordinate/resolved db)))
 
-(defn basis-t
+(defn ^:seon.fn/agent-facing? basis-t
   "The selected tx coordinate of a db value.
 
    For an [[as-of]] value this is its selected time point, not the later head

@@ -80,13 +80,19 @@ snapshots, and rollback beside `register!`; `seon.db` advertises boot,
 provenance, listener, transaction-scope, schema-bridge, and raw-entity internals
 beside query/pull/transact.
 
-The next unit is structural eligibility, not string compression. Agent-facing
-function declaration is colocated metadata persisted on the ordinary
-`:seon.fn` entity. Required compact cards derive their callable set and schema
-closure from those facts; current namespace source stays full. Domain/entity
-schemas retain a positive data-model inclusion rule. No renderer blocklist or
-benchmark-specific exclusion list is admitted. The exact audit and acceptance
-boundary are in [[research/namespace-surface-audit-2026-07-15]].
+Structural eligibility is now implemented for the core surface. Agent-facing
+function declaration is colocated metadata persisted as an optional positive
+`:seon.fn/agent-facing?` fact on the ordinary program entity. Boot indexing,
+eval tee, drift repair, compact namespace cards, and both menu paths share that
+fact; current namespace source stays full. Exact `seon.db` and `seon.schema`
+inventories prevent internal projection/eval/database mechanics from silently
+re-entering context and retain the standard current-agent accessor. The focused
+gate passes 66 tests and 319 assertions across indexing, tee persistence,
+namespace cards, and menus. Domain/entity schemas retain a positive data-model
+inclusion rule. No renderer blocklist or benchmark-specific exclusion list is
+admitted. Downstream ACME declarations still require their separate handback
+review. The exact audit and acceptance boundary are in
+[[research/namespace-surface-audit-2026-07-15]].
 
 The first policy unit now resolves run ceilings through one config manifest
 section and persists three scalar singleton facts. The live isolated database

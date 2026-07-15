@@ -403,7 +403,7 @@
 ;; crash. Both reuse `::message-response`.
 ;; ============================================================
 
-(defn ^:async user
+(defn ^{:async true :seon.fn/agent-facing? true} user
   "Send a message to your human user.
 
    [[message!]] with `to` := THE one user. `from` is you (the ALS
@@ -416,7 +416,7 @@
   (await (message! {:seon.agent.message/content content
                     :seon.agent.message/to      [user-ref]})))
 
-(defn ^:async agent
+(defn ^{:async true :seon.fn/agent-facing? true} agent
   "Send a message to a PEER agent by id.
 
    `message!` with `to` := `[[:seon.agent/id agent-id]]`. `from` is you

@@ -70,18 +70,22 @@
     {:seon.db/tx-data
      [{:seon.fn/sym      "my.plan/done!"
        :seon.fn/fn-var?  true
+       :seon.fn/agent-facing? true
        :seon.fn/arglists "([{:my.plan/keys [id]}])"
        :seon.fn/doc      "Mark a step done; may unblock its dependents next turn.\n\n   Longer prose that must NOT render in the menu."}
       {:seon.fn/sym      "my.plan/step!"
        :seon.fn/fn-var?  true
+       :seon.fn/agent-facing? true
        :seon.fn/arglists "([request])"
        :seon.fn/doc      "Mint one OPEN plan step (agent = caller; blank title refused)."}
       {:seon.fn/sym      "my.plan/secret-helper"
        :seon.fn/fn-var?  true
+       :seon.fn/agent-facing? true
        :seon.fn/private? true
        :seon.fn/arglists "([x])"}
       {:seon.fn/sym      "my.plan/drop!"
        :seon.fn/fn-var?  true
+       :seon.fn/agent-facing? true
        :seon.fn/arglists "([{:my.plan/keys [id]}])"
        :seon.fn/doc      "Retract a step AND its whole subtree."}
       {:seon.ns/name :my.agent.menutestagent
@@ -168,6 +172,7 @@
          :seon.ns.require/alias  'plan}]}
       {:seon.fn/sym      "my.plan/plan!"
        :seon.fn/fn-var?  true
+       :seon.fn/agent-facing? true
        :seon.fn/ns       [:seon.ns/name :my.plan]
        :seon.fn/spec     "[:=> [:cat :my.plan/plan-request] :my.plan/plan-response]"
        :seon.fn/arglists "([request])"
@@ -177,9 +182,16 @@
        :seon.fn/spec    "[:=> [:cat :my.plan/id-request] :my.plan/write-response]"}
       {:seon.fn/sym      "my.plan/no-spec-fn"
        :seon.fn/fn-var?  true
+       :seon.fn/agent-facing? true
        :seon.fn/ns       [:seon.ns/name :my.plan]
        :seon.fn/arglists "([x])"
-       :seon.fn/doc      "Public but unspecced — not a toolkit entry."}]}))
+       :seon.fn/doc      "Public but unspecced — not a toolkit entry."}
+      {:seon.fn/sym      "my.plan/internal-specced"
+       :seon.fn/fn-var?  true
+       :seon.fn/ns       [:seon.ns/name :my.plan]
+       :seon.fn/spec     "[:=> [:cat :int] :int]"
+       :seon.fn/arglists "([x])"
+       :seon.fn/doc      "Unmarked implementation function."}]}))
 
 (deftest toolkit-group-one-numbering-dedup-and-cap
   (async done
@@ -203,6 +215,8 @@
                           "a function already in the recency group is never duplicated")
                       (is (not (str/includes? out "no-spec-fn"))
                           "a spec-less public fn is not a toolkit entry")
+                      (is (not (str/includes? out "internal-specced"))
+                          "a specced public implementation fn is not a toolkit entry")
                       (is (every? true?
                                   (map (fn [sym offer]
                                          (str/includes?

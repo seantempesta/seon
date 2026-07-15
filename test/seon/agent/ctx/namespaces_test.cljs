@@ -41,6 +41,7 @@
      :seon.fn/ns       [:seon.ns/name ns-kw]
      :seon.fn/source   (str "(defn " nm " [x] (" body-marker " x))")
      :seon.fn/fn-var?  true :seon.fn/private? false
+     :seon.fn/agent-facing? true
      :seon.fn/arglists "([x])"}))
 
 (defn- seed-tx []
@@ -54,6 +55,12 @@
    ;; REQUIRED by the current ns → COMPACT card.
    {:seon.ns/name :my.helper :seon.ns/source "(ns my.helper)"}
    (fn-row "my.helper/assist" :my.helper "HLP-BODY")
+   ;; Public program data without positive eligibility stays out of the card.
+   {:seon.fn/sym "my.helper/runtime-helper"
+    :seon.fn/ns [:seon.ns/name :my.helper]
+    :seon.fn/source "(defn runtime-helper [x] (RUNTIME-BODY x))"
+    :seon.fn/fn-var? true :seon.fn/private? false
+    :seon.fn/arglists "([x])"}
    ;; NEITHER current, required, nor pinned → DROPPED.
    {:seon.ns/name :my.unrelated :seon.ns/source "(ns my.unrelated)"}
    (fn-row "my.unrelated/stray" :my.unrelated "UNR-BODY")
@@ -91,7 +98,9 @@
                 (is (str/includes? out "CUR-BODY") "current ns renders FULL — its body survives")
                 (is (not (str/includes? out "HLP-BODY")) "a required ns renders COMPACT — its body is elided"))
               (testing "private fns never enter a compact card"
-                (is (not (str/includes? out "secret")))))))
+                (is (not (str/includes? out "secret"))))
+              (testing "unmarked public functions remain program data only"
+                (is (not (str/includes? out "runtime-helper")))))))
         (.then (fn [_] (done)) (fn [e] (is false (str "threw: " (.-message e))) (done))))))
 
 (deftest full-source-pins-an-otherwise-dropped-ns-to-full

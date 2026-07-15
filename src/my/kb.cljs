@@ -130,7 +130,7 @@
 ;;; WRITES — transact! returns the envelope Promise (await it in a fn).
 ;;; ALWAYS read it: an eval can succeed yet `:seon.db/ok? false`.
 
-(defn remember-sources!
+(defn ^:seon.fn/agent-facing? remember-sources!
   "Store the sample sources, linking authors and findings by ref.
 
    The two idiomatic ref links:
@@ -163,7 +163,7 @@
        :my.kb.source/rating 5 :my.kb.source/topics [:functional :data-structures]
        :my.kb.source/author "author-okasaki"}]}))
 
-(defn ^:async remember
+(defn ^{:async true :seon.fn/agent-facing? true} remember
   "Store ONE finding as a durable, provenance-stamped knowledge row.
 
    The one-call way to persist what you verified, with NO schema design, NO
@@ -208,7 +208,7 @@
       {::id (get tempids "finding")}
       env)))
 
-(defn retitle-source!
+(defn ^:seon.fn/agent-facing? retitle-source!
   "Rename one source's title in place, by its id.
 
    UPSERT by identity — the same `:my.kb.source/id` updates in place, no
@@ -217,7 +217,7 @@
   [id new-title]
   (db/transact! {::db/tx-data [{:my.kb.source/id id :my.kb.source/title new-title}]}))
 
-(defn clear-rating!
+(defn ^:seon.fn/agent-facing? clear-rating!
   "Remove one source's rating, an explicit retraction.
 
    `[:db/retract ref attr]` (no value) removes the current value (omitting
@@ -226,7 +226,7 @@
   [id]
   (db/transact! {::db/tx-data [[:db/retract [:my.kb.source/id id] :my.kb.source/rating]]}))
 
-(defn replace-topics!
+(defn ^:seon.fn/agent-facing? replace-topics!
   "Replace a source's whole topics set with a new one.
 
    Transacting topics only ADDS to the set; to REPLACE, retract every
@@ -238,7 +238,7 @@
     {::db/tx-data [[:db/retract [:my.kb.source/id id] :my.kb.source/topics]
                    {:my.kb.source/id id :my.kb.source/topics topics}]}))
 
-(defn forget-source!
+(defn ^:seon.fn/agent-facing? forget-source!
   "Delete one source and all its findings, by id.
 
    `:db.fn/retractEntity` removes the whole entity; component children
@@ -251,7 +251,7 @@
 ;;; :find shape picks the result: bare relation = SET of tuples; `[?x ...]` =
 ;;; one column as a vector; `?x .` = a single scalar.
 
-(defn titles
+(defn ^:seon.fn/agent-facing? titles
   "List every stored source title.
 
    FIND by attribute presence: every entity asserting `:my.kb.source/title`.
@@ -260,7 +260,7 @@
   []
   (db/query '[:find [?t ...] :where [?e :my.kb.source/title ?t]]))
 
-(defn title+rating
+(defn ^:seon.fn/agent-facing? title+rating
   "List every source's title and rating as `[title rating]` pairs.
 
    Relation find — a SET of tuples, JOINING two attrs on one entity
@@ -270,7 +270,7 @@
   (db/query '[:find ?title ?rating
               :where [?e :my.kb.source/title ?title] [?e :my.kb.source/rating ?rating]]))
 
-(defn titles-by-author
+(defn ^:seon.fn/agent-facing? titles-by-author
   "List the titles of every source by the named author.
 
    `:in`-bound input + REF-JOIN.
@@ -284,7 +284,7 @@
                      [?s :my.kb.source/title ?title]]
             author-name))
 
-(defn source-stats
+(defn ^:seon.fn/agent-facing? source-stats
   "Summarize stored sources: count, rating total, and topic tally.
 
    Aggregation toward a question — the analysis built ON TOP of stored
@@ -342,7 +342,7 @@
        (sort-by (fn [[e n]] [(- n) e]))
        vec))
 
-(defn ^:async recall
+(defn ^{:async true :seon.fn/agent-facing? true} recall
   "Find what you already know about a topic: ranked facts with sources.
 
    \"What do we know about X?\" in ONE call. Map-in:
@@ -407,7 +407,7 @@
 ;;; PULL / ENTITY — read one entity by lookup-ref `[identity-attr value]`,
 ;;; which IS the "by name" addressing.
 
-(defn source-detail
+(defn ^:seon.fn/agent-facing? source-detail
   "Fetch one source with its author and findings, by id.
 
    Pull by LOOKUP-REF.
@@ -419,7 +419,7 @@
   (db/pull '[* {:my.kb.source/author [:my.kb.author/name]}]
            [:my.kb.source/id id]))
 
-(defn source-entity
+(defn ^:seon.fn/agent-facing? source-entity
   "Fetch one source as a plain map, nil when the id is unknown.
 
    Looks up the entity by lookup-ref.

@@ -204,6 +204,9 @@
 (schema/register! :seon.fn/arglists   :string)
 (schema/register! :seon.fn/doc        :string)
 (schema/register! :seon.fn/private?   :boolean)
+;; Positive capability declaration. Presence true means the function may
+;; enter agent tool context; absence keeps it only in the program graph.
+(schema/register! :seon.fn/agent-facing? :boolean)
 ;; The fn's contract: `(pr-str (m/form <the fn's :malli/schema>))`.
 ;; PRESENT ⇒ specced (the exact contract is in the corpus); ABSENT ⇒
 ;; unspecced.
@@ -286,6 +289,7 @@
    [:seon.fn/arglists   {:optional true} :seon.fn/arglists]
    [:seon.fn/doc        {:optional true} :seon.fn/doc]
    [:seon.fn/private?   {:optional true} :seon.fn/private?]
+   [:seon.fn/agent-facing? {:optional true} :seon.fn/agent-facing?]
    [:seon.fn/spec       {:optional true} :seon.fn/spec]
    [:seon.fn/schema-error {:optional true} :seon.fn/schema-error]
    ;; The declared read-set (qualified keyword literals in the source,

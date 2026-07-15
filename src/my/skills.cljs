@@ -222,7 +222,7 @@
 ;;; FUNCTIONS — thin wrappers over install!/remove! + a derived row query. The
 ;;; agent gets DATA (the eval path auto-awaits the ^:async ones).
 
-(defn ^:async load
+(defn ^{:async true :seon.fn/agent-facing? true} load
   "Load skill `skill-name`'s body INTO your context.
 
    Install ONE `:skill/<name>` context block whose body is the skill's SKILL.md, rendered
@@ -250,7 +250,7 @@
           {::ok? false
            ::message (str "load failed: " (:seon.agent.ctx/error res))})))))
 
-(defn ^:async unload
+(defn ^{:async true :seon.fn/agent-facing? true} unload
   "Unload skill `skill-name`, removing its `:skill/<name>` block.
 
    Its body (and token cost) is gone next render. No-op success if it
@@ -266,7 +266,7 @@
       {::ok? false
        ::message (str "unload failed: " (:seon.agent.ctx/error res))})))
 
-(defn list
+(defn ^:seon.fn/agent-facing? list
   "The skill catalog: every available skill and whether YOU loaded it.
 
    Each entry carries its description and `::loaded?` — derived from your
