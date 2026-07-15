@@ -7,6 +7,7 @@
    database-scoped request names its database explicitly; there is no ambient
    connection path."
   (:require [clojure.edn :as edn]
+            [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.constants :as datahike.constants]
@@ -77,8 +78,10 @@
  ::initialize-request
  [:map
   [::runtime ::runtime]
-  [::connection ::connection]
-  [::database-name ::database-name]])
+  [::registry/conn ::connection]
+  [::registry/database-name ::registry/database-name]
+  [::registry/attachment ::coordinate/attachment]
+  [::registry/open-intent ::registry/open-intent]])
 
 ;;; Datahike values and transaction shapes
 
@@ -225,6 +228,24 @@
                 {::failure-kind protocol/protocol-error
                  ::missing-schema (mapv :db/ident missing)})))))
 
+(defn- assert-declared-secondary-indices-live!
+  [connection]
+  (let [db-value (d/db connection)
+        declared (into #{}
+                       (keep (fn [[ident entry]]
+                               (when (and (keyword? ident)
+                                          (map? entry)
+                                          (:db.secondary/type entry))
+                                 ident)))
+                       (:schema db-value))
+        live (set (keys (:secondary-indices db-value)))
+        missing (vec (sort-by str (set/difference declared live)))]
+    (when (seq missing)
+      (throw
+       (ex-info "A declared secondary index did not restore on branch open."
+                {::failure-kind protocol/protocol-error
+                 ::missing-secondary-indices missing})))))
+
 ;;; Transaction report and publication
 
 (defn- transaction-report-data
@@ -292,11 +313,17 @@
   {:malli/schema [:=> [:cat ::initialize-request]
                   [:map
                    [::database-initialized? ::database-initialized?]]]}
-  [{::keys [runtime connection database-name]}]
+  [{::keys [runtime]
+    connection ::registry/conn
+    database-name ::registry/database-name
+    open-intent ::registry/open-intent}]
   (assert-protocol-native-schema! connection)
+  (when (= :seon.db.registry.open/branch open-intent)
+    (assert-declared-secondary-indices-live! connection))
   (d/listen connection ::transaction-publication
             (transaction-listener runtime database-name))
-  ((::database-initializer runtime) connection (keyword database-name))
+  (when (= :seon.db.registry.open/main open-intent)
+    ((::database-initializer runtime) connection database-name))
   {::database-initialized? true})
 
 (defn- transform-transaction
@@ -755,11 +782,9 @@
           (::protocol/backend request)
           (::protocol/database-path request)
           (::coordinate/attachment request)
-          (fn [connection _database-keyword]
+          (fn [initialize-request]
             (initialize-connection!
-             {::runtime runtime
-              ::connection connection
-              ::database-name database-name}))))
+             (assoc initialize-request ::runtime runtime)))))
         backend-kind (::registry/backend entry)
         database-path (::registry/path entry)]
     (protocol/success

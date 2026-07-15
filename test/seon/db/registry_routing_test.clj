@@ -2,6 +2,7 @@
   "Explicit database routing and connection initialization tests."
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [datahike.api :as d]
+            [seon.db.coordinate :as coordinate]
             [seon.db.registry :as registry]))
 
 (defn- isolate-registry
@@ -30,7 +31,7 @@
                      [database-name
                       (::registry/conn
                        (ensure-memory! database-name
-                                       (fn [_connection _name] nil)))]))
+                                       (fn [_request] nil)))]))
               database-names)]
     (doseq [[database-name connection] connections]
       (let [resolved
@@ -51,14 +52,17 @@
         calls (atom [])
         reports (atom [])
         initialize!
-        (fn [connection seen-name]
-          (swap! calls conj [seen-name (some? @connection)])
-          (d/listen connection ::capture #(swap! reports conj %)))
+        (fn [{::registry/keys [conn database-name attachment open-intent]}]
+          (swap! calls conj [database-name (some? @conn) attachment open-intent])
+          (d/listen conn ::capture #(swap! reports conj %)))
         first-entry (ensure-memory! database-name initialize!)
         second-entry (ensure-memory! database-name initialize!)
         connection (::registry/conn first-entry)]
     (is (identical? connection (::registry/conn second-entry)))
-    (is (= [[database-name true]] @calls))
+    (is (= [[database-name true
+             (::registry/attachment first-entry)
+             :seon.db.registry.open/main]]
+           @calls))
     (d/transact connection
                 [{:db/ident :routing/value
                   :db/valueType :db.type/string
@@ -75,7 +79,7 @@
         (try
           (ensure-memory!
            database-name
-           (fn [_connection _name]
+           (fn [_request]
              (throw (ex-info "initializer failed" {}))))
           nil
           (catch clojure.lang.ExceptionInfo exception exception))]
@@ -84,4 +88,37 @@
                {::registry/database-name database-name})))
     (is (some?
          (::registry/conn
-          (ensure-memory! database-name (fn [_connection _name] nil)))))))
+          (ensure-memory! database-name (fn [_request] nil)))))))
+
+(deftest non-main-initializer-must-be-observational
+  (let [main-name :routing/observational-main
+        branch-name :routing/observational-branch
+        main (ensure-memory! main-name (fn [_request] nil))
+        main-connection (::registry/conn main)
+        branch :routing.branch/observational
+        attachment (assoc (::registry/attachment main)
+                          ::coordinate/branch branch)]
+    (d/branch! main-connection :db branch)
+    (let [before (coordinate/resolved
+                  (d/branch-as-db main-connection branch))
+          failure
+          (try
+            (registry/ensure-database!
+             {::registry/database-name branch-name
+              ::registry/backend :memory
+              ::registry/attachment attachment
+              ::registry/initialize-connection!
+              (fn [{::registry/keys [conn open-intent]}]
+                (is (= :seon.db.registry.open/branch open-intent))
+                (d/transact conn
+                            [{:db/ident :routing.branch/value
+                              :db/valueType :db.type/string
+                              :db/cardinality :db.cardinality/one}]))})
+            nil
+            (catch clojure.lang.ExceptionInfo exception exception))]
+      (is (= :seon.db.registry.error/branch-initializer-wrote
+             (:seon.error/kind (ex-data failure))))
+      (is (= before (::registry/coordinate-before (ex-data failure))))
+      (is (not= before (::registry/coordinate-after (ex-data failure))))
+      (is (= {} (registry/lookup-connection
+                 {::registry/database-name branch-name}))))))

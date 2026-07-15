@@ -7,7 +7,8 @@
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.transport.uds :as uds]
-            [seon.db.writer :as writer])
+            [seon.db.writer :as writer]
+            [seon.embed :as embed])
   (:import [java.io File]
            [java.nio.channels Channels SocketChannel]))
 
@@ -20,11 +21,13 @@
             (str "seon-writer-" label "-" (random-uuid) ".sock")))))
 
 (defn- dependencies
-  []
-  {::writer/database-initializer (fn [_connection _database-name] nil)
-   ::writer/transaction-transform (fn [_db-value transaction-data]
-                                    transaction-data)
-   ::writer/knn-search (fn [_db-value _request] {:seon.embed/hits []})})
+  ([]
+   (dependencies (fn [_connection _database-name] nil)))
+  ([database-initializer]
+   {::writer/database-initializer database-initializer
+    ::writer/transaction-transform (fn [_db-value transaction-data]
+                                     transaction-data)
+    ::writer/knn-search (fn [_db-value _request] {:seon.embed/hits []})}))
 
 (defn- wait-for-subscriber!
   [publisher]
@@ -160,6 +163,65 @@
         (writer/stop! server)
         (.delete (File. request-path))
         (.delete (File. publish-path))))))
+
+(deftest native-branch-open-restores-proximum-without-running-main-initializer
+  (let [database-name (str "writer-proximum-main-" (random-uuid))
+        branch-name (str "writer-proximum-branch-" (random-uuid))
+        database-root (File. "tmp" (str "writer-proximum-" (random-uuid)))
+        database-path (.getPath (File. database-root "db"))
+        request-path (socket-path "proximum-branch-request")
+        publish-path (socket-path "proximum-branch-publish")
+        initializer-calls (atom [])
+        server
+        (writer/start!
+         {::writer/dependencies
+          (dependencies
+           (fn [connection initialized-database-name]
+             (swap! initializer-calls conj initialized-database-name)
+             (embed/install! connection)))
+          ::writer/database-name database-name
+          ::writer/backend :file
+          ::writer/database-path database-path
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})
+        main
+        (registry/resolve-connection
+         {::registry/database-name (keyword database-name)})
+        branch :experiment/proximum
+        attachment
+        (assoc (::registry/attachment main) ::coordinate/branch branch)]
+    (try
+      (is (embed/index-declared? (::registry/conn main)))
+      (is (embed/index-live? (::registry/conn main)))
+      (d/branch! (::registry/conn main)
+                 (::coordinate/commit-id (::registry/coordinate main))
+                 branch)
+      (let [before (coordinate/resolved
+                    (d/branch-as-db (::registry/conn main) branch))]
+        (with-open [channel (uds/connect! request-path)]
+          (let [response
+                (call! channel
+                       (protocol/ensure-database-request
+                        {::protocol/database-name branch-name
+                         ::protocol/backend :file
+                         ::protocol/database-path database-path
+                         ::coordinate/attachment attachment}))
+                opened
+                (registry/resolve-connection
+                 {::registry/database-name (keyword branch-name)})]
+            (is (::protocol/success? response))
+            (is (= before (::registry/coordinate opened)))
+            (is (embed/index-declared? (::registry/conn opened)))
+            (is (embed/index-live? (::registry/conn opened)))
+            (is (= [(keyword database-name)] @initializer-calls)
+                "the writing database initializer runs only for main"))))
+      (finally
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))
+        (when (.exists database-root)
+          (run! (fn [^File file] (.delete file))
+                (reverse (file-seq database-root))))))))
 
 (deftest canonical-writes-route-commit-and-publish-exactly-once
   (let [database-name (str "writer-integration-" (random-uuid))

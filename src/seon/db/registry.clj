@@ -26,8 +26,10 @@
 
    Connection setup is an explicit dependency of `ensure-database!`, not a global
    callback registry. The writer assembles one fixed initializer at boot and
-   passes it on every open. A failed initializer releases the new connection
-   and leaves no half-initialized registry entry."
+   passes it on every open. The initializer receives one request describing
+   the exact attachment and whether the open is main or branch-observational.
+   A failed initializer releases the new connection and leaves no
+   half-initialized registry entry."
   (:require [clojure.set :as set]
             [datahike.api :as d]
             [seon.db.coordinate :as coordinate]
@@ -45,6 +47,9 @@
 (schema/register! ::attachment ::coordinate/attachment)
 (schema/register! ::coordinate ::coordinate/coordinate)
 (schema/register! ::release-error :string)
+(schema/register! ::open-intent
+                  [:enum :seon.db.registry.open/main
+                   :seon.db.registry.open/branch])
 
 ;; A live conn is an opaque clojure.lang.IAtom2 (datahike connection
 ;; type). We don't constrain its shape; the registry hands it out as-is.
@@ -66,6 +71,13 @@
                    [::attachment {:optional true} ::attachment]
                    [::initial-tx {:optional true} ::initial-tx]
                    [::initialize-connection! 'fn?]])
+
+(schema/register! ::initialize-connection-request
+                  [:map
+                   [::conn ::conn]
+                   [::database-name ::database-name]
+                   [::attachment ::attachment]
+                   [::open-intent ::open-intent]])
 
 (schema/register! ::entry-view
                   [:map
@@ -349,9 +361,29 @@
              registry database-name attachment* backend backend-path)
             (let [entry (open-entry! registry database-name backend backend-path
                                      attachment* initial-tx)
-                  conn (::conn entry)]
+                  conn (::conn entry)
+                  branch (::coordinate/branch attachment*)
+                  open-intent (if (= :db branch)
+                                :seon.db.registry.open/main
+                                :seon.db.registry.open/branch)
+                  coordinate-before (current-coordinate entry)]
               (try
-                (initialize-connection! conn database-name)
+                (initialize-connection!
+                 {::conn conn
+                  ::database-name database-name
+                  ::attachment attachment*
+                  ::open-intent open-intent})
+                (when (and (= :seon.db.registry.open/branch open-intent)
+                           (not= coordinate-before (current-coordinate entry)))
+                  (throw
+                   (ex-info
+                    "A non-main branch initializer changed its database head."
+                    {:seon.error/kind
+                     :seon.db.registry.error/branch-initializer-wrote
+                     ::database-name database-name
+                     ::attachment attachment*
+                     ::coordinate-before coordinate-before
+                     ::coordinate-after (current-coordinate entry)})))
                 (swap! !registry assoc database-name entry)
                 (entry-view database-name entry)
                 (catch Throwable throwable

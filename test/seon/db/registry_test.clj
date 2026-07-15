@@ -22,7 +22,7 @@
   [request]
   (registry/ensure-database!
    (assoc request ::registry/initialize-connection!
-          (fn [_connection _database-name] nil))))
+          (fn [_request] nil))))
 
 (defn- delete-tree!
   [path]
@@ -124,9 +124,9 @@
           ::registry/backend :memory
           ::registry/initial-tx [declaration]
           ::registry/initialize-connection!
-          (fn [connection _]
+          (fn [{::registry/keys [conn]}]
             (reset! observed
-                    (get (:schema (d/db connection)) :registry.initial/id)))})]
+                    (get (:schema (d/db conn)) :registry.initial/id)))})]
     (is (= (select-keys declaration [:db/valueType :db/cardinality])
            (select-keys @observed [:db/valueType :db/cardinality])))
     (is (identical? (::registry/conn entry)
@@ -136,7 +136,7 @@
                        ::registry/backend :memory
                        ::registry/initial-tx []
                        ::registry/initialize-connection!
-                       (fn [_ _]
+                       (fn [_request]
                          (throw (ex-info "initializer reran" {})))}))))))
 
 (deftest native-branch-attachments-are-distinct-routes-to-one-database
