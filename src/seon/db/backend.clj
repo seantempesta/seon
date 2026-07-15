@@ -34,12 +34,14 @@
 (schema/register! ::database-name :keyword)
 (schema/register! ::backend [:enum :memory :file])
 (schema/register! ::path [:string {:min 1}])
+(schema/register! ::initial-tx [:vector :map])
 
 (schema/register! ::datahike-config-request
                   [:map
                    [::database-name ::database-name]
                    [::backend ::backend]
-                   [::path {:optional true} ::path]])
+                   [::path {:optional true} ::path]
+                   [::initial-tx {:optional true} ::initial-tx]])
 
 ;; The returned cfg is an opaque datahike config map. We don't constrain
 ;; its shape here — datahike's own schema validates it at connect time.
@@ -129,14 +131,15 @@
      ::path    — override the default on-disk path. Ignored for :memory."
   {:malli/schema [:=> [:cat ::datahike-config-request]
                   ::datahike-config-response]}
-  [{::keys [database-name backend] :as request}]
+  [{::keys [database-name backend initial-tx] :as request}]
   (let [{::keys [database-id path]} (backend-facts request)
         options (case backend
                   :memory {:backend :memory :id database-id}
                   :file   {:backend :file
                            :path path
                            :id database-id})]
-    (assoc base-cfg :store options :name (str database-name))))
+    (cond-> (assoc base-cfg :store options :name (str database-name))
+      (seq initial-tx) (assoc :initial-tx initial-tx))))
 
 (defn ensure-parent-dir!
   "Side-effecting helper for callers about to call

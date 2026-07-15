@@ -18,10 +18,11 @@ a second authority.
 The JVM writer is the sole durable Datahike owner; the pod uses one immutable
 replica and typed protocol. Durable receipts, bounded replay/live overlap,
 config reconciliation, numeric as-of reads, and crash fencing exist. Complete
-Malli projection building also exists, but receipt-native schema is still
-installed through a hand-written pre-initializer path and post-commit
-instrumentation failure does not close admission or reconstruct the committed
-generation.
+Malli projection building also exists. Receipt-native schema is now derived
+from that registry, installed through Datahike's creation transaction, and
+validated before an existing connection is published. Post-commit
+instrumentation failure still does not close admission or reconstruct the
+committed generation.
 
 The maintained Datahike SHA already contains same-store branch/delete,
 commit/branch root reads, historical-secondary-index correction, awaited
@@ -128,10 +129,34 @@ reconcile returned exactly default head
 `6a56e5fa-0caa-5574-b579-ba8be7a2ae85`/`536870971`; the config cache held
 that coordinate plus the decoded map and no database value.
 
+The receipt schema bypass is removed. `request-id` declares its identity
+semantics in the canonical Malli form; the writer derives all five native
+Datahike declarations from the registry snapshot. A fresh database receives
+them through Datahike `:initial-tx`, while a reopened database must already
+match before the registry publishes its connection. The raw declaration vector
+and receipt-specific seed transaction are deleted. Datahike source and live
+probes established why genesis is required here: ordinary entity data may use
+schema declared in the same transaction, but transaction metadata is validated
+against the schema that existed before that transaction. Receipts are
+transaction metadata. The complete JVM gate passes 57 tests/337 assertions;
+the relevant CLJS schema/replica gate passes 24/140. After a full restart, the
+writer and pod agreed on default head
+`54b5b7e7-51fb-3220-b079-81a81914d86f`/`:db`/
+`6a56e85d-cd67-5c5a-a2cb-5f1aeb6ef905`/`536870974`, and live schema read-back
+showed the expected string, UUID, long, string, and ref signatures with
+`request-id` as a unique identity. Post-commit schema/program publication
+admission is the remaining candidate boundary.
+
 ## Research evidence
 
 - [[research/database-lifecycle-source-audit-2026-07-14]] — current dependency
   ledger, live probes, transition matrix, and ordered implementation slices.
+- [[research/native-branch-registry-protocol-audit-2026-07-14]] — exact native
+  branch attachment, registry, protocol, and deletion cutover.
+- [[research/branch-local-blobs-forensic-runtime-audit-2026-07-14]] — blob
+  overlays, integrity, non-autonomous runtime, and promotion materialization.
+- [[research/quiesced-restart-restore-undo-audit-2026-07-14]] — planned drain,
+  unexpected recovery, immutable restore intent, promotion, and undo.
 - [[research/config-schema-runtime-restoration-2026-07-12]],
   [[research/malli-runtime-schema-authority-audit-2026-07-13]], and
   [[research/db-protocol-cut-implementation-audit-2026-07-13]] — historical

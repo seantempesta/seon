@@ -2,6 +2,7 @@
   "End-to-end canonical writer request and publication tests."
   (:require [clojure.test :refer [deftest is]]
             [datahike.api :as d]
+            [seon.db.backend :as backend]
             [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
@@ -35,6 +36,43 @@
   [channel request]
   (uds/call! {::uds/channel channel ::uds/message request}))
 
+(deftest existing-database-must-already-match-the-protocol-candidate
+  (doseq [[label initial-tx]
+          [["missing" nil]
+           ["incompatible"
+            [{:db/ident ::protocol/request-id
+              :db/valueType :db.type/keyword
+              :db/cardinality :db.cardinality/one
+              :db/unique :db.unique/identity}]]]]
+    (let [database-name (str "writer-protocol-candidate-" label "-"
+                             (random-uuid))
+          database-keyword (keyword database-name)
+          config
+          (backend/datahike-config
+           (cond-> {::backend/database-name database-keyword
+                    ::backend/backend :memory}
+             (seq initial-tx) (assoc ::backend/initial-tx initial-tx)))
+          request-path (socket-path (str label "-request"))
+          publish-path (socket-path (str label "-publish"))]
+      (try
+        (d/create-database config)
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"Initial database ensure failed"
+             (writer/start!
+              {::writer/dependencies (dependencies)
+               ::writer/database-name database-name
+               ::writer/backend :memory
+               ::writer/request-socket-path request-path
+               ::writer/publish-socket-path publish-path})))
+        (is (empty? (::registry/databases (registry/list-databases {})))
+            "a rejected schema never publishes a registry entry")
+        (finally
+          (when (d/database-exists? config)
+            (d/delete-database config))
+          (.delete (File. request-path))
+          (.delete (File. publish-path)))))))
+
 (deftest canonical-writes-route-commit-and-publish-exactly-once
   (let [database-name (str "writer-integration-" (random-uuid))
         request-path (socket-path "request")
@@ -59,6 +97,10 @@
                     {::protocol/database-name database-name
                      ::protocol/backend :memory}))
             initial-coordinate (::coordinate/coordinate ensure-response)
+            writer-connection
+            (::registry/conn
+             (registry/resolve-connection
+              {::registry/database-name (keyword database-name)}))
             invalid-response
             (call! request-channel
                    {::protocol/operation protocol/transact-operation
@@ -132,6 +174,10 @@
                (::protocol/error-kind unknown-response))
             "a named unknown database cannot fall back to the open database")
         (is (true? (::protocol/success? schema-response)))
+        (is (= protocol/reserved-attributes
+               (set (filter #(contains? (:schema (d/db writer-connection)) %)
+                            protocol/reserved-attributes)))
+            "the canonical Malli-derived receipt schema exists at publication")
         (is (true? (::protocol/success? entity-response)))
         (is (pos-int?
              (get (::protocol/temporary-ids entity-response) "person-temp")))

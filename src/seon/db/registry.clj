@@ -35,6 +35,7 @@
 (schema/register! ::database-name :seon.db.backend/database-name)
 (schema/register! ::backend :seon.db.backend/backend)
 (schema/register! ::path :seon.db.backend/path)
+(schema/register! ::initial-tx :seon.db.backend/initial-tx)
 
 ;; A live conn is an opaque clojure.lang.IAtom2 (datahike connection
 ;; type). We don't constrain its shape; the registry hands it out as-is.
@@ -51,6 +52,7 @@
                    [::database-name ::database-name]
                    [::backend {:optional true} ::backend]
                    [::path {:optional true} ::path]
+                   [::initial-tx {:optional true} ::initial-tx]
                    [::initialize-connection! 'fn?]])
 
 (schema/register! ::ensure-database!-response ::entry)
@@ -140,10 +142,12 @@
   "Build a datahike cfg, ensure the db exists, connect, return the
    new entry map. Side-effecting; called under the swap! winner's
    thread only."
-  [database-name backend path]
+  [database-name backend path initial-tx]
   (let [cfg-req (cond-> {:seon.db.backend/database-name database-name
                          :seon.db.backend/backend backend}
-                  path (assoc :seon.db.backend/path path))
+                  path (assoc :seon.db.backend/path path)
+                  (seq initial-tx)
+                  (assoc :seon.db.backend/initial-tx initial-tx))
         cfg (backend/datahike-config cfg-req)
         backend-path (:seon.db.backend/path (backend/backend-facts cfg-req))]
     (when backend-path
@@ -172,7 +176,7 @@
    It runs exactly once for a newly opened connection, before publication. A
    failure releases the connection and is rethrown; no broken entry survives."
   {:malli/schema [:=> [:cat ::ensure-database!-request] ::ensure-database!-response]}
-  [{::keys [database-name backend path initialize-connection!]
+  [{::keys [database-name backend path initial-tx initialize-connection!]
     :or {backend :file}}]
   ;; First check without locking — fast path for the common "already
   ;; registered" case. Avoids paying the create-entry! cost in the
@@ -187,7 +191,7 @@
       ;; database-name's lifetime.
       (locking !registry
         (or (get @!registry database-name)
-            (let [entry (create-entry! database-name backend path)
+            (let [entry (create-entry! database-name backend path initial-tx)
                   conn  (::conn entry)]
               (try
                 (initialize-connection! conn database-name)

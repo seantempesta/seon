@@ -153,7 +153,7 @@
                   :where [?entity :receipt/value "different"]]
                 (d/db connection)))))))
 
-(deftest database-ensure-does-not-reseed-converged-receipt-schema
+(deftest database-ensure-reuses-the-created-protocol-schema-without-a-write
   (let [runtime (runtime)
         database-name (str "receipt-seed-" (random-uuid))
         first-response (ensure-database! runtime database-name)
@@ -162,6 +162,6 @@
     (is (true? (::protocol/success? second-response)))
     (is (= (::protocol/coordinate first-response)
            (::protocol/coordinate second-response)))
-    (is (= (set (map :db/ident protocol/receipt-schema))
+    (is (= protocol/reserved-attributes
            (set (filter #(contains? (:schema (d/db (connection database-name))) %)
-                        (map :db/ident protocol/receipt-schema)))))))
+                        protocol/reserved-attributes))))))

@@ -67,7 +67,8 @@
 (schema/register! ::replayed-count [:int {:min 0}])
 (schema/register! ::datoms-added [:int {:min 0}])
 (schema/register! ::datoms-retracted [:int {:min 0}])
-(schema/register! ::request-id [:string {:min 1}])
+(schema/register! ::request-id
+                  [:string {:min 1 :seon.db/identity true}])
 (schema/register! ::request-hash :uuid)
 (schema/register! ::version [:int {:min 1}])
 (schema/register! ::transaction-data [:vector :any])
@@ -347,25 +348,6 @@
   (m/explain ::response response))
 
 ;;; Durable idempotency receipt
-
-(def receipt-schema
-  "Raw Datahike declarations for the protocol receipt attributes."
-  [{:db/ident ::request-id
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident ::request-hash
-    :db/valueType :db.type/uuid
-    :db/cardinality :db.cardinality/one}
-   {:db/ident ::version
-    :db/valueType :db.type/long
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.db.protocol.tempid/key-edn
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.db.protocol.tempid/entity
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/one}])
 
 (def receipt-attributes
   #{:seon.db.protocol.tempid/key-edn

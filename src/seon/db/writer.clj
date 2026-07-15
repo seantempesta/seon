@@ -12,6 +12,7 @@
             [datahike.constants :as datahike.constants]
             [datahike.db.interface :as dbi]
             [seon.db.coordinate :as coordinate]
+            [seon.db.datahike.schema :as datahike.schema]
             [seon.db.id :as id]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
@@ -78,6 +79,13 @@
   [:db/valueType :db/cardinality :db/unique :db/isComponent])
 
 (def ^:private internal-tempid-prefix "seon.db.protocol.tempid/")
+
+(def ^:private protocol-native-schema
+  (datahike.schema/malli-map->datahike-schema
+   (into [:map]
+         (map (fn [attribute]
+                [attribute (get (schema/snapshot) attribute)]))
+         (sort protocol/reserved-attributes))))
 
 (defn- basis-t-of
   [db]
@@ -183,7 +191,7 @@
   (not-empty
    (apply dissoc (or transaction-meta {}) protocol/reserved-attributes)))
 
-(defn- seed-receipt-schema!
+(defn- assert-protocol-native-schema!
   [connection]
   (let [installed (:schema (d/db connection))
         incompatible
@@ -196,16 +204,19 @@
                  {::attribute ident
                   ::expected-schema expected
                   ::actual-schema actual}))))
-         protocol/receipt-schema)
+         protocol-native-schema)
         missing (filterv #(not (contains? installed (:db/ident %)))
-                         protocol/receipt-schema)]
+                         protocol-native-schema)]
     (when (seq incompatible)
       (throw
        (ex-info "Database protocol receipt schema is incompatible."
                 {::failure-kind protocol/protocol-error
                  ::incompatible-schema (vec incompatible)})))
     (when (seq missing)
-      (d/transact connection missing))))
+      (throw
+       (ex-info "Database protocol receipt schema is missing."
+                {::failure-kind protocol/protocol-error
+                 ::missing-schema (mapv :db/ident missing)})))))
 
 ;;; Transaction report and publication
 
@@ -275,7 +286,7 @@
                   [:map
                    [::database-initialized? ::database-initialized?]]]}
   [{::keys [runtime connection database-name]}]
-  (seed-receipt-schema! connection)
+  (assert-protocol-native-schema! connection)
   (d/listen connection ::transaction-publication
             (transaction-listener runtime database-name))
   ((::database-initializer runtime) connection (keyword database-name))
@@ -722,6 +733,7 @@
   (cond->
    {::registry/database-name (keyword database-name)
     ::registry/backend backend-kind
+    ::registry/initial-tx protocol-native-schema
     ::registry/initialize-connection! connection-initializer}
     database-path (assoc ::registry/path database-path)))
 

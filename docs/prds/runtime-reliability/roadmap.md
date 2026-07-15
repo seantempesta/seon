@@ -605,8 +605,10 @@ critical eval/context gates, and live instrumentation census pass.
 
 ### Slice 1 — database lifecycle and reconstruction — CARVED OUT
 
-- Finish candidate installation of missing native Datahike attributes and make
-  accepted program/schema publication fail closed: if post-commit runtime
+- Receipt-native Datahike attributes are now derived from the canonical Malli
+  forms, installed in Datahike's creation transaction, and validated before a
+  reopened connection is published. Make accepted program/schema publication
+  fail closed: if post-commit runtime
   publication cannot complete, stop admission and reconstruct from committed
   facts through the existing projection path.
 - Freeze supervisor intent so config remains operation-scoped and optional.
@@ -1586,9 +1588,15 @@ or discover archived behavior.
    transitive schema-reference indexes through Malli's walker (keyword data is
    not mistaken for a reference). The renderer consumes that catalog directly; persisted
    required/id/render decomposition, its boot transaction, Datalog discovery,
-   and the renderer cache atom are deleted. Remaining: compute compatible
-   missing Datahike attributes in the candidate, bound
-   historical projections by fingerprint. Agent program/schema transitions now
+   and the renderer cache atom are deleted. Receipt protocol attributes now
+   derive their native signatures from the same canonical forms, enter fresh
+   databases through Datahike `:initial-tx`, and fail connection publication on
+   a missing or incompatible reopen; the raw schema and receipt seed transaction
+   are deleted. Datahike source and live probes prove this genesis exception is
+   necessary because transaction metadata cannot use schema first declared in
+   its own transaction. Remaining: bring non-protocol compatible native
+   additions through the complete candidate and bound historical projections
+   by fingerprint. Agent program/schema transitions now
    build the complete candidate before recording; an invalid dependent contract
    becomes the eval's user-input failure and commits no declaration facts.
    Remaining: stop admission/reconstruct from committed facts if the already

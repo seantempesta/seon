@@ -37,9 +37,13 @@
   (let [root (str (System/getProperty "java.io.tmpdir")
                   "/seon-backend-test-" (random-uuid))
         path (str root "/database")
+        initial-tx [{:db/ident :test.initial/id
+                     :db/valueType :db.type/string
+                     :db/cardinality :db.cardinality/one}]
         request {::backend/database-name :test/pure
                  ::backend/backend :file
-                 ::backend/path path}
+                 ::backend/path path
+                 ::backend/initial-tx initial-tx}
         config (backend/datahike-config request)]
     (try
       (is (= {:backend :file
@@ -48,6 +52,7 @@
              (:store config)))
       (is (= :write (:schema-flexibility config)))
       (is (true? (:keep-history? config)))
+      (is (= initial-tx (:initial-tx config)))
       (is (not (.exists (File. root)))
           "constructing configuration performs no filesystem writes")
       (is (true? (::backend/created?

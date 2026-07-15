@@ -57,6 +57,33 @@
                    (registry/release-database!
                     {::registry/database-name database-name})))))))
 
+(deftest initial-schema-is-installed-before-connection-publication
+  (let [database-name :registry/initial-schema
+        declaration {:db/ident :registry.initial/id
+                     :db/valueType :db.type/string
+                     :db/cardinality :db.cardinality/one}
+        observed (atom nil)
+        entry
+        (registry/ensure-database!
+         {::registry/database-name database-name
+          ::registry/backend :memory
+          ::registry/initial-tx [declaration]
+          ::registry/initialize-connection!
+          (fn [connection _]
+            (reset! observed
+                    (get (:schema (d/db connection)) :registry.initial/id)))})]
+    (is (= (select-keys declaration [:db/valueType :db/cardinality])
+           (select-keys @observed [:db/valueType :db/cardinality])))
+    (is (identical? (::registry/conn entry)
+                    (::registry/conn
+                     (registry/ensure-database!
+                      {::registry/database-name database-name
+                       ::registry/backend :memory
+                       ::registry/initial-tx []
+                       ::registry/initialize-connection!
+                       (fn [_ _]
+                         (throw (ex-info "initializer reran" {})))}))))))
+
 (deftest file-fork-has-independent-identity-and-exact-fork-state
   (let [root (str (System/getProperty "java.io.tmpdir")
                   "/seon-registry-fork-" (random-uuid))
