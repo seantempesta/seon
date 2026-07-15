@@ -73,6 +73,34 @@
     (is (= 200 (::response-status response)))
     (is (= "{:seon.state/ok? true}" (::response-body response)))))
 
+(deftest operator-quiesce-route-is-unadmitted-and-loopback-only
+  (let [!invocations (atom 0)
+        handler (fn [_request ^js response]
+                  (swap! !invocations inc)
+                  (.writeHead response 200 #js {"Content-Type" "application/edn"})
+                  (.end response "{:seon.runtime/quiesced? true}"))]
+    (router/install!
+      {:seon.web.router/operator-quiesce handler
+       :seon.web.router/loopback-peer? (constantly false)})
+    (let [response (request! "POST" "/_seon/operator/quiesce")]
+      (is (= 403 (::response-status response)))
+      (is (zero? @!invocations)))
+    (router/install!
+      {:seon.web.router/operator-quiesce handler
+       :seon.web.router/loopback-peer? (constantly true)})
+    (let [prior (admission/state)]
+      (try
+        (reset! @#'admission/!state
+                {::admission/status :unavailable
+                 ::admission/reason "ordinary work is closed"})
+        (let [response (request! "POST" "/_seon/operator/quiesce")]
+          (is (= 200 (::response-status response)))
+          (is (= "{:seon.runtime/quiesced? true}" (::response-body response)))
+          (is (= 1 @!invocations)
+              "lifecycle work bypasses ordinary admission only for loopback"))
+        (finally
+          (reset! @#'admission/!state prior))))))
+
 (deftest closed-admission-refuses-post-before-the-domain-handler
   (let [!invocations (atom 0)
         prior (admission/state)]

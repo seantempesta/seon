@@ -80,6 +80,7 @@
   !router-state
   (atom {::config           {}
          ::same-origin-pred (constantly true)
+         ::loopback-peer-pred (constantly false)
          ::cache-key        nil
          ::ring-handler     nil}))
 
@@ -162,6 +163,20 @@
                  (write-text! (node-res r) 403 "cross-origin POST refused")
                  hijacked))))})
 
+(def ^:private loopback-peer-mw
+  {:name ::loopback-peer
+   :wrap (fn [handler]
+           (fn [r]
+             (if ((::loopback-peer-pred @!router-state) (node-req r))
+               (handler r)
+               (do
+                 (log/info-console! "seon.web.router"
+                                    "operator request from non-loopback peer REFUSED"
+                                    {:path (:uri r)})
+                 (write-text! (node-res r) 403
+                              "loopback operator request required")
+                 hijacked))))})
+
 ;; ============================================================
 ;; Middleware registry — the ONE place a `:seon.route/middleware` keyword
 ;; resolves to its reitit middleware. Threaded into the reitit router as
@@ -172,7 +187,8 @@
 ;; ============================================================
 
 (def ^:private mw-registry
-  {:seon.route/same-origin same-origin-mw})
+  {:seon.route/same-origin same-origin-mw
+   :seon.route/loopback-peer loopback-peer-mw})
 
 ;; ============================================================
 ;; db->routes — the route vector is a PURE projection of the `:seon.route/*`
@@ -288,8 +304,9 @@
    (serve's handlers) + the directly-required `call` leaf handler."
   [h]
   (let [{::keys [static readiness chat stop resume clear log
-                 complete agent-run config-apply]} h]
-    [["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
+                 complete agent-run config-apply operator-quiesce]} h]
+    (cond->
+     [["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/js/{*path}"  {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
 
      ;; The data browser is a static operator route, but its live projection
@@ -321,7 +338,11 @@
      ["/agent/{id}/complete" {:post {:middleware [:seon.route/same-origin]
                                      :handler (fn [r] (complete (node-req r) (node-res r)
                                                                 (get-in r [:path-params :id]))
-                                                hijacked)}}]]))
+                                                hijacked)}}]]
+      operator-quiesce
+      (conj ["/_seon/operator/quiesce"
+             {:post {:middleware [:seon.route/loopback-peer]
+                     :handler (post-handler operator-quiesce)}}]))))
 
 ;; ============================================================
 ;; The no-match default-handler — a graceful redirect HOME (#28). reitit
@@ -419,15 +440,18 @@
    at load (re-runs on hot-reload, so the cached router tracks reloaded
    handlers + the latest route datoms). `config` keys:
    `:seon.web.router/{static chat stop resume clear log complete agent-run
-   config-apply}` (the serve handler fns) +
-   `:seon.web.router/same-origin?` (the predicate). The CORE routes are NOT in
+   config-apply operator-quiesce}` (the serve handler fns) +
+   `:seon.web.router/same-origin?` and `:seon.web.router/loopback-peer?`
+   (the predicates). The CORE routes are NOT in
    `config` — they project from the
    `:seon.route/*` datoms via [[db->routes]]."
   {:malli/schema [:=> [:catn [::config :map]] :nil]}
   [config]
   (swap! !router-state assoc
          ::config config
-         ::same-origin-pred (or (::same-origin? config) (constantly true)))
+         ::same-origin-pred (or (::same-origin? config) (constantly true))
+         ::loopback-peer-pred (or (::loopback-peer? config)
+                                  (constantly false)))
   (attach!)
   (log/info-console! "seon.web.router" "router installed"
                      {:supplement (count (static-supplement config))})

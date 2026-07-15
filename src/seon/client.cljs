@@ -59,7 +59,7 @@
     ;; trigger (seon.agent does NOT, to stay acyclic).
     [seon.agent.loop :as agent-loop]
     ;; The run lifecycle — the bootstrap turn-0 opens a run for its turn.
-    [seon.agent.run]
+    [seon.agent.run :as agent-run]
     ;; Cron-as-data — required so its `:seon.agent.schedule/*` register! calls
     ;; run before `agent-bootstrap-attrs` installs them, and so the ticker's
     ;; `fire-due-schedules!` is in the build.
@@ -245,6 +245,8 @@
 (schema/register! ::runtime-phase
   [:enum :seon.client.runtime/starting
    :seon.client.runtime/running
+   :seon.client.runtime/quiescing
+   :seon.client.runtime/quiesced
    :seon.client.runtime/stopping
    :seon.client.runtime/cleanup-required])
 (schema/register! ::blob-storage-view :my.blob/storage-view)
@@ -2677,6 +2679,23 @@
 
 (schema/register! ::stopped? :boolean)
 (schema/register! ::stop-error :string)
+(schema/register! ::quiesced? :boolean)
+(schema/register! ::quiesce-error :string)
+(schema/register! ::quiesced-run-ids [:vector :seon.agent.run/id])
+(schema/register! ::completed-turn-ids [:vector :string])
+(schema/register! ::errored-turn-ids [:vector :string])
+(schema/register! ::quiesce-runtime-response
+  [:or
+   [:map {:closed true}
+    [::quiesced? [:= true]]
+    [::db.coordinate/coordinate ::db.coordinate/coordinate]
+    [::quiesced-run-ids ::quiesced-run-ids]
+    [::completed-turn-ids ::completed-turn-ids]
+    [::errored-turn-ids ::errored-turn-ids]
+    [::agent-runtime/unhosted-ids ::agent-runtime/unhosted-ids]]
+   [:map {:closed true}
+    [::quiesced? [:= false]]
+    [::quiesce-error ::quiesce-error]]])
 (schema/register! ::stop-runtime-response
   [:or
    [:map {:closed true}
@@ -2685,6 +2704,232 @@
    [:map {:closed true}
     [::stopped? [:= false]]
     [::stop-error ::stop-error]]])
+
+(defn- next-quiescence-observation!
+  "Yield once before re-reading durable run and turn facts."
+  []
+  (js/Promise. (fn [resolve _reject] (js/setTimeout resolve 10))))
+
+(defn- quiescence-deadline
+  "Deadline for the existing bounded-turn lifecycle to finish settling."
+  []
+  (+ (.now js/Date) (config/turn-timeout-ms)))
+
+(defn- settled-turns
+  "Partition observed turn ids by their terminal durable status."
+  [database turn-ids]
+  (reduce
+   (fn [result turn-id]
+     (case (:seon.agent.turn/status
+            (db/entity {:seon.db/db database
+                        :seon.db/ref [:seon.agent.turn/id turn-id]}))
+       :done (update result ::completed-turn-ids conj turn-id)
+       :error (update result ::errored-turn-ids conj turn-id)
+       (throw
+        (ex-info "A drained turn has no terminal durable status."
+                 {:seon.agent.turn/id turn-id}))))
+   {::completed-turn-ids [] ::errored-turn-ids []}
+   (sort turn-ids)))
+
+(defn ^:async ^:private close-quiescent-runs!
+  "Close the supplied pointer-owned runs and retain their results."
+  [current-runs]
+  (await
+   (loop [remaining current-runs
+          results []]
+     (if-let [{run-id :seon.agent.run/id} (first remaining)]
+       (let [result
+             (await
+              (agent-run/close-run!
+               {:seon.agent.run/id run-id
+                :seon.agent.run/closed-reason :quiesced}))]
+         (recur (next remaining) (conj results [run-id result])))
+       results))))
+
+(defn ^:async ^:private drain-agent-work!
+  "Close idle current runs and wait for every running turn bracket."
+  [conn deadline]
+  (await
+   (loop [quiesced-run-ids #{}
+          observed-turn-ids #{}]
+     (let [work (agent-run/quiescence-work @conn)
+           current-runs (::agent-run/current-runs work)
+           running-turns (::agent-run/running-turns work)
+           running-run-ids (into #{} (map :seon.agent.run/id) running-turns)
+           closable (remove #(contains? running-run-ids
+                                        (:seon.agent.run/id %))
+                            current-runs)
+           close-results (await (close-quiescent-runs! closable))
+           refreshed (agent-run/quiescence-work @conn)
+           remaining-run-ids
+           (into #{}
+                 (map :seon.agent.run/id)
+                 (::agent-run/current-runs refreshed))
+           failed-owned
+           (->> close-results
+                (keep (fn [[run-id result]]
+                        (when (and (false? (:seon.db/ok? result))
+                                   (contains? remaining-run-ids run-id))
+                          run-id)))
+                vec)
+           quiesced-run-ids
+           (into quiesced-run-ids
+                 (keep (fn [[run-id result]]
+                         (when (:seon.db/ok? result) run-id)))
+                 close-results)
+           observed-turn-ids
+           (into observed-turn-ids
+                 (map :seon.agent.turn/id)
+                 running-turns)]
+       (when (seq failed-owned)
+         (throw
+          (ex-info "Planned quiesce could not close current runs."
+                   {::quiesced-run-ids failed-owned})))
+       (if (and (empty? (::agent-run/current-runs refreshed))
+                (empty? (::agent-run/running-turns refreshed)))
+         (merge
+          {::quiesced-run-ids (vec (sort quiesced-run-ids))}
+          (settled-turns @conn observed-turn-ids))
+         (if (<= deadline (.now js/Date))
+           (throw
+            (ex-info "Planned quiesce timed out waiting for durable work."
+                     {::agent-run/quiescence-work refreshed}))
+           (do
+             (await (next-quiescence-observation!))
+             (recur quiesced-run-ids observed-turn-ids))))))))
+
+(defn- merge-quiesce-progress
+  "Union retry-safe lifecycle evidence accumulated by completed inverses."
+  [left right]
+  {::quiesced-run-ids
+   (vec (sort (set/union
+               (set (::quiesced-run-ids left))
+               (set (::quiesced-run-ids right)))))
+   ::completed-turn-ids
+   (vec (sort (set/union
+               (set (::completed-turn-ids left))
+               (set (::completed-turn-ids right)))))
+   ::errored-turn-ids
+   (vec (sort (set/union
+               (set (::errored-turn-ids left))
+               (set (::errored-turn-ids right)))))
+   ::agent-runtime/unhosted-ids
+   (vec (sort (set/union
+               (set (::agent-runtime/unhosted-ids left))
+               (set (::agent-runtime/unhosted-ids right)))))})
+
+(defn ^:async ^:private drain-runtime-owners!
+  "Drain every runtime owner below the optional HTTP listener inverse."
+  [conn capability capture-coordinate?]
+  (agent-loop/uninstall-ticker!)
+  (let [{wake-ids ::agent-loop/uninstalled-ids}
+        (agent-loop/uninstall-all-wake-triggers!)
+        _ (swap! !state update ::quiesce-progress
+                 merge-quiesce-progress
+                 {::agent-runtime/unhosted-ids wake-ids})
+        {::keys [quiesced-run-ids completed-turn-ids errored-turn-ids]}
+        (if (true? (::autonomous? capability))
+          (await (drain-agent-work! conn (quiescence-deadline)))
+          {::quiesced-run-ids []
+           ::completed-turn-ids []
+           ::errored-turn-ids []})
+        _ (swap! !state update ::quiesce-progress
+                 merge-quiesce-progress
+                 {::quiesced-run-ids quiesced-run-ids
+                  ::completed-turn-ids completed-turn-ids
+                  ::errored-turn-ids errored-turn-ids})
+        {host-ids ::agent-runtime/unhosted-ids}
+        (agent-runtime/unhost-all!)
+        state (swap! !state update ::quiesce-progress
+                     merge-quiesce-progress
+                     {::agent-runtime/unhosted-ids host-ids})
+        progress (::quiesce-progress state)]
+    (replica/detach!)
+    (let [detached (admission/detach!)]
+      (when (false? (::admission/detached? detached))
+        (throw (ex-info "Runtime projection detach failed." detached))))
+    (let [coordinate (when capture-coordinate? (db/head-coordinate @conn))]
+      (await (db/release-connection! {::db/conn conn}))
+      (set! db/*conn* nil)
+      (swap! !state dissoc
+             ::launch-capability
+             ::cleanup-requires-connection?
+             ::quiesce-progress)
+      (cond->
+       (assoc progress ::quiesced? true)
+        coordinate (assoc ::db.coordinate/coordinate coordinate)))))
+
+(defn- quiesce-failure
+  [message]
+  {::quiesced? false ::quiesce-error message})
+
+(defn ^:async quiesce-runtime!
+  "Drain this pod and return its final complete database coordinate.
+
+   The first caller closes executable admission synchronously. Overlapping
+   calls fail closed through the retained lifecycle phase; a completed call
+   returns the same typed result. Failures retain the connection, launch
+   capability, and cleanup-required occurrence for an explicit retry. The web
+   server remains alive so the operator can receive the complete EDN result."
+  {:malli/schema [:=> [:cat] ::quiesce-runtime-response]}
+  []
+  (let [state @!state
+        phase (::runtime-phase state)
+        completed (::quiesce-result state)
+        conn db/*conn*
+        capability (::launch-capability state)
+        retry? (and (= :seon.client.runtime/cleanup-required phase)
+                    (::quiesce-started? state))]
+    (cond
+      (and (= :seon.client.runtime/quiesced phase) completed)
+      completed
+
+      (= :seon.client.runtime/quiescing phase)
+      (quiesce-failure "A runtime quiesce transition is already in progress.")
+
+      (not (or (= :seon.client.runtime/running phase) retry?))
+      (quiesce-failure "The runtime is not in a quiesceable lifecycle phase.")
+
+      (or (nil? conn) (nil? capability))
+      (do
+        (swap! !state assoc
+               ::runtime-phase :seon.client.runtime/cleanup-required
+               ::cleanup-requires-connection? true)
+        (quiesce-failure
+         "The runtime has no retained connection and launch capability."))
+
+      :else
+      (do
+        (swap! !state assoc
+               ::runtime-phase :seon.client.runtime/quiescing)
+        (if (and (not retry?)
+                 (not (admission/begin-quiesce!)))
+          (do
+            (swap! !state
+                   (fn [state]
+                     (-> state
+                         (assoc ::runtime-phase
+                                :seon.client.runtime/running)
+                         (dissoc ::quiesce-started?))))
+            (quiesce-failure
+             "Executable admission could not begin the planned quiesce."))
+          (try
+            (swap! !state assoc ::quiesce-started? true)
+            (let [result
+                  (await (drain-runtime-owners! conn capability true))]
+              (swap! !state
+                     (fn [state]
+                       (-> state
+                           (assoc ::runtime-phase
+                                  :seon.client.runtime/quiesced
+                                  ::quiesce-result result)
+                           (dissoc ::quiesce-started?))))
+              result)
+            (catch :default error
+              (swap! !state assoc
+                     ::runtime-phase :seon.client.runtime/cleanup-required
+                     ::quiesce-started? true)
+              (quiesce-failure (or (.-message error) (str error))))))))))
 
 (defn ^:async stop-runtime!
   "Stop every runtime owner and release the local database connection.
@@ -2701,7 +2946,9 @@
         capability (::launch-capability state)
         conn db/*conn*
         wholly-absent? (and (nil? phase) (nil? capability) (nil? conn))
+        quiesce-result (::quiesce-result state)
         transition-active? (contains? #{:seon.client.runtime/starting
+                                        :seon.client.runtime/quiescing
                                         :seon.client.runtime/stopping}
                                       phase)
         connection-required? (or (= :seon.client.runtime/running phase)
@@ -2714,6 +2961,23 @@
       transition-active?
       {::stopped? false
        ::stop-error "A runtime lifecycle transition is already in progress."}
+
+      (= :seon.client.runtime/quiesced phase)
+      (try
+        (await (web.serve/stop!))
+        (swap! !state dissoc
+               ::runtime-phase
+               ::quiesce-result
+               ::quiesce-started?
+               ::cleanup-requires-connection?)
+        {::stopped? true
+         ::agent-runtime/unhosted-ids
+         (or (::agent-runtime/unhosted-ids quiesce-result) [])}
+        (catch :default error
+          (swap! !state assoc
+                 ::runtime-phase :seon.client.runtime/cleanup-required)
+          {::stopped? false
+           ::stop-error (or (.-message error) (str error))}))
 
       (and connection-required?
            (or (nil? conn) (not (db/attached?))))
@@ -2729,25 +2993,22 @@
       (do
         (swap! !state assoc ::runtime-phase :seon.client.runtime/stopping)
         (try
+          (when (admission/available?)
+            (admission/begin-quiesce!))
           (await (web.serve/stop!))
-          (agent-loop/uninstall-ticker!)
-          (let [{::agent-runtime/keys [unhosted-ids]}
-            (agent-runtime/unhost-all!)]
-            (replica/detach!)
-            (let [detached (admission/detach!)]
-              (when (false? (::admission/detached? detached))
-                (throw
-                 (ex-info "Runtime projection detach failed."
-                          detached))))
-            (when conn
-              (await (db/release-connection! {::db/conn conn})))
-            (set! db/*conn* nil)
+          (let [drained
+                (if conn
+                  (await (drain-runtime-owners! conn capability false))
+                  {::agent-runtime/unhosted-ids []})]
             (swap! !state dissoc
                    ::launch-capability
                    ::runtime-phase
-                   ::cleanup-requires-connection?)
+                   ::cleanup-requires-connection?
+                   ::quiesce-started?
+                   ::quiesce-result)
             {::stopped? true
-             ::agent-runtime/unhosted-ids unhosted-ids})
+             ::agent-runtime/unhosted-ids
+             (::agent-runtime/unhosted-ids drained)})
           (catch :default error
             (swap! !state assoc
                    ::runtime-phase :seon.client.runtime/cleanup-required)

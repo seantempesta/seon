@@ -859,6 +859,49 @@
   ;; allow when no Host header is available to compare against.
   #{"127.0.0.1" "localhost" "[::1]" "::1"})
 
+(def ^:private loopback-peer-addresses
+  #{"127.0.0.1" "::1" "::ffff:127.0.0.1"})
+
+(defn loopback-peer?
+  "Whether the TCP peer of this Node request is the local machine.
+
+   This is the operator lifecycle identity check, not a browser-origin check.
+   Missing socket evidence fails closed; Host and Origin headers are never
+   accepted as substitutes for the kernel-reported remote address."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [^js req]
+  (contains? loopback-peer-addresses
+             (some-> req .-socket .-remoteAddress)))
+
+(defn- handle-operator-quiesce!
+  "Drain this pod and flush its typed lifecycle result as EDN."
+  [_req res]
+  (if-let [quiesce! (seval/lookup-value 'seon.client/quiesce-runtime!)]
+    (-> (js/Promise.resolve (quiesce!))
+        (.then
+         (fn [result]
+           (write-status!
+            res
+            (if (:seon.client/quiesced? result) 200 409)
+            "application/edn; charset=utf-8"
+            (pr-str result))))
+        (.catch
+         (fn [error]
+           (log/error-console! "seon.web.serve"
+                               "operator quiesce failed" error)
+           (write-status!
+            res 500 "application/edn; charset=utf-8"
+            (pr-str
+             {:seon.client/quiesced? false
+              :seon.client/quiesce-error
+              (or (.-message error) (str error))})))))
+    (write-status!
+     res 503 "application/edn; charset=utf-8"
+     (pr-str
+      {:seon.client/quiesced? false
+       :seon.client/quiesce-error
+       "The runtime lifecycle owner is not loaded."}))))
+
 (defn same-origin?
   "Whether the request passes the same-origin (CSRF) check.
 
@@ -908,7 +951,9 @@
    :seon.web.router/complete      handle-complete-agent!
    :seon.web.router/agent-run     handle-agent-run!
    :seon.web.router/config-apply  handle-config-apply!
-   :seon.web.router/same-origin?  same-origin?})
+   :seon.web.router/operator-quiesce handle-operator-quiesce!
+   :seon.web.router/same-origin?  same-origin?
+   :seon.web.router/loopback-peer? loopback-peer?})
 
 ;; ============================================================
 ;; Lifecycle

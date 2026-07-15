@@ -4,10 +4,13 @@
     [cljs.test :refer [async deftest is testing]]
     [seon.agent :as agent]
     [seon.agent.loop :as agent-loop]
+    [seon.agent.run :as agent-run]
     [seon.agent.runtime :as agent-runtime]
     [seon.ai :as ai]
     [seon.client :as client]
+    [seon.config :as config]
     [seon.db :as db]
+    [seon.db.coordinate :as db.coordinate]
     [seon.error :as error]
     [seon.eval :as seval]
     [seon.instrument :as instrument]
@@ -557,6 +560,7 @@
 (deftest stop-is-ordered-awaited-idempotent-and-serialized
   (async done
     (let [previous-state @client/!state
+          previous-admission @(deref #'admission/!state)
           previous-connection db/*conn*
           connection (atom {})
           effects (atom [])
@@ -650,11 +654,292 @@
                (set! db/release-connection! original-release)
                (set! db/*conn* previous-connection)
                (reset! client/!state previous-state)
+               (reset! (deref #'admission/!state) previous-admission)
                (done))))))))
+
+(deftest planned-quiesce-drains-durable-work-and-retains-one-result
+  (async done
+    (let [previous-state @client/!state
+          previous-admission @(deref #'admission/!state)
+          previous-connection db/*conn*
+          connection (atom {})
+          effects (atom [])
+          work-call (atom 0)
+          release! (atom nil)
+          release-promise (js/Promise. (fn [resolve _reject]
+                                         (reset! release! resolve)))
+          coordinate {:seon.db.coordinate/database-id (random-uuid)
+                      :seon.db.coordinate/branch :db
+                      :seon.db.coordinate/commit-id (random-uuid)
+                      :seon.db.coordinate/t 42}
+          original-ticker agent-loop/uninstall-ticker!
+          original-wakes agent-loop/uninstall-all-wake-triggers!
+          original-work agent-run/quiescence-work
+          original-close agent-run/close-run!
+          original-unhost agent-runtime/unhost-all!
+          original-replica replica/detach!
+          original-admission admission/detach!
+          original-entity db/entity
+          original-head db/head-coordinate
+          original-release db/release-connection!]
+      (set! db/*conn* connection)
+      (reset! client/!state
+              (assoc previous-state
+                     ::client/launch-capability client/default-launch-capability
+                     ::client/runtime-phase :seon.client.runtime/running))
+      (reset! (deref #'admission/!state)
+              {::admission/status :available ::admission/generation 42})
+      (set! agent-loop/uninstall-ticker!
+            (fn [] (swap! effects conj :ticker)))
+      (set! agent-loop/uninstall-all-wake-triggers!
+            (fn []
+              (swap! effects conj :wakes)
+              {::agent-loop/uninstalled-ids ["root"]}))
+      (set! agent-run/quiescence-work
+            (fn [_]
+              (let [call (swap! work-call inc)]
+                (swap! effects conj [:work call])
+                (case call
+                  (1 2)
+                  {::agent-run/current-runs
+                   [{:seon.agent/id "root"
+                     :seon.agent.run/id "run-1"}]
+                   ::agent-run/running-turns
+                   [{:seon.agent.run/id "run-1"
+                     :seon.agent.turn/id "turn-1"}]}
+
+                  3
+                  {::agent-run/current-runs
+                   [{:seon.agent/id "root"
+                     :seon.agent.run/id "run-1"}]
+                   ::agent-run/running-turns []}
+
+                  {::agent-run/current-runs []
+                   ::agent-run/running-turns []}))))
+      (set! agent-run/close-run!
+            (fn [request]
+              (swap! effects conj [:close request])
+              (promise-value {:seon.db/ok? true})))
+      (set! agent-runtime/unhost-all!
+            (fn []
+              (swap! effects conj :hosts)
+              {::agent-runtime/unhosted-ids []}))
+      (set! replica/detach! (fn [] (swap! effects conj :replica) true))
+      (set! admission/detach!
+            (fn []
+              (swap! effects conj :projection)
+              {::admission/detached? true}))
+      (set! db/entity
+            (fn
+              ([{:seon.db/keys [ref]}]
+               (is (= [:seon.agent.turn/id "turn-1"] ref))
+               {:seon.agent.turn/status :done})
+              ([_database ref]
+               (is (= [:seon.agent.turn/id "turn-1"] ref))
+               {:seon.agent.turn/status :done})))
+      (set! db/head-coordinate
+            (fn
+              ([] coordinate)
+              ([database]
+               (is (identical? @connection database))
+               (swap! effects conj :coordinate)
+               coordinate)))
+      (set! db/release-connection!
+            (fn [{::db/keys [conn]}]
+              (is (identical? connection conn))
+              (swap! effects conj :release)
+              release-promise))
+      (let [first (client/quiesce-runtime!)]
+        (-> (next-event-loop-turn)
+            (.then
+             (fn [_]
+               (is (= :seon.client.runtime/quiescing
+                      ((deref #'client/runtime-phase))))
+               (client/quiesce-runtime!)))
+            (.then
+             (fn [overlap]
+               (is (false? (::client/quiesced? overlap)))
+               (is (re-find #"already in progress"
+                            (::client/quiesce-error overlap)))
+               (@release! {::db/released? true})
+               first))
+            (.then
+             (fn [result]
+               (is (= {::client/quiesced? true
+                       ::db.coordinate/coordinate coordinate
+                       ::client/quiesced-run-ids ["run-1"]
+                       ::client/completed-turn-ids ["turn-1"]
+                       ::client/errored-turn-ids []
+                       ::agent-runtime/unhosted-ids ["root"]}
+                      result))
+               (is (= :seon.client.runtime/quiesced
+                      ((deref #'client/runtime-phase))))
+               (is (nil? db/*conn*))
+               (is (not (contains? @client/!state
+                                   ::client/launch-capability)))
+               (client/quiesce-runtime!)))
+            (.then
+             (fn [repeated]
+               (is (= (::client/quiesce-result @client/!state) repeated))
+               (is (= 1 (count (filter #{:release} @effects)))
+                   "a completed repeat reuses typed data without effects")))
+            (.catch
+             (fn [error]
+               (is false (str "planned quiesce proof threw " error))))
+            (.finally
+             (fn []
+               (set! agent-loop/uninstall-ticker! original-ticker)
+               (set! agent-loop/uninstall-all-wake-triggers! original-wakes)
+               (set! agent-run/quiescence-work original-work)
+               (set! agent-run/close-run! original-close)
+               (set! agent-runtime/unhost-all! original-unhost)
+               (set! replica/detach! original-replica)
+               (set! admission/detach! original-admission)
+               (set! db/entity original-entity)
+               (set! db/head-coordinate original-head)
+               (set! db/release-connection! original-release)
+               (set! db/*conn* previous-connection)
+               (reset! client/!state previous-state)
+               (reset! (deref #'admission/!state) previous-admission)
+               (done))))))))
+
+(deftest failed-planned-release-retains-authority-for-the-same-retry
+  (async done
+    (let [previous-state @client/!state
+          previous-admission @(deref #'admission/!state)
+          previous-connection db/*conn*
+          connection (atom {})
+          release-calls (atom 0)
+          wake-calls (atom 0)
+          coordinate {:seon.db.coordinate/database-id (random-uuid)
+                      :seon.db.coordinate/branch :db
+                      :seon.db.coordinate/commit-id (random-uuid)
+                      :seon.db.coordinate/t 51}
+          original-ticker agent-loop/uninstall-ticker!
+          original-wakes agent-loop/uninstall-all-wake-triggers!
+          original-unhost agent-runtime/unhost-all!
+          original-replica replica/detach!
+          original-admission admission/detach!
+          original-head db/head-coordinate
+          original-release db/release-connection!]
+      (set! db/*conn* connection)
+      (reset! client/!state
+              (assoc previous-state
+                     ::client/launch-capability non-autonomous-capability
+                     ::client/runtime-phase :seon.client.runtime/running))
+      (reset! (deref #'admission/!state)
+              {::admission/status :available ::admission/generation 51})
+      (set! agent-loop/uninstall-ticker! (constantly nil))
+      (set! agent-loop/uninstall-all-wake-triggers!
+            (fn []
+              {::agent-loop/uninstalled-ids
+               (if (= 1 (swap! wake-calls inc)) ["root"] [])}))
+      (set! agent-runtime/unhost-all!
+            (fn [] {::agent-runtime/unhosted-ids []}))
+      (set! replica/detach! (constantly true))
+      (set! admission/detach!
+            (fn [] {::admission/detached? true}))
+      (set! db/head-coordinate
+            (fn
+              ([] coordinate)
+              ([_database] coordinate)))
+      (set! db/release-connection!
+            (fn [_]
+              (if (= 1 (swap! release-calls inc))
+                (js/Promise.reject (js/Error. "injected release failure"))
+                (promise-value {::db/released? true}))))
+      (-> (client/quiesce-runtime!)
+          (.then
+           (fn [failed]
+             (is (false? (::client/quiesced? failed)))
+             (is (= :seon.client.runtime/cleanup-required
+                    ((deref #'client/runtime-phase))))
+             (is (identical? connection db/*conn*))
+             (is (= non-autonomous-capability
+                    (::client/launch-capability @client/!state)))
+             (client/quiesce-runtime!)))
+          (.then
+           (fn [retried]
+             (is (true? (::client/quiesced? retried)))
+             (is (= 2 @release-calls))
+             (is (= ["root"] (::agent-runtime/unhosted-ids retried))
+                 "retry preserves the first attempt's completed inverse data")
+             (is (nil? db/*conn*))))
+          (.catch
+           (fn [error]
+             (is false (str "planned release retry proof threw " error))))
+          (.finally
+           (fn []
+             (set! agent-loop/uninstall-ticker! original-ticker)
+             (set! agent-loop/uninstall-all-wake-triggers! original-wakes)
+             (set! agent-runtime/unhost-all! original-unhost)
+             (set! replica/detach! original-replica)
+             (set! admission/detach! original-admission)
+             (set! db/head-coordinate original-head)
+             (set! db/release-connection! original-release)
+             (set! db/*conn* previous-connection)
+             (reset! client/!state previous-state)
+             (reset! (deref #'admission/!state) previous-admission)
+             (done)))))))
+
+(deftest planned-quiesce-deadline-fails-closed-with-retained-authority
+  (async done
+    (let [previous-state @client/!state
+          previous-admission @(deref #'admission/!state)
+          previous-connection db/*conn*
+          connection (atom {})
+          original-timeout config/turn-timeout-ms
+          original-ticker agent-loop/uninstall-ticker!
+          original-wakes agent-loop/uninstall-all-wake-triggers!
+          original-work agent-run/quiescence-work]
+      (set! db/*conn* connection)
+      (reset! client/!state
+              (assoc previous-state
+                     ::client/launch-capability client/default-launch-capability
+                     ::client/runtime-phase :seon.client.runtime/running))
+      (reset! (deref #'admission/!state)
+              {::admission/status :available ::admission/generation 61})
+      (set! config/turn-timeout-ms (constantly 0))
+      (set! agent-loop/uninstall-ticker! (constantly nil))
+      (set! agent-loop/uninstall-all-wake-triggers!
+            (fn [] {::agent-loop/uninstalled-ids ["root"]}))
+      (set! agent-run/quiescence-work
+            (fn [_]
+              {::agent-run/current-runs
+               [{:seon.agent/id "root" :seon.agent.run/id "run-blocked"}]
+               ::agent-run/running-turns
+               [{:seon.agent.run/id "run-blocked"
+                 :seon.agent.turn/id "turn-blocked"}]}))
+      (-> (client/quiesce-runtime!)
+          (.then
+           (fn [result]
+             (is (false? (::client/quiesced? result)))
+             (is (re-find #"timed out" (::client/quiesce-error result)))
+             (is (= :seon.client.runtime/cleanup-required
+                    ((deref #'client/runtime-phase))))
+             (is (admission/quiescing?)
+                 "deadline failure leaves ordinary admission closed")
+             (is (identical? connection db/*conn*))
+             (is (= client/default-launch-capability
+                    (::client/launch-capability @client/!state)))))
+          (.catch
+           (fn [error]
+             (is false (str "planned quiesce deadline proof threw " error))))
+          (.finally
+           (fn []
+             (set! config/turn-timeout-ms original-timeout)
+             (set! agent-loop/uninstall-ticker! original-ticker)
+             (set! agent-loop/uninstall-all-wake-triggers! original-wakes)
+             (set! agent-run/quiescence-work original-work)
+             (set! db/*conn* previous-connection)
+             (reset! client/!state previous-state)
+             (reset! (deref #'admission/!state) previous-admission)
+             (done)))))))
 
 (deftest failed-web-close-retains-state-and-retries-the-same-inverse
   (async done
     (let [previous-state @client/!state
+          previous-admission @(deref #'admission/!state)
           previous-connection db/*conn*
           connection (atom {})
           web-calls (atom 0)
@@ -724,11 +1009,13 @@
              (set! db/release-connection! original-release)
              (set! db/*conn* previous-connection)
              (reset! client/!state previous-state)
+             (reset! (deref #'admission/!state) previous-admission)
              (done)))))))
 
 (defn- run-stop-step-retry-proof!
   [failed-stage]
   (let [previous-state @client/!state
+        previous-admission @(deref #'admission/!state)
         previous-connection db/*conn*
         connection (atom {})
         attempts (atom {})
@@ -806,7 +1093,8 @@
            (set! admission/detach! original-admission-detach)
            (set! db/release-connection! original-release)
            (set! db/*conn* previous-connection)
-           (reset! client/!state previous-state))))))
+           (reset! client/!state previous-state)
+           (reset! (deref #'admission/!state) previous-admission))))))
 
 (deftest every-destructive-stop-step-retains-authority-and-retries
   (async done

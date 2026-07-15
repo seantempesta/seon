@@ -7,9 +7,11 @@
    Origin is present and NOT loopback. Absent Origin (curl / the agent /
    non-browser) is allowed; the pod's own loopback UI is allowed."
   (:require
-    [cljs.test :refer [deftest is testing]]
+    [cljs.reader :as reader]
+    [cljs.test :refer [async deftest is testing]]
     [goog.object :as gobj]
     [seon.agent.run :as run]
+    [seon.eval :as seval]
     [seon.runtime.admission :as admission]
     [seon.web.serve :as serve]))
 
@@ -78,6 +80,70 @@
     (is (false? (serve/same-origin? (req-with-origin "http://attacker.test:80"))))
     (testing "even when a Host header is present but does NOT match the Origin"
       (is (false? (serve/same-origin? (req-with-origin "https://evil.example.com" "127.0.0.1:7890")))))))
+
+(deftest operator-peer-identity-uses-the-socket-and-fails-closed
+  (doseq [address ["127.0.0.1" "::1" "::ffff:127.0.0.1"]]
+    (is (true? (serve/loopback-peer?
+                 #js {:socket #js {:remoteAddress address}}))
+        (str address " is a kernel-reported loopback peer")))
+  (is (false? (serve/loopback-peer?
+                #js {:socket #js {:remoteAddress "192.0.2.10"}})))
+  (is (false? (serve/loopback-peer? #js {:headers #js {"host" "127.0.0.1"}}))
+      "a forgeable Host header cannot replace missing peer evidence"))
+
+(deftest operator-quiesce-flushes-only-after-the-lifecycle-result-resolves
+  (async done
+    (let [original-lookup seval/lookup-value
+          resolve-result (atom nil)
+          result-promise (js/Promise. (fn [resolve _reject]
+                                        (reset! resolve-result resolve)))
+          observed (atom {})
+          response #js {:writeHead
+                        (fn [status headers]
+                          (swap! observed assoc
+                                 ::status status
+                                 ::headers (js->clj headers)))
+                        :end
+                        (fn [body]
+                          (swap! observed assoc ::body body)
+                          (is (= 200 (::status @observed)))
+                          (is (= "application/edn; charset=utf-8"
+                                 (get (::headers @observed) "Content-Type")))
+                          (is (= {:seon.client/quiesced? true
+                                  :seon.db.coordinate/coordinate
+                                  {:seon.db.coordinate/database-id
+                                   #uuid "00000000-0000-0000-0000-000000000001"
+                                   :seon.db.coordinate/branch :db
+                                   :seon.db.coordinate/commit-id
+                                   #uuid "00000000-0000-0000-0000-000000000002"
+                                   :seon.db.coordinate/t 42}
+                                  :seon.client/quiesced-run-ids []
+                                  :seon.client/completed-turn-ids []
+                                  :seon.client/errored-turn-ids []
+                                  :seon.agent.runtime/unhosted-ids []}
+                                 (reader/read-string body)))
+                          (set! seval/lookup-value original-lookup)
+                          (done))}]
+      (set! seval/lookup-value
+            (fn [symbol]
+              (is (= 'seon.client/quiesce-runtime! symbol))
+              (fn [] result-promise)))
+      ((deref #'serve/handle-operator-quiesce!) nil response)
+      (is (empty? @observed)
+          "the HTTP response remains open while remote release is pending")
+      (@resolve-result
+       {:seon.client/quiesced? true
+        :seon.db.coordinate/coordinate
+        {:seon.db.coordinate/database-id
+         #uuid "00000000-0000-0000-0000-000000000001"
+         :seon.db.coordinate/branch :db
+         :seon.db.coordinate/commit-id
+         #uuid "00000000-0000-0000-0000-000000000002"
+         :seon.db.coordinate/t 42}
+        :seon.client/quiesced-run-ids []
+        :seon.client/completed-turn-ids []
+        :seon.client/errored-turn-ids []
+        :seon.agent.runtime/unhosted-ids []}))))
 
 (defn- readiness-response
   "Status and body written by the live readiness handler."
