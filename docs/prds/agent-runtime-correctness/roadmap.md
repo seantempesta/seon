@@ -92,6 +92,10 @@ failures or errors).
   Piscina grounding; pod-owned child and parent capability decision; actor,
   receipt, cancellation, kill/reap, memory-backend, reconstruction, failure,
   and ordered implementation laws.
+- [[research/parent-owned-task-capability-receipt-plan-2026-07-15]] — the one
+  `seon.eval` receipt/capability mechanism; exact actor-stamp, CAS, recovery,
+  compatibility, denial, and lost-ack laws; and the source boundary that is
+  safe before versus dependent on unit-1 process containment.
 
 ## Ordered work
 
@@ -139,7 +143,14 @@ failures or errors).
    and the parent-stamped actor capability before provider and eval cutovers.
    Plan lifecycle authority may land its pure decisions earlier, but cannot
    claim an unforgeable actor while eval can replace `seon.db/with-agent`
-   context.
+   context. In parallel with that experiment, one root-owned slice may add the
+   existing eval entity's running/terminal status, pure start/terminal tx-data
+   builders, historical compatibility reads, and recovery CAS proof. Do not
+   cut over eval or expose a temporary actor authority. After launch ownership
+   settles, `seon.eval` retains one immutable capability in the parent child-
+   handle closure, starts each form durably, stamps every accepted effect from
+   that capability, and acknowledges only committed terminal receipts. A
+   killed form becomes interrupted and later forms remain absent.
 7. Integrate Inspect tasks/scorers that falsify each transition, then run paid
    or small-model trials only after deterministic runtime gates pass.
 
