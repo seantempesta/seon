@@ -22,12 +22,16 @@ issue's data gate is satisfied.
 
 ## Evidence
 
-- `src/seon/repl/autocomplete.cljs` renders serving cards through
-  `seon.agent.ctx.namespaces/compact-fn-head` over as-of `:seon.fn` rows and now
-  carries the turn's complete `{database-id, branch, commit-id, t}` coordinate.
-  Its export still lacks a format/schema version, source/config/profile
-  identity, referenced-schema closure, immutable split manifest, content-
-  derived artifact name, rejection rows, and staged-world verdict.
+- `src/seon/repl/autocomplete.cljs` now renders serving cards through
+  `seon.agent.ctx.namespaces/compact-fn-head` over as-of `:seon.fn` rows and
+  emits a content-addressed v1 manifest. It carries complete
+  `{database-id, branch, commit-id, t}` coordinates, source/runtime/config/
+  profile identities, deduplicated closures from the existing referenced-schema
+  mechanism, stable row ids and deterministic splits, explicit `observed`
+  projection semantics, and addressable rejection rows. The Inspect reader
+  verifies these identities and consumes rows without reconstructing cards.
+  Staged-world replay/verdicts and honest counterfactual/substantive target
+  construction remain open.
 - `src-needle/src/seon_needle/kt1_envelope.py::compact_card` performs a
   string-aware brace deletion over rendered cards, while
   `src-needle/scripts/kt3_redux.py::render_card` constructs fake `(defn ...)`

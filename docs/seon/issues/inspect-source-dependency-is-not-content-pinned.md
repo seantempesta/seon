@@ -64,6 +64,13 @@ native Inspect metadata. Finalization copies, hashes, reopens, requires a
 successful native status, and compares that exact identity map; a missing,
 unreadable, incomplete, or wrong-run `.eval` is rejected.
 
+The native frozen shell/file/web task added after this checkpoint now performs
+the same admission at task construction, retains the map in task and sample
+metadata, and re-verifies it after the pod returns but before scoring. This
+repairs the gap found when those task paths were accidentally swept into an
+unrelated lifecycle commit; direct task invocation no longer bypasses source
+admission.
+
 A fresh `uv sync --extra test` synchronized the selected distributions. The
 focused admission/catalog/native-log gate passes 34 tests, including a real
 offline native-log read-back; the complete suite passes 321 tests with eight

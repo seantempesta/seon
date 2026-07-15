@@ -20,9 +20,11 @@ replica and typed protocol. Durable receipts, bounded replay/live overlap,
 config reconciliation, numeric as-of reads, and crash fencing exist. Complete
 Malli projection building also exists. Receipt-native schema is now derived
 from that registry, installed through Datahike's creation transaction, and
-validated before an existing connection is published. Post-commit
-instrumentation failure still does not close admission or reconstruct the
-committed generation.
+validated before an existing connection is published. One fail-closed runtime
+admission now reconstructs and verifies the committed generation before agent,
+eval, web-command, schedule, wake, run-loop, or ticker work proceeds.
+Deterministic publication-failure and config-free live restart evidence remain
+before this transition graduates.
 
 The maintained Datahike SHA already contains same-store branch/delete,
 commit/branch root reads, historical-secondary-index correction, awaited
@@ -143,14 +145,13 @@ writer and pod agreed on default head
 `54b5b7e7-51fb-3220-b079-81a81914d86f`/`:db`/
 `6a56e85d-cd67-5c5a-a2cb-5f1aeb6ef905`/`536870974`, and live schema read-back
 showed the expected string, UUID, long, string, and ref signatures with
-`request-id` as a unique identity. Post-commit schema/program publication
-admission is the remaining candidate boundary. Its implementation audit found
-one hard predecessor: exact wrapper preparation still accepts an incomplete
-multi-arity contract, after which Malli unstrument can destroy an uncovered
-live arity. Enforce live/schema arity parity before mutation, then add the one
-fail-closed admission and committed-generation reconstruction transition; full
-reconstruction is not a safe recovery primitive before that precondition
-holds.
+`request-id` as a unique identity. Exact wrapper preparation now rejects
+incomplete live/schema arity coverage before mutation. The one publication
+transition closes admission, reconstructs the complete committed projection,
+verifies wrappers, retries once from a newly frozen database value, and either
+publishes that generation or leaves readiness unavailable. Agent and web
+boundaries consume the same admission state. Focused tests pass; deterministic
+failure injection plus config-free live restart remain the graduation proof.
 
 The agent-side admission cut is implemented against the one runtime gate.
 Messages refuse before identity allocation or durable write; public spawn,
@@ -197,6 +198,15 @@ complete writer checkpoint passes 68/388. Native branch create/delete,
 branch-local feed/replica attachment, operator/runtime launch, forensic pods,
 blob-view injection, promotion, and restore remain later slices.
 
+The implementation-ready reconciliation for the next boundary is
+[[research/native-branch-create-delete-implementation-plan-2026-07-14]]. Typed
+JVM create/release/delete can now land against the existing registry and source
+connection monitor. One prerequisite belongs in the same unit: a non-main open
+must validate inherited schema and secondary resources without running the
+writing main initializer, because embedding installation/backfill can otherwise
+advance the branch before its exact fork point is published. Forensic pod,
+operator, and restore work remain ordered after this writer-local cut.
+
 The first branch-local blob prerequisite is implemented independently of
 native branch attachment. `my.blob` now consumes one validated process-local
 storage view with one writable directory and ordered read-only bases. Writes
@@ -217,6 +227,9 @@ materialization, and retention remain later lifecycle slices.
   ledger, live probes, transition matrix, and ordered implementation slices.
 - [[research/native-branch-registry-protocol-audit-2026-07-14]] — exact native
   branch attachment, registry, protocol, and deletion cutover.
+- [[research/native-branch-create-delete-implementation-plan-2026-07-14]] —
+  current-HEAD reconciliation, non-writing branch-open prerequisite, exact JVM
+  implementation slice, failure matrix, tests, and live acceptance proof.
 - [[research/branch-local-blobs-forensic-runtime-audit-2026-07-14]] — blob
   overlays, integrity, non-autonomous runtime, and promotion materialization.
 - [[research/quiesced-restart-restore-undo-audit-2026-07-14]] — planned drain,

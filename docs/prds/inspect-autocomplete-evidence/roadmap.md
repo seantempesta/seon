@@ -46,10 +46,13 @@ These mechanisms are not yet one reproducible evidence path:
   the complete admitted source map; evidence-directory copies are digest-
   verified. Scorecard summaries still need a stable correlation to that native
   authority, and static URL mode is not lifecycle isolation; and
-- autocomplete rows now carry the complete database coordinate but still lack
-  runtime/config/profile identities, artifact/schema version, shared referenced-
-  schema closure, frozen row/split manifest, current-world verdict, content-
-  derived naming, and retained rejection rows.
+- canonical observed autocomplete export is implemented: the existing CLJS
+  exporter now emits a byte-stable, content-addressed v1 manifest with complete
+  coordinates, source/runtime/config/profile identities, serving cards,
+  deduplicated referenced-schema closures, stable row ids/splits, and
+  addressable rejection rows. Inspect verifies the envelope and consumes frozen
+  split rows without rebuilding projections. Counterfactual/substantive targets
+  and current-world replay verdicts remain scorer/replay work.
 
 Historical stable/display/pin/plan-pilot evidence is classified and hash-backed
 in the runtime-reliability preservation audits. It remains evidence to replay,
@@ -82,10 +85,13 @@ not code to cherry-pick. Training and paid model trials remain paused.
 2. **Live ownership.** Implement the operator lease, then prove concurrent
    disjoint samples, dynamic CLJ/CLJS discovery, identity-preserving restart,
    cancellation, and token-fenced idempotent cleanup.
-3. **Canonical export.** Strengthen the existing ClojureScript exporter in
-   place. Emit the same runtime cards plus referenced schemas once; distinguish
-   observed/counterfactual/substantive targets; content-address rows, manifest,
-   splits, and rejections at one complete database coordinate.
+3. **Canonical export — observed artifact complete.** The existing
+   ClojureScript exporter emits serving cards plus deduplicated referenced
+   schemas, content-addressed rows/manifest, deterministic splits, and retained
+   rejections. The Inspect reader verifies every digest/reference before split
+   selection. Add counterfactual/substantive modes only with the replay/scorer
+   implementation that can prove their semantics; observed rows declare their
+   mode now and are never silently rewritten.
 4. **Replay and scorer.** Stage facts, render through serving, eval through the
    current boundary, derive database outcomes, and port historical fair-scoring,
    LoRA failure, and continuation scanner acceptance cases into Inspect.

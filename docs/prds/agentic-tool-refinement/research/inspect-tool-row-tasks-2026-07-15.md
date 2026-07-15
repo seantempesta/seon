@@ -71,6 +71,14 @@ The task requires an explicit `cluster_url`. Its solver constructs only
 task-local semaphore keeps the static pod serial even if an Inspect caller
 mistakenly requests sample concurrency greater than one.
 
+Task construction first passes the shared source-admission gate. The exact
+admission map rides both task and sample metadata, and production execution
+re-verifies the same source world after the pod returns but before scoring.
+Dirty or changed selected source therefore cannot produce an accepted native
+sample. This closes the source gap accidentally exposed when these paths were
+swept into the lifecycle commit; static-target runtime artifact/config identity
+still waits for the operator lease.
+
 Every invocation uses `tmp/inspect-tool-rows/<Inspect sample UUID>` unless the
 caller selects another project-local root. Initial files are materialized
 there, and the real absolute workspace or ephemeral loopback fixture URL
@@ -112,14 +120,14 @@ operator command.
 
 ## Focused evidence
 
-- Fourteen new tests run real `inspect_ai.eval` calls with an injected pod
+- Fifteen tests run real `inspect_ai.eval` calls with an injected pod
   solver. All three rows produce native `.eval` files, preserve rendered
   prompts and pod/database/turn metadata, use the existing outcome scorers,
-  and delete their UUID workspaces after scoring.
+  retain exact source admission, and delete their UUID workspaces after scoring.
 - The same tests prove an untouched workspace scores incorrect, while timeout
   and core-error closes make the native log error with no score. A two-sample
   run configured with `max_samples=2` observes maximum pod concurrency one.
-- The focused task, planning, pod-solver, and oracle checkpoint passes 84
+- The focused task, planning, pod-solver, and oracle checkpoint passes 85
   tests. The generated development bytes still match the existing lock:
   `shell_use` `829d5f77...31bdc`, `file_edit` `4d4c2ca5...45d59`, and
   `web_fetch` `68c23d24...b0c`.

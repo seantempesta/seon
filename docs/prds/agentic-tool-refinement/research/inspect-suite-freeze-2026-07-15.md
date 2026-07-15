@@ -271,10 +271,11 @@ label. A sample with an infrastructure failure receives no capability score.
 3. **Generated blind seed has no durable owner.** Resolve it once at formal
    open and persist it in native Inspect metadata. Environment variables alone
    cannot reproduce the run.
-4. **P1 identities remain incomplete.** Inspect source is a local mutable path,
-   the `reference-code/inspect-ai` checkout has a modified nested UI worktree,
-   and provider/model artifact identities are not yet part of this freeze.
-   Dataset membership can be selected now, but comparative claims wait for P1.
+4. **P1 static-target identity remains incomplete.** Source/task/provider
+   admission is content-pinned and the native tool-row task rejects source
+   changes before scoring. A bare static URL still cannot prove the target
+   pod's runtime artifact/config identity; comparative claims wait for the
+   ownership-fenced operator lease.
 5. **No serial ACME `.eval` covers all ten members.** The seven ready samples
    can smoke the bridge; the P0 exit run waits for gaps 1–3 so its artifact
    covers all promised categories.

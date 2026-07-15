@@ -13,6 +13,9 @@ from seon_inspect.generators import generate_rows, rows_jsonl_bytes
 from seon_inspect.tasks import frozen_tool_rows as tasks
 
 
+ADMISSION = {"schema_version": 2, "bench": {"name": "test"}}
+
+
 def _write_expected_workspace(state: TaskState) -> None:
     root = Path(state.metadata["workspace"])
     for check in state.metadata["oracle"]["checks"]:
@@ -66,6 +69,7 @@ def _run(monkeypatch, tmp_path, row, position, *, touch_workspace=True,
         positions=str(position),
         cluster_url="http://127.0.0.1:7994",
         workspaces_root=str(tmp_path / "workspaces"),
+        _admission=ADMISSION,
     )
     return inspect_eval(
         task,
@@ -93,6 +97,7 @@ def test_each_row_scores_through_native_inspect(
     assert sample.metadata["pod_agent_id"] == "test-agent"
     assert sample.metadata["pod_database_coordinate"] == {"basis_t": 42}
     assert sample.metadata["pod_turn_evidence"] == [{"turn_id": "turn-1"}]
+    assert sample.metadata["seon_source_admission"] == ADMISSION
     rendered_messages = "\n".join(message.text for message in sample.messages)
     assert "{workspace}" not in rendered_messages
     assert "{fixture_url}" not in rendered_messages
@@ -144,7 +149,8 @@ def test_invalid_positions_fail_loud(positions):
 
 def test_static_cluster_url_is_mandatory():
     with pytest.raises(ValueError, match="cluster_url is required"):
-        tasks.frozen_tool_rows(row="shell_use", positions="0")
+        tasks.frozen_tool_rows(
+            row="shell_use", positions="0", _admission=ADMISSION)
 
 
 def test_explicit_static_cluster_url_is_threaded_to_the_pod_solver(
@@ -164,6 +170,7 @@ def test_explicit_static_cluster_url_is_threaded_to_the_pod_solver(
         cluster_url="http://127.0.0.1:7994",
         timeout_s=17,
         workspaces_root=str(tmp_path),
+        _admission=ADMISSION,
     )
     assert captured == {
         "cluster_url": "http://127.0.0.1:7994",
@@ -204,6 +211,7 @@ def test_task_serializes_samples_even_if_inspect_allows_concurrency(
         positions="0,1",
         cluster_url="http://127.0.0.1:7994",
         workspaces_root=str(tmp_path / "workspaces"),
+        _admission=ADMISSION,
     )
     log = inspect_eval(
         task,
@@ -214,3 +222,19 @@ def test_task_serializes_samples_even_if_inspect_allows_concurrency(
     )[0]
     assert log.status == "success", log.error
     assert maximum == 1
+
+
+def test_task_admits_source_before_dataset_construction(monkeypatch):
+    admitted = {"schema_version": 2, "bench": {"name": "admitted"}}
+    seen = []
+    monkeypatch.setattr(
+        tasks.source_admission, "verify_sources",
+        lambda bench: seen.append(bench) or admitted,
+    )
+    task = tasks.frozen_tool_rows(
+        row="shell_use", positions="0",
+        cluster_url="http://127.0.0.1:7994",
+    )
+    assert seen == [tasks._bench_identity("shell_use")]
+    assert task.metadata["seon_source_admission"] == admitted
+    assert task.dataset[0].metadata["seon_source_admission"] == admitted

@@ -5,9 +5,9 @@
         VALUE: rendered twice over the same exact resolved coordinate
         it is byte-identical, shows the database BEFORE the turn (the prior
         turn's eval, not the turn's own), and fits the ~700-token budget.
-     2. EXPORT ROW SHAPE — `export!` writes one JSONL row per ok-eval
-        turn: context/cards/target/meta, target = the turn's ok sources
-        in order, meta carries turn-id/agent/coordinate/database/projection-sha.
+     2. EXPORT MANIFEST — `export!` writes one content-addressed manifest with
+        stable row ids/splits, complete coordinates, source/runtime/config/
+        profile identities, and referenced-schema closures emitted once.
      3. CURATION — `rate!` upserts `::rating` onto a real turn (an unknown
         id is refused as a value); `:excluded` turns drop out of the
         export; a rating rides the row's meta.
@@ -179,10 +179,11 @@
 ;; 2 + 3. Export row shape + curation.
 ;; ---------------------------------------------------------------------------
 
-(defn- read-rows [path]
-  (->> (str/split-lines (.readFileSync nfs path "utf8"))
-       (remove str/blank?)
-       (mapv #(js->clj (js/JSON.parse %)))))
+(defn- read-manifest [path]
+  (js->clj (js/JSON.parse (.readFileSync nfs path "utf8"))))
+
+(defn- manifest-rows [manifest]
+  (get-in manifest ["content" "rows"]))
 
 (deftest export-rows-shape-target-meta-and-curation
   (async done
@@ -199,41 +200,63 @@
               t1   (await (drive-turn! a "(+ 11 22)\n"))
               t2   (await (drive-turn!
                             a "(db/query {:seon.db/query '[:find ?id :where [_ :seon.agent/id ?id]]})\n"))
-              out  (str fixture-dir "/rows.jsonl")
+              out  (str fixture-dir "/manifest.json")
               res  (await
                      (auto/export! {:seon.repl.autocomplete/out-path out
                                     :seon.repl.autocomplete/projection-sha "test-sha"
                                     :seon.db/db @db/*conn*}))]
-          (is (true? (:seon.repl.autocomplete/ok? res)))
+          (is (true? (:seon.repl.autocomplete/ok? res)) (pr-str res))
           (is (= 2 (:seon.repl.autocomplete/rows res))
               "both ok-eval turns row out")
-          (let [rows (read-rows out)
+          (let [manifest (read-manifest out)
+                rows (manifest-rows manifest)
                 r2   (some #(when (str/includes? (get % "target") "db/query") %)
                            rows)]
+            (is (= (:seon.repl.autocomplete/manifest-id res)
+                   (get manifest "manifest_id")))
+            (is (= 64 (count (get manifest "manifest_id"))))
+            (is (= "seon.autocomplete.export/v1"
+                   (get-in manifest ["content" "format"])))
             (is (= 2 (count rows)))
             (is (some? r2) "the db/query turn produced a row")
             (is (every? #(and (contains? % "context") (contains? % "cards")
-                              (contains? % "target") (contains? % "meta"))
+                              (contains? % "target") (contains? % "row_id")
+                              (contains? % "split"))
                         rows)
-                "every row carries the design.md shape")
+                "every row carries stable identity and split assignment")
             (let [point (turn/rendered-coordinate t2)]
               (is (= (str (::coordinate/database-id point))
-                     (get-in r2 ["meta" "coordinate" "database-id"])))
+                     (get-in r2 ["coordinate" "database_id"])))
               (is (= (name (::coordinate/branch point))
-                     (get-in r2 ["meta" "coordinate" "branch"])))
+                     (get-in r2 ["coordinate" "branch"])))
               (is (= (str (::coordinate/commit-id point))
-                     (get-in r2 ["meta" "coordinate" "commit-id"])))
+                     (get-in r2 ["coordinate" "commit_id"])))
               (is (= (::coordinate/t point)
-                     (get-in r2 ["meta" "coordinate" "t"]))))
-            (is (= aid (get-in r2 ["meta" "agent"])))
-            (is (= "test-sha" (get-in r2 ["meta" "projection-sha"])))
-            (is (= (:seon.agent.turn/id t2) (get-in r2 ["meta" "turn-id"])))
-            (is (number? (get-in r2 ["meta" "coverage"]))
-                "per-row ingredients coverage rides the meta")
+                     (get-in r2 ["coordinate" "t"]))))
+            (is (= aid (get r2 "agent")))
+            (is (= "test-sha"
+                   (get-in manifest ["content" "source" "projection_sha"])))
+            (is (= (:seon.agent.turn/id t2) (get r2 "turn_id")))
+            (is (= "observed" (get r2 "projection_mode")))
+            (is (number? (get r2 "coverage")))
+            (is (some #(= (get r2 "schema_closure_id") (get % "id"))
+                      (get-in manifest ["content" "schema_closures"])))
+            (is (map? (get-in manifest ["content" "runtime_artifact"]))
+                "one runtime artifact identity is manifest-wide")
             (is (str/includes? (get r2 "context" "") "(+ 11 22)")
                 "the row's context is the PRE-turn projection (prior turn visible)")
             (is (some #(str/includes? % "seon.db/query") (get r2 "cards"))
-                "the called fn's compact card rides the row"))
+                "the called fn's compact card rides the row")
+            (let [bytes-1 (.readFileSync nfs out "utf8")
+                  res-repeat (await
+                               (auto/export!
+                                 {:seon.repl.autocomplete/out-path out
+                                  :seon.repl.autocomplete/projection-sha "test-sha"
+                                  :seon.db/db @db/*conn*}))]
+              (is (= (:seon.repl.autocomplete/manifest-id res)
+                     (:seon.repl.autocomplete/manifest-id res-repeat)))
+              (is (= bytes-1 (.readFileSync nfs out "utf8"))
+                  "same basis/source/runtime world is byte-identical")))
           ;; curation: exclude t1, gold t2, re-export
           (let [r-ex (await (auto/rate! {:seon.agent.turn/id (:seon.agent.turn/id t1)
                                          :seon.repl.autocomplete/rating :excluded}))
@@ -243,14 +266,19 @@
                        (auto/export! {:seon.repl.autocomplete/out-path out
                                       :seon.repl.autocomplete/projection-sha "test-sha"
                                       :seon.db/db @db/*conn*}))
-                rows2 (read-rows out)]
+                manifest2 (read-manifest out)
+                rows2 (manifest-rows manifest2)
+                rejections2 (get-in manifest2 ["content" "rejections"])]
             (is (true? (:seon.repl.autocomplete/ok? r-ex)))
             (is (true? (:seon.repl.autocomplete/ok? r-au)))
             (is (= 1 (:seon.repl.autocomplete/skipped-excluded res2))
                 ":excluded turns drop out")
             (is (= 1 (count rows2)))
-            (is (= "gold" (get-in (first rows2) ["meta" "rating"]))
-                "a rating rides the row's meta"))))
+            (is (= "gold" (get (first rows2) "rating"))
+                "a rating rides the row")
+            (is (= "excluded-rating" (get (first rejections2) "reason")))
+            (is (= 64 (count (get (first rejections2) "rejection_id")))
+                "excluded evidence is retained with an addressable id"))))
       done)))
 
 (deftest rate-of-unknown-turn-is-a-refusal-value

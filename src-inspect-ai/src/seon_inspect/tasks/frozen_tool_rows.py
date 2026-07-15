@@ -22,6 +22,7 @@ from seon_inspect.generators import (
     render_input,
     serve_fixtures,
 )
+from seon_inspect import source_admission
 from seon_inspect.solver import seon_pod_solver
 from seon_inspect.tool_scorers import fixture_answer_scorer, workspace_scorer
 
@@ -29,6 +30,15 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_WORKSPACES_ROOT = REPO_ROOT / "tmp" / "inspect-tool-rows"
 TOOL_ROWS = ("shell_use", "file_edit", "web_fetch")
 WORKSPACE_ROWS = ("shell_use", "file_edit")
+
+
+def _bench_identity(row: str) -> dict[str, str]:
+    return {
+        "name": f"frozen_tool_rows:{row}",
+        "module": "seon_inspect.tasks.frozen_tool_rows",
+        "attribute": "frozen_tool_rows",
+        "kind": "seon-native",
+    }
 
 
 class ToolRowInfrastructureError(RuntimeError):
@@ -58,13 +68,14 @@ def selected_rows(row: str, seed: int, positions: str) -> list[dict]:
     return [generated[position] for position in selected]
 
 
-def _sample(row: dict) -> Sample:
+def _sample(row: dict, admission: dict) -> Sample:
     """Adapt one generated row without sharing mutable metadata with Inspect."""
     return Sample(
         id=row["id"],
         input=row["input"],
         target=row["target"],
-        metadata=copy.deepcopy(row["metadata"]),
+        metadata={**copy.deepcopy(row["metadata"]),
+                  "seon_source_admission": copy.deepcopy(admission)},
     )
 
 
@@ -97,6 +108,7 @@ def frozen_tool_row_solver(
     cluster_url: str | None = None,
     timeout_s: int | None = None,
     workspaces_root: str | None = None,
+    admission: dict | None = None,
 ) -> Solver:
     """Materialize one row, render its real location, then drive the Seon pod."""
     if row not in TOOL_ROWS:
@@ -132,6 +144,11 @@ def frozen_tool_row_solver(
                     state = await pod_solver(state, generate)
 
             _require_completed_run(state)
+            if admission is not None:
+                end = source_admission.verify_sources(_bench_identity(row))
+                if end != admission:
+                    raise source_admission.SourceAdmissionError(
+                        "frozen tool-row source changed during the sample")
             return state
 
     return solve
@@ -152,17 +169,21 @@ def frozen_tool_rows(
     cluster_url: str | None = None,
     timeout_s: int | None = None,
     workspaces_root: str | None = None,
+    _admission: dict | None = None,
 ) -> Task:
     """Evaluate exact frozen generator positions through native Inspect logs."""
+    admission = _admission or source_admission.verify_sources(
+        _bench_identity(row))
     rows = selected_rows(row, seed, positions)
     scorer = fixture_answer_scorer() if row == "web_fetch" else workspace_scorer()
     return Task(
-        dataset=MemoryDataset([_sample(sample) for sample in rows]),
+        dataset=MemoryDataset([_sample(sample, admission) for sample in rows]),
         solver=frozen_tool_row_solver(
             row=row,
             cluster_url=cluster_url,
             timeout_s=timeout_s,
             workspaces_root=workspaces_root,
+            admission=None if _admission is not None else admission,
         ),
         scorer=scorer,
         cleanup=cleanup_workspace,
@@ -170,5 +191,6 @@ def frozen_tool_rows(
             "seon_tool_row": row,
             "seon_generator_seed": seed,
             "seon_generator_positions": list(parse_positions(positions)),
+            "seon_source_admission": admission,
         },
     )

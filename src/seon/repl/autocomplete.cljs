@@ -16,16 +16,19 @@
      - [[rate!]] + the `::rating`/`::tag` curation attrs — mark turns
        gold/good/excluded for the training corpus.
      - [[export!]] — walk every agent's turns (`seon.agent.ctx/agent-turns`),
-       render [[context]] at each turn's complete rendered coordinate,
-       pair it with the turn's ok `:seon.eval/source` forms, and write one
-       JSONL row per turn under `data/tune/`.
+       render [[context]] at each turn's complete rendered coordinate, pair it
+       with the turn's ok `:seon.eval/source` forms, and write one canonical,
+       content-addressed manifest under `data/tune/`.
 
    If this projection (or any block it renders) changes, previously exported
-   datasets are STALE — re-export, never patch (each row stamps the git sha)."
+   datasets are STALE — re-export, never patch (source identity is manifest
+   content and therefore changes its digest)."
   (:require
     ["node:child_process" :as child-process]
+    ["node:crypto" :as node-crypto]
     ["node:fs" :as nfs]
     ["node:path" :as npath]
+    [cljs.reader :as reader]
     [clojure.string :as str]
     ;; The profile's section fns resolve LATE (symbol slots via
     ;; seon.eval/lookup-value) — required here so every bundle that carries
@@ -184,7 +187,7 @@
        :seon.agent.ctx/profile (or (profile-from-db db) context-blocks)})))
 
 ;; ============================================================
-;; Export internals — mining turns into JSONL training rows.
+;; Export internals — mining turns into canonical manifest rows.
 ;; ============================================================
 
 (def ^:private qualified-token-re
@@ -246,8 +249,8 @@
                         refers)]
     (->> (concat qualified referred) distinct sort vec)))
 
-(defn- fn-card
-  "The compact one-line card for fn `sym-str` in db value `db`, or nil.
+(defn- fn-record
+  "The indexed row and compact card for fn `sym-str`, or nil.
 
    ONE mechanism with the `:namespaces` compact cards —
    `seon.agent.ctx.namespaces/compact-fn-head` over the indexed
@@ -258,7 +261,7 @@
                         :seon.db/ref [:seon.fn/sym sym-str]
                         :seon.db/pull-pattern '[:seon.fn/sym :seon.fn/arglists
                                                 :seon.fn/doc :seon.fn/spec]})]
-      (ns-cards/compact-fn-head row))))
+      {::fn-row row ::card (ns-cards/compact-fn-head row)})))
 
 (def ^:private keyword-token-re
   "Keyword tokens in Clojure source — `:kw`, `:ns/kw`, `::kw` (the `::`
@@ -319,40 +322,135 @@
   (let [dir (config/env-string "SEON_CLUSTER_DIR")]
     (if (str/blank? dir) "default" (.basename npath dir))))
 
-(defn- row-json
-  "ONE JSONL line for a mined turn — the design.md row shape
-   (`context`/`cards`/`target`/`meta`), JSON-stringified."
-  [{::keys [context-text cards target turn-id agent-id point database sha
-            rating coverage]}]
-  (let [coordinate-json
-        (js-obj "database-id" (str (::coordinate/database-id point))
-                "branch" (name (::coordinate/branch point))
-                "commit-id" (str (::coordinate/commit-id point))
-                "t" (::coordinate/t point))
-        meta (js-obj "turn-id" turn-id
-                     "agent" agent-id
-                     "coordinate" coordinate-json
-                     "database" database
-                     "projection-sha" sha
-                     "coverage" coverage)]
-    (when rating (aset meta "rating" (name rating)))
-    (js/JSON.stringify
-      (js-obj "context" context-text
-              "cards" (into-array cards)
-              "target" target
-              "meta" meta))))
+(def ^:private export-format "seon.autocomplete.export/v1")
+(def ^:private split-policy
+  {"id" "sha256-row-id-mod-100/v1"
+   "seed" "seon-autocomplete-v1"
+   "ranges" {"development" [0 80]
+             "milestone" [80 90]
+             "test" [90 100]}})
+
+(defn- json-key [k]
+  (cond
+    (keyword? k) (if-let [ns (namespace k)] (str ns "/" (name k)) (name k))
+    (symbol? k) (str k)
+    :else (str k)))
+
+(declare canonical-json)
+
+(defn- canonical-json
+  "Stable JSON for content identities. Map keys and set members are sorted;
+   Clojure keywords/symbols are represented by their full reader names."
+  [x]
+  (cond
+    (map? x) (str "{" (str/join "," (map (fn [[k v]]
+                                            (str (js/JSON.stringify (json-key k))
+                                                 ":" (canonical-json v)))
+                                          (sort-by (comp json-key key) x))) "}")
+    (set? x) (canonical-json (sort-by canonical-json x))
+    (sequential? x) (str "[" (str/join "," (map canonical-json x)) "]")
+    (keyword? x) (js/JSON.stringify (json-key x))
+    (symbol? x) (js/JSON.stringify (str x))
+    (uuid? x) (js/JSON.stringify (str x))
+    (nil? x) "null"
+    :else (js/JSON.stringify x)))
+
+(defn- sha256 [s]
+  (-> (.createHash node-crypto "sha256") (.update s "utf8") (.digest "hex")))
+
+(defn- coordinate-data [point]
+  {"database_id" (str (::coordinate/database-id point))
+   "branch" (name (::coordinate/branch point))
+   "commit_id" (str (::coordinate/commit-id point))
+   "t" (::coordinate/t point)})
+
+(defn- split-for [row-id]
+  (let [bucket (mod (js/parseInt (subs row-id 0 8) 16) 100)]
+    (cond (< bucket 80) "development"
+          (< bucket 90) "milestone"
+          :else "test")))
+
+(defn- source-identity [projection-sha]
+  (let [head (git-head-sha)
+        diff (try
+               (.toString
+                 (.execFileSync child-process "git"
+                   #js ["diff" "--binary" "HEAD" "--"
+                        "src" "config" "deps.edn" "shadow-cljs.edn"
+                        "package.json" "package-lock.json"]
+                   #js {:stdio #js ["ignore" "pipe" "ignore"]}))
+               (catch :default _ "source-diff-unavailable"))]
+    {"revision" head
+     "projection_sha" projection-sha
+     ;; Diagnostic source-world identity. The runtime artifact's application
+     ;; digest is the authoritative transitive binding for the ACTUAL compiled
+     ;; renderer; manifest content separately binds exact rendered/card/schema
+     ;; bytes. Do not mislabel a source-path list as a dependency closure.
+     "runtime_root_diff_sha256" (sha256 diff)}))
+
+(defn- runtime-artifact-path []
+  (let [flavor (or (config/env-string "SEON_ARTIFACT_FLAVOR") "default")
+        proc-dir (or (config/env-string "SEON_PROC_DIR") "tmp/seon-operator")
+        file (if (= flavor "acme") "artifact-acme.edn" "artifact.edn")]
+    (.resolve npath proc-dir file)))
+
+(defn- runtime-artifact-identity []
+  (let [path (runtime-artifact-path)]
+    (when-not (.existsSync nfs path)
+      (throw (ex-info "autocomplete export requires the canonical runtime artifact manifest"
+                      {:path path})))
+    (let [manifest (reader/read-string (.readFileSync nfs path "utf8"))
+          identity (select-keys manifest
+                     [:seon.dev.artifact/version :seon.dev.artifact/flavor
+                      :seon.dev.artifact/client-build-id
+                      :seon.dev.artifact/writer-digest
+                      :seon.dev.artifact/client-digest
+                      :seon.dev.artifact/bootstrap-digest
+                      :seon.dev.artifact/css-digest
+                      :seon.dev.artifact/application-digest])]
+      {"identity_sha256" (sha256 (canonical-json identity))
+       "manifest" identity})))
+
+(defn- config-identity [db]
+  ;; Query attr presence rather than using a lookup ref: historical/test
+  ;; databases can carry the singleton before `:seon.config/id` was unique.
+  (let [eid (ffirst (db/query
+                      {:seon.db/db db
+                       :seon.db/query
+                       '[:find ?e :in $ ?id :where [?e :seon.config/id ?id]]
+                       :seon.db/args [config/cluster-config-id]}))
+        row (some-> (when eid
+                      (db/entity-lazy {:seon.db/db db :seon.db/ref eid}))
+                    (dissoc :db/id))]
+    (sha256 (canonical-json (or row {})))))
+
+(defn- profile-identity [db]
+  (sha256 (canonical-json (or (profile-from-db db) context-blocks))))
+
+(defn- rejection-record
+  [{::keys [agent-id turn point reason target]}]
+  (let [base (cond-> {"agent" agent-id
+                      "turn_id" (:seon.agent.turn/id turn)
+                      "projection_mode" "observed"
+                      "attempted_target" (or target "")
+                      "reason" reason}
+               (and point (not (:seon.error/message point)))
+               (assoc "coordinate" (coordinate-data point)))
+        id (sha256 (canonical-json base))]
+    (assoc base "rejection_id" id)))
 
 ;; ============================================================
 ;; The exporter.
 ;; ============================================================
 
 (schema/register! ::out-path       :string)
+(schema/register! ::manifest-id    :string)
 (schema/register! ::projection-sha :string)
 (schema/register! ::distractors    [:int {:min 0}])
 (schema/register! ::count          [:int {:min 0}])
 ;; [min p50 max] token summary of a row column (Token Reporting rule —
 ;; sizes are ALWAYS tokens; the full distribution is derivable from the
-;; JSONL file itself).
+;; manifest rows themselves).
 (schema/register! ::token-summary  [:vector :int])
 
 (schema/register! ::export-request
@@ -366,6 +464,7 @@
   [:map
    [::ok?              ::ok?]
    [::out-path         {:optional true} ::out-path]
+   [::manifest-id      {:optional true} ::manifest-id]
    [::projection-sha   {:optional true} ::projection-sha]
    [::agents           {:optional true} ::count]
    [::turns-walked     {:optional true} ::count]
@@ -382,7 +481,7 @@
    [::error            {:optional true} ::error]])
 
 (defn ^:async export!
-  "Export every agent's ok-eval turns as autocomplete JSONL training rows.
+  "Export every agent's turns as one content-addressed autocomplete manifest.
 
    Walks agent → runs → turns (`seon.agent.ctx/agent-turns`) over db value
    `:seon.db/db` (default: the live db). A turn contributes one row when it
@@ -398,9 +497,13 @@
      meta    — turn-id, agent, complete coordinate, database, projection-sha
                (git HEAD unless passed), and rating when present
 
-   Writes `::out-path` (default `data/tune/<database>-<yyyy-mm-dd>.jsonl`,
-   one JSON object per line) via node fs and returns honest counters —
-   never throws; a failure comes back as `{::ok? false ::error …}`."
+   Rows, referenced-schema closures, configurations, profiles, deterministic
+   split assignments, and addressable rejection records live in one canonical
+   content object. The envelope's `manifest_id` is SHA-256 of that object and
+   the default path is `data/tune/<manifest-id>.manifest.json`. Repeating an
+   export from the same database/source/runtime world is byte-identical.
+
+   Never throws; a failure comes back as `{::ok? false ::error …}`."
   {:malli/schema [:=> [:cat ::export-request] ::export-response]}
   [{db :seon.db/db ::keys [out-path projection-sha distractors]}]
   (try
@@ -408,9 +511,8 @@
           sha   (or projection-sha (git-head-sha))
           k     (or distractors 3)
           database (database-name)
-          out   (or out-path
-                    (str "data/tune/" database "-"
-                         (subs (.toISOString (js/Date.)) 0 10) ".jsonl"))
+          runtime-artifact (runtime-artifact-identity)
+          source (source-identity sha)
           agent-ids (->> (db/query {:seon.db/db db
                                     :seon.db/query
                                     '[:find ?id :where [_ :seon.agent/id ?id]]})
@@ -447,18 +549,37 @@
                           rating  (when rating-ok? (::rating turn))]
                       (cond
                         (= :excluded rating)
-                        {::turns-walked 1 ::skipped-excluded 1}
+                        {::turns-walked 1 ::skipped-excluded 1
+                         ::rejections
+                         [(rejection-record
+                            {::agent-id agent-id ::turn turn ::point point
+                             ::target (str/join "\n" sources)
+                             ::reason "excluded-rating"})]}
 
                         (empty? sources)
-                        {::turns-walked 1 ::skipped-no-evals 1}
+                        {::turns-walked 1 ::skipped-no-evals 1
+                         ::rejections
+                         [(rejection-record
+                            {::agent-id agent-id ::turn turn ::point point
+                             ::target "" ::reason "no-successful-evals"})]}
 
                         (:seon.error/message point)
-                        {::turns-walked 1 ::skipped-no-coordinate 1}
+                        {::turns-walked 1 ::skipped-no-coordinate 1
+                         ::rejections
+                         [(rejection-record
+                            {::agent-id agent-id ::turn turn
+                             ::target (str/join "\n" sources)
+                             ::reason "incomplete-rendered-coordinate"})]}
 
                         :else
                         (let [aodb (await (db/at-coordinate db/*conn* point))]
                           (if (:seon.error/message aodb)
-                            {::turns-walked 1 ::skipped-no-coordinate 1}
+                            {::turns-walked 1 ::skipped-no-coordinate 1
+                             ::rejections
+                             [(rejection-record
+                                {::agent-id agent-id ::turn turn ::point point
+                                 ::target (str/join "\n" sources)
+                                 ::reason "unresolvable-rendered-coordinate"})]}
                             (let [ctext   (context {:seon.agent/id agent-id
                                                       :seon.db/db aodb})
                                     ;; determinism self-check: the SAME as-of
@@ -473,7 +594,18 @@
                                     syms    (into called
                                                   (distractor-syms fn-syms called
                                                                    turn-id k))
-                                    cards   (vec (keep #(fn-card aodb %) syms))
+                                    records (vec (keep #(fn-record aodb %) syms))
+                                    cards   (mapv ::card records)
+                                    specs   (vec (keep (comp :seon.fn/spec ::fn-row)
+                                                       records))
+                                    schema-text (or (ctx/referenced-schema-block
+                                                      {:seon.db/db aodb
+                                                       :seon.agent.ctx/seed-specs specs
+                                                       :seon.agent.ctx/own-keys #{}})
+                                                    "")
+                                    schema-id (sha256 schema-text)
+                                    config-id (config-identity aodb)
+                                    profile-id (profile-identity aodb)
                                     missed  (- (count syms) (count cards))
                                     ;; context-GAP evidence (never "fixed"
                                     ;; here): how much of the target the
@@ -482,23 +614,46 @@
                                              target
                                              (str ctext "\n"
                                                   (str/join "\n" cards)))]
-                              {::turns-walked 1
-                               ::rows 1
-                               ::cards-missed missed
-                               ::determinism-mismatches
-                               (if (= ctext ctext2) 0 1)
-                               ::ctx-tokens [(tokens/estimate ctext)]
-                               ::target-tokens [(tokens/estimate target)]
-                               ::lines [(row-json {::context-text ctext
-                                                   ::cards cards
-                                                   ::target target
-                                                   ::turn-id turn-id
-                                                   ::agent-id agent-id
-                                                   ::point point
-                                                   ::database database
-                                                   ::sha sha
-                                                   ::rating rating
-                                                   ::coverage coverage})]}))))))
+                              (if (not= ctext ctext2)
+                                {::turns-walked 1
+                                 ::determinism-mismatches 1
+                                 ::rejections
+                                 [(rejection-record
+                                    {::agent-id agent-id ::turn turn ::point point
+                                     ::target target
+                                     ::reason "context-determinism-mismatch"})]}
+                                (let [row-base
+                                      (cond->
+                                        {"agent" agent-id
+                                         "turn_id" turn-id
+                                         "projection_mode" "observed"
+                                         "coordinate" (coordinate-data point)
+                                         "context" ctext
+                                         "cards" cards
+                                         "target" target
+                                         "coverage" coverage
+                                         "schema_closure_id" schema-id
+                                         "config_id" config-id
+                                         "profile_id" profile-id}
+                                        rating (assoc "rating" (name rating)))
+                                      row-id (sha256
+                                               (canonical-json
+                                                 {"seed" (get split-policy "seed")
+                                                  "row" row-base}))
+                                      row (assoc row-base
+                                                 "row_id" row-id
+                                                 "split" (split-for row-id))]
+                                  {::turns-walked 1
+                                   ::rows 1
+                                   ::cards-missed missed
+                                   ::determinism-mismatches 0
+                                   ::ctx-tokens [(tokens/estimate ctext)]
+                                   ::target-tokens [(tokens/estimate target)]
+                                   ::row-data [row]
+                                   ::schema-data [{"id" schema-id
+                                                   "definitions" schema-text}]
+                                   ::config-data [{"id" config-id}]
+                                   ::profile-data [{"id" profile-id}]}))))))))
                   candidates))))
           acc (reduce
                 (fn [acc contribution]
@@ -512,17 +667,44 @@
                 {::turns-walked 0 ::rows 0 ::skipped-no-evals 0
                  ::skipped-no-coordinate 0 ::skipped-excluded 0
                  ::cards-missed 0 ::determinism-mismatches 0
-                 ::ctx-tokens [] ::target-tokens [] ::lines []}
+                 ::ctx-tokens [] ::target-tokens [] ::row-data []
+                 ::rejections [] ::schema-data [] ::config-data []
+                 ::profile-data []}
                 (js->clj contributions))
           summary (fn [xs]
                     (if (empty? xs)
                       [0 0 0]
                       (let [s (vec (sort xs))]
-                        [(first s) (nth s (quot (count s) 2)) (peek s)])))]
+                        [(first s) (nth s (quot (count s) 2)) (peek s)])))
+          dedupe-by-id (fn [xs]
+                         (->> xs
+                              (reduce (fn [m x] (assoc m (get x "id") x)) {})
+                              vals
+                              (sort-by #(get % "id"))
+                              vec))
+          rows (vec (sort-by #(get % "row_id") (::row-data acc)))
+          rejections (vec (sort-by #(get % "rejection_id") (::rejections acc)))
+          content
+          {"format" export-format
+           "database" database
+           "source" source
+           "runtime_artifact" runtime-artifact
+           "renderer" {"symbol" "seon.repl.autocomplete/context"
+                       "profile" "autocomplete"}
+           "split_policy" split-policy
+           "schema_closures" (dedupe-by-id (::schema-data acc))
+           "configurations" (dedupe-by-id (::config-data acc))
+           "profiles" (dedupe-by-id (::profile-data acc))
+           "rows" rows
+           "rejections" rejections}
+          manifest-id (sha256 (canonical-json content))
+          manifest {"manifest_id" manifest-id "content" content}
+          out (or out-path (str "data/tune/" manifest-id ".manifest.json"))]
       (.mkdirSync nfs (.dirname npath out) #js {:recursive true})
-      (.writeFileSync nfs out (str (str/join "\n" (::lines acc)) "\n"))
+      (.writeFileSync nfs out (str (canonical-json manifest) "\n"))
       {::ok?              true
        ::out-path         out
+       ::manifest-id      manifest-id
        ::projection-sha   sha
        ::agents           (count agent-ids)
        ::turns-walked     (::turns-walked acc)
@@ -535,4 +717,7 @@
        ::context-tokens   (summary (::ctx-tokens acc))
        ::target-tokens    (summary (::target-tokens acc))})
     (catch :default e
-      {::ok? false ::error (str (ex-message e))})))
+      {::ok? false
+       ::error (str (ex-message e)
+                    (when-let [data (ex-data e)] (str " " (pr-str data)))
+                    (when-let [stack (.-stack e)] (str "\n" stack)))})))
