@@ -9,6 +9,10 @@ tags: [prd, agent, research]
 > Detailed source evidence and the current reconciliation/acceptance matrix
 > live in [[research/inspect-autocomplete-source-evidence-audit-2026-07-14]]
 > and [[research/agentic-inspect-autocomplete-reconciliation-2026-07-14]].
+> The bounded current-source disposition of live Inspect, planner/worker,
+> long-term planning, autocomplete, default tools, small-model evidence, and
+> the ACME handback is
+> [[research/integrated-agent-testing-evidence-reconciliation-2026-07-15]].
 
 ## Outcome
 
@@ -53,6 +57,25 @@ These mechanisms are not yet one reproducible evidence path:
   addressable rejection rows. Inspect verifies the envelope and consumes frozen
   split rows without rebuilding projections. Counterfactual/substantive targets
   and current-world replay verdicts remain scorer/replay work.
+
+The 2026-07-15 reconciliation makes the model-evidence boundary explicit:
+
+- live pod-backed Inspect, native turn/coordinate retention, offline planning
+  discrimination, positive program-graph tool eligibility, and observed
+  autocomplete manifests are implemented;
+- the historical plan-preload drive proves useful runtime behavior and failure
+  modes, but no accepted Inspect artifact yet binds a separately identified
+  larger planner to a smaller `my.plan` executor across restart;
+- the default home surface requires six principal `my.*` namespaces plus the
+  core database/schema/runtime functions, while `my.ns` and `my.skills` are
+  currently outside that default list pending frozen-task evidence; and
+- one Qwen 3.5 2B BFCL success and one Qwen2.5 Coder 0.5B database failure are
+  diagnostics, not the representative 90% small-model graduation matrix.
+
+The focused current-source audit gate passes 83 tests across planning,
+autocomplete-manifest verification, frozen ordinary-tool tasks, and the BFCL
+adapter. The protected 16-row Celsius sample is narrow untracked evidence and
+is not admitted into the graduation battery.
 
 Historical stable/display/pin/plan-pilot evidence is classified and hash-backed
 in the runtime-reliability preservation audits. It remains evidence to replay,
