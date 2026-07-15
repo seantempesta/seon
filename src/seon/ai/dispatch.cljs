@@ -21,7 +21,8 @@
 (schema/register! ::request
   [:map
    [:seon.ai/ctx :seon.ai/ctx]
-   [:seon.ai/stream? {:optional true} :seon.ai/stream?]])
+   [:seon.ai/stream? {:optional true} :seon.ai/stream?]
+   [:seon.ai/abort-signal {:optional true} :seon.ai/abort-signal]])
 (schema/register! ::arg [:or :string ::request])
 (schema/register! ::llm-fn 'fn?)
 

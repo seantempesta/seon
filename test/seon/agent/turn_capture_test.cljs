@@ -168,7 +168,7 @@
               expected (db/head-coordinate @db/*conn*)
               turn     (await (drive-turn!
                                 a (fn [p]
-                                    (reset! !ctx p)
+                                    (reset! !ctx (ai/llm-arg->ctx p))
                                     (js/Promise.resolve {:text reply}))))
               turn-id  (:seon.agent.turn/id turn)]
           (is (= :done (:seon.agent.turn/status turn)))

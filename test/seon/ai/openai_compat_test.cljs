@@ -315,6 +315,7 @@
   (fn [url init]
     (reset! captured {:url     url
                       :auth    (some-> init .-headers (.get "authorization"))
+                      :signal  (.-signal init)
                       :body    (js->clj (.parse js/JSON (.-body init))
                                         :keywordize-keys true)})
     (js/Promise.resolve
@@ -343,6 +344,27 @@
               (is (= "Bearer test-key" (:auth @captured)))
               (is (= {:include_usage true} (-> @captured :body :stream_options))
                   ":stream_options rides the wire")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest agent-adapter-threads-attempt-signal-to-sdk-fetch
+  (async done
+    (let [captured  (atom nil)
+          controller (js/AbortController.)
+          signal    (.-signal controller)]
+      (-> (with-conn
+            (fn [_conn]
+              (with-stubbed
+                (fn [_url init]
+                  (reset! captured (.-signal init))
+                  (.abort controller)
+                  (js/Promise.reject (js/DOMException. "aborted" "AbortError")))
+                #((openai/agent-adapter)
+                  {:seon.ai/ctx "hi" :seon.ai/abort-signal signal}))))
+          (.then (fn [{:seon.ai/keys [error]}]
+                   (is (true? (:seon.ai/timeout? error)))
+                   (is (true? (.-aborted @captured))
+                       "the SDK links the attempt signal to its fetch controller")))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 

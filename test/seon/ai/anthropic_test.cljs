@@ -355,6 +355,7 @@
   [captured sse-string]
   (fn [url init]
     (reset! captured {:url  url
+                      :signal (.-signal init)
                       :body (js->clj (.parse js/JSON (.-body init))
                                      :keywordize-keys true)})
     (js/Promise.resolve
@@ -377,6 +378,36 @@
               (is (map? usage) "usage assembled from the message")
               (is (str/ends-with? (:url @captured) "/v1/messages")
                   "the SDK owns the Messages URL")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest agent-adapter-threads-attempt-signal-to-sdk-fetch
+  (async done
+    (let [captured   (atom nil)
+          controller (js/AbortController.)
+          signal     (.-signal controller)]
+      (-> (with-conn
+            (fn [_conn]
+              (with-key
+                (fn []
+                  (with-fetch
+                    (fn [_url init]
+                      (reset! captured (.-signal init))
+                      (js/Promise.
+                        (fn [_resolve reject]
+                          (.addEventListener
+                            (.-signal init)
+                            "abort"
+                            #(reject (js/DOMException. "aborted" "AbortError"))
+                            #js{:once true})
+                          (js/setTimeout (fn [] (.abort controller)) 0))))
+                    (fn []
+                      ((anthropic/agent-adapter)
+                       {:seon.ai/ctx "hi" :seon.ai/abort-signal signal})))))))
+          (.then (fn [{:seon.ai/keys [error]}]
+                   (is (true? (:seon.ai/timeout? error)))
+                   (is (true? (.-aborted @captured))
+                       "the SDK links the attempt signal to its fetch controller")))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 

@@ -890,16 +890,17 @@
 
    The agent ref rides from the ambient `db/with-agent` turn scope when
    present (outside a scope the row still records, unattributed)."
-  [proj]
-  (let [row (cond-> proj
-              (db/current-agent-id)
-              (assoc :seon.typeahead/agent
-                     [:seon.agent/id (db/current-agent-id)]))
-        res (await (db/transact! {:seon.db/tx-data [row]}))]
-    (when (false? (:seon.db/ok? res))
-      (js/console.warn "[seon.ai.typeahead] step projection failed:"
-                       (pr-str (:seon.db/error res))))
-    nil))
+  [proj signal]
+  (when-not (ai/aborted? signal)
+    (let [row (cond-> proj
+                (db/current-agent-id)
+                (assoc :seon.typeahead/agent
+                       [:seon.agent/id (db/current-agent-id)]))
+          res (await (db/transact! {:seon.db/tx-data [row]}))]
+      (when (false? (:seon.db/ok? res))
+        (js/console.warn "[seon.ai.typeahead] step projection failed:"
+                         (pr-str (:seon.db/error res))))))
+  nil)
 
 (defn- ^:async run-plan-pass!
   "Run ONE plan pass (planner-worker-design W2): a small worker call —
@@ -941,7 +942,7 @@
                                   (tokens/estimate (template-text template))
                                   :seon.typeahead/prompt-tokens
                                   (tokens/estimate pass-render)))
-            _          (await (record-step! proj))]
+            _          (await (record-step! proj (:seon.ai/abort-signal opts)))]
         {::pass-form       form'
          ::pass-proj       proj
          ::pass-no-change? unchanged?}))))
@@ -950,7 +951,7 @@
   "Record one marked pass row per budget-skipped affordance — the skip
    is a step projection with `:seon.typeahead/pass-skip` carrying the
    reason, so the demotion measurement sees skips, never silence."
-  [call-id skips]
+  [call-id skips signal]
   (loop [ss (seq skips)]
     (when ss
       (let [[_head reason] (first ss)]
@@ -960,7 +961,8 @@
                               :seon.typeahead/transition   :pass-skip
                               :seon.typeahead/locked-count 0
                               :seon.typeahead/plan-pass?   true
-                              :seon.typeahead/pass-skip    reason}))
+                              :seon.typeahead/pass-skip    reason}
+                             signal))
         (recur (next ss))))))
 
 ;; ============================================================
@@ -976,12 +978,21 @@
    ::outcome     outcome
    ::steps       steps})
 
+(defn- abort-response
+  []
+  {:text ""
+   :seon.ai/error {:seon.ai/msg      "Typeahead provider attempt aborted"
+                   :seon.ai/timeout? true}})
+
 (defn ^:async ^:private step-loop!
   "Run the mode=step FSM loop for one rendered prompt; return the
    turn-loop reply shape `{:text … :seon.ai/raw …}` (plus
    `:seon.ai/error` when a step failed)."
-  [opts prompt]
-  (let [db         (some-> db/*conn* deref)
+  [opts arg]
+  (let [prompt     (ai/llm-arg->ctx arg)
+        signal     (ai/llm-arg->abort-signal arg)
+        opts       (cond-> opts signal (assoc :seon.ai/abort-signal signal))
+        db         (some-> db/*conn* deref)
         agent-id   (db/current-agent-id)
         policy     (menu/policy db)
         offers     (if (and db agent-id) (menu/function-offers db agent-id) [])
@@ -1016,7 +1027,7 @@
         pass       (when (and (= :every-step pass-mode) passable?)
                      (await (run-plan-pass! opts policy entries call-id)))
         _          (when (and (= :every-step pass-mode) (seq skips))
-                     (await (record-pass-skips! call-id skips)))
+                     (await (record-pass-skips! call-id skips signal)))
         pass-form  (::pass-form pass)]
     ;; `failed` = glyphs whose EXPANSION locked nothing — suppressed for the
     ;; rest of the call (P6). The worker is stateless by design; this loop's
@@ -1030,9 +1041,15 @@
            steps (if pass [(::pass-proj pass)] [])
            failed #{}
            passed? (some? pass)]
-      (if (>= round max-rounds)
+      (cond
+        (ai/aborted? signal)
+        (abort-response)
+
+        (>= round max-rounds)
         (let [reply (assemble-reply locked-all draft)]
           {:text reply :seon.ai/raw (loop-raw reply call-id :round-cap steps)})
+
+        :else
         (let [live (into [] (remove #(contains? failed (:seon.typeahead/glyph %)))
                          offers)
               resp (await (dg/complete (merge (cond-> wire
@@ -1060,7 +1077,7 @@
                                          :seon.typeahead/committed-tokens
                                          (tokens/estimate committed'))
                                   (with-withheld-offers withheld))
-                  _           (await (record-step! proj))
+                  _           (await (record-step! proj signal))
                   steps'      (conj steps proj)
                   draft'      (str (:new_draft out))
                   transition  (:transition out)
@@ -1092,7 +1109,7 @@
                                 (await (run-plan-pass! opts policy entries
                                                        call-id)))
                       _       (when (and moment? (seq skips))
-                                (await (record-pass-skips! call-id skips)))
+                                (await (record-pass-skips! call-id skips signal)))
                       pform   (::pass-form pass')]
                   (recur (inc round)
                          (if pform
@@ -1121,4 +1138,4 @@
     [:=> [:cat] :any]
     [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
-  ([opts] (fn [arg] (step-loop! opts (ai/llm-arg->ctx arg)))))
+  ([opts] (fn [arg] (step-loop! opts arg))))

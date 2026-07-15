@@ -71,6 +71,7 @@
    [:seon.ai/max-tokens    {:optional true} :seon.ai/max-tokens]
    [:seon.ai/tools         {:optional true} :seon.ai/tools]
    [:seon.ai/tool-choice   {:optional true} :seon.ai/tool-choice]
+   [:seon.ai/abort-signal  {:optional true} :seon.ai/abort-signal]
    [:seon.ai/extra-body    {:optional true} :seon.ai/extra-body]])
 
 (schema/register! :seon.ai.anthropic/stop-reason :string)
@@ -349,7 +350,10 @@
               params  (clj->js (cond-> (request-params request)
                                  (seq extra) (merge extra)))
               ^js messages (.. client -messages)
-              ^js stream (.stream messages params)
+              signal (:seon.ai/abort-signal request)
+              ^js stream (if signal
+                           (.stream messages params #js{:signal signal})
+                           (.stream messages params))
               message (await (.finalMessage stream))
               result  (parse-completion message)]
           (when-let [err (:seon.ai/error result)]
@@ -370,8 +374,11 @@
    shape the turn loop expects. On failure `:seon.ai/error` is lifted
    to the TOP level (alongside `:text`) so the turn loop can surface
    it without digging into `:seon.ai/raw`."
-  [opts ctx-text]
-  (let [resp (await (complete (assoc opts :seon.ai/ctx ctx-text)))]
+  [opts arg]
+  (let [ctx-text (ai/llm-arg->ctx arg)
+        signal   (ai/llm-arg->abort-signal arg)
+        resp (await (complete (cond-> (assoc opts :seon.ai/ctx ctx-text)
+                                signal (assoc :seon.ai/abort-signal signal))))]
     (cond-> {:text        (:seon.ai/text resp)
              :seon.ai/raw resp}
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))
@@ -392,6 +399,6 @@
     [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
   ([opts]
-   ;; Accept the widened string-or-map llm-fn arg (repl-mode); this adapter
-   ;; buffers, so it uses the ctx and ignores `:seon.ai/stream?`.
-   (fn [arg] (complete+wrap opts (ai/llm-arg->ctx arg)))))
+   ;; This adapter buffers, so it ignores `:seon.ai/stream?`, but preserves the
+   ;; request's attempt-cancellation signal.
+   (fn [arg] (complete+wrap opts arg))))

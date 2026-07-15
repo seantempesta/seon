@@ -221,6 +221,55 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(deftest abort-stops-poll-and-requests-one-remote-cancel
+  (async done
+    (let [calls      (atom [])
+          controller (js/AbortController.)
+          signal     (.-signal controller)
+          fetch
+          (fn [url init]
+            (swap! calls conj {:url url :signal (.-signal init)})
+            (cond
+              (re-find #"/run$" url)
+              (js/Promise.resolve
+                (json-response 200 {:id "abort-job" :status "IN_QUEUE"}))
+
+              (re-find #"/status/" url)
+              (js/Promise.
+                (fn [_ reject]
+                  (.addEventListener
+                    (.-signal init) "abort"
+                    (fn [] (reject (js/DOMException. "aborted" "AbortError")))
+                    #js{:once true})))
+
+              (re-find #"/cancel/abort-job$" url)
+              (js/Promise.resolve (json-response 200 {:id "abort-job"}))
+
+              :else
+              (js/Promise.reject (js/Error. (str "unexpected URL " url)))))]
+      (-> (with-worker fetch
+            (fn []
+              (let [p (dg/complete {::dg/mode :generate
+                                    ::dg/prompt "x"
+                                    :seon.ai/abort-signal signal})]
+                (js/setTimeout #(.abort controller) 20)
+                p)))
+          (.then
+            (fn [{:seon.ai/keys [text error]}]
+              (is (= "" text))
+              (is (true? (:seon.ai/timeout? error)))
+              (is (not (contains? error :seon.ai/transport?))
+                  "an owned abort is not a retryable network failure")
+              (let [xs @calls]
+                (is (= 3 (count xs)) "submit, one status, one cancel")
+                (is (identical? signal (:signal (second xs)))
+                    "poll fetch receives the exact attempt signal")
+                (is (nil? (:signal (last xs)))
+                    "remote cancel is independent of the already-aborted signal")
+                (is (re-find #"/cancel/abort-job$" (:url (last xs)))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
 (deftest missing-endpoint-is-a-legible-config-error
   (async done
     (let [called (atom 0)]

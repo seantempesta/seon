@@ -34,8 +34,10 @@ same exact Promise-aware owner as synchronous contracts. Fixed, variadic,
 multi-arity, and multi-plus-variadic functions validate resolved output and
 guards; exact-minimum variadic calls receive a removable callable bridge; and
 the coverage denominator no longer hides async targets. The outer provider
-timeout does not cancel the underlying request; a successful plan step has no
-required verification evidence; cross-agent and address-message transitions can reopen or displace
+attempt cap now aborts the underlying SDK/fetch request and best-effort cancels
+a known DiffusionGemma remote job; run-lifecycle cancellation remains pending.
+A successful plan step has no required verification evidence; cross-agent and
+address-message transitions can reopen or displace
 authored work; narration can echo runtime scaffolding; and arbitrary self-host
 evaluation has bounded result retention but no measured hard process-memory
 containment. Pod-restart recovery is already transactionally fenced and
@@ -89,12 +91,17 @@ failures or errors).
    failures record once, and generation/reconciliation/removal preserve exact
    callable state. Focused proof: `tmp/test-cljs-20260715-012122-80190.log`
    (77 assertions, zero failures or errors).
-3. **Exact-source audit complete; implementation pending:** actively cancel the
-   existing provider attempt on its cap and thread one signal through every
-   dispatch adapter while retaining `seon.agent.turn/call-llm!` as the sole
-   retry owner. Preserve OpenAI first-form `.abort()` as a successful local
-   stream-consumer stop. Add run-lifecycle cancellation only after the dirty
-   loop/client owners land; do not invent a registry or second retry path.
+3. **Attempt cancellation implemented; lifecycle cancellation pending:** the
+   existing attempt cap creates one fresh signal per retry invocation and
+   actively aborts OpenAI, Anthropic, and DiffusionGemma requests while
+   retaining `seon.agent.turn/call-llm!` as the sole retry owner. A known
+   DiffusionGemma job receives one best-effort remote cancel. OpenAI first-form
+   `.abort()` remains a successful local stream-consumer stop. Add run-lifecycle
+   cancellation only after the loop/client owners land; do not invent a
+   registry or second retry path. Focused cancellation/provider proof is green
+   in `tmp/test-cljs-20260715-022342-27368.log` through
+   `tmp/test-cljs-20260715-022853-34911.log` (eight namespaces, 465 assertions,
+   zero failures or errors, zero compile warnings).
 4. Give plan completion schema'd verification evidence and settle authority for
    authored, addressed, cross-agent, retry, and resume transitions through the
    one `my.plan` mechanism.

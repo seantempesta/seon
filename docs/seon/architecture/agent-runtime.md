@@ -676,9 +676,12 @@ mechanisms — extended, never duplicated — make every hang a value:
   wall-clock wrapper (the same one everywhere: agent forms, auto-test runs,
   each LLM attempt, the loop's turn await). A timeout is an **error value**
   (`:seon/error` / `:seon.ai/error` timed-out flavor) surfaced through
-  warnings — never a throw, never a silent park. The bound frees the
-  *awaiter*; it does not pretend to cancel the work (nothing can, on one
-  event loop) — that's what the next two mechanisms absorb.
+  warnings — never a throw, never a silent park. When the bounded operation
+  exposes an owned cancellation capability, the timeout invokes it after
+  choosing the timeout result: each LLM attempt gets one fresh abort signal,
+  every provider adapter preserves it, and a known remote job is cancelled
+  best-effort. Arbitrary in-process work has no preemptive cancellation on one
+  event loop; the next two mechanisms absorb its late settlement.
 - **One in-pod reaper: the ticker.** The run deadline + `close-overdue-runs!` on
   the one 30s beat is the outer watchdog; per-await bounds are the inner
   one. There is no second in-pod watchdog, heartbeat service, or in-flight

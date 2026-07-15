@@ -44,6 +44,29 @@
                    (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
+(deftest timer-win-runs-cancellation-after-choosing-timeout
+  (async done
+    (let [events (atom [])
+          never  (js/Promise. (fn [_ _]))]
+      (-> (seval/race-timeout never 20 #(swap! events conj :cancelled))
+          (.then (fn [v]
+                   (is (true? (seval/timed-out? v)))
+                   (is (= [:cancelled] @events)
+                       "the timeout owner invokes cancellation exactly once")
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest inner-win-never-runs-cancellation
+  (async done
+    (let [!cancelled (atom 0)]
+      (-> (seval/race-timeout (js/Promise.resolve :fast) 60000
+                              #(swap! !cancelled inc))
+          (.then (fn [v]
+                   (is (= :fast v))
+                   (is (zero? @!cancelled))
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
 (deftest sentinel-is-identity-not-shape
   (async done
     (-> (seval/race-timeout (js/Promise.resolve #js {:_seon_eval_timeout true}) 60000)

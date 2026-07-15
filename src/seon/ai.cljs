@@ -103,6 +103,9 @@
 ;; estimates, not provider-reported.
 (schema/register! ::stream?    :boolean)
 (schema/register! ::estimated? :boolean)
+;; Process-local host cancellation capability. AbortSignal is a third-party JS
+;; object and is never persisted; :any is intentional at this boundary.
+(schema/register! ::abort-signal :any)
 
 (defn llm-arg->ctx
   "The ctx string from a bare-string or request-map llm-fn argument.
@@ -123,6 +126,21 @@
   {:malli/schema [:=> [:catn [::arg :any]] :boolean]}
   [arg]
   (boolean (and (map? arg) (::stream? arg))))
+
+(defn llm-arg->abort-signal
+  "The optional host AbortSignal carried by a request-map LLM argument.
+
+   A legacy bare-string argument has no signal. The signal is process-local
+   transport control, never database data."
+  {:malli/schema [:=> [:catn [::arg :any]] [:maybe ::abort-signal]]}
+  [arg]
+  (when (map? arg) (::abort-signal arg)))
+
+(defn aborted?
+  "True when `signal` is an aborted host AbortSignal. nil is false."
+  {:malli/schema [:=> [:catn [::signal [:maybe ::abort-signal]]] :boolean]}
+  [signal]
+  (boolean (and signal (.-aborted signal))))
 
 ;; The errors-are-values envelope for LLM calls. Every failure mode
 ;; (timeout, fetch throw, HTTP non-2xx, unparseable body, refusal)

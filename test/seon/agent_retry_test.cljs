@@ -195,3 +195,37 @@
           (is (nil? (:seon.agent.turn/status result)))
           (is (= 1 (:seon.agent.turn/llm-retries result)))))
       done)))
+
+(deftest attempt-timeout-aborts-provider-and-never-retries
+  (async done
+    (let [env   (.. js/process -env)
+          saved (aget env "SEON_LLM_ATTEMPT_TIMEOUT_MS")
+          !calls (atom 0)
+          !signals (atom [])
+          !aborted (atom 0)
+          llm-fn (fn [arg]
+                   (let [signal (:seon.ai/abort-signal arg)]
+                     (swap! !calls inc)
+                     (swap! !signals conj signal)
+                     (.addEventListener signal "abort"
+                       (fn [] (swap! !aborted inc))
+                       #js{:once true})
+                     (js/Promise. (fn [_ _]))))]
+      (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" "30")
+      (-> (with-conn
+            (fn ^:async run []
+              (let [result (await (ask! "AGTretryabort1" llm-fn 3))]
+                (is (= 1 @!calls) "timeout is nonretryable")
+                (is (= 1 @!aborted) "the provider signal was actively aborted")
+                (is (= 1 (count @!signals)))
+                (is (true? (.-aborted (first @!signals))))
+                (is (= :error (:seon.agent.turn/status result)))
+                (is (str/includes? (:seon.agent.turn/error result)
+                                   "provider request cancelled"))
+                (is (not (contains? result :seon.agent.turn/llm-retries))))))
+          (.finally (fn []
+                      (if (some? saved)
+                        (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" saved)
+                        (js-delete env "SEON_LLM_ATTEMPT_TIMEOUT_MS"))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

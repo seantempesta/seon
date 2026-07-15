@@ -74,7 +74,7 @@
                       (-> (.parse js/JSON body)
                           (js->clj :keywordize-keys false)
                           (get "input")))]
-        (swap! calls conj {:url url :payload payload}))
+        (swap! calls conj {:url url :payload payload :signal (.-signal init)}))
       (js/Promise.resolve (nth responses (swap! n inc))))))
 
 (defn- fresh-conn
@@ -384,6 +384,35 @@
                                              [?b :seon.agent.ctx/name :typeahead-steps]]
                                            :seon.db/args [a-id]}))
                                 "the loop never self-installs :typeahead-steps")))))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest step-loop-threads-attempt-signal-to-worker
+  (async done
+    (let [calls      (atom [])
+          controller (js/AbortController.)
+          signal     (.-signal controller)
+          fetch      (scripted-fetch
+                       calls
+                       [(step-response {:transition "done"
+                                        :locked ["(def a 1)"]
+                                        :new_draft ""})])]
+      (-> (with-conn
+            (fn [_conn]
+              (with-local-worker fetch
+                (fn []
+                  (db/with-agent
+                    a-id
+                    (fn []
+                      ((ta/agent-adapter)
+                       {:seon.ai/ctx "the rendered prompt"
+                        :seon.ai/abort-signal signal})))))))
+          (.then (fn [{:keys [text] :as resp}]
+                   (is (nil? (:seon.ai/error resp)))
+                   (is (= "(def a 1)" text))
+                   (is (= 1 (count @calls)))
+                   (is (identical? signal (:signal (first @calls)))
+                       "every worker fetch receives the attempt signal")))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 

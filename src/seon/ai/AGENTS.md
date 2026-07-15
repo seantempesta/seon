@@ -13,6 +13,12 @@ LLM call sits in the turn), `observability.md` (what of the request/response
 - **`seon.agent.turn/call-llm!` is the sole retry authority.** Providers do
   ONE attempt; backoff/strategy lives there (`seon.retry`, the ported
   `again` design). Never add a retry loop inside a provider.
+- **One fresh abort signal belongs to one provider attempt.**
+  `seon.agent.turn/bounded-llm-attempt!` creates it and every dispatch adapter
+  preserves it through the provider request. The attempt timeout aborts before
+  it returns its timeout value. OpenAI first-form `.abort()` remains a distinct
+  successful stream-consumer stop; DiffusionGemma also best-effort cancels a
+  known remote job id. Never reuse an aborted signal across retries.
 - **Per-agent provider routing** (`:seon.ai/agent-provider` via the config
   manifest) selects the adapter per agent — this is how forensic/debug
   agents get a reasoning model with thinking ON while workers stay on the

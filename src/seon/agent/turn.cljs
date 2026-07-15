@@ -496,33 +496,37 @@
 (defn ^:async ^:private bounded-llm-attempt!
   "ONE adapter attempt under the per-attempt wall-clock cap.
 
-   Races `(llm-fn prompt-text)` against [[seon.config/llm-attempt-timeout-ms]]
+   Races one signal-bearing request against
+   [[seon.config/llm-attempt-timeout-ms]]
    (`SEON_LLM_ATTEMPT_TIMEOUT_MS`, default 2 min) via the ONE racer
    ([[seon.eval/race-timeout]]) — the inner bound that keeps a single attempt
    from parking the turn when the adapter's own `:seon.ai/timeout-ms` is
    unset/huge. A timed-out attempt resolves to a `:seon.ai/error` VALUE
    (`:seon.ai/timeout? true` — never a throw), so [[llm-retryable?]]
-   classifies it exactly like an adapter-side timeout. The cap frees the
-   AWAITER only — the underlying request keeps running (no preemption);
-   a late settler's turn writes are aborted by the run's in-tx CAS
-   work-fence.
+   classifies it exactly like an adapter-side timeout. When the cap wins it
+   aborts the attempt's provider signal; the run's in-tx CAS work-fence remains
+   the final publication backstop for any late settler.
 
    `stream?` (repl-mode `:stream`) hands the llm-fn the WIDENED map arg
-   `{:seon.ai/ctx … :seon.ai/stream? true}` so the adapter consumes the
-   SDK stream and aborts at the first complete form; `false` passes the
-   bare ctx string (back-compat batch shape)."
+   canonical request map. In repl-mode `:stream`, `:seon.ai/stream? true` asks
+   the adapter to consume the SDK stream and stop it at the first complete
+   form. Every retry gets a fresh controller."
   [llm-fn prompt-text stream?]
-  (let [ms  (config/llm-attempt-timeout-ms)
-        arg (if stream?
-              {:seon.ai/ctx prompt-text :seon.ai/stream? true}
-              prompt-text)
-        v   (await (seval/race-timeout (llm-fn arg) ms))]
+  (let [ms         (config/llm-attempt-timeout-ms)
+        controller (js/AbortController.)
+        signal     (.-signal controller)
+        arg        (cond-> {:seon.ai/ctx          prompt-text
+                            :seon.ai/abort-signal signal}
+                     stream? (assoc :seon.ai/stream? true))
+        v          (await (seval/race-timeout
+                            (llm-fn arg)
+                            ms
+                            (fn [] (.abort controller))))]
     (if (seval/timed-out? v)
       {:seon.ai/error {:seon.ai/msg      (str "LLM attempt exceeded the per-attempt "
                                               "cap (" ms "ms, SEON_LLM_ATTEMPT_"
-                                              "TIMEOUT_MS) — awaiter freed; the "
-                                              "request may still settle in the "
-                                              "background (CAS-fenced)")
+                                              "TIMEOUT_MS) — provider request "
+                                              "cancelled")
                        :seon.ai/timeout? true}}
       v)))
 

@@ -75,6 +75,7 @@
    [:seon.ai/tools         {:optional true} :seon.ai/tools]
    [:seon.ai/tool-choice   {:optional true} :seon.ai/tool-choice]
    [:seon.ai/stream?       {:optional true} :seon.ai/stream?]
+   [:seon.ai/abort-signal  {:optional true} :seon.ai/abort-signal]
    [:seon.ai/extra-body    {:optional true} :seon.ai/extra-body]])
 
 (schema/register!
@@ -476,7 +477,10 @@
                                  (seq extra) (merge extra)))
               ^js completions (.. client -chat -completions)
               stream?  (boolean (:seon.ai/stream? request))
-              ^js stream (.stream completions params)]
+              signal   (:seon.ai/abort-signal request)
+              ^js stream (if signal
+                           (.stream completions params #js{:signal signal})
+                           (.stream completions params))]
           (if stream?
             ;; repl-mode :stream — consume deltas, abort at the first
             ;; complete top-level form (one form per turn).
@@ -528,8 +532,10 @@
   [opts arg]
   (let [ctx-text (ai/llm-arg->ctx arg)
         stream?  (ai/llm-arg->stream? arg)
+        signal   (ai/llm-arg->abort-signal arg)
         resp (await (complete (cond-> (assoc opts :seon.ai/ctx ctx-text)
-                                stream? (assoc :seon.ai/stream? true))))]
+                                stream? (assoc :seon.ai/stream? true)
+                                signal (assoc :seon.ai/abort-signal signal))))]
     (cond-> {:text        (:seon.ai/text resp)
              :seon.ai/raw resp}
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))

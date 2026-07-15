@@ -136,7 +136,8 @@
    [::offers              {:optional true} ::offers]
    [::prefills            {:optional true} ::prefills]
    [::policy              {:optional true} ::policy]
-   [::null-render         {:optional true} ::null-render]])
+   [::null-render         {:optional true} ::null-render]
+   [:seon.ai/abort-signal {:optional true} :seon.ai/abort-signal]])
 
 ;; The worker `output` map is Google/RunPod's shape, not seon's — a :map
 ;; boundary (like :seon.ai/provider-fields). We surface a normalized
@@ -377,6 +378,13 @@
     (ai/log-error! label err)
     {:seon.ai/text "" :seon.ai/error err}))
 
+(defn- abort-error
+  "Non-retryable errors-as-data result for an externally aborted attempt."
+  []
+  {:seon.ai/text ""
+   :seon.ai/error {:seon.ai/msg      (str label " request aborted")
+                   :seon.ai/timeout? true}})
+
 ;; ============================================================
 ;; The submit + poll loop.
 ;; ============================================================
@@ -384,8 +392,25 @@
 (defn- fetch-fn [] (or *fetch* js/fetch))
 
 (defn- ^:async sleep!
-  [ms]
-  (js/Promise. (fn [resolve] (js/setTimeout resolve ms))))
+  "Resolve after `ms`, or immediately when `signal` aborts."
+  [ms signal]
+  (js/Promise.
+    (fn [resolve _]
+      (if (ai/aborted? signal)
+        (resolve nil)
+        (let [!timer (volatile! nil)
+              on-abort (fn []
+                         (js/clearTimeout @!timer)
+                         (resolve nil))]
+          (vreset! !timer
+                   (js/setTimeout
+                     (fn []
+                       (when signal
+                         (.removeEventListener signal "abort" on-abort))
+                       (resolve nil))
+                     ms))
+          (when signal
+            (.addEventListener signal "abort" on-abort #js{:once true})))))))
 
 (defn- ^:async fetch-resp
   "Call the injectable fetch and parse the JSON body. Returns
@@ -408,24 +433,47 @@
 
 (defn- ^:async submit!
   "POST the job; returns the parsed `{:status :retry-after :body}`."
-  [base key payload]
-  (fetch-resp (str base "/run")
-              #js{:method  "POST"
-                  :headers (doto (auth-headers key)
-                             (aset "Content-Type" "application/json"))
-                  :body    (.stringify js/JSON (clj->js {:input payload}))}))
+  [base key payload signal]
+  (let [init #js{:method  "POST"
+                 :headers (doto (auth-headers key)
+                            (aset "Content-Type" "application/json"))
+                 :body    (.stringify js/JSON (clj->js {:input payload}))}]
+    (when signal (aset init "signal" signal))
+    (fetch-resp (str base "/run") init)))
 
 (defn- ^:async status!
   "GET the job status; returns the parsed `{:status :retry-after :body}`."
+  [base key jid signal]
+  (let [init #js{:method "GET" :headers (auth-headers key)}]
+    (when signal (aset init "signal" signal))
+    (fetch-resp (str base "/status/" jid) init)))
+
+(defn- request-cancel!
+  "Best-effort RunPod cancellation for an admitted remote job.
+
+   The attempt's signal is already aborted, so the cleanup request deliberately
+   has no signal. Its rejection is consumed locally; retry remains owned by the
+   turn and cancellation cleanup never creates another provider attempt."
   [base key jid]
-  (fetch-resp (str base "/status/" jid)
-              #js{:method "GET" :headers (auth-headers key)}))
+  (try
+    (-> ((fetch-fn)
+          (str base "/cancel/" jid)
+          #js{:method "POST" :headers (auth-headers key)})
+        (.catch (fn [e]
+                  (js/console.warn
+                    (str "[seon.ai.diffusiongemma] remote cancel failed for " jid ":")
+                    e))))
+    (catch :default e
+      (js/console.warn
+        (str "[seon.ai.diffusiongemma] remote cancel threw for " jid ":")
+        e)))
+  nil)
 
 (defn- ^:async poll-to-terminal!
   "Poll `…/status/{jid}` until the job is terminal or the budget is
    exhausted; map the terminal state to a `::response`. A throw here
    propagates to [[complete]]'s catch (→ transport, retried)."
-  [base key jid mode]
+  [base key jid mode signal]
   (let [poll-ms   (if (local-endpoint?)
                     (min *poll-ms* *local-poll-ms*)   ; a test's 0 stays 0
                     *poll-ms*)
@@ -434,18 +482,20 @@
                          (quot (* *max-polls* *poll-ms*) (max poll-ms 1)))
                     *max-polls*)]
     (loop [polls 0]
-      (let [{:keys [status retry-after body]} (await (status! base key jid))]
-        (if (>= status 400)
-          (http-error "status" status retry-after body)
-          (case (:status body)
-            "COMPLETED"           (normalize-output mode (:output body))
-            ("FAILED" "CANCELLED") (job-error (str "job " (:status body) ": " (pr-str body)))
-            ;; IN_QUEUE / IN_PROGRESS / unknown → keep polling within budget.
-            (if (>= polls max-polls)
-              (job-error (str "job " jid " did not complete within " max-polls
-                              " polls (last status " (pr-str (:status body)) ")"))
-              (do (await (sleep! poll-ms))
-                  (recur (inc polls))))))))))
+      (if (ai/aborted? signal)
+        (abort-error)
+        (let [{:keys [status retry-after body]} (await (status! base key jid signal))]
+          (if (>= status 400)
+            (http-error "status" status retry-after body)
+            (case (:status body)
+              "COMPLETED"           (normalize-output mode (:output body))
+              ("FAILED" "CANCELLED") (job-error (str "job " (:status body) ": " (pr-str body)))
+              ;; IN_QUEUE / IN_PROGRESS / unknown → keep polling within budget.
+              (if (>= polls max-polls)
+                (job-error (str "job " jid " did not complete within " max-polls
+                                " polls (last status " (pr-str (:status body)) ")"))
+                (do (await (sleep! poll-ms signal))
+                    (recur (inc polls)))))))))))
 
 (defn ^:async complete
   "Submit a control-worker job and poll it to completion.
@@ -462,7 +512,8 @@
   {:malli/schema [:=> [:cat ::request] ::response]}
   [{::keys [mode] :as request}]
   (let [base (base-url)
-        key  (resolved-api-key)]
+        key  (resolved-api-key)
+        signal (:seon.ai/abort-signal request)]
     (cond
       (nil? base)
       (config-error
@@ -476,21 +527,48 @@
         (str label " API key not found in process.env — set RUNPOD_API_KEY "
              "(or point SEON_DG_API_KEY_ENV at the env var holding the key)"))
 
+      (ai/aborted? signal)
+      (abort-error)
+
       :else
-      (let [payload (request->payload request)]
+      (let [payload (request->payload request)
+            !job-id (volatile! nil)
+            !cancel-requested? (volatile! false)
+            cancel-known! (fn []
+                            (when (and @!job-id
+                                       (not @!cancel-requested?))
+                              (vreset! !cancel-requested? true)
+                              (request-cancel! base key @!job-id)))
+            arm-cancel! (fn []
+                          (when (and signal @!job-id)
+                            (if (ai/aborted? signal)
+                              (cancel-known!)
+                              (.addEventListener signal "abort" cancel-known!
+                                                 #js{:once true}))))]
         (try
-          (let [{:keys [status retry-after body]} (await (submit! base key payload))]
-            (if (>= status 400)
-              (http-error "submit" status retry-after body)
-              (if-let [jid (:id body)]
-                (case (:status body)
-                  ;; rare: /run already terminal — handle without polling.
-                  "COMPLETED"            (normalize-output mode (:output body))
-                  ("FAILED" "CANCELLED") (job-error (str "job " (:status body) ": " (pr-str body)))
-                  (await (poll-to-terminal! base key jid mode)))
-                (job-error (str "submit returned no job id: " (pr-str body))))))
+          (let [{:keys [status retry-after body]} (await (submit! base key payload signal))
+                _ (when-let [jid (:id body)] (vreset! !job-id jid))
+                _ (arm-cancel!)
+                result
+                (if (>= status 400)
+                  (http-error "submit" status retry-after body)
+                  (if-let [jid @!job-id]
+                    (case (:status body)
+                      ;; rare: /run already terminal — handle without polling.
+                      "COMPLETED"            (normalize-output mode (:output body))
+                      ("FAILED" "CANCELLED") (job-error (str "job " (:status body) ": " (pr-str body)))
+                      (await (poll-to-terminal! base key jid mode signal)))
+                    (job-error (str "submit returned no job id: " (pr-str body)))))]
+            (if (ai/aborted? signal)
+              (do (cancel-known!) (abort-error))
+              result))
           (catch :default e
-            (transport-error "submit/poll" e)))))))
+            (if (ai/aborted? signal)
+              (do (cancel-known!) (abort-error))
+              (transport-error "submit/poll" e)))
+          (finally
+            (when signal
+              (.removeEventListener signal "abort" cancel-known!))))))))
 
 ;; ============================================================
 ;; Adapter for seon.agent — (fn [ctx-string]) → Promise<{:text … :raw …}>.
@@ -504,11 +582,14 @@
    `::max-new-tokens`, so a downstream deployment retunes the output cap
    like any other provider; precedence is explicit opt > config row >
    the worker's gen-config default (no default-gen-opts cap)."
-  [opts ctx-text]
-  (let [cfg-max (:seon.ai/max-tokens (ai/current))
+  [opts arg]
+  (let [ctx-text (ai/llm-arg->ctx arg)
+        signal   (ai/llm-arg->abort-signal arg)
+        cfg-max (:seon.ai/max-tokens (ai/current))
         request (cond-> (merge default-gen-opts opts {::prompt ctx-text})
                   (and cfg-max (not (contains? opts ::max-new-tokens)))
-                  (assoc ::max-new-tokens cfg-max))
+                  (assoc ::max-new-tokens cfg-max)
+                  signal (assoc :seon.ai/abort-signal signal))
         resp    (await (complete request))]
     (cond-> {:text        (:seon.ai/text resp)
              :seon.ai/raw resp}
@@ -530,4 +611,4 @@
   ([] (agent-adapter {}))
   ;; Accept the widened string-or-map llm-fn arg (repl-mode); this adapter
   ;; buffers, so it uses the ctx and ignores `:seon.ai/stream?`.
-  ([opts] (fn [arg] (complete+wrap opts (ai/llm-arg->ctx arg)))))
+  ([opts] (fn [arg] (complete+wrap opts arg))))

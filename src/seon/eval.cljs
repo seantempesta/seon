@@ -332,6 +332,7 @@
 ;; wins. A fresh JS object so `identical?` distinguishes it from any
 ;; resolved eval value.
 (defonce ^:private timeout-sentinel #js {:_seon_eval_timeout true})
+(schema/register! ::timeout-callback 'fn?)
 
 (defn timed-out?
   "True when `v` is [[race-timeout]]'s timeout sentinel (identity check)."
@@ -347,23 +348,44 @@
    on this shape — never a second racer). If `inner` settles first,
    returns its resolved value and CLEARS the pending timer (no dangling
    timer on a fast settle). If the timer fires first, returns the
-   timeout sentinel — check via [[timed-out?]]. The timeout does NOT
-   cancel the underlying work (JS has no preemptive cancellation, one
-   event loop): it frees the AWAITER; a late settler's run-scoped
-   writes are aborted by the in-tx CAS work-fence."
-  {:malli/schema [:=> [:catn [::inner :any] [::ms :int]] :any]}
-  [inner ms]
-  (let [!timer (volatile! nil)
-        timer  (js/Promise.
-                 (fn [resolve _]
-                   (vreset! !timer
-                            (js/setTimeout (fn [] (resolve timeout-sentinel)) ms))))]
-    (try
-      (await (js/Promise.race #js [inner timer]))
-      (finally
-        ;; `inner` won (value or throw) → clear the still-pending timer.
-        ;; When the TIMER won this is a no-op (clearing a fired timer).
-        (js/clearTimeout @!timer)))))
+   timeout sentinel — check via [[timed-out?]]. The optional `on-timeout`
+   callback cancels work that exposes an owned cancellation capability; callers
+   without one retain the ordinary awaiter-only bound."
+  {:malli/schema
+   [:function
+    [:=> [:catn [::inner :any] [::ms :int]] :any]
+    [:=> [:catn [::inner :any] [::ms :int]
+          [::on-timeout ::timeout-callback]] :any]]}
+  ([inner ms]
+   (race-timeout inner ms (fn [] nil)))
+  ([inner ms on-timeout]
+   (let [!timer (volatile! nil)
+         timer  (js/Promise.
+                  (fn [resolve _]
+                    (vreset!
+                      !timer
+                      (js/setTimeout
+                        (fn []
+                          ;; Establish the timeout result before cancelling the
+                          ;; loser. Abort listeners run synchronously and may
+                          ;; otherwise race an SDK rejection ahead of the
+                          ;; sentinel that owns this outcome.
+                          (resolve timeout-sentinel)
+                          (try
+                            (on-timeout)
+                            (catch :default e
+                              ;; Cleanup failure must not throw from a timer
+                              ;; callback and crash the pod.
+                              (js/console.error
+                                "seon.eval/race-timeout cleanup failed:"
+                                e))))
+                        ms))))]
+     (try
+       (await (js/Promise.race #js [inner timer]))
+       (finally
+         ;; `inner` won (value or throw) → clear the still-pending timer.
+         ;; When the TIMER won this is a no-op (clearing a fired timer).
+         (js/clearTimeout @!timer))))))
 
 ;; ============================================================
 ;; Bootstrap init — load cljs.core + cljs.core$macros from the
