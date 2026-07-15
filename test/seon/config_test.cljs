@@ -388,7 +388,7 @@
                 {:seon.agent/ctx [{:seon.agent.ctx/name :transcript}]}
                 :seon.config/root-context
                 {:seon.agent/ctx [{:seon.agent.ctx/name :canvas}]}}]
-    (with-redefs [config/config-view (fn [] stored)
+    (with-redefs [config/config-view (fn ([] stored) ([_] stored))
                   config/load-manifest
                   (fn [] (throw (js/Error. "external config must not be read")))]
       (is (= #{:transcript} (ctx-block-names "worker-x" nil)))
@@ -521,4 +521,40 @@
                               "the hot config cache retains no database value"))
                         (finally (set! db/*conn* prev) (done)))))
                   (.catch (fn [e] (set! db/*conn* prev) (is false (str e)) (done)))))))
+        (.catch (fn [e] (is false (str e)) (done))))))
+
+(deftest explicit-database-config-view-does-not-reread-the-ambient-head
+  (async done
+    (-> (config-scratch-conn)
+        (.then
+          (fn [conn]
+            (let [prev db/*conn*
+                  transact-cap!
+                  (fn [cap]
+                    (db/with-tx-context
+                      {:seon.db/user [:seon.agent/id "root"]
+                       :seon.db/process
+                       [:seon.db.process/id :seon.db.process/config]}
+                      (fn []
+                        (db/transact!
+                          {:seon.db/conn conn
+                           :seon.db/tx-data
+                           [{:seon.config/id config/cluster-config-id
+                             :seon.config.render/database-edn-cap cap}]}))))]
+              (-> (transact-cap! 111)
+                  (.then
+                    (fn [{ok? :seon.db/ok?}]
+                      (is (true? ok?))
+                      (let [frozen @conn]
+                        (-> (transact-cap! 222)
+                            (.then
+                              (fn [{ok? :seon.db/ok?}]
+                                (is (true? ok?))
+                                (set! db/*conn* conn)
+                                (is (= 111 (config/database-edn-cap frozen))
+                                    "the frozen database retains cap A")
+                                (is (= 222 (config/database-edn-cap))
+                                    "the ambient head advances to cap B")))))))
+                  (.finally (fn [] (set! db/*conn* prev)))))))
+        (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))

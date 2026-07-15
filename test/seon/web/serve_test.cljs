@@ -12,7 +12,9 @@
     [goog.object :as gobj]
     [my.blob :as blob]
     [seon.agent.run :as run]
-    [seon.config :as config]
+    [seon.agent.ctx :as ctx]
+    [seon.ai :as ai]
+    [seon.db :as db]
     [seon.db.coordinate :as coordinate]
     [seon.eval :as seval]
     [seon.runtime.admission :as admission]
@@ -66,7 +68,8 @@
               [100 10 "turn-a" "eval-a" first-at 20]]
              #{10 11}
              final-coordinate
-             #(get pulls %))))))
+             #(get pulls %)
+             10000)))))
 
 (def ^:private evidence-coordinate
   {::coordinate/database-id #uuid "00000000-0000-0000-0000-000000000001"
@@ -95,13 +98,12 @@
 (deftest operation-evidence-projection-is-bounded-lossless-and-fail-closed
   (let [content (pr-str evidence-operations)
         project (deref #'serve/project-operation-evidence)]
-    (with-redefs [config/database-edn-cap (constantly (inc (count content)))
-                  blob/get (fn [_]
+    (with-redefs [blob/get (fn [_]
                              {:my.blob/ok? true
                               :my.blob/content content
                               :my.blob/tokens 1})]
       (let [proof (project {:my.blob/hash "proof" :my.blob/tokens 1}
-                           evidence-coordinate)
+                           evidence-coordinate (inc (count content)))
             [tx query] (:operations proof)]
         (is (= "inline" (:status proof)))
         (is (= [0 1] (mapv :position (:operations proof))))
@@ -110,50 +112,44 @@
         (is (= {:kind "scalar" :value 1} (:result query)))
         (is (= "map" (get-in tx [:request :kind]))
             "namespaced request data uses the lossless tagged tree")))
-    (with-redefs [config/database-edn-cap (constantly 4)
-                  blob/get (fn [_] (throw (js/Error. "must not read")))]
+    (with-redefs [blob/get (fn [_] (throw (js/Error. "must not read")))]
       (is (= {:status "oversized" :blob_hash "proof" :tokens 2}
              (project {:my.blob/hash "proof" :my.blob/tokens 2}
-                      evidence-coordinate))
+                      evidence-coordinate 4))
           "token projection stops oversized evidence before disk read"))
-    (with-redefs [config/database-edn-cap (constantly 100)
-                  blob/get (constantly {:my.blob/ok? false})]
+    (with-redefs [blob/get (constantly {:my.blob/ok? false})]
       (is (= "missing"
              (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
-                               evidence-coordinate)))))
+                               evidence-coordinate 100)))))
     (is (= {:status "missing"}
-           (project {:my.blob/tokens 1} evidence-coordinate))
+           (project {:my.blob/tokens 1} evidence-coordinate 100))
         "an invalid identity is omitted rather than fabricated")
-    (with-redefs [config/database-edn-cap (constantly 100)
-                  blob/get (constantly {:my.blob/ok? true
+    (with-redefs [blob/get (constantly {:my.blob/ok? true
                                         :my.blob/content "not-edn )"
                                         :my.blob/tokens 1})]
       (is (= "malformed"
              (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
-                               evidence-coordinate)))))
-    (with-redefs [config/database-edn-cap (constantly 100)
-                  blob/get (constantly {:my.blob/ok? true
+                               evidence-coordinate 100)))))
+    (with-redefs [blob/get (constantly {:my.blob/ok? true
                                         :my.blob/content "[] trailing"
                                         :my.blob/tokens 1})]
       (is (= "malformed"
              (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
-                               evidence-coordinate)))
+                               evidence-coordinate 100)))
           "trailing forms cannot hide behind one valid prefix"))
-    (with-redefs [config/database-edn-cap (constantly 100)
-                  blob/get (constantly {:my.blob/ok? true
+    (with-redefs [blob/get (constantly {:my.blob/ok? true
                                         :my.blob/content "[]"
                                         :my.blob/tokens 2})]
       (is (= "malformed"
              (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
-                               evidence-coordinate)))
+                               evidence-coordinate 100)))
           "blob bytes must match the final snapshot's token projection"))
-    (with-redefs [config/database-edn-cap (constantly 4)
-                  blob/get (constantly {:my.blob/ok? true
+    (with-redefs [blob/get (constantly {:my.blob/ok? true
                                         :my.blob/content "[12345]"
                                         :my.blob/tokens 1})]
       (is (= "oversized"
              (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
-                               evidence-coordinate)))
+                               evidence-coordinate 4)))
           "pathological token/char mismatch remains status-only"))))
 
 (deftest exact-transaction-origin-is-deduplicated-and-fails-closed
@@ -232,6 +228,44 @@
    :seon.ai.attempt/stream? false
    :seon.ai.attempt/credential-class :configured-env
    :seon.ai.attempt/outcome (if (zero? ordinal) :provider-error :success)})
+
+(deftest historical-attempt-adapter-and-turn-stream-are-rederived
+  (async done
+    (let [attempt (model-attempt 0 20)
+          resolved {:seon.ai/provider :deepseek
+                    :seon.ai/model "small-model"
+                    :seon.ai/temperature 0.0
+                    :seon.ai/max-tokens 512
+                    :seon.ai/timeout-ms 30000
+                    :seon.ai/base-url "http://127.0.0.1:8080/v1"
+                    :seon.config.model-transport/endpoint-cap 2048}
+          config-valid? (deref #'serve/historical-attempt-config-valid?)
+          stream-valid? (deref #'serve/historical-turn-stream-valid?)]
+      (with-redefs [db/at-coordinate
+                    (fn
+                      ([_] (js/Promise.resolve {:historical true}))
+                      ([_ _] (js/Promise.resolve {:historical true})))
+                    ai/resolved-config
+                    (fn [_] {:seon.ai/resolved-config resolved})
+                    ctx/repl-mode (constantly :batch)]
+        (-> (js/Promise.all
+              #js [(config-valid? :conn "agent" attempt)
+                   (config-valid? :conn "agent"
+                                  (assoc attempt
+                                         :seon.ai.attempt/adapter :anthropic))
+                   (stream-valid? :conn evidence-coordinate [attempt])
+                   (stream-valid?
+                     :conn evidence-coordinate
+                     [(assoc attempt :seon.ai.attempt/stream? true)])])
+            (.then
+              (fn [validities]
+                (is (= [true false true false] (vec validities))
+                    "stored adapter and stream mode must match their owners")
+                (done)))
+            (.catch
+              (fn [error]
+                (is false (str error))
+                (done))))))))
 
 (deftest model-transport-evidence-is-final-snapshot-ordered-and-bounded
   (let [project (deref #'serve/project-model-transport-rows)

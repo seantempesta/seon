@@ -162,3 +162,22 @@ status and the scorer fails closed. Until the focused CLJS and offline
 regressions land, the preceding green checkpoint does not establish coordinate
 containment and the issue remains open for both this correction and the
 admitted native proof.
+
+## Exact-origin and frozen-cap correction — 2026-07-15
+
+The composition door now reuses `seon.db/resolve-transaction-coordinate!`
+against the request's exact frozen final head and compares the returned
+transaction coordinate for exact equality. Resolution is memoized by
+transaction number within the request. A random commit UUID, sibling,
+unretained commit, resolver failure, or mismatch changes the bounded operation
+projection to `malformed` and removes its inline operations; no web-local
+history walker exists.
+
+The same review found that operation evidence read the database EDN cap twice
+from the ambient config accessor. A concurrent config commit could therefore
+pass the token precheck under one policy and apply the character check under a
+different policy. The existing config singleton reader now accepts an explicit
+immutable database value. The door resolves the cap once from the final
+request snapshot and threads that scalar through the pure projection. The
+issue remains open only for the admitted generated sample and finalized native
+log read-back.

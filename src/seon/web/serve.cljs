@@ -29,6 +29,7 @@
     [goog.object :as gobj]
     [my.blob :as blob]
     [seon.agent :as agent]
+    [seon.agent.ctx :as ctx]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.agent.debug :as agent-debug]
@@ -628,6 +629,18 @@
    ::coordinate/commit-id (:seon.ai.attempt/commit-id attempt)
    ::coordinate/t (:seon.ai.attempt/t attempt)})
 
+(defn- turn-rendered-coordinate [turn]
+  (let [point {::coordinate/database-id
+               (:seon.agent.turn/rendered-database-id turn)
+               ::coordinate/branch
+               (:seon.agent.turn/rendered-branch turn)
+               ::coordinate/commit-id
+               (:seon.agent.turn/rendered-commit-id turn)
+               ::coordinate/t
+               (:seon.agent.turn/rendered-t turn)}]
+    (when (schema/valid-candidate-value? ::coordinate/coordinate point)
+      point)))
+
 (defn- attempt-json
   [turn-id attempt final-coordinate historical-config-valid?]
   (let [point (attempt-coordinate attempt)]
@@ -750,8 +763,18 @@
                        (ai/resolved-config
                          {:seon.db/db historical :seon.agent/id agent-id}))]
         (and (response-identity-valid? attempt resolved)
+             (= (:seon.ai.attempt/adapter attempt)
+                (ai/resolved-adapter resolved))
              (attempt-config-matches?
                attempt (resolved-attempt-config resolved)))))))
+
+(defn- ^:async historical-turn-stream-valid?
+  [conn point attempts]
+  (when point
+    (let [historical (await (db/at-coordinate conn point))]
+      (and (schema/valid-candidate-value? :seon.db/db-val historical)
+           (let [expected (= :stream (ctx/repl-mode historical))]
+             (every? #(= expected (:seon.ai.attempt/stream? %)) attempts))))))
 
 (defn- project-model-transport-rows
   "Pure bounded projection over rows selected from one final database value."
@@ -822,7 +845,8 @@
 (defn- ^:async project-model-transport-evidence
   "Bounded ordered provider-attempt proof from the run's final database value."
   [conn dbv agent-id turn-rows origin-valid?]
-  (let [turn-eids (mapv first turn-rows)
+  (let [cap (config/database-edn-cap dbv)
+        turn-eids (mapv first turn-rows)
         rows (if (seq turn-eids)
                (db/query {:seon.db/db dbv
                           :seon.db/query
@@ -839,27 +863,70 @@
                                   :seon.db/pull-pattern attempt-pull-pattern
                                   :seon.db/ref attempt-eid})]))
                        rows)
-        historical-validity
+        turn-coordinates
         (into {}
-              (map (fn [[attempt-eid valid?]] [attempt-eid valid?]))
-              (await
-                (js/Promise.all
-                  (clj->js
-                    (mapv (fn [[attempt-eid attempt]]
+              (map (fn [turn-eid]
+                     [turn-eid
+                      (turn-rendered-coordinate
+                        (db/pull
+                          {:seon.db/db dbv
+                           :seon.db/pull-pattern
+                           '[:seon.agent.turn/rendered-database-id
+                             :seon.agent.turn/rendered-branch
+                             :seon.agent.turn/rendered-commit-id
+                             :seon.agent.turn/rendered-t]
+                           :seon.db/ref turn-eid}))]))
+              turn-eids)
+        attempts-by-turn
+        (reduce (fn [grouped [turn-eid attempt-eid]]
+                  (update grouped turn-eid conj (get attempts attempt-eid)))
+                {} rows)]
+    (let [turn-stream-validity
+          (into {}
+                (await
+                  (js/Promise.all
+                    (clj->js
+                      (mapv
+                        (fn [turn-eid]
+                          (let [point (get turn-coordinates turn-eid)]
                             (-> (js/Promise.all
-                                  #js [(origin-valid?
-                                         (attempt-coordinate attempt))
-                                       (historical-attempt-config-valid?
-                                         conn agent-id attempt)])
-                                (.then (fn [validities]
-                                         [attempt-eid
-                                          (every? true? validities)]))))
-                          attempts)))))]
-    (project-model-transport-rows
-      turn-rows rows (db/head-coordinate dbv)
-      #(get attempts %)
-      #(get historical-validity % false)
-      (config/database-edn-cap))))
+                                  #js [(origin-valid? point)
+                                       (historical-turn-stream-valid?
+                                         conn point
+                                         (get attempts-by-turn turn-eid []))])
+                                (.then
+                                  (fn [validities]
+                                    [turn-eid (every? true? validities)])))))
+                        turn-eids)))))
+          turn-eid-by-attempt
+          (into {} (map (fn [[turn attempt]] [attempt turn])) rows)
+          historical-validity
+          (into {}
+                (await
+                  (js/Promise.all
+                    (clj->js
+                      (mapv
+                        (fn [[attempt-eid attempt]]
+                          (-> (js/Promise.all
+                                #js [(origin-valid?
+                                       (attempt-coordinate attempt))
+                                     (historical-attempt-config-valid?
+                                       conn agent-id attempt)])
+                              (.then
+                                (fn [validities]
+                                  [attempt-eid
+                                   (and
+                                     (every? true? validities)
+                                     (true?
+                                       (get turn-stream-validity
+                                            (get turn-eid-by-attempt
+                                                 attempt-eid))))]))))
+                        attempts)))))]
+      (project-model-transport-rows
+        turn-rows rows (db/head-coordinate dbv)
+        #(get attempts %)
+        #(get historical-validity % false)
+        cap))))
 
 (defn- operation-json [operation final-coordinate]
   (let [point (:seon.db/operation-coordinate operation)]
@@ -913,10 +980,10 @@
 
 (defn- project-operation-evidence
   "Bounded operation proof resolved from one final-snapshot blob ref."
-  [blob-row final-coordinate]
+  [blob-row final-coordinate cap]
   (let [hash (:my.blob/hash blob-row)
         projected-tokens (:my.blob/tokens blob-row)
-        token-ceiling (tokens/chars->tokens (config/database-edn-cap))]
+        token-ceiling (tokens/chars->tokens cap)]
     (cond
       (or (not (string? hash)) (not (int? projected-tokens)))
       (cond-> {:status "missing"}
@@ -933,7 +1000,7 @@
           (not (string? (:my.blob/content readback))))
           {:status "missing" :blob_hash hash :tokens projected-tokens}
 
-          (> (count (:my.blob/content readback)) (config/database-edn-cap))
+          (> (count (:my.blob/content readback)) cap)
           {:status "oversized"
            :blob_hash hash
            :chars (count (:my.blob/content readback))
@@ -1005,7 +1072,7 @@
 
 (defn- project-eval-evidence
   "Stable external projection of selected eval rows."
-  [rows turn-eids final-coordinate pull-row]
+  [rows turn-eids final-coordinate pull-row cap]
   (->> rows
        (filter (fn [[_ turn-eid]] (contains? turn-eids turn-eid)))
        (sort-by (fn [[_ _ _ _ _ eval-t]] eval-t))
@@ -1025,12 +1092,13 @@
                (assoc :operation_evidence
                       (project-operation-evidence
                         (:seon.eval/database-operations-blob row)
-                        final-coordinate))))))))
+                        final-coordinate cap))))))))
 
 (defn- ^:async eval-evidence
   "Stable external projection of one request window's evaluated forms."
   [dbv _agent-eid turn-eids origin-valid?]
-  (let [rows (db/query {:seon.db/db dbv
+  (let [cap (config/database-edn-cap dbv)
+        rows (db/query {:seon.db/db dbv
                         :seon.db/query '[:find ?e ?t ?turn-id ?id ?at ?eval-t
                                          :in $ [?t ...] :where
                                          [?t :seon.agent.turn/id ?turn-id]
@@ -1047,7 +1115,8 @@
                         '[:seon.eval/source :seon.eval/ok? :seon.eval/narration
                           {:seon.eval/database-operations-blob
                            [:my.blob/hash :my.blob/tokens]}]
-                        :seon.db/ref eval-eid})))]
+                        :seon.db/ref eval-eid}))
+            cap)]
       (vec
         (await
           (js/Promise.all

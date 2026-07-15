@@ -64,8 +64,13 @@ flag:
   response model/fingerprint/request identity. The adapter consumes that one
   resolved value without rereading mutable config. Missing response fields stay
   absent; credentials, headers, and signed parameters never enter evidence.
-  Evidence-size policy is read from the config singleton in that same immutable
-  value. An absent policy or rejected optional identity makes formal evidence
+  Projection re-derives the adapter from the attempt's resolved value and
+  stream mode from the linked turn's frozen rendered coordinate. Evidence-size
+  policy is read from the config singleton in the final immutable response
+  value, once per projection. The process-owned outer attempt bound is retained
+  as the exact applied value; admission rejects drift within a run and binds
+  cross-run comparison to the admitted process environment. An absent policy
+  or rejected optional identity makes formal evidence
   incomplete without changing the provider request, model output, usage, or
   successful outcome; rejected bytes never enter an error value.
 

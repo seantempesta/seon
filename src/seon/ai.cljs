@@ -384,6 +384,18 @@
                     ::thinking "false" ::timeout-ms 60000}
    :diffusiongemma {::dg-backend :control}})
 
+(defn resolved-adapter
+  "The provider adapter selected by one immutable resolved config."
+  {:malli/schema [:=> [:cat ::resolved-config] ::adapter]}
+  [config]
+  (case (::provider config)
+    :anthropic :anthropic
+    :diffusiongemma (if (= :control (::dg-backend config))
+                      :diffusiongemma
+                      :openai-compat)
+    :typeahead :typeahead
+    :openai-compat))
+
 ;; The config attrs a row (or the env) may carry — shared shape for
 ;; [[sync-tx-data]]'s two inputs and the row read.
 (schema/register! ::row

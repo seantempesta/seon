@@ -42,8 +42,21 @@ final database value as the rest of `/agents/run`. It resolves every stored
 attempt coordinate through `seon.db/at-coordinate`, rejects an unretained or
 foreign commit, and compares stored request fields and their absence with
 `seon.ai/resolved-config` at that historical value. The response is governed
-by the database-backed evidence cap and carries no provider body, prompt,
-credential, or raw environment value.
+by the evidence cap read once from the final frozen database, never from the
+ambient connection after asynchronous validation. It also re-derives the
+adapter from the attempt's canonical resolved configuration and stream mode
+from the linked turn's own frozen rendered database coordinate. A merely
+well-formed but fabricated adapter or stream boolean therefore fails closed.
+The projection carries no provider body, prompt, credential, or raw
+environment value.
+
+The outer attempt timeout is intentionally process-owned rather than a model
+configuration datom. The runtime records the exact integer applied before each
+race, and Inspect rejects a change across comparable attempts in one run. That
+is sufficient to establish the execution bound governing the retained call;
+cross-run reproducibility additionally relies on the admitted operator's
+non-secret process-environment identity. It is not reconstructed from a later
+database value or mislabeled as model identity.
 
 `seon_inspect.solver` copies the projection unchanged into native sample
 metadata. Its common capability admission gate requires inline ordered
@@ -99,6 +112,9 @@ never inferred from final/current state or from `/v1/models` alone.
 - A fake fetch that transacts B after attempt capture still receives and records
   only A, including A's evidence caps; no field is reread from B while
   assembling or validating the request and response.
+- A final response projection frozen at cap A remains governed by A after the
+  ambient config advances to cap B. Adapter and stream mutations fail against
+  the attempt coordinate and linked turn-rendered coordinate respectively.
 - `/agents/run` reports ordered per-attempt coordinates, endpoints, adapter and
   outer timeouts, immutable model identity, outcomes, and present response
   identity; the Inspect solver retains them unchanged in `.eval` metadata.

@@ -45,21 +45,23 @@ The immediate resumption authority is [[roadmap#Resumption packet —
 issue.
 
 The single active contract is bounded proof of what the model and database
-actually did. Ordered per-eval database-operation observations are persisted
-through `my.blob`, projected from the final immutable request snapshot, and
-consumed by the generated database scorer with fail-closed fixtures. Ordered
-per-attempt model transport facts are persisted on each turn; their
-database-configured bounds and final web/Inspect projection are the remaining
-source boundary before the admitted replay.
+actually did. Ordered per-eval database-operation observations and per-attempt
+model transport facts are persisted, projected from the final immutable
+request snapshot, and consumed through fail-closed Inspect admission. The
+source checkpoint proves the display cap is read once from that frozen
+database, adapter identity is re-derived from the attempt coordinate, and
+stream mode is re-derived from the linked turn's rendered coordinate. Its
+focused config/web/retry gate passes 40 tests and 218 assertions.
 
 P0 membership, native wrappers, source locks, request-scoped evidence,
 database-owned deadlines, effective-timeout evidence, and interrupted native-
 log retention are committed. P0b has not run. Shared runtime source is dirty
 under other owners and the live ACME target is degraded after hot reload; do
-not restart it or stage those paths. Finish and review the model-evidence
-boundary, wait for coherent source commits, restart only ACME, require ready
-status, then run exactly `database_workflow-seed1-000` and read its finalized
-native log back.
+not restart it or stage those paths. Finish and commit the focused evidence
+boundary, then wait for the runtime lane's explicit handoff of one coordinated
+Datahike checkout/gitlink/dependency/artifact-manifest coordinate. Restart only
+ACME after that handoff, require ready status, then run exactly
+`database_workflow-seed1-000` and read its finalized native log back.
 
 The multi-form ordering defect is real but queued for P4, not the active gate:
 `:seon.agent.turn/evals` is cardinality-many and its identity datom transaction

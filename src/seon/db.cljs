@@ -2211,15 +2211,18 @@
               ent)))))
 
 (config/set-db-config-view!
-  (fn config-singleton-view []
-    (when *conn*
-      (let [db @*conn*
-            coordinate (head-coordinate db)
-            c  @!config-view-cache]
-        (if (= coordinate (::cached-config-coordinate c))
-          (::cached-config-view c)
-          (let [view (read-config-singleton db)]
-            (reset! !config-view-cache
-                    {::cached-config-coordinate coordinate
-                     ::cached-config-view view})
-            view))))))
+  (fn config-singleton-view
+    ([]
+     (when *conn*
+       (let [db @*conn*
+             coordinate (head-coordinate db)
+             c  @!config-view-cache]
+         (if (= coordinate (::cached-config-coordinate c))
+           (::cached-config-view c)
+           (let [view (read-config-singleton db)]
+             (reset! !config-view-cache
+                     {::cached-config-coordinate coordinate
+                      ::cached-config-view view})
+             view)))))
+    ([database]
+     (read-config-singleton database))))

@@ -538,7 +538,15 @@ readiness from this paragraph.
   turn-owned attempt components retain coordinates, request identity,
   effective adapter and outer timeouts, outcomes, and present provider response
   identity; zero temperature and false thinking remain present values. The
-  database-configured cap integration and web/Inspect projection remain open.
+  database-configured caps now come from that immutable request resolution.
+  The final composition door reads its display bound once from the frozen final
+  database, re-derives adapter identity from each attempt's historical
+  resolution, and re-derives stream mode from the linked turn's frozen rendered
+  coordinate. Exact transaction-origin validation rejects random, sibling, and
+  unretained commit ids for both model and database-operation evidence. The
+  focused source gate passes 40 tests and 218 assertions across config, web,
+  and retry/attempt persistence. Immutable model-server weights identity and
+  one admitted live read-back remain formal evidence gaps.
 - One awaited database-operation observer spans eval plus auto-await and
   retains ordered normalized reads and transactions with explicit position,
   success, source classification, and complete coordinate. Canonical blob
@@ -558,9 +566,12 @@ readiness from this paragraph.
 ### Current blockers
 
 - Shared source currently contains uncommitted runtime edits owned by other
-  lanes. Restarting ACME now would build an uncommitted mixed artifact; staging
-  those files here would cross ownership. Wait for those coherent commits, then
-  restart ACME and require ready status.
+  lanes. The runtime lane is also selecting a maintained Datahike secondary-
+  index commit and will hand off the protected checkout, gitlink, dependency
+  pins, and artifact manifest as one coordinate. Restarting ACME before that
+  explicit handoff would build an unreviewed mixed dependency closure. Wait for
+  the coordinate handoff and coherent source commits, then restart ACME and
+  require ready status.
 - The native milestone task can now enter through common source admission,
   mandatory finalization, and exact before/after operator status. The remaining
   P1a gate is a clean ACME rebuild after concurrent source owners commit; the
@@ -583,23 +594,24 @@ readiness from this paragraph.
   [[../../seon/issues/multi-form-eval-order-is-not-durable]] and belongs to
   P4 after the first accepted serial slice unless it directly invalidates the
   active sample.
-- Formal P0 evidence can now prove the database answer offline from persisted
-  final-snapshot facts, but its admitted live read-back is still pending. The
-  actual provider attempts are persisted as ordered component facts; their
-  immutable database-configured bounds and web/Inspect projection must close
-  before a formal capability score. Neither consumer may reconstruct an
-  attempt from final config or rendered transcript text.
+- Formal P0 evidence can now prove the database answer and exact per-attempt
+  transport configuration offline from persisted final-snapshot facts, but its
+  admitted live read-back is still pending. Immutable model-server
+  revision/weights identity remains required before a formal cross-model claim.
+  Neither consumer reconstructs an attempt from final config or rendered
+  transcript text.
 
 ### Exact next order
 
 1. Read `git status --short` and `bin/acme status --edn`. If another owner still
    has dirty runtime inputs, do documentation or read-only source grounding
    only; do not restart, stage, or repair their files.
-2. Finish and review the database-configured model-evidence caps and the
-   model-attempt web/Inspect projection. Do not restart while either source
-   owner or another admitted runtime owner remains dirty.
-3. When the shared runtime edits converge, restart only ACME and prove a ready,
-   ownership-coherent artifact plus clean admitted source.
+2. Commit the green frozen-cap, adapter, stream-mode, and exact-origin source
+   checkpoint path-limited. Do not restart while either source owner or another
+   admitted runtime owner remains dirty.
+3. Wait for the runtime lane's explicit maintained Datahike coordinate handoff.
+   When dependency pins and shared runtime edits converge, restart only ACME
+   and prove a ready, ownership-coherent artifact plus clean admitted source.
 4. Query the rebuilt immutable database projection and require the stored
    `query` and `transact!` contracts to carry `:seon.db/request` with no `&` or
    private accumulator name. Require `my.canvas/button`, `input`, `select`, and

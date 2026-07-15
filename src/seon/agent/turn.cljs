@@ -554,17 +554,6 @@
       (retry/max-retries (ai/agent-max-retries id llm-retry-default-n))
       (retry/max-duration llm-retry-total-cap-ms)))
 
-(defn- resolved-adapter
-  "The provider adapter selected by one immutable resolved config."
-  [config]
-  (case (:seon.ai/provider config)
-    :anthropic :anthropic
-    :diffusiongemma (if (= :control (:seon.ai/dg-backend config))
-                      :diffusiongemma
-                      :openai-compat)
-    :typeahead :typeahead
-    :openai-compat))
-
 (defn- attempt-outcome
   [response outer-timeout?]
   (cond
@@ -595,7 +584,7 @@
                       (:seon.ai/evidence-error raw)
                       (get-in response [:seon.ai/error :seon.ai/evidence-error]))
                   (ai/bounded-evidence-error response-identity-cap)))
-        adapter (or (:seon.ai/adapter response) (resolved-adapter config))
+        adapter (or (:seon.ai/adapter response) (ai/resolved-adapter config))
         status (get-in response [:seon.ai/error :seon.ai/status])]
     (cond->
       {:seon.ai.attempt/ordinal ordinal

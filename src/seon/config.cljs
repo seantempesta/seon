@@ -451,8 +451,8 @@
 ;; POST-conn; a nil reader / no conn / unseeded singleton falls back to the
 ;; boot manifest resolve (the pre-conn sliver). ONE switchover point.
 (defonce ^:private !db-config-view
-  ;; fn of [] → the DECODED singleton config map (collections decoded), or nil
-  ;; when no conn / the singleton is not yet seeded.
+  ;; fn of [] or [immutable-db] → the DECODED singleton config map
+  ;; (collections decoded), or nil when no conn / the singleton is not seeded.
   (atom nil))
 
 (defn set-db-config-view!
@@ -781,19 +781,29 @@
       (assoc :seon.config/root-context (:seon.config/root-context manifest)))))
 
 (defn config-view
-  "The live config singleton map — database post-attach, explicit input pre-attach.
+  "The live config singleton map.
 
-   The ONE switchover: the injected [[!db-config-view]] seam reads the seeded
+   Database post-attach, explicit input pre-attach. The ONE switchover: the
+   injected [[!db-config-view]] seam reads the seeded
    `:seon.config` singleton once the conn is up (config-through-DB); before the
    conn exists (the bootstrap sliver — the `on-core-error` dial can fire during
    database attach) it resolves an explicitly selected manifest or the code
    defaults. Post-attach the db value is authoritative, so a live
    `db/transact!` to the singleton or an explicit config apply reaches every
    accessor. Collections are already decoded by the seam."
-  {:malli/schema [:=> [:cat] :map]}
-  []
-  (or (when-let [f @!db-config-view] (f))
-      (resolve-config-singleton (or (load-manifest) {}))))
+  {:malli/schema
+   [:function
+    [:=> [:cat] :map]
+    [:=> [:cat 'map?] :map]]}
+  ([]
+   (or (when-let [f @!db-config-view] (f))
+       (resolve-config-singleton (or (load-manifest) {}))))
+  ([database]
+   ;; An explicit immutable database must never fall through to the currently
+   ;; selected manifest: the same database value must produce the same view.
+   ;; An older unseeded database therefore receives code defaults only.
+   (or (when-let [f @!db-config-view] (f database))
+       (resolve-config-singleton {}))))
 
 (defn namespaces-policy
   "The resolved namespaces render policy — read from the config singleton.
@@ -934,17 +944,22 @@
   "The live config-singleton map [[config-view]] returns — carries every
    `:seon.config.render/*` cap datom as a top-level key. Each render accessor
    reads it with its own literal fallback (= the default)."
-  []
-  (config-view))
+  ([] (config-view))
+  ([database] (config-view database)))
 
 (defn database-edn-cap
   "Per-value pr-str truncation cap for stored EDN display.
 
    Manifest
    `:seon.config.render/database-edn-cap`; env `SEON_RENDER_DATABASE_EDN_CAP`; 16384."
-  {:malli/schema [:=> [:cat] :int]}
-  []
-  (get (render-config) :seon.config.render/database-edn-cap 16384))
+  {:malli/schema
+   [:function
+    [:=> [:cat] :int]
+    [:=> [:cat 'map?] :int]]}
+  ([]
+   (get (render-config) :seon.config.render/database-edn-cap 16384))
+  ([database]
+   (get (render-config database) :seon.config.render/database-edn-cap 16384)))
 
 (defn eval-render-cap
   "Char cap for one eval row's echoed SOURCE + captured STDOUT.
