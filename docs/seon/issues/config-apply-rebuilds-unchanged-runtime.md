@@ -10,8 +10,8 @@ tags: [issue, config, runtime, acme]
 ## Problem
 
 `bin/seon config apply <manifest>` promises explicit database config
-reconciliation, but routes through the complete development artifact build and
-process reconcile path. Applying the same converged manifest can therefore
+reconciliation, but routed through the complete development artifact build and
+process reconcile path. Applying the same converged manifest could therefore
 rebuild the writer and client and restart the writer and pod even though only a
 database desired-state operation was requested.
 
@@ -22,8 +22,14 @@ application digest `7808d66b…`. Two consecutive applications of the unchanged
 `config/acme.edn` each ran dependency preparation, writer uberjar, client,
 bootstrap, and CSS builds. The second ready target had application digest
 `2fe1f0f9…`, new writer and pod PIDs, and the same resolved run/transcript
-policy. `script/seon/dev/cli.clj/config!` directly calls
-`reconcile-development!`; the config operation has no narrower live boundary.
+policy. `script/seon/dev/cli.clj/config!` directly called
+`reconcile-development!`; the config operation had no narrower live boundary.
+
+Commit `2f348806` removed that widening. Two unchanged live applies wrote zero
+operations; an intentional policy delta and restoration each wrote two; and
+watcher `81044`, writer `81308`, and pod `81335` remained unchanged. The live
+boundary currently transports the selected path and resolves it once in the
+pod; it does not yet persist an immutable resolved payload in supervisor intent.
 
 ## Owner
 

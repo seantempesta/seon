@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, schema, config]
 ---
@@ -34,3 +34,12 @@ presence-sensitive exact comparison.
 - Presence remains significant for every value Datahike can actually store.
 - A second identical reconcile submits no transaction and leaves the basis
   unchanged.
+
+## Resolution
+
+Resolved by `2f348806`. The compiler removes only impossible empty
+cardinality-many presences before exact comparison, retaining attribute
+presence as signal for every storable value. `seon.state-test` passed 7
+tests/35 assertions, including a basis-stable empty-many convergence proof;
+the live config apply then returned zero operations on the next identical
+manifest.

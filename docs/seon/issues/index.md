@@ -21,7 +21,7 @@ See `README.md` for the convention.
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
 | [Make the downstream runtime package self-contained](downstream-runtime-package-is-not-self-contained.md) | blocker | Core |
 
-## Friction (31)
+## Friction (30)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -49,7 +49,6 @@ See `README.md` for the convention.
 | [Make schema hot reload atomic](hot-reload-schema-import-can-partially-fail.md) | friction | agent |
 | [Model can ghost-echo runtime scaffolding into the transcript spine](narration-ghost-echo-not-neutralized.md) | friction | agent |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
-| [Reconcile empty cardinality-many values without metadata-only transactions](reconcile-empty-many-metadata-only-transaction.md) | friction | Core |
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |
 | [Remove undeclared-var warnings from the self-host bootstrap build](bootstrap-analyzer-api-emits-undeclared-var-warnings.md) | friction | agent |
 | [Self-host `cljs.test/is` throws inside a dynamically-evaled `:test` thunk](selfhost-cljs-test-is-thunk-resolution.md) | friction | agent |
