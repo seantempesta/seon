@@ -21,8 +21,8 @@ CONTRACTS = {
         "purpose is `audit invoices reachability`. Do not choose an id and do "
         "not send the child a task. End that turn after the spawn so you can "
         "read the real returned id. In a later turn, run a scalar Datalog query "
-        "that finds the child whose parent is root and whose purpose is exactly "
-        "`audit invoices reachability`. Report the queried child id to your "
+        "that constrains the child by that exact returned id, parent root, and "
+        "purpose exactly `audit invoices reachability`. Report the queried child id to your "
         "human with `message/user`, then `complete` with the same id. Never "
         "invent the id and do not inspect source files."
     ),

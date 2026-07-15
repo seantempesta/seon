@@ -95,6 +95,31 @@ def _text_tree(value: Any) -> str:
     return str(value)
 
 
+def _maps_in(value: Any):
+    """Yield every mapping nested in one decoded retained value."""
+    if isinstance(value, dict):
+        yield value
+        for item in value.values():
+            yield from _maps_in(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _maps_in(item)
+
+
+def _created_root_child(request: Any) -> str:
+    """The sole idle root child created by the retained transaction request."""
+    parent = [":seon.agent/id", "root"]
+    matches = [
+        row for row in _maps_in(request)
+        if row.get(":seon.agent/purpose") == ROOT_PURPOSE
+        and row.get(":seon.agent/parent") == parent
+        and isinstance(row.get(":seon.agent/id"), str)
+    ]
+    if len(matches) != 1 or ":seon.agent/run" in matches[0]:
+        return ""
+    return matches[0][":seon.agent/id"]
+
+
 def _decoded_operations(
     row: dict[str, Any], final_coordinate: dict[str, Any]
 ) -> list[tuple[dict[str, Any], Any, Any]]:
@@ -187,9 +212,15 @@ def _root(
         and agent_rows == {"start!", "delegate!"}
     )
     starts = _successful(rows, "agent/start!", "seon.agent/start!")
+    delegates = _successful(rows, "agent/delegate!", "seon.agent/delegate!")
+    child_messages = _successful(
+        rows, "message/agent", "seon.agent.message/agent"
+    )
     queries = _successful(rows, "db/query", "seon.db/query")
     selection = bool(
-        starts
+        len(starts) == 1
+        and not delegates
+        and not child_messages
         and queries
         and ROOT_PURPOSE in (rows[starts[0]].get("source") or "")
         and starts[0] < queries[-1]
@@ -204,17 +235,18 @@ def _root(
             query, query_request, query_result = _operation(query_ops, "/query")
             tx_text = _text_tree(tx_request)
             query_text = _text_tree(query_request)
-            child_id = query_result if isinstance(query_result, str) else ""
+            child_id = _created_root_child(tx_request)
             execution = (
-                ROOT_PURPOSE in tx_text
-                and ":seon.agent/parent" in tx_text
-                and "root" in tx_text
+                bool(child_id)
+                and ROOT_PURPOSE in tx_text
                 and isinstance(tx_result, dict)
                 and tx_result.get(":seon.db/ok?") is True
                 and tx["coordinate"]["t"] <= query["coordinate"]["t"]
             )
             verification = (
                 bool(child_id)
+                and query_result == child_id
+                and child_id in query_text
                 and ROOT_PURPOSE in query_text
                 and ":seon.agent/parent" in query_text
                 and ":seon.agent/purpose" in query_text
@@ -223,9 +255,17 @@ def _root(
         except (EvidenceError, KeyError, StopIteration, TypeError, ValueError):
             pass
     later = _later_prompt_indices(turns, rows[starts[0]]) if starts else []
+    query_turn_index = (
+        _turn_index(turns).get(rows[queries[-1]].get("turn_id"), -1)
+        if queries else -1
+    )
     dynamic = bool(
         later
-        and any(":seon.agent/id" in _prompt(turns, index) for index in later)
+        and child_id
+        and any(
+            index <= query_turn_index and child_id in _prompt(turns, index)
+            for index in later
+        )
     )
     query_prompts = (
         [

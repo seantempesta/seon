@@ -135,11 +135,12 @@ def _root_fixture():
         _eval(
             "root-2",
             2,
-            f'(db/query \'[:find ?id . :in $ ?purpose :where '
+            f'(db/query \'[:find ?id . :in $ ?child-id ?purpose :where '
+            f'[?child :seon.agent/id ?child-id] '
             f'[?child :seon.agent/id ?id] '
             f'[?child :seon.agent/purpose ?purpose] '
             f'[?child :seon.agent/parent ?parent] '
-            f'[?parent :seon.agent/id "root"]] "{ROOT_PURPOSE}")',
+            f'[?parent :seon.agent/id "root"]] "{child}" "{ROOT_PURPOSE}")',
             operations=_ops(
                 _operation(
                     0,
@@ -147,6 +148,7 @@ def _root_fixture():
                     {
                         ":seon.db/query": [
                             ":find", "?id", ".", ":where",
+                            ["?child", ":seon.agent/id", child],
                             ["?child", ":seon.agent/id", "?id"],
                             ["?child", ":seon.agent/purpose", ROOT_PURPOSE],
                             ["?child", ":seon.agent/parent", "?parent"],
@@ -320,6 +322,57 @@ def test_root_surface_rejects_every_other_public_agent_row(excluded):
         "root_orchestration", turns, eval_rows, reply, FINAL
     )
     assert not result["checks"]["surface"]
+
+
+def test_root_requires_exactly_one_start_without_delegate_or_child_message():
+    turns, eval_rows, reply = _root_fixture()
+    duplicate = copy.deepcopy(eval_rows[0])
+    duplicate["eval_transaction"] = 2
+    changed = [eval_rows[0], duplicate, *eval_rows[1:]]
+    result = check_reachability(
+        "root_orchestration", turns, changed, reply, FINAL
+    )
+    assert not result["checks"]["selection"]
+
+    turns, eval_rows, reply = _root_fixture()
+    eval_rows.insert(1, _eval(
+        "root-1", 2,
+        f'(agent/delegate! {{:seon.agent/purpose "{ROOT_PURPOSE}" '
+        ':seon.agent.message/content "work"})',
+    ))
+    result = check_reachability(
+        "root_orchestration", turns, eval_rows, reply, FINAL
+    )
+    assert not result["checks"]["selection"]
+
+    turns, eval_rows, reply = _root_fixture()
+    eval_rows.insert(1, _eval(
+        "root-1", 2, '(message/agent "quiet-crows-count" "work")'
+    ))
+    result = check_reachability(
+        "root_orchestration", turns, eval_rows, reply, FINAL
+    )
+    assert not result["checks"]["selection"]
+
+
+def test_root_query_and_dynamic_prompt_must_join_created_child():
+    turns, eval_rows, reply = _root_fixture()
+    changed = copy.deepcopy(eval_rows)
+    changed[1]["operation_evidence"]["operations"][0]["result"] = _tag(
+        "older-same-purpose-child"
+    )
+    result = check_reachability(
+        "root_orchestration", turns, changed, reply, FINAL
+    )
+    assert not result["checks"]["verification"]
+
+    turns, eval_rows, reply = _root_fixture()
+    changed_turns = copy.deepcopy(turns)
+    changed_turns[1]["prompt"] = "; generic :seon.agent/id schema only"
+    result = check_reachability(
+        "root_orchestration", changed_turns, eval_rows, reply, FINAL
+    )
+    assert not result["checks"]["dynamic_context"]
 
 
 @pytest.mark.parametrize("row", ROWS)
