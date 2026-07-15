@@ -61,6 +61,17 @@ explicit pending integration/proof boundaries. If the current work cannot be
 traced to one of those exits, stop, record the finding if useful, and resume
 the ordered program.
 
+Separate sequencing from concurrency explicitly. The earliest unsettled
+contract and its integrated proof form the ordered spine; no consumer may
+invent or assume that contract. Everything else is a rolling parallel
+portfolio: later-unit source grounding, independent consumer implementation
+against already-settled contracts, downstream packaging, and bounded proof
+work may occupy the remaining slots. Keep the top level available to review
+cross-boundary decisions, resolve overlaps, update the ledger, and integrate
+proof; it should not duplicate a delegated implementation merely to appear
+busy. A returned lane frees a slot only after its claims and owned diff are
+reviewed, but unrelated lanes never wait for that review.
+
 Do not let a locally interesting defect silently replace the program. Before
 expanding an investigation, name the roadmap exit measure it blocks. If it
 does not block the active slice and can be isolated safely, record it in the

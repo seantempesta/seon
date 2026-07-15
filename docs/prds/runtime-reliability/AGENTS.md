@@ -17,12 +17,24 @@ sessions, canvas interaction, agent runtime correctness, Inspect/autocomplete
 evidence, independent downstream distribution, and final local-performance
 graduation.
 
-This PRD is in **integrated completion**. Work from the original phases 3–5
-landed out of order, so the former “phase 3 of 6” label was retired. The
-authoritative remaining order is the **Program task ledger** at the top of
-[[roadmap]]; unit 0 (current branch graduation) is in progress. The
-active plan replaces mechanisms in place and deletes superseded paths; it does
-not create compatibility namespaces or parallel architectures.
+This PRD has **graduated unit 0 and now serves as the program integration
+ledger**. Work from the original phases 3–5 landed out of order, so the former
+“phase 3 of 6” label was retired. The authoritative remaining order is the
+**Program task ledger** at the top of [[roadmap]]; unit 1, database lifecycle
+and recovery, is the ordered spine. The active plan replaces mechanisms in
+place and deletes superseded paths; it does not create compatibility
+namespaces or parallel architectures.
+
+The ordered spine and the parallel portfolio are different things. Unit 1's
+launch/publication, restart/crash, restore/undo, and multi-form contracts must
+settle in that order before dependent consumers claim them. In parallel, use
+the remaining agent slots for the reactive-unit and agent-runtime cuts that
+consume already-settled boundaries, exact-source research for later units,
+Inspect/autocomplete evidence, and downstream artifact work whose assumptions
+are explicit. The top level reviews and integrates every return, updates
+[[roadmap]], and immediately refills a safe slot from its documented queue.
+Do not make all lanes wait for one another, and do not manufacture parallel
+edits inside one owner.
 
 The 2026-07-14 live-browser baseline in [[roadmap]] is the current falsification
 set: existing feeds partially stale plan/transcript/root units because a

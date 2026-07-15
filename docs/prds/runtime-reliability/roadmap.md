@@ -88,6 +88,15 @@ unsettled contract. Returned research is written into its owning PRD, reviewed
 against source, and either integrated or converted into an explicit ordered
 gap before that slot is reused.
 
+The target steady state is one ordered spine plus three independent lanes, not
+four agents editing the same milestone. The top level owns integration,
+cross-boundary review, ledger maintenance, and live/destructive proof. Agent
+slots own coherent path-bounded implementations, exact-source audits, or
+independent evidence work. If fewer than three safe parallel tasks exist, do
+not invent work: advance the spine until another contract becomes safe to
+consume. If a safe documented task exists, leaving a slot idle is a cadence
+failure.
+
 The current dependency spine is:
 
 1. finish unit 1 publication admission, native branch lifecycle, restart/crash
