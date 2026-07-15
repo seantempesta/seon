@@ -9,15 +9,33 @@ tags: [issue, agent, database, research]
 
 ## Problem
 
-`POST /agents/run` and the retained Inspect `.eval` project model intent only
-after a run finishes. They omit the OpenAI-compatible base URL and adapter
-timeout, and the adapter may reread reactive configuration while assembling one
-request. A completed log therefore cannot prove which immutable database value,
-endpoint, model bytes, timeout layers, or response identity governed any
-provider attempt. Final intent is insufficient provenance for a formal
-capability result or comparison between model arms.
+`POST /agents/run` and the retained Inspect `.eval` still project model intent
+only after a run finishes. The resolver and OpenAI-compatible adapter now
+produce complete immutable request and response evidence, but no ordered
+turn-owned attempt facts retain it. A completed log therefore cannot prove
+which immutable database value, endpoint, model bytes, timeout layers, or
+response identity governed every provider attempt. Final intent is
+insufficient provenance for a formal capability result or comparison between
+model arms.
 
 ## Evidence
+
+The database-derived resolver now includes endpoint, adapter timeout,
+credential-source name, and extra-body digest, and the OpenAI-compatible
+adapter consumes one caller-supplied immutable resolution without rereading
+ambient configuration. Its response also retains bounded response model,
+system fingerprint, and request id when those fields are present; absence
+remains absence.
+
+The remaining first dependency is ownership of the immutable attempt value.
+`seon.ai.dispatch/llm-fn` currently captures the database value and resolution
+inside the promise-returning provider call. The turn's outer timeout can win
+before that promise returns, so `seon.agent.turn` has no coordinate or resolved
+configuration to persist for the timed-out attempt. Ordered component facts
+must therefore wait until dispatch hands the captured attempt value to the
+turn synchronously (or the turn captures it and dispatch consumes that exact
+value). Persisting success/error attempts alone would make outer-timeout facts
+structurally incomplete and falsely plausible.
 
 Inspect's public `read_eval_log` shows that native sample metadata retains a
 complete `pod_database_coordinate` with database id, branch, commit id, and
@@ -28,12 +46,13 @@ including `:seon.ai/base-url` and `:seon.ai/timeout-ms`. This makes a manual
 forensic reconstruction possible while the referenced Datahike commit remains
 retained, but no public end-to-end helper or run projection performs it.
 
-`seon.ai/resolved-config` is already the one database-derived effective model
-resolver consumed per request. Its returned transport projection intentionally
-does not include endpoint or timeout, and `seon.web.serve` consequently cannot
-place those values in `/agents/run` evidence. Inspect should preserve the pod's
-projection rather than opening a second database client or inventing another
-configuration authority.
+`seon.ai/resolved-config` is the one database-derived effective model resolver
+consumed per request. It now includes endpoint and adapter timeout alongside
+the other non-secret transport values. `seon.web.serve` still cannot place
+those values in `/agents/run` evidence because the turn has no persisted
+attempt entities to query. Inspect should preserve the pod's projection rather
+than opening a second database client or inventing another configuration
+authority.
 
 The complete grounded contract is in
 [[../../prds/agentic-tool-refinement/research/model-transport-evidence-audit-2026-07-15]].

@@ -60,6 +60,9 @@
 
 (schema/register! ::text :string)
 (schema/register! ::model :string)
+(schema/register! ::response-model [:string {:min 1 :max 512}])
+(schema/register! ::system-fingerprint [:string {:min 1 :max 512}])
+(schema/register! ::request-id [:string {:min 1 :max 512}])
 (schema/register! ::temperature :double)
 (schema/register! ::max-tokens :int)
 (schema/register! ::system-prompt :string)

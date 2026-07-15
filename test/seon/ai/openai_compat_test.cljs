@@ -320,6 +320,29 @@
                      :choices [] :usage usage-fixture})
         "data: [DONE]\n\n")))
 
+(deftest parse-completion-retains-bounded-response-identity
+  (let [response
+        (openai/parse-completion
+          #js{:id "req-transport-1"
+              :model "response-model-a"
+              :system_fingerprint "fp-transport-a"
+              :choices #js[#js{:message #js{:content "ok"}
+                                :finish_reason "stop"}]})]
+    (is (= "response-model-a" (:seon.ai/response-model response)))
+    (is (= "fp-transport-a" (:seon.ai/system-fingerprint response)))
+    (is (= "req-transport-1" (:seon.ai/request-id response)))
+    (is (not (contains? (:seon.ai/provider-fields response) :model))
+        "known identity fields are retained once, not duplicated as extras")))
+
+(deftest parse-completion-preserves-absent-response-identity
+  (let [response
+        (openai/parse-completion
+          #js{:choices #js[#js{:message #js{:content "ok"}
+                                :finish_reason "stop"}]})]
+    (is (not (contains? response :seon.ai/response-model)))
+    (is (not (contains? response :seon.ai/system-fingerprint)))
+    (is (not (contains? response :seon.ai/request-id)))))
+
 (defn- streaming-fetch
   "An injected fetch that records [url init] into `captured` and returns
    a 200 streaming Response whose body is `sse-string`."

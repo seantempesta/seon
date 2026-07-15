@@ -90,6 +90,9 @@
    [:seon.ai/estimated?                 {:optional true} :seon.ai/estimated?]
    [:seon.ai/tool-calls                 {:optional true} :seon.ai/tool-calls]
    [:seon.ai/provider-fields            {:optional true} :seon.ai/provider-fields]
+   [:seon.ai/response-model             {:optional true} :seon.ai/response-model]
+   [:seon.ai/system-fingerprint         {:optional true} :seon.ai/system-fingerprint]
+   [:seon.ai/request-id                 {:optional true} :seon.ai/request-id]
    [:seon.ai/config-evidence {:optional true} :seon.ai/config-evidence]])
 
 ;; agent-adapter request-option overrides (e.g. {:seon.ai/temperature 0.2}).
@@ -274,7 +277,8 @@
    sent it (we request it via `:stream_options {:include_usage true}`,
    but a gateway may omit the usage chunk — optional-is-absent, never
    a present nil); message.tool_calls → `:seon.ai/tool-calls` when
-   present; the
+   present; response `model`, `system_fingerprint`, and request `id`
+   retain their bounded identities when present; the
    unrecognized top-level fields → `:seon.ai/provider-fields` (omitted
    when empty — optional-is-absent). Public for tests."
   {:malli/schema [:=> [:catn [:seon.ai.openai-compat/completion :any]]
@@ -303,6 +307,10 @@
              :seon.ai.openai-compat/finish-reason (:finish_reason choice)}
       (some? (:usage body)) (assoc :seon.ai/usage (:usage body))
       (seq tool-calls)      (assoc :seon.ai/tool-calls tool-calls)
+      (some? (:model body)) (assoc :seon.ai/response-model (:model body))
+      (some? (:system_fingerprint body))
+      (assoc :seon.ai/system-fingerprint (:system_fingerprint body))
+      (some? (:id body)) (assoc :seon.ai/request-id (:id body))
       (seq extras)          (assoc :seon.ai/provider-fields extras))))
 
 (defn- config-error
