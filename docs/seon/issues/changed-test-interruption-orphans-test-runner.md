@@ -38,3 +38,32 @@ or test runner.
 - No orphan can write or execute `out/test/test.js` after interruption.
 - A concurrent exact runner either observes the live owner and fails closed or
   acquires a fully quiescent artifact boundary.
+
+## Implementation evidence
+
+Implemented on 2026-07-15 in the one `seon.dev.changed-test/run-command!`
+lifecycle. Every child command now registers an owner-process shutdown hook,
+captures a stable `ProcessHandle` tree, signals descendants before ancestors,
+and awaits their absence. Timeout and thread-interruption paths retain the hook
+until cleanup completes. If graceful termination does not converge, the owner
+rescans every still-known handle for newly spawned descendants before forced
+termination and reports cleanup failure if bounded absence cannot be proven.
+
+Focused operator proof passed 15 tests and 37 assertions in
+`tmp/test-changed/changed-operator-1784099964314-331ede03-3436-46f5-8ccc-ca50be91a746.log`.
+One regression installs a TERM trap that spawns a new child during the grace
+period and proves escalation includes it. Another starts a real nested
+Babashka changed-test owner, Bash child, and Bash grandchild, sends the owner
+SIGTERM, and proves its shutdown hook awaits both descendants before exit.
+
+This guarantee covers catchable JVM shutdown and the runner's ordinary
+timeout/interruption paths. SIGKILL cannot run a shutdown hook in any process;
+after an external uncatchable kill, the existing PID-validated stale-lock
+recovery remains the next-invocation repair boundary rather than a claim that
+the killed owner performed cleanup.
+
+The focused process-tree proof is not yet sufficient to close this issue. A
+source-frozen verification window must still interrupt the real changed-test
+owner once during CLJS compilation and once during Node execution, then prove
+that the shared test lock is released only after every owned descendant has
+exited and that no orphan continues to write or execute `out/test/test.js`.

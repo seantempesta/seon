@@ -44,3 +44,39 @@ add a second runner.
 - The compile graph contains every requested namespace once.
 - A nonempty exact-selector request that matches zero tests exits nonzero.
 - The retained summary reports the requested and executed selector counts.
+
+## Implementation evidence
+
+The dependency-owned hash-promotion defect was fixed on 2026-07-15. Shadow
+3.4.11 constructed each
+registered var symbol with `(symbol ns name)`, even though metadata `:ns` and
+`:name` are already symbols. Exact CLI symbols compared equal while the
+selection set used its linear representation, but after nine qualified
+selectors promoted it to a hash set their hashes no longer agreed and every
+lookup missed. The maintained `seantempesta/shadow-cljs` fork reconstructs the
+candidate from canonical strings and carries a ten-selector promotion
+regression at commit `d39b6fd3`; commit `9b73a5db` adds standard
+`:deps/prep-lib` Java preparation for fresh git consumers.
+
+Root `:cljs` now pins exact fork SHA
+`9b73a5db33e5077cb9622fd9eadff5022d66578a`. The source is upstream 3.4.11;
+the npm `shadow-cljs` 3.4.10 package remains only the deps-mode CLI shim, while
+the Clojure CLI basis selects the forked JVM implementation. The unchanged
+shim successfully launched the pinned compiler and exact runner, so no npm
+artifact change is required for this JVM-classpath repair.
+
+Fresh-cache proof removed the exact gitlib checkout, ran
+`clojure -X:deps prep :aliases '[:cljs]'`, and then resolved
+`clojure -P -M:cljs` without manual Leiningen or checked-in classes. The
+unchanged `bin/test-cljs` then executed the original ten selectors in one Node
+process: 10 tests and 72 assertions, zero failures/errors, compile zero
+warnings. Retained log:
+`tmp/test-cljs-20260715-031618-3190.log`. This replaces both false-green
+zero-test logs without chunking, retrying, or stitching multiple runs.
+
+This proof closes the observed greater-than-eight selector failure, but the
+issue remains open at the wrapper boundary. `bin/test-cljs` still accepts a
+complete `Ran 0 tests` summary as green for a nonempty selector request, and
+its retained report does not compare requested and executed selector counts.
+Closure requires the remaining fail-closed validation and reporting acceptance
+above, including focused regressions for an unmatched exact selector.

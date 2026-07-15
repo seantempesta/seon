@@ -16,6 +16,7 @@
 
 (def manifest-wait-ms 3000)
 (def test-timeout-ms 300000)
+(def termination-wait-ms 2000)
 
 (def host-analysis-config
   "{:output {:format :edn} :analysis {:var-usages false :var-definitions {:shallow true}}}")
@@ -334,11 +335,66 @@
                     (drop 20))]
     (fs/delete-if-exists path)))
 
-(defn- terminate! [^Process process]
-  (doseq [handle (reverse (vec (iterator-seq (.iterator (.descendants
-                                                          (.toHandle process))))))]
-    (.destroyForcibly ^java.lang.ProcessHandle handle))
-  (.destroyForcibly process))
+(defn- process-descendants [^java.lang.ProcessHandle handle]
+  (with-open [stream (.descendants handle)]
+    (vec (iterator-seq (.iterator stream)))))
+
+(defn- stable-process-handles
+  "Expand known handles until two descendant observations are equal."
+  [known]
+  (loop [prior nil handles known attempts 0]
+    (let [expanded
+          (reduce
+            (fn [result handle]
+              (into result
+                    (map (juxt #(.pid ^java.lang.ProcessHandle %) identity))
+                    (when (.isAlive ^java.lang.ProcessHandle handle)
+                      (process-descendants handle))))
+            handles
+            (vals handles))]
+      (if (or (= (set (keys prior)) (set (keys expanded)))
+              (= attempts 20))
+        expanded
+        (do (Thread/sleep 10)
+            (recur handles expanded (inc attempts)))))))
+
+(defn- stable-process-tree [^Process process]
+  (let [root (.toHandle process)]
+    (stable-process-handles {(.pid root) root})))
+
+(defn- process-depth [handles ^java.lang.ProcessHandle handle]
+  (loop [current handle depth 0]
+    (let [parent (.parent current)]
+      (if (and (.isPresent parent)
+               (contains? handles (.pid ^java.lang.ProcessHandle (.get parent))))
+        (recur (.get parent) (inc depth))
+        depth))))
+
+(defn- await-process-absence [handles timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (if (every? #(not (.isAlive ^java.lang.ProcessHandle %)) (vals handles))
+        true
+        (if (< (System/currentTimeMillis) deadline)
+          (do (Thread/sleep 10) (recur))
+          false)))))
+
+(defn- signal-tree! [handles force?]
+  (doseq [handle (sort-by #(process-depth handles %) > (vals handles))
+          :when (.isAlive ^java.lang.ProcessHandle handle)]
+    (if force?
+      (.destroyForcibly ^java.lang.ProcessHandle handle)
+      (.destroy ^java.lang.ProcessHandle handle))))
+
+(defn- terminate!
+  "Terminate one stable process tree descendants-first and await absence."
+  [^Process process]
+  (let [handles (stable-process-tree process)]
+    (signal-tree! handles false)
+    (or (await-process-absence handles termination-wait-ms)
+        (let [expanded (stable-process-handles handles)]
+          (signal-tree! expanded true)
+          (await-process-absence expanded termination-wait-ms)))))
 
 (defn failure-excerpts
   "Return bounded cljs.test failure blocks with expected and actual values."
@@ -376,8 +432,27 @@
                   (.redirectOutput (.toFile log)))
         _ (.putAll (.environment builder) environment)
         process (.start builder)
-        completed? (.waitFor process test-timeout-ms TimeUnit/MILLISECONDS)
-        _ (when-not completed? (terminate! process))
+        shutdown-hook
+        (Thread. #(terminate! process)
+                 (str "seon-changed-test-cleanup-" (.pid process)))
+        runtime (Runtime/getRuntime)
+        _ (.addShutdownHook runtime shutdown-hook)
+        [completed? terminated?]
+        (try
+          (let [completed? (.waitFor process test-timeout-ms
+                                     TimeUnit/MILLISECONDS)]
+            [completed? (if completed? true (terminate! process))])
+          (catch InterruptedException error
+            (terminate! process)
+            (.interrupt (Thread/currentThread))
+            (throw error))
+          (catch Throwable error
+            (terminate! process)
+            (throw error))
+          (finally
+            (try
+              (.removeShutdownHook runtime shutdown-hook)
+              (catch IllegalStateException _))))
         exit (if completed? (.exitValue process) 124)
         output (slurp (str log))
         summary (some->> (str/split-lines output)
@@ -391,10 +466,13 @@
         {:seon.dev.changed-test/boundary boundary
          :seon.dev.changed-test/command argv
          :seon.dev.changed-test/status
-         (if (and completed? (zero? exit) summary counts
+         (if (and completed? terminated? (zero? exit) summary counts
                   (str/starts-with? counts "0 failures, 0 errors."))
            :passed
-           (if completed? :failed :timed-out))
+           (cond
+             (not terminated?) :cleanup-failed
+             completed? :failed
+             :else :timed-out))
          :seon.dev.changed-test/exit exit
          :seon.dev.changed-test/summary summary
          :seon.dev.changed-test/counts counts
@@ -477,6 +555,7 @@
 (defn- aggregate-status [boundary-results]
   (let [statuses (set (map :seon.dev.changed-test/status boundary-results))]
     (cond
+      (contains? statuses :cleanup-failed) :cleanup-failed
       (contains? statuses :timed-out) :timed-out
       (contains? statuses :failed) :failed
       (contains? statuses :build-unavailable) :build-unavailable

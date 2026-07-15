@@ -107,7 +107,12 @@
          :extra-paths   ["test" "script"]
          :extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
-                         thheller/shadow-cljs                 {:mvn/version "3.4.10"}
+                         ;; Upstream 3.4.11 plus the exact-selector symbol/hash
+                         ;; fix. This is a JVM build-classpath dependency only;
+                         ;; npm shadow-cljs stays at 3.4.10 for the CLI shim.
+                         thheller/shadow-cljs
+                         {:git/url "https://github.com/seantempesta/shadow-cljs"
+                          :git/sha "9b73a5db33e5077cb9622fd9eadff5022d66578a"}
                          aero/aero                            {:mvn/version "1.1.6"}
                          com.taoensso/timbre                  {:mvn/version "6.5.0"}
                          parinferish/parinferish              {:mvn/version "0.8.0"}

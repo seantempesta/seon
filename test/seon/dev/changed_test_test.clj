@@ -1,6 +1,26 @@
 (ns seon.dev.changed-test-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [babashka.fs :as fs]
+            [clojure.test :refer [deftest is testing]]
             [seon.dev.changed-test :as changed]))
+
+(defn- wait-until [pred timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (cond
+        (pred) true
+        (< (System/currentTimeMillis) deadline)
+        (do (Thread/sleep 10) (recur))
+        :else false))))
+
+(defn- pid-handle [pid]
+  (.orElse (java.lang.ProcessHandle/of pid) nil))
+
+(defn- pid-alive? [pid]
+  (boolean (some-> (pid-handle pid) .isAlive)))
+
+(defn- force-pid! [pid]
+  (when-let [handle (pid-handle pid)]
+    (when (.isAlive handle) (.destroyForcibly handle))))
 
 (def manifest
   {:seon.dev.test.artifact/test-namespaces
@@ -162,3 +182,82 @@
     (is (every? #(and (re-find #"expected:" %)
                       (re-find #"actual:" %))
                 excerpts))))
+
+(deftest termination-rescans-children-spawned-during-grace
+  (let [root (System/getProperty "user.dir")
+        directory (fs/path root "tmp" (str "changed-tree-" (random-uuid)))
+        ready (fs/path directory "ready.pid")
+        spawned (fs/path directory "spawned.pid")
+        command
+        (str "trap 'sleep 30 & echo $! > " spawned "' TERM; "
+             "echo $$ > " ready "; while true; do sleep 1; done")
+        _ (fs/create-dirs directory)
+        process (.start (ProcessBuilder. ^java.util.List
+                                         ["bash" "-c" command]))]
+    (try
+      (is (wait-until #(fs/regular-file? ready) 3000))
+      (with-redefs [changed/termination-wait-ms 200]
+        (is (true? (#'changed/terminate! process))))
+      (is (wait-until #(fs/regular-file? spawned) 1000)
+          "the TERM trap spawned a child after the first tree capture")
+      (let [spawned-pid (parse-long (first (fs/read-all-lines spawned)))]
+        (is (false? (pid-alive? spawned-pid))
+            "the forced escalation included the newly spawned child"))
+      (finally
+        (.destroyForcibly process)
+        (when (fs/regular-file? spawned)
+          (force-pid! (parse-long (first (fs/read-all-lines spawned)))))
+        (fs/delete-tree directory)))))
+
+(deftest killing-changed-test-owner-unwinds-its-complete-process-tree
+  (let [root (System/getProperty "user.dir")
+        directory (fs/path root "tmp" (str "changed-owner-" (random-uuid)))
+        child-file (fs/path directory "child.pid")
+        grandchild-file (fs/path directory "grandchild.pid")
+        owner-log (fs/path directory "owner.log")
+        child-command
+        (str "echo $$ > " child-file "; "
+             "bash -c 'echo $$ > " grandchild-file "; sleep 30' & wait")
+        expression
+        (str "(do (require 'seon.dev.changed-test) "
+             "(let [run (deref (ns-resolve 'seon.dev.changed-test "
+             "'run-command!))] (run " (pr-str root) " :pod "
+             (pr-str ["bash" "-c" child-command]) " {})))")
+        _ (fs/create-dirs directory)
+        owner
+        (.start
+          (doto
+            (ProcessBuilder.
+              ^java.util.List
+              ["bb" "--config" (str (fs/path root "bb.edn"))
+               "--deps-root" root "-e" expression])
+            (.redirectErrorStream true)
+            (.redirectOutput (.toFile owner-log))))]
+    (try
+      (let [ready? (wait-until #(and (fs/regular-file? child-file)
+                                     (fs/regular-file? grandchild-file))
+                               5000)]
+        (is ready? (when (fs/regular-file? owner-log)
+                     (slurp (str owner-log))))
+        (when ready?
+          (let [child-pid (parse-long (first (fs/read-all-lines child-file)))
+                grandchild-pid
+                (parse-long (first (fs/read-all-lines grandchild-file)))]
+            (is (pid-alive? child-pid))
+            (is (pid-alive? grandchild-pid))
+            (.destroy owner)
+            (is (.waitFor owner 10 java.util.concurrent.TimeUnit/SECONDS))
+            (is (wait-until #(and (not (pid-alive? child-pid))
+                                  (not (pid-alive? grandchild-pid)))
+                            5000)
+                "the owner's shutdown hook awaited every known descendant")
+            (force-pid! child-pid)
+            (force-pid! grandchild-pid))))
+      (finally
+        (.destroyForcibly owner)
+        (when (fs/regular-file? child-file)
+          (force-pid! (parse-long (first (fs/read-all-lines child-file)))))
+        (when (fs/regular-file? grandchild-file)
+          (force-pid!
+            (parse-long (first (fs/read-all-lines grandchild-file)))))
+        (fs/delete-tree directory)))))
