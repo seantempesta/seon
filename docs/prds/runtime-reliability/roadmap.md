@@ -123,8 +123,8 @@ contract work and independent consumers:
 
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
-| Top-level integration | **Review the first native branch lifecycle implementation boundary while preserving the full units 1–9 ledger:** integrate only exact typed transport, retained lifecycle intent, and create/close behavior that consume the committed descriptor contract | Descriptor publication is committed at `c60e698e`, receipt/recovery Slice A at `defb8014`, and runner lifecycle at `8d938d56`. The single-run gates are free; a separate exact two-test probe isolated the remaining full-suite schema-projection contaminant and cleared receipts as its cause | Review and falsify the Babashka UDS boundary, then the retained pod-owned branch transition. Coordinate the first real create/close proof before releasing unit 1 into restart/crash; keep the activated-projection repair as an explicit independent proof blocker rather than mixing it into lifecycle code |
-| Database lifecycle | **Babashka typed UDS portability is complete; retained native branch lifecycle is next:** ordinary and branch descriptors are committed; the next owner must retain the exact source descriptor/create request before mutation and close from the current target head rather than the immutable creation cut | `ce342572` keeps the existing typed UDS owner and passes the Babashka transport gate at 9 tests/28 assertions plus the retained JVM transport/writer integration at 16/93. The descriptor still intentionally does not retain the source logical route needed for close, so native lifecycle intent remains the earliest unsettled contract | Review the integrated UDS boundary, then implement exact retained open/close with crash-safe inverse evidence. After a real create/close gate, prove default restart/crash, restore/undo, and multi-form transitions in that order |
+| Top-level integration | **Retained native branch lifecycle is integrated; preserve the full units 1–9 ledger while unit 1 advances through interruption and live exposure:** review only the settled typed transport, retained intent, and exact create/close boundary before consuming it | `74bfa7e2` retains intent before mutation, resumes response loss, rejects a moved newly-created head, preserves reused pods on publication failure, and closes from the fresh target head; `088b99a1` records the remaining interruption boundary. The focused branch/process/config/CLI gate passes 30 tests/130 assertions | Prove real SIGINT ownership before exposing branch lifecycle through CLI/status/MCP. Then coordinate the first live default create/write/restart/close proof; keep the activated-projection repair as an independent proof blocker rather than mixing it into lifecycle code |
+| Database lifecycle | **Native branch open/close is complete; real supervisor interruption is next:** the operator retains the exact source descriptor/create request before mutation, starts only the target pod, and deletes only the freshly ensured target head | Typed Babashka UDS landed in `ce342572`; crash-safe registry adoption in `e7bd160c`; retained pod lifecycle in `74bfa7e2`. Failure injection proves one cleanup owner for a newly started pod and no stop/delete for a converged reused pod. The remaining open issue is a real SIGINT during ordinary watcher/writer/pod startup or readiness | Inject and prove SIGINT cleanup in the existing supervisor. Then expose the settled lifecycle through CLI/status/MCP and run live create/write/restart/close before default restart/crash, restore/undo, and multi-form transitions in that order |
 | Reactive/database views | **Runner lifecycle complete; reverse render-unit candidate selection is the active refill:** Shadow exact selectors, fail-closed telemetry, serialized dependency prep, and changed-test descendant cleanup are committed in `df24a9ff` + `8d938d56` | Fresh fork preparation and the ten exact selectors pass 10/72 with requested=matched=executed=10; an unmatched selector exits before execution at 11/10/0; public writer gates pass 4/16 and 4/21; real Node and Shadow-compile interruption remove descendants/lock and leave artifacts stable. The stale queued-hook admission issue and downstream prep graduation remain honestly open | Ground and implement the one reverse candidate index from the public query-attribute projection, then prove a related write selects the unit and an unrelated write does no work. Run live `/data` browser/SSE proof at the next coordinated checkpoint |
 | Agent runtime correctness | **Receipt/recovery Slice A complete; parent capability/child launch waits on unit 1:** `seon.eval` owns eval attributes, `seon.eval.internal` owns pure receipt mechanics, terminalization is one CAS, and recovery closes run/turn/eval in one transaction | Commit `defb8014` passes 7 tests/67 assertions. The exact ordered contaminant probe proves `client-runtime`'s real-replay fixture leaves an attachment-incomplete active schema projection before the next eval test; `10b7ac4f` records the owning fix and explicitly clears Slice A | Repair the attachment-scoped projection fixture/contract independently, then consume unit-1 process ownership for immutable parent capabilities and measured child launch/kill/reap. Inspect task/scorer grounding continues without claiming the unsettled child boundary |
 
@@ -133,15 +133,18 @@ The ordered top-level sequence is therefore:
 1. **Complete:** integrate and falsify validation-only non-main open;
 2. **Complete:** implement the one typed native create/release/delete lifecycle,
    prove exact fork coordinates, and remove physical directory copying;
-3. **In progress:** non-autonomous runtime stop/start plus closed launch,
-   replica, client, and blob consumption are complete; implement pod-only
-   branch operator ownership and unit 1
-   restart/crash, restore/undo, and multi-form transition proof;
-4. graduate units 2 and 6 from bounded consumers into their complete acceptance
+3. **Complete:** non-autonomous runtime stop/start plus closed launch, replica,
+   client, blob consumption, and retained pod-only branch ownership are
+   integrated through `74bfa7e2`;
+4. **In progress:** prove real SIGINT ownership across ordinary process startup
+   and readiness, then expose the settled branch lifecycle through
+   CLI/status/MCP, run the first live create/write/restart/close transition,
+   and continue through restart/crash, restore/undo, and multi-form proof;
+5. graduate units 2 and 6 from bounded consumers into their complete acceptance
    matrices while starting unit 3/4 only from their settled contracts;
-5. complete canvas, Inspect/autocomplete, and independent artifact consumption
+6. complete canvas, Inspect/autocomplete, and independent artifact consumption
    in dependency order; and
-6. run unit 9's destructive, browser, performance, simultaneous-cluster, and
+7. run unit 9's destructive, browser, performance, simultaneous-cluster, and
    authorized legacy-worktree cleanup matrix last.
 
 On every lane return, the top-level agent first reviews source and proof,
