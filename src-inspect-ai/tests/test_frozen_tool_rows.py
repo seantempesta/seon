@@ -9,11 +9,76 @@ import pytest
 from inspect_ai import eval as inspect_eval
 from inspect_ai.solver import Generate, TaskState, solver
 
+from seon_inspect import catalog
 from seon_inspect.generators import generate_rows, rows_jsonl_bytes
 from seon_inspect.tasks import frozen_tool_rows as tasks
 
 
 ADMISSION = {"schema_version": 2, "bench": {"name": "test"}}
+
+
+def _model_server_identity():
+    revision = "c" * 40
+    request_model = f"/cache/snapshots/{revision}"
+    return {
+        "schema_version": 1,
+        "implementation": "mlx-lm",
+        "endpoint": "http://127.0.0.1:18081/v1/chat/completions",
+        "process": {"pid": 123, "start_instant": "instant",
+                    "argv_sha256": "a" * 64},
+        "runtime": {"module_sha256": "b" * 64,
+                    "packages": {"mlx-lm": "0.31.3"}},
+        "artifact": {
+            "mechanism": "huggingface-snapshot",
+            "request_model": request_model,
+            "revision": revision,
+            "manifest_sha256": "d" * 64,
+            "size_bytes": 1,
+            "quantization": "4bit",
+            "config_sha256": "e" * 64,
+        },
+        "response": {
+            "model": request_model,
+            "system_fingerprint": "mlx-fixture",
+        },
+    }
+
+
+def _completed_pod_result(reply: str):
+    identity = _model_server_identity()
+    final = {"database_id": "db-1", "branch": "db",
+             "commit_id": "final", "t": 30}
+    attempt = {
+        "turn_id": "turn-1",
+        "ordinal": 0,
+        "coordinate": {**final, "commit_id": "attempt", "t": 20},
+        "coordinate_valid": True,
+        "provider": "deepseek",
+        "adapter": "openai-compat",
+        "requested_model": identity["artifact"]["request_model"],
+        "endpoint": identity["endpoint"],
+        "adapter_timeout_ms": 30_000,
+        "outer_timeout_ms": 45_000,
+        "stream": False,
+        "response_model": identity["response"]["model"],
+        "system_fingerprint": identity["response"]["system_fingerprint"],
+        "outcome": "success",
+    }
+    return {
+        "agent_id": "test-agent",
+        "reply": reply,
+        "turns": 1,
+        "evals": 1,
+        "timed_out": False,
+        "closed_reason": ":completed",
+        "database_coordinate": final,
+        "turn_evidence": [{"turn_id": "turn-1"}],
+        "model_transport_evidence": {
+            "status": "inline",
+            "transport_drift": False,
+            "turns": [{"turn_id": "turn-1", "attempts": [attempt]}],
+        },
+    }
 
 
 def _write_expected_workspace(state: TaskState) -> None:
@@ -167,31 +232,31 @@ def test_infrastructure_close_invalidates_instead_of_scoring(
 def test_completed_default_solver_reaches_the_unchanged_static_scorer(
     monkeypatch, tmp_path
 ):
-    task = tasks.frozen_tool_rows(
-        row="web_fetch",
-        seed=1,
-        positions="0",
-        cluster_url="http://127.0.0.1:7994",
-        workspaces_root=str(tmp_path / "workspaces"),
-        _admission=ADMISSION,
-    )
-    expected = task.dataset[0].metadata["oracle"]["answer"]
+    expected = generate_rows("web_fetch", 1, 1)[0]["metadata"]["oracle"][
+        "answer"]
+    monkeypatch.setattr(
+        catalog.source_admission, "verify_sources", lambda _identity: ADMISSION)
     monkeypatch.setattr(
         "seon_inspect.solver.pod_run",
-        lambda *_args, **_kwargs: {
-            "agent_id": "test-agent",
-            "reply": expected,
-            "timed_out": False,
-            "closed_reason": ":completed",
-        },
+        lambda *_args, **_kwargs: _completed_pod_result(expected),
     )
 
-    log = inspect_eval(
-        task,
+    log = catalog.run_native_task(
+        tasks._bench_identity("web_fetch"),
+        tasks.frozen_tool_rows,
+        task_kwargs={
+            "row": "web_fetch",
+            "seed": 1,
+            "positions": "0",
+            "cluster_url": "http://127.0.0.1:7994",
+            "workspaces_root": str(tmp_path / "workspaces"),
+        },
+        target_snapshot=lambda: {"artifact": "stable"},
+        model_server_snapshot=_model_server_identity,
+        evidence_dir=tmp_path / "evidence",
         model="mockllm/model",
         display="none",
         log_dir=str(tmp_path / "logs"),
-        max_samples=1,
     )[0]
 
     assert log.status == "success", log.error
