@@ -29,6 +29,16 @@ Historical research and the archived dual-path audit already identify stale
 schema projections across hot reload, but there is no open issue owning this
 observed partial-import/readiness behavior.
 
+The exact dependency path is now grounded in
+`docs/prds/runtime-reliability/research/schema-generation-lifecycle-audit-2026-07-15.md`.
+Shadow's Node client catches an exception while synchronously importing the
+selected JavaScript files, logs `JS reload failed`, returns from
+`handle-build-complete`, and still invokes Seon's custom `:build-complete`
+notification. ClojureScript `def` reloads have already assigned any namespaces
+loaded before the failure. Seon can then wrap that partial live population with
+the old committed database contracts and mistake wrapper coverage for a
+complete implementation generation.
+
 The ACME evidence run reproduced the dangerous consequence on 2026-07-15. A
 stale hot-reloaded pod accepted `POST /agents/run`, then crashed under the
 intentional core-fault policy because the transcript renderer resolved
@@ -54,5 +64,7 @@ complete generation atomically.
   instrumentation/readiness state.
 - Logs and readiness name the retained or published generation and the exact
   rejected schema/symbol.
+- A nominal Shadow `:build-complete` after a caught JavaScript import failure
+  cannot reopen admission or rehost agents/tickers.
 - A hot-reload test proves dependent namespace order, failed publication, and
   successful recovery without a process restart.
