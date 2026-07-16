@@ -164,7 +164,14 @@
                   [:map [:foo/email {:seon.db/unique true} :string]])
           attr (find-attr result :foo/email)]
       (is (= :db.type/string (:db/valueType attr)))
-      (is (= :db.unique/value (:db/unique attr))))))
+      (is (= :db.unique/value (:db/unique attr)))))
+
+  (testing ":seon.db/index true -> :db/index true"
+    (let [result (dhs/malli-map->datahike-schema
+                  [:map [:foo/status {:seon.db/index true} :keyword]])
+          attr (find-attr result :foo/status)]
+      (is (= :db.type/keyword (:db/valueType attr)))
+      (is (true? (:db/index attr))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Enum

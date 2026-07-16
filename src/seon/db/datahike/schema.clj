@@ -111,13 +111,12 @@
     entry-schema))
 
 (defn- seon-db-props->db-props
-  "Translate `:seon.db/*` Malli properties to `:db/unique`. Datahike does not
-   need `:db/valueType` overrides from seon props -- value types are derived
-   from the leaf schema directly."
+  "Translate persisted `:seon.db/*` Malli properties to Datahike schema."
   [props]
   (cond-> {}
     (:seon.db/identity props) (assoc :db/unique :db.unique/identity)
     (:seon.db/unique props)   (assoc :db/unique :db.unique/value)
+    (:seon.db/index props)    (assoc :db/index true)
     (:seon.db/component props) (assoc :db/isComponent true)))
 
 (declare ^:private schema->attr-partial)

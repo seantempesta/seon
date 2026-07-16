@@ -42,6 +42,8 @@
 (def core-tx (delay (client/index-core!)))
 (def schemas-tx (delay (client/index-schemas)))
 
+(schema/register! ::indexed-value [:string {:seon.db/index true}])
+
 (defn- transact-through
   "Transact `tx-data` on `conn` through a stable database process."
   [conn process-id tx-data]
@@ -463,6 +465,13 @@
             :db/cardinality :db.cardinality/one}
            (select-keys installed [:db/valueType :db/cardinality]))
         "the persisted policy attr is installed by the pod bootstrap schema")))
+
+(deftest malli-bridge-preserves-explicit-avet-indexing
+  (is (= {:db/ident ::indexed-value
+          :db/valueType :db.type/string
+          :db/cardinality :db.cardinality/one
+          :db/index true}
+         (first (db/malli->datahike-schema [::indexed-value])))))
 
 (deftest core-program-tx-idempotent-across-boots
   ;; The "fresh agent, same conn" guard: core-program-tx drops rows already

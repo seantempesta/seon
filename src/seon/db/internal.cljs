@@ -157,6 +157,8 @@
                                (form->cardinality (resolve-malli-form raw)))}
       secondary? (assoc :db.secondary/only true)
       (:seon.db/identity props) (assoc :db/unique :db.unique/identity)
+      (:seon.db/unique props) (assoc :db/unique :db.unique/value)
+      (:seon.db/index props) (assoc :db/index true)
       (:seon.db/component props) (assoc :db/isComponent true))))
 
 (defn malli->datahike-schema
