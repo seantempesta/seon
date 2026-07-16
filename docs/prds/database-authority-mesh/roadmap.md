@@ -636,6 +636,34 @@ completion normally. This is the first deletion prerequisite for moving request
 lifetime wholly into the writer. The focused executor gate passes 26 tests/664
 assertions and the changed writer boundary passes 72 tests/982 assertions.
 
+The writer now owns every production request from admission through physical
+executor completion. One active-request map reserves the exact scope and job
+identities before submission, so synchronous rejection can reenter completion
+without a waiter or race. Single reads and mutations deliver only after their
+real executor result; execute-many progressively refills its bounded window,
+retains one materialized database value, releases it before removing the active
+request, and only then calls transport delivery. Final database release drains
+executor jobs and then waits for that writer-owned scope cleanup. Active
+duplicate request IDs reject before Datahike work and become reusable after
+cleanup. The blocking UDS server is now explicitly a temporary callback adapter,
+not the request-lifetime owner. The focused writer integration proof passes 14
+tests/128 assertions, including callback duplicate rejection/reuse and the
+existing execute-many and release fences; executor, receipts, and integration
+pass 47 tests/837 assertions.
+
+Exact Datahike source and an in-memory probe confirm that execute-many already
+gets the intended index reuse: one captured immutable value shares its primary
+index objects and the connection-owned storage cache across every member, while
+historical secondary owners require only the one outer release. The maintained
+query cache already uses exact connection/generation/commit identity and
+generation-scoped eviction. The older datom-search memoizer reads
+`:cache-size` while configuration defines `:search-cache-size`; it is therefore
+normally disabled. Its global five-value, legacy-hash retention has no
+generation release fence, so the spelling mismatch is not repaired. A
+directional 5,000-datom probe measured 30.32 ms disabled, 24.19 ms when forced,
+and 2.46 ms for an exact query-result-cache hit loop. Direct pull/search evidence
+must justify any future exact-identity replacement.
+
 Selector source review removes the unwired executor `:encode` class. Encoding
 has no database scope, immediate responses also require it, and a rejected
 encode after semantic completion has no honest response path. The transport
@@ -661,6 +689,21 @@ full-suite and density RSS mandatory graduation evidence. One
 `SEON_JS_RUNTIME` owner must select the pod, focused/full tests, changed-test
 runner, worker validator, and packaging path; no Bun-specific Shadow target is
 justified.
+
+Exact Bun source further constrains the native session. `Socket.write` is
+unbuffered: it returns the accepted byte count and does not retain the suffix,
+so the owner keeps one immutable frame plus offset and retries only from
+`drain`. Every terminal callback and the rejected connect Promise enter one
+idempotent close transition because `connectError` does not imply `close`.
+Native `data` callbacks are synchronous state transitions; Bun does not await a
+returned Promise. Receive chunks are copied into JS ownership, so retaining the
+current chunk and offset is safe but not zero-copy. The implementation uses
+`uint8array`, exact payload allocation, linear cursors, and `pause` only after
+retaining the unconsumed current chunk. `Bun.allocUnsafe`,
+`Bun.ArrayBufferSink`, and `Bun.concatArrayBuffers` remain three measured frame
+encoding candidates rather than assumptions. Bun socket and server callbacks
+preserve `AsyncLocalStorage`; an interleaved two-context proof remains required
+for first-party usage.
 
 ### Unit 7 — remote `seon.db` and coarse core reads
 
@@ -738,33 +781,35 @@ protocol and database APIs do not change.
 The implementation is ordered by semantic dependency, while independent proof
 and consumer inventory may run in parallel:
 
-- Spine: Unit 4 phase-aware bounded execution and fair database selection.
-- Slot 2: Unit 5 protocol and execute-many fixtures against graduated Datahike
-  capabilities, without implementing the unsettled Unit 4 execution owner.
-- Slot 3: retain Bun persistent-session fragmentation and backpressure fixtures
-  against the settled protocol envelopes.
-- Slot 4: retain consumer migration batches and deletion inventory without
-  editing the database mechanism.
+- Spine: finish deleting executor result promises/retained-request waiters now
+  that writer callback ownership is proven, then add explicit connection-owned
+  database acquisition.
+- Slot 2: implement the JVM selector/session owner against the settled callback
+  and acquisition contracts.
+- Slot 3: implement the Bun persistent-session parser, partial-write queue, and
+  terminal transition against exact native semantics.
+- Slot 4: make the bottom-up `seon.db` consumer closure Promise-ready and retain
+  one read-plan/ordinary-result interface before the atomic replica deletion.
 
 After each unit, integrate its retained proof before refilling. A build/restart
 checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
 
 ## Current boundary and final graduation gate
 
-Earliest unsettled implementation contract: the callback-complete writer closes
-the remaining Unit 4/Unit 6 execution boundary. Provider waits consume only
-embedding capacity; native KNN, queries, mutation completion, response encoding,
-and lifecycle requests retain their own bounded workers or bytes. `d/transact!`
-completion must hold its mutation admission without a parked thread. Database
-selection precedes shared worker acquisition, and the ready structure retains
-only databases with queued work so churn cannot make authority selection scan
-historical empty names. Each Datahike connection remains the only ordered writer
-for its database.
+Earliest unsettled implementation contract: delete the executor's compatibility
+result promises and retained-request coordinator so the callback-complete writer
+is the only request-lifetime owner. Then protocol version 5 adds explicit
+`acquire-database` using the existing database name, attachment, coordinate, and
+internal transport connection—no session ID or second reference count. Every
+network database operation must resolve through that exact acquisition before
+the selector and Bun session become reachable.
 
 Integrated proof that closes it:
-[[research/authority-heavy-class-proof-plan-2026-07-15]] plus retained 2/4/8
-database saturation, cancellation, failure/retry, encoding pressure, release,
-and shutdown tests with bounded threads, queues, bytes, and zero retained work.
+Callback duplicate/reuse, synchronous rejection reentry, reverse-order
+execute-many completion, throwing delivery, 1,000 pending requests with fixed
+workers, final materialized-value release ordering, and executor ABA replacement
+proof; followed by acquisition/close race, sibling survival, selector framing,
+partial-write, and slow-session byte-bound proof.
 
 Final graduation requires all ten units, deletion of the replica/feed/Node
 transport mechanisms, clean protocol conformance, real browser and agent

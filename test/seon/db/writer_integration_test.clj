@@ -407,6 +407,68 @@
         (.delete (File. request-path))
         (.delete (File. publish-path))))))
 
+(deftest callback-requests-reject-active-duplicates-and-reuse-cleanly
+  (let [database-name (str "writer-callback-reuse-" (random-uuid))
+        request-path (socket-path "callback-reuse-request")
+        publish-path (socket-path "callback-reuse-publish")
+        entered (java.util.concurrent.CountDownLatch. 1)
+        finish (java.util.concurrent.CountDownLatch. 1)
+        calls (atom 0)
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})
+        runtime (::writer/runtime server)
+        ^SocketChannel request-channel (uds/connect! request-path)]
+    (try
+      (let [head
+            (call! request-channel
+                   (protocol/resolve-head-request
+                    {::protocol/request-id "callback-reuse/head"
+                     ::protocol/database-name database-name}))
+            request
+            (protocol/pull-request
+             {::protocol/request-id "callback-reuse/read"
+              ::protocol/database-name database-name
+              ::protocol/attachment (::protocol/attachment head)
+              ::protocol/coordinate (::protocol/coordinate head)
+              ::protocol/selector [:callback/value]
+              ::protocol/entity-id 1})
+            first-response (promise)
+            duplicate-response (promise)
+            reused-response (promise)]
+        (with-redefs [d/pull
+                      (fn [_db-value _request]
+                        (let [call (swap! calls inc)]
+                          (when (= 1 call)
+                            (.countDown entered)
+                            (.await finish))
+                          {:callback/value call}))]
+          (writer/handle-request! runtime request #(deliver first-response %))
+          (is (.await entered 5 java.util.concurrent.TimeUnit/SECONDS))
+          (writer/handle-request! runtime request #(deliver duplicate-response %))
+          (is (= protocol/request-conflict-error
+                 (::protocol/error-kind
+                  (deref duplicate-response 1000 ::not-delivered))))
+          (is (= 1 @calls) "the duplicate never reaches Datahike")
+          (.countDown finish)
+          (is (= {:callback/value 1}
+                 (::protocol/result (deref first-response 5000 ::not-delivered))))
+          (writer/handle-request! runtime request #(deliver reused-response %))
+          (is (= {:callback/value 2}
+                 (::protocol/result (deref reused-response 5000 ::not-delivered))))
+          (is (= 2 @calls))
+          (is (empty? @(::writer/active-requests runtime)))))
+      (finally
+        (.countDown finish)
+        (try (.close request-channel) (catch Throwable _))
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
+
 (deftest writer-stop-surfaces-release-failure-and-retains-database-identity
   (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
         database-name (str "writer-release-failure-" (random-uuid))

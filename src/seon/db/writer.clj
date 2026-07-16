@@ -47,6 +47,7 @@
 (schema/register! ::executor ::executor/executor)
 (schema/register! ::query-vec 'fn?)
 (schema/register! ::knn 'fn?)
+(schema/register! ::active-requests 'some?)
 (schema/register! ::publisher :seon.db.transport.uds/publisher)
 (schema/register!
  ::dependencies
@@ -71,6 +72,7 @@
   [::query-vec ::query-vec]
   [::knn ::knn]
   [::executor ::executor]
+  [::active-requests {:optional true} ::active-requests]
   [::publisher ::publisher]])
 (schema/register! ::request-server :seon.db.transport.uds/request-server)
 (schema/register! ::database-name :seon.db.protocol/database-name)
@@ -95,6 +97,7 @@
   [::request-server ::request-server]
   [::publisher ::publisher]
   [::executor ::executor]
+  [::runtime ::runtime]
   [::database-name ::database-name]])
 (schema/register! ::stopped? :boolean)
 (schema/register! ::release-result :seon.db.protocol/writer-release-result)
@@ -1499,6 +1502,8 @@
       ::protocol/restore-completion-coordinates
       (::registry/restore-completion-coordinates observation)})))
 
+(declare await-active-scope!)
+
 (defn- fence-database-work!
   [runtime database-name expected-attachment]
   (let [{::registry/keys [conn attachment]}
@@ -1512,6 +1517,7 @@
             ::executor/scope scope
             ::executor/cancel d/cancel-query!
             ::executor/abandon-work-classes #{:provider}}))
+        (await-active-scope! runtime scope)
         scope))))
 
 (defn- handle-release-database
@@ -1777,7 +1783,265 @@
           {::protocol/request-id (or (::protocol/request-id request)
                                      "invalid-request")}})))))
 
-(defn handle-request
+(defn- request-failure-response
+  [^Throwable throwable]
+  (protocol/failure
+   {::protocol/error-kind
+    (let [kind (:seon.error/kind (ex-data throwable))]
+      (cond
+        (::failure-kind (ex-data throwable))
+        (::failure-kind (ex-data throwable))
+
+        (or (= protocol/not-found-error kind)
+            (contains? protocol/lifecycle-error-kinds kind))
+        kind
+
+        :else protocol/database-error))
+    ::protocol/error
+    (str (.getMessage throwable) " " (pr-str (ex-data throwable)))}))
+
+(defn- claim-request!
+  [runtime request complete!]
+  (let [active (::active-requests runtime)
+        request-id (::protocol/request-id request)
+        owner (Object.)]
+    (locking active
+      (when-not (contains? @active request-id)
+        (swap! active assoc request-id
+               {::owner owner
+                ::request request
+                ::complete! complete!
+                ::jobs #{}
+                ::canceled? false})
+        owner))))
+
+(defn- remove-active-request!
+  [runtime request-id owner]
+  (let [active (::active-requests runtime)]
+    (locking active
+      (when (identical? owner (get-in @active [request-id ::owner]))
+        (swap! active dissoc request-id)
+        (.notifyAll ^Object active)
+        true))))
+
+(defn- deliver-active-request!
+  [runtime request-id owner response]
+  (let [active (::active-requests runtime)
+        entry (locking active
+                (let [entry (get @active request-id)]
+                  (when (and entry (identical? owner (::owner entry)))
+                    (swap! active dissoc request-id)
+                    (.notifyAll ^Object active)
+                    entry)))]
+    (when entry
+      (try
+        ((::complete! entry) (canonical-response (::request entry) response))
+        (catch Throwable throwable
+          (log/error throwable "database request delivery failed"
+                     {::protocol/request-id request-id}))))))
+
+(defn- await-active-scope!
+  [runtime scope]
+  (when-let [active (::active-requests runtime)]
+    (locking active
+      (loop []
+        (when (some (fn [[_ entry]] (= scope (::scope entry))) @active)
+          (.wait ^Object active)
+          (recur))))))
+
+(defn- single-outcome-response
+  [request [outcome value]]
+  (if (= ::executor/throwable outcome)
+    (request-failure-response value)
+    (if (#{protocol/query-operation
+           protocol/pull-operation
+           protocol/pull-many-operation}
+         (::protocol/operation request))
+      (protocol/success value)
+      value)))
+
+(defn- reserve-single-job!
+  [runtime request-id owner scope job-id]
+  (let [active (::active-requests runtime)]
+    (locking active
+      (when (identical? owner (get-in @active [request-id ::owner]))
+        (swap! active update request-id assoc
+               ::scope scope ::jobs #{job-id})
+        true))))
+
+(declare complete-executor! drive-execute-many!)
+
+(defn- submit-execute-many-members!
+  [runtime request-id owner submissions]
+  (doseq [{job-id ::executor/job-id :as submission} submissions]
+    (let [active (::active-requests runtime)
+          reserved?
+          (locking active
+            (and (identical? owner (get-in @active [request-id ::owner]))
+                 (contains? (get-in @active [request-id ::jobs]) job-id)))]
+      (when reserved?
+        (try
+          (executor/try-submit! submission)
+          (catch Throwable throwable
+            (complete-executor!
+             runtime
+             {::executor/job-id job-id
+              ::executor/request-id request-id
+              ::executor/outcome [::executor/throwable throwable]})))
+        (when (locking active
+                (true? (get-in @active [request-id ::canceled?])))
+          (executor/cancel!
+           {::executor/executor (::executor runtime)
+            ::executor/job-id job-id}))))))
+
+(defn- reserve-execute-many-members!
+  [runtime request-id owner]
+  (let [active (::active-requests runtime)
+        dispatcher (::executor runtime)]
+    (locking active
+      (let [{::keys [request scope database-value next-position jobs canceled?]
+             :as entry}
+            (get @active request-id)]
+        (when (and entry (identical? owner (::owner entry)) database-value
+                   (not canceled?) (not (::finishing? entry)))
+          (let [members (::protocol/members request)
+                member-count (count members)
+                active-limit
+                (get-in dispatcher
+                        [::executor/capacity ::executor/classes :read
+                         ::executor/maximum-queued-by-database])
+                count-to-reserve
+                (min (- active-limit (count jobs))
+                     (- member-count next-position))
+                positions (range next-position (+ next-position count-to-reserve))
+                submissions
+                (mapv
+                 (fn [position]
+                   (let [member (nth members position)
+                         job-id [request-id position]
+                         caller-id (str "execute-many/"
+                                        (hasch/uuid [request-id position]))]
+                     {::executor/executor dispatcher
+                      ::executor/work-class :read
+                      ::executor/database-name (::protocol/database-name request)
+                      ::executor/scope scope
+                      ::executor/job-id job-id
+                      ::executor/request-id request-id
+                      ::executor/request
+                      {::database-name (::protocol/database-name request)
+                       ::scope scope
+                       ::database-value database-value
+                       ::job-id job-id
+                       ::caller-id caller-id
+                       ::request member}}))
+                 positions)]
+            (when (seq submissions)
+              (swap! active update request-id
+                     (fn [current]
+                       (-> current
+                           (assoc ::next-position (+ next-position count-to-reserve))
+                           (update ::jobs into (map ::executor/job-id submissions))))))
+            submissions))))))
+
+(defn- execute-many-canceled-result []
+  (member-failure
+   (ex-info "The database request was canceled."
+            {::failure-kind protocol/database-error})))
+
+(defn- finalize-execute-many!
+  [runtime request-id owner]
+  (let [active (::active-requests runtime)
+        final
+        (locking active
+          (let [{::keys [request jobs canceled? next-position results]
+                 :as entry}
+                (get @active request-id)
+                member-count (count (::protocol/members request))]
+            (when (and entry (identical? owner (::owner entry))
+                       (not (::finishing? entry))
+                       (empty? jobs)
+                       (or canceled? (= next-position member-count)))
+              (let [results (if canceled?
+                              (mapv #(or % (execute-many-canceled-result)) results)
+                              results)
+                    response
+                    (protocol/success
+                     (assoc (read-response-base request)
+                            ::protocol/results results))]
+                (swap! active assoc-in [request-id ::finishing?] true)
+                [entry response]))))]
+    (when final
+      (let [[entry response] final
+            release-error
+            (when-let [database-value (::database-value entry)]
+              (try
+                (d/release-materialized-db database-value)
+                nil
+                (catch Throwable throwable throwable)))
+            response (if release-error
+                       (request-failure-response release-error)
+                       response)]
+        (when (remove-active-request! runtime request-id owner)
+          (try
+            ((::complete! entry) (canonical-response (::request entry) response))
+            (catch Throwable throwable
+              (log/error throwable "execute-many delivery failed"
+                         {::protocol/request-id request-id}))))))))
+
+(defn- drive-execute-many!
+  [runtime request-id owner]
+  (when-let [submissions
+             (reserve-execute-many-members! runtime request-id owner)]
+    (submit-execute-many-members! runtime request-id owner submissions))
+  (finalize-execute-many! runtime request-id owner))
+
+(defn- complete-execute-many!
+  [runtime request-id owner job-id outcome]
+  (let [active (::active-requests runtime)
+        resolution? (= job-id [request-id :resolve])]
+    (locking active
+      (let [entry (get @active request-id)]
+        (when (and entry (identical? owner (::owner entry))
+                   (contains? (::jobs entry) job-id))
+          (if resolution?
+            (if (= ::executor/throwable (first outcome))
+              (swap! active update request-id
+                     #(-> %
+                          (update ::jobs disj job-id)
+                          (assoc ::failure-response
+                                 (request-failure-response (second outcome)))))
+              (swap! active update request-id
+                     #(-> %
+                          (update ::jobs disj job-id)
+                          (assoc ::database-value (second outcome)))))
+            (let [position (second job-id)
+                  result (if (= ::executor/throwable (first outcome))
+                           (member-failure (second outcome))
+                           (second outcome))]
+              (swap! active update request-id
+                     #(-> %
+                          (update ::jobs disj job-id)
+                          (assoc-in [::results position] result))))))))
+    (if (and resolution? (= ::executor/throwable (first outcome)))
+      (let [entry (locking active (get @active request-id))
+            response (::failure-response entry)]
+        (when response
+          (deliver-active-request! runtime request-id owner response)))
+      (drive-execute-many! runtime request-id owner))))
+
+(defn- complete-executor!
+  [runtime {::executor/keys [request-id job-id outcome]}]
+  (when request-id
+    (let [active (::active-requests runtime)
+          entry (locking active (get @active request-id))]
+      (when entry
+        (if (::execute-many? entry)
+          (complete-execute-many! runtime request-id (::owner entry) job-id outcome)
+          (deliver-active-request!
+           runtime request-id (::owner entry)
+           (single-outcome-response (::request entry) outcome)))))))
+
+(defn- handle-request-sync
   "Interpret one complete canonical database protocol request."
   {:malli/schema [:=> [:catn [::runtime ::runtime]
                             [:seon.db.writer/request :map]]
@@ -1895,6 +2159,204 @@
           {::protocol/error-kind protocol/internal-error
            ::protocol/error (.toString throwable)}))))))
 
+(defn- stale-coordinate-response
+  [request]
+  (protocol/failure
+   {::protocol/error-kind protocol/stale-coordinate-error
+    ::protocol/error "The database attachment is no longer current."
+    ::protocol/body {::protocol/request-id (::protocol/request-id request)}}))
+
+(defn- submit-single!
+  [runtime request-id owner scope submission]
+  (when (reserve-single-job! runtime request-id owner scope
+                             (::executor/job-id submission))
+    (try
+      (executor/try-submit! submission)
+      (catch Throwable throwable
+        (complete-executor!
+         runtime
+         {::executor/job-id (::executor/job-id submission)
+          ::executor/request-id request-id
+          ::executor/outcome [::executor/throwable throwable]})))))
+
+(defn- start-read-request!
+  [runtime request request-id owner]
+  (validate-read-input! request)
+  (if-let [scope (scope-for-read request)]
+    (submit-single!
+     runtime request-id owner scope
+     {::executor/executor (::executor runtime)
+      ::executor/work-class :read
+      ::executor/database-name (::protocol/database-name request)
+      ::executor/scope scope
+      ::executor/job-id request-id
+      ::executor/request-id request-id
+      ::executor/request {::database-name (::protocol/database-name request)
+                          ::scope scope
+                          ::request request}})
+    (deliver-active-request! runtime request-id owner
+                             (stale-coordinate-response request))))
+
+(defn- start-execute-many-request!
+  [runtime request request-id owner]
+  (run! validate-read-input! (::protocol/members request))
+  (if-let [scope (scope-for-read request)]
+    (let [active (::active-requests runtime)
+          resolution-id [request-id :resolve]
+          initialized?
+          (locking active
+            (when (identical? owner (get-in @active [request-id ::owner]))
+              (swap! active update request-id assoc
+                     ::execute-many? true
+                     ::scope scope
+                     ::jobs #{resolution-id}
+                     ::next-position 0
+                     ::results (vec (repeat (count (::protocol/members request))
+                                            nil)))
+              true))]
+      (when initialized?
+        (try
+          (executor/try-submit!
+           {::executor/executor (::executor runtime)
+            ::executor/work-class :read
+            ::executor/database-name (::protocol/database-name request)
+            ::executor/scope scope
+            ::executor/job-id resolution-id
+            ::executor/request-id request-id
+            ::executor/request
+            {::database-name (::protocol/database-name request)
+             ::scope scope
+             ::resolve-only? true
+             ::request request}})
+          (catch Throwable throwable
+            (complete-executor!
+             runtime
+             {::executor/job-id resolution-id
+              ::executor/request-id request-id
+              ::executor/outcome [::executor/throwable throwable]})))))
+    (deliver-active-request! runtime request-id owner
+                             (stale-coordinate-response request))))
+
+(defn- start-transact-request!
+  [runtime request request-id owner]
+  (if-let [{::keys [connection database-name]
+            attachment ::coordinate/attachment}
+           (connection-for-request request)]
+    (let [scope (committed-scope database-name attachment (d/db connection))]
+      (submit-single!
+       runtime request-id owner scope
+       {::executor/executor (::executor runtime)
+        ::executor/work-class :mutation
+        ::executor/database-name database-name
+        ::executor/scope scope
+        ::executor/job-id request-id
+        ::executor/request-id request-id
+        ::executor/request request}))
+    (deliver-active-request!
+     runtime request-id owner
+     (protocol/failure
+      {::protocol/error-kind protocol/not-found-error
+       ::protocol/error (str "Unknown database: "
+                             (::protocol/database-name request))}))))
+
+(defn- start-knn-request!
+  [runtime request request-id owner]
+  (if-let [scope (scope-for-read request)]
+    (submit-single!
+     runtime request-id owner scope
+     {::executor/executor (::executor runtime)
+      ::executor/work-class :provider
+      ::executor/database-name (::protocol/database-name request)
+      ::executor/scope scope
+      ::executor/job-id request-id
+      ::executor/request-id request-id
+      ::executor/request
+      {::database-name (::protocol/database-name request)
+       ::scope scope
+       ::request request}
+      ::executor/reserved-work-class :knn
+      ::executor/reserved-request-bytes (* 64 1024)})
+    (deliver-active-request! runtime request-id owner
+                             (stale-coordinate-response request))))
+
+(defn- cancel-active-request!
+  [runtime request]
+  (let [target-request-id (::protocol/target-request-id request)
+        active (::active-requests runtime)
+        target
+        (locking active
+          (when-let [entry (get @active target-request-id)]
+            (swap! active assoc-in [target-request-id ::canceled?] true)
+            entry))
+        response
+        (if (= (::protocol/request-id request) target-request-id)
+          (protocol/failure
+           {::protocol/error-kind protocol/protocol-error
+            ::protocol/error "A cancel request cannot cancel itself."})
+          (handle-cancel runtime request))]
+    (when (::execute-many? target)
+      (drive-execute-many! runtime target-request-id (::owner target)))
+    response))
+
+(defn handle-request!
+  "Start one request and invoke complete! exactly once after physical completion."
+  [runtime request complete!]
+  (if-not (protocol/valid-request? request)
+    (try
+      (complete! (handle-request-sync runtime request))
+      (catch Throwable throwable
+        (log/error throwable "invalid database request delivery failed")))
+    (let [request-id (::protocol/request-id request)]
+      (if-let [owner (claim-request! runtime request complete!)]
+        (try
+          (case (::protocol/operation request)
+            :seon.db.protocol.operation/query
+            (start-read-request! runtime request request-id owner)
+
+            :seon.db.protocol.operation/pull
+            (start-read-request! runtime request request-id owner)
+
+            :seon.db.protocol.operation/pull-many
+            (start-read-request! runtime request request-id owner)
+
+            :seon.db.protocol.operation/execute-many
+            (start-execute-many-request! runtime request request-id owner)
+
+            :seon.db.protocol.operation/transact
+            (start-transact-request! runtime request request-id owner)
+
+            :seon.db.protocol.operation/knn-search
+            (start-knn-request! runtime request request-id owner)
+
+            :seon.db.protocol.operation/cancel
+            (deliver-active-request! runtime request-id owner
+                                     (cancel-active-request! runtime request))
+
+            (deliver-active-request! runtime request-id owner
+                                     (handle-request-sync runtime request)))
+          (catch Throwable throwable
+            (deliver-active-request! runtime request-id owner
+                                     (request-failure-response throwable))))
+        (try
+          (complete!
+           (canonical-response
+            request
+            (protocol/failure
+             {::protocol/error-kind protocol/request-conflict-error
+              ::protocol/error "The request id is already active."})))
+          (catch Throwable throwable
+            (log/error throwable "duplicate database request delivery failed"
+                       {::protocol/request-id request-id})))))))
+
+(defn handle-request
+  "Temporarily adapt callback completion to the blocking request server."
+  [runtime request]
+  (if (::active-requests runtime)
+    (let [response (promise)]
+      (handle-request! runtime request #(deliver response %))
+      @response)
+    (handle-request-sync runtime request)))
+
 ;;; Explicit server lifecycle
 
 (defn start!
@@ -1903,6 +2365,8 @@
   [{::keys [dependencies database-name backend database-path selected-processors
             request-socket-path publish-socket-path]}]
   (let [publisher (uds/start-publisher! publish-socket-path)
+        active-requests (atom {})
+        runtime-ref (atom nil)
         dispatcher
         (executor/start!
          {::executor/capacity (if selected-processors
@@ -1912,10 +2376,16 @@
           {:read execute-read!
            :provider (partial execute-provider! dependencies)
            :knn (partial execute-knn! dependencies)
-           :mutation (partial execute-mutation! dependencies)}})
+           :mutation (fn [request]
+                       (execute-mutation! @runtime-ref request))}
+          ::executor/complete!
+          (fn [completion]
+            (complete-executor! @runtime-ref completion))})
         runtime (assoc dependencies
                        ::publisher publisher
-                       ::executor dispatcher)]
+                       ::executor dispatcher
+                       ::active-requests active-requests)
+        _ (reset! runtime-ref runtime)]
     (try
       (let [ensure-response
             (handle-request
@@ -1937,6 +2407,7 @@
            ::uds/handler (partial handle-request runtime)})
          ::publisher publisher
          ::executor dispatcher
+         ::runtime runtime
          ::database-name database-name})
       (catch Throwable throwable
         (let [release
