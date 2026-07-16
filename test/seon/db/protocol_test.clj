@@ -30,6 +30,8 @@
           ::protocol/direction :forward
           ::protocol/history? false}))
 
+(defrecord HostOwner [value])
+
 (defn- transit-roundtrip
   [value]
   (let [output (ByteArrayOutputStream.)]
@@ -237,3 +239,104 @@
                  (assoc unlisten :transport/session-id "private"))))
     (is (false? (protocol/valid-response?
                  (assoc event ::protocol/database-name "default"))))))
+
+(deftest ordinary-wire-values-are-eager-portable-data
+  (let [binary (byte-array [1 2 3])
+        accepted
+        [nil true 17 17N 17M 1/3 "value" :bare :qualified/value
+         'query/value #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
+         #inst "2026-07-16T00:00:00.000-00:00"
+         (java.net.URI. "https://example.test/value") binary
+         {:find ['?entity] :where [['?entity :person/name "Ada"]]}
+         #{:one :two} [:one {:bare "preserved"}] '(and (= ?x 1))]
+        rejected
+        [(fn [] :host) (map identity [1 2]) (->HostOwner :host)
+         (atom :host) (future :host) (promise) (Thread/currentThread)
+         (ex-info "host" {})]]
+    (is (every? protocol/ordinary-wire-value? accepted))
+    (is (not-any? protocol/ordinary-wire-value? rejected))))
+
+(deftest canonical-validation-rejects-host-owners-before-encoding
+  (let [query
+        (protocol/query-request
+         {::protocol/request-id "query/host-owner"
+          ::protocol/database-name "default"
+          ::protocol/attachment attachment
+          ::protocol/coordinate point
+          ::protocol/query-form '[:find ?value :in $ ?input]
+          ::protocol/arguments [(future :host)]})
+        response
+        (protocol/success
+         {::protocol/request-id "pull/lazy-result"
+          ::protocol/database-name "default"
+          ::protocol/attachment attachment
+          ::protocol/coordinate point
+          ::protocol/result (map identity [1 2])})
+        event
+        {::protocol/event protocol/datoms-event
+         ::protocol/request-id "listen/host-owner"
+         ::protocol/coordinate point
+         ::protocol/datoms [(assoc datom :seon.db/v (atom :host))]}]
+    (is (false? (protocol/valid-request? query)))
+    (is (map? (protocol/explain-request query)))
+    (is (false? (protocol/valid-response? response)))
+    (is (map? (protocol/explain-response response)))
+    (is (false? (protocol/valid-response? event)))))
+
+(deftest generated-candidate-manifests-use-the-portable-id-shape
+  (let [candidate
+        {:seon.db.id/key :allocation/agent
+         :seon.db.id/identity-attr :seon.agent/id
+         :seon.db.id/value "mint-ember-otter"
+         :seon.db.id/dependent-lookup-refs
+         [[:seon.user/id "human"]]}
+        request
+        (protocol/transaction-request
+         {::protocol/database-name "default"
+          ::protocol/request-id "transact/generated"
+          ::protocol/transaction-data []
+          ::protocol/generated-candidates [candidate]})
+        conflict
+        (protocol/failure
+         {::protocol/error-kind protocol/generated-candidate-conflict-error
+          ::protocol/error "collision"
+          ::protocol/body
+          {::protocol/request-id "transact/generated"
+           ::protocol/generated-candidate candidate}})]
+    (is (protocol/valid-request? request))
+    (is (protocol/valid-response? conflict))
+    (is (= request (transit-roundtrip request)))
+    (testing "the manifest is nonempty, closed, and attribute-qualified"
+      (doseq [invalid-candidate
+              [(assoc candidate :seon.db.id/extra true)
+               (assoc candidate :seon.db.id/key :unqualified)
+               (assoc candidate :seon.db.id/identity-attr :unqualified)
+               (assoc candidate :seon.db.id/value "invalid")
+               (assoc candidate :seon.db.id/dependent-lookup-refs [])
+               (assoc candidate :seon.db.id/dependent-lookup-refs
+                      [[:unqualified "human"]])]]
+        (is (false?
+             (protocol/valid-request?
+              (assoc request ::protocol/generated-candidates
+                     [invalid-candidate]))))))
+    (is (false?
+         (protocol/valid-request?
+          (assoc request ::protocol/generated-candidates []))))
+    (testing "candidate keys identify one result position"
+      (is (false?
+           (protocol/valid-request?
+            (assoc request ::protocol/generated-candidates
+                   [candidate
+                    (assoc candidate
+                           :seon.db.id/identity-attr :my.plan/id
+                           :seon.db.id/value "abcdefghijkl")]))))
+      (is (map? (protocol/explain-request
+                 (assoc request ::protocol/generated-candidates
+                        [candidate
+                         (assoc candidate
+                                :seon.db.id/identity-attr :my.plan/id
+                                :seon.db.id/value "abcdefghijkl")])))))
+    (is (false?
+         (protocol/valid-response?
+          (assoc conflict ::protocol/generated-candidate
+                 (assoc candidate :seon.db.id/key :unqualified)))))))

@@ -11,6 +11,8 @@
    transaction request. One logical write therefore has one identity from
    delivery through recovery."
   (:require #?@(:bb [] :default [[hasch.core :as hasch]])
+            #?@(:cljs [[cognitect.transit :as transit]
+                       [goog.object :as gobj]])
             [malli.core :as m]
             [seon.db.coordinate :as coordinate]
             [seon.db.restore.schema]
@@ -104,6 +106,69 @@
 
 (def writer-process :seon.dev.process/writer)
 
+;;; Ordinary wire values
+
+#?(:clj
+   (def ^:private byte-array-class (Class/forName "[B")))
+
+(defn ordinary-wire-value?
+  "True when `value` is eager data supported by every protocol host."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [value]
+  (cond
+    (or (fn? value)
+        (record? value)
+        #?(:clj (or (instance? clojure.lang.IDeref value)
+                    (instance? java.lang.Thread value)
+                    (instance? java.util.concurrent.Future value)
+                    (instance? Throwable value))
+           :cljs (or (satisfies? IDeref value)
+                     (instance? js/Promise value)
+                     (instance? js/Error value))))
+    false
+
+    (map? value)
+    (and (every? ordinary-wire-value? (keys value))
+         (every? ordinary-wire-value? (vals value)))
+
+    (vector? value)
+    (every? ordinary-wire-value? value)
+
+    (set? value)
+    (every? ordinary-wire-value? value)
+
+    (list? value)
+    (every? ordinary-wire-value? value)
+
+    (sequential? value)
+    false
+
+    :else
+    (or (nil? value)
+        (boolean? value)
+        (number? value)
+        (string? value)
+        (keyword? value)
+        (symbol? value)
+        (uuid? value)
+        (inst? value)
+        #?(:clj
+           (or (instance? java.net.URI value)
+               (instance? byte-array-class value))
+           :cljs
+           (or (instance? js/Uint8Array value)
+               (transit/integer? value)
+               (transit/bigint? value)
+               (transit/bigdec? value)
+               (transit/uri? value)
+               (and (transit/tagged-value? value)
+                    (= "ratio" (gobj/get value "tag"))
+                    (let [representation (gobj/get value "rep")]
+                      (and (vector? representation)
+                           (= 2 (count representation))
+                           (every? ordinary-wire-value?
+                                   representation)))))))))
+
 ;;; Shared schemas
 
 (schema/register!
@@ -134,9 +199,9 @@
 (schema/register! ::pong? :boolean)
 (schema/register! ::capabilities :map)
 (schema/register! ::maximum-frame-bytes [:int {:min 1}])
-;; Datahike query and pull values are intentionally polymorphic EDN. The JVM
-;; authority performs the stricter recursive host-value/laziness check before
-;; encoding while preserving native result shapes and legitimate bare keys.
+;; Datahike query and pull values are intentionally polymorphic data. The
+;; canonical request/response validators apply `ordinary-wire-value?`
+;; recursively while preserving native result shapes and legitimate bare keys.
 (schema/register! ::result :any)
 (schema/register! ::arguments [:vector :any])
 (schema/register! ::selector :any)
@@ -202,9 +267,19 @@
 (schema/register! ::transaction-data [:vector :any])
 (schema/register! ::transaction-meta :map)
 (schema/register! ::temporary-ids :map)
-(schema/register! ::generated-candidates [:vector :any])
-(schema/register! ::generated-candidate :any)
-(schema/register! ::generated-entity-ids :map)
+(schema/register!
+ ::generated-candidate
+ [:map {:closed true}
+  [:seon.db.id/key :qualified-keyword]
+  [:seon.db.id/identity-attr :qualified-keyword]
+  [:seon.db.id/value :seon.db/id]
+  [:seon.db.id/dependent-lookup-refs {:optional true}
+   [:vector {:min 1}
+    [:tuple :qualified-keyword :seon.db/lookup-ref-value]]]])
+(schema/register! ::generated-candidates
+                  [:vector {:min 1} ::generated-candidate])
+(schema/register! ::generated-entity-ids
+                  [:map-of :qualified-keyword :int])
 (schema/register! ::recovered? :boolean)
 (schema/register! ::event
                   [:enum transaction-event datoms-event
@@ -674,6 +749,7 @@
   [::request-id ::request-id]
   [::error-kind ::error-kind]
   [::error ::error]
+  [::generated-candidate {:optional true} ::generated-candidate]
   [::expected-coordinate {:optional true} ::expected-coordinate]
   [::current-coordinate {:optional true} ::current-coordinate]])
 (schema/register!
@@ -1355,27 +1431,46 @@
 (defonce ^:private writer-terminal-result-validator
   (delay (m/validator @writer-terminal-result-schema)))
 
+(defn- generated-candidate-keys-unique?
+  [request]
+  (if-let [candidates (::generated-candidates request)]
+    (let [candidate-keys (map :seon.db.id/key candidates)]
+      (= (count candidate-keys) (count (distinct candidate-keys))))
+    true))
+
+(defn- request-semantics-valid?
+  [request]
+  (and (request-cursors-match? request)
+       (generated-candidate-keys-unique? request)))
+
 (defn valid-request?
   "True when `request` is one complete canonical protocol request."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [request]
   (and (@request-validator request)
-       (request-cursors-match? request)))
+       (ordinary-wire-value? request)
+       (request-semantics-valid? request)))
 
 (defn explain-request
   "Malli explanation for an invalid request, or nil when valid."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
   [request]
   (or (@request-explainer request)
+      (when-not (ordinary-wire-value? request)
+        {::error "Protocol requests contain only eager ordinary wire values."})
       (when-not (request-cursors-match? request)
         {::cursor (::cursor request)
-         ::error "Index-page cursor does not match request."})))
+         ::error "Index-page cursor does not match request."})
+      (when-not (generated-candidate-keys-unique? request)
+        {::generated-candidates (::generated-candidates request)
+         ::error "Generated candidate keys must be unique."})))
 
 (defn valid-response?
   "True when `response` is one complete canonical protocol response."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [response]
-  (@response-validator response))
+  (and (@response-validator response)
+       (ordinary-wire-value? response)))
 
 (defn valid-writer-terminal-result?
   "True when `result` is one complete writer terminal value."
@@ -1387,7 +1482,9 @@
   "Malli explanation for an invalid response, or nil when valid."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
   [response]
-  (@response-explainer response))
+  (or (@response-explainer response)
+      (when-not (ordinary-wire-value? response)
+        {::error "Protocol responses contain only eager ordinary wire values."})))
 
 ;;; Durable idempotency receipt
 
