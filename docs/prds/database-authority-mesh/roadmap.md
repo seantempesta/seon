@@ -147,6 +147,8 @@ probes are grounded in
 The Datahike-owned pre-compute acquisition that removes single-flight joiners
 from scarce Seon CPU capacity is
 [[research/single-flight-admission-seam-2026-07-16]].
+The generated-ID remote seam and rejected declarative-template alternative are
+[[research/generated-id-authority-seam-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -936,8 +938,9 @@ and consumer inventory may run in parallel:
 - Slot 4: the atomic reachability inventory across `db.cljs`,
   `db/internal.cljs`, `client.cljs`, `repl.cljs`, `embed.cljs`,
   `handlers/ns.cljs`, `coordinate.cljc`, `id.cljc`, replica, publisher, and
-  replay owners is complete. Refill with the generated-ID builder and async
-  render-boundary falsifiers before freezing the final `seon.db` contract.
+  replay owners is complete. The generated-ID builder falsifier selected the
+  existing ordinary candidate-manifest transaction; refill with the async
+  render-boundary falsifier before freezing the final `seon.db` contract.
 
 After each unit, integrate its retained proof before refilling. A build/restart
 checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
@@ -1000,6 +1003,16 @@ Schema/index/history/selective-interest conformance, including forward/reverse
 cursor continuity, register/commit/unlisten ordering, addressed one-of-1,000
 delivery, report-gap resynchronization, sibling disconnect, and final release;
 followed by the first coarse remote `seon.db` consumer plan.
+
+Generated identity allocation does not need another authority operation. All
+11 production builders are pure over generated IDs and frozen caller data. Bun
+keeps candidate generation and sends the existing transaction data plus
+candidate manifest; the JVM retains policy validation, collision detection,
+serialized commit, durable receipt, and generated-entity recovery. The warm
+path is already one request. Only a collision uses a new candidate round and
+request ID; ambiguous delivery resends identical bytes and the identical
+request ID. A declarative template would add a second transaction language to
+avoid only that rare retry.
 
 Final graduation requires all ten units, deletion of the replica/feed/Node
 transport mechanisms, clean protocol conformance, real browser and agent
