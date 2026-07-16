@@ -117,7 +117,8 @@
   [props]
   (cond-> {}
     (:seon.db/identity props) (assoc :db/unique :db.unique/identity)
-    (:seon.db/unique props)   (assoc :db/unique :db.unique/value)))
+    (:seon.db/unique props)   (assoc :db/unique :db.unique/value)
+    (:seon.db/component props) (assoc :db/isComponent true)))
 
 (declare ^:private schema->attr-partial)
 
@@ -136,7 +137,8 @@
         combined-seon-props (merge (seon-db-props->db-props (m/properties child-schema))
                                    (seon-db-props->db-props entry-props))]
     (case schema-type
-      (:string :int :long :double :float :boolean :keyword :symbol :uuid :inst
+      (:string :int :long :double :float :boolean :keyword :qualified-keyword
+               :symbol :qualified-symbol :uuid :inst
                string? int? double? float? boolean? keyword? symbol? uuid? inst?)
       (merge {:db/valueType (malli-type->datahike-type schema-type)
               :db/cardinality :db.cardinality/one}
@@ -149,7 +151,12 @@
       (let [inner (first (m/children child-schema))]
         (schema->attr-partial attr-key entry-props inner))
 
-      (:vector :set)
+      :and
+      (merge (schema->attr-partial attr-key nil
+                                   (first (m/children child-schema)))
+             combined-seon-props)
+
+      (:vector :set :sequential)
       (let [inner (first (m/children child-schema))
             inner-type (m/type inner)
             float-inner? (contains? #{:float :double float? double?} inner-type)
@@ -213,18 +220,27 @@
              combined-seon-props)
 
       :or
-      ;; :or must declare :seon.db/value-type in properties to be persisted.
-      (let [vt (:seon.db/value-type (m/properties child-schema))]
-        (if vt
-          (merge {:db/valueType vt
-                  :db/cardinality :db.cardinality/one}
-                 combined-seon-props)
-          (throw (ex-info
-                  (str ":or schema for attr " attr-key
-                       " must declare :seon.db/value-type in properties "
-                       "to be persisted. Example: "
-                       "[:or {:seon.db/value-type :db.type/string} ...]")
-                  {:attr attr-key :schema child-schema}))))
+      ;; Homogeneous unions retain their one storage type. Mixed or
+      ;; unbridgeable unions use Seon's one EDN-string representation; the
+      ;; client write/read boundary owns encoding and decoding those values.
+      (let [explicit (:seon.db/value-type (m/properties child-schema))
+            child-types
+            (into #{}
+                  (map (fn [child]
+                         (try
+                           (:db/valueType
+                            (schema->attr-partial attr-key nil child))
+                           (catch Throwable _ ::unmappable))))
+                  (m/children child-schema))
+            value-type
+            (or explicit
+                (when (and (= 1 (count child-types))
+                           (not (contains? child-types ::unmappable)))
+                  (first child-types))
+                :db.type/string)]
+        (merge {:db/valueType value-type
+                :db/cardinality :db.cardinality/one}
+               combined-seon-props))
 
       :malli.core/schema
       ;; A registered-keyword reference (e.g. :seon.db/ref). Pre-deref, we
@@ -301,7 +317,8 @@
      tempids, pos-int eids, or [unique-attr value] lookup-refs). Cross-DB
      handles use plain `:uuid` with `:seon.db/ref-to` metadata and are
      never labeled as `:seon.db/ref`.
-   - `:or` requires `:seon.db/value-type` in properties to be persistable.
+   - homogeneous `:or` forms retain their one type; mixed forms use the
+     existing EDN-string representation unless `:seon.db/value-type` is set.
    - Nested `:map` as component ref is not supported in phase 1.
 
    Note: single-arg positional (not map-in). Pure derivation utility."

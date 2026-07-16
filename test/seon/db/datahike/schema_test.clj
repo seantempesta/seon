@@ -260,15 +260,14 @@
       (is (= :db.type/string (:db/valueType attr))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; :or requires :seon.db/value-type
+;;; :or storage representation
 ;;; ---------------------------------------------------------------------------
 
-(deftest bridge-or-requires-value-type-test
-  (testing ":or without :seon.db/value-type raises"
-    (is (thrown-with-msg?
-         Exception #"must declare :seon.db/value-type"
-         (dhs/malli-map->datahike-schema
-          [:map [:foo/x [:or :string :keyword]]]))))
+(deftest bridge-or-storage-test
+  (testing "mixed :or uses the existing EDN-string representation"
+    (let [result (dhs/malli-map->datahike-schema
+                  [:map [:foo/x [:or :string :keyword]]])]
+      (is (= :db.type/string (:db/valueType (find-attr result :foo/x))))))
 
   (testing ":or with :seon.db/value-type uses declared type"
     (let [result (dhs/malli-map->datahike-schema
@@ -281,9 +280,26 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest explicit-form-population-is-the-only-reference-registry-test
-  (let [forms {:example/name :string
+  (let [forms {:seon.db/lookup-ref-value
+               [:or :string :uuid :keyword :int]
+               :seon.db/ref
+               [:or :int :string
+                [:tuple :keyword :seon.db/lookup-ref-value]]
+               :seon.db.id/legacy-value [:string {:min 14 :max 14}]
+               :seon.db.id/compact-value
+               [:or :seon.db.id/legacy-value
+                [:and :string [:re "^[a-z][a-z0-9]{11}$"]]]
+               :example/name :string
                :example/names [:set :example/name]
-               :example/id [:uuid {:seon.db/identity true}]}]
+               :example/id [:uuid {:seon.db/identity true}]
+               :example/generated-id
+               [:and {:seon.db/identity true
+                      :seon.db.id/generator
+                      :seon.db.id.generator/compact}
+                :seon.db.id/compact-value]
+               :example/children
+               [:vector {:seon.db/component true} :seon.db/ref]
+               :example/render [:or :string :symbol]}]
     (is (= {:db/ident :example/names
             :db/valueType :db.type/string
             :db/cardinality :db.cardinality/many}
@@ -294,7 +310,24 @@
             :db/cardinality :db.cardinality/one
             :db/unique :db.unique/identity}
            (dhs/malli-form->datahike-attribute
-            forms :example/id (:example/id forms))))))
+            forms :example/id (:example/id forms))))
+    (is (= {:db/ident :example/generated-id
+            :db/valueType :db.type/string
+            :db/cardinality :db.cardinality/one
+            :db/unique :db.unique/identity}
+           (dhs/malli-form->datahike-attribute
+            forms :example/generated-id (:example/generated-id forms))))
+    (is (= {:db/ident :example/children
+            :db/valueType :db.type/ref
+            :db/cardinality :db.cardinality/many
+            :db/isComponent true}
+           (dhs/malli-form->datahike-attribute
+            forms :example/children (:example/children forms))))
+    (is (= {:db/ident :example/render
+            :db/valueType :db.type/string
+            :db/cardinality :db.cardinality/one}
+           (dhs/malli-form->datahike-attribute
+            forms :example/render (:example/render forms))))))
 
 (deftest e2e-derive-install-transact-test
   (testing "derived schema installs and accepts valid data"

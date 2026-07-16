@@ -5,6 +5,7 @@
             [seon.db.backend :as backend]
             [seon.db.coordinate :as coordinate]
             [seon.db.executor :as executor]
+            [seon.db.id :as id]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.transport.uds :as uds]
@@ -1630,6 +1631,261 @@
       (finally
         (try (.close a) (catch Throwable _))
         (try (.close b) (catch Throwable _))
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
+
+(deftest canonical-schema-forms-augment-the-same-domain-transaction
+  (let [database-name (str "writer-schema-" (random-uuid))
+        isolated-name (str "writer-schema-isolated-" (random-uuid))
+        request-path (socket-path "schema-request")
+        publish-path (socket-path "schema-publish")
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})
+        ^SocketChannel channel (uds/connect! request-path)
+        bootstrap-schema
+        [{:db/ident :seon.schema/key
+          :db/valueType :db.type/keyword
+          :db/cardinality :db.cardinality/one
+          :db/unique :db.unique/identity}
+         {:db/ident :seon.schema/form
+          :db/valueType :db.type/string
+          :db/cardinality :db.cardinality/one}
+         {:db/ident :seon.db.id/generator
+          :db/valueType :db.type/keyword
+          :db/cardinality :db.cardinality/one}]
+        transact!
+        (fn [database request-id transaction-data]
+          (call! channel
+                 (protocol/transaction-request
+                  {::protocol/database-name database
+                   ::protocol/request-id request-id
+                   ::protocol/transaction-data transaction-data})))
+        initialize!
+        (fn [database request-prefix]
+          (acquire! channel database request-prefix)
+          (transact! database (str request-prefix "/bootstrap")
+                     bootstrap-schema))]
+    (try
+      (initialize! database-name "schema/main")
+      (let [forms
+            [{:seon.schema/key :writer.schema/id
+              :seon.schema/form
+              "[:string {:seon.db/identity true}]"}
+             {:seon.schema/key :seon.db/lookup-ref-value
+              :seon.schema/form "[:or :string :uuid :keyword :int]"}
+             {:seon.schema/key :seon.db/ref
+              :seon.schema/form
+              "[:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]]"}
+             {:seon.schema/key :writer.schema/name
+              :seon.schema/form ":string"}
+             {:seon.schema/key :writer.schema/score
+              :seon.schema/form ":double"}
+             {:seon.schema/key :writer.schema/parent
+              :seon.schema/form
+              ":seon.db/ref"}
+             {:seon.schema/key :writer.schema/children
+              :seon.schema/form
+              "[:vector {:seon.db/component true} :seon.db/ref]"}]
+            admitted
+            (transact!
+             database-name "schema/admit"
+             (into forms
+                   [{:db/id "schema-parent"
+                     :writer.schema/id "parent"
+                     :writer.schema/name "Parent"
+                     :writer.schema/score 1}
+                    {:db/id "schema-child"
+                     :writer.schema/id "child"
+                     :writer.schema/name "Child"
+                     :writer.schema/parent "schema-parent"}
+                    {:db/id "component-root"
+                     :writer.schema/id "component-root"
+                     :writer.schema/children
+                     [{:db/id "component-child"
+                       :writer.schema/id "component-child"
+                       :writer.schema/name "Nested"}]}]))
+            connection
+            (::registry/conn
+             (registry/lookup-connection
+              {::registry/database-name (keyword database-name)}))
+            admitted-db (d/db connection)
+            child (d/pull admitted-db '[* {:writer.schema/parent [*]}]
+                          [:writer.schema/id "child"])
+            shared-transaction
+            (d/q '[:find ?transaction .
+                   :where
+                   [?schema :seon.schema/key :writer.schema/id ?transaction]
+                   [?entity :writer.schema/id "child" ?transaction]]
+                 admitted-db)
+            repeated
+            (transact! database-name "schema/repeat" [(second forms)])
+            before-incompatible (coordinate/resolved (d/db connection))
+            incompatible
+            (transact!
+             database-name "schema/incompatible"
+             [{:seon.schema/key :writer.schema/name
+               :seon.schema/form ":int"}
+              {:writer.schema/id "must-not-land"
+               :writer.schema/name "Wrong"}])
+            before-invalid (coordinate/resolved (d/db connection))
+            invalid
+            (transact!
+             database-name "schema/invalid-value"
+             [{:seon.schema/key :writer.schema/broken
+               :seon.schema/form ":int"}
+              {:writer.schema/broken "not-an-int"}])
+            after-invalid (d/db connection)]
+        (is (true? (::protocol/success? admitted)))
+        (is (pos-int? shared-transaction)
+            "canonical schema and domain facts share one transaction")
+        (is (= :db.type/ref
+               (get-in admitted-db [:schema :writer.schema/parent
+                                    :db/valueType])))
+        (is (= :db.unique/identity
+               (get-in admitted-db [:schema :writer.schema/id :db/unique])))
+        (is (true?
+             (get-in admitted-db
+                     [:schema :writer.schema/children :db/isComponent])))
+        (is (= 1.0 (:writer.schema/score
+                    (d/pull admitted-db '[*]
+                            [:writer.schema/id "parent"])))
+            "new numeric schema participates in wire-number coercion")
+        (is (= "parent"
+               (get-in child [:writer.schema/parent :writer.schema/id])))
+        (is (= #{"schema-parent" "schema-child"
+                 "component-root" "component-child"}
+               (set (keys (::protocol/temporary-ids admitted))))
+            "derived ref schema participates in caller tempid recovery")
+        (is (true? (::protocol/success? repeated)))
+        (is (not-any? #(= :db/ident (second %))
+                      (::protocol/transaction-data repeated))
+            "an installed matching declaration is not re-added")
+        (is (false? (::protocol/success? incompatible)))
+        (is (= :user-input (:seon.error/kind incompatible)))
+        (is (= before-incompatible (coordinate/resolved (d/db connection))))
+        (is (nil? (d/pull (d/db connection) '[*]
+                          [:writer.schema/id "must-not-land"])))
+        (is (false? (::protocol/success? invalid)))
+        (is (= before-invalid (coordinate/resolved after-invalid)))
+        (is (not (contains? (:schema after-invalid) :writer.schema/broken)))
+        (is (nil? (d/q '[:find ?schema .
+                         :where
+                         [?schema :seon.schema/key :writer.schema/broken]]
+                       after-invalid)))
+
+        (let [schema-only
+              (transact!
+               database-name "schema/lazy/admit"
+               [{:seon.schema/key :writer.schema/lazy
+                 :seon.schema/form ":keyword"}
+                {:seon.schema/key :writer.schema/non-attribute
+                 :seon.schema/form
+                 "[:map [:writer.schema/non-attribute-value :string]]"}])
+              after-schema-only (d/db connection)
+              lazy-use
+              (transact!
+               database-name "schema/lazy/use"
+               [{:writer.schema/lazy :ready}])
+              before-unknown (coordinate/resolved (d/db connection))
+              unknown
+              (transact!
+               database-name "schema/unknown"
+               [{:writer.schema/unknown "not-declared"}])]
+          (is (true? (::protocol/success? schema-only)))
+          (is (not (contains? (:schema after-schema-only)
+                              :writer.schema/lazy))
+              "schema-only facts wait for actual attribute use")
+          (is (pos-int?
+               (d/q '[:find ?schema .
+                      :where
+                      [?schema :seon.schema/key :writer.schema/lazy]
+                      [?schema :seon.schema/form ":keyword"]]
+                    after-schema-only))
+              "the canonical form is durable before lazy installation")
+          (is (not (contains? (:schema after-schema-only)
+                              :writer.schema/non-attribute))
+              "non-attribute schema forms remain ordinary facts")
+          (is (true? (::protocol/success? lazy-use)))
+          (is (= :db.type/keyword
+                 (get-in (d/db connection)
+                         [:schema :writer.schema/lazy :db/valueType])))
+          (is (false? (::protocol/success? unknown)))
+          (is (= :user-input (:seon.error/kind unknown)))
+          (is (= before-unknown (coordinate/resolved (d/db connection)))))
+
+        (let [generated-value "xschema00000"
+              generated-schema
+              (transact!
+               database-name "schema/generated/admit"
+               [{:seon.schema/key :seon.db.id/legacy-value
+                 :seon.schema/form "[:string {:min 14 :max 14}]"}
+                {:seon.schema/key :seon.db.id/compact-value
+                 :seon.schema/form
+                 (str "[:or :seon.db.id/legacy-value "
+                      "[:and :string [:re \"^[a-z][a-z0-9]{11}$\"]]]")}
+                {:seon.schema/key :writer.schema/generated-id
+                 :seon.schema/form
+                 (str "[:and {:seon.db/identity true "
+                      ":seon.db.id/generator "
+                      ":seon.db.id.generator/compact} "
+                      ":seon.db.id/compact-value]")
+                 :seon.db.id/generator
+                 :seon.db.id.generator/compact}])
+              generated
+              (call! channel
+                     (protocol/transaction-request
+                      {::protocol/database-name database-name
+                       ::protocol/request-id "schema/generated/write"
+                       ::protocol/transaction-data
+                       [{:writer.schema/generated-id generated-value
+                         :writer.schema/name "Generated"}]
+                       ::protocol/generated-candidates
+                       [{::id/key :schema/generated
+                         ::id/identity-attr :writer.schema/generated-id
+                         ::id/value generated-value}]}))]
+          (is (true? (::protocol/success? generated-schema))
+              (pr-str generated-schema))
+          (is (true? (::protocol/success? generated)) (pr-str generated))
+          (is (pos-int?
+               (get (::protocol/generated-entity-ids generated)
+                    :schema/generated)))
+          (is (= "Generated"
+                 (:writer.schema/name
+                  (d/pull (d/db connection) '[*]
+                          [:writer.schema/generated-id generated-value])))))
+
+        (call! channel
+               (protocol/ensure-database-request
+                {::protocol/request-id "schema/isolated/ensure"
+                 ::protocol/database-name isolated-name
+                 ::protocol/backend :memory}))
+        (initialize! isolated-name "schema/isolated")
+        (let [isolated
+              (transact!
+               isolated-name "schema/isolated/admit"
+               [{:seon.schema/key :writer.schema/name
+                 :seon.schema/form ":int"}
+                {:writer.schema/name 42}])
+              isolated-connection
+              (::registry/conn
+               (registry/lookup-connection
+                {::registry/database-name (keyword isolated-name)}))]
+          (is (true? (::protocol/success? isolated)))
+          (is (= :db.type/long
+                 (get-in (d/db isolated-connection)
+                         [:schema :writer.schema/name :db/valueType])))
+          (is (= :db.type/string
+                 (get-in (d/db connection)
+                         [:schema :writer.schema/name :db/valueType]))
+              "canonical form registries are isolated per database")))
+      (finally
+        (try (.close channel) (catch Throwable _))
         (writer/stop! server)
         (.delete (File. request-path))
         (.delete (File. publish-path))))))

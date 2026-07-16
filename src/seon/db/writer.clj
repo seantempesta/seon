@@ -209,6 +209,150 @@
              :else [])))
         (tree-seq coll? seq transaction-data)))
 
+(defn- transaction-schema-identifiers
+  [transaction-data]
+  (into #{}
+        (keep (fn [item]
+                (when (and (map? item)
+                           (qualified-keyword? (:db/ident item)))
+                  (:db/ident item))))
+        transaction-data))
+
+(defn- schema-row-key
+  [item]
+  (when (map? item)
+    (or (:seon.schema/key item)
+        (let [entity (:db/id item)]
+          (when (and (sequential? entity)
+                     (= 2 (count entity))
+                     (= :seon.schema/key (first entity)))
+            (second entity))))))
+
+(defn- schema-form-strings
+  [transaction-data]
+  (into {}
+        (keep (fn [item]
+                (when-let [attribute (schema-row-key item)]
+                  (when (contains? item :seon.schema/form)
+                    [attribute (:seon.schema/form item)]))))
+        transaction-data))
+
+(defn- generated-schema-attributes
+  [transaction-data]
+  (into #{}
+        (keep (fn [item]
+                (when (and (map? item)
+                           (contains? item :seon.db.id/generator))
+                  (schema-row-key item))))
+        transaction-data))
+
+(defn- read-schema-form
+  [attribute form-string]
+  (when-not (string? form-string)
+    (throw
+     (ex-info "A canonical schema form must be an EDN string."
+              {::attribute attribute
+               ::schema-form form-string
+               :seon.error/kind :user-input})))
+  (try
+    (edn/read-string form-string)
+    (catch Throwable throwable
+      (throw
+       (ex-info "A canonical schema form is not readable EDN."
+                {::attribute attribute
+                 ::schema-form form-string
+                 :seon.error/kind :user-input}
+                throwable)))))
+
+(defn- stored-schema-form-strings
+  [db-value]
+  (if (and (contains? (:schema db-value) :seon.schema/key)
+           (contains? (:schema db-value) :seon.schema/form))
+    (into {}
+          (d/q '[:find ?attribute ?form
+                 :where
+                 [?schema :seon.schema/key ?attribute]
+                 [?schema :seon.schema/form ?form]]
+               db-value))
+    {}))
+
+(defn- canonical-schema-forms
+  [db-value transaction-data]
+  (let [form-strings
+        (merge (stored-schema-form-strings db-value)
+               (schema-form-strings transaction-data))]
+    (into {}
+          (map (fn [[attribute form-string]]
+                 [attribute (read-schema-form attribute form-string)]))
+          form-strings)))
+
+(defn- schema-shape
+  [declaration]
+  (select-keys declaration schema-properties))
+
+(defn- derive-transaction-schema
+  [db-value transaction-data]
+  (let [installed (:schema db-value)
+        admitted (set (keys (schema-form-strings transaction-data)))
+        directly-declared (transaction-schema-identifiers transaction-data)
+        missing-used
+        (into #{}
+              (comp
+               (filter qualified-keyword?)
+               (remove #(= "db" (namespace %)))
+               (remove directly-declared)
+               (remove #(contains? installed %)))
+              (transaction-attributes transaction-data))
+        candidates (set/union missing-used
+                              (generated-schema-attributes transaction-data)
+                              (set/intersection admitted
+                                                (set (keys installed))))]
+    (if (empty? candidates)
+      []
+      (let [forms (canonical-schema-forms db-value transaction-data)
+            unresolved (vec (sort-by str (remove #(contains? forms %)
+                                                  candidates)))
+            _ (when (seq unresolved)
+                (throw
+                 (ex-info "A transaction attribute has no canonical schema form."
+                          {::attributes unresolved
+                           :seon.error/kind :user-input})))
+            affected (sort-by str candidates)
+            declarations
+            (mapv
+             (fn [attribute]
+               (try
+                 (datahike.schema/malli-form->datahike-attribute
+                  forms attribute (get forms attribute))
+                 (catch Throwable throwable
+                   (throw
+                    (ex-info "A canonical schema form cannot be stored by Datahike."
+                             {::attribute attribute
+                              ::schema-form (get forms attribute)
+                              :seon.error/kind :user-input}
+                             throwable)))))
+             affected)
+            incompatible
+            (into []
+                  (keep
+                   (fn [{:db/keys [ident] :as declaration}]
+                     (when-let [actual (get installed ident)]
+                       (let [expected (schema-shape declaration)
+                             actual (schema-shape actual)]
+                         (when (not= expected actual)
+                           {::attribute ident
+                            ::expected-schema expected
+                            ::actual-schema actual})))))
+                  declarations)]
+        (when (seq incompatible)
+          (throw
+           (ex-info "A canonical schema form conflicts with installed schema."
+                    {::incompatible-schema incompatible
+                     :seon.error/kind :user-input})))
+        (into []
+              (remove #(contains? installed (:db/ident %)))
+              declarations)))))
+
 (defn- assert-protocol-attributes-free!
   [transaction-data transaction-meta]
   (let [used (into (set (keys (or transaction-meta {})))
@@ -1072,14 +1216,23 @@
         {::response response}
         (let [db-value (d/db connection)
               _ (assert-current-coordinate! db-value expected-coordinate)
+              schema-declarations
+              (derive-transaction-schema db-value transaction-data)
+              effective-schema
+              (merge (into {}
+                           (map (juxt :db/ident identity))
+                           schema-declarations)
+                     (:schema db-value))
               coerced-data
-              (coerce-transaction-data (:schema db-value) transaction-data)
+              (coerce-transaction-data effective-schema transaction-data)
+              augmented-data
+              (into (vec schema-declarations) coerced-data)
               caller-tempids
               (id/transaction-tempids
                {::id/db-value db-value
-                ::id/transaction-data coerced-data})
+                ::id/transaction-data augmented-data})
               data-with-receipts
-              (into (vec coerced-data)
+              (into augmented-data
                     (protocol/tempid-receipts request-id caller-tempids))
               transaction-meta*
               (assoc (or transaction-meta {})
@@ -1680,10 +1833,10 @@
             ::protocol/error (::id/message classified)})
 
           :seon.db.id/unrelated
-          (throw throwable)))
+          (request-failure-response throwable)))
 
       :else
-      (throw throwable))))
+      (request-failure-response throwable))))
 
 (defn- transaction-outcome
   [request result]
