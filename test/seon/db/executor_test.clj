@@ -19,9 +19,47 @@
   ([processors execute]
    (start-worker processors execute (fn [_completion] nil)))
   ([processors execute complete!]
-   (executor/start! {::executor/capacity (test-capacity processors)
-                     ::executor/execute execute
-                     ::executor/complete! complete!})))
+   (let [completions (atom {})]
+     (assoc
+      (executor/start!
+       {::executor/capacity (test-capacity processors)
+        ::executor/execute execute
+        ::executor/complete!
+        (fn [completion]
+          (when-let [result (get @completions (::executor/job-id completion))]
+            (deliver result (::executor/outcome completion)))
+          (complete! completion))})
+      ::completion-promises completions))))
+
+(defn- submit-async!
+  [submission]
+  (let [worker (::executor/executor submission)
+        job-id (::executor/job-id submission)
+        completions (::completion-promises worker)
+        candidate (promise)
+        result (get (swap! completions
+                           #(if (contains? % job-id)
+                              %
+                              (assoc % job-id candidate)))
+                    job-id)]
+    (when (identical? candidate result)
+      (executor/try-submit! submission))
+    result))
+
+(defn- submit-with-evidence!
+  [submission]
+  (let [worker (::executor/executor submission)
+        job-id (::executor/job-id submission)
+        result (promise)]
+    (swap! (::completion-promises worker) assoc job-id result)
+    [(executor/try-submit! submission) result]))
+
+(defn- submit!
+  [submission]
+  (let [[outcome value] @(submit-async! submission)]
+    (if (= ::executor/throwable outcome)
+      (throw value)
+      value)))
 
 (defn- await-queued
   [worker expected]
@@ -91,7 +129,7 @@
   (let [worker (start-worker {:read :request/value})
         scope (scope "a" (random-uuid) (random-uuid))]
     (try
-      (is (= :value (executor/submit!
+      (is (= :value (submit!
                      (request worker "a" scope "job-1" :value))))
       (is (= {} (::executor/running-by-database
                  (executor/evidence worker))))
@@ -107,7 +145,7 @@
                     exact-scope
                     (scope database-name (random-uuid) (random-uuid))]]
         (is (= index
-               (executor/submit!
+               (submit!
                 (request worker database-name exact-scope
                          (str "churn/job-" index) index)))))
       (let [ready (get-in @(::executor/state worker)
@@ -145,7 +183,7 @@
     (reset! worker* worker)
     (try
       (is (= :first
-             (executor/submit!
+             (submit!
               (request worker "a" exact-scope "callback/first" :first))))
       (is (= {::executor/accepted? true ::executor/joined? false}
              (deref reentered 5000 nil))
@@ -174,11 +212,11 @@
         running-request
         (assoc-in (request worker "a" exact-scope "cancel/running-callback" :run)
                   [::executor/request :request/block?] true)
-        running (executor/submit-async! running-request)]
+        running (submit-async! running-request)]
     (try
       (is (.await entered 5 TimeUnit/SECONDS))
       (let [queued
-            (executor/submit-async!
+            (submit-async!
              (request worker "a" exact-scope "cancel/queued-callback" :queued))]
         (is (await-queued worker 1))
         (is (= {::executor/cancellation :queued}
@@ -193,11 +231,12 @@
                 (executor/cancel!
                  {::executor/executor worker
                   ::executor/job-id "cancel/running-callback"}))))
-        (is (= ::executor/throwable (first @running)))
+        (is (not (realized? running)))
         (is (= ["cancel/queued-callback"]
                (mapv ::executor/job-id @completions))
             "running cancellation does not claim physical completion")
         (.countDown release)
+        (is (= ::executor/throwable (first @running)))
         (loop [attempt 0]
           (when (and (< attempt 10000) (< (count @completions) 2))
             (Thread/yield)
@@ -224,7 +263,7 @@
         exact-scope (scope "a" (random-uuid) (random-uuid))
         request-id "cancel/request-owned"
         running
-        (executor/submit-async!
+        (submit-async!
          (assoc (request worker "a" exact-scope [request-id 0] :running)
                 ::executor/request-id request-id
                 ::executor/request {:request/value :running
@@ -232,7 +271,7 @@
     (try
       (is (.await entered 5 TimeUnit/SECONDS))
       (let [queued
-            (executor/submit-async!
+            (submit-async!
              (assoc (request worker "a" exact-scope [request-id 1] :queued)
                     ::executor/request-id request-id))]
         (is (await-queued worker 1))
@@ -242,6 +281,8 @@
                  {::executor/executor worker
                   ::executor/request-id request-id}))))
         (is (= ::executor/throwable (first @queued)))
+        (is (not (realized? running)))
+        (.countDown release)
         (is (= ::executor/throwable (first @running))))
       (finally
         (.countDown release)
@@ -262,7 +303,7 @@
         exact-scope (scope "a" (random-uuid) (random-uuid))]
     (try
       (let [rejected
-            (executor/submit-async!
+            (submit-async!
              (assoc (request worker "a" exact-scope "callback/rejected" :x)
                     ::executor/request-bytes
                     (inc (::executor/maximum-request-bytes
@@ -271,7 +312,7 @@
         (is (= ["callback/rejected"]
                (mapv ::executor/job-id @completions))))
       (let [running
-            (executor/submit-async!
+            (submit-async!
              (request worker "a" exact-scope "callback/abandoned" :late))]
         (is (.await entered 5 TimeUnit/SECONDS))
         (is (= {::executor/abandoned-count 0}
@@ -300,7 +341,7 @@
         exact-scope (scope "a" (random-uuid) (random-uuid))]
     (try
       (is (= :value
-             (executor/submit!
+             (submit!
               (request worker "a" exact-scope "callback/throws" :value))))
       (is (zero? (::executor/retained-identities (executor/evidence worker))))
       (is (zero? (::executor/running (executor/evidence worker))))
@@ -314,7 +355,7 @@
                              #(swap! completions conj %))
         exact-scope (scope "a" (random-uuid) (random-uuid))
         result
-        (executor/submit-async!
+        (submit-async!
          (assoc (request worker "a" exact-scope "mutation/async" nil)
                 ::executor/work-class :mutation))]
     (try
@@ -346,7 +387,7 @@
                              #(deliver completion %))
         exact-scope (scope "a" (random-uuid) (random-uuid))
         result
-        (executor/submit-async!
+        (submit-async!
          (assoc (request worker "a" exact-scope "mutation/closed" nil)
                 ::executor/work-class :mutation))]
     (try
@@ -371,11 +412,11 @@
         scope (scope "a" (random-uuid) (random-uuid))
         submission (request worker "a" scope "same-job" :value)]
     (try
-      (let [first-result (executor/submit-async! submission)]
+      (let [first-result (submit-async! submission)]
         (is (.await entered 5 TimeUnit/SECONDS))
         (is (= {::executor/accepted? false ::executor/joined? true}
                (executor/try-submit! submission)))
-        (let [joined-result (executor/submit-async! submission)]
+        (let [joined-result (submit-async! submission)]
           (is (identical? first-result joined-result))
           (is (= {"a" 1} (::executor/running-by-database
                            (executor/evidence worker))))
@@ -398,12 +439,12 @@
         database-id (random-uuid)
         old-scope (scope "a" database-id (random-uuid))
         new-scope (scope "a" database-id (random-uuid))
-        running (executor/submit-async!
+        running (submit-async!
                  (assoc-in (request worker "a" old-scope "old-running" :old)
                            [::executor/request :request/block?] true))]
     (try
       (is (.await entered 5 TimeUnit/SECONDS))
-      (let [queued (executor/submit-async!
+      (let [queued (submit-async!
                     (request worker "a" old-scope "old-queued" :queued))]
         (is (await-queued worker 1))
         (let [queued-work
@@ -423,7 +464,7 @@
                (executor/try-submit!
                 (request worker "a" old-scope "old-after-close" :stale)))
             "the closed generation cannot admit later work")
-        (let [replacement (executor/submit-async!
+        (let [replacement (submit-async!
                            (request worker "a" new-scope "new" :new))]
           (.countDown release)
           (is (= [::executor/value :new] @replacement))
@@ -444,11 +485,11 @@
                   (.await release)
                   (:request/value request))})
         scope (scope "a" (random-uuid) (random-uuid))
-        running (executor/submit-async!
+        running (submit-async!
                  (request worker "a" scope "read/running" :value))]
     (try
       (is (.await entered 5 TimeUnit/SECONDS))
-      (let [queued (executor/submit-async!
+      (let [queued (submit-async!
                     (request worker "a" scope "read/queued" :queued))
             _ (is (await-queued worker 1))
             drained
@@ -488,123 +529,9 @@
                  {::executor/executor worker ::executor/scope closed-scope})))
       (is (zero? (::executor/fenced-scopes (executor/evidence worker))))
       (is (= :open
-             (executor/submit!
+             (submit!
               (request worker "a" closed-scope "reopened" :open))))
       (finally
-        (executor/stop! {::executor/executor worker})))))
-
-(deftest retained-request-closes-the-resolution-to-member-release-gap
-  (let [worker (start-worker {:read :request/value})
-        one-scope (scope "a" (random-uuid) (random-uuid))
-        request-id "many/retained"]
-    (try
-      (is (nil? (executor/retain-request!
-                 {::executor/executor worker
-                  ::executor/scope one-scope
-                  ::executor/request-id request-id})))
-      (is (= 1 (::executor/retained-identities (executor/evidence worker))))
-      (let [drained (future
-                      (executor/fence-and-drain!
-                       {::executor/executor worker
-                        ::executor/scope one-scope
-                        ::executor/cancel (constantly nil)}))]
-        (Thread/sleep 25)
-        (is (not (realized? drained))
-            "scope release waits while a request owns the resolved value")
-        (is (thrown-with-msg?
-             clojure.lang.ExceptionInfo #"still owns"
-             (executor/release-scope!
-              {::executor/executor worker ::executor/scope one-scope})))
-        (is (nil? (executor/release-request!
-                   {::executor/executor worker
-                    ::executor/request-id request-id})))
-        (is (= {::executor/abandoned-count 0} @drained))
-        (is (zero? (::executor/retained-identities
-                    (executor/evidence worker)))))
-      (finally
-        (executor/stop! {::executor/executor worker})))))
-
-(deftest canceling-one-request-removes-all-of-its-queued-jobs
-  (let [entered (CountDownLatch. 1)
-        release (CountDownLatch. 1)
-        worker (start-worker
-                {:read (fn [request]
-                         (.countDown entered)
-                         (.await release)
-                         (:request/value request))})
-        one-scope (scope "a" (random-uuid) (random-uuid))
-        request-id "many/cancel"
-        submit (fn [job-id value]
-                 (executor/submit-async!
-                  (assoc (request worker "a" one-scope job-id value)
-                         ::executor/request-id request-id)))]
-    (try
-      (executor/retain-request!
-       {::executor/executor worker ::executor/scope one-scope
-        ::executor/request-id request-id})
-      (let [running (submit "many/running" :running)
-            _ (is (.await entered 5 TimeUnit/SECONDS))
-            queued-a (submit "many/a" :a)
-            queued-b (submit "many/b" :b)
-            _ (is (await-queued worker 2))
-            canceled (executor/cancel-request!
-                      {::executor/executor worker
-                       ::executor/request-id request-id})]
-        (is (= :running (::executor/cancellation canceled)))
-        (is (= 1 (count (::executor/requests canceled))))
-        (is (executor/request-canceled?
-             {::executor/executor worker ::executor/request-id request-id}))
-        (is (= ::executor/throwable (first @queued-a)))
-        (is (= ::executor/throwable (first @queued-b)))
-        (.countDown release)
-        (is (= ::executor/throwable (first @running)))
-        (executor/release-request!
-         {::executor/executor worker ::executor/request-id request-id}))
-      (finally
-        (.countDown release)
-        (executor/stop! {::executor/executor worker})))))
-
-(deftest scope-fence-reports-removed-members-to-the-retained-request
-  (let [entered (CountDownLatch. 1)
-        release (CountDownLatch. 1)
-        worker (start-worker
-                {:read (fn [request]
-                         (.countDown entered)
-                         (.await release)
-                         (:request/value request))})
-        one-scope (scope "a" (random-uuid) (random-uuid))
-        request-id "many/release"
-        submit (fn [job-id]
-                 (executor/submit-async!
-                  (assoc (request worker "a" one-scope job-id job-id)
-                         ::executor/request-id request-id)))]
-    (try
-      (executor/retain-request!
-       {::executor/executor worker ::executor/scope one-scope
-        ::executor/request-id request-id})
-      (let [running (submit "many/release-running")
-            _ (is (.await entered 5 TimeUnit/SECONDS))
-            queued (submit "many/release-queued")
-            _ (is (await-queued worker 1))
-            drained (future
-                      (executor/fence-and-drain!
-                       {::executor/executor worker
-                        ::executor/scope one-scope
-                        ::executor/cancel (constantly nil)}))]
-        (is (= "many/release-queued"
-               (executor/await-completed!
-                {::executor/executor worker ::executor/request-id request-id})))
-        (is (= ::executor/throwable (first @queued)))
-        (.countDown release)
-        (is (= [::executor/value "many/release-running"] @running))
-        (is (= "many/release-running"
-               (executor/await-completed!
-                {::executor/executor worker ::executor/request-id request-id})))
-        (executor/release-request!
-         {::executor/executor worker ::executor/request-id request-id})
-        (is (= {::executor/abandoned-count 1} @drained)))
-      (finally
-        (.countDown release)
         (executor/stop! {::executor/executor worker})))))
 
 (deftest cancellation-distinguishes-queued-running-and-absent-jobs
@@ -618,10 +545,10 @@
                   (:request/value request))})
         scope (scope "a" (random-uuid) (random-uuid))
         running-request (request worker "a" scope "cancel/running" :running)
-        running (executor/submit-async! running-request)]
+        running (submit-async! running-request)]
     (try
       (is (.await entered 5 TimeUnit/SECONDS))
-      (let [queued (executor/submit-async!
+      (let [queued (submit-async!
                     (request worker "a" scope "cancel/queued" :queued))]
         (is (await-queued worker 1))
         (is (= {::executor/cancellation :queued}
@@ -660,10 +587,10 @@
         read-scope (scope "read" (random-uuid) (random-uuid))
         provider-scope (scope "provider" (random-uuid) (random-uuid))]
     (try
-      (let [read-result (executor/submit-async!
+      (let [read-result (submit-async!
                          (request worker "read" read-scope "cpu/read" :read))
             provider-result
-            (executor/submit-async!
+            (submit-async!
              (assoc (request worker "provider" provider-scope
                              "provider/wait" :provider)
                     ::executor/work-class :provider))]
@@ -705,9 +632,9 @@
                           ::executor/reserved-work-class :knn
                           ::executor/reserved-request-bytes 65536)]
     (try
-      (let [result (executor/submit-async! submission)]
+      (let [result (submit-async! submission)]
         (is (.await provider-entered 5 TimeUnit/SECONDS))
-        (is (identical? result (executor/submit-async! submission)))
+        (is (identical? result (submit-async! submission)))
         (.countDown release-provider)
         (is (.await knn-entered 5 TimeUnit/SECONDS))
         (is (= {:knn 1}
@@ -745,15 +672,17 @@
                           ::executor/reserved-work-class :knn
                           ::executor/reserved-request-bytes 65536)]
     (try
-      (let [result (executor/submit-async! submission)]
+      (let [result (submit-async! submission)]
         (is (.await entered 5 TimeUnit/SECONDS))
         (is (= :running
                (::executor/cancellation
                 (executor/cancel!
                  {::executor/executor worker
                   ::executor/job-id "semantic/cancel"}))))
-        (is (= ::executor/throwable (first @result)))
+        (is (not (realized? result))
+            "running cancellation waits for physical provider completion")
         (.countDown release)
+        (is (= ::executor/throwable (first @result)))
         (loop [attempt 0]
           (when (and (pos? (::executor/retained-identities
                             (executor/evidence worker)))
@@ -773,17 +702,26 @@
         cap (assoc (test-capacity 2)
                    ::executor/maximum-request-bytes 10
                    ::executor/maximum-queued-request-bytes 10)
-        worker (executor/start!
-                {::executor/capacity cap
-                 ::executor/execute
-                 {:read (fn [request]
-                          (when (:request/block? request)
-                            (.countDown entered)
-                            (.await release))
-                          (:request/value request))}})
+        completions (atom {})
+        worker
+        (assoc
+         (executor/start!
+          {::executor/capacity cap
+           ::executor/execute
+           {:read (fn [request]
+                    (when (:request/block? request)
+                      (.countDown entered)
+                      (.await release))
+                    (:request/value request))}
+           ::executor/complete!
+           (fn [completion]
+             (when-let [result
+                        (get @completions (::executor/job-id completion))]
+               (deliver result (::executor/outcome completion))))})
+         ::completion-promises completions)
         one-scope (scope "a" (random-uuid) (random-uuid))]
     (try
-      (let [running (executor/submit-async!
+      (let [running (submit-async!
                      (assoc-in (request worker "a" one-scope "bytes/running" :a)
                                [::executor/request :request/block?] true))]
         (is (.await entered 5 TimeUnit/SECONDS))
@@ -820,15 +758,15 @@
         a (scope "a" (random-uuid) (random-uuid))
         b (scope "b" (random-uuid) (random-uuid))]
     (try
-      (let [first (executor/submit-async! (request worker "a" a "fair/first" :first))]
+      (let [first (submit-async! (request worker "a" a "fair/first" :first))]
         (is (.await entered 5 TimeUnit/SECONDS))
-        (let [jobs [(executor/submit-async!
+        (let [jobs [(submit-async!
                      (assoc (request worker "a" a "fair/knn" :knn)
                             ::executor/work-class :knn))
-                    (executor/submit-async!
+                    (submit-async!
                      (assoc (request worker "b" b "fair/hnsw" :hnsw)
                             ::executor/work-class :hnsw))
-                    (executor/submit-async!
+                    (submit-async!
                      (request worker "b" b "fair/read" :read))]]
           (.countDown release)
           @first
@@ -857,7 +795,7 @@
         a (scope "a" (random-uuid) (random-uuid))
         b (scope "b" (random-uuid) (random-uuid))
         submit (fn [database-name one-scope job-id]
-                 (executor/submit-async!
+                 (submit-async!
                   (assoc (request worker database-name one-scope job-id
                                   database-name)
                          ::executor/work-class :mutation
@@ -924,7 +862,7 @@
       (let [results
             (mapv
              (fn [database-name]
-               (executor/submit-async!
+               (submit-async!
                 {::executor/executor worker
                  ::executor/work-class :read
                  ::executor/database-name database-name

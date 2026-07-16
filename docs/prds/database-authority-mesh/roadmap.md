@@ -651,6 +651,22 @@ tests/128 assertions, including callback duplicate rejection/reuse and the
 existing execute-many and release fences; executor, receipts, and integration
 pass 47 tests/837 assertions.
 
+The compatibility executor mechanism is now deleted. Jobs retain one private
+object solely for ABA-safe ownership; no executor result Promise, retained
+public request, completed-job queue, waiter API, or blocking submit API remains.
+Admission returns ordinary evidence and all terminal paths use the one stable
+completion callback outside the executor lock. Queued cancellation completes
+immediately, while running cancellation completes only after the worker or
+asynchronous `ReadPort` physically returns. A scope fence may abandon a running
+provider job only when it has no public request ID; public provider/KNN work
+retains truthful request and capacity ownership until physical completion.
+Dead synchronous read, execute-many, admitted-mutation, and KNN writer paths
+are removed; the request server's blocking adapter waits only on the writer
+callback and disappears with the selector cut. The focused executor proof
+passes 23 tests/645 assertions. Executor, protocol, registry, receipts, writer,
+generated identities, transaction coordinates, and replay pass 86 tests/1,049
+assertions.
+
 Exact Datahike source and an in-memory probe confirm that execute-many already
 gets the intended index reuse: one captured immutable value shares its primary
 index objects and the connection-owned storage cache across every member, while
@@ -796,13 +812,16 @@ checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
 
 ## Current boundary and final graduation gate
 
-Earliest unsettled implementation contract: delete the executor's compatibility
-result promises and retained-request coordinator so the callback-complete writer
-is the only request-lifetime owner. Then protocol version 5 adds explicit
-`acquire-database` using the existing database name, attachment, coordinate, and
-internal transport connection—no session ID or second reference count. Every
-network database operation must resolve through that exact acquisition before
-the selector and Bun session become reachable.
+The callback deletion boundary is closed: the writer is the only public
+request-lifetime owner. Earliest unsettled implementation contract: protocol
+version 5 now defines explicit `acquire-database` using the existing request ID,
+database name, and caller-resolved attachment; success returns that attachment,
+the current coordinate, and whether a new Datahike reference was acquired. The
+registry validates the attachment before duplicate membership or `d/connect`.
+The remaining contract is to bind acquisition to the exact internal selector
+connection, require that membership for every network database operation, and
+release its acquisitions exactly once on close—no session ID or second
+reference count.
 
 Integrated proof that closes it:
 Callback duplicate/reuse, synchronous rejection reentry, reverse-order

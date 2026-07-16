@@ -63,9 +63,6 @@
                    [::request-bytes {:optional true} ::request-bytes]])
 (schema/register! ::remove-database-request
                   [:map [::executor ::executor] [::scope ::scope]])
-(schema/register! ::retain-request
-                  [:map [::executor ::executor] [::scope ::scope]
-                   [::request-id ::request-id]])
 (schema/register! ::cancel 'fn?)
 (schema/register! ::cancellation [:enum :not-found :queued :running])
 (schema/register! ::cancel-request [:map [::executor ::executor] [::job-id ::job-id]])
@@ -154,7 +151,6 @@
    ::io-class-cursor 0
    ::ready (zipmap classes (repeat (empty-class-ready)))
    ::jobs {}
-   ::retained-requests {}
    ::closed-scopes #{}
    ::running-by-class {}
    ::running-by-class-database {}
@@ -265,7 +261,7 @@
                       (= database-name (::database-name job)))))
            (::jobs state))))
 
-(defn- remove-queued-results [state results]
+(defn- remove-queued-work [state owners]
   (update state ::ready
           (fn [ready]
             (into {}
@@ -277,8 +273,8 @@
                                         (let [remaining
                                               (into empty-queue
                                                     (remove
-                                                     #(contains? results
-                                                                 (::result %)))
+                                                     #(contains? owners
+                                                                 (::owner %)))
                                                     queue)]
                                           (when (seq remaining)
                                             [database-name remaining]))))
@@ -331,19 +327,14 @@
 
 (defn- finish-work! [executor work]
   (locking (::lock executor)
-    (let [{::keys [job-id request-id result]} work]
+    (let [{::keys [job-id owner]} work]
       (let [current (get-in @(::state executor) [::jobs job-id])
-            owns-completion? (identical? result (::result current))
+            owns-completion? (identical? owner (::owner current))
             canceled? (true? (::canceled? current))]
         (swap! (::state executor)
                (fn [state]
                  (cond-> (decrement-running state work)
                    owns-completion? (update ::jobs dissoc job-id))))
-      (when (and request-id
-                 (get-in @(::state executor) [::retained-requests request-id]))
-        (swap! (::state executor) update-in
-               [::retained-requests request-id ::completed-jobs]
-               conj job-id))
         (swap! (::counts executor) update ::completed inc)
         (.notifyAll ^Object (::lock executor))
         {::owns-completion? owns-completion?
@@ -357,13 +348,13 @@
 (defn- continue-work!
   [executor work continuation]
   (locking (::lock executor)
-    (let [{::keys [job-id result scope reserved-work-class
+    (let [{::keys [job-id owner scope reserved-work-class
                    reserved-request-bytes]} work
           next-class (::continue-work-class continuation)
           state @(::state executor)
           current (get-in state [::jobs job-id])]
       (when (and (= next-class reserved-work-class)
-                 (identical? result (::result current))
+                 (identical? owner (::owner current))
                  (not (::canceled? current))
                  (not (contains? (::closed-scopes state) scope)))
         (let [next-work (-> current
@@ -381,8 +372,7 @@
           true)))))
 
 (defn- finish-outcome! [executor work outcome]
-  (let [result (::result work)
-        continuation (when (= ::value (first outcome))
+  (let [continuation (when (= ::value (first outcome))
                        (let [value (second outcome)]
                          (when (and (map? value)
                                     (::continue-work-class value))
@@ -402,7 +392,6 @@
                        (ex-info "The database request was canceled."
                                 {::job-id (::job-id work)})]
                       outcome)]
-        (deliver result outcome)
         (when owns-completion?
           (publish-completion! executor work outcome))))))
 
@@ -482,13 +471,12 @@
           (.start))]
     (assoc executor ::worker-threads (conj workers provider-dispatcher))))
 
-(defn- rejection! [executor result database-name work-class message]
+(defn- rejection! [executor database-name work-class message]
   (swap! (::counts executor) update ::rejected inc)
   (let [outcome [::throwable (ex-info message
                                       {::database-name database-name
                                        ::work-class work-class})]]
-    (deliver result outcome)
-    [{::accepted? false ::joined? false} result outcome]))
+    [{::accepted? false ::joined? false} outcome]))
 
 (defn- admit! [{::keys [executor work-class database-name scope job-id request-id
                         request request-bytes reserved-work-class
@@ -499,8 +487,8 @@
         (locking (::lock executor)
           (let [state @(::state executor)]
       (if-let [existing (get-in state [::jobs job-id])]
-        [{::accepted? false ::joined? true} (::result existing)]
-        (let [result (promise)
+        [{::accepted? false ::joined? true}]
+        (let [owner (Object.)
               class-capacity (get-in (::capacity executor) [::classes work-class])
               class-count (get (queued-by-class state) work-class 0)
               database-count (queued-by-class-database state work-class database-name)
@@ -529,7 +517,7 @@
                           (<= (+ queued-bytes request-bytes reserved-request-bytes)
                               (::maximum-queued-request-bytes (::capacity executor))))]
           (if-not valid?
-            (rejection! executor result database-name work-class
+            (rejection! executor database-name work-class
                         "The database work queue is full, fenced, or stopped.")
             (let [work {::work-class work-class
                         ::database-name database-name
@@ -540,82 +528,21 @@
                         ::request-bytes request-bytes
                         ::reserved-work-class reserved-work-class
                         ::reserved-request-bytes reserved-request-bytes
-                        ::result result}]
+                        ::owner owner}]
               (reset! (::state executor)
                       (-> state
                           (enqueue work-class database-name work)
                           (assoc-in [::jobs job-id]
                                     (assoc work ::status :queued))))
               (.notifyAll ^Object (::lock executor))
-              [{::accepted? true ::joined? false} result]))))))]
-    (when-let [outcome (nth admission 2 nil)]
+              [{::accepted? true ::joined? false}]))))))]
+    (when-let [outcome (second admission)]
       (publish-completion! executor submission outcome))
-    admission))
+    (first admission)))
 
 (defn try-submit!
   "Try to admit work and return ordinary admission evidence."
-  [request] (first (admit! request)))
-(defn submit-async!
-  "Admit or join work and return its internal result promise."
-  [request] (second (admit! request)))
-(defn submit-async-with-evidence!
-  "Try admission and return its evidence together with the result promise."
   [request] (admit! request))
-(defn submit!
-  "Admit or join work and await its result."
-  [request]
-  (let [[outcome value] @(submit-async! request)]
-    (if (= ::throwable outcome) (throw value) value)))
-
-(defn retain-request!
-  "Retain one exact database scope under the existing public request identity."
-  [{::keys [executor scope request-id]}]
-  (locking (::lock executor)
-    (let [state @(::state executor)]
-      (when (or @(::stopped executor)
-                (contains? (::closed-scopes state) scope)
-                (contains? (::retained-requests state) request-id))
-        (throw (ex-info "The database request cannot retain this scope."
-                        {::scope scope ::request-id request-id})))
-      (swap! (::state executor) assoc-in
-             [::retained-requests request-id]
-             {::scope scope ::canceled? false
-              ::completed-jobs empty-queue})))
-  nil)
-
-(defn release-request!
-  "Release the exact scope retained by one completed request."
-  [{::keys [executor request-id]}]
-  (locking (::lock executor)
-    (swap! (::state executor) update ::retained-requests dissoc request-id)
-    (.notifyAll ^Object (::lock executor)))
-  nil)
-
-(defn request-canceled?
-  "Return whether cancellation reached one retained request."
-  [{::keys [executor request-id]}]
-  (true? (get-in @(::state executor)
-                 [::retained-requests request-id ::canceled?])))
-
-(defn await-completed!
-  "Wait for the next internal job completed by one retained request."
-  [{::keys [executor request-id]}]
-  (locking (::lock executor)
-    (loop []
-      (let [queue (get-in @(::state executor)
-                          [::retained-requests request-id ::completed-jobs])]
-        (cond
-          (seq queue)
-          (let [job-id (peek queue)]
-            (swap! (::state executor) assoc-in
-                   [::retained-requests request-id ::completed-jobs]
-                   (pop queue))
-            job-id)
-
-          (get-in @(::state executor) [::retained-requests request-id])
-          (do (.wait ^Object (::lock executor)) (recur))
-
-          :else nil)))))
 
 (defn- fence-scope! [executor scope abandon-work-classes]
   (let [{::keys [removed] :as fenced}
@@ -629,25 +556,16 @@
                 (into {}
                       (filter (fn [[_ job]]
                                 (and (= :running (::status job))
+                                     (nil? (::request-id job))
                                      (abandon-work-classes (::work-class job)))))
                       matching)
                 removed (merge queued abandoned-running)
-                results (set (map (comp ::result val) removed))
+                owners (set (map (comp ::owner val) removed))
                 next-state
-                (reduce
-                 (fn [current [job-id job]]
-                   (if-let [request-id (::request-id job)]
-                     (if (get-in current [::retained-requests request-id])
-                       (update-in current
-                                  [::retained-requests request-id ::completed-jobs]
-                                  conj job-id)
-                       current)
-                     current))
-                 (-> state
-                     (remove-queued-results results)
-                     (update ::closed-scopes conj scope)
-                     (update ::jobs #(apply dissoc % (keys removed))))
-                 queued)]
+                (-> state
+                    (remove-queued-work owners)
+                    (update ::closed-scopes conj scope)
+                    (update ::jobs #(apply dissoc % (keys removed))))]
             (reset! (::state executor) next-state)
             (swap! (::counts executor) update ::fenced + (count matching))
             (.notifyAll ^Object (::lock executor))
@@ -655,8 +573,7 @@
         outcome [::throwable
                  (ex-info "The database scope closed before completion."
                           {::scope scope})]]
-    (doseq [[_ {::keys [result] :as work}] removed]
-      (deliver result outcome)
+    (doseq [[_ work] removed]
       (publish-completion! executor work outcome))
     (dissoc fenced ::removed)))
 
@@ -675,9 +592,7 @@
   [{::keys [executor scope]}]
   (locking (::lock executor)
     (when (let [state @(::state executor)]
-            (or (some (fn [[_ job]] (= scope (::scope job))) (::jobs state))
-                (some (fn [[_ retained]] (= scope (::scope retained)))
-                      (::retained-requests state))))
+            (some (fn [[_ job]] (= scope (::scope job))) (::jobs state)))
       (throw (ex-info "Cannot release a scope while work still owns it."
                       {::scope scope})))
     (swap! (::state executor) update ::closed-scopes disj scope))
@@ -703,9 +618,7 @@
     (locking (::lock executor)
       (loop []
         (when (let [state @(::state executor)]
-                (or (some (fn [[_ job]] (= scope (::scope job))) (::jobs state))
-                    (some (fn [[_ retained]] (= scope (::scope retained)))
-                          (::retained-requests state))))
+                (some (fn [[_ job]] (= scope (::scope job))) (::jobs state)))
           (.wait ^Object (::lock executor))
           (recur))))
     {::abandoned-count (count queued)}))
@@ -716,7 +629,7 @@
   [{::keys [executor job-id]}]
   (let [{::keys [completion] :as canceled}
         (locking (::lock executor)
-          (if-let [{::keys [status result request] :as job}
+          (if-let [{::keys [status request] :as job}
                    (get-in @(::state executor) [::jobs job-id])]
             (let [outcome [::throwable
                            (ex-info "The database request was canceled."
@@ -725,18 +638,14 @@
                 (do
                   (swap! (::state executor)
                          #(-> %
-                              (remove-queued-results #{result})
+                              (remove-queued-work #{(::owner job)})
                               (update ::jobs dissoc job-id)))
                   (swap! (::counts executor) update ::fenced inc)
-                  (deliver result outcome)
                   {::cancellation :queued
                    ::completion [job outcome]})
                 (do
                   (swap! (::state executor) assoc-in
                          [::jobs job-id ::canceled?] true)
-                  ;; The legacy result promise settles immediately, while the
-                  ;; stable completion waits for physical worker release.
-                  (deliver result outcome)
                   {::cancellation :running ::request request})))
             {::cancellation :not-found}))]
     (when completion
@@ -750,7 +659,6 @@
   (let [{::keys [queued] :as canceled}
         (locking (::lock executor)
           (let [state @(::state executor)
-                retained (get-in state [::retained-requests request-id])
                 matching (into {}
                                (filter (fn [[_ job]]
                                          (= request-id (::request-id job))))
@@ -760,7 +668,7 @@
                              matching)
                 running-map (apply dissoc matching (keys queued))
                 running (vals running-map)
-                results (set (map (comp ::result val) queued))
+                owners (set (map (comp ::owner val) queued))
                 outcome-for
                 (fn [job-id]
                   [::throwable
@@ -768,35 +676,21 @@
                             {::job-id job-id ::request-id request-id})])]
             (swap! (::state executor)
                    (fn [current]
-                     (cond->
-                       (-> current
-                           (remove-queued-results results)
-                           (update ::jobs #(apply dissoc % (keys queued)))
-                           (update ::jobs
-                                   (fn [jobs]
-                                     (reduce
-                                      (fn [current job-id]
-                                        (assoc-in current [job-id ::canceled?] true))
-                                      jobs (keys running-map)))))
-                       retained
-                       (-> (assoc-in
-                            [::retained-requests request-id ::canceled?] true)
-                           (update-in
-                            [::retained-requests request-id ::completed-jobs]
-                            #(into (or % empty-queue) (keys queued)))))))
-            (doseq [[job-id {::keys [result]}] queued]
-              (deliver result (outcome-for job-id)))
-            (doseq [[job-id {::keys [result]}] running-map]
-              ;; Promise compatibility settles now; stable completion waits
-              ;; until the worker physically returns.
-              (deliver result (outcome-for job-id)))
+                     (-> current
+                         (remove-queued-work owners)
+                         (update ::jobs #(apply dissoc % (keys queued)))
+                         (update ::jobs
+                                 (fn [jobs]
+                                   (reduce
+                                    (fn [current job-id]
+                                      (assoc-in current [job-id ::canceled?] true))
+                                    jobs (keys running-map)))))))
             (.notifyAll ^Object (::lock executor))
             {::cancellation (cond
                               (seq running) :running
                               (seq queued) :queued
-                              retained :queued
                               :else :not-found)
-             ::canceled? (boolean (or retained (seq matching)))
+             ::canceled? (boolean (seq matching))
              ::requests (mapv ::request running)
              ::queued (mapv (fn [[job-id work]]
                               [work (outcome-for job-id)])
@@ -820,8 +714,7 @@
        ::running (reduce + 0 (vals running-by-class))
        ::running-by-class running-by-class
        ::running-by-database (::running-by-database state)
-       ::retained-identities (+ (count (::jobs state))
-                                (count (::retained-requests state)))
+       ::retained-identities (count (::jobs state))
        ::fenced-scopes (count (::closed-scopes state))
        ::fenced (::fenced counts)
        ::completed (::completed counts)

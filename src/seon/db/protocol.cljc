@@ -413,7 +413,8 @@
  [:map {:closed true}
   [::operation [:= acquire-database-operation]]
   [::request-id ::request-id]
-  [::database-name ::database-name]])
+  [::database-name ::database-name]
+  [::attachment ::attachment]])
 (schema/register!
  ::observe-database-lifecycle-request
  [:map {:closed true}
@@ -740,7 +741,8 @@
  ::acquire-database-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [::database-name ::database-name]])
+  [::database-name ::database-name]
+  [::attachment ::attachment]])
 (schema/register!
  ::request-id-input
  [:map {:closed true}

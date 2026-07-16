@@ -132,7 +132,8 @@
         attachment (coordinate/attachment point)
         request (protocol/acquire-database-request
                  {::protocol/request-id "acquire/alpha"
-                  ::protocol/database-name "alpha"})
+                  ::protocol/database-name "alpha"
+                  ::protocol/attachment attachment})
         response (protocol/success
                   {::protocol/request-id "acquire/alpha"
                    ::protocol/database-name "alpha"
@@ -146,6 +147,9 @@
     (is (false? (protocol/valid-request?
                  (assoc request :unexpected/field true)))
         "acquisition requests reject transport-private or unknown fields")
+    (is (false? (protocol/valid-request?
+                 (dissoc request ::protocol/attachment)))
+        "acquisition is fenced to the attachment resolved by the caller")
     (is (false? (protocol/valid-response?
                  (assoc response :unexpected/field true)))
         "acquisition responses reject transport-private or unknown fields")
