@@ -157,6 +157,9 @@ The generated-ID remote seam and rejected declarative-template alternative are
 The async render cut that preserves pure recursive rendering while moving
 database I/O to coordinate-pinned outer acquisition or the owning isolated
 agent child is [[research/async-render-authority-seam-2026-07-16]].
+The data-driven correction that selects one trusted compiled child prompt
+owner, rejects the fixed seed-count batch, and preserves the stable `seon.db`
+facade is [[research/compiled-child-prompt-owner-2026-07-16]].
 The final ordinary-data async database surface and its eight concrete closure
 gaps are [[research/remote-seon-db-contract-freeze-2026-07-16]]. The exact Bun
 child lifecycle, zero-process dormant-agent wake seam, and density proof are
@@ -1265,6 +1268,13 @@ is prohibited.
   Datahike reachability and leaves the remote owner behind the unchanged public
   `seon.db` interface. Eval-limit environment reads move into closed
   startup/config data before enforcing the explicit child environment.
+  Commit `ecead888` advances the closer data-driven seam with execution
+  protocol v2: the one invocation identity is either an authored source digest
+  or the one fixed compiled prompt entrypoint plus verified artifact digest.
+  Host callers cannot select another compiled symbol, invalid identity fails
+  before session/program work, and valid compiled dispatch performs zero
+  authored-program reads. Focused execution/host proof passes 22 tests and 98
+  assertions.
   Commit `ff87ea2e` moves planned-quiesce reads to the same facade: one
   two-member `execute-many` supplies current runs, running turns, and its exact
   coordinate; one aligned `pull-many` classifies observed terminal turns at
