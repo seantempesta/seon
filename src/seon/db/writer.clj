@@ -126,6 +126,8 @@
 (def ^:private schema-properties
   [:db/valueType :db/cardinality :db/unique :db/isComponent])
 
+(def ^:private maximum-schema-reference-count 64)
+
 (def ^:private internal-tempid-prefix "seon.db.protocol.tempid/")
 
 (def ^:private protocol-native-schema
@@ -303,7 +305,8 @@
   (let [transaction-forms (schema-form-strings transaction-data)]
     (loop [pending candidates
            attempted #{}
-           forms {}]
+           forms {}
+           reference-count 0]
       (if (empty? pending)
         forms
         (let [same-transaction (select-keys transaction-forms pending)
@@ -321,8 +324,18 @@
               (into #{}
                     (comp (mapcat schema-form-references)
                           (remove attempted))
-                    (vals parsed))]
-          (recur dependencies attempted (into forms parsed)))))))
+                    (vals parsed))
+              reference-count (+ reference-count (count dependencies))]
+          (when (> reference-count maximum-schema-reference-count)
+            (throw
+             (ex-info
+              "A canonical schema form references too many other schema forms."
+              {::schema-reference-count reference-count
+               ::maximum-schema-reference-count
+               maximum-schema-reference-count
+               :seon.error/kind :user-input})))
+          (recur dependencies attempted (into forms parsed)
+                 reference-count))))))
 
 (defn- schema-shape
   [declaration]

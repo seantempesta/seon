@@ -1791,11 +1791,26 @@
                  {:seon.schema/key :writer.schema/non-attribute
                   :seon.schema/form
                   "[:map [:writer.schema/non-attribute-value :string]]"}]
-                (map (fn [index]
-                       {:seon.schema/key
-                        (keyword "writer.schema.irrelevant" (str index))
-                        :seon.schema/form "[malformed"}))
-                (range 128)))
+                (concat
+                 (map (fn [index]
+                        {:seon.schema/key
+                         (keyword "writer.schema.irrelevant" (str index))
+                         :seon.schema/form "[malformed"})
+                      (range 128))
+                 (map (fn [index]
+                        {:seon.schema/key
+                         (keyword "writer.schema.chain" (str "n" index))
+                         :seon.schema/form
+                         (pr-str
+                          (if (= 65 index)
+                            :string
+                            (keyword "writer.schema.chain"
+                                     (str "n" (inc index)))))})
+                      (range 66))
+                 [{:seon.schema/key :writer.schema.cycle/a
+                   :seon.schema/form ":writer.schema.cycle/b"}
+                  {:seon.schema/key :writer.schema.cycle/b
+                   :seon.schema/form ":writer.schema.cycle/a"}])))
               after-schema-only (d/db connection)
               parsed-forms (atom [])
               original-read-string edn/read-string
@@ -1813,6 +1828,23 @@
                [{:writer.schema/id "lazy-child"
                  :writer.schema/lazy-parent
                  [:writer.schema/id "parent"]}])
+              before-long-chain (coordinate/resolved (d/db connection))
+              long-chain
+              (transact!
+               database-name "schema/long-chain"
+               [(hash-map (keyword "writer.schema.chain" "n0")
+                          "too-deep")])
+              after-long-chain (coordinate/resolved (d/db connection))
+              cycle-parsed-forms (atom [])
+              cycle
+              (with-redefs [edn/read-string
+                            (fn [form-string]
+                              (swap! cycle-parsed-forms conj form-string)
+                              (original-read-string form-string))]
+                (transact!
+                 database-name "schema/cycle"
+                 [{:writer.schema.cycle/a "recursive"}]))
+              after-cycle (coordinate/resolved (d/db connection))
               before-unknown (coordinate/resolved (d/db connection))
               unknown
               (transact!
@@ -1844,6 +1876,17 @@
                  (get-in (d/db connection)
                          [:schema :writer.schema/lazy-parent :db/valueType]))
               "candidate lookup follows only stored schema references")
+          (is (false? (::protocol/success? long-chain)))
+          (is (= :user-input (:seon.error/kind long-chain)))
+          (is (re-find #"references too many other schema forms"
+                       (::protocol/error long-chain)))
+          (is (= before-long-chain after-long-chain))
+          (is (false? (::protocol/success? cycle)))
+          (is (= {":writer.schema.cycle/a" 1
+                  ":writer.schema.cycle/b" 1}
+                 (frequencies @cycle-parsed-forms))
+              "a cycle queries and parses each canonical form once")
+          (is (= after-long-chain after-cycle))
           (is (false? (::protocol/success? unknown)))
           (is (= :user-input (:seon.error/kind unknown)))
           (is (= before-unknown (coordinate/resolved (d/db connection)))))
