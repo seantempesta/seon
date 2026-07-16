@@ -28,6 +28,7 @@
   (:require
     [seon.config :as config]
     [seon.db :as db]
+    [seon.db.protocol :as protocol]
     [seon.log :as log]
     [seon.schema :as schema]))
 
@@ -210,7 +211,7 @@
       (seq asserts) (conj (assoc asserts ::id "brand")))))
 
 (defn ^:async sync!
-  "Sync the brand row on the ambient conn to the SEON_BRAND_* env vars.
+  "Sync the brand row to the `SEON_BRAND_*` environment.
 
    See ns doc: env OWNS the row across boots. Called from the web UI's
    `install!` at boot; idempotent — a second call with the same env
@@ -219,13 +220,37 @@
   {:malli/schema [:=> [:cat] ::sync-response]}
   []
   (try
-    (let [tx (sync-tx-data (let [existing (row @db/*conn*)]
-                             (cond-> {::env (env-row)}
-                               (some? existing) (assoc ::row existing))))]
+    (let [acquired
+          (await
+            (db/execute-many
+              {::db/members
+               [{::protocol/operation protocol/pull-operation
+                 ::protocol/selector [::id ::name ::tagline ::theme]
+                 ::protocol/entity-id [::id "brand"]
+                 :datahike.resource/max-work 10000
+                 :datahike.resource/max-results 1
+                 :datahike.resource/max-result-weight 65536}]}))
+          member (first (::db/results acquired))
+          _ (when (:seon.error/message acquired)
+              (throw (ex-info "Brand acquisition failed."
+                              {:seon.db/error acquired
+                               :seon.error/kind :core-bug})))
+          _ (when-not (true? (::protocol/success? member))
+              (throw (ex-info "Brand acquisition failed."
+                              {:seon.db/error member
+                               :seon.error/kind :core-bug})))
+          existing (some-> (::protocol/result member)
+                           (select-keys [::name ::tagline ::theme]))
+          tx (sync-tx-data (cond-> {::env (env-row)}
+                             (some? existing) (assoc ::row existing)))]
       (if (empty? tx)
         {::synced? false}
         (let [{ok?   :seon.db/ok?
-               error :seon.db/error} (await (db/transact! {:seon.db/tx-data tx}))]
+               error :seon.db/error}
+              (await
+                (db/transact!
+                  {::db/tx-data tx
+                   ::db/expected-coordinate (::db/coordinate acquired)}))]
           (if ok?
             (log/info-console! "seon.web.brand" "brand row synced from env"
                                {:tx-ops (count tx)})

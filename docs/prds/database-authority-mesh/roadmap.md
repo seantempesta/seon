@@ -1458,6 +1458,11 @@ is prohibited.
   derive whether any non-root agent has ever existed without a local history
   value, a replica, or a second query interface; focused session proof checks
   the exact flag and coordinate on the wire.
+- LLM configuration seeding and brand reconciliation now each acquire their
+  singleton as one bounded ordinary pull and fence any derived transaction at
+  that exact coordinate. Their established pure transaction compilers and
+  nonfatal startup behavior remain unchanged; neither singleton sync reads a
+  local database value.
 - **Next refill:** finish the remaining startup/web synchronous consumers,
   move launch-descriptor ownership out of the replica, switch client open
   atomically, and

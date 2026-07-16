@@ -15,7 +15,9 @@
     [seon.agent]
     [seon.agent.message]
     [seon.ai :as ai]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
+    [seon.db.protocol :as protocol]))
 
 ;; ============================================================
 ;; Pure — sync-tx-data (env/config SEEDS ONCE → the DB OWNS the row).
@@ -40,6 +42,56 @@
               {::ai/row {::ai/provider :deepseek ::ai/model "deepseek-chat"}
                ::ai/env {::ai/provider :anthropic ::ai/max-tokens 2048}}))
       "configured row → DB owns; env never overrides after the initial seed"))
+
+(deftest sync-acquires-once-and-fences-the-seed
+  (async done
+    (let [point {::coordinate/database-id
+                 #uuid "00000000-0000-0000-0000-000000000071"
+                 ::coordinate/branch :db
+                 ::coordinate/commit-id
+                 #uuid "00000000-0000-0000-0000-000000000072"
+                 ::coordinate/t 536870912}
+          original-execute-many db/execute-many
+          original-transact db/transact!
+          original-env-row ai/env-row
+          calls (atom [])]
+      (set! db/execute-many
+            (fn [request]
+              (swap! calls conj [:acquire request])
+              (js/Promise.resolve
+                {::db/coordinate point
+                 ::db/results
+                 [{::protocol/success? true
+                   ::protocol/result nil}]})))
+      (set! db/transact!
+            (fn [request]
+              (swap! calls conj [:transact request])
+              (js/Promise.resolve {::db/ok? true})))
+      (set! ai/env-row (constantly {::ai/thinking "true"}))
+      (-> (ai/sync!)
+          (.then
+            (fn [result]
+              (let [[[_ acquire] [_ transact]] @calls
+                    member (first (::db/members acquire))]
+                (is (= {::ai/synced? true} result))
+                (is (= 1 (count (::db/members acquire)))
+                    "startup performs one authority acquisition")
+                (is (= protocol/pull-operation
+                       (::protocol/operation member)))
+                (is (= [::ai/id "config"]
+                       (::protocol/entity-id member)))
+                (is (= point (::db/expected-coordinate transact))
+                    "the immutable acquisition coordinate fences the seed")
+                (is (= [{::ai/id "config" ::ai/thinking "true"}]
+                       (::db/tx-data transact))))))
+          (.catch (fn [error]
+                    (is false (str "AI sync proof threw: " error))))
+          (.finally
+            (fn []
+              (set! db/execute-many original-execute-many)
+              (set! db/transact! original-transact)
+              (set! ai/env-row original-env-row)
+              (done)))))))
 
 ;; ============================================================
 ;; Pure — thinking-mode parses the stored string.

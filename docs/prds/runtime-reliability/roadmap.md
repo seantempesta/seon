@@ -65,6 +65,8 @@ session and the client no longer imports the replica; remaining local reads are
 the explicit startup/replay/resume and web/config migration inventory.
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
+LLM configuration and brand startup sync also use bounded coordinate-fenced
+authority pulls rather than ambient replica values.
 Autocomplete/export and the debug feed already consume the same coordinate-
 pinned compiled child result; the obsolete synchronous AI composer is deleted.
 Stale debug completions cannot install candidate catalogs, and raw AI

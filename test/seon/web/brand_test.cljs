@@ -13,6 +13,8 @@
     [seon.agent]
     [seon.agent.message]
     [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
+    [seon.db.protocol :as protocol]
     [seon.web.brand :as brand]))
 
 ;; ============================================================
@@ -42,6 +44,58 @@
            {::brand/row {::brand/name "old" ::brand/tagline "ship it"}
             ::brand/env {::brand/name "Acme" ::brand/theme "midnight"}}))
       "mixed: retracts first, then one assert map for the set attrs"))
+
+(deftest sync-acquires-once-and-fences-the-env-reconciliation
+  (async done
+    (let [point {::coordinate/database-id
+                 #uuid "00000000-0000-0000-0000-000000000073"
+                 ::coordinate/branch :db
+                 ::coordinate/commit-id
+                 #uuid "00000000-0000-0000-0000-000000000074"
+                 ::coordinate/t 536870912}
+          original-execute-many db/execute-many
+          original-transact db/transact!
+          original-env-row brand/env-row
+          calls (atom [])]
+      (set! db/execute-many
+            (fn [request]
+              (swap! calls conj [:acquire request])
+              (js/Promise.resolve
+                {::db/coordinate point
+                 ::db/results
+                 [{::protocol/success? true
+                   ::protocol/result
+                   {::brand/id "brand" ::brand/name "Acme"}}]})))
+      (set! db/transact!
+            (fn [request]
+              (swap! calls conj [:transact request])
+              (js/Promise.resolve {::db/ok? true})))
+      (set! brand/env-row (constantly {}))
+      (-> (brand/sync!)
+          (.then
+            (fn [result]
+              (let [[[_ acquire] [_ transact]] @calls
+                    member (first (::db/members acquire))]
+                (is (= {::brand/synced? true} result))
+                (is (= 1 (count (::db/members acquire)))
+                    "startup performs one authority acquisition")
+                (is (= protocol/pull-operation
+                       (::protocol/operation member)))
+                (is (= [::brand/id "brand"]
+                       (::protocol/entity-id member)))
+                (is (= point (::db/expected-coordinate transact))
+                    "the immutable acquisition coordinate fences reconciliation")
+                (is (= [[:db/retract [::brand/id "brand"]
+                         ::brand/name "Acme"]]
+                       (::db/tx-data transact))))))
+          (.catch (fn [error]
+                    (is false (str "brand sync proof threw: " error))))
+          (.finally
+            (fn []
+              (set! db/execute-many original-execute-many)
+              (set! db/transact! original-transact)
+              (set! brand/env-row original-env-row)
+              (done)))))))
 
 ;; ============================================================
 ;; Pure — render helpers.
