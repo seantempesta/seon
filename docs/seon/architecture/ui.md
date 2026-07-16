@@ -88,13 +88,11 @@ String, `:html` → hiccup). Renders are projections, never persisted. A throwin
 hung render yields a `:seon/error` value (see [[data-model]] §6) for THAT render
 only; siblings never crash.
 
-**prompt == page by construction.** Both derive from the same blocks over the
-same db value resolved from the turn's
-`{database-id, branch, commit-id, t}`: the prompt is
-`seon.agent.ctx/render-context` (ai renders concatenated by
-`:seon.agent.ctx/priority`), the page is the same blocks' html renders placed into
-a layout's slots. "What the agent saw at turn N" is a re-derive from that exact
-commit; t alone is not a durable bookmark.
+**prompt == page by construction.** Both derive from the same blocks at the
+turn's `{database-id, branch, commit-id, t}`. The compiled prompt child acquires
+and formats the AI renders in `:seon.agent.ctx/priority` order; the web UI places
+the same blocks' HTML renders into a layout's slots. "What the agent saw at turn
+N" is a re-derive from that exact coordinate; t alone is not a durable bookmark.
 
 **The typed block renderer.** Above `seon.ui.html` sits one reusable value→hiccup
 layer, `seon.render/block` — `(block view x)` dispatches on the value-KIND `x`

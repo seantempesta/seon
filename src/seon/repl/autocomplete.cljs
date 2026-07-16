@@ -5,14 +5,11 @@
    encoder-decoder learns the mapping from a compact SITUATION projection to
    the next REPL forms. This ns owns the seon side of that contract:
 
-     - [[context]] — the encoder input. NOT a new renderer: the ONE prompt
-       producer (`seon.agent.ctx/render-context`, the same fn behind
-       `render-prompt` and the web UI) invoked with the `:autocomplete`
+     - [[context]] — the encoder input. NOT a new renderer: the compiled
+       prompt child invoked at a complete coordinate with the `:autocomplete`
        render PROFILE (db-stored `:seon.config/context-profiles`, code
        default [[context-blocks]]) — the existing :plan / :transcript
-       section fns under tight per-block token caps. Pure over a db VALUE:
-       the live db at inference, an exact resolved coordinate at export — same
-       function, same bytes, by construction.
+       functions under tight per-block token caps.
      - [[rate!]] + the `::rating`/`::tag` curation attrs — mark turns
        gold/good/excluded for the training corpus.
      - [[export!]] — walk every agent's turns (`seon.agent.ctx/agent-turns`),
@@ -163,28 +160,56 @@
 (schema/register! ::context-request
   [:map
    [:seon.agent/id :string]
-   [:seon.db/db {:optional true} :seon.db/db]])
+   [:seon.db.coordinate/coordinate :seon.db.coordinate/coordinate]
+   [:seon.agent.ctx/profile {:optional true} :seon.agent.ctx/profile]])
 
-(defn context
+(schema/register! ::context-result
+  [:or
+   :string
+   [:map
+    [:seon.error/message :string]
+    [:seon.error/kind :keyword]
+    [:seon.error/data {:optional true} :map]]])
+
+(defn ^:async ^:private profile-at-coordinate
+  [point]
+  (let [config-row
+        (await
+          (db/pull
+            {::db/coordinate point
+             ::db/pull-pattern [:seon.config/context-profiles]
+             ::db/ref [:seon.config/id config/cluster-config-id]
+             ::db/max-work 100000
+             ::db/max-results 1
+             ::db/max-result-weight 65536}))]
+    (if (:seon.error/message config-row)
+      config-row
+      (or (some->> (:seon.config/context-profiles config-row)
+                   (db/decode-edn-value :seon.config/context-profiles)
+                   :autocomplete
+                   seq
+                   vec)
+          context-blocks))))
+
+(defn ^:async context
   "The autocomplete situation projection for one agent, as a bare String.
 
-   THE encoder input (byte-exact contract): the ONE producer
-   (`seon.agent.ctx/render-context` — the same fn behind the real prompt
-   and the web UI) invoked with the `:autocomplete` render profile — the
-   db-stored `:seon.config/context-profiles` entry when the passed db
-   carries one (the profile in force at that t), else [[context-blocks]].
-   Pure over the db VALUE: pass the live db at inference, or the immutable
-   value returned by `db/at-coordinate` at export — identical bytes for
-   identical inputs (readline, `result/<id>` handles, and resume markers —
-   the wall-clock / process-identity bytes — are off in this profile).
-   Deterministic: no wall clock, no randomness."
-  {:malli/schema [:=> [:cat ::context-request] :string]}
-  [{id :seon.agent/id db :seon.db/db}]
-  (let [db (or db @db/*conn*)]
-    (ctx/render-context
-      {:seon.agent/id id
-       :seon.db/db    db
-       :seon.agent.ctx/profile (or (profile-from-db db) context-blocks)})))
+   The encoder input (byte-exact contract): the same compiled owner as the
+   real prompt, invoked with the database-owned `:autocomplete` profile at the
+   supplied complete coordinate. The default [[context-blocks]] applies when
+   that coordinate has no stored profile. Errors remain values."
+  {:malli/schema [:=> [:cat ::context-request] ::context-result]}
+  [{id :seon.agent/id
+    point :seon.db.coordinate/coordinate
+    supplied-profile :seon.agent.ctx/profile}]
+  (let [profile (or supplied-profile
+                    (await (profile-at-coordinate point)))]
+    (if (:seon.error/message profile)
+      profile
+      (let [rendered (await (turn/render-prompt id point profile))]
+        (if (:seon.error/message rendered)
+          rendered
+          (:seon.render/text rendered))))))
 
 ;; ============================================================
 ;; Export internals — mining turns into canonical manifest rows.
@@ -472,9 +497,10 @@
    [::skipped-no-evals {:optional true} ::count]
    [::skipped-no-coordinate {:optional true} ::count]
    [::skipped-excluded {:optional true} ::count]
+   [::skipped-context  {:optional true} ::count]
    [::cards-missed     {:optional true} ::count]
    ;; Byte-exactness self-check: every row's context is rendered TWICE
-   ;; over the same as-of db value; a mismatch is a determinism bug.
+   ;; at the same complete coordinate; a mismatch is a determinism bug.
    [::determinism-mismatches {:optional true} ::count]
    [::context-tokens   {:optional true} ::token-summary]
    [::target-tokens    {:optional true} ::token-summary]
@@ -580,41 +606,42 @@
                                 {::agent-id agent-id ::turn turn ::point point
                                  ::target (str/join "\n" sources)
                                  ::reason "unresolvable-rendered-coordinate"})]}
-                            (let [ctext   (context {:seon.agent/id agent-id
-                                                      :seon.db/db aodb})
-                                    ;; determinism self-check: the SAME as-of
-                                    ;; db value must render the SAME bytes.
-                                    ctext2  (context {:seon.agent/id agent-id
-                                                      :seon.db/db aodb})
-                                    target  (str/join "\n" sources)
-                                    fn-syms (indexed-fn-syms aodb)
-                                    called  (called-syms target fn-syms
-                                                         aliases refers)
-                                    turn-id (:seon.agent.turn/id turn)
-                                    syms    (into called
-                                                  (distractor-syms fn-syms called
-                                                                   turn-id k))
-                                    records (vec (keep #(fn-record aodb %) syms))
-                                    cards   (mapv ::card records)
-                                    specs   (vec (keep (comp :seon.fn/spec ::fn-row)
-                                                       records))
-                                    schema-text (or (ctx/referenced-schema-block
-                                                      {:seon.db/db aodb
-                                                       :seon.agent.ctx/seed-specs specs
-                                                       :seon.agent.ctx/own-keys #{}})
-                                                    "")
-                                    schema-id (sha256 schema-text)
-                                    config-id (config-identity aodb)
-                                    profile-id (profile-identity aodb)
-                                    missed  (- (count syms) (count cards))
-                                    ;; context-GAP evidence (never "fixed"
-                                    ;; here): how much of the target the
-                                    ;; situation actually showed the model.
-                                  coverage (ingredients-coverage
-                                             target
-                                             (str ctext "\n"
-                                                  (str/join "\n" cards)))]
-                              (if (not= ctext ctext2)
+                            (let [profile (or (profile-from-db aodb)
+                                              context-blocks)
+                                  ctext (await
+                                          (context
+                                            {:seon.agent/id agent-id
+                                             :seon.db.coordinate/coordinate point
+                                             :seon.agent.ctx/profile profile}))
+                                  ;; The second child call proves byte stability.
+                                  ;; A first-call error stops immediately.
+                                  ctext2 (when-not (:seon.error/message ctext)
+                                           (await
+                                             (context
+                                               {:seon.agent/id agent-id
+                                                :seon.db.coordinate/coordinate point
+                                                :seon.agent.ctx/profile profile})))
+                                  target (str/join "\n" sources)]
+                              (cond
+                                (:seon.error/message ctext)
+                                {::turns-walked 1
+                                 ::skipped-context 1
+                                 ::rejections
+                                 [(rejection-record
+                                    {::agent-id agent-id ::turn turn ::point point
+                                     ::target target
+                                     ::reason "context-render-failed"})]}
+
+                                (:seon.error/message ctext2)
+                                {::turns-walked 1
+                                 ::skipped-context 1
+                                 ::rejections
+                                 [(rejection-record
+                                    {::agent-id agent-id ::turn turn ::point point
+                                     ::target target
+                                     ::reason "context-rerender-failed"})]}
+
+                                (not= ctext ctext2)
                                 {::turns-walked 1
                                  ::determinism-mismatches 1
                                  ::rejections
@@ -622,7 +649,33 @@
                                     {::agent-id agent-id ::turn turn ::point point
                                      ::target target
                                      ::reason "context-determinism-mismatch"})]}
-                                (let [row-base
+                                :else
+                                (let [fn-syms (indexed-fn-syms aodb)
+                                      called (called-syms target fn-syms
+                                                          aliases refers)
+                                      turn-id (:seon.agent.turn/id turn)
+                                      syms (into called
+                                                 (distractor-syms fn-syms called
+                                                                  turn-id k))
+                                      records (vec (keep #(fn-record aodb %) syms))
+                                      cards (mapv ::card records)
+                                      specs (vec (keep (comp :seon.fn/spec ::fn-row)
+                                                       records))
+                                      schema-text
+                                      (or (ctx/referenced-schema-block
+                                            {:seon.db/db aodb
+                                             :seon.agent.ctx/seed-specs specs
+                                             :seon.agent.ctx/own-keys #{}})
+                                          "")
+                                      schema-id (sha256 schema-text)
+                                      config-id (config-identity aodb)
+                                      profile-id (profile-identity aodb)
+                                      missed (- (count syms) (count cards))
+                                      coverage
+                                      (ingredients-coverage
+                                        target
+                                        (str ctext "\n" (str/join "\n" cards)))
+                                      row-base
                                       (cond->
                                         {"agent" agent-id
                                          "turn_id" turn-id
@@ -666,6 +719,7 @@
                     contribution))
                 {::turns-walked 0 ::rows 0 ::skipped-no-evals 0
                  ::skipped-no-coordinate 0 ::skipped-excluded 0
+                 ::skipped-context 0
                  ::cards-missed 0 ::determinism-mismatches 0
                  ::ctx-tokens [] ::target-tokens [] ::row-data []
                  ::rejections [] ::schema-data [] ::config-data []
@@ -712,6 +766,7 @@
        ::skipped-no-evals (::skipped-no-evals acc)
        ::skipped-no-coordinate (::skipped-no-coordinate acc)
        ::skipped-excluded (::skipped-excluded acc)
+       ::skipped-context (::skipped-context acc)
        ::cards-missed     (::cards-missed acc)
        ::determinism-mismatches (::determinism-mismatches acc)
        ::context-tokens   (summary (::ctx-tokens acc))

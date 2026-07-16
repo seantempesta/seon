@@ -1230,9 +1230,13 @@ is prohibited.
   acquired data. No compatibility connection, query-result replay map, public
   namespace alias, or second database facade may make old local-Datahike call
   shapes appear synchronous.
-- **Earliest unsettled contract:** let the live debug feed consume the same
-  coordinate-pinned child result without adding a synchronous cache or a second
-  renderer. The optional prompt owners are complete: `2dc9b44a` feeds the one
+- **Earliest unsettled contract:** make restore completion and readiness
+  ordinary-data, session-native owners. Planned quiescence already uses the
+  authority facade, and `seon.db/close-session!` is the complete native inverse;
+  neither needs another protocol. Prompt consumers are complete: the live debug
+  feed and autocomplete/export consume the same coordinate-pinned child result
+  without a synchronous cache or second renderer. The optional prompt owners
+  are complete: `2dc9b44a` feeds the one
   existing warning-check registry shared ordinary acquisition, `0602b8a0`
   replaces per-child subagent reads with two bounded batches, and `93d8e0b0`
   acquires menu/typeahead data without a local database value. Commit `43645eaa`
@@ -1245,10 +1249,13 @@ is prohibited.
   precomputed results and remains synchronous. The normalized Datastar
   subscription now admits a value or Promise while retaining one active render,
   at most the newest coherently merged pending change, shared equivalent
-  consumers, initial-full upgrade, and subscription-id fencing. The current
-  debug transition callback remains synchronous; its async child result must
-  now cross that settled reactive owner rather than being hidden in a
-  prompt-specific process cache.
+  consumers, initial-full upgrade, and subscription-id fencing. The debug
+  transition awaits the child through that settled reactive owner rather than
+  hiding it in a prompt-specific process cache. Autocomplete uses the same
+  compiled entrypoint with its database-owned profile at the exact turn
+  coordinate; export invokes that owner twice for its byte-stability check. The
+  obsolete synchronous `render-context`, `rendered-context`, and
+  `rendered-context-blocks` functions are gone.
   The compiled owner now acquires the agent and `:seon.config/system-text` in
   one inherited-coordinate `execute-many` and returns the established
   `:seon.ai/system-prompt` beside the rendered context. Turn capture, token
@@ -1413,9 +1420,9 @@ is prohibited.
   execution and bench-client artifacts compile at the unchanged 18/46 warning
   inventories; the focused test artifact compiles before the known replica
   import stops namespace startup.
-- **Next refill:** move autocomplete/export to the same coordinate-pinned child
-  result, then delete the synchronous AI composition path. In parallel, finish restore/readiness,
-  quiescence, and session close. Only then switch client open atomically and
+- **Next refill:** move restore completion/publication acquisition and the
+  readiness door to ordinary coordinate/result data. Then finish the remaining
+  startup/web synchronous consumers, switch client open atomically, and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
   synchronous database-value arities, and compatibility reachability.
   Supervision graduation then proves immediate idle release, parent-loss

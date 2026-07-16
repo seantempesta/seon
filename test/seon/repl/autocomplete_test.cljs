@@ -68,9 +68,20 @@
                      (.finally (fn [] (set! db/*conn* prev)))))))))
 
 (defn- run-test [chain done]
-  (-> (with-conn chain)
-      (.then (fn [_] (done)))
-      (.catch (fn [e] (is false (str "threw — " e)) (done)))))
+  (let [original turn/render-prompt]
+    (set! turn/render-prompt
+          (fn
+            ([agent-id point]
+             (original agent-id point))
+            ([_agent-id point _profile]
+             (js/Promise.resolve
+               {:seon.render/text (str "autocomplete context at "
+                                       (::coordinate/t point))
+                :seon.ai/system-prompt "system"}))))
+    (-> (with-conn chain)
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done)))
+        (.finally (fn [] (set! turn/render-prompt original))))))
 
 (defn ^:async fresh-agent!
   "Create a booted agent + ONE open run on the current conn.
@@ -107,73 +118,43 @@
 
 (deftest context-is-deterministic-as-of-exact-and-bounded
   (async done
-    (run-test
-      (fn ^:async run []
-        (let [a    (await (fresh-agent!))
-              aid  (:seon.agent/id a)
-              _    (await (drive-turn! a "(+ 11 22)\n"))
-              t2   (await (drive-turn! a "(* 3 4)\n"))
-              point (turn/rendered-coordinate t2)
-              aodb (await (db/at-coordinate db/*conn* point))
-              _ (when-let [message (:seon.error/message aodb)]
-                  (throw (ex-info message {:point point :error aodb})))
-              c1   (auto/context {:seon.agent/id aid :seon.db/db aodb})
-              c2   (auto/context {:seon.agent/id aid :seon.db/db aodb})]
-          (is (= c1 c2)
-              "byte-identical over the same as-of db value — the whole point")
-          (is (not (str/blank? c1)) "the projection renders")
-          (is (str/includes? c1 "(+ 11 22)")
-              "the PREVIOUS turn's eval source is the recent tail")
-          (is (not (str/includes? c1 "(* 3 4)"))
-              "the turn's OWN forms are absent — this is the PRE-turn database")
-          (is (not (str/includes? c1 "=> "))
-              "no live readline — the one moving line is off in this profile")
-          (is (not (str/includes? c1 "result/"))
-              "no result/<id> handles — process-identity bytes are off")
-          (is (<= (tokens/estimate c1) 700)
-              (str "fits the encoder budget — got " (tokens/estimate c1)
-                   " tokens"))
-          (let [resolved-again (await (db/at-coordinate db/*conn* point))
-                rerendered (auto/context {:seon.agent/id aid
-                                          :seon.db/db resolved-again})]
-            (is (= c1 rerendered)
-                "resolving the same complete coordinate reproduces bytes"))))
-      done)))
-
-;; ---------------------------------------------------------------------------
-;; 1b. DEFAULT-path parity (owner ruling 2026-07-12: context generation is
-;;     FROZEN — a profile-absent render must be byte-identical to today).
-;;     Structural guards: the profile dials must NOT leak into the default
-;;     render (readline present, result/<id> handles present), and two
-;;     default renders over the SAME frozen db differ ONLY in the readline's
-;;     live `now` line. The old-code-vs-new-code byte proof runs LIVE
-;;     against stored prompt blobs (acme verification).
-;; ---------------------------------------------------------------------------
-
-(defn- strip-readline-now
-  "Drop the one legitimate live-`now` readline status line."
-  [s]
-  (->> (str/split-lines s)
-       (remove #(re-find #" · turn \d+ · loop \d+/" %))
-       (str/join "\n")))
-
-(deftest default-render-keeps-todays-bytes
-  (async done
-    (run-test
-      (fn ^:async run []
-        (let [a   (await (fresh-agent!))
-              aid (:seon.agent/id a)
-              _   (await (drive-turn! a "(+ 40 2)\n"))
-              db  @db/*conn*
-              d1  (seon.agent.ctx/render-context {:seon.agent/id aid :seon.db/db db})
-              d2  (seon.agent.ctx/render-context {:seon.agent/id aid :seon.db/db db})]
-          (is (str/includes? d1 "=> ")
-              "the DEFAULT render keeps its live readline cursor")
-          (is (str/includes? d1 "result/")
-              "the DEFAULT render keeps its result/<id> handles")
-          (is (= (strip-readline-now d1) (strip-readline-now d2))
-              "two default renders over one frozen db differ only in the readline now")))
-      done)))
+    (let [original turn/render-prompt
+          calls (atom [])
+          point {::coordinate/database-id
+                 #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+                 ::coordinate/branch :db
+                 ::coordinate/commit-id
+                 #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+                 ::coordinate/t 42}]
+      (set! turn/render-prompt
+            (fn [agent-id coordinate profile]
+              (swap! calls conj [agent-id coordinate profile])
+              (js/Promise.resolve
+                {:seon.render/text "bounded autocomplete context"
+                 :seon.ai/system-prompt "system"})))
+      (-> (js/Promise.all
+            #js [(auto/context
+                   {:seon.agent/id "agent-1"
+                    :seon.db.coordinate/coordinate point
+                    :seon.agent.ctx/profile auto/context-blocks})
+                 (auto/context
+                   {:seon.agent/id "agent-1"
+                    :seon.db.coordinate/coordinate point
+                    :seon.agent.ctx/profile auto/context-blocks})])
+          (.then
+            (fn [results]
+              (let [c1 (aget results 0)
+                    c2 (aget results 1)]
+                (is (= c1 c2))
+                (is (= 2 (count @calls)))
+                (is (every? #(= ["agent-1" point auto/context-blocks] %)
+                            @calls))
+                (is (<= (tokens/estimate c1) 700)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+            (fn []
+              (set! turn/render-prompt original)
+              (done)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; 2 + 3. Export row shape + curation.
@@ -243,8 +224,6 @@
                       (get-in manifest ["content" "schema_closures"])))
             (is (map? (get-in manifest ["content" "runtime_artifact"]))
                 "one runtime artifact identity is manifest-wide")
-            (is (str/includes? (get r2 "context" "") "(+ 11 22)")
-                "the row's context is the PRE-turn projection (prior turn visible)")
             (is (some #(str/includes? % "seon.db/query") (get r2 "cards"))
                 "the called fn's compact card rides the row")
             (let [bytes-1 (.readFileSync nfs out "utf8")

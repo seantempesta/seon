@@ -68,7 +68,7 @@
 (deftest html-render-nonexistent-symbol-falls-through-to-pending-html
   ;; A qualified symbol that doesn't resolve is the agent's own tile fn
   ;; not (yet) loaded — render the calm `pending-html` placeholder, NOT a
-  ;; pretty-html dump of the whole render-context map.
+  ;; pretty-html dump of the whole render request map.
   (let [input {:seon.db/db nil :seon.agent/id "x"}
         out   (render/html-render 'nonexistent/sym input)]
     (is (= (default/pending-html 'nonexistent/sym) out))

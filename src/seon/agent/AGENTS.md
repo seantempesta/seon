@@ -9,18 +9,21 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
 ## Systems at play
 
 - **`loop.cljs`** — the FSM as data: a fold of one transition over events
-  derived from the run's data each iteration. It pins **ONE frozen db value
-  per turn** (§8a) and threads it everywhere; never re-deref `*conn*` mid-turn.
+  derived from the run's data each iteration. It pins **ONE complete database
+  coordinate per turn** (§8a) and threads it everywhere; never read a newer
+  coordinate mid-turn.
 - **`run.cljs`** — a run is the bounded unit a trigger opens: two independent
   bounds (turn-limit + wall-clock deadline), run-id as fencing token, the
   in-tx `:db.fn/cas` work-fence so a superseded run's writes abort at commit.
-- **`turn.cljs`** — one turn: `render-prompt` (pure over the frozen db) →
+- **`turn.cljs`** — one turn: `render-prompt` (one coordinate-pinned compiled
+  child result) →
   `call-llm!` (the SOLE LLM retry authority — never add a parallel retry) →
   eval the reply's forms → persist. Turn datoms are projections; big text
   goes to blobs (see observability.md).
 - **`ctx.cljs` + `ctx/*`** — the block system: blocks are seed-COPIED into
-  the agent's own `:seon.agent/ctx` at creation; `render-context` reads that
-  complete set by `:seon.agent.ctx/priority` and stops. Override =
+  the agent's own `:seon.agent/ctx` at creation; the compiled prompt owner
+  acquires that complete set and pure formatting orders it by
+  `:seon.agent.ctx/priority`. Override =
   `install!`/`remove!`, period. No render-merge, no default set, no provider.
   Each `ctx/*` file is one installed block family (namespaces, transcript,
   warnings, canvas, menu, subagents, typeahead-steps).

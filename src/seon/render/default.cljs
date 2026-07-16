@@ -57,7 +57,7 @@
    right now (`seon.eval/lookup-value` returned nil). Mirrors the
    `seon.render.canvas/welcome` card shape (compact + expanded,
    muted text) so the human sees \"preparing this view…\", NOT an error
-   dump of the render-context map. Self-heals: the moment the fn is
+   dump of the render request map. Self-heals: the moment the fn is
    (re)defined the symbol resolves and the real surface renders again."
   {:malli/schema [:=> [:cat :symbol] :seon.render/html-response]}
   [sym]

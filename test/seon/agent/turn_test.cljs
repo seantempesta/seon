@@ -40,6 +40,33 @@
               (set! execution.host/invoke-compiled! original)
               (done)))))))
 
+(deftest prompt-profile-is-forwarded-to-the-same-compiled-owner
+  (async done
+    (let [original execution.host/invoke-compiled!
+          observed (atom nil)
+          profile [{:seon.agent.ctx/name :transcript}]]
+      (set! execution.host/invoke-compiled!
+            (fn [coordinate agent-id arguments]
+              (reset! observed [coordinate agent-id arguments])
+              (js/Promise.resolve
+                {::execution/message execution/result-message
+                 ::execution/coordinate coordinate
+                 ::execution/result {:seon.render/text "profile prompt"
+                                     :seon.ai/system-prompt "system"}})))
+      (-> (turn/render-prompt "agent-1" point profile)
+          (.then
+            (fn [prompt]
+              (is (= "profile prompt" (:seon.render/text prompt)))
+              (is (= [point "agent-1"
+                      [{:seon.agent/id "agent-1"
+                        :seon.agent.ctx/profile profile}]]
+                     @observed))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+            (fn []
+              (set! execution.host/invoke-compiled! original)
+              (done)))))))
+
 (deftest prompt-rejects-a-moved-coordinate-as-data
   (async done
     (let [original execution.host/invoke-compiled!

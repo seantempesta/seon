@@ -2551,12 +2551,6 @@
       ;; read) — profile renders are deterministic over the db value.
       (seq profile) (assoc :seon.agent.ctx/profile-render? true))))
 
-(schema/register! ::render-context-request
-  [:map
-   [:seon.agent/id :string]
-   [:seon.db/db    {:optional true} :seon.db/db]
-   [:seon.agent.ctx/profile {:optional true} :seon.agent.ctx/profile]])
-
 (schema/register! ::rendered-block
   [:map
    [:seon.agent.ctx/name :seon.agent.ctx/name]
@@ -2570,35 +2564,6 @@
   [:map
    [:seon.render/text {:optional true} :string]
    [:seon.agent.ctx/rendered-blocks ::rendered-blocks]])
-
-(declare rendered-context)
-
-(defn render-context
-  "THE agent's full LLM context, as a bare String.
-
-   The SINGLE producer
-   the prompt path ([[seon.agent.turn/render-prompt]]) AND the human
-   web UI ([[seon.agent.debug/ctx-preview]]) both route through. Both
-   render the `:seon.render/ai` side of ONE render ([[seon.render/render]])
-   over the SAME `context-root` over the SAME db value, so the model's
-   prompt and the web UI's context pane are byte-identical BY
-   CONSTRUCTION (the only per-render-moment difference is the single live
-   `now` in the transcript readline).
-
-   Renders [[context-root]] in the `:seon.render/ai` view UNLESS the agent
-   carries a per-agent `:seon.render/ai` OVERRIDE on its entity: a STRING
-   renders verbatim, a SYMBOL renders through the same render (a custom
-   prompt fn returning a bare String). `:seon.db/db` is the render snapshot
-   (defaults to `@*conn*`); pass the SAME db to both consumers to keep them
-   byte-identical.
-
-   An optional `:seon.agent.ctx/profile` (a list of block patches, see the
-   schema above) renders a CURATED subset through the same root — the
-   per-agent slot override is bypassed (a profile asks for exactly those
-   blocks). Absent ⇒ byte-parity with today."
-  {:malli/schema [:=> [:cat ::render-context-request] :string]}
-  [request]
-  (or (:seon.render/text (rendered-context request #{:ai})) ""))
 
 (defn- block-renders-ai?
   "A context block contributes to the agent's PROMPT only when it declares an
@@ -2736,7 +2701,7 @@
    This is the synchronous tail for the compiled prompt owner. It selects the
    entity's complete stored block set or the requested profile, preserves the
    existing omission, cap, order, bracket, and cache-boundary behavior, and
-   returns the ordinary [[rendered-context]] shape. The asynchronous owner may
+   returns the ordinary rendered prompt map. The asynchronous owner may
    supply an already-selected block vector whose symbol slots have become
    literal results or block-local error strings."
   {:malli/schema [:=> [:cat ::acquired-context-request] ::rendered-context]}
@@ -2780,71 +2745,6 @@
                     (constantly nil))]
         {:seon.render/text (rendered-blocks->context-text root blocks)
          :seon.agent.ctx/rendered-blocks blocks}))))
-
-(defn rendered-context
-  "Render one frozen context projection, reusing its AI block results.
-
-   The returned `:seon.render/text` is the same bare context string as
-   [[render-context]] when `formats` includes `:ai`. The accompanying ordered
-   `:seon.agent.ctx/rendered-blocks` are the exact strings used to assemble
-   it, plus HTML twins only when `:html` was requested. An agent-level
-   `:seon.render/ai` override replaces the whole context, so it produces one
-   synthetic `:prompt` AI block and no unrelated default HTML twins.
-
-   This is a pure projection over the supplied db value and writes no datoms."
-  {:malli/schema [:=> [:catn [::request ::render-context-request]
-                       [:seon.render/formats [:set [:enum :ai :html]]]]
-                  ::rendered-context]}
-  [{:seon.agent/keys [id] :seon.db/keys [db]
-    profile :seon.agent.ctx/profile}
-   formats]
-  (let [db (or db @db/*conn*)
-        entity (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
-        slot (when-not (seq profile)
-               (some->> (:seon.render/ai entity)
-                        (db/decode-edn-value :seon.render/ai)))
-        ctx (cond-> {:seon.db/db db :seon.agent/id id}
-              (seq profile) (assoc :seon.agent.ctx/profile (vec profile)))]
-    (if (or (string? slot) (symbol? slot))
-      (let [text (when (contains? formats :ai)
-                   (if (string? slot)
-                     slot
-                     (or (render/render :seon.render/ai ctx
-                                        {:seon.agent.ctx/name :prompt
-                                         :seon.render/ai slot})
-                         "")))
-            blocks (cond-> []
-                     (and (string? text) (not (str/blank? text)))
-                     (conj {:seon.agent.ctx/name :prompt
-                            :seon.agent.ctx/priority 0
-                            :seon.render/text text
-                            :seon.render/token-estimate (tokens/estimate text)}))]
-        (cond-> {:seon.agent.ctx/rendered-blocks blocks}
-          (contains? formats :ai) (assoc :seon.render/text (or text ""))))
-      (let [root (context-root ctx)
-            ctx* (assoc ctx :seon.agent/entity (:seon.agent/entity root))
-            blocks (rendered-child-blocks
-                     (:seon.agent.ctx/children root)
-                     formats
-                     #(render/render :seon.render/ai ctx* %)
-                     #(render/render :seon.render/html ctx* %))]
-        (cond-> {:seon.agent.ctx/rendered-blocks blocks}
-          (contains? formats :ai)
-          (assoc :seon.render/text
-                 (rendered-blocks->context-text root blocks)))))))
-
-(defn rendered-context-blocks
-  "Resolved context blocks for one agent and frozen db snapshot.
-
-   Reads the database-owned block collection, adds DB-derived auto-run blocks,
-   and renders only `formats` (`:ai`, `:html`, or both). Output stays block-
-   oriented so every consumer sees the same ordered identities. Rendering is a
-   pure projection and writes no datoms."
-  {:malli/schema [:=> [:catn [::ctx :map]
-                       [:seon.render/formats [:set [:enum :ai :html]]]]
-                  [:vector :map]]}
-  [ctx formats]
-  (:seon.agent.ctx/rendered-blocks (rendered-context ctx formats)))
 
 (defn render-context-ai
   "The ROOT renderable's `:ai` slot — the block renderer.
@@ -2946,8 +2846,7 @@
    [::blocks       [:vector ::keyable-block]]
    ;; agent id value-schema = :string (NOT the :seon.agent/id ref): this ns
    ;; loads BEFORE seon.agent registers that attr, so a ref would be an
-   ;; unregistered schema at cold boot — same reason ::render-context-request
-   ;; spells it :string.
+   ;; unregistered schema at cold boot, so this request spells it :string.
    [:seon.agent/id :string]])
 
 (schema/register! ::block-chain-keys-response
@@ -2961,8 +2860,8 @@
    (`::blocks`, `:seon.agent/id`) only — no I/O, no GPU.
 
    `::blocks` is the turn's `:seon.render/text`-bearing blocks in prompt order
-   (static→volatile by stored priority), as produced by
-   [[rendered-context-blocks]]. The
+   (static→volatile by stored priority), as returned by the compiled prompt
+   child. The
    output `::chain-hashes` is parallel to `::blocks`: hash i fingerprints the
    exact block prefix 0..i, salted at the root by `:seon.agent/id`.
 

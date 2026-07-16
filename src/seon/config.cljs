@@ -383,8 +383,8 @@
 (schema/register! :seon.config/system-text :string)
 ;; Named context RENDER PROFILES — `{profile-kw → [block-patch …]}`, each
 ;; patch a `:seon.agent.ctx/profile` entry (block name + per-block config
-;; overrides) that `seon.agent.ctx/render-context` renders as a curated
-;; subset of the agent's blocks. Config-through-DB so an as-of render
+;; overrides) that the compiled prompt child renders as a curated subset of
+;; the agent's blocks. Config-through-DB so an as-of render
 ;; regenerates under the profile IN FORCE at that t (the byte-exact
 ;; contract — `seon.repl.autocomplete` reads its `:autocomplete` profile
 ;; off the passed db value, code default when absent). OPTIONAL, no

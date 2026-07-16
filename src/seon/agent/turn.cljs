@@ -322,46 +322,55 @@
 
    The caller supplies the complete frozen database coordinate. The trusted
    compiled prompt owner performs every prompt read and selected function call
-   at that coordinate and returns the ordinary rendered-context value. This
+   at that coordinate and returns the ordinary rendered prompt map. This
    orchestration tail validates that the child did not move coordinates and
    preserves the exact context and system text consumed by the LLM."
-  {:malli/schema [:=> [:cat :seon.agent/id
-                       :seon.db.coordinate/coordinate]
-                  ::prompt-result]}
-  [agent-id point]
-  (let [response
-        (await
-          (execution.host/invoke-compiled!
-            point agent-id [{:seon.agent/id agent-id}]))]
-    (cond
-      (not= point (::execution/coordinate response))
-      {:seon.error/message
-       "The execution child returned a prompt from another database coordinate."
-       :seon.error/kind :core-bug
-       :seon.error/data
-       {:seon.db/expected-coordinate point
-        :seon.db/current-coordinate (::execution/coordinate response)}}
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.agent/id :seon.db.coordinate/coordinate]
+     ::prompt-result]
+    [:=> [:cat :seon.agent/id :seon.db.coordinate/coordinate
+          :seon.agent.ctx/profile]
+     ::prompt-result]]}
+  ([agent-id point]
+   (await (render-prompt agent-id point [])))
+  ([agent-id point profile]
+   (let [request (cond-> {:seon.agent/id agent-id}
+                   (seq profile)
+                   (assoc :seon.agent.ctx/profile (vec profile)))
+         response
+         (await
+           (execution.host/invoke-compiled!
+             point agent-id [request]))]
+     (cond
+       (not= point (::execution/coordinate response))
+       {:seon.error/message
+        "The execution child returned a prompt from another database coordinate."
+        :seon.error/kind :core-bug
+        :seon.error/data
+        {:seon.db/expected-coordinate point
+         :seon.db/current-coordinate (::execution/coordinate response)}}
 
-      (= execution/result-message (::execution/message response))
-      (let [rendered (::execution/result response)
-            text (:seon.render/text rendered)
-            system-prompt (:seon.ai/system-prompt rendered)]
-        (cond
-          (and (map? rendered) (string? (:seon.error/message rendered)))
-          rendered
+       (= execution/result-message (::execution/message response))
+       (let [rendered (::execution/result response)
+             text (:seon.render/text rendered)
+             system-prompt (:seon.ai/system-prompt rendered)]
+         (cond
+           (and (map? rendered) (string? (:seon.error/message rendered)))
+           rendered
 
-          (and (string? text) (string? system-prompt))
-          rendered
+           (and (string? text) (string? system-prompt))
+           rendered
 
-          :else
-          {:seon.error/message
-           "The execution child returned an invalid rendered prompt."
-           :seon.error/kind :core-bug}))
+           :else
+           {:seon.error/message
+            "The execution child returned an invalid rendered prompt."
+            :seon.error/kind :core-bug}))
 
-      :else
-      (or (::execution/error response)
-          {:seon.error/message "The execution child did not return a prompt."
-           :seon.error/kind :core-bug}))))
+       :else
+       (or (::execution/error response)
+           {:seon.error/message "The execution child did not return a prompt."
+            :seon.error/kind :core-bug})))))
 
 ;; ============================================================
 ;; The turn bracket — open-turn! folds the prompt projection + the current

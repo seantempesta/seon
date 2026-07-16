@@ -274,22 +274,39 @@
         "a genuine agent-authored def is still teed")))
 
 ;; ------------------------------------------------------------
-;; Composer: purpose-as-entity-data, merge, functions.
+;; Root renderer: purpose-as-entity-data, merge, functions.
 ;; ------------------------------------------------------------
 
+(defn- rendered-ai-blocks
+  "Rendered AI blocks by name from one immutable database value."
+  [database id]
+  (let [input {:seon.db/db database :seon.agent/id id}
+        root (ctx/context-root input)
+        input (assoc input :seon.agent/entity (:seon.agent/entity root))
+        blocks
+        (->> (:seon.agent.ctx/children root)
+             (keep
+               (fn [block]
+                 (when (contains? block :seon.render/ai)
+                   (let [text (render/render :seon.render/ai input block)]
+                     (when-not (str/blank? text)
+                       {:seon.agent.ctx/name (:seon.agent.ctx/name block)
+                        :seon.render/text text})))))
+             vec)]
+    {:seon.ctx-test/order (mapv :seon.agent.ctx/name blocks)
+     :seon.ctx-test/text
+     (into {} (map (juxt :seon.agent.ctx/name :seon.render/text)) blocks)
+     :seon.ctx-test/blocks blocks}))
+
 (defn- assemble
-  "The assembled context as a map, derived from the keystone ONE-render
-   (`context-root` + `rendered-context-blocks`) — the shape the old
-   `assemble-context` returned, rebuilt from the new system so these tests
-   keep asserting against the agent's real context."
+  "The assembled context map derived from the public root renderer."
   [id]
   (let [ctx   {:seon.db/db @db/*conn* :seon.agent/id id}
         root  (ctx/context-root ctx)
         text  (or (render/render :seon.render/ai ctx root) "")
         split (ctx/split-context text)
-        blocks (ctx/rendered-context-blocks ctx #{:ai :html})
-        section-texts (filterv #(contains? % :seon.render/text) blocks)
-        section-html  (filterv #(contains? % :seon.render/hiccup) blocks)]
+        section-texts (:seon.ctx-test/blocks
+                        (rendered-ai-blocks @db/*conn* id))]
     {:seon.render/text           text
      :seon.render/stable-text    (:seon.render/stable-text split)
      :seon.render/volatile-text  (:seon.render/volatile-text split)
@@ -298,23 +315,12 @@
      ;; old assemble-context's :seon.render/sections carried.
      :seon.render/sections       (mapv :seon.agent.ctx/name (:seon.agent.ctx/children root))
      :seon.render/section-texts  section-texts
-     :seon.render/section-html   section-html
      :seon.render/token-estimate (tokens/estimate text)}))
 
 (defn- section-text
   [id nm]
   (some #(when (= nm (:seon.agent.ctx/name %)) (:seon.render/text %))
         (:seon.render/section-texts (assemble id))))
-
-(defn- rendered-ai-blocks
-  "Rendered AI blocks by name from one immutable database value."
-  [database id]
-  (let [blocks (ctx/rendered-context-blocks
-                 {:seon.db/db database :seon.agent/id id}
-                 #{:ai})]
-    {:seon.ctx-test/order (mapv :seon.agent.ctx/name blocks)
-     :seon.ctx-test/text
-     (into {} (map (juxt :seon.agent.ctx/name :seon.render/text)) blocks)}))
 
 (defn- root-fleet-volatility-proof!
   []
@@ -389,8 +395,8 @@
                          "no bare ⚠ render-failed placeholder")
                      (is (not (str/includes? out "malli"))
                          "no swallowed malli code in the agent's context"))
-                   ;; (b) the REAL prompt path (render-context-ai, NOT the
-                   ;; debug view's rendered-context-blocks) must also be render-failure-free.
+                   ;; (b) the real root prompt renderer, not the debug
+                   ;; projection, must also be render-failure-free.
                    (let [ctx  {:seon.db/db @db/*conn* :seon.agent/id "AGTctxtile00p1"}
                          text (str (render/render :seon.render/ai ctx
                                                   (ctx/context-root ctx)))]

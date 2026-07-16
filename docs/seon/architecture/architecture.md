@@ -135,8 +135,9 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **html render** — `:seon.render/html` selects the function that produces the
   human render; its response carries `:seon.render/hiccup`, which becomes a
   surface.
-- **prompt** — the agent's assembled context: ai renders concatenated by priority
-  (`seon.agent.ctx/render-context`), prefixed by a system role resolved by
+- **prompt** — the agent's assembled context: the compiled prompt child acquires
+  ai renders at one complete coordinate and concatenates them by priority,
+  prefixed by a system role resolved by
   `seon.ai/effective-system-prompt` — the per-request `:seon.ai/system-prompt`
   override → the cluster's `:seon.config/system-text` datom → the shipped
   `seon.agent.ctx/system-text` default. The system prompt is DB state and
