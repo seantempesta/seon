@@ -24,6 +24,7 @@
     [seon.agent.home :as home]
     [seon.ai.tokens :as tokens]
     [seon.client :as client]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
@@ -110,6 +111,80 @@
 (defn- block [conn]
   (block-for conn agent-id))
 
+(def ^:private eager-current-row
+  {:seon.ns/name cur-ns
+   :seon.db/tx 1
+   :seon.ns/source
+   "(ns my.agent.tst-2606260000 (:require [my.helper :as h])) (defn plan [x] (CUR-BODY x))"
+   :seon.ns/require-edges [{:seon.ns.require/target :my.helper
+                            :seon.ns.require/refers #{'assist}}]
+   :seon.fn/_ns [(dissoc (fn-row "my.agent.tst-2606260000/plan"
+                                  cur-ns "CUR-BODY")
+                           :seon.fn/ns)]})
+
+(def ^:private eager-helper-row
+  {:seon.ns/name :my.helper
+   :seon.db/tx 1
+   :seon.ns/source "(ns my.helper)"
+   :seon.fn/_ns
+   (mapv #(dissoc % :seon.fn/ns)
+         [(fn-row "my.helper/assist" :my.helper "HLP-BODY")
+          (fn-row "my.helper/runtime-helper" :my.helper "RUNTIME-BODY")
+          {:seon.fn/sym "my.helper/unspecced"
+           :seon.fn/source "(defn unspecced [x] x)"
+           :seon.fn/fn-var? true :seon.fn/private? false
+           :seon.fn/arglists "([x])"}
+          {:seon.fn/sym "my.helper/secret"
+           :seon.fn/source "(defn- secret [x] x)"
+           :seon.fn/fn-var? true :seon.fn/private? true
+           :seon.fn/arglists "([x])"
+           :seon.fn/spec "[:=> [:cat :int] :int]"}])})
+
+(defn- eager-input []
+  {:seon.agent/id agent-id
+   :seon.config/current-ns :full
+   :seon.agent.ctx.render-fns/current-ns cur-ns
+   :seon.agent.ctx.namespaces/full-source #{}
+   :seon.agent.ctx.namespaces/with-tests #{}
+   :seon.agent.ctx.namespaces/current-full? true
+   :seon.agent.ctx.namespaces/current-tests? true
+   :seon.agent.ctx.namespaces/namespace-rows
+   [eager-current-row eager-helper-row]
+   :seon.agent.ctx/schema-rows []})
+
+(defn- member [result]
+  {::protocol/success? true ::protocol/result result})
+
+(defn- fail-member [message]
+  {::protocol/success? false
+   ::protocol/error {:seon.error/message message}})
+
+(defn- fail-on-db-io [& _]
+  (throw (js/Error. "pure namespace tail attempted database I/O")))
+
+(deftest eager-namespace-tail-does-zero-database-io
+  (let [original-execute-many db/execute-many
+        original-query db/query
+        original-pull db/pull
+        original-entity db/entity
+        original-entity-lazy db/entity-lazy]
+    (try
+      (set! db/execute-many fail-on-db-io)
+      (set! db/query fail-on-db-io)
+      (set! db/pull fail-on-db-io)
+      (set! db/entity fail-on-db-io)
+      (set! db/entity-lazy fail-on-db-io)
+      (let [out (nss/namespaces-block (eager-input))]
+        (is (str/includes? out "CUR-BODY"))
+        (is (str/includes? out "my.helper/assist"))
+        (is (not (str/includes? out "HLP-BODY"))))
+      (finally
+        (set! db/execute-many original-execute-many)
+        (set! db/query original-query)
+        (set! db/pull original-pull)
+        (set! db/entity original-entity)
+        (set! db/entity-lazy original-entity-lazy)))))
+
 (deftest remote-acquisition-is-bounded-and-selection-scoped
   (let [initial (@#'nss/initial-acquisition-members agent-id)
         selected (@#'nss/selected-acquisition-members
@@ -148,6 +223,235 @@
              (::protocol/arguments tx-member)))
       (is (not-any? #{'?all-names}
                     (tree-seq coll? seq (::protocol/query-form tx-member)))))))
+
+(deftest remote-namespace-block-preserves-pure-and-local-bytes
+  (async done
+    (-> (with-seeded []
+          (fn [conn]
+            (let [coordinate {:seon.db.coordinate/database-id "db"
+                              :seon.db.coordinate/branch "main"
+                              :seon.db.coordinate/commit-id "commit"
+                              :seon.db.coordinate/t 1}
+                  original-execute-many db/execute-many
+                  original-pull db/pull
+                  responses
+                  (atom
+                    [{::db/coordinate coordinate
+                      ::db/results
+                      [(member {:seon.agent/id agent-id})
+                       (member [[cur-ns (js/Date. 1) 1]])
+                       (member {:seon.config/current-ns :full})]}
+                     {::db/coordinate coordinate
+                      ::db/results
+                      [(member [eager-current-row eager-helper-row])
+                       (member [[cur-ns 1] [:my.helper 1]])]}])]
+              (set! db/execute-many
+                    (fn [_]
+                      (let [response (first @responses)]
+                        (swap! responses subvec 1)
+                        (js/Promise.resolve response))))
+              (set! db/pull (fn [_] (js/Promise.resolve eager-current-row)))
+              (-> (nss/namespaces-block! {:seon.agent/id agent-id})
+                  (.then
+                    (fn [remote]
+                      (set! db/execute-many original-execute-many)
+                      (set! db/pull original-pull)
+                      (let [pure (nss/namespaces-block (eager-input))
+                            local (block conn)]
+                        (is (= pure remote)
+                            "the async owner renders through the pure tail")
+                        (is (= local remote)
+                            "the temporary local wrapper remains byte-identical"))))
+                  (.finally
+                    (fn []
+                      (set! db/execute-many original-execute-many)
+                      (set! db/pull original-pull)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw: " (.-message e))) (done))))))
+
+(deftest remote-namespace-failures-keep-member-and-coordinate-evidence
+  (async done
+    (let [coordinate {:seon.db.coordinate/database-id "db"
+                      :seon.db.coordinate/branch "main"
+                      :seon.db.coordinate/commit-id "commit"
+                      :seon.db.coordinate/t 1}
+          moved (assoc coordinate :seon.db.coordinate/t 2)
+          original-execute-many db/execute-many
+          original-pull db/pull
+          responses
+          (atom
+            [{::db/coordinate coordinate
+              ::db/results
+              [(member {:seon.agent/id agent-id})
+               (fail-member "latest namespace failed")
+               (member {})]}
+             {::db/coordinate coordinate
+              ::db/results
+              [(member {:seon.agent/id agent-id})
+               (member [[cur-ns (js/Date. 1) 1]])
+               (member {})]}
+             {::db/coordinate moved
+              ::db/results [(member [eager-current-row])
+                            (member [[cur-ns 1]])]}])]
+      (set! db/execute-many
+            (fn [_]
+              (let [response (first @responses)]
+                (swap! responses subvec 1)
+                (js/Promise.resolve response))))
+      (set! db/pull (fn [_] (js/Promise.resolve eager-current-row)))
+      (-> (nss/namespaces-block! {:seon.agent/id agent-id})
+          (.then
+            (fn [member-failure]
+              (is (str/includes? member-failure "initial member"))
+              (nss/namespaces-block! {:seon.agent/id agent-id})))
+          (.then
+            (fn [coordinate-failure]
+              (is (str/includes? coordinate-failure
+                                 ":seon.db/expected-coordinate"))
+              (is (str/includes? coordinate-failure
+                                 ":seon.db/actual-coordinate"))))
+          (.catch (fn [e] (is false (str "threw: " (.-message e)))))
+          (.finally
+            (fn []
+              (set! db/execute-many original-execute-many)
+              (set! db/pull original-pull)
+              (done)))))))
+
+(deftest grown-schema-frontier-keeps-the-production-cap-and-budgets
+  (async done
+    (let [coordinate {:seon.db.coordinate/database-id "db"
+                      :seon.db.coordinate/branch "main"
+                      :seon.db.coordinate/commit-id "commit"
+                      :seon.db.coordinate/t 1}
+          left-keys (mapv #(keyword "grown.left" (str "k" %))
+                          (range ctx/referenced-schema-cap))
+          right-keys (mapv #(keyword "grown.right" (str "k" %))
+                           (range ctx/referenced-schema-cap))
+          spec (fn [keys]
+                 (str "[:=> [:cat "
+                      (str/join " " (map pr-str keys))
+                      "] :string]"))
+          requests (atom [])
+          original-query db/query]
+      (set! db/query
+            (fn [request]
+              (swap! requests conj request)
+              (js/Promise.resolve
+                (mapv (fn [k] [k ":string"])
+                      (first (::db/args request))))))
+      (-> ((deref #'nss/acquire-schema-rows!)
+           {::db/coordinate coordinate
+            :seon.agent.ctx.namespaces/namespace-rows
+            [{:seon.ns/name :grown.left
+              :seon.fn/_ns [{:seon.fn/sym "grown.left/run"
+                             :seon.fn/spec (spec left-keys)}]}
+             {:seon.ns/name :grown.right
+              :seon.fn/_ns [{:seon.fn/sym "grown.right/run"
+                             :seon.fn/spec (spec right-keys)}]}]})
+          (.then
+            (fn [acquired]
+              (is (= (* 2 ctx/referenced-schema-cap)
+                     (count (:seon.agent.ctx/schema-rows acquired)))
+                  "the wire result supports both independent formatter closures")
+              (is (= 2 (count @requests)))
+              (doseq [request @requests]
+                (let [frontier (first (::db/args request))]
+                  (is (= ctx/referenced-schema-cap (count frontier)))
+                  (is (= coordinate (::db/coordinate request)))
+                  (is (= 500000 (::db/max-work request)))
+                  (is (= 256 (::db/max-results request)))
+                  (is (= 262144 (::db/max-result-weight request)))))))
+          (.catch (fn [e] (is false (str "threw: " (.-message e)))))
+          (.finally (fn [] (set! db/query original-query) (done)))))))
+
+(deftest schema-frontier-fails-instead-of-silently-truncating-the-aggregate
+  (async done
+    (let [coordinate {:seon.db.coordinate/database-id "db"
+                      :seon.db.coordinate/branch "main"
+                      :seon.db.coordinate/commit-id "commit"
+                      :seon.db.coordinate/t 1}
+          namespace-count 52
+          rows
+          (mapv
+            (fn [namespace-index]
+              (let [ns-name (keyword (str "aggregate.n" namespace-index))
+                    keys (mapv #(keyword (name ns-name) (str "k" %))
+                               (range ctx/referenced-schema-cap))]
+                {:seon.ns/name ns-name
+                 :seon.fn/_ns
+                 [{:seon.fn/sym (str (name ns-name) "/run")
+                   :seon.fn/spec
+                   (str "[:=> [:cat "
+                        (str/join " " (map pr-str keys))
+                        "] :string]")}]}))
+            (range namespace-count))
+          original-query db/query]
+      (set! db/query
+            (fn [request]
+              (js/Promise.resolve
+                (mapv (fn [k] [k ":string"])
+                      (first (::db/args request))))))
+      (-> ((deref #'nss/acquire-schema-rows!)
+           {::db/coordinate coordinate
+            :seon.agent.ctx.namespaces/namespace-rows rows})
+          (.then
+            (fn [acquired]
+              (let [error (:seon.agent.ctx.namespaces/error acquired)
+                    data (:seon.error/data error)]
+                (is (map? error))
+                (is (str/includes? (:seon.error/message error)
+                                   "schema aggregate bound"))
+                (is (> (:seon.agent.ctx/schema-key-count data)
+                       (:seon.agent.ctx/schema-key-cap data))))))
+          (.catch (fn [e] (is false (str "threw: " (.-message e)))))
+          (.finally (fn [] (set! db/query original-query) (done)))))))
+
+(deftest schema-acquisition-does-not-preselect-the-formatters-first-forty
+  (async done
+    (let [coordinate {:seon.db.coordinate/database-id "db"
+                      :seon.db.coordinate/branch "main"
+                      :seon.db.coordinate/commit-id "commit"
+                      :seon.db.coordinate/t 1}
+          initial-keys (mapv #(keyword "z.branch" (str "k" %))
+                             (range ctx/referenced-schema-cap))
+          earlier-child :a.branch/child
+          row {:seon.ns/name :branch.root
+               :seon.fn/_ns
+               [{:seon.fn/sym "branch.root/run"
+                 :seon.fn/spec
+                 (str "[:=> [:cat "
+                      (str/join " " (map pr-str initial-keys))
+                      "] :string]")}]}
+          original-query db/query]
+      (set! db/query
+            (fn [request]
+              (js/Promise.resolve
+                (mapv (fn [k]
+                        [k (if (= k (first initial-keys))
+                             (pr-str [:tuple earlier-child])
+                             ":string")])
+                      (first (::db/args request))))))
+      (-> ((deref #'nss/acquire-schema-rows!)
+           {::db/coordinate coordinate
+            :seon.agent.ctx.namespaces/namespace-rows [row]})
+          (.then
+            (fn [acquired]
+              (let [schema-rows (:seon.agent.ctx/schema-rows acquired)
+                    rendered (ctx/render-namespace-ai
+                               {:seon.ns/name :branch.root
+                                :seon.agent.ctx/namespace-rows [row]
+                                :seon.agent.ctx/schema-rows schema-rows})]
+                (is (= (inc ctx/referenced-schema-cap) (count schema-rows))
+                    "acquisition retains the complete reachable closure")
+                (is (str/includes? rendered
+                                   "(register! :a.branch/child"))
+                (is (not (str/includes? rendered
+                                        "(register! :z.branch/k39"))
+                    "ctx alone selects its lexically re-sorted first forty")
+                (is (str/includes? rendered
+                                   "40+ referenced schemas — capped")))))
+          (.catch (fn [e] (is false (str "threw: " (.-message e)))))
+          (.finally (fn [] (set! db/query original-query) (done)))))))
 
 (defn- fresh-latest-ns-conn
   []

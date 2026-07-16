@@ -1652,7 +1652,7 @@
 ;;; the transitive expansion ourselves over db source strings.)
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private referenced-schema-cap
+(def referenced-schema-cap
   ;; Token weight is real (these cards ride every prompt). Bound the closure and
   ;; say what was capped rather than silently truncate. Measured max closure in
   ;; the live corpus is ~26; 40 is headroom that essentially never trips.
@@ -1815,11 +1815,29 @@
 
 (schema/register! ::seed-specs ::schema-sources)
 (schema/register! ::own-keys   [:set :keyword])
+(schema/register! ::schema-row
+  [:map
+   [:seon.schema/key :keyword]
+   [:seon.schema/form :string]])
+(schema/register! ::schema-rows [:vector ::schema-row])
+(schema/register! ::referenced-schema-rows-request
+  [:map
+   [::seed-specs ::seed-specs]
+   [::own-keys ::own-keys]
+   [::schema-rows ::schema-rows]])
 (schema/register! ::referenced-schema-request
   [:map
    [:seon.db/db  :seon.db/db]
    [::seed-specs ::seed-specs]
    [::own-keys   ::own-keys]])
+
+(defn referenced-schema-rows-block
+  "Render referenced schema definitions from ordinary persisted rows."
+  {:malli/schema [:=> [:cat ::referenced-schema-rows-request]
+                  [:maybe :string]]}
+  [{seed-specs ::seed-specs own-keys ::own-keys schema-rows ::schema-rows}]
+  (let [definitions (schema-definitions-from-rows schema-rows)]
+    (referenced-schema-block* #(get definitions %) seed-specs own-keys)))
 
 (defn referenced-schema-block
   "The DEFINITIONS behind a namespace's fn specs — the transitive closure of
@@ -1832,9 +1850,10 @@
    Map-in: `{:seon.db/db <db> ::seed-specs [<spec-str>…] ::own-keys #{<kw>…}}`."
   {:malli/schema [:=> [:cat ::referenced-schema-request] [:maybe :string]]}
   [{db :seon.db/db seed-specs ::seed-specs own-keys ::own-keys}]
-  (let [schema-rows (referenced-schema-rows-in-db db seed-specs own-keys)
-        definitions (schema-definitions-from-rows schema-rows)]
-    (referenced-schema-block* #(get definitions %) seed-specs own-keys)))
+  (referenced-schema-rows-block
+    {::seed-specs seed-specs
+     ::own-keys own-keys
+     ::schema-rows (referenced-schema-rows-in-db db seed-specs own-keys)}))
 
 (defn- schema-block-ai
   "One schema rendered from the supplied database row."
@@ -1942,11 +1961,6 @@
    [:seon.schema/_ns {:optional true} [:vector [:map]]]
    [:seon.test/_ns {:optional true} [:vector [:map]]]])
 (schema/register! ::namespace-rows [:vector ::namespace-row])
-(schema/register! ::schema-row
-  [:map
-   [:seon.schema/key :keyword]
-   [:seon.schema/form :string]])
-(schema/register! ::schema-rows [:vector ::schema-row])
 (schema/register! ::render-namespace-ai-request
   [:map
    [:seon.ns/name :seon.ns/name]
@@ -1964,9 +1978,10 @@
         schemas     (:seon.schema/_ns data)
         seed-specs  (into [] (keep :seon.fn/spec) fns)
         own-keys    (into #{} (map :seon.schema/key) schemas)
-        definitions (schema-definitions-from-rows schema-rows)
-        ref-blk     (referenced-schema-block* #(get definitions %)
-                                              seed-specs own-keys)]
+        ref-blk     (referenced-schema-rows-block
+                      {::seed-specs seed-specs
+                       ::own-keys own-keys
+                       ::schema-rows (into schema-rows schemas)})]
     (render-one-ns-ai ns-kw data ref-blk)))
 
 (defn- render-namespace-ai-from-db

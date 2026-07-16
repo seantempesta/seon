@@ -50,7 +50,8 @@
 ;; The compact card renderer is defined at the BOTTOM of this file (its
 ;; helpers cluster there); [[namespaces-block]] above it dispatches the long
 ;; tail to it, so forward-declare it here.
-(declare render-one-ns-compact resolve-cfg)
+(declare namespaces-block render-one-ns-compact render-one-ns-compact-row
+         resolve-cfg)
 
 ;; ============================================================
 ;; Config interface — the namespaces-block render dials, as reactive
@@ -413,6 +414,107 @@
                                    (get txs nm) (assoc :seon.db/tx (get txs nm))))
                                names rows)}))))))))))))
 
+(def ^:private schema-frontier-query
+  '[:find ?requested ?form
+    :in $ [?requested ...]
+    :where
+    [?schema :seon.schema/key ?requested]
+    [?schema :seon.schema/form ?form]])
+
+(def ^:private schema-row-aggregate-cap 2048)
+
+(defn- schema-frontier-request
+  [coordinate frontier]
+  {::db/coordinate coordinate
+   ::db/query schema-frontier-query
+   ::db/args [frontier]
+   ::db/max-work 500000
+   ::db/max-results 256
+   ::db/max-result-weight 262144})
+
+(defn- database-error
+  [value]
+  (when (and (map? value) (string? (:seon.error/message value))) value))
+
+(defn ^:async ^:private acquire-one-schema-closure!
+  [coordinate row state]
+  (let [own-keys (into #{} (keep :seon.schema/key) (:seon.schema/_ns row))
+        sources (into []
+                      (remove str/blank?)
+                      (concat (keep :seon.fn/spec (:seon.fn/_ns row))
+                              (keep :seon.schema/form (:seon.schema/_ns row))))
+        initial (into (sorted-set)
+                      (remove own-keys)
+                      (ctx/schema-refs sources))]
+    (loop [pending initial seen own-keys state state]
+      (if (or (empty? pending)
+              (::error state))
+        state
+        (let [frontier (vec (take ctx/referenced-schema-cap pending))
+              rows-by-key (::schema-rows-by-key state)
+              missing (::missing-schema-keys state)
+              unknown (filterv #(and (not (contains? rows-by-key %))
+                                     (not (contains? missing %)))
+                               frontier)
+              response (if (seq unknown)
+                         (await (db/query (schema-frontier-request
+                                           coordinate unknown)))
+                         [])]
+          (if-let [error (database-error response)]
+            (assoc state ::error
+                   (acquisition-error "schema frontier acquisition" error))
+            (let [returned (into {}
+                                 (map (fn [[k form]]
+                                        [k {:seon.schema/key k
+                                            :seon.schema/form form}]))
+                                 response)
+                  rows-by-key' (merge rows-by-key returned)
+                  missing' (into missing
+                                 (remove #(contains? returned %))
+                                 unknown)]
+              (if (> (+ (count rows-by-key') (count missing'))
+                     schema-row-aggregate-cap)
+                (assoc state ::error
+                       (acquisition-error
+                         "schema aggregate bound"
+                         {:seon.agent.ctx/schema-key-count
+                          (+ (count rows-by-key') (count missing'))
+                          :seon.agent.ctx/schema-key-cap
+                          schema-row-aggregate-cap}))
+                (let [definitions (keep rows-by-key' frontier)
+                      children (ctx/schema-refs
+                                 (mapv :seon.schema/form definitions))
+                      seen' (into seen frontier)
+                      pending' (into (sorted-set)
+                                     (remove seen')
+                                     (concat (remove (set frontier) pending)
+                                             (remove own-keys children)))]
+                  (recur pending' seen'
+                         (assoc state
+                                ::schema-rows-by-key rows-by-key'
+                                ::missing-schema-keys missing')))))))))))
+
+(defn ^:async ^:private acquire-schema-rows!
+  "Acquire each namespace's bounded referenced-schema closure."
+  [input]
+  (if-let [error (database-error input)]
+    (assoc input ::error error)
+    (let [coordinate (::db/coordinate input)
+          namespace-rows (::namespace-rows input)]
+      (loop [rows namespace-rows
+             state {::schema-rows-by-key {}
+                    ::missing-schema-keys #{}}]
+        (if (or (empty? rows) (::error state))
+          (cond-> (assoc input :seon.agent.ctx/schema-rows
+                         (->> (::schema-rows-by-key state)
+                              vals
+                              (sort-by :seon.schema/key)
+                              vec))
+            (::error state) (assoc ::error (::error state)))
+          (recur (subvec rows 1)
+                 (await (acquire-one-schema-closure!
+                          coordinate (first rows) state))))))))
+
 (defn- full?
   "True when an included ns `nm` renders FULL (its whole real source); false
    means it renders as a COMPACT CARD ([[render-one-ns-compact]]). ONE rule, no
@@ -470,13 +572,8 @@
    and the current ns's `::current-tests?` flag. nil when the ns has no
    `:seon.ns/name` entity (a brand-new current ns not yet indexed — `db/pull`
    would throw on the missing lookup ref)."
-  [db nm]
-  (let [tests (->> (when (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.ns/name nm]})
-                     (db/pull {:seon.db/db db
-                               :seon.db/ref [:seon.ns/name nm]
-                               :seon.db/pull-pattern
-                               '[{:seon.test/_ns [:seon.test/sym :seon.test/source]}]}))
-                   :seon.test/_ns
+  [row]
+  (let [tests (->> (:seon.test/_ns row)
                    (sort-by :seon.test/sym))
         srcs  (keep (fn [{:seon.test/keys [source]}]
                       (when-not (str/blank? source) (str/trim source)))
@@ -521,7 +618,7 @@
    row the caller already matched (an included, current-ns row). `id` is the
    agent id, threaded so the stub prose shows THIS agent's actual configured
    requires ([[seon.agent.home/home-requires-for]]) — not the const default."
-  [_db nm id]
+  [nm id]
   (ctx/ns-demarc
     nm
     (str (home/home-ns-form nm (home/home-requires-for id)) "\n"
@@ -544,17 +641,15 @@
    short-circuit to the stub). Every OTHER ns with nothing real to show is
    omitted (nil). `id` threads through to the workspace stub so its prose
    reflects THIS agent's configured requires."
-  [db nm cur-ns id]
-  (if-not (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.ns/name nm]})
+  [nm row schema-rows cur-ns id]
+  (if-not row
     ;; No `:seon.ns/name` entity — the current ns still keeps its promise via
     ;; the workspace stub; any other row with no entity is omitted.
-    (when (= nm cur-ns) (cur-ns-workspace-stub db nm id))
-    (let [txt    (-> (ctx/render-namespace
-                       {:seon.ns/name       nm
-                        :seon.render/depth  0
-                        :seon.render/detail :full
-                        :seon.db/db         db})
-                     :seon.render/text
+    (when (= nm cur-ns) (cur-ns-workspace-stub nm id))
+    (let [txt    (-> (ctx/render-namespace-ai
+                       {:seon.ns/name nm
+                        :seon.agent.ctx/namespace-rows [row]
+                        :seon.agent.ctx/schema-rows schema-rows})
                      str/trim)
           ;; render-namespace brackets even an empty ns, whose body is then
           ;; `; (no recorded source/fns/schemas)` (entity present, no
@@ -565,7 +660,7 @@
                      (str/includes? txt "(no recorded source/fns/schemas)")
                      (str/includes? txt "(not in db)"))]
       (cond
-        (= nm cur-ns) (if empty? (cur-ns-workspace-stub db nm id) txt)
+        (= nm cur-ns) (if empty? (cur-ns-workspace-stub nm id) txt)
         empty?        nil
         :else         txt))))
 
@@ -575,12 +670,79 @@
    with nothing indexed adds noise, not signal, so it stays dropped rather than
    emit an empty card. The compact SIBLING of [[render-one]] (the full
    wrapper); delegates to [[render-one-ns-compact]]."
-  [db nm selection]
-  (let [card (render-one-ns-compact
-               (merge {:seon.ns/name nm :seon.db/db db} selection))]
+  [nm row schema-rows selection]
+  (let [card (render-one-ns-compact-row
+               nm row schema-rows (:seon.ns.require/refers selection))]
     (when-not (or (str/includes? card "(nothing indexed)")
                   (str/includes? card "(not in db"))
       card)))
+
+(defn- local-namespaces-input
+  "Temporarily adapt the local database value to eager namespace rows."
+  [{:seon.db/keys [db] id :seon.agent/id :as input}]
+  (let [policy (config/namespaces-policy)
+        cur-ns (when id
+                 (try
+                   (some-> (ctx/current-ns {:seon.agent/id id :seon.db/db db})
+                           name keyword)
+                   (catch :default _ nil)))
+        block (ns-block-entity db id)
+        agent (when id (db/entity {:seon.db/db db
+                                   :seon.db/ref [:seon.agent/id id]}))
+        full-source (set (resolve-cfg block agent ::full-source #{}))
+        required (required-ns-selections
+                   (seval/persisted-require-edges db cur-ns) cur-ns)
+        names (->> (cond-> (into (set (keys required)) full-source)
+                     cur-ns (conj cur-ns))
+                   (filter included-ns?)
+                   (sort-by name)
+                   vec)
+        txs (into {}
+                  (db/query
+                    {:seon.db/db db
+                     :seon.db/query
+                     '[:find ?name ?tx
+                       :in $ [?name ...]
+                       :where
+                       [?namespace :seon.ns/name ?name ?tx]]
+                     :seon.db/args [names]}))
+        namespace-rows
+        (mapv (fn [nm]
+                (let [row (try
+                            (db/pull {:seon.db/db db
+                                      :seon.db/ref [:seon.ns/name nm]
+                                      :seon.db/pull-pattern namespace-selector})
+                            (catch :default _ nil))]
+                  (cond-> (or row {:seon.ns/name nm})
+                    (get txs nm) (assoc :seon.db/tx (get txs nm)))))
+              names)
+        schema-rows
+        (->> (db/query
+               {:seon.db/db db
+                :seon.db/query
+                '[:find ?key ?form
+                  :where
+                  [?schema :seon.schema/key ?key]
+                  [?schema :seon.schema/form ?form]]})
+             (mapv (fn [[k form]]
+                     {:seon.schema/key k :seon.schema/form form})))]
+    (merge input
+           {:seon.config/current-ns (:seon.config/current-ns policy)
+            :seon.agent.ctx.render-fns/current-ns cur-ns
+            ::full-source full-source
+            ::with-tests (set (resolve-cfg block agent ::with-tests #{}))
+            ::current-full? (resolve-cfg block agent ::current-full? true)
+            ::current-tests? (resolve-cfg block agent ::current-tests? true)
+            ::namespace-rows namespace-rows
+            :seon.agent.ctx/schema-rows schema-rows})))
+
+(defn ^:async namespaces-block!
+  "Acquire and render namespaces at the active database coordinate."
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
+  [input]
+  (namespaces-block
+    (await (acquire-schema-rows! (await (acquire-namespace-rows!
+                                         (:seon.agent/id input)))))))
 
 (defn namespaces-block
   "The namespaces body — the CURRENT ns full, its requires as cards.
@@ -622,71 +784,52 @@
    NEVER a render-time file read — the boot indexer is the one reader; both the
    full renderer and the compact card read only indexed rows."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [{:seon.db/keys [db] id :seon.agent/id}]
-  (let [policy (config/namespaces-policy)
-        ;; The agent's current ns (latest successful eval's ns) → rendered per
-        ;; the policy's :current-ns even if it is a framework ns. nil id
-        ;; (web UI path) → nil → no ns is forced current.
-        cur-ns (when id
-                 (try (when-let [c (ctx/current-ns {:seon.agent/id id :seon.db/db db})]
-                        ;; current-ns yields a KEYWORD from a recorded eval but
-                        ;; a SYMBOL from the (home-ns id) fallback (a fresh agent
-                        ;; with no successful evals yet) — normalize to a keyword
-                        ;; so the `(= nm cur-ns)` match against the keyword ns
-                        ;; rows holds in BOTH cases (GI-2 fires even on turn 0).
-                        (keyword (name c)))
-                      (catch :default _ nil)))
-        ;; The per-agent render dials, read off the :namespaces BLOCK entity
-        ;; (config-driven-agent-init), falling back to the agent datom then the
-        ;; malli default. Presence-sets arrive as cardinality-many keyword
-        ;; columns → sets; the two booleans default true (current ns full +
-        ;; its tests).
-        block          (ns-block-entity db id)
-        agent-ent      (when id (db/entity {:seon.db/db db
-                                            :seon.db/ref [:seon.agent/id id]}))
-        full-source-cfg (set (resolve-cfg block agent-ent ::full-source #{}))
-        with-tests-cfg  (set (resolve-cfg block agent-ent ::with-tests #{}))
-        current-full?   (resolve-cfg block agent-ent ::current-full? true)
-        current-tests?  (resolve-cfg block agent-ent ::current-tests? true)
-        ;; The set of nses whose indexed test source rides along: the explicit
-        ;; ::with-tests members ∪ (the current ns when ::current-tests? is on).
-        tests-set      (cond-> with-tests-cfg
-                         (and cur-ns current-tests?) (conj cur-ns))
-        ;; The CURRENT ns's persisted require edges, retaining their callable
-        ;; selection semantics for each compact card.
-        required       (required-ns-selections
-                         (seval/persisted-require-edges db cur-ns)
-                         cur-ns)
-        ;; The INCLUDE set — PURELY: the current ns ∪ its requires ∪ the
-        ;; per-agent ::full-source pins. Everything else is DROPPED.
-        include-set    (cond-> (into (set (keys required)) full-source-cfg)
-                         cur-ns (conj cur-ns))
-        ;; The included ns rows, recency-ordered. One :seon.ns/name datom per
-        ;; ns carries its tx; filter to the include set.
-        scanned (->> (db/query
-                       {:seon.db/db db
-                        :seon.db/query
-                        '[:find ?nm ?tx
-                          :where
-                          [?n :seon.ns/name ?nm ?tx]]})
-                     (filter (fn [[nm _]] (and (included-ns? nm)
-                                               (contains? include-set nm))))
-                     (sort-by (fn [[nm tx]] [tx (name nm)])))
-        ;; The current ns ALWAYS renders (the "YOUR OWN namespace renders in
-        ;; full" promise — an empty home ns becomes a workspace stub in
-        ;; [[render-one]]). A fresh home ns (`my.agent.<id>`) may carry no
-        ;; `:seon.ns/name` row yet, so synthesize a tail row when the scan
-        ;; missed it.
-        rows   (if (and cur-ns (not (some (fn [[nm _]] (= nm cur-ns)) scanned)))
-                 (conj (vec scanned) [cur-ns js/Number.MAX_SAFE_INTEGER])
-                 scanned)
+  [raw-input]
+  (let [{id :seon.agent/id :as input}
+        (if (contains? raw-input ::namespace-rows)
+          raw-input
+          (local-namespaces-input raw-input))]
+    (if-let [error (or (::error input) (database-error input))]
+      (str "[namespaces] render failed: " (pr-str error))
+      (let [policy {:seon.config/current-ns (:seon.config/current-ns input)}
+        cur-ns (:seon.agent.ctx.render-fns/current-ns input)
+        full-source-cfg (set (::full-source input))
+        with-tests-cfg (set (::with-tests input))
+        current-full? (if (boolean? (::current-full? input))
+                        (::current-full? input) true)
+        current-tests? (if (boolean? (::current-tests? input))
+                         (::current-tests? input) true)
+        namespace-rows (::namespace-rows input)
+        schema-rows (:seon.agent.ctx/schema-rows input)
+        row-by-name (into {} (map (juxt :seon.ns/name identity)) namespace-rows)
+        current-row (get row-by-name cur-ns)
+        required (required-ns-selections
+                   (:seon.ns/require-edges current-row) cur-ns)
+        include-set (cond-> (into (set (keys required)) full-source-cfg)
+                      cur-ns (conj cur-ns))
+        tests-set (cond-> with-tests-cfg
+                    (and cur-ns current-tests?) (conj cur-ns))
+        scanned (->> namespace-rows
+                     (filter (fn [row]
+                               (let [nm (:seon.ns/name row)]
+                                 (and (included-ns? nm)
+                                      (contains? include-set nm)))))
+                     (sort-by (fn [row]
+                                [(or (:seon.db/tx row)
+                                     js/Number.MAX_SAFE_INTEGER)
+                                 (name (:seon.ns/name row))])))
+        rows (if (and cur-ns
+                      (not (some #(= cur-ns (:seon.ns/name %)) scanned)))
+               (conj (vec scanned) {:seon.ns/name cur-ns})
+               scanned)
         ;; Each row + its full? flag + PHASE: :prefix for a STABLE seon.*
         ;; required ns (name-sorted cache prefix); :body for the agent's
         ;; churning nses (my.* / current ns), recency-ordered nearest the tail.
-        selected (mapv (fn [[nm _tx]]
-                         (let [prefix? (and (not= nm cur-ns)
+        selected (mapv (fn [row]
+                         (let [nm (:seon.ns/name row)
+                               prefix? (and (not= nm cur-ns)
                                             (seon-framework-ns? nm))]
-                           [nm
+                           [nm row
                             (full? policy nm cur-ns full-source-cfg current-full?)
                             (if prefix? :prefix :body)
                             (if (= nm cur-ns) {} (get required nm {}))]))
@@ -694,23 +837,23 @@
         ;; Render ONE row: full → render-one (omitted when empty); else a
         ;; COMPACT card (it is a required ns). A card is nil when nothing is
         ;; indexed. Append the ns's indexed test source when it is in tests-set.
-        render-row (fn [[nm full? _phase selection]]
+        render-row (fn [[nm row full? _phase selection]]
                      (when-let [block-txt (if full?
-                                            (render-one db nm cur-ns id)
-                                            (compact-block db nm selection))]
+                                            (render-one nm row schema-rows cur-ns id)
+                                            (compact-block nm row schema-rows selection))]
                        (str block-txt
                             (when (contains? tests-set nm)
-                              (ns-tests-block db nm)))))
+                              (ns-tests-block row)))))
         prefix-rows (->> selected
-                         (filter (fn [[_ _ phase _]] (= phase :prefix)))
-                         (sort-by (fn [[nm _ _ _]] (name nm))))
-        body-rows   (filterv (fn [[_ _ phase _]] (= phase :body)) selected)
+                         (filter (fn [[_ _ _ phase _]] (= phase :prefix)))
+                         (sort-by (fn [[nm _ _ _ _]] (name nm))))
+        body-rows   (filterv (fn [[_ _ _ phase _]] (= phase :body)) selected)
         prefix-blocks (keep render-row prefix-rows)
         body-blocks   (keep render-row body-rows)
         blocks        (concat prefix-blocks body-blocks)]
     (if (seq blocks)
       (str namespaces-header "\n\n" (str/join "\n\n" blocks))
-      "")))
+      "")))))
 
 ;; ============================================================
 ;; The COMPACT card renderer — a SIBLING detail-level to
@@ -961,6 +1104,50 @@
     {:optional true}
     :seon.ns.require/refers]])
 
+(defn- render-one-ns-compact-row
+  "Render one eager namespace row as a compact card."
+  [ns-kw row schema-rows refers]
+  (let [ns-str (name ns-kw)]
+    (if-not row
+      (ctx/ns-demarc ns-kw "; (not in db — not indexed)")
+      (let [all-schemas (->> (:seon.schema/_ns row)
+                             (filter (fn [{:seon.schema/keys [key]}]
+                                       (= (namespace key) ns-str)))
+                             (sort-by (comp str :seon.schema/key)))
+            fns     (->> (:seon.fn/_ns row)
+                         (filter callable-fn-row?)
+                         (filter (fn [{:seon.fn/keys [sym]}]
+                                   (or (nil? refers)
+                                       (contains?
+                                         refers
+                                         (symbol (name (symbol sym)))))))
+                         (sort-by :seon.fn/sym))
+            schemas (if (nil? refers) all-schemas [])
+            reg-lines (map compact-schema-line schemas)
+            fn-lines  (map compact-fn-head fns)
+            ref-blk   (some-> (ctx/referenced-schema-rows-block
+                                {:seon.agent.ctx/seed-specs
+                                 (cond-> (into [] (keep :seon.fn/spec) fns)
+                                   (nil? refers)
+                                   (into (keep :seon.schema/form) all-schemas))
+                                 :seon.agent.ctx/own-keys
+                                 (if (nil? refers)
+                                   (into #{} (map :seon.schema/key) all-schemas)
+                                   #{})
+                                 :seon.agent.ctx/schema-rows
+                                 (into schema-rows all-schemas)})
+                              omit-runtime-object-tags)
+            parts (cond-> []
+                    (seq reg-lines)                 (into reg-lines)
+                    ref-blk                         (conj ref-blk)
+                    (and (or (seq reg-lines) ref-blk) (seq fn-lines)) (conj "")
+                    (seq fn-lines)                  (into fn-lines))
+            body  (if (seq parts)
+                    (ctx/quote-lines (str/join "\n" parts)
+                                     {:seon.agent.ctx/strip-markers? true})
+                    "; (nothing indexed)")]
+        (ctx/ns-demarc ns-kw body)))))
+
 (defn render-one-ns-compact
   "Render ONE namespace as a COMPACT CARD string.
 
@@ -980,61 +1167,20 @@
    card string."
   {:malli/schema [:=> [:cat ::render-one-ns-compact-request] :string]}
   [{ns-kw :seon.ns/name db :seon.db/db refers :seon.ns.require/refers}]
-  (let [ns-str (name ns-kw)]
-    (if-not (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.ns/name ns-kw]})
-      (ctx/ns-demarc ns-kw "; (not in db — not indexed)")
-      (let [pull    (db/pull
-                      {:seon.db/db db
-                       :seon.db/ref [:seon.ns/name ns-kw]
-                       :seon.db/pull-pattern
-                       '[{:seon.fn/_ns     [:seon.fn/sym :seon.fn/arglists
-                                            :seon.fn/doc :seon.fn/spec
-                                            :seon.fn/private?
-                                            :seon.fn/fn-var?
-                                            :seon.fn/schema-error]
-                          :seon.schema/_ns [:seon.schema/key :seon.schema/form]}]})
-            all-schemas (->> (:seon.schema/_ns pull)
-                             (filter (fn [{:seon.schema/keys [key]}]
-                                       (= (namespace key) ns-str)))
-                             (sort-by (comp str :seon.schema/key)))
-            fns     (->> (:seon.fn/_ns pull)
-                         (filter callable-fn-row?)
-                         (filter (fn [{:seon.fn/keys [sym]}]
-                                   (or (nil? refers)
-                                       (contains?
-                                         refers
-                                         (symbol (name (symbol sym)))))))
-                         (sort-by :seon.fn/sym))
-            ;; Narrow `:refer` cards let the shared closure emit only schemas
-            ;; reachable from the selected functions. Whole-surface cards keep
-            ;; every owned schema plus cross-namespace references.
-            schemas (if (nil? refers) all-schemas [])
-            reg-lines (map compact-schema-line schemas)
-            fn-lines  (map compact-fn-head fns)
-            ;; The cross-ns schema DEFINITIONS these fns reference (transitive,
-            ;; global — the ns's OWN schemas are already in reg-lines above and
-            ;; excluded). Shared closure lives in seon.agent.ctx (one mechanism).
-            ref-blk   (some-> (ctx/referenced-schema-block
-                                {:seon.db/db          db
-                                 :seon.agent.ctx/seed-specs
-                                 (cond-> (into [] (keep :seon.fn/spec) fns)
-                                   (nil? refers)
-                                   (into (keep :seon.schema/form) all-schemas))
-                                 :seon.agent.ctx/own-keys
-                                 (if (nil? refers)
-                                   (into #{} (map :seon.schema/key) all-schemas)
-                                   #{})})
-                              omit-runtime-object-tags)
-            ;; Schema records first, then referenced definitions, one blank line,
-            ;; then fn signatures. The WHOLE body routes through quote-lines so
-            ;; an echo is inert at the actual reply parser boundary.
-            parts (cond-> []
-                    (seq reg-lines)                 (into reg-lines)
-                    ref-blk                         (conj ref-blk)
-                    (and (or (seq reg-lines) ref-blk) (seq fn-lines)) (conj "")
-                    (seq fn-lines)                  (into fn-lines))
-            body  (if (seq parts)
-                    (ctx/quote-lines (str/join "\n" parts)
-                                     {:seon.agent.ctx/strip-markers? true})
-                    "; (nothing indexed)")]
-        (ctx/ns-demarc ns-kw body)))))
+  (let [present? (db/entity-lazy {:seon.db/db db
+                                  :seon.db/ref [:seon.ns/name ns-kw]})
+        row (when present?
+              (db/pull {:seon.db/db db
+                        :seon.db/ref [:seon.ns/name ns-kw]
+                        :seon.db/pull-pattern namespace-selector}))
+        schema-rows (->> (db/query
+                           {:seon.db/db db
+                            :seon.db/query
+                            '[:find ?key ?form
+                              :where
+                              [?schema :seon.schema/key ?key]
+                              [?schema :seon.schema/form ?form]]})
+                         (mapv (fn [[k form]]
+                                 {:seon.schema/key k
+                                  :seon.schema/form form})))]
+    (render-one-ns-compact-row ns-kw row schema-rows refers)))

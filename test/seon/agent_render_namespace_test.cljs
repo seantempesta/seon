@@ -462,7 +462,7 @@
       (is (= #{:pure.root/own :pure.cross/a :pure.missing/value
                :pure.cross/output}
              (ctx/schema-refs
-               ["[:=> [:cat :pure.root/own :pure.cross/a :pure.missing/value] :pure.cross/output]"])))))
+               ["[:=> [:cat :pure.root/own :pure.cross/a :pure.missing/value] :pure.cross/output]"]))))))
 
 (deftest eager-namespace-formatting-preserves-missing-row-and-cap
   (let [keys        (mapv #(keyword "pure.cap" (str "k" %)) (range 41))
@@ -475,7 +475,7 @@
                      :seon.fn/_ns
                      [{:seon.fn/sym "pure.cap.root/run"
                        :seon.fn/spec
-                       (str "[:=> [:cat " (pr-str (first keys)) "] :string]" )}]}
+                       (str "[:=> [:cat " (pr-str (first keys)) "] :string]")}]}
         capped      (ctx/render-namespace-ai
                       {:seon.ns/name :pure.cap.root
                        :seon.agent.ctx/namespace-rows [row]
@@ -484,45 +484,47 @@
                       {:seon.ns/name :pure.absent
                        :seon.agent.ctx/namespace-rows [row]
                        :seon.agent.ctx/schema-rows schema-rows})]
-    (is (= 40 (count (re-seq #"\(register! :pure.cap/k" capped))))
+    (is (= 40 (count (re-seq #"\(register! :pure.cap/k" capped)))
         "the existing closure cap emits exactly forty definitions")
     (is (str/includes? capped "40+ referenced schemas — capped"))
     (is (= "; requires: pure.absent (not in db)" missing))))
 
 (deftest eager-and-local-namespace-ai-are-byte-identical
   (async done
-    (-> (with-seeded-conn
-          (fn [conn]
-            (binding [db/*conn* conn]
-              (-> (db/transact!
-                    {:seon.db/tx-data
-                     (into
-                       [{:seon.ns/name :pure.root}
-                        {:seon.fn/sym "pure.root/run"
-                         :seon.fn/ns [:seon.ns/name :pure.root]
-                         :seon.fn/arglists "([request])"
-                         :seon.fn/source "(defn run [request] request)"
-                         :seon.fn/spec
-                         "[:=> [:cat :pure.root/own :pure.cross/a :pure.missing/value] :pure.cross/output]"}
-                        {:seon.schema/key :pure.root/own
-                         :seon.schema/ns [:seon.ns/name :pure.root]
-                         :seon.schema/form "[:map [:pure.root/value :pure.cross/b]]"}]
-                       (remove #(= :pure.root/own (:seon.schema/key %))
-                               pure-schema-rows))})
-                  (.then
-                    (fn [_]
-                      (let [local (:seon.render/text
-                                    (ctx/render-namespace
-                                      {:seon.db/db @conn
-                                       :seon.ns/name :pure.root
-                                       :seon.render/depth 0}))
-                            eager (ctx/render-namespace-ai
-                                    {:seon.ns/name :pure.root
-                                     :seon.agent.ctx/namespace-rows
-                                     [pure-namespace-row]
-                                     :seon.agent.ctx/schema-rows
-                                     pure-schema-rows})]
-                        (is (= local eager)
-                            "the DB wrapper delegates to the exact pure AI formatter")))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+    (let [proof
+          (with-seeded-conn
+            (fn [conn]
+              (binding [db/*conn* conn]
+                (-> (db/transact!
+                      {:seon.db/tx-data
+                       (into
+                         [{:seon.ns/name :pure.root}
+                          {:seon.fn/sym "pure.root/run"
+                           :seon.fn/ns [:seon.ns/name :pure.root]
+                           :seon.fn/arglists "([request])"
+                           :seon.fn/source "(defn run [request] request)"
+                           :seon.fn/spec
+                           "[:=> [:cat :pure.root/own :pure.cross/a :pure.missing/value] :pure.cross/output]"}
+                          {:seon.schema/key :pure.root/own
+                           :seon.schema/ns [:seon.ns/name :pure.root]
+                           :seon.schema/form "[:map [:pure.root/value :pure.cross/b]]"}]
+                         (remove #(= :pure.root/own (:seon.schema/key %))
+                                 pure-schema-rows))})
+                    (.then
+                      (fn [_]
+                        (let [local (:seon.render/text
+                                      (ctx/render-namespace
+                                        {:seon.db/db @conn
+                                         :seon.ns/name :pure.root
+                                         :seon.render/depth 0}))
+                              eager (ctx/render-namespace-ai
+                                      {:seon.ns/name :pure.root
+                                       :seon.agent.ctx/namespace-rows
+                                       [pure-namespace-row]
+                                       :seon.agent.ctx/schema-rows
+                                       pure-schema-rows})]
+                          (is (= local eager)
+                              "the DB wrapper delegates to the exact pure AI formatter"))))))))]
+      (-> proof
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
