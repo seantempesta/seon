@@ -4,55 +4,28 @@
 
    The entity card shows what the NAMESPACE CONTAINS (fns + schemas),
    not the `(ns ...)` source line itself — the owning `:seon.eval`
-   already shows that. The query runs at render time so newly-added
-   fns/schemas appear as soon as the next render fires.
+   already shows that. The database authority supplies the namespace and its
+   members as ordinary pulled data before this formatter runs.
 
    Symbol names linkify (HTML pane) to anchor ids on the corresponding
    `:seon.fn` / `:seon.schema` cards. The card stamps the anchor id
    on its top-level div so a click jumps in-page."
-  (:require
-    [datahike.api :as d]
-    [clojure.string :as str]))
+  (:require [clojure.string :as str]))
 
 (defn- ns-contents
-  "Pull lists of {sym, doc, private?} for fns and {key, shape-source}
-   for schemas that point at `:seon.ns/name <ns-kw>`.
-
-   Returns `{:fns [...] :schemas [...]}`. Safe if `db` is nil — returns
-   empty vectors (some callers might invoke without a db; the web UI
-   always passes one)."
-  [db ns-kw]
-  (if (or (nil? db) (nil? ns-kw))
-    {:fns [] :schemas []}
-    (let [fns (try
-                (d/q '[:find ?sym ?priv ?doc
-                       :in $ ?nk
-                       :where
-                       [?n :seon.ns/name ?nk]
-                       [?f :seon.fn/ns ?n]
-                       [?f :seon.fn/sym ?sym]
-                       [(get-else $ ?f :seon.fn/private? false) ?priv]
-                       [(get-else $ ?f :seon.fn/doc "") ?doc]]
-                     db ns-kw)
-                (catch :default _ #{}))
-          schemas (try
-                    (d/q '[:find ?k
-                           :in $ ?nk
-                           :where
-                           [?n :seon.ns/name ?nk]
-                           [?s :seon.schema/ns ?n]
-                           [?s :seon.schema/key ?k]]
-                         db ns-kw)
-                    (catch :default _ #{}))]
-      {:fns     (->> fns
-                     (map (fn [[sym priv doc]]
-                            {:sym sym :private? priv :doc doc}))
-                     (sort-by :sym)
-                     vec)
-       :schemas (->> schemas
-                     (map first)
-                     (sort-by (comp str pr-str))
-                     vec)})))
+  "Project already-pulled namespace members into this formatter's shape."
+  [node]
+  {:fns (->> (:seon.fn/_ns node)
+             (map (fn [row]
+                    {:sym (:seon.fn/sym row)
+                     :private? (boolean (:seon.fn/private? row))
+                     :doc (or (:seon.fn/doc row) "")}))
+             (sort-by :sym)
+             vec)
+   :schemas (->> (:seon.schema/_ns node)
+                 (keep :seon.schema/key)
+                 (sort-by (comp str pr-str))
+                 vec)})
 
 (defn- short-name
   "For an FQ symbol string `\"my.agent.XAR-.../foo\"`, return `\"foo\"`.
@@ -70,10 +43,10 @@
 
      [ns my.agent.XAR-...]  fns: add, sub  schemas: :answer, :id"
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
-  [{:seon.db/keys [db] :seon.render/keys [node entity]}]
+  [{:seon.render/keys [node entity]}]
   (let [entity (or node entity)
         n      (:seon.ns/name entity)
-        {:keys [fns schemas]} (ns-contents db n)
+        {:keys [fns schemas]} (ns-contents entity)
         fn-list (->> fns (map (comp short-name :sym)) (str/join ", "))
         sc-list (->> schemas (map short-name) (str/join ", "))
         parts   (cond-> [(str "[ns " (name n) "]")]
@@ -99,10 +72,10 @@
    (fns / schemas). Each name is an in-page anchor link — clicking
    `add` jumps to the `:seon.fn` entity card further down the pane."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
-  [{:seon.db/keys [db] :seon.render/keys [node entity]}]
+  [{:seon.render/keys [node entity]}]
   (let [entity (or node entity)
         n (:seon.ns/name entity)
-        {:keys [fns schemas]} (ns-contents db n)]
+        {:keys [fns schemas]} (ns-contents entity)]
     [:div {:class "py-1"}
      [:div {:class "flex items-baseline gap-2 flex-wrap"}
       [:span {:class "text-xs font-mono font-semibold text-amber-400"} "ns"]

@@ -1,13 +1,12 @@
 (ns seon.repl
-  "Iteration-surface helpers — `dev-init!`, compile-state + history
-   conn defonces. The text→entries parser used to live here too but
+  "Iteration-surface helpers for `dev-init!` and the compiler state.
+   The text→entries parser used to live here too but
    was extracted to [[seon.repl.internal]] (.cljc — JVM-testable, no pod
    required for the corpus).
 
    ## Iteration surface (`dev-init!`)
 
-   `dev-init!` opens a history-enabled datahike conn AND initializes
-   bootstrap-CLJS, both stashed in defonce'd atoms. Decoupled from
+   `dev-init!` initializes bootstrap-CLJS in one defonce'd atom. Decoupled from
    `seon.client/start-agent!` so core experiments don't have to
    spin up the stub LLM, web server, or broadcast watcher.
 
@@ -15,12 +14,12 @@
 
    The MCP server piggybacks shadow's nREPL into the :client runtime;
    forms eval'd through it see every namespace required from
-   seon.client — including rewrite-clj, datahike, cljs.js, and
-   (after `dev-init!`) the persistent compile-state + history conn.
+   seon.client — including rewrite-clj and cljs.js and, after
+   `dev-init!`, the persistent compile-state.
 
    ```clojure
    (seon.repl/dev-init!)
-   ; ⟹ Promise<{:compile-state #<atom> :conn #<conn>}>
+   ; returns a Promise containing the compile-state
 
    (rewrite-clj.parser/parse-string-all \";; hi\\n(+ 1 2)\\n\")
 
@@ -40,12 +39,10 @@
      experience — error shapes, ns switching, `^:async`,
      `(def …)` cross-form persistence.
 
-   Both write to the same datahike conn, so tx-meta tags and
-   history queries work the same way through either surface."
+   Database experiments use the running authority through `seon.db`; this
+   namespace never creates a second local database."
   (:require
     ;; --- Iteration-surface deps ---
-    [datahike.api :as d]
-    [seon.db.id :as id]
     [seon.eval :as seval]
     ;; Pulled in so the :client bundle can reach rewrite-clj via the
     ;; host REPL (`eval_cljs`) for ad-hoc core probes
@@ -74,9 +71,8 @@
 (schema/register! ::span [:tuple :int :int])
 
 ;; ============================================================
-;; Iteration-surface — dev-init! opens an agent conn (history-on) +
-;; bootstrap-CLJS compile-state. Both stored in defonce atoms so
-;; subsequent calls are cheap. Wired separately from
+;; Iteration-surface — dev-init! opens the bootstrap-CLJS compile-state.
+;; It is stored in a defonce atom so subsequent calls are cheap. Wired apart from
 ;; seon.client/start-agent! so core experiments don't drag in
 ;; the stub LLM, web server, or broadcast watcher.
 ;; ============================================================
@@ -89,8 +85,6 @@
 ;; mismatch and rebuilds the state. See KI-2 in agent-repl-mvp + the
 ;; lifecycle research note for the design rationale.
 (defonce !init-version (atom nil))
-
-(defonce !conn (atom nil))
 
 (defn ^:async ensure-bootstrap!
   "Lazy-init the bootstrap-CLJS compile-state.
@@ -115,31 +109,12 @@
       (reset! !init-version seval/init-version)
       state)))
 
-(defn ^:async ^:private ensure-conn!
-  "Lazy-init a :memory datahike conn with history enabled. History
-   is the load-bearing bit — the spec's tx-meta-via-history-datoms
-   trick (every eval entity IS its tx) doesn't work without it."
-  []
-  (or @!conn
-      (let [cfg {:store              {:backend :memory
-                                      :id      (random-uuid)}
-                 :schema-flexibility :write
-                 :keep-history?      true}]
-        (await (d/create-database cfg))
-        (let [conn (await (d/connect (id/allocation-connect-config cfg)))]
-          (id/assert-allocation-writer! conn)
-          (reset! !conn conn)
-          conn))))
-
 (defn ^:async dev-init!
   "Idempotent dev bring-up.
 
-   Returns a Promise resolving to
-   `{:compile-state <state> :conn <conn>}`. Safe to call on every
+   Returns a Promise resolving to `{:compile-state <state>}`. Safe to call on every
    MCP eval — second + subsequent calls are O(atom-deref)."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (let [conn  (await (ensure-conn!))
-        state (await (ensure-bootstrap!))]
-    {:compile-state state
-     :conn          conn}))
+  (let [state (await (ensure-bootstrap!))]
+    {:compile-state state}))

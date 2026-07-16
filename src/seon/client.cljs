@@ -30,13 +30,6 @@
     [cljs.reader :as reader]
     [clojure.set :as set]
     [clojure.string :as str]
-    [datahike.api :as d]
-    ;; konserve.node-filestore registers datahike's :file store backend
-    ;; for Node (the agent conn persists to disk — see open-agent-conn!).
-    ;; datahike.api conditionally js/requires it, but require it
-    ;; explicitly so the :file backend is guaranteed registered in the
-    ;; :client bundle regardless of that conditional's timing.
-    [konserve.node-filestore]
     ;; malli.core/form round-trips a fn's `:malli/schema` to the stable
     ;; `:seon.fn/spec` string in index-core! (the runtime-introspection
     ;; core indexer — coherent-bootstrap-indexing Step 2).
@@ -585,27 +578,6 @@
       nil))
   true)
 
-(defn ^:async mem-db
-  "REPL convenience — open a fresh :memory datahike-cljs DB with optional
-   schema. Returns a Promise resolving to a caller-owned conn atom; call
-   `(datahike.api/release conn)` when finished."
-  {:malli/schema [:function
-                  [:=> [:cat] :any]
-                  [:=> [:catn [::schema :any]] :any]]}
-  ([] (mem-db []))
-  ([schema]
-   (let [cfg {:store              {:backend :memory
-                                   :id (random-uuid)}
-              :schema-flexibility :write
-              ;; Match the agent connection's history posture (Phase 2.5).
-              :keep-history?      true}]
-     (await (d/create-database cfg))
-     (let [conn (await (d/connect (id/allocation-connect-config cfg)))]
-       (id/assert-allocation-writer! conn)
-       (when (seq schema)
-         (await (d/transact! conn schema)))
-       conn))))
-
 ;; ---------------------------------------------------------------------------
 ;; Cluster runtime
 ;;
@@ -887,11 +859,7 @@
    db.restore/completion-attrs))
 
 ;; ---------------------------------------------------------------------------
-;; Cluster database connection.
-;;
-;; Reads use shared immutable Konserve files; writes use the remote Datahike
-;; writer over UDS. There is no local-write fallback: boot fails loudly when
-;; the authoritative writer is unavailable.
+;; Cluster database authority session.
 ;; ---------------------------------------------------------------------------
 
 (declare index-schemas)
@@ -914,47 +882,6 @@
           (when (false? (:seon.db/ok? schema-env))
             (throw (ex-info "Runtime schema installation failed."
                             schema-env))))))))
-
-(defn ^:async open-agent-conn!
-  "Open a FRESH ISOLATED `:memory` conn carrying the pod's full
-   bootstrap schema. Test/diagnostic surface ONLY — the pod itself
-   is separate from the production authority session.
-   Isolated-by-construction: tests that build agents on this conn can
-   never touch the cluster database."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (let [cfg {:store              {:backend :memory
-                                  :id      (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (await (d/create-database cfg))
-    (let [conn (await (d/connect (id/allocation-connect-config cfg)))]
-      (id/assert-allocation-writer! conn)
-      ;; Establish the minimal root/process boundary first. Every subsequent
-      ;; schema/policy write is an ordinary attributed transaction, including
-      ;; on restarts of an existing store.
-      (await (db/ensure-provenance! {:seon.db/conn conn}))
-      ;; Isolated diagnostic databases carry the same authoritative identity
-      ;; policies as a cold-started cluster.
-      (await (install-runtime-schema! conn true))
-      ;; Program admission is reconstructed exclusively from database facts.
-      ;; A diagnostic connection therefore needs the canonical Malli
-      ;; declarations as well as Datahike's transaction schema; otherwise the
-      ;; first accepted function-contract change would publish an empty schema
-      ;; generation into this process.
-      (await
-       (db/with-tx-context
-        {:seon.db/user [:seon.agent/id "root"]
-         :seon.db/process (db.process/lookup-ref :seon.db.process/boot)}
-        (fn ^:async install-program-schemas! []
-          (let [result
-                (await
-                 (db/transact! {:seon.db/conn conn
-                                :seon.db/tx-data (index-schemas)}))]
-            (when (false? (:seon.db/ok? result))
-              (throw (ex-info "Program schema installation failed."
-                              result)))))))
-      conn)))
 
 (schema/register! ::prepare-writes? :boolean)
 (schema/register! ::open-database-session-request

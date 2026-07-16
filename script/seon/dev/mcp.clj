@@ -51,7 +51,7 @@
 
 (def own-cluster
   ;; The cluster THIS supervisor serves — basename of SEON_CLUSTER_DIR
-  ;; (the same rule as seon.db.replica/database-name). The
+  ;; (the shared rule in seon.dev.runtime-id). The
   ;; singleton `default` session pins to the runtime advertising it.
   (rid/dir->cluster-name (or (System/getenv "SEON_CLUSTER_DIR")
                              "data/clusters/default")))

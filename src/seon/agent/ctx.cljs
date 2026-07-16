@@ -2008,7 +2008,7 @@
     (let [fns     (->> (:seon.fn/_ns data)     (sort-by :seon.fn/sym))
           schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
           tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))
-          ns-ent  {:seon.ns/name ns-kw}]
+          ns-ent  (assoc data :seon.ns/name ns-kw)]
       ;; The handlers are CONVERTERS now — they return BARE hiccup (keystone),
       ;; called with the entity under :seon.render/node.
       (into

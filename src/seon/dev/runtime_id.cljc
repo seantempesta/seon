@@ -38,9 +38,8 @@
 (defn dir->cluster-name
   "Cluster name from a cluster dir — its basename; blank dir → `default`.
 
-   The same rule as `seon.db.replica/database-name` (basename of
-   `SEON_CLUSTER_DIR`), exposed here so the Babashka resolver can derive
-   its own cluster without loading the replica."
+   This shared derivation keeps the pod and Babashka resolver aligned without
+   either process loading a database implementation."
   {:malli/schema [:=> [:catn [:seon.dev.runtime-id/dir :string]] :string]}
   [dir]
   (or (last (remove str/blank? (str/split dir #"/"))) "default"))
