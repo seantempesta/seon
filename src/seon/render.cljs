@@ -277,8 +277,9 @@
    — the two-step resolution both renders share: per-entity attr override
    wins (`:seon.render/html` / `:seon.render/ai`, bridge-decoded), else
    the entity's primary `:seon.schema` shape's default symbol. nil when
-   neither step yields a value."
-  [db entity render]
+   neither step yields a value. The entity map and process-local schema
+   catalog are the complete input; dispatch never observes a database."
+  [entity render]
   (let [attr (case render :html :seon.render/html :ai :seon.render/ai)]
     (or (some->> (get entity attr)
                  (db/decode-edn-value attr))
@@ -385,16 +386,14 @@
    legible error banner naming the fn + message, siblings render
    untouched, the page stays 200.
 
-   `input` is the system-input shape every render fn receives:
-     {:seon.db/db    <db>
-      :seon.agent/id <agent-id>
+   `input` is ordinary render data every render fn receives:
+     {:seon.agent/id <agent-id>
       :seon.render/node <entity-map>}
    (`:seon.render/entity` is tolerated as the node key for older callers.)"
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :any]]}
-  [{:seon.db/keys [db] :seon.render/keys [entity node] :as input}]
-  (let [db     (or db @db/*conn*)
-        entity (or node entity)]
-    (when-let [sym (entity-render db entity :html)]
+  [{:seon.render/keys [entity node] :as input}]
+  (let [entity (or node entity)]
+    (when-let [sym (entity-render entity :html)]
       (try
         (let [f (eval/lookup-value sym)
               r (when f (f (assoc input :seon.render/node entity)))]
@@ -857,10 +856,9 @@
    returning a BARE String, called with the entity under
    `:seon.render/node` (`:seon.render/entity` tolerated)."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
-  [{:seon.db/keys [db] :seon.render/keys [entity node] :as input}]
-  (let [db     (or db @db/*conn*)
-        entity (or node entity)]
-    (when-let [sym (entity-render db entity :ai)]
+  [{:seon.render/keys [entity node] :as input}]
+  (let [entity (or node entity)]
+    (when-let [sym (entity-render entity :ai)]
       (try
         (let [f (eval/lookup-value sym)
               r (when f (f (assoc input :seon.render/node entity)))]
@@ -954,10 +952,10 @@
   "resolve-render step 4 — the renderer the node's primary `:seon.schema`
    shape registers (or a per-entity slot override), via the existing
    `entity-render` / `entity-primary-schema` dispatch. Calls the resolved
-   converter symbol (bare value); nil when no schema matches."
+   converter symbol (bare value); nil when no schema matches. Selection uses
+   only the ordinary node and process-local schema catalog."
   [view node input]
-  (let [db (or (:seon.db/db input) @db/*conn*)
-        in (assoc input :seon.db/db db :seon.render/node node)]
+  (let [in (assoc input :seon.render/node node)]
     (case view
       :seon.render/html (render-entity-html in)
       (render-entity-ai in))))

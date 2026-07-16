@@ -267,6 +267,27 @@
   [_input]
   {:seon.render/hiccup [:p "sibling-ok"]})
 
+(defn ordinary-ai-renderer
+  "Render one ordinary entity without a database handle."
+  [{:seon.render/keys [node]}]
+  (str "ordinary-" (:example/id node)))
+
+(deftest entity-render-dispatch-does-not-observe-the-ambient-database
+  (let [previous db/*conn*]
+    (set! db/*conn* nil)
+    (try
+      (let [entity {:example/id "input"
+                    :seon.render/ai
+                    'seon.render-test/ordinary-ai-renderer
+                    :seon.render/html
+                    'seon.render-test/sibling-renderer}]
+        (is (= "ordinary-input"
+               (render/render-entity-ai {:seon.render/entity entity})))
+        (is (= [:p "sibling-ok"]
+               (render/render-entity-html {:seon.render/entity entity}))))
+      (finally
+        (set! db/*conn* previous)))))
+
 (deftest render-entity-html-throwing-renderer-shows-banner
   (async done
     (-> (with-tile-conn
