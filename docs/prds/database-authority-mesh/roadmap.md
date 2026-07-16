@@ -141,6 +141,9 @@ replica-removal operation surface is
 [[research/remote-datahike-operation-seams-2026-07-16]]. The deterministic
 fairness, resilience, and later one-versus-shards measurement is
 [[research/adversarial-throughput-resilience-proof-2026-07-16]].
+The final Bun consumer closure, deletion order, and two remaining semantic
+probes are grounded in
+[[research/atomic-bun-authority-consumer-replacement-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -918,9 +921,11 @@ and consumer inventory may run in parallel:
 - Slot 3: use the completed Bun event demultiplexing and bounded callback
   handoff to make the bottom-up `seon.db` consumer closure Promise-ready around
   coarse query/pull-many/execute-many plans, then delete lazy entity traversal.
-- Slot 4: prepare the atomic reachability deletion across `db.cljs`,
-  `db/internal.cljs`, `client.cljs`, `repl.cljs`, `embed.cljs`, `handlers/ns.cljs`,
-  `coordinate.cljc`, `id.cljc`, replica, publisher, and replay owners.
+- Slot 4: the atomic reachability inventory across `db.cljs`,
+  `db/internal.cljs`, `client.cljs`, `repl.cljs`, `embed.cljs`,
+  `handlers/ns.cljs`, `coordinate.cljc`, `id.cljc`, replica, publisher, and
+  replay owners is complete. Refill with the generated-ID builder and async
+  render-boundary falsifiers before freezing the final `seon.db` contract.
 
 After each unit, integrate its retained proof before refilling. A build/restart
 checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
