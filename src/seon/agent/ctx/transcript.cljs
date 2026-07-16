@@ -145,16 +145,6 @@
 ;; reads it.
 ;; ============================================================
 
-(defn block-ent
-  "The agent's `:seon.agent.ctx/name` `nm` context-BLOCK entity map from db
-   value `db` (its config datoms — e.g. the transcript block's
-   `::result-decay` / `::tiers`), or nil when the agent has no such block.
-   Reactive config-on-record: the renderer reads its own config off this
-   entity every render, never a const."
-  [db agent-eid nm]
-  (some (fn [b] (when (= nm (:seon.agent.ctx/name b)) b))
-        (:seon.agent/ctx (db/entity {:seon.db/db db :seon.db/ref agent-eid}))))
-
 (defn decay-cap-for-offset
   "The eval-result render token-cap for an eval at turn-`offset` (current-turn
    − the eval's turn), selected from the transcript block's `::result-decay`
@@ -583,6 +573,7 @@
       {::at         (:seon.agent.message/at m)
        ::kind       :message
        ::id         (:seon.agent.message/id m)
+       ::entity     m
        ::outbound?  outbound?
        ::content    (:seon.agent.message/content m)
        ::from-label (ctx/message-label from own-id)
@@ -591,35 +582,6 @@
                          distinct vec)
        :seon.render/ai
        'seon.agent.ctx.transcript/message->renderable})))
-
-(defn- message-events
-  "ALL of the agent's WAKING-inbound + outbound messages as transcript
-   events, each `{::at ::kind :message :seon.render/ai 'message->renderable
-   ::from-label ::to-labels ::content ::id ::outbound?}`. Inbound messages
-   pass the [[inbound-msg?]] gate (so a `:core` nudge never renders as a
-   fake inbound); outbound messages (from me) always render. ONE query."
-  [db my-eid own-id turn-ats]
-  (when my-eid
-    (->> (db/query
-           {:seon.db/db db
-            :seon.db/query
-            ;; Wildcard pull: an attr with zero datoms (e.g. origin on a
-            ;; legacy row) is simply ABSENT (pulling it explicitly THROWS).
-            ;; The gate treats absent origin as waking.
-            '[:find (pull ?m [* {:seon.agent.message/from
-                                 [:db/id :seon.user/id :seon.agent/id]
-                                 :seon.agent.message/to
-                                 [:db/id :seon.user/id :seon.agent/id]}])
-              :in $ ?me
-              :where
-              (or-join [?m ?me]
-                [?m :seon.agent.message/from ?me]
-                [?m :seon.agent.message/to ?me])
-              [?m :seon.agent.message/at _]]
-            :seon.db/args [my-eid]})
-         (map first)
-         (keep #(message->event my-eid own-id %))
-         (mapv #(assoc % ::turn-idx (turn-index-at turn-ats (::at %)))))))
 
 (defn- eval->event
   "Convert one eval row into a transcript event at its optional turn index."
@@ -633,29 +595,6 @@
      ::result-live? result-live?
      :seon.render/ai 'seon.agent.ctx.transcript/eval->renderable}
     (some? turn-idx) (assoc ::turn-idx turn-idx))))
-
-(defn- eval-events
-  "ALL of the agent's evals as transcript events across ALL its turns,
-   oldest-first, each `{::at ::kind :eval ::entity ::result-live? ::turn-idx
-   :seon.render/ai 'eval->renderable}`. Walks agent → runs → turns → evals
-   (via [[seon.agent.ctx/agent-turns]]). `::result-live?` is derived from
-   exact membership in the one bounded runtime cache, so an evicted result
-   loses its handle even when its run was opened by this process, while a live
-   member keeps its handle regardless of run. `::turn-idx` is the
-   0-based enumeration index of the eval's TURN (oldest turn = 0), the handle
-   the `::turns-retained` window + `::tiers` age-banding key on."
-  [db id]
-  (let [turns (ctx/agent-turns id db)]
-    (vec
-      (for [[ti t] (map-indexed vector turns)
-            e      (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
-        (eval->event ti e)))))
-
-(defn- agent-rec
-  "The agent entity (lazy) for `id` against `db`."
-  [id db]
-  (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id id]}
-                    db (assoc :seon.db/db db))))
 
 (defn- with-ns-markers
   "Thread a `; in <ns>` marker into each EVAL event whose ns differs from
@@ -1282,33 +1221,6 @@
           (into [preceding] recent)
           recent)))))
 
-(defn- recent-html-source-events
-  "Bound message/eval reads before constructing the human transcript DOM.
-
-   Each fact owner contributes at most 200 newest append-only entities. The
-   retained-turn projection then removes older rows. This cap is deliberately
-   HTML-only; the AI transcript's policy remains unchanged."
-  [db own-id my-eid turn-ats]
-  (let [messages (if my-eid
-                   (msg/recent
-                     {:seon.db/db db
-                      :seon.agent/id own-id
-                      :seon.agent.message/recent-limit 200})
-                   [])
-        evals (seval/recent
-                {:seon.db/db db
-                 :seon.agent/id own-id
-                 :seon.eval/recent-limit 200})
-        kind-rank {:message 0 :eval 1}]
-    (->> (concat
-           (keep #(message->event my-eid own-id %) messages)
-           (map #(eval->event (turn-index-at turn-ats (:seon.eval/at %)) %)
-                evals))
-         (filter #(instance? js/Date (::at %)))
-         (sort-by (juxt #(.getTime ^js (::at %))
-                        #(kind-rank (::kind %) 9)))
-         vec)))
-
 (defn- coalesced-card-html
   "One fixed-size activity row for a coalesced error run.
 
@@ -1321,59 +1233,49 @@
     (tokens/clip-str signature 30)]
    [:span {:class "font-mono text-error shrink-0"} (str count "× failed")]])
 
-(defn transcript-block-html
-  "The HTML TWIN of [[transcript-block]]: the agent's flat time-ordered
-   event stream rendered as a professional chat (message bubbles + terse eval
-   activity rows), oldest-first. The normal surface is bounded by the block's
-   `::turns-retained` policy and never embeds eval source/result/error payloads
-   in hidden DOM. Returns BARE hiccup; an empty transcript renders a friendly
-   placeholder."
-  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
-  [{:seon.agent/keys [id] db :seon.db/db :as input}]
-  (let [db       (or db @db/*conn*)
-        a        (agent-rec id db)
-        my-eid   (:db/id a)
-        own-id   id
-        node     (:seon.render/node input)
-        tblock   (block-ent db my-eid :transcript)
-        retained (or (::turns-retained node)
-                     (::turns-retained tblock)
-                     default-turns-retained)
-        ;; Project only the ordered fact the window policy needs. Datahike
-        ;; entities are associative views, not Clojure maps; keeping them out
-        ;; of the pure helper also keeps its public contract storage-agnostic.
-        turn-ats (mapv :seon.agent.turn/at (ctx/agent-turns id db))
-        ;; The HTML twin is a human navigation surface, not a second copy of
-        ;; the full technical log. Bound first, then coalesce the visible
-        ;; window so a historical error burst cannot re-enter through its
-        ;; member cards.
-        events   (->> (recent-html-source-events db own-id my-eid turn-ats)
-                      (recent-html-events turn-ats retained)
-                      coalesce-events)
+(defn- message-card-html
+  "Render one already-acquired message row without another database read."
+  [agent-id message]
+  (let [from-label (ctx/message-label (:seon.agent.message/from message) agent-id)
+        to-labels (->> (:seon.agent.message/to message)
+                       (map #(ctx/message-label % agent-id))
+                       distinct
+                       (str/join ", "))
+        user? (= "user" from-label)
+        body (or (:seon.agent.message/content message) "")]
+    [:div {:class "py-1 flex"}
+     [:div {:class (str "seon-bubble max-w-[78%] min-w-0 rounded px-2.5 py-1.5 "
+                        (if user?
+                          "ml-auto bg-amber-950/40 border border-amber-800/40"
+                          "mr-auto bg-base-900 border border-base-800"))}
+      [:div {:class "flex items-baseline gap-2 flex-wrap"}
+       [:span {:class "text-xs font-mono font-semibold"} from-label]
+       (when-not (str/blank? to-labels)
+         [:span {:class "text-xs font-mono text-text-500"}
+          (str "→ " to-labels)])]
+      [:div {:class "markdown mt-0.5 min-w-0"}
+       (render/block :html {:seon.render/markdown (str/trim body)})]]]))
+
+(defn- format-transcript-html
+  [{:seon.agent/keys [id] turns ::turns :as input}]
+  (let [node (:seon.render/node input)
+        retained (or (::turns-retained node) default-turns-retained)
+        turn-ats (mapv :seon.agent.turn/at turns)
+        events (->> (ordered-events input)
+                    (recent-html-events turn-ats retained)
+                    coalesce-events)
         render-message
-        (fn [ev]
-          (when-let [mid (::id ev)]
-            (render/render-entity-html
-              (assoc input :seon.db/db db
-                     :seon.render/node
-                     (db/pull db '[* {:seon.agent.message/from
-                                      [:db/id :seon.user/id :seon.agent/id]
-                                      :seon.agent.message/to
-                                      [:db/id :seon.user/id :seon.agent/id]}]
-                              [:seon.agent.message/id mid])))))
+        (fn [event]
+          (message-card-html id (::entity event)))
         cards
         (->> events
              (keep
-               (fn [ev]
-                 (case (::kind ev)
-                   :coalesced (coalesced-card-html ev)
-                   ;; Message events carry projected fields, not the raw
-                   ;; entity — re-pull the message by id so the html
-                   ;; converter sees its full shape.
-                   :message   (render-message ev)
-                   :eval      (eval-handler/render-activity-html
-                                (assoc input :seon.render/node (::entity ev)
-                                       :seon.db/db db))
+               (fn [event]
+                 (case (::kind event)
+                   :coalesced (coalesced-card-html event)
+                   :message (render-message event)
+                   :eval (eval-handler/render-activity-html
+                           {:seon.render/node (::entity event)})
                    nil)))
              vec)
         latest-reply (some->> events
@@ -1388,3 +1290,19 @@
        (into [:div {:class "seon-card-expanded flex flex-col"}] cards)]
       [:div {:class "text-text-500 italic p-2 text-xs font-mono"}
        "no events yet — every message and eval this agent makes appears here live"])))
+
+(defn ^:async transcript-block-html
+  "The HTML TWIN of [[transcript-block]]: the agent's flat time-ordered
+   event stream rendered as a professional chat (message bubbles + terse eval
+   activity rows), oldest-first. The normal surface is bounded by the block's
+   `::turns-retained` policy and never embeds eval source/result/error payloads
+   in hidden DOM. Returns BARE hiccup; an empty transcript renders a friendly
+   placeholder."
+  {:malli/schema [:=> [:cat :seon.render/section-request :any]
+                  [:maybe :seon.render.canvas/hiccup]]}
+  [input _invoke-selected!]
+  (let [acquired (await (acquire-transcript input))]
+    (if-let [error (::error acquired)]
+      [:div {:class "text-error p-2 text-xs font-mono"}
+       (str "transcript render failed: " (pr-str error))]
+      (format-transcript-html acquired))))

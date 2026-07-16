@@ -14,9 +14,7 @@
    (The former `:plan-ledger` section retired 2026-07-11 — owner ruling,
    planner-worker-design.md: `:plan` is THE plan surface; its ▶/☐/
    done-dropped compactness contract lives in
-   `my.plan.internal/plan-block` now. Its glyphs were never wire offers,
-   so [[function-offers]] alignment is untouched — and the render-side
-   duplicate-① ambiguity is gone with it.)
+   `my.plan.internal/plan-block` now.)
 
    The one law (settled by measurement — see the design doc): selection
    is STRICTLY OPTIONAL, forever. Each section header teaches it once,
@@ -25,16 +23,12 @@
 
    This ns also owns the `:seon.typeahead/*` driver-policy row — the ONE
    policy surface the typeahead design allows (no new config system).
-   Defaults live in code ([[default-policy]]); the
-   `[:seon.typeahead/id \"policy\"]` singleton row, when present,
-   OVERRIDES per knob ([[policy]] — read at render, so a `db/transact!`
-   changes the next render). The config→DB migration is in flight on
-   another lane, so the defaults deliberately stay code-side; the row is
-   the override. (The keyword ns `seon.typeahead` names the DRIVER
-   surface later phases add; the design doc pins these keyword names.)"
+   Defaults live in code ([[default-policy]]); the database row is acquired
+   at the invocation coordinate by [[function-menu-block]]. The keyword ns
+   `seon.typeahead` names the DRIVER
+   surface later phases add; the design doc pins these keyword names."
   (:require
     [clojure.string :as str]
-    [seon.agent.ctx :as ctx]
     [seon.agent.home :as home]
     [seon.agent.ctx.namespaces :as ns-cards]
     [seon.db :as db]
@@ -131,30 +125,6 @@
    :seon.typeahead/max-rounds        8
    :seon.typeahead/plan-pass         :every-step})
 
-(defn policy
-  "The effective typeahead driver policy in db value `db`.
-
-   [[default-policy]] with the `[:seon.typeahead/id \"policy\"]`
-   singleton row's knobs merged over it (per-knob override; an absent
-   row/attr keeps the code default). Read at render time — transact the
-   row and the next render behaves differently. Never throws: a db
-   without the attr installed answers the defaults."
-  {:malli/schema [:=> [:catn [::db :seon.db/db]] ::policy-view]}
-  [db]
-  (let [row (when (and db (contains? (db/installed-schema db) :seon.typeahead/id))
-              (db/entity-lazy {:seon.db/db db
-                               :seon.db/ref [:seon.typeahead/id policy-row-id]}))]
-    (merge default-policy
-           (when row (select-keys row (keys default-policy))))))
-
-(defn- menu-cap
-  "The effective entry cap for one rendered menu: the policy's
-   `:seon.typeahead/menu-cap` bounded by the glyph vocabulary size."
-  [db]
-  (-> (:seon.typeahead/menu-cap (policy db))
-      (min (count glyphs))
-      (max 0)))
-
 ;; ============================================================
 ;; :function-menu — most recently/frequently eval'd public fns, derived
 ;; from the eval log + the program graph. Nothing new is stored: the
@@ -169,24 +139,6 @@
    ranking. A window (not all history) keeps the menu tracking what the
    agent is doing NOW and bounds the per-render read."
   30)
-
-(defn- eval-rows
-  "The agent's most recent successful eval rows in `db`, newest first.
-
-   `{:seon.eval/at … :seon.eval/source … :seon.eval/ns …}` maps, capped
-   at [[eval-scan-window]]. The fact owner's bounded reverse window is read
-   first, so a long eval history is never scanned merely to build a menu. []
-   when the agent/attrs are absent."
-  [db agent-id]
-  (->> (seval/recent
-         {:seon.db/db db
-          :seon.agent/id agent-id
-          :seon.eval/recent-limit 200})
-       reverse
-       (filter #(and (:seon.eval/ok? %)
-                     (:seon.eval/at %)))
-       (take eval-scan-window)
-       vec))
 
 (defn- call-syms
   "Every symbol in call position anywhere in eval `source`, in order.
@@ -203,14 +155,6 @@
                         (first f)))))
         (or (repl-internal/read-forms source) [])))
 
-(defn- require-info-for
-  "The `::seval/require-info` lexical env of ns `ns-kw` in `db` — the
-   alias→ns + refers maps its persisted require edges fold to. The empty
-   info for a nil/unstored ns (fully-qualified calls still resolve)."
-  [db ns-kw]
-  (seval/edges->require-info
-    (if ns-kw (seval/persisted-require-edges db ns-kw) #{})))
-
 (defn- resolve-call-sym
   "Resolve call symbol `sym` to a full `\"ns/name\"` string via the
    eval ns's require `info`, or nil when unresolvable (a local, a core
@@ -222,48 +166,6 @@
             (when (contains? syms sym)
               (str target "/" (name sym))))
           refers)))
-
-(defn- public-fn-row
-  "The `:seon.fn` row for `s` when it declares an agent-facing public fn."
-  [db s]
-  (let [e (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.fn/sym s]})]
-    (when (and e (:seon.fn/fn-var? e) (:seon.fn/agent-facing? e)
-               (not (:seon.fn/private? e)))
-      e)))
-
-(defn- ranked-functions
-  "`[full-sym-str fn-row]` pairs for the public fns called across eval
-   `rows` (newest first), ranked most-CALLED first, most-RECENT first on
-   ties. Uncapped — the section applies the policy menu-cap."
-  [db rows]
-  (let [infos (into {}
-                    (map (fn [k] [k (require-info-for db k)]))
-                    (distinct (map :seon.eval/ns rows)))
-        occ   (vec (mapcat (fn [{src :seon.eval/source ns-kw :seon.eval/ns}]
-                             (keep #(resolve-call-sym (get infos ns-kw) %)
-                                   (call-syms src)))
-                           rows))
-        freq  (frequencies occ)
-        seen  (reduce (fn [m [i s]] (if (contains? m s) m (assoc m s i)))
-                      {}
-                      (map-indexed vector occ))]
-    (->> (keys freq)
-         (sort-by (juxt #(- (freq %)) seen))
-         (keep (fn [s] (when-let [row (public-fn-row db s)] [s row])))
-         vec)))
-
-(defn- capped-functions
-  "The RECENCY-group `[full-sym-str fn-row]` pairs for agent `id` in
-   `db` — [[ranked-functions]] over the eval window, policy menu-capped.
-   [] when the db/agent/attrs are absent, so callers share ONE guard.
-   [[combined-functions]] (recency + toolkit, one glyph numbering) is
-   what the rendered menu AND the driver's wire offers both consume."
-  [db id]
-  (if (and db id
-           (contains? (db/installed-schema db) :seon.eval/agent)
-           (contains? (db/installed-schema db) :seon.fn/sym))
-    (vec (take (menu-cap db) (ranked-functions db (eval-rows db id))))
-    []))
 
 ;; ============================================================
 ;; Toolkit group (P6) — task-relevant offers from the program graph. The
@@ -302,126 +204,6 @@
   "How many of the CLUSTER's most recent successful evals (any agent)
    feed the toolkit-group ranking. Bounds the per-render read."
   200)
-
-(defn- all-eval-rows
-  "The newest [[global-eval-scan-window]] successful eval rows in `db`
-   across ALL agents, newest first — [[eval-rows]] without the agent
-   filter. Reads the fact owner's bounded reverse window rather than sorting
-   the complete cluster history. [] when the attr is absent."
-  [db]
-  (->> (seval/recent-all
-         {:seon.db/db db
-          :seon.eval/recent-limit global-eval-scan-window})
-       reverse
-       (filter #(and (:seon.eval/ok? %)
-                     (:seon.eval/at %)))
-       vec))
-
-(defn- call-freq
-  "full-sym-str → call count across eval `rows` (aliases resolved via
-   each eval ns's stored require-edges, as in [[ranked-functions]])."
-  [db rows]
-  (let [infos (into {}
-                    (map (fn [k] [k (require-info-for db k)]))
-                    (distinct (map :seon.eval/ns rows)))]
-    (frequencies
-      (mapcat (fn [{src :seon.eval/source ns-kw :seon.eval/ns}]
-                (keep #(resolve-call-sym (get infos ns-kw) %)
-                      (call-syms src)))
-              rows))))
-
-(defn- toolkit-nses
-  "The agent's toolkit ns names (keywords): the nses its CURRENT ns
-   requires, per the stored require-edges — the same set the compact ns
-   cards render (`seon.agent.ctx.namespaces` `required-ns-set` mirror),
-   structurally filtered by [[ns-cards/included-ns?]]. #{} when the
-   agent/attrs are absent."
-  [db id]
-  (let [cur (try (some-> (ctx/current-ns {:seon.agent/id id :seon.db/db db})
-                         name keyword)
-                 (catch :default _ nil))]
-    (if (and cur (contains? (db/installed-schema db) :seon.ns/name))
-      (into #{}
-            (filter ns-cards/included-ns?)
-            (seval/persisted-require-targets db cur))
-      #{})))
-
-(defn- ns-public-specced-fns
-  "`[full-sym-str fn-row]` pairs for an ns's agent-facing specced fns in
-   `db`, fn-name order. [] when the ns is unindexed."
-  [db ns-kw]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query '[:find [?e ...]
-                                   :in $ ?nsname
-                                   :where
-                                   [?ns :seon.ns/name ?nsname]
-                                   [?e :seon.fn/ns ?ns]
-                                   [?e :seon.fn/fn-var? true]
-                                   [?e :seon.fn/agent-facing? true]]
-                  :seon.db/args [ns-kw]})
-       (map #(db/pull {:seon.db/db db
-                       :seon.db/pull-pattern
-                       [:seon.fn/sym :seon.fn/private?
-                        :seon.fn/agent-facing? :seon.fn/spec
-                        :seon.fn/arglists :seon.fn/doc]
-                       :seon.db/ref %}))
-       (filter (fn [row] (and (not (:seon.fn/private? row))
-                              (:seon.fn/spec row)
-                              (:seon.fn/sym row))))
-       (map (fn [row] [(:seon.fn/sym row) row]))
-       (sort-by first)
-       vec))
-
-(defn- toolkit-functions
-  "Up to `cap` `[full-sym-str fn-row]` toolkit entries for agent `id`,
-   excluding syms in `exclude` (the recency group's — no duplicate
-   offers). Round-robin per ns: nses ordered by their best candidate's
-   global call frequency (desc, ns name on ties); within an ns,
-   frequency desc then fn name."
-  [db id exclude cap]
-  (if (and db id (pos? cap)
-           (contains? (db/installed-schema db) :seon.fn/sym))
-    (let [freq     (if (contains? (db/installed-schema db) :seon.eval/ok?)
-                     (call-freq db (all-eval-rows db))
-                     {})
-          per-ns   (->> (toolkit-nses db id)
-                        (map (fn [ns-kw]
-                               (->> (ns-public-specced-fns db ns-kw)
-                                    (remove #(contains? exclude (first %)))
-                                    (sort-by (fn [[s _]] [(- (freq s 0)) s]))
-                                    vec)))
-                        (remove empty?)
-                        (sort-by (fn [cands]
-                                   [(- (freq (ffirst cands) 0))
-                                    (ffirst cands)])))
-          max-len  (apply max 0 (map count per-ns))]
-      (->> (for [k    (range max-len)
-                 cands per-ns
-                 :when (< k (count cands))]
-             (nth cands k))
-           (take cap)
-           vec))
-    []))
-
-;; ============================================================
-;; The combined function menu — recent group then toolkit group, ONE
-;; glyph numbering, bounded by the glyph vocabulary. The SAME structure
-;; drives the rendered section AND the wire offers.
-;; ============================================================
-
-(defn- combined-functions
-  "`{::recent [[sym row]…] ::toolkit [[sym row]…]}` for agent `id` in
-   `db` — the recency group ([[capped-functions]]) plus the toolkit group
-   ([[toolkit-functions]], deduped, policy `toolkit-cap`), together
-   bounded by the glyph vocabulary. Both groups [] when db/agent are
-   absent."
-  [db id]
-  (let [recent  (capped-functions db id)
-        t-cap   (-> (:seon.typeahead/toolkit-cap (policy db))
-                    (min (- (count glyphs) (count recent)))
-                    (max 0))
-        toolkit (toolkit-functions db id (into #{} (map first) recent) t-cap)]
-    {::recent recent ::toolkit toolkit}))
 
 (def ^:private menu-teaching
   ;; The measured P5 teaching, byte-stable (the bench's teaching overlay
@@ -733,36 +515,6 @@
    [:seon.typeahead/label    :seon.typeahead/label]
    [:seon.typeahead/template :seon.typeahead/template]])
 (schema/register! ::offers-view [:vector :seon.typeahead/offer])
-
-(def ^:private offer-args-free-tokens
-  "Free tokens a function template grants for the call's arguments."
-  24)
-
-(defn function-offers
-  "Driver offers mirroring the agent's rendered `:function-menu` menu.
-
-   One offer per [[combined-functions]] entry (recent group then toolkit
-   group — the SAME concatenation the section renders, so glyph N on
-   the wire is glyph N in the prompt for every offer) — the selection
-   glyph, the SAME compact callable-contract label the prompt renders, and a
-   `(sym ` + free-args-hole + `)` clamp template the driver expands on
-   selection. [] when the agent
-   has no menu (same guard as the rendered section), so the wire
-   carries offers exactly when the prompt shows the menu."
-  {:malli/schema [:=> [:catn [::db :seon.db/db] [:seon.agent/id :string]]
-                  ::offers-view]}
-  [db id]
-  (let [{::keys [recent toolkit]} (combined-functions db id)]
-    (vec
-      (map-indexed
-        (fn [i [s row]]
-          {:seon.typeahead/glyph    (glyphs i)
-           :seon.typeahead/label    (ns-cards/compact-fn-head
-                                      (compact-row s row))
-           :seon.typeahead/template [["clamp" (str "(" s " ")]
-                                     ["free" offer-args-free-tokens]
-                                     ["clamp" ")"]]})
-        (concat recent toolkit)))))
 
 ;; (The `:plan-ledger` section that used to live here retired 2026-07-11
 ;; — see the ns docstring; `my.plan.internal/plan-block` carries the

@@ -13,10 +13,9 @@
        `:seon.ns/require-edges` rows — write a real `(:require [x …])` and `x`
        joins as a card; drop the require → it vanishes
        ([[render-one-ns-compact]]).
-     - DROPPED — everything else. Still INDEXED (its `:seon.ns/name` +
-       `:seon.fn` / `:seon.schema` / `:seon.test` rows) and readable in FULL on
-       demand via [[seon.agent.ctx/render-namespace]], just not resident in the
-       section. `*.internal` / `*-test` and empty cards are always omitted.
+     - DROPPED — everything else remains indexed and searchable, just not
+       resident in the section. `*.internal` / `*-test` and empty cards are
+       always omitted.
 
    Each rendered ns is a comment-block delimited by per-ns
    `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─` brackets
@@ -44,14 +43,12 @@
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.error.instrument :as einstrument]
-    [seon.eval :as seval]
     [seon.schema :as schema]))
 
 ;; The compact card renderer is defined at the BOTTOM of this file (its
 ;; helpers cluster there); [[namespaces-block]] above it dispatches the long
 ;; tail to it, so forward-declare it here.
-(declare format-namespaces-block render-one-ns-compact render-one-ns-compact-row
-         resolve-cfg)
+(declare format-namespaces-block render-one-ns-compact-row resolve-cfg)
 
 ;; ============================================================
 ;; Config interface — the namespaces-block render dials, as reactive
@@ -117,8 +114,8 @@
 
    Never enters the agent prompt — its `deftest`s are noise to the working
    agent, and the per-fn `:test` usage example already rides the fn's attr-map in
-   the compact head. Full tests stay reachable on demand via
-   [[seon.agent.ctx/render-namespace]]. STRUCTURAL, like [[hidden-ns-name?]]: the
+   the compact head. Full tests stay searchable as indexed database data.
+   STRUCTURAL, like [[hidden-ns-name?]]: the
    suffix IS the filter. String/keyword/symbol tolerant."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
@@ -332,14 +329,17 @@
 
 (defn ^:async ^:private acquire-namespace-rows!
   "Acquire namespace rows at one database coordinate."
-  [id]
-  (let [initial (await (db/execute-many
-                         {::db/members (initial-acquisition-members id)
-                          ::db/max-result-weight 786432}))]
-    (if-not (::db/coordinate initial)
+  [{id :seon.agent/id :as input}]
+  (let [coordinate (or (::db/coordinate input)
+                       (::db/coordinate (db/current-tx-context)))
+        initial (when coordinate
+                  (await (db/execute-many
+                           {::db/coordinate coordinate
+                            ::db/members (initial-acquisition-members id)
+                            ::db/max-result-weight 786432})))]
+    (if-not (and coordinate (= coordinate (::db/coordinate initial)))
       (acquisition-error "initial acquisition" initial)
-      (let [coordinate (::db/coordinate initial)
-            [agent-member ns-member config-member] (::db/results initial)
+      (let [[agent-member ns-member config-member] (::db/results initial)
             agent (member-result agent-member)
             latest-ns (some-> (member-result ns-member) first first)
             config-row (member-result config-member)]
@@ -532,24 +532,6 @@
              current-full?
              (not= :off (:seon.config/current-ns policy))))))
 
-(defn- ns-block-entity
-  "The agent's `:namespaces` block entity (raw datahike Entity, lazy ILookup),
-   or nil when the agent has no id / no such block. Mirrors
-   [[seon.agent.ctx.canvas/block-content]]: read the agent's
-   `:seon.agent/ctx` set and find the block named `:namespaces`. The
-   config-driven-agent-init lane transacts the render-dial datoms
-   (`::full-source` / `::with-tests` / `::current-full?` / `::current-tests?`)
-   onto THIS entity; the render reads them reactively (a `db/transact!`
-   re-derives next render, no apply step). If the lane doesn't instantiate a
-   `:namespaces` block yet, this is nil and the caller falls back to the agent
-   datom then the malli default — byte-parity for the current full set holds
-   either way."
-  [db id]
-  (when id
-    (some (fn [b] (when (= :namespaces (:seon.agent.ctx/name b)) b))
-          (:seon.agent/ctx
-            (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})))))
-
 (defn- resolve-cfg
   "Resolve render-dial attr `k` for the agent: the value on its `:namespaces`
    BLOCK entity if present, else the value on its AGENT entity (datom
@@ -605,7 +587,7 @@
   "The never-omit block for the agent's CURRENT ns when it has no members
    defined yet (GI-2). A fresh home ns (`my.agent.<id>`) carries a
    `:seon.ns/name` row but no stored `:seon.ns/source` and no fns/schemas, so
-   [[seon.agent.ctx/render-namespace]] yields an empty body that would be omitted
+   [[seon.agent.ctx/render-namespace-ai]] yields an empty body that would be omitted
    — breaking the system prompt's promise that YOUR OWN namespace renders in
    full. This stub keeps that promise: it shows the REAL `(ns … (:require …))`
    form [[seon.eval/setup-agent-ns!]] actually installed — `[seon.agent.message
@@ -627,8 +609,8 @@
          ";  auto-runs every turn: its output becomes a live section of your context + a surface on your page)")))
 
 (defn- render-one
-  "Render ONE included ns FULL through the SINGLE renderer
-   ([[seon.agent.ctx/render-namespace]]), flat (depth 0 — no require-recursion;
+  "Render ONE included ns FULL through the pure ordinary-data renderer
+   ([[seon.agent.ctx/render-namespace-ai]]), flat (no require-recursion;
    the section renders each ns once): the whole-ns view, real file source +
    members, unclipped.
 
@@ -637,8 +619,8 @@
    'YOUR OWN namespace renders in full' promise holds — this covers BOTH a home
    ns with a `:seon.ns/name` row but no source AND one with NO row at all (a
    brand-new agent whose home ns was never indexed;
-   [[seon.agent.ctx/render-namespace]] throws on the missing entity, so
-   short-circuit to the stub). Every OTHER ns with nothing real to show is
+   the missing row short-circuits to the stub). Every OTHER ns with nothing
+   real to show is
    omitted (nil). `id` threads through to the workspace stub so its prose
    reflects THIS agent's configured requires."
   [nm row schema-rows cur-ns id]
@@ -682,8 +664,7 @@
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :map]}
   [input _invoke-selected!]
   (let [acquired
-        (await (acquire-schema-rows! (await (acquire-namespace-rows!
-                                             (:seon.agent/id input)))))
+        (await (acquire-schema-rows! (await (acquire-namespace-rows! input))))
         current-ns (:seon.agent.ctx.render-fns/current-ns acquired)
         current-row (some #(when (= current-ns (:seon.ns/name %)) %)
                           (::namespace-rows acquired))]
@@ -708,8 +689,8 @@
        than full.
        The whole card is reader-commented, so echoing it cannot enqueue evals.
        Self-healing on the `:seon.ns/require-edges` rows.
-     - DROPPED — everything else, reachable via grep /
-       [[seon.agent.ctx/render-namespace]]. (`*.internal` / `*-test` excluded
+     - DROPPED — everything else remains reachable via indexed search.
+       (`*.internal` / `*-test` excluded
        outright, [[included-ns?]]; empty cards dropped.)
 
    DRIVEN BY THE PER-AGENT CONFIG DIALS, read reactively off the agent's
@@ -1040,14 +1021,6 @@
         head    (str "fn " sym " — " contract docpart)]
     head))
 
-(schema/register! ::render-one-ns-compact-request
-  [:map
-   [:seon.ns/name :seon.ns/name]
-   [:seon.db/db   :seon.db/db]
-   [:seon.ns.require/refers
-    {:optional true}
-    :seon.ns.require/refers]])
-
 (defn- render-one-ns-compact-row
   "Render one eager namespace row as a compact card."
   [ns-kw row schema-rows refers]
@@ -1091,40 +1064,3 @@
                                      {:seon.agent.ctx/strip-markers? true})
                     "; (nothing indexed)")]
         (ctx/ns-demarc ns-kw body)))))
-
-(defn render-one-ns-compact
-  "Render ONE namespace as a COMPACT CARD string.
-
-   The selected schema definitions plus every public, schema-complete function
-   condensed to inert comment records, inside the standard `;;; ┌─/└─`
-   demarcation
-   ([[seon.agent.ctx/ns-demarc]]). Compact output contains no executable
-   pseudo-definitions and no serialized runtime objects.
-
-   Reads INDEXED ROWS ONLY (`:seon.schema/_ns` / `:seon.fn/_ns` off the
-   `:seon.ns/name` entity) — NEVER a file read (code-as-data). A sibling
-   detail-level to [[seon.agent.ctx/render-one-ns-ai]]'s full block, ~3–5×
-   smaller. Errors-as-values: a ns with no `:seon.ns` entity renders a
-   one-line note; a bad row degrades one line, never throws.
-
-   Map-in: `{:seon.ns/name <keyword> :seon.db/db <db-value>}`. Returns the
-   card string."
-  {:malli/schema [:=> [:cat ::render-one-ns-compact-request] :string]}
-  [{ns-kw :seon.ns/name db :seon.db/db refers :seon.ns.require/refers}]
-  (let [present? (db/entity-lazy {:seon.db/db db
-                                  :seon.db/ref [:seon.ns/name ns-kw]})
-        row (when present?
-              (db/pull {:seon.db/db db
-                        :seon.db/ref [:seon.ns/name ns-kw]
-                        :seon.db/pull-pattern namespace-selector}))
-        schema-rows (->> (db/query
-                           {:seon.db/db db
-                            :seon.db/query
-                            '[:find ?key ?form
-                              :where
-                              [?schema :seon.schema/key ?key]
-                              [?schema :seon.schema/form ?form]]})
-                         (mapv (fn [[k form]]
-                                 {:seon.schema/key k
-                                  :seon.schema/form form})))]
-    (render-one-ns-compact-row ns-kw row schema-rows refers)))

@@ -2,8 +2,8 @@
   "The `:typeahead-steps` ctx block family — the diffusion typeahead
    provider's observability twin (typeahead-design.md \"The live block\").
 
-   ONE block, BOTH render slots, both reactive (pure fns of the db at
-   render time — reactive-context, nothing stored):
+   ONE block, BOTH render slots. Acquisition is asynchronous and pinned to
+   the invocation coordinate; formatting is pure over ordinary values:
 
      - `:seon.render/html` ([[steps-surface-html]]) — the agent-page live
        surface: a state banner (FSM state now, provider, step k/N, rounds,
@@ -22,8 +22,7 @@
        lack the data (reactive-context).
      - `:seon.render/ai` ([[steps-ai]]) — the provider protocol's
        special instructions, rendered ONLY when the agent's RESOLVED
-       provider is `:typeahead` (`seon.ai/resolved-config` over the
-       render db — per-agent `::agent-provider` overlay included). Any
+       provider is `:typeahead` (the per-agent provider overlay included). Any
        other provider → \"\" and the section vanishes at zero token
        cost. Glyph-selection teaching stays colocated with the menu
        sections (`seon.agent.ctx.menu` headers own it — one fact, one
@@ -39,7 +38,6 @@
   (:require
     [cljs.reader :as reader]
     [clojure.string :as str]
-    [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.db.protocol :as protocol]))
@@ -73,18 +71,6 @@
        "; Locked forms are eval'd by the pod AFTER the turn — results\n"
        "; arrive next turn as the transcript's bare `⟹ <value>` rows.\n"
        "; `⟹` is runtime output only; `;; =>` is not part of the grammar."))
-
-(defn- resolved-provider
-  "Agent `id`'s RESOLVED provider keyword in db value `db`, nil on any
-   read failure (a fresh db without the config attrs installed)."
-  [db id]
-  (try
-    (when db
-      (get-in (ai/resolved-config
-                (cond-> {:seon.db/db db}
-                  id (assoc :seon.agent/id id)))
-              [:seon.ai/resolved-config :seon.ai/provider]))
-    (catch :default _ nil)))
 
 (defn- prompt-provider
   "Resolve the prompt provider from already-acquired ordinary rows."
@@ -167,31 +153,92 @@
   (when (string? s)
     (try (reader/read-string s) (catch :default _ nil))))
 
-(defn- last-call-steps
-  "The agent's most recent call's step rows, step-idx-ordered. nil when
-   the attr is uninstalled or the agent has no steps."
-  [db id]
-  (when (and db id (contains? (db/installed-schema db) :seon.typeahead/call))
-    (let [rows (->> (db/query {:seon.db/db    db
-                               :seon.db/query '[:find [?e ...]
-                                                :in $ ?aid
-                                                :where
-                                                [?a :seon.agent/id ?aid]
-                                                [?e :seon.typeahead/agent ?a]]
-                               :seon.db/args  [id]})
-                    (map #(db/pull {:seon.db/db db
-                                    :seon.db/pull-pattern '[*]
-                                    :seon.db/ref %}))
-                    (filter :seon.typeahead/at))]
-      (when (seq rows)
-        (let [call (->> rows
-                        (sort-by #(.getTime ^js (:seon.typeahead/at %)))
-                        last
-                        :seon.typeahead/call)]
-          (->> rows
-               (filter #(= call (:seon.typeahead/call %)))
-               (sort-by :seon.typeahead/step-idx)
-               vec))))))
+(def ^:private latest-call-query
+  {:find '[?call ?at ?step]
+   :in '[$ ?agent-id]
+   :where '[[?agent :seon.agent/id ?agent-id]
+            [?step :seon.typeahead/agent ?agent]
+            [?step :seon.typeahead/call ?call]
+            [?step :seon.typeahead/at ?at]]
+   :order-by '[?at :desc ?step :desc]
+   :limit 1})
+
+(def ^:private call-steps-query
+  '{:find [(pull ?step [*])]
+    :in [$ ?agent-id ?call]
+    :where [[?agent :seon.agent/id ?agent-id]
+            [?step :seon.typeahead/agent ?agent]
+            [?step :seon.typeahead/call ?call]
+            [?step :seon.typeahead/step-idx ?step-idx]]
+    :order-by [?step-idx :asc ?step :asc]})
+
+(defn- query-member
+  [query arguments max-results max-result-weight]
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form query
+   ::protocol/arguments arguments
+   :datahike.resource/max-work 1000000
+   :datahike.resource/max-results max-results
+   :datahike.resource/max-result-weight max-result-weight})
+
+(defn- member-result
+  [member]
+  (when (true? (::protocol/success? member))
+    (or (:datahike.query/result member)
+        (::protocol/result member))))
+
+(defn ^:async ^:private acquire-steps-surface
+  [{agent-id :seon.agent/id :as input}]
+  (let [coordinate (or (::db/coordinate input)
+                       (::db/coordinate (db/current-tx-context)))
+        initial (when coordinate
+                  (await
+                    (db/execute-many
+                      {::db/coordinate coordinate
+                       ::db/members
+                       [{::protocol/operation protocol/pull-operation
+                         ::protocol/selector [:seon.ai/agent-provider]
+                         ::protocol/entity-id [:seon.agent/id agent-id]
+                         :datahike.resource/max-work 10000
+                         :datahike.resource/max-results 8
+                         :datahike.resource/max-result-weight 1024}
+                        {::protocol/operation protocol/pull-operation
+                         ::protocol/selector [:seon.ai/provider]
+                         ::protocol/entity-id [:seon.ai/id "config"]
+                         :datahike.resource/max-work 10000
+                         :datahike.resource/max-results 8
+                         :datahike.resource/max-result-weight 1024}
+                        (query-member latest-call-query [agent-id] 64 4096)]
+                       ::db/max-result-weight 8192})))
+        members (::db/results initial)]
+    (if-not (and coordinate (= coordinate (::db/coordinate initial))
+                 (= 3 (count members))
+                 (every? #(true? (::protocol/success? %)) members))
+      {:seon.error/message "Typeahead surface acquisition failed."
+       :seon.error/kind :core-bug
+       :seon.error/data initial}
+      (let [[agent-member config-member call-member] members
+            provider (prompt-provider (member-result agent-member)
+                                      (member-result config-member))
+            call (ffirst (member-result call-member))]
+        (if-not call
+          {:seon.typeahead/provider provider :seon.typeahead/steps []}
+          (let [selected (await
+                           (db/execute-many
+                             {::db/coordinate coordinate
+                              ::db/members
+                              [(query-member call-steps-query [agent-id call]
+                                             2048 1048576)]
+                              ::db/max-result-weight 1048576}))
+                member (first (::db/results selected))]
+            (if-not (and (= coordinate (::db/coordinate selected))
+                         (true? (::protocol/success? member)))
+              {:seon.error/message "Typeahead step acquisition failed."
+               :seon.error/kind :core-bug
+               :seon.error/data selected}
+              {:seon.typeahead/provider provider
+               :seon.typeahead/steps
+               (mapv first (or (member-result member) []))})))))))
 
 ;; ------------------------------------------------------------
 ;; 1. State banner — the FSM state NOW + the call vitals.
@@ -214,10 +261,10 @@
   "The surface masthead: `● <state>` + provider · N steps · step k/N ·
    rounds j/b · wall so far · ctx tokens · server sha (short) —
    whichever of those the rows carry."
-  [db id steps]
+  [provider steps]
   (let [row    (last steps)
         {:keys [dot class label]} (fsm-state row)
-        prov   (some-> (resolved-provider db id) name)
+        prov   (some-> provider name)
         n      (count steps)
         kmax   (:seon.typeahead/max-rounds row)
         ru     (:seon.typeahead/rounds-used row)
@@ -486,7 +533,21 @@
              " tok ")]
        draft-preview])))
 
-(defn steps-surface-html
+(defn- format-steps-surface
+  [provider steps]
+  (when (seq steps)
+    (let [row (last steps)]
+      (into [:div {:class "flex flex-col gap-1.5"}]
+            (keep identity
+                  [(state-banner provider steps)
+                   (buffer-pane row)
+                   (offers-panel row)
+                   (holes-panel steps)
+                   (done-strip steps)
+                   (step-history steps)
+                   (draft-line steps)])))))
+
+(defn ^:async steps-surface-html
   "The typeahead canvas — the last provider call, fully legible.
 
    Composed top to bottom, every panel reactive (vanishes when its rows
@@ -497,19 +558,12 @@
    holes panel (per-hole entropy/length/accepted after an EXPAND), the
    done-ness strip (EOS meter + harvest totals) and the compact step
    history. nil when the agent has no step rows (reactive-context)."
-  {:malli/schema [:=> [:cat :seon.render/section-request]
+  {:malli/schema [:=> [:cat :seon.render/section-request :any]
                   [:maybe :seon.render.canvas/hiccup]]}
-  [{db :seon.db/db id :seon.agent/id}]
-  (let [db    (or db (some-> db/*conn* deref))
-        steps (last-call-steps db id)]
-    (when (seq steps)
-      (let [row (last steps)]
-        (into [:div {:class "flex flex-col gap-1.5"}]
-              (keep identity
-                    [(state-banner db id steps)
-                     (buffer-pane row)
-                     (offers-panel row)
-                     (holes-panel steps)
-                     (done-strip steps)
-                     (step-history steps)
-                     (draft-line steps)]))))))
+  [input _invoke-selected!]
+  (let [acquired (await (acquire-steps-surface input))]
+    (if (:seon.error/message acquired)
+      [:div {:class "text-error p-2 text-xs font-mono"}
+       (:seon.error/message acquired)]
+      (format-steps-surface (:seon.typeahead/provider acquired)
+                            (:seon.typeahead/steps acquired)))))

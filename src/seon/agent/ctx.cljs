@@ -16,7 +16,7 @@
      - `install!` / `remove!` — the ONE scope-aware mutation surface over the
        agent's own `:seon.agent/ctx` block set; [[initial-agent-context]]
        projects the manifest-declared tree into the atomic birth transaction.
-       `context-root` reads the agent's COMPLETE `:seon.agent/ctx`, decoded
+       `selected-agent-blocks` reads the agent's COMPLETE `:seon.agent/ctx`, decoded
        + priority-sorted — NO render-time merge, NO separate default set, NO
        char budget. The render guard (a broken block renders an inline error
        line, never breaks assembly) lives in [[seon.render]].
@@ -31,11 +31,8 @@
        sent as the LLM `system` role message (via
        `seon.ai/effective-system-prompt`); NOT a context section (the
        soul/agents files are context sections via [[file-block]]) — and
-       the derived read API every section shares (messages / evals /
-       session-evals / current-ns /
-       format-eval-row / the eval-render caps / …) —
-       every read takes the composer's `:seon.db/db` snapshot so one
-       render is one db view. The other core sections live in their own
+       the pure formatting functions shared by acquired context data. The
+       other core sections live in their own
        `seon.agent.ctx.<name>` nses: :namespaces → `seon.agent.ctx.namespaces`,
        :canvas → `seon.agent.ctx.canvas`, :warnings →
        `seon.agent.ctx.warnings`,
@@ -43,40 +40,20 @@
        `config/system.edn` wires active blocks by SYMBOL (late lookup-value
        resolution), so this ns does NOT require them — they require this
        ns for the shared read API.
-     - `render-namespace` — the standalone whole-namespace render
-       (ns + fns + schemas + tests, :ai or :html), an agent-callable
-       core capability the system prompt documents by name.
-
-   Section fns receive ONE map — the registered OPEN
-   `:seon.render/section-request` shape (its named keys are the
-   `seon.instrument/injectables` contract):
-     {:seon.db/db        <db value>
-      :seon.agent/id     <id string>          ; convenience, = entity id
-      :seon.render/at    <basis-t int>        ; \"now\" — the turn's time coordinate
-      :seon.agent/entity <the agent's own entity, pulled ONCE>
-      :seon.render/node  <this section's map>} ; per-section overrides
-   and return a string; \"\" suppresses the section.
-
-   seon.agent requires this ns and re-exports the agent-facing read API
-   (seon.agent/messages …)."
+   Child acquisition is asynchronous and coordinate-pinned in
+   `seon.execution.runtime`; this namespace formats only ordinary values."
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]
     [malli.core :as m]
     [malli.registry :as mr]
-    [seon.agent.home :as home]
-    [seon.agent.message :as message]
-    [seon.agent.ctx.render-fns :as render-fns]
+    [seon.agent.ctx.render-fns]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
-    [seon.handlers.fn :as h-fn]
-    [seon.handlers.ns :as h-ns]
-    [seon.handlers.schema :as h-schema]
     [seon.handlers.test :as h-test]
-    [seon.render :as render]
     [seon.schema :as schema]
     [seon.ui.markdown :as md]))
 
@@ -89,7 +66,7 @@
 
 ;; Program-graph ns rows. :seon.ns/name itself is registered in
 ;; seon.agent.ctx.render-fns — the FIRST-loading ns whose load-time
-;; schemas reference it (this ns requires render-fns, so render-fns
+;; schemas reference it (this ns requires render-fns for schema ownership, so render-fns
 ;; loads before line 90 here would run; registering it here broke
 ;; every COLD pod boot while hot reloads sailed). The rest of the
 ;; :seon.fn/:seon.schema attr family stays in seon.agent until the P6
@@ -144,7 +121,7 @@
 ;;   ::escape-clipping? (#43) — WIRED (CP-5): default true frees successful
 ;;                     eval source/stdout caps; failed diagnostics retain the
 ;;                     hard eval cap and result decay governs citable values.
-;;   ::cache-breakpoint — WIRED (render-context-ai reads it; replaces the
+;;   ::cache-breakpoint — WIRED (the pure prompt formatter reads it; replaces the
 ;;                        stable-priority-max const).
 ;;
 ;; PARKED (config-init CP-4.5, owner three-fates = PARK — deferred, NOT inert):
@@ -360,55 +337,6 @@
    `seon.agent.run/default-form-limit` without introducing the run→ctx cycle."
   (:seon.config.run/stream-form-limit (config/default-run-policy)))
 
-(schema/register! ::run-policy
-  [:map
-   [:seon.config.run/batch-turn-limit :seon.config.run/batch-turn-limit]
-   [:seon.config.run/stream-form-limit :seon.config.run/stream-form-limit]
-   [:seon.config.run/deadline-ms :seon.config.run/deadline-ms]])
-
-(defn run-policy
-  "Run safety policy from the frozen database config singleton.
-
-   The manifest resolver persists all three scalar attrs. A missing singleton
-   exists only in pre-config scratch stores and falls back through the same
-   schema defaults used by config resolution—never a second literal table."
-  {:malli/schema [:=> [:catn [:seon.db/db :any]] ::run-policy]}
-  [db]
-  (let [defaults (config/default-run-policy)
-        stored   (when (and db
-                            (every? (db/installed-schema db)
-                                    (keys defaults)))
-                   (select-keys
-                     (db/entity
-                       {:seon.db/db db
-                        :seon.db/ref [:seon.config/id config/cluster-config-id]})
-                     (keys defaults)))]
-    (merge defaults stored)))
-
-;; `current-run` + `derived-state` are the [[seon.derive]] leaf — call
-;; `seon.derive/current-run` / `seon.derive/derive-state` with the db value the
-;; caller holds (the readline + web UI + loop + wake gate all share that one
-;; rule). They were duplicated here only to dodge the agent→ctx→render cycle.
-
-(defn agent-turns
-  "ALL `:seon.agent.turn` entities the agent owns, oldest-first.
-
-   Lazy, by
-   `:at` — walks the agent's runs (reverse ref `:seon.agent.run/_agent`) →
-   their turns (reverse ref `:seon.agent.turn/_run`). Replaces the old
-   sessions→turns walk; nothing is stored. Optional `db` snapshot."
-  {:malli/schema [:function
-                  [:=> [:catn [::agent-id :string]] [:vector :any]]
-                  [:=> [:catn [::agent-id :string] [::db :any]] [:vector :any]]]}
-  ([agent-id] (agent-turns agent-id nil))
-  ([agent-id db]
-   (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
-                             db (assoc :seon.db/db db)))]
-     (->> (:seon.agent.run/_agent a)
-          (mapcat :seon.agent.turn/_run)
-          (sort-by #(.getTime ^js (:seon.agent.turn/at %)))
-          vec))))
-
 ;; The namespace-display selection rules (hidden-ns-name?,
 ;; included-ns?, full-source-ns?, …) live in their rightful home,
 ;; [[seon.agent.ctx.namespaces]] — the ns that owns the namespaces section
@@ -426,55 +354,12 @@
     (or (some-> (js/Intl.DateTimeFormat.) .resolvedOptions .-timeZone) "UTC")
     (catch :default _ "UTC")))
 
-(defn escape-clipping?
-  "Whether this agent's successful authored eval components render in full.
-
-   The per-value clip
-   cap (#43) — READ off the agent entity's `:seon.agent.ctx/escape-clipping?`
-   datom (reactive config-on-record, CP-3 move 8), the sole source. Absent →
-   the schema default `true`. Failed source, stdout, and diagnostics never use
-   this escape; they retain the configured hard eval cap."
-  {:malli/schema [:function
-                  [:=> [:cat] :boolean]
-                  [:=> [:catn [::agent-id [:maybe :string]]] :boolean]]}
-  ([] (escape-clipping? (db/current-agent-id)))
-  ([agent-id]
-   (let [db (some-> db/*conn* deref)]
-     (if (and db agent-id
-              (contains? (db/installed-schema db) ::escape-clipping?))
-       (let [v (:seon.agent.ctx/escape-clipping?
-                 (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]}))]
-         (if (boolean? v) v true))
-       true))))
-
 (def ^:private default-cache-breakpoint
   "The cache-breakpoint priority when no agent datom is present (byte-parity =
    the old `stable-priority-max` const): blocks with priority ≤ this are the
    byte-stable cacheable PREFIX (soul → :namespaces, priority 20); the provider
    cache line falls at the transition to the volatile tail."
   20)
-
-(defn cache-breakpoint
-  "The agent's cache-breakpoint priority.
-
-   Blocks with `:seon.agent.ctx/priority`
-   ≤ this are the byte-stable cacheable PREFIX (the reactive config-on-record
-   source `:seon.agent.ctx/cache-breakpoint`, default 20). REPLACES the
-   `stable-priority-max` const: the renderer reads the datom off the agent it
-   renders, falling back to [[default-cache-breakpoint]] (= today's 20) when the
-   agent/schema is absent, so a no-config agent renders byte-identically."
-  {:malli/schema [:function
-                  [:=> [:cat] :int]
-                  [:=> [:catn [::agent-id [:maybe :string]]] :int]]}
-  ([] (cache-breakpoint (db/current-agent-id)))
-  ([agent-id]
-   (let [db (some-> db/*conn* deref)]
-     (if (and db agent-id
-              (contains? (db/installed-schema db) ::cache-breakpoint))
-       (let [v (:seon.agent.ctx/cache-breakpoint
-                 (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]}))]
-         (if (int? v) v default-cache-breakpoint))
-       default-cache-breakpoint))))
 
 (defn- clip-or-full
   "THE authored-content clip gate — the SINGLE place a display cap is
@@ -706,22 +591,6 @@
    reserved and appear legitimately elsewhere (compacted values / `my.plan`)."
   #{result-marker result-close status-open status-close prompt})
 
-(defn repl-mode
-  "The cluster's live REPL mode datom — `:batch` (default) | `:stream`.
-
-   Reads `:seon.config/repl-mode` off the `:seon.config` singleton entity
-   (`seon.config/cluster-config-id`) in db value `db`; `:batch` when the
-   datom is absent (config-through-DB: the manifest was reconciled there at
-   boot, so the turn loop + masthead read THIS db value — pinned to the
-   turn's frozen db — never the config accessor). Guarded: nil db / no such
-   attr / no entity → `:batch`."
-  {:malli/schema [:=> [:catn [:seon.db/db :any]] :seon.config/repl-mode]}
-  [db]
-  (or (when (and db (contains? (db/installed-schema db) :seon.config/repl-mode))
-        (:seon.config/repl-mode
-          (db/entity {:seon.db/db db :seon.db/ref [:seon.config/id config/cluster-config-id]})))
-      :batch))
-
 (defn- error-lines
   "Render an error/guidance body `s` as the REPL FAILURE shape: the FIRST
    non-blank line becomes the bare `⟹ ✗ <headline>` output line (a RUNTIME
@@ -839,7 +708,7 @@
          ;; governed independently by the age-decay `result-body-cap`.
          escape?     (if (some? escape-override)
                        (boolean escape-override)
-                       (escape-clipping?))
+                       true)
          small-full? (and ok? (or full? escape?))
          ;; Echoed source + stdout + error/guidance bodies cap at the
          ;; smaller `eval-render-cap` (1500); only the citable result
@@ -961,184 +830,8 @@
           (str/join "\n")))))
 
 ;; ------------------------------------------------------------
-;; Read API — what the agent calls from its REPL to walk its own
-;; state. All sync, all pulling from the live conn. Match v1.md §5's
-;; map-arg convention with smart defaults.
-;;
-;; Agent-id resolution: callers pass `:seon.agent/id` explicitly OR
-;; run inside a `(seon.db/with-agent id …)` scope (the normal boot/
-;; run-loop path). `resolve-id` throws a clear ex-info when neither
-;; is available — we don't guess, we don't fall back to a hardcoded
-;; process-global default (audit P1).
-;; ------------------------------------------------------------
-
-(defn- resolve-id
-  "Return the explicit id when supplied, else `(db/current-agent-id)`,
-   else throw with a clear message. Centralized so every read API
-   surfaces the same instruction when called outside any agent scope."
-  [id]
-  (or id
-      (db/current-agent-id)
-      (throw (ex-info
-               (str "seon.agent: no agent-id in scope — pass "
-                    ":seon.agent/id explicitly or call inside "
-                    "(seon.db/with-agent id …).")
-               {::error :seon.agent/no-agent-id}))))
-
-(defn messages
-  "Last N messages of MY conversation, oldest-first.
-
-   The conversation
-   is DERIVED — `from = me OR to ∋ me` — never stored as a membership
-   attr. Queries the message log DIRECTLY (standalone inbound messages
-   never attach to a turn, so a turn-walk would miss them). The from/to
-   refs are pulled with their id attrs so transcript labeling resolves by
-   ref kind. Default {:seon.agent/n 50}. Optional `:seon.db/db` — the
-   composer threads its render snapshot here so every section reads the
-   SAME db value."
-  {:malli/schema [:function
-                  [:=> [:cat] [:vector :any]]
-                  [:=> [:catn [::opts [:map
-                                       [:seon.agent/n  {:optional true} :int]
-                                       [:seon.agent/id {:optional true} :seon.agent/id]
-                                       [:seon.db/db    {:optional true} :any]]]]
-                   [:vector :any]]]}
-  ([] (messages {}))
-  ([{:seon.agent/keys [n id] db :seon.db/db :or {n 50}}]
-   (let [id     (resolve-id id)
-         db     (or db @db/*conn*)]
-     (if (pos? n)
-       (message/recent
-         {:seon.db/db db
-          :seon.agent/id id
-          :seon.agent.message/recent-limit (min 200 n)})
-       []))))
-
-(defn current-turn
-  "The most-recent `:seon.agent.turn` the agent owns.
-
-   The latest by `:at`
-   (the one that's :running, or the last :done if no turn is open)."
-  {:malli/schema [:function
-                  [:=> [:cat] :any]
-                  [:=> [:catn [::opts [:map
-                                       [:seon.agent/id {:optional true} :seon.agent/id]
-                                       [:seon.db/db    {:optional true} :any]]]]
-                   :any]]}
-  ([] (current-turn {}))
-  ([{:seon.agent/keys [id] db :seon.db/db}]
-   (let [id (resolve-id id)]
-     (last (agent-turns id db)))))
-
-(defn session-evals
-  "ALL `:seon.eval` entries for `agent-id`, oldest-first.
-
-   Across ALL its turns,
-   each tagged with its owning `:seon.agent.run/id-of-run` for callers that
-   need durable run grouping. Result-handle availability does not derive from
-   that tag; it is exact bounded-runtime membership. Walks agent → runs →
-   turns → evals. Optional `db` snapshot."
-  {:malli/schema [:=> [:catn [::agent-id :string] [::db :any]] [:vector :map]]}
-  [agent-id db]
-  (vec
-    (for [t (agent-turns agent-id db)
-          e (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
-      (assoc (into {} e)
-             :seon.agent.run/id-of-run
-             (:seon.agent.run/id (:seon.agent.turn/run t))))))
-
-(defn evals
-  "Last N `:seon.eval` entries for the agent, oldest-first.
-
-   Walks the agent's
-   turns → :seon.agent.turn/evals. Default {:seon.agent/n 20}. Optional
-   `:seon.db/db` snapshot."
-  {:malli/schema [:function
-                  [:=> [:cat] [:vector :any]]
-                  [:=> [:catn [::opts [:map
-                                       [:seon.agent/n  {:optional true} :int]
-                                       [:seon.agent/id {:optional true} :seon.agent/id]
-                                       [:seon.db/db    {:optional true} :any]]]]
-                   [:vector :any]]]}
-  ([] (evals {}))
-  ([{:seon.agent/keys [n id] db :seon.db/db :or {n 20}}]
-   (let [id (resolve-id id)
-         db (or db @db/*conn*)]
-     (if (pos? n)
-       (seval/recent
-         {:seon.db/db db
-          :seon.agent/id id
-          :seon.eval/recent-limit (min 200 n)})
-       []))))
-
-(defn current-ns
-  "The agent's current namespace.
-
-   Derived from the latest successful
-   eval's :seon.eval/ns. Falls back to (home/home-ns id) when no successful
-   eval has run yet. Reactive: the next successful eval that switches
-   ns (via `(ns …)`) shows up here on the next call. See
-   docs/seon/concepts/reactive-context. Optional `:seon.db/db`
-   snapshot (the composer threads its render db here)."
-  {:malli/schema [:function
-                  [:=> [:cat] :any]
-                  [:=> [:catn [::opts [:map
-                                       [:seon.agent/id {:optional true} :seon.agent/id]
-                                       [:seon.db/db    {:optional true} :any]]]]
-                   :any]]}
-  ([] (current-ns {}))
-  ([{:seon.agent/keys [id] db :seon.db/db}]
-   (let [id (resolve-id id)
-         dbv (or db @db/*conn*)
-         latest-ns
-         (some->> (db/query
-                    {:seon.db/db dbv
-                     :seon.db/query
-                     '[:find ?at ?ns
-                       :in $ ?aid
-                       :where
-                       [?agent :seon.agent/id ?aid]
-                       [?run :seon.agent.run/agent ?agent]
-                       [?turn :seon.agent.turn/run ?run]
-                       [?turn :seon.agent.turn/evals ?eval]
-                       [?eval :seon.eval/ok? true]
-                       [?eval :seon.eval/at ?at]
-                       [?eval :seon.eval/ns ?ns]]
-                     :seon.db/args [id]})
-                  (sort-by first)
-                  last
-                  second)]
-     (or latest-ns (home/home-ns id)))))
-
-(defn ctx-entities
-  "Pull the agent's `:seon.agent/ctx` vector, entities inlined.
-
-   Each :seon.agent.ctx entity
-   inlined. Sorted by :seon.agent.ctx/priority. Useful for inspection
-   and for the agent's layout-editing flow."
-  {:malli/schema [:function
-                  [:=> [:cat] [:vector :map]]
-                  [:=> [:catn [::opts [:map
-                                       [:seon.agent/id {:optional true} :seon.agent/id]]]]
-                   [:vector :map]]]}
-  ([] (ctx-entities {}))
-  ([{:seon.agent/keys [id]}]
-   (let [id (resolve-id id)]
-     (->> (db/pull {:seon.db/pull-pattern '[{:seon.agent/ctx [*]}]
-                    :seon.db/ref [:seon.agent/id id]})
-          :seon.agent/ctx
-          (map decode-block)
-          (sort-by :seon.agent.ctx/priority)
-          vec))))
-
-;; ------------------------------------------------------------
-;; Section fns (v1.md §5.2). Each takes :seon.render/system-input
-;; {:seon.db/db :seon.agent/id}; the render engine ALSO injects this
-;; section's own block map as :seon.render/node (NOT :seon.agent.ctx/block —
-;; reading that key is a dead read, the engine never sets it; see
-;; seon.render/render), so the fn reads per-section overrides like
-;; :seon.warn/ns off :seon.render/node. Returns a string;
-;; empty string = section suppressed by the composer.
+;; Byte-stable system instructions. Context acquisition and child invocation
+;; are owned by seon.execution.runtime; this namespace formats their values.
 ;; ------------------------------------------------------------
 
 (def system-text
@@ -1284,13 +977,8 @@
     "; the surface) can carry an :seon.render/html twin — that is where rich\n"
     "; panels (tables, images, SVG) go: the agent reads the :ai text, the\n"
     "; human sees the :html panel, one section row serving both.\n"
-    "; AUTO-RUN: a defn in your CURRENT ns whose :malli/schema OUTPUT is a\n"
-    "; map declaring :seon.render/ai (and/or :seon.render/hiccup) runs\n"
-    "; automatically every turn — its output becomes a live section of your\n"
-    "; own context and a surface on your page, no call needed. Declare\n"
-    "; :seon.db/db / :seon.agent/id as optional request keys and the\n"
-    "; current values arrive by themselves. Writing such a specced view fn\n"
-    "; IS building a live, always-current view.\n"
+    "; A specced view returns ordinary render data. The runtime acquires its\n"
+    "; database inputs at one immutable coordinate before formatting.\n"
     "; SHOW, DON'T TELL: your canvas (the canvas section below) is\n"
     "; your PRIMARY surface for showing your human data, results, and\n"
     "; status; (message/user \"...\") is narration/backup that scrolls away.\n"
@@ -1319,8 +1007,7 @@
     "; away, so you are not buried in code you don't need. Never hallucinate a\n"
     "; fn name — discover it. To find or read any non-shown ns or fn:\n"
     ";   (seon.agent.search/grep {:seon.agent.search/pattern \"defn store-\"})\n"
-    ";   (keys (db/installed-schema @db/*conn*))  ; every installed attribute\n"
-    ";   (seon.agent.ctx/render-namespace {:seon.ns/name :seon.warn})  ; whole-ns source\n"
+    ";   (seon.agent.search/grep {:seon.agent.search/pattern \"seon.warn\"})\n"
     "; To PIN a ns into your always-on view, transact its keyword onto your\n"
     "; agent's :seon.agent.ctx/render-namespaces; retract it to unpin.\n"
     "; Full namespaces are ordered by RECENCY — most-recently-modified LAST,\n"
@@ -1354,7 +1041,7 @@
     "; - Consult stored knowledge FIRST — query it rather than relying on a\n"
     ";   wall of text. Use (my.kb/recall {:my.kb/about \"<topic>\"}) for\n"
     ";   knowledge, or Datalog an existing attribute directly. Inspect\n"
-    ";   (keys (db/installed-schema @db/*conn*)) before defining a new attr.\n"
+    ";   Search existing schemas before defining a new attribute.\n"
     ";   Prior agents already answered many questions; re-deriving a\n"
     ";   stored answer is wasted turns.\n"
     "; - Store what you verify, without being asked — ONE call does it:\n"
@@ -1526,72 +1213,6 @@
   (let [s (str s)]
     (if (> (count s) n) (str (subs s 0 n) " …") s)))
 
-(defn- parse-require-syms
-  "Parse an `(ns … (:require …))` source string and return the vector of
-   required namespace symbols (in declaration order, deduped). Handles
-   bare-symbol specs (`a.b`) and vector specs (`[a.b :as c :refer […]]`).
-   Returns [] on any parse failure or when there's no `(ns …)` form —
-   recursion simply stops rather than erroring."
-  [src]
-  (if (or (nil? src) (str/blank? src))
-    []
-    (try
-      (let [form (edn/read-string src)]
-        (if (and (seq? form) (= 'ns (first form)))
-          (->> (rest form)
-               (filter #(and (seq? %) (= :require (first %))))
-               (mapcat rest)
-               (keep (fn [spec]
-                       (cond
-                         (symbol? spec)     spec
-                         (sequential? spec) (first spec)
-                         :else              nil)))
-               (filter symbol?)
-               distinct
-               vec)
-          []))
-      (catch :default _ []))))
-
-(defn- pull-ns-data
-  "Reverse-ref pull of everything one `:seon.ns` owns: its source plus
-   every `:seon.fn` / `:seon.schema` / `:seon.test` whose `:ns` points at
-   it. Returns nil when no `:seon.ns` entity exists for `ns-kw` (the
-   caller renders a one-line 'not in db' note instead). `:seon.test` is a
-   real entity kind (Step 3); its rows are pulled and rendered under the
-   ns alongside fns and schemas.
-
-   Guarded by an `entity` existence check first: `db/pull` throws on an
-   unresolved lookup-ref, so we confirm presence before pulling."
-  [db ns-kw]
-  (when (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.ns/name ns-kw]})
-    (let [core (db/pull {:seon.db/db db
-                         :seon.db/ref [:seon.ns/name ns-kw]
-                         :seon.db/pull-pattern
-                         '[:seon.ns/source
-                           {:seon.fn/_ns     [:seon.fn/sym :seon.fn/arglists
-                                              :seon.fn/doc :seon.fn/source
-                                              :seon.fn/private? :seon.fn/spec
-                                              :seon.fn/schema-error]
-                            :seon.schema/_ns [:seon.schema/key :seon.schema/form]}]})
-          ;; :seon.test is now a real entity kind (Step 3): `:seon.test/ns`
-          ;; IS registered, so this reverse-ref pull resolves. Kept as a
-          ;; SEPARATE guarded call (vs. inlining into the `core` pull) for
-          ;; cleanliness: a conn that has no `:seon.test` rows for this ns
-          ;; yields nil and the merge below is a no-op.
-          tests (try
-                  (-> (db/pull {:seon.db/db db
-                                :seon.db/ref [:seon.ns/name ns-kw]
-                                :seon.db/pull-pattern
-                                '[{:seon.test/_ns
-                                   [:seon.test/sym :seon.test/source
-                                    :seon.test/last-passed-at
-                                    :seon.test/last-failed-at
-                                    :seon.test/last-failure-summary]}]})
-                      :seon.test/_ns)
-                  (catch :default _ nil))]
-      (cond-> core
-        (seq tests) (assoc :seon.test/_ns tests)))))
-
 (defn- fn-block-ai
   "One fn rendered for the :ai form: `(sym arglists)` header, first-doc-line,
    and FULL source — no size gate, no clipping (signatures retired; authored
@@ -1728,19 +1349,6 @@
       (nth form 2)
       form)))
 
-(defn- schema-definition-in-db
-  "The normalized persisted definition for schema key `k`, or nil."
-  [db k]
-  (when (keyword? k)
-    (try
-      (when-let [source (:seon.schema/form
-                          (db/entity-lazy
-                            {:seon.db/db db
-                             :seon.db/ref [:seon.schema/key k]}))]
-        {::schema-source source
-         ::schema-form   (normalize-schema-form source)})
-      (catch :default _ nil))))
-
 (defn- schema-definition-text
   "Reader-shaped text for one normalized persisted schema definition."
   [{::keys [schema-source schema-form]}]
@@ -1801,18 +1409,6 @@
     (when (seq lines)
       (str/join "\n" lines))))
 
-(defn- referenced-schema-rows-in-db
-  "Persisted schema rows needed by one referenced-schema block."
-  [db seed-specs own-keys]
-  (let [seed        (reduce (fn [a s] (into a (schema-str-refs s))) #{} seed-specs)
-        closure     (schema-ref-closure #(schema-definition-in-db db %)
-                                        seed own-keys)]
-    (->> (::definitions closure)
-         (sort-by key)
-         (mapv (fn [[k definition]]
-                 {:seon.schema/key k
-                  :seon.schema/form (::schema-source definition)})))))
-
 (schema/register! ::seed-specs ::schema-sources)
 (schema/register! ::own-keys   [:set :keyword])
 (schema/register! ::schema-row
@@ -1825,12 +1421,6 @@
    [::seed-specs ::seed-specs]
    [::own-keys ::own-keys]
    [::schema-rows ::schema-rows]])
-(schema/register! ::referenced-schema-request
-  [:map
-   [:seon.db/db  :seon.db/db]
-   [::seed-specs ::seed-specs]
-   [::own-keys   ::own-keys]])
-
 (defn referenced-schema-rows-block
   "Render referenced schema definitions from ordinary persisted rows."
   {:malli/schema [:=> [:cat ::referenced-schema-rows-request]
@@ -1838,22 +1428,6 @@
   [{seed-specs ::seed-specs own-keys ::own-keys schema-rows ::schema-rows}]
   (let [definitions (schema-definitions-from-rows schema-rows)]
     (referenced-schema-block* #(get definitions %) seed-specs own-keys)))
-
-(defn referenced-schema-block
-  "The DEFINITIONS behind a namespace's fn specs — the transitive closure of
-   registered schemas its fns reference, INCLUDING cross-namespace ones, as
-   runnable `(register! <key> <form>)` lines. Excludes `::own-keys` (the ns's
-   own schemas, already shown), so nothing renders twice. Pure fn of the db
-   value; malli-native ref detection; cycle-safe; bounded with an explicit cap
-   note. Returns the block string, or nil when the closure is empty.
-
-   Map-in: `{:seon.db/db <db> ::seed-specs [<spec-str>…] ::own-keys #{<kw>…}}`."
-  {:malli/schema [:=> [:cat ::referenced-schema-request] [:maybe :string]]}
-  [{db :seon.db/db seed-specs ::seed-specs own-keys ::own-keys}]
-  (referenced-schema-rows-block
-    {::seed-specs seed-specs
-     ::own-keys own-keys
-     ::schema-rows (referenced-schema-rows-in-db db seed-specs own-keys)}))
 
 (defn- schema-block-ai
   "One schema rendered from the supplied database row."
@@ -1984,197 +1558,6 @@
                        ::schema-rows (into schema-rows schemas)})]
     (render-one-ns-ai ns-kw data ref-blk)))
 
-(defn- render-namespace-ai-from-db
-  "Acquire persisted schema rows, then use the ordinary-data AI formatter."
-  [db ns-kw data]
-  (let [fns         (:seon.fn/_ns data)
-        schemas     (:seon.schema/_ns data)
-        seed-specs  (into [] (keep :seon.fn/spec) fns)
-        own-keys    (into #{} (map :seon.schema/key) schemas)
-        schema-rows (referenced-schema-rows-in-db db seed-specs own-keys)]
-    (render-namespace-ai
-      {:seon.ns/name ns-kw
-       ::namespace-rows (cond-> [] data (conj (assoc data :seon.ns/name ns-kw)))
-       ::schema-rows schema-rows})))
-
-(defn- render-one-ns-html
-  "Render a single namespace block to hiccup. Reuses the per-kind
-   `seon.handlers.{ns,fn,schema}/render-html` for each member so the
-   webview card styling stays consistent with the debug view panes."
-  [db ns-kw data]
-  (if (nil? data)
-    [:div {:class "py-1 text-xs font-mono text-text-500 italic"}
-     (str "requires: " (name ns-kw) " (not in db)")]
-    (let [fns     (->> (:seon.fn/_ns data)     (sort-by :seon.fn/sym))
-          schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
-          tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))
-          ns-ent  (assoc data :seon.ns/name ns-kw)]
-      ;; The handlers are CONVERTERS now — they return BARE hiccup (keystone),
-      ;; called with the entity under :seon.render/node.
-      (into
-        [:section {:class "py-1 border-l-2 border-base-700 pl-2"}
-         (h-ns/render-html {:seon.db/db db :seon.render/node ns-ent})]
-        (concat
-          (for [f fns]
-            (h-fn/render-html {:seon.db/db db :seon.render/node f}))
-          (for [s schemas]
-            (h-schema/render-html {:seon.db/db db :seon.render/node s}))
-          ;; Tests rendered via the per-kind handler — same `test-status`
-          ;; source as the AI path, so the pass/fail pill never diverges.
-          (for [t tests]
-            (h-test/render-html {:seon.db/db db :seon.render/node t})))))))
-
-(defn- collect-ns-order
-  "Compute the ordered, deduped list of namespace keywords to render —
-   required nses FIRST (prepended), then the ns itself, recursing to
-   `depth`. Cycle- and revisit-safe: a ns already in the accumulator is
-   never expanded or re-added. depth 0 = just `ns-kw` (no requires).
-
-   Returns `[ordered-kws data-by-kw]` where `data-by-kw` caches each
-   ns's `pull-ns-data` result (possibly nil for not-in-db requires)."
-  [db ns-kw depth]
-  (let [data-by-kw (atom {})
-        seen       (atom #{})
-        order      (atom [])
-        ;; memoized pull
-        data-for   (fn [k]
-                     (if (contains? @data-by-kw k)
-                       (@data-by-kw k)
-                       (let [d (pull-ns-data db k)]
-                         (swap! data-by-kw assoc k d)
-                         d)))
-        walk       (fn walk [k d]
-                     (when-not (contains? @seen k)
-                       (swap! seen conj k)
-                       (let [data (data-for k)
-                             reqs (when (and data (pos? d))
-                                    (->> (parse-require-syms (:seon.ns/source data))
-                                         (map keyword)))]
-                         ;; required nses first (prepended), then self
-                         (doseq [r reqs] (walk r (dec d)))
-                         (swap! order conj k))))]
-    (walk ns-kw depth)
-    [@order @data-by-kw]))
-
-(schema/register! :seon.render/depth :int)
-(schema/register! :seon.render/format [:enum :ai :html])
-;; Signatures retired — `:full` is the only detail (every rendered ns renders
-;; whole real source). Kept as a single-value enum so the discoverable
-;; `(render-namespace {… :seon.render/detail :full})` affordance still validates.
-(schema/register! :seon.render/detail [:enum :full])
-
-;; The member-drill handle: name ONE fn within the rendered ns to pull its
-;; FULL source (the common case — the agent wants a specific function, not the
-;; whole namespace). Accepts a bare name ("store-fact"), a qualified name
-;; ("my.kb/store-fact"), or a symbol — normalized + matched against
-;; :seon.fn/sym in [[render-member]].
-(schema/register! :seon.ns/member [:or :symbol :string])
-
-(schema/register! ::render-namespace-request
-  [:map
-   [:seon.ns/name        :seon.ns/name]
-   [:seon.ns/member      {:optional true} :seon.ns/member]
-   [:seon.render/depth   {:optional true} :seon.render/depth]
-   [:seon.render/format  {:optional true} :seon.render/format]
-   [:seon.render/detail  {:optional true} :seon.render/detail]
-   [:seon.db/db          {:optional true} :seon.db/db]])
-
-(defn- render-member
-  "Member-drill: render ONE fn's FULL source. `data` is the `pull-ns-data`
-   result for `ns-kw`; `member` is a bare or qualified fn name (or symbol).
-   Matches against `:seon.fn/sym` by the trailing name (so both
-   \"store-fact\" and \"my.kb/store-fact\" resolve). Errors-as-values: when
-   the member isn't found, returns a one-line note listing the public fns
-   so the agent can re-issue with a real name — never a throw."
-  [ns-kw data member]
-  (let [want  (let [m (name (symbol (str member)))] m)
-        fns   (->> (:seon.fn/_ns data) (sort-by :seon.fn/sym))
-        match (some (fn [{:seon.fn/keys [sym] :as f}]
-                      (when (= (name (symbol (str sym))) want) f))
-                    fns)]
-    (if match
-      (ns-demarc ns-kw (fn-block-ai match) (str "(member " want ")"))
-      (let [names (->> (remove :seon.fn/private? fns)
-                       (map #(name (symbol (str (:seon.fn/sym %)))))
-                       sort)]
-        (str "; member " want " not found in " (name ns-kw)
-             (if (seq names)
-               (str " — public fns: " (str/join ", " names))
-               " — no public fns indexed"))))))
-
-(schema/register! ::render-namespace-response
-  [:map
-   [:seon.render/text   {:optional true} :string]
-   ;; Pure-data shallow hiccup bound — registered forms must not embed
-   ;; fns (platform law; see seon.render.canvas). Deep validation
-   ;; stays at the render boundary.
-   [:seon.render/hiccup {:optional true} :seon.render.canvas/hiccup]])
-
-(defn render-namespace
-  "Render a WHOLE namespace — its source plus every owned entity.
-
-   Its `(ns …)` source plus every `:seon.fn`,
-   `:seon.schema`, and (when the kind exists) `:seon.test` it owns — in
-   either `:ai` text or `:html` hiccup, recursing into the namespaces it
-   `(:require …)`s.
-
-   Required namespaces render FIRST (prepended), then the namespace
-   itself, to `:seon.render/depth` (default 1 = the ns + its direct
-   requires). Recursion is deduped (each ns rendered once) and cycle-safe.
-   A required ns with no `:seon.ns` entity is noted on a single line
-   (`requires: x.y (not in db)`), never errored.
-
-   Map-in / map-out:
-
-     {:seon.ns/name <keyword>
-      :seon.ns/member <name, optional — drill ONE fn's full source>
-      :seon.render/depth  <int, default 1>
-      :seon.render/format <:ai | :html, default :ai>
-      :seon.render/detail <:full — the only detail; signatures retired>
-      :seon.db/db <db value, optional — defaults to @*conn*>}
-
-   → {:seon.render/text <string>}     for :ai
-   → {:seon.render/hiccup <hiccup>}   for :html
-
-   FULL by default — signatures are retired: the function returns the ns's whole
-   real source (plus every member), unclipped. Token budget is bound by
-   CURATION (the always-on `:namespaces` section curates WHICH nses it routes
-   here), never by compression.
-
-   `:seon.ns/member` is the DRILL handle — the common case where the agent
-   wants ONE specific function, not the whole ns. Naming a member (bare
-   \"store-fact\" or qualified \"my.kb/store-fact\") returns just that fn's
-   FULL source, ignoring depth. An unknown member returns a one-line note
-   listing the public fns (errors-as-values), never a throw.
-
-   This is the foundation of every agent's default context; the section
-   that surfaces the agent's namespaces resolves to it."
-  {:malli/schema [:=> [:cat ::render-namespace-request] ::render-namespace-response]}
-  [{ns-name :seon.ns/name
-    member :seon.ns/member
-    :seon.render/keys [depth format]
-    :seon.db/keys [db]
-    :or {depth 1 format :ai}}]
-  (let [db    (or db @db/*conn*)
-        ns-kw (if (keyword? ns-name) ns-name (keyword (str ns-name)))]
-    (cond
-      (some? member)
-      ;; member-drill short-circuits BEFORE recursion: depth-0 pull of this
-      ;; ns only, render the one fn's full source (or the not-found note).
-      {:seon.render/text (render-member ns-kw (pull-ns-data db ns-kw) member)}
-
-      :else
-      (let [[order data-by-kw] (collect-ns-order db ns-kw (max 0 depth))]
-        (if (= format :html)
-          {:seon.render/hiccup
-           (into [:div {:class "flex flex-col gap-2"}]
-                 (for [k order]
-                   (render-one-ns-html db k (data-by-kw k))))}
-          {:seon.render/text
-           (str/join "\n\n" (for [k order]
-                              (render-namespace-ai-from-db
-                                db k (data-by-kw k))))})))))
-
 ;; The HTML TWIN of a rendered section (debug-view-section-twins-2026-06-18):
 ;; the dormant `:seon.render/html` slot, resolved through
 ;; `seon.render/html-render` + the throw-to-banner guard, paired with its
@@ -2288,6 +1671,23 @@
         (when (seq blocks)
           [{:seon.agent/id id :seon.agent/ctx (vec blocks)}])))
 
+(defn ^:async ^:private acquire-context-blocks
+  "Acquire the scoped agent's context components as ordinary maps."
+  [id]
+  (let [entity (await
+                 (db/pull {::db/pull-pattern '[{:seon.agent/ctx [*]}]
+                           ::db/ref [:seon.agent/id id]
+                           ::db/max-work 100000
+                           ::db/max-results 2048
+                           ::db/max-result-weight 262144}))]
+    (if (:seon.error/message entity)
+      entity
+      (->> (:seon.agent/ctx entity)
+           (map decode-block)
+           (sort-by (juxt :seon.agent.ctx/priority
+                          (comp str :seon.agent.ctx/name)))
+           vec))))
+
 (defn ^:async install!
   "Install context BLOCK(S) into the agent in scope.
 
@@ -2309,20 +1709,25 @@
       {::ok? false
        ::error (str "install!: no agent in scope — call inside "
                     "(seon.db/with-agent id …).")}
-      (let [blocks    (if (vector? block-or-blocks) block-or-blocks [block-or-blocks])
-            new-names (into #{} (map :seon.agent.ctx/name) blocks)
-            current   (ctx-entities {:seon.agent/id id})
-            kept      (->> current
-                           (remove #(contains? new-names (:seon.agent.ctx/name %)))
-                           (mapv #(dissoc % :db/id)))
-            res       (await (db/transact!
-                               {:seon.db/tx-data
-                                (upsert-ctx-tx id (into kept blocks))}))]
-        (if (false? (:seon.db/ok? res))
-          {::ok? false
-           ::error (str "install! transact failed: "
-                        (:seon.error/message (:seon.db/error res)))}
-          {::ok? true ::names (vec new-names)})))))
+      (let [current (await (acquire-context-blocks id))]
+        (if (:seon.error/message current)
+          {::ok? false ::error (:seon.error/message current)}
+          (let [blocks (if (vector? block-or-blocks)
+                         block-or-blocks
+                         [block-or-blocks])
+                new-names (into #{} (map :seon.agent.ctx/name) blocks)
+                kept (->> current
+                          (remove #(contains? new-names
+                                              (:seon.agent.ctx/name %)))
+                          (mapv #(dissoc % :db/id)))
+                res (await (db/transact!
+                             {:seon.db/tx-data
+                              (upsert-ctx-tx id (into kept blocks))}))]
+            (if (false? (:seon.db/ok? res))
+              {::ok? false
+               ::error (str "install! transact failed: "
+                            (:seon.error/message (:seon.db/error res)))}
+              {::ok? true ::names (vec new-names)})))))))
 
 (defn ^:async remove!
   "Remove ONE context block by name from the agent in scope.
@@ -2339,17 +1744,19 @@
       {::ok? false
        ::error (str "remove!: no agent in scope — call inside "
                     "(seon.db/with-agent id …).")}
-      (let [current (ctx-entities {:seon.agent/id id})
-            kept    (->> current
-                         (remove #(= nm (:seon.agent.ctx/name %)))
-                         (mapv #(dissoc % :db/id)))
-            res     (await (db/transact!
+      (let [current (await (acquire-context-blocks id))]
+        (if (:seon.error/message current)
+          {::ok? false ::error (:seon.error/message current)}
+          (let [kept (->> current
+                          (remove #(= nm (:seon.agent.ctx/name %)))
+                          (mapv #(dissoc % :db/id)))
+                res (await (db/transact!
                              {:seon.db/tx-data (upsert-ctx-tx id kept)}))]
-        (if (false? (:seon.db/ok? res))
-          {::ok? false
-           ::error (str "remove! transact failed: "
-                        (:seon.error/message (:seon.db/error res)))}
-          {::ok? true ::names [nm]})))))
+            (if (false? (:seon.db/ok? res))
+              {::ok? false
+               ::error (str "remove! transact failed: "
+                            (:seon.error/message (:seon.db/error res)))}
+              {::ok? true ::names [nm]})))))))
 
 ;; ============================================================
 ;; Render pipeline — the agent's OWN block set, decoded + priority-sorted,
@@ -2412,31 +1819,6 @@
        body
        "\n;;; └─ end " (name section-name) " ─"))
 
-(defn- pull-agent-entity
-  "The agent entity, pulled ONCE (the run/turn history is walked separately
-   by the transcript; a bare `[*]` pull would inline every turn/eval
-   component). Rides in the injected ctx so every section fn reads it without
-   re-pulling. Registered-but-uninstalled attrs (e.g. the canvas pin on a
-   store predating it) are silently filtered by the pull guard — safe."
-  [db id]
-  (if-let [eid (ffirst
-                 (db/query {:seon.db/db db
-                            :seon.db/query '[:find ?a
-                                             :in $ ?id
-                                             :where [?a :seon.agent/id ?id]]
-                            :seon.db/args [id]}))]
-    (db/pull {:seon.db/db db
-              :seon.db/pull-pattern
-              '[:db/id :seon.agent/id
-                :seon.agent/purpose
-                :seon.agent/default-turn-limit
-                :seon.agent.ctx/cache-breakpoint
-                :seon.render/ai :seon.render/html
-                :seon.render.canvas/content
-                {:seon.agent/ctx [*]}]
-              :seon.db/ref eid})
-    {}))
-
 ;; A render PROFILE — an ordered list of block PATCH maps, each carrying at
 ;; least the block `::name`. Present on a render request ⇒ the root's
 ;; children are exactly these entries, each MERGED over the agent's stored
@@ -2446,110 +1828,6 @@
 ;; consumer: the `seon.repl.autocomplete` projection.
 (schema/register! :seon.agent.ctx/profile
   [:vector [:map [:seon.agent.ctx/name :seon.agent.ctx/name]]])
-
-(defn context-root
-  "The ROOT renderable — the agent's block set plus the current ns's
-   auto-run render fns.
-
-   Its children are the agent's OWN
-   `:seon.agent/ctx` block set — slot-decoded and priority-sorted by
-   [[agent-blocks]], with NO render-time merge over a separate default
-   catalog (every block was seed-copied into the agent at creation) —
-   PLUS the DERIVED auto-run blocks ([[seon.agent.ctx.render-fns/derived-blocks]]):
-   one block/surface twin per current-ns fn whose output schema declares a
-   render type, computed per render, never stored. One ordered list.
-   The agent entity is pulled once
-   and stashed so every child reads it without re-pulling.
-
-   A `:seon.agent.ctx/profile` on `ctx` narrows the root: children become
-   the profile's entries, each merged over the stored block of the same
-   name (patch wins; no derived blocks) — the ONE producer rendering a
-   curated subset. Absent ⇒ byte-parity with today.
-
-   Producing the prompt is rendering the root per view — there is no
-   bespoke composer:
-     (seon.render/render :seon.render/ai   ctx (context-root ctx))  ; String
-     (seon.render/render :seon.render/html ctx (context-root ctx))  ; hiccup
-
-   The root carries the agent entity + a stash of its sorted children;
-   the root's slot fns ([[render-context-ai]] / [[render-context-html]])
-   render each child through the injected recursion handle."
-  {:malli/schema [:=> [:catn [::ctx :map]] :map]}
-  [{:seon.db/keys [db] :seon.agent/keys [id] profile :seon.agent.ctx/profile :as ctx}]
-  (let [entity   (pull-agent-entity db id)
-        stored   (agent-blocks entity)
-        ;; AUTO-RUN (context.md §"Auto-run") — the current ns's render fns
-        ;; join the SAME ordered list as DERIVED blocks (derive-don't-store;
-        ;; seon.agent.ctx.render-fns). A fn already pinned by a stored
-        ;; block's slot is the install! override — skipped here. GUARDED:
-        ;; a discovery failure degrades to the stored set, never breaks
-        ;; context assembly.
-        derived  (try
-                   (when (seq profile) (throw (ex-info "profile render — no derived blocks" {})))
-                   (let [cur-ns (some-> (current-ns {:seon.agent/id id
-                                                     :seon.db/db db})
-                                        name keyword)
-                         ;; A fn already pinned — as a STORED block's slot
-                         ;; (install!) or as the agent's CANVAS content — is
-                         ;; the explicit override: it renders there, so it is
-                         ;; NOT re-derived as its own auto-run block.
-                         canvas (some->> (:seon.render.canvas/content entity)
-                                         (db/decode-edn-value
-                                           :seon.render.canvas/content))
-                         ;; No pin → the canvas is the DERIVED last-updated
-                         ;; surface (render-fns/last-updated-surface — the same
-                         ;; resolution render-agent-canvas applies), so that fn
-                         ;; is equally "already rendering on the canvas" and
-                         ;; is skipped as its own auto-run block.
-                         canvas (or canvas
-                                    (when id
-                                      (::render-fns/surface-sym
-                                        (render-fns/last-updated-surface
-                                          {:seon.db/db db :seon.agent/id id}))))
-                         pinned (cond-> (into #{}
-                                              (comp (mapcat (juxt :seon.render/ai
-                                                                  :seon.render/html))
-                                                    (filter symbol?))
-                                              stored)
-                                  (symbol? canvas) (conj canvas))]
-                     (render-fns/derived-blocks
-                       (cond-> {:seon.db/db db
-                                ::render-fns/pinned-syms pinned}
-                         id     (assoc :seon.agent/id id)
-                         cur-ns (assoc ::render-fns/current-ns cur-ns))))
-                   (catch :default _ []))
-        children (if (seq profile)
-                   ;; PROFILE render: exactly the listed blocks, each patch
-                   ;; merged over the agent's stored block of that name
-                   ;; (patch keys win; unmatched names render from the patch
-                   ;; alone). No derived auto-run blocks.
-                   (let [by-name (into {} (map (juxt :seon.agent.ctx/name
-                                                     identity))
-                                       stored)]
-                     (->> profile
-                          (mapv (fn [patch]
-                                  (merge (get by-name
-                                              (:seon.agent.ctx/name patch) {})
-                                         patch)))
-                          (sort-by (juxt :seon.agent.ctx/priority
-                                         (comp str :seon.agent.ctx/name)))
-                          vec))
-                   (->> (concat stored derived)
-                        (sort-by (juxt :seon.agent.ctx/priority
-                                       (comp str :seon.agent.ctx/name)))
-                        vec))]
-    (cond-> {:seon.agent.ctx/name             :context
-             :seon.agent.ctx/cache-breakpoint
-             (or (:seon.agent.ctx/cache-breakpoint entity)
-                 default-cache-breakpoint)
-             :seon.agent/entity               entity
-             :seon.agent.ctx/children         children
-             :seon.render/ai                  'seon.agent.ctx/render-context-ai
-             :seon.render/html                'seon.agent.ctx/render-context-html}
-      ;; Flag a profile render on the root so [[render-context-ai]] skips
-      ;; the provider cache-boundary split (and its live-conn breakpoint
-      ;; read) — profile renders are deterministic over the db value.
-      (seq profile) (assoc :seon.agent.ctx/profile-render? true))))
 
 (schema/register! ::rendered-block
   [:map
@@ -2574,7 +1852,7 @@
    This is the inverse of the html view's 'AI-only block contributes no surface'
    rule, and the reactive-context principle: a block surfaces to the agent
    only when it has ai content for the current state. The html twin is
-   untouched — the block still renders for humans ([[render-context-html]]).
+   untouched — the block still renders for humans through its HTML slot.
    A block that DOES declare an ai render but resolves to blank for the
    current state is dropped separately, after render, by
    [[rendered-block-texts]] — both 'no ai content' cases vanish."
@@ -2745,37 +2023,6 @@
                     (constantly nil))]
         {:seon.render/text (rendered-blocks->context-text root blocks)
          :seon.agent.ctx/rendered-blocks blocks}))))
-
-(defn render-context-ai
-  "The ROOT renderable's `:ai` slot — the block renderer.
-
-   Renders each child
-   via the injected `:seon.render/render` handle, drops blanks, brackets each
-   block (self-demarcating — replaces the old `;; ── x ──` headers), and joins
-   with the in-band [[stable-boundary]] inserted at the static stable→volatile
-   `:seon.agent.ctx/priority` transition (priority ≤ [[cache-breakpoint]] =
-   the cacheable prefix). [[split-context]] recovers the two halves on the
-   provider side."
-  {:malli/schema [:=> [:catn [::input :map]] :string]}
-  [{:seon.render/keys [node render]}]
-  (rendered-blocks->context-text
-    node
-    (rendered-child-blocks
-      (:seon.agent.ctx/children node) #{:ai} render (constantly nil))))
-
-(defn render-context-html
-  "The ROOT renderable's `:html` slot — each child's html twin.
-
-   Renders each child's html twin via the
-   injected handle, one card per renderable (eval cards short, per-item — NOT
-   a section-level dump), in render order."
-  {:malli/schema [:=> [:catn [::input :map]] :seon.render.canvas/hiccup]}
-  [{:seon.render/keys [node render]}]
-  (into [:div {:class "flex flex-col gap-2"}]
-        (map (fn [{nm :seon.agent.ctx/name h :seon.render/hiccup}]
-               [:section {:data-context-block (clojure.core/name nm)} h]))
-        (rendered-child-blocks
-          (:seon.agent.ctx/children node) #{:html} (constantly nil) render)))
 
 ;; ============================================================
 ;; Block-chain KV cache keys — the Seon half of the prefix-KV reuse win.
