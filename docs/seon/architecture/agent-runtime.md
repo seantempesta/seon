@@ -691,32 +691,27 @@ facts it reads.
 
 ## Nothing wedges — bounded execution through the one chokepoint
 
-Nothing can permanently wedge the pod. All execution reaches the runtime
-through **one door** (`seon.eval`, the exec service), and five existing
-mechanisms — extended, never duplicated — make every hang a value:
+Nothing can permanently wedge the web UI host or a sibling agent. All authored
+execution reaches the runtime through **one door** (`seon.eval`, the execution
+service), and the following mechanisms make every hang a value:
 
-- **One bound: `race-timeout`.** Every await self-bounds by racing the one
-  wall-clock wrapper (the same one everywhere: agent forms, auto-test runs,
-  each LLM attempt, the loop's turn await). A timeout is an **error value**
-  (`:seon/error` / `:seon.ai/error` timed-out flavor) surfaced through
-  warnings — never a throw, never a silent park. When the bounded operation
-  exposes an owned cancellation capability, the timeout invokes it after
-  choosing the timeout result: each LLM attempt gets one fresh abort signal,
-  every provider adapter preserves it, and a known remote job is cancelled
-  best-effort. Arbitrary in-process work has no preemptive cancellation on one
-  event loop; the next two mechanisms absorb its late settlement.
+- **One bound: the invocation deadline.** The Bun host owns the outer
+  wall-clock deadline for one child invocation. Async work also uses the one
+  `race-timeout` wrapper for prompt cancellation and useful structured errors.
+  A cooperative timeout closes the child's authority session and aborts owned
+  provider work; a synchronous loop cannot block the parent's timer, so the
+  exact child is poisoned against reuse and terminated after the bounded grace.
 - **One immutable config per provider attempt.** The retry thunk captures one
   database value and complete coordinate, resolves the agent's complete
   non-secret transport configuration once, and passes that value through
   dispatch and the adapter without reactive rereads. A later retry may capture
   a newer value, but both attempts become ordered database facts and any drift
   invalidates formal capability scoring.
-- **One in-pod reaper: the ticker.** The run deadline + `close-overdue-runs!` on
-  the one 30s beat is the outer watchdog; per-await bounds are the inner
-  one. There is no second in-pod watchdog, heartbeat service, or in-flight
-  registry—the external cluster supervisor only owns process/restore/crash
-  lifecycle. In-flight work is DERIVED (open runs, pending
-  `result/<id>` stashes), queryable like everything else.
+- **One durable run reaper.** The run deadline + `close-overdue-runs!` repairs
+  durable work whose process disappeared. The Bun host owns live invocation
+  deadlines and `proc.exited` truth; there is no duplicate in-process watchdog
+  or mutable in-flight authority. In-flight work remains derived from open
+  runs and invocation facts.
 - **One fence: the run-id CAS.** A late-settling await from a reaped or
   superseded run cannot corrupt state — its writes lead with the work-fence
   and abort at commit. Late results are values, absorbed or discarded.
@@ -735,10 +730,10 @@ mechanisms — extended, never duplicated — make every hang a value:
   cache admission uses the same bounded weight walk and skips uncertifiable
   values.
 
-The honest residual is a synchronous CPU loop: it blocks the pod event loop and
-cannot be preempted by an in-process timer. The local runtime records and
-recovers this as a process-level core fault; it does not claim that SCI is a
-security boundary or that an in-process timeout cancels work.
+The honest residual is limited to one execution child: a synchronous CPU loop
+blocks that child's event loop, but not its parent, the web UI, or sibling
+agents. The parent terminates the child; durable run recovery closes or retries
+only work whose existing fences permit it.
 
 ## Isolation — one execution-service contract
 
@@ -748,11 +743,15 @@ contract owns capability selection, deadline/cancellation signaling, result and
 write bounds, the run CAS fence, structured errors, and cleanup. A backend may
 not bypass the JVM writer or commit an unfenced late result.
 
-The local pod executes that contract through SCI. Process isolation is a later
-backend change, not a second function surface or database path. Worker threads,
-pool sizing, memory limits, platform-specific microVMs, and kernel containment
-belong to an execution-isolation PRD and require measured behavioral proof. The
-architecture retains only three independent requirements for such a backend:
+The local deployment executes that contract as compiled ClojureScript inside
+one separately supervised Bun child per active agent. The child owns one
+compiler state and one direct authority session, and the parent owns lifecycle,
+deadline, cancellation, bounded IPC, and terminal `proc.exited` evidence. A
+changed loaded source retires the child instead of attempting to unload stale
+process-global definitions. SCI is not the isolation mechanism. Worker pools,
+platform-specific microVMs, and stricter kernel resource limits remain measured
+implementations of the same contract, not another function or database path.
+The architecture retains three independent requirements:
 
 - **capability isolation** exposes only explicitly granted functions;
 - **fault isolation** lets a hung execution be terminated without wedging other
