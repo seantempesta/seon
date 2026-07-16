@@ -45,7 +45,6 @@
   (:require
     [clojure.string :as str]
     [my.plan.internal :as plan-internal]
-    [seon.agent.ctx :as ctx]
     [seon.agent.home :as home]
     [seon.agent.message :as message]
     [seon.agent.run :as run]
@@ -53,7 +52,7 @@
     [seon.agent.turn :as turn]
     [seon.config :as config]
     [seon.db :as db]
-    [seon.db.coordinate :as coordinate]
+    [seon.db.protocol :as db.protocol]
     [seon.derive :as derive]
     [seon.eval :as seval]
     [seon.log :as seon-log]
@@ -139,19 +138,100 @@
    turn-limit cap."
   3)
 
+(def ^:private current-run-query
+  '[:find ?run-id .
+    :in $ ?agent-id
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?agent :seon.agent/run ?run]
+    [?run :seon.agent.run/id ?run-id]
+    [?run :seon.agent.run/status :open]])
+
+(def ^:private run-turn-count-query
+  '[:find (count ?turn) .
+    :in $ ?run-id
+    :where
+    [?run :seon.agent.run/id ?run-id]
+    [?turn :seon.agent.turn/run ?run]
+    (not [?turn :seon.agent.turn/scheduled? true])])
+
+(def ^:private run-form-count-query
+  '[:find (count ?eval) .
+    :in $ ?run-id
+    :where
+    [?run :seon.agent.run/id ?run-id]
+    [?turn :seon.agent.turn/run ?run]
+    (not [?turn :seon.agent.turn/scheduled? true])
+    [?turn :seon.agent.turn/evals ?eval]])
+
+(def ^:private repl-mode-query
+  '[:find ?mode . :where [_ :seon.config/repl-mode ?mode]])
+
+(defn- query-member [query arguments]
+  {::db.protocol/operation db.protocol/query-operation
+   ::db.protocol/query-form query
+   ::db.protocol/arguments arguments
+   :datahike.resource/max-work 500000
+   :datahike.resource/max-results 4096
+   :datahike.resource/max-result-weight 65536})
+
+(defn- pull-member [selector ref]
+  {::db.protocol/operation db.protocol/pull-operation
+   ::db.protocol/selector selector
+   ::db.protocol/entity-id ref
+   :datahike.resource/max-work 100000
+   :datahike.resource/max-results 64
+   :datahike.resource/max-result-weight 65536})
+
+(defn- successful-member? [member]
+  (true? (::db.protocol/success? member)))
+
+(defn- member-result [member]
+  (or (::db.protocol/result member)
+      (:datahike.query/result member)))
+
+(defn- read-failure [message data]
+  {:seon.db/ok? false
+   :seon.db/error {:seon.error/message message
+                   :seon.error/kind :core-bug
+                   :seon.error/data data}})
+
+(defn ^:async ^:private acquire-loop-state
+  "Read every fact used by one loop recurrence from one immutable database value."
+  [id run-id]
+  (let [acquired
+        (await
+          (db/execute-many
+            {::db/members
+             [(pull-member
+                [:seon.agent.run/id :seon.agent.run/status
+                 :seon.agent.run/closed-reason :seon.agent.run/paused-at
+                 :seon.agent.run/turn-limit :seon.agent.run/deadline]
+                [:seon.agent.run/id run-id])
+              (query-member current-run-query [id])
+              (query-member repl-mode-query [])
+              (query-member run-turn-count-query [run-id])
+              (query-member run-form-count-query [run-id])]
+             ::db/max-result-weight 262144}))
+        members (::db/results acquired)]
+    (if-not (and (::db/coordinate acquired)
+                 (= 5 (count members))
+                 (every? successful-member? members))
+      (read-failure "Agent loop database acquisition failed." acquired)
+      (let [[run-member current-member mode-member turns-member forms-member]
+            members]
+        {::db/coordinate (::db/coordinate acquired)
+         ::run (member-result run-member)
+         ::current-run-id (member-result current-member)
+         ::repl-mode (or (member-result mode-member) :batch)
+         ::turn-count (or (member-result turns-member) 0)
+         ::form-count (or (member-result forms-member) 0)}))))
+
 (defn- next-event
-  "Derive the loop event from the run's data over the FROZEN db value `db`
-   (§8a — one basis-t per turn) + the consecutive empty-turn `streak` (no side
-   effects). One of :wait/:complete/:terminate (a function closed the run inside a
-   turn), :superseded (a newer run owns the agent OR the pointer was
-   retracted), :pause, :turn-limit, :deadline, :no-forms (the LLM produced zero
-   actionable forms for [[no-forms-streak-limit]] turns running), or :turn-ok
-   (run another turn)."
-  [db id run-id streak]
-  (let [r      (db/entity {:seon.db/db db :seon.db/ref [:seon.agent.run/id run-id]})
-        status (:seon.agent.run/status r)
-        reason (:seon.agent.run/closed-reason r)
-        cur    (derive/current-run db id)]
+  "Derive one loop event from a database projection and the empty-turn streak."
+  [{::keys [run current-run-id repl-mode turn-count form-count]} streak]
+  (let [status (:seon.agent.run/status run)
+        reason (:seon.agent.run/closed-reason run)]
     (cond
       (= :closed status)
       (case reason
@@ -165,10 +245,10 @@
       ;; The agent's CURRENT open run is no longer THIS run — a newer run owns
       ;; it (supersede) or the pointer was retracted (watchdog). The in-tx CAS
       ;; on `beat!`/`run-turn!` would reject our work anyway, so bail first.
-      (not= run-id (:seon.agent.run/id cur))
+      (not= (:seon.agent.run/id run) current-run-id)
       :superseded
 
-      (:seon.agent.run/paused-at r)
+      (:seon.agent.run/paused-at run)
       :pause
 
       ;; The WORK bound is mode-denominated (repl-milestone rung-0 verdict, 2026-07-10):
@@ -176,13 +256,11 @@
       ;; counts FORMS (one form per turn — a prose/orientation turn burns
       ;; nothing, so a green agent is never parked at :turn-limit by its
       ;; own narration).
-      (run/turn-limit-reached? (if (= :stream (ctx/repl-mode db))
-                                 (derive/run-form-count db run-id)
-                                 (derive/run-turn-count db run-id))
-                               (:seon.agent.run/turn-limit r))
+      (run/turn-limit-reached? (if (= :stream repl-mode) form-count turn-count)
+                               (:seon.agent.run/turn-limit run))
       :turn-limit
 
-      (run/deadline-passed? (:seon.agent.run/deadline r) (js/Date.))
+      (run/deadline-passed? (:seon.agent.run/deadline run) (js/Date.))
       :deadline
 
       ;; The empty-streak guard: the LLM has produced no actionable forms for a
@@ -265,8 +343,10 @@
         :quiesce (await (close-quiescing-run! id run-id state))
         :unavailable (admission/unavailable)
         :available
-        (let [db    @db/*conn*               ; §8a — ONE frozen basis-t per turn
-              event (next-event db id run-id streak)]
+        (let [database (await (acquire-loop-state id run-id))
+              event (if (false? (:seon.db/ok? database))
+                      :error
+                      (next-event database streak))]
         (cond
           (= :turn-ok event)
           (let [beat (await (await-bounded
@@ -304,8 +384,7 @@
                                       {:seon.agent/id id
                                        :seon.agent/llm-fn
                                        (:seon.agent/llm-fn input)
-                                       :seon.agent.run/id run-id
-                                       :seon.db/db db})))
+                                       :seon.agent.run/id run-id})))
                     ;; A turn that errored (LLM error / catastrophic), a result
                     ;; that created NO turn (no `:seon.agent.turn/id` — e.g. a
                     ;; fenced/failed open-tx that left no entity), OR a turn that
@@ -330,7 +409,10 @@
                   ;; classify): a stop event means the run is no longer ours to
                   ;; close → route there; otherwise the loop owns the :error
                   ;; close.
-                  (let [ev (next-event @db/*conn* id run-id 0)]
+                  (let [latest (await (acquire-loop-state id run-id))
+                        ev (if (false? (:seon.db/ok? latest))
+                             :error
+                             (next-event latest 0))]
                     (if (contains? #{:superseded :wait :complete :terminate} ev)
                       (do (log id "halt" (str "turn rejected/closed — " (name ev)))
                           (transition state ev))
@@ -361,6 +443,15 @@
                            (if (zero? (or (:seon.agent/eval-count r) 0))
                              (inc streak)
                              0)))))))))
+
+          (= :error event)
+          (do (log id "halt" "database read failed → close run :error")
+              (await (await-bounded
+                       "run/close-run!"
+                       (run/close-run!
+                         {:seon.agent.run/id            run-id
+                          :seon.agent.run/closed-reason :error})))
+              (transition state :error))
 
           (= :no-forms event)
           (do (log id "halt"
@@ -407,10 +498,46 @@
    bounds (the sliding window). Shared by the :running wake branch and the
    :idle CAS-loss path (a wake that lost the atomic open race). A no-op when
    the agent has no open run. Caller establishes the `with-agent` scope."
-  [id]
-  (when-let [cur (run/current-run {:seon.agent/id id})]
+  [id run-id]
+  (when run-id
     (await (run/renew! {:seon.agent/id     id
-                        :seon.agent.run/id (:seon.agent.run/id cur)}))))
+                        :seon.agent.run/id run-id}))))
+
+(defn ^:async ^:private acquire-agent-state
+  "Read one agent and its current run from one database value."
+  ([id] (await (acquire-agent-state id nil)))
+  ([id point]
+   (let [request
+         (cond->
+           {::db/members
+            [(pull-member
+               [:db/id :seon.agent/terminated-at
+                {:seon.agent/run
+                 [:seon.agent.run/id :seon.agent.run/status
+                  :seon.agent.run/paused-at]}]
+               [:seon.agent/id id])]}
+           point (assoc ::db/coordinate point))
+         acquired (await (db/execute-many request))
+         member (first (::db/results acquired))]
+     (if-not (and (::db/coordinate acquired)
+                  (= 1 (count (::db/results acquired)))
+                  (successful-member? member))
+       (read-failure "Agent state database acquisition failed." acquired)
+       (let [agent (member-result member)
+             current-run (:seon.agent/run agent)
+             open? (= :open (:seon.agent.run/status current-run))]
+         {::db/coordinate (::db/coordinate acquired)
+          ::agent agent
+          ::current-run-id (when open? (:seon.agent.run/id current-run))
+          ::state
+          (derive/state-from-primitives
+            (cond-> {:seon.agent.run/open? open?}
+              (:seon.agent/terminated-at agent)
+              (assoc :seon.agent/terminated-at
+                     (:seon.agent/terminated-at agent))
+              (and open? (:seon.agent.run/paused-at current-run))
+              (assoc :seon.agent.run/paused-at
+                     (:seon.agent.run/paused-at current-run))))})))))
 
 ;; ============================================================
 ;; Wake — the per-tx listener fires on every transact; we filter for new
@@ -442,108 +569,140 @@
          :seon.db/process [:seon.db.process/id :seon.db.process/repl]}
         f))))
 
+(defn- schedule-renew! [id run-id]
+  (js/setTimeout
+    (fn []
+      (-> (js/Promise.resolve
+            (with-agent-repl
+              id
+              (fn ^:async renew! []
+                (await (renew-current-run! id run-id)))))
+          (.catch
+            (fn [exception]
+              (js/console.error
+                (str "seon.agent.loop: wake renew threw for " id ": "
+                     (or (.-message exception) exception)))))))
+    0))
+
+(defn- schedule-message-run! [input cause-eid]
+  (let [id (:seon.agent/id input)]
+    (js/setTimeout
+      (fn []
+        (-> (js/Promise.resolve
+              (with-agent-repl
+                id
+                (fn ^:async wake! []
+                  (let [opened
+                        (await
+                          (run/open-run!
+                            {:seon.agent/id id
+                             :seon.agent.run/trigger :message
+                             :seon.agent.run/cause cause-eid}))]
+                    (if-not (false? (:seon.db/ok? opened))
+                      (await (run-loop! input (:seon.agent.run/id opened)))
+                      (let [latest (await (acquire-agent-state id))]
+                        (if-let [winner (::current-run-id latest)]
+                          (await (renew-current-run! id winner))
+                          (js/console.error
+                            (str "seon.agent.loop: open-run! FAILED for " id ": "
+                                 (:seon.error/message
+                                   (:seon.db/error opened))))))))))
+            (.catch
+              (fn [exception]
+                (js/console.error
+                  (str "seon.agent.loop: wake loop threw for " id ": "
+                       (or (.-message exception) exception)))))))
+      0))))
+
 (defn wake-handler
   "Return the tx-listener handler for `input`'s agent.
 
-   On an inbound datom
-   that passes [[seon.agent.message/inbound-msg-datom?]], derive the agent's state
-   from the local db snapshot; if :idle → open a `:message` run (cause = the
-   waking message) and start `run-loop!`; if :running → `renew!` the open
-   run's lease. The idle open is CAS-guarded; a wake that loses the race
-   renews the winner's run instead of opening a second."
+   The database interest supplies added datoms and the exact database value
+   that contains them. The handler reads the agent and candidate messages at
+   that same value, then opens or renews the run."
   {:malli/schema [:=> [:catn [:input [:map [:seon.agent/id :seon.agent/id]]]] :any]}
   [{:seon.agent/keys [id] :as input}]
-  (fn [{:seon.db/keys [db attr-index]}]
+  (fn ^:async handle-datoms! [{point ::db.protocol/coordinate
+                               datoms ::db.protocol/datoms}]
     (if-not (admission/available?)
       (admission/unavailable)
-      (let [my-eid  (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
-            inbound (when my-eid
-                    (->> (:seon.agent.message/to attr-index)
-                         (filter :seon.db/added?)
-                         (filter #(message/inbound-msg-datom? db % my-eid))))
-          {waking false exhausted true}
-          (group-by (fn [{eid :seon.db/e}]
-                      (>= (or (:seon.agent.message/hops
-                                (db/entity {:seon.db/db db :seon.db/ref eid}))
-                              0)
-                          warn/hop-cap))
-                    inbound)]
-      ;; Hop guard AT wake — refuse, loudly. The message stays in the DB
-      ;; (check-hop-exhausted renders it); the loop does NOT start for it.
-      (doseq [{eid :seon.db/e} exhausted]
-        (let [msg (db/entity {:seon.db/db db :seon.db/ref eid})]
-          (js/console.error
-            (str "seon.agent.loop: WAKE REFUSED for agent " id
-                 " — message " (:seon.agent.message/id msg)
-                 " hops=" (:seon.agent.message/hops msg)
-                 " reached hop-cap " warn/hop-cap
-                 " (agent↔agent ping-pong guard). A human message"
-                 " resets the chain (hops 0)."))))
-      (when (seq waking)
-        (let [state (derive/derive-state db id)
-              ;; The message that caused this wake (the run's cause ref on an
-              ;; :idle open). The first waking datom's eid — the others, if
-              ;; any, are absorbed by the same run's lease.
-              cause-eid (:seon.db/e (first waking))]
-          (case state
-            :terminated
-            (log id "wake skipped" "terminated — change state first")
+      (let [database (await (acquire-agent-state id point))
+            my-eid (get-in database [::agent :db/id])
+            candidates
+            (->> datoms
+                 (filter #(and (:seon.db/added? %)
+                               (= :seon.agent.message/to (:seon.db/a %))))
+                 vec)]
+        (if (or (false? (:seon.db/ok? database))
+                (nil? my-eid)
+                (empty? candidates))
+          database
+          (let [checks
+                (await
+                  (js/Promise.all
+                    (into-array
+                      (map #(message/inbound-msg-datom?
+                              {::db/coordinate (::db/coordinate database)
+                               :seon.db/datom %
+                               :seon.agent/eid my-eid})
+                           candidates))))
+                checked (mapv vector candidates (array-seq checks))
+                failure (some (fn [[_ result]]
+                                (when (map? result) result))
+                              checked)]
+            (if failure
+              failure
+              (let [inbound (->> checked
+                                 (keep (fn [[datom result]]
+                                         (when (true? result) datom)))
+                                 vec)
+                    messages
+                    (if (seq inbound)
+                      (await
+                        (db/pull-many
+                          {::db/coordinate (::db/coordinate database)
+                           ::db/pull-pattern
+                           [:seon.agent.message/id :seon.agent.message/hops]
+                           ::db/refs (mapv :seon.db/e inbound)
+                           ::db/max-results (count inbound)
+                           ::db/max-result-weight 65536}))
+                      [])
+                    ]
+                (if (map? messages)
+                  (read-failure "Wake message database acquisition failed."
+                                messages)
+                  (let [message-by-eid
+                        (zipmap (map :seon.db/e inbound) messages)
+                        {waking true exhausted false}
+                        (group-by
+                          (fn [{eid :seon.db/e}]
+                            (message/hop-live? (get message-by-eid eid)))
+                          inbound)]
+                    (doseq [{eid :seon.db/e} exhausted]
+                      (let [msg (get message-by-eid eid)]
+                        (js/console.error
+                          (str "seon.agent.loop: WAKE REFUSED for agent " id
+                               " — message " (:seon.agent.message/id msg)
+                               " hops=" (:seon.agent.message/hops msg)
+                               " reached hop-cap " warn/hop-cap
+                               " (agent↔agent ping-pong guard). A human message"
+                               " resets the chain (hops 0)."))))
+                    (when (seq waking)
+                      (let [state (::state database)
+                            run-id (::current-run-id database)
+                            cause-eid (:seon.db/e (first waking))]
+                        (case state
+                          :terminated
+                          (log id "wake skipped" "terminated — change state first")
 
-            :paused
-            (log id "wake skipped" "paused — resume first")
+                          :paused
+                          (log id "wake skipped" "paused — resume first")
 
-            :running
-            ;; A run is already driving turns; renew its lease so the new
-            ;; message extends both bounds (the sliding window).
-            (js/setTimeout
-              (fn []
-                (-> (js/Promise.resolve
-                      (with-agent-repl
-                        id
-                        (fn ^:async renew! []
-                          (await (renew-current-run! id)))))
-                    (.catch (fn [e]
-                              (js/console.error
-                                (str "seon.agent.loop: wake renew threw for "
-                                     id ": " (or (.-message e) e)))))))
-              0)
+                          :running
+                          (schedule-renew! id run-id)
 
-            ;; :idle — open a fresh run and drive it. setTimeout breaks the
-            ;; ALS scope, so re-enter `with-agent` for the loop's downstream
-            ;; calls (db/current-agent-id).
-            (js/setTimeout
-              (fn []
-                (-> (js/Promise.resolve
-                      (with-agent-repl
-                        id
-                        (fn ^:async wake! []
-                          (let [opened (await (run/open-run!
-                                                {:seon.agent/id           id
-                                                 :seon.agent.run/trigger  :message
-                                                 :seon.agent.run/cause    cause-eid}))]
-                            (cond
-                              ;; Opened a fresh run (the snapshot has no
-                              ;; :seon.db/ok? key) — drive it.
-                              (not (false? (:seon.db/ok? opened)))
-                              (await (run-loop! input (:seon.agent.run/id opened)))
-
-                              ;; Open FAILED but a run now exists ⇒ we LOST the
-                              ;; atomic open race (a concurrent message/schedule
-                              ;; won the CAS). The agent IS running; absorb this
-                              ;; message by renewing the winner's lease.
-                              (run/current-run {:seon.agent/id id})
-                              (await (renew-current-run! id))
-
-                              :else
-                              (js/console.error
-                                (str "seon.agent.loop: open-run! FAILED for " id
-                                     ": " (:seon.error/message
-                                            (:seon.db/error opened)))))))))
-                    (.catch (fn [e]
-                              (js/console.error
-                                (str "seon.agent.loop: wake loop threw for "
-                                     id ": " (or (.-message e) e)))))))
-              0))))))))
+                          :idle
+                          (schedule-message-run! input cause-eid))))))))))))))
 
 ;; ============================================================
 ;; Re-drive — RESUME re-enters the loop. The loop EXITS on :pause (the run
@@ -579,9 +738,10 @@
               (with-agent-repl
                 id
                 (fn ^:async redrive! []
-                  (when-let [cur (run/current-run {:seon.agent/id id})]
+                  (let [database (await (acquire-agent-state id))]
+                    (when-let [run-id (::current-run-id database)]
                     (await
-                      (run-loop! input (:seon.agent.run/id cur)))))))
+                        (run-loop! input run-id)))))))
             (.catch (fn [e]
                       (js/console.error
                         (str "seon.agent.loop: drive-run! threw for "
@@ -634,13 +794,14 @@
    `^:async`."
   {:malli/schema [:=> [:cat ::exec-request] :any]}
   [{:seon.agent/keys [id] fns :seon.agent.schedule/fns}]
-  (let [database @db/*conn*
-        point (coordinate/resolved database)]
-    (await
-     (db/with-agent id
-       (fn ^:async run-scheduled! []
-         (when-let [cur (derive/current-run database id)]
-           (let [run-id  (:seon.agent.run/id cur)
+  (let [database (await (acquire-agent-state id))]
+    (if (false? (:seon.db/ok? database))
+      database
+      (await
+       (db/with-agent id
+         (fn ^:async run-scheduled! []
+           (when-let [run-id (::current-run-id database)]
+             (let [point (::db/coordinate database)
                  source  (str/join "\n"
                            (map (fn [s]
                                   (str ";; schedule fired — running " s "\n(" s ")"))
@@ -661,7 +822,7 @@
                      (await
                       (turn/eval-parsed!
                        id point (repl-internal/parse-forms source)
-                       (home/home-ns id) turn-id run-id)))))))))))))))
+                       (home/home-ns id) turn-id run-id))))))))))))))))
 
 (defn install-wake-trigger!
   "Register the inbound-message wake trigger for this agent.
@@ -823,7 +984,10 @@
 (schema/register! :seon.agent.loop/activity-response
   [:map [:seon.agent.loop/entries [:vector :seon.agent.loop/activity-entry]]])
 
-(defn activity-log
+(schema/register! :seon.agent.loop/activity-result
+  [:or :seon.agent.loop/activity-response :seon.db/transact-response])
+
+(defn ^:async activity-log
   "Return the agent's activity log — a DERIVED timeline of its RUNS.
 
    Ordered by `:seon.agent.run/started-at`. Map-in, map-out.
@@ -836,40 +1000,44 @@
    `:message` trigger — `:seon.agent.loop/cause` (the waking message's content).
    A function of the DB; no stored log to clear."
   {:malli/schema [:=> [:cat :seon.agent.loop/activity-request]
-                       :seon.agent.loop/activity-response]}
+                       :seon.agent.loop/activity-result]}
   [{:seon.agent/keys [id]}]
-  (let [agent-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))]
-    (if-not agent-eid
-      {:seon.agent.loop/entries []}
-      (let [rows (->> (db/query {:seon.db/query
-                                 '[:find ?r ?started
-                                   :in $ ?aid
-                                   :where
-                                   [?a :seon.agent/id ?aid]
-                                   [?r :seon.agent.run/agent ?a]
-                                   [?r :seon.agent.run/started-at ?started]]
-                                 :seon.db/args [id]})
-                      (sort-by #(.getTime ^js (second %))))]
-        {:seon.agent.loop/entries
-         (mapv (fn [[run-eid started]]
-                 (let [r        (db/entity run-eid)
-                       reason   (:seon.agent.run/closed-reason r)
-                       open?    (= :open (:seon.agent.run/status r))
-                       cause    (some-> (:db/id (:seon.agent.run/cause r))
-                                        db/entity
-                                        :seon.agent.message/content)
-                       ;; DERIVE the per-run state via the ONE rule so :paused
-                       ;; (an open run carrying paused-at) is included — map a
-                       ;; closed-:terminated run to a terminated-at primitive.
-                       state    (derive/state-from-primitives
-                                  (cond-> {:seon.agent.run/open? open?}
-                                    (= reason :terminated)
-                                    (assoc :seon.agent/terminated-at started)
-                                    (:seon.agent.run/paused-at r)
-                                    (assoc :seon.agent.run/paused-at
-                                           (:seon.agent.run/paused-at r))))]
-                   (cond-> {:seon.agent.loop/at    started
-                            :seon.agent/state      state}
-                     reason (assoc :seon.agent.loop/stop-reason reason)
-                     cause  (assoc :seon.agent.loop/cause cause))))
-               rows)}))))
+  (let [rows
+        (await
+          (db/query
+            {::db/query
+             '[:find (pull ?run
+                           [:seon.agent.run/status
+                            :seon.agent.run/closed-reason
+                            :seon.agent.run/paused-at
+                            {:seon.agent.run/cause
+                             [:seon.agent.message/content]}])
+                    ?started
+               :in $ ?agent-id
+               :where
+               [?agent :seon.agent/id ?agent-id]
+               [?run :seon.agent.run/agent ?agent]
+               [?run :seon.agent.run/started-at ?started]]
+             ::db/args [id]}))]
+    (if (:seon.error/message rows)
+      (read-failure "Agent activity database acquisition failed." rows)
+      {:seon.agent.loop/entries
+       (->> rows
+            (sort-by #(.getTime ^js (second %)))
+            (mapv (fn [[run started]]
+                    (let [reason (:seon.agent.run/closed-reason run)
+                          open? (= :open (:seon.agent.run/status run))
+                          cause (get-in run [:seon.agent.run/cause
+                                             :seon.agent.message/content])
+                          state
+                          (derive/state-from-primitives
+                            (cond-> {:seon.agent.run/open? open?}
+                              (= reason :terminated)
+                              (assoc :seon.agent/terminated-at started)
+                              (:seon.agent.run/paused-at run)
+                              (assoc :seon.agent.run/paused-at
+                                     (:seon.agent.run/paused-at run))))]
+                      (cond-> {:seon.agent.loop/at started
+                               :seon.agent/state state}
+                        reason (assoc :seon.agent.loop/stop-reason reason)
+                        cause (assoc :seon.agent.loop/cause cause))))))})))
