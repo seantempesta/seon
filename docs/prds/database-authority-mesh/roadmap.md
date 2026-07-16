@@ -92,7 +92,8 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `d21abadb9412f1b828b02ddb3c08ddc81d57c595` (bounded JVM-host
+- Datahike `670cd1ada40462cb5927f0dc687f6b3a95f9e13f` (schema-update
+  comparison retains every detected incompatibility, atop bounded JVM-host
   structural weight over direct numeric earlier-as-of query sharing, ordered
   temporal index-page, ordered
   pull-many, and two-phase host query
@@ -1142,6 +1143,60 @@ reads in their owning Bun children. No consumer may preserve a replica or
 invent another cache while migrating. Exact source and decisions are in
 [[research/async-db-facade-source-audit-2026-07-16]] and
 [[research/route-direct-interest-source-audit-2026-07-16]].
+
+Commit `82c96010` now owns one persistent process session in `seon.db`, honest
+async query/pull/pull-many/schema/index/KNN/transaction operations, exact
+coordinate precedence, selective interests, and compact ordinary results. The
+route cache subscribes before reading and acquires its initial projection at
+the interest acknowledgement coordinate; later completions are fenced by
+coordinate and owner, and request dispatch performs no database read. Embedding
+scope, KNN, and one ordered pull-many enrichment stay at one coordinate. Focused
+proof passes 6 tests/38 assertions for the session facade, 6/22 for routes, and
+3/8 for embeddings. The remaining synchronous-call compiler warnings are the
+consumer inventory; they are not compatibility work to preserve.
+
+Client bootstrap cannot switch independently. Review rejected and reverted a
+partial session cut because its next provenance, schema, restore, program,
+recovery, and quiescence owners still dereferenced the returned ordinary value
+as a Datahike connection. The replacement must migrate the complete cold-start
+call graph or remain on the last stable client until the atomic cut. The exact
+plan is the active client audit lane; focused tests that stub these owners do
+not prove production startup.
+
+The turn/context falsifier also corrected the dependency order. Core entity
+render dispatch is now pure over ordinary node data at `1a19c3e7`, but authored
+renderers still execute synchronously in-process and discover source, requires,
+exposed namespaces, and helpers through a local Datahike value. There is no
+existing child invocation surface to bind those open-ended reads to the prompt
+coordinate. Therefore the one 13-member ordinary-agent / 16-member root prompt
+acquisition waits for the canonical Unit 8 child execution service shared by
+eval, authored renderers, and interactions; a render-only executor or local
+fallback is prohibited.
+
+### 2026-07-16 active implementation card
+
+- **Earliest unsettled contract:** one atomic writer transaction derives only
+  the non-Datahike attributes actually used by that transaction from canonical
+  `:seon.schema/key` / `:seon.schema/form` facts, prepends their Datahike
+  declarations, and commits schema plus facts under the expected coordinate.
+  Schema rows describe functions, requests, responses, and entities as well as
+  stored attributes, so eager installation of the complete registry and a new
+  persisted attribute marker are both rejected.
+- **Integrated proof that closes it:** same-transaction schema plus first fact,
+  later first use from a stored form, real component and generated-identity
+  forms, incompatible installed schema rollback, unknown used attribute,
+  concurrent expected-coordinate writers, and no coordinate advance on any
+  rejected form. Datahike `670cd1ad` closes the dependency reducer defect.
+- **Dependency-ready parallel portfolio:** the writer/schema bridge owns that
+  atomic seam; the client lane owns the complete cold-start replacement audit;
+  the Bun-child lane owns the one shared execution-service contract; top-level
+  integration owns the committed async facade, route, embedding, roadmap, and
+  cross-lane review.
+- **Next refill:** after writer admission, migrate remote provenance and schema
+  preparation; after the child contract, implement one eval/render invocation
+  cohort; then land the full coordinate-pinned prompt acquisition and immutable
+  retry inputs; only after the complete client call graph is remote may the
+  client session switch land again.
 
 Datahike's existing `pull-many` already parses once, owns one pull frame
 machine and resource budget, and certifies one eager result. Its dependency
