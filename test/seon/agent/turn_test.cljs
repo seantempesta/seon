@@ -135,8 +135,8 @@
                                     :seon.eval/n-fail 0
                                     :seon.eval/ids ["eval-1"]}})))
       (-> (js/Promise.resolve
-           (@#'turn/eval-parsed! "agent-1" point parsed 'my.agent.agent-1
-                                 "turn-1" "run-1"))
+           (turn/eval-parsed! "agent-1" point parsed 'my.agent.agent-1
+                              "turn-1" "run-1"))
           (.then
            (fn [result]
              (is (= {:seon.eval/n-ok 1

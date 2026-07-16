@@ -53,10 +53,10 @@
     [seon.agent.turn :as turn]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
     [seon.derive :as derive]
     [seon.eval :as seval]
     [seon.log :as seon-log]
-    [seon.repl :as repl]
     [seon.repl.internal :as repl-internal]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]
@@ -607,8 +607,8 @@
 ;; would close `:turn-limit` having done zero LLM work (#66).
 ;;
 ;; A broken scheduled fn records a failed eval (errors are values), never
-;; crashing the ticker. compile-state comes from the one pod-global bootstrap
-;; ([[seon.repl/ensure-bootstrap!]]), so this needs no per-agent loop-input.
+;; crashing the ticker. The existing per-agent execution child owns eval and
+;; its compiler, so this needs no compiler in the pod or per-agent loop input.
 ;; ============================================================
 
 (schema/register! ::exec-request
@@ -630,34 +630,34 @@
    `^:async`."
   {:malli/schema [:=> [:cat ::exec-request] :any]}
   [{:seon.agent/keys [id] fns :seon.agent.schedule/fns}]
-  (let [compile-state (await (repl/ensure-bootstrap!))]
+  (let [database @db/*conn*
+        point (coordinate/resolved database)]
     (await
-      (db/with-agent id
-        (fn ^:async run-scheduled! []
-          (when-let [cur (run/current-run {:seon.agent/id id})]
-            (let [run-id  (:seon.agent.run/id cur)
-                  source  (str/join "\n"
-                            (map (fn [s]
-                                   (str ";; schedule fired — running " s "\n(" s ")"))
-                                 fns))]
-              (await
-                (db/with-tx-context
-                  {:seon.db/user [:seon.agent/id id]
-                   :seon.db/process
-                   [:seon.db.process/id :seon.db.process/repl]}
-                  (fn ^:async open-scheduled-turn! []
-                    (await
-                      (turn/open-turn!
-                        {:seon.agent/id               id
-                         :seon.agent.run/id-of-run    run-id
-                         :seon.agent.turn/scheduled?  true
-                         :seon.agent.turn/prompt-text ""}
-                        (fn ^:async eval-scheduled! [turn-id]
-                          (await (seval/eval-batch!
-                                   compile-state
-                                   (repl-internal/parse-forms source)
-                                   (home/home-ns id)
-                                   id turn-id run-id)))))))))))))))
+     (db/with-agent id
+       (fn ^:async run-scheduled! []
+         (when-let [cur (derive/current-run database id)]
+           (let [run-id  (:seon.agent.run/id cur)
+                 source  (str/join "\n"
+                           (map (fn [s]
+                                  (str ";; schedule fired — running " s "\n(" s ")"))
+                                fns))]
+             (await
+              (db/with-tx-context
+               {:seon.db/user [:seon.agent/id id]
+                :seon.db/process
+                [:seon.db.process/id :seon.db.process/repl]}
+               (fn ^:async open-scheduled-turn! []
+                 (await
+                  (turn/open-turn!
+                   {:seon.agent/id               id
+                    :seon.agent.run/id-of-run    run-id
+                    :seon.agent.turn/scheduled?  true
+                    :seon.agent.turn/prompt-text ""}
+                   (fn ^:async eval-scheduled! [turn-id]
+                     (await
+                      (turn/eval-parsed!
+                       id point (repl-internal/parse-forms source)
+                       (home/home-ns id) turn-id run-id)))))))))))))))
 
 (defn install-wake-trigger!
   "Register the inbound-message wake trigger for this agent.

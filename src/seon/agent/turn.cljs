@@ -378,8 +378,13 @@
            {:seon.error/message "The execution child did not return a prompt."
             :seon.error/kind :core-bug})))))
 
-(defn ^:async ^:private eval-parsed!
+(defn ^:async eval-parsed!
   "Evaluate parsed model output in the agent's existing execution child."
+  {:malli/schema
+   [:=> [:cat :seon.agent/id :seon.db.coordinate/coordinate
+         [:vector :map] :symbol :seon.agent.turn/id
+         [:or :nil :seon.agent.run/id]]
+    :map]}
   [agent-id point parsed starting-ns turn-id run-id]
   (let [request (cond-> {:seon.eval/parsed parsed
                          :seon.eval/starting-ns starting-ns

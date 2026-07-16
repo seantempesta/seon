@@ -1656,7 +1656,13 @@ package-size measurement is added for this test.
   local-Datahike REPL fixtures currently fail during their obsolete provenance
   bootstrap before reaching these forms; the active atomic-client issue owns
   their deletion or authority-session rewrite and prohibits a local fallback.
-- **Next refill:** move the remaining schedule/test/authored-route
+- Scheduled function execution now parses in the pod but evaluates in the
+  same per-agent child through the shared `turn/eval-parsed!` orchestration
+  function. It captures one frozen coordinate before opening the schedule turn,
+  retains the existing run fence and scheduled-turn accounting, and passes no
+  compiler state through loop input. The frozen client artifact compiles with
+  its existing migration-warning inventory.
+- **Next refill:** move the remaining stored-test/authored-route
   consumers onto the existing per-agent child execution owner, delete global
   pod replay rather than adapting it, finish the remaining web synchronous
   consumers, and
