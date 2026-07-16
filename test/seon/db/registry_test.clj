@@ -66,7 +66,198 @@
                    {::registry/database-name database-name}))))
       (is (false? (::registry/released?
                    (registry/release-database!
-                    {::registry/database-name database-name})))))))
+                   {::registry/database-name database-name})))))))
+
+(deftest transport-connections-share-datahike-reference-lifetime
+  (let [database-name :registry/shared-transport
+        unrelated-name :registry/unrelated-release
+        opened (ensure-database!
+                {::registry/database-name database-name
+                 ::registry/backend :memory})
+        conn (::registry/conn opened)
+        connection-a (Object.)
+        connection-b (Object.)
+        connect-calls (atom 0)
+        release-calls (atom 0)
+        drains (atom [])
+        real-connect d/connect
+        real-release d/release]
+    (with-redefs [d/connect
+                  (fn [config]
+                    (swap! connect-calls inc)
+                    (real-connect config))
+                  d/release
+                  (fn [connection]
+                    (swap! release-calls inc)
+                    (real-release connection))]
+      (let [first-acquire
+            (registry/acquire-database!
+             {::registry/database-name database-name
+              ::registry/transport-connection connection-a})
+            duplicate-acquire
+            (registry/acquire-database!
+             {::registry/database-name database-name
+              ::registry/transport-connection connection-a})
+            second-acquire
+            (registry/acquire-database!
+             {::registry/database-name database-name
+              ::registry/transport-connection connection-b})]
+        (is (::registry/acquired? first-acquire))
+        (is (false? (::registry/acquired? duplicate-acquire)))
+        (is (::registry/acquired? second-acquire))
+        (is (= 1 @connect-calls)
+            "the first connection takes the ensured reference; only its sibling reconnects")
+        (is (identical? conn
+                        (::registry/conn
+                         (registry/resolve-connection
+                          {::registry/database-name database-name}))))
+        (is (::registry/released?
+             (registry/release-database-acquisition!
+              {::registry/database-name database-name
+               ::registry/transport-connection connection-a
+               ::registry/drain! #(swap! drains conj %)})))
+        (is (= 1 @release-calls))
+        (is (empty? @drains)
+            "a sibling release never fences the shared database")
+        (is (= (d/db conn)
+               (d/db (::registry/conn
+                      (registry/resolve-connection
+                       {::registry/database-name database-name}))))
+            "the sibling still reads the identical live connection")
+        (is (false?
+             (::registry/released?
+              (registry/release-database-acquisition!
+               {::registry/database-name database-name
+                ::registry/transport-connection connection-a
+                ::registry/drain! #(swap! drains conj %)}))))
+        (is (= 1 @release-calls)
+            "a duplicate close does not release another Datahike reference")
+        (is (::registry/released?
+             (registry/release-database-acquisition!
+              {::registry/database-name database-name
+               ::registry/transport-connection connection-b
+               ::registry/drain!
+               (fn [request]
+                 (swap! drains conj request)
+                 (is (::registry/conn
+                      (deref
+                       (future
+                         (ensure-database!
+                          {::registry/database-name unrelated-name
+                           ::registry/backend :memory}))
+                       1000
+                       nil))
+                     "final drain does not hold the registry-wide lock"))})))
+        (is (= 2 @release-calls))
+        (is (= [{::registry/database-name database-name
+                 ::registry/attachment (::registry/attachment opened)}]
+               @drains))
+        (is (= {} (registry/lookup-connection
+                   {::registry/database-name database-name})))
+        (is (thrown? clojure.lang.ExceptionInfo (d/db conn)))))))
+
+(deftest administrative-reference-is-independent-of-live-connections
+  (let [database-name :registry/admin-and-transport
+        connection (Object.)]
+    (ensure-database!
+     {::registry/database-name database-name ::registry/backend :memory})
+    (registry/acquire-database!
+     {::registry/database-name database-name
+      ::registry/transport-connection connection})
+    (ensure-database!
+     {::registry/database-name database-name ::registry/backend :memory})
+    (is (::registry/released?
+         (registry/release-database!
+          {::registry/database-name database-name})))
+    (is (::registry/conn
+         (registry/resolve-connection
+          {::registry/database-name database-name}))
+        "administrative release leaves the live transport connection intact")
+    (is (::registry/released?
+         (registry/release-database-acquisition!
+          {::registry/database-name database-name
+           ::registry/transport-connection connection
+           ::registry/drain! (fn [_] nil)})))
+    (is (= {} (registry/lookup-connection
+               {::registry/database-name database-name})))))
+
+(deftest final-connection-release-fences-reacquire-and-stale-close
+  (let [database-name :registry/final-release-race
+        connection-a (Object.)
+        connection-b (Object.)
+        entered-drain (promise)
+        finish-drain (promise)
+        first (ensure-database!
+               {::registry/database-name database-name
+                ::registry/backend :memory})
+        first-conn (::registry/conn first)]
+    (registry/acquire-database!
+     {::registry/database-name database-name
+      ::registry/transport-connection connection-a})
+    (let [release
+          (future
+            (registry/release-database-acquisition!
+             {::registry/database-name database-name
+              ::registry/transport-connection connection-a
+              ::registry/drain!
+              (fn [_]
+                (deliver entered-drain true)
+                @finish-drain)}))]
+      @entered-drain
+      (let [failure
+            (try
+              (registry/acquire-database!
+               {::registry/database-name database-name
+                ::registry/transport-connection connection-b})
+              nil
+              (catch clojure.lang.ExceptionInfo exception exception))]
+        (is (= :seon.db.registry.error/releasing
+               (:seon.error/kind (ex-data failure)))))
+      (deliver finish-drain true)
+      (is (::registry/released? @release)))
+    (let [reopened (ensure-database!
+                    {::registry/database-name database-name
+                     ::registry/backend :memory})
+          second-conn (::registry/conn reopened)]
+      (is (not (identical? first-conn second-conn))
+          "reopen creates a new Datahike connection generation")
+      (registry/acquire-database!
+       {::registry/database-name database-name
+        ::registry/transport-connection connection-b})
+      (is (false?
+           (::registry/released?
+            (registry/release-database-acquisition!
+             {::registry/database-name database-name
+              ::registry/transport-connection connection-a
+              ::registry/drain! (fn [_] nil)})))
+          "a late close from the old socket cannot release the reopened route")
+      (is (identical? second-conn
+                      (::registry/conn
+                       (registry/resolve-connection
+                        {::registry/database-name database-name})))))))
+
+(deftest failed-final-connection-drain-retains-cleanup-required
+  (let [database-name :registry/final-drain-failure
+        connection (Object.)]
+    (ensure-database!
+     {::registry/database-name database-name ::registry/backend :memory})
+    (registry/acquire-database!
+     {::registry/database-name database-name
+      ::registry/transport-connection connection})
+    (let [result
+          (registry/release-database-acquisition!
+           {::registry/database-name database-name
+            ::registry/transport-connection connection
+            ::registry/drain!
+            (fn [_]
+              (throw (ex-info "injected final drain failure" {})))})]
+      (is (false? (::registry/released? result)))
+      (is (re-find #"injected final drain failure"
+                   (::registry/release-error result)))
+      (is (= :seon.db.registry.error/cleanup-required
+             (::registry/error-kind
+              (registry/resolve-connection
+               {::registry/database-name database-name})))))))
 
 (deftest release-failure-remains-visible-and-retains-registry-identity
   (let [database-name :registry/release-failure

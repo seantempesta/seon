@@ -530,6 +530,33 @@ Exact `4 + payload` input bytes must be reserved from the frame header before
 allocation, handed into semantic admission, and retained until that handoff
 settles. These are part of the replacement, not compatibility layers.
 
+[[research/connection-acquisition-lifetime-2026-07-16]] removes a planned
+Seon-side reference count: Datahike already increments on matching `connect`
+and performs cache/report/writer/index/store cleanup only on final `release`.
+Seon retains only exact live socket membership for idempotent crash cleanup; the
+socket object is internal and no additional identifier crosses the protocol.
+Final release is claimed before draining and runs outside the registry-wide
+lock so one database cannot gate unrelated databases.
+
+The registry implementation now transfers the startup ensure reference to the
+first live connection, calls Datahike `connect` only for additional siblings,
+and releases each exact membership once. Its reconstructed config includes
+Seon's serialized allocation-writer setting because Datahike correctly includes
+writer configuration in physical connection identity; omitting it opened a
+second writer instead of sharing the registered one. Duplicate acquire/close,
+sibling survival, administrative-reference independence, final drain outside
+the global lock, close-versus-reacquire generation fencing, stale close, and
+cleanup-required failure pass 20 focused tests/126 assertions. The broader
+registry, routing, executor, writer-integration, and server proof passes 61
+tests/430 assertions.
+
+[[research/callback-complete-writer-2026-07-16]] defines the no-waiter writer
+seam. One writer active-request map plus one stable executor completion function
+replaces per-job result promises, Future waiters, and the execute-many
+coordinator loop. Completion updates accounting under the executor lock and
+routes outside it; cancellation retains physical cleanup until the shared
+database value can be released exactly once.
+
 [[research/selector-session-source-proof-2026-07-16]] validates the replacement
 against exact Bun and JDK 26 source. A disposable fragmented-frame probe
 delivered 10,000 multiplexed requests at about 164,862 requests per second,

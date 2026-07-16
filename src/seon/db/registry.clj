@@ -21,8 +21,12 @@
    `{::released? false}`. A failed release retains the registered identity and
    its failure; the same process never reclassifies unproved exclusive release
    as success. `delete-database!` additionally deletes the durable database.
-   Concurrent ensures on the same name race exactly once —
-   losers see the winner's conn.
+   Concurrent ensures on the same name race exactly once — losers see the
+   winner's conn. Persistent transport connections acquire exact membership
+   here while Datahike remains the reference-count authority. The first live
+   connection may take the administrative ensure reference; sibling
+   connections call Datahike connect once, duplicate acquire/close is a no-op,
+   and only final release drains and removes the entry.
 
    Connection setup is an explicit dependency of `ensure-database!`, not a global
    callback registry. The writer assembles one fixed initializer at boot and
@@ -53,8 +57,15 @@
 (schema/register! ::coordinate ::coordinate/coordinate)
 (schema/register! ::release-error :string)
 (schema/register! ::initialization-error :string)
+(schema/register! ::transport-connection 'some?)
+(schema/register! ::transport-connections [:set ::transport-connection])
+(schema/register! ::ensured? :boolean)
+(schema/register! ::acquired? :boolean)
+(schema/register! ::release-completion 'some?)
+(schema/register! ::drain! 'fn?)
 (schema/register! ::entry-state
                   [:enum :seon.db.registry.entry/ready
+                   :seon.db.registry.entry/releasing
                    :seon.db.registry.entry/cleanup-required])
 (schema/register! ::open-intent
                   [:enum :seon.db.registry.open/main
@@ -101,6 +112,10 @@
                    [::attachment ::attachment]
                    [::backend ::backend]
                    [::path {:optional true} ::path]
+                   [::ensured? ::ensured?]
+                   [::transport-connections ::transport-connections]
+                   [::release-completion {:optional true}
+                    ::release-completion]
                    [::release-error {:optional true} ::release-error]
                    [::initialization-error {:optional true}
                     ::initialization-error]])
@@ -135,6 +150,35 @@
                     ::initialization-error]])
 
 (schema/register! ::ensure-database!-response ::entry-view)
+
+(schema/register!
+ ::acquire-database!-request
+ [:map {:closed true}
+  [::database-name ::database-name]
+  [::transport-connection ::transport-connection]])
+(schema/register!
+ ::acquire-database!-response
+ [:map
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::backend ::backend]
+  [::entry-state ::entry-state]
+  [::path {:optional true} ::path]
+  [::acquired? ::acquired?]])
+
+(schema/register!
+ ::release-database-acquisition!-request
+ [:map {:closed true}
+  [::database-name ::database-name]
+  [::transport-connection ::transport-connection]
+  [::drain! ::drain!]])
+(schema/register!
+ ::release-database-acquisition!-response
+ [:map {:closed true}
+  [::database-name ::database-name]
+  [::released? :boolean]
+  [::release-error {:optional true} ::release-error]])
 
 (schema/register!
  ::observe-database-lifecycle-request
@@ -311,16 +355,23 @@
 
 (defn- derived-entry-state
   [entry]
-  (if (cleanup-required? entry)
+  (cond
+    (cleanup-required? entry)
     :seon.db.registry.entry/cleanup-required
+
+    (::release-completion entry)
+    :seon.db.registry.entry/releasing
+
+    :else
     :seon.db.registry.entry/ready))
 
 (defn- entry-view
   [database-name entry]
-  (assoc entry
-         ::database-name database-name
-         ::entry-state (derived-entry-state entry)
-         ::coordinate (current-coordinate entry)))
+  (-> entry
+      (dissoc ::ensured? ::transport-connections ::release-completion)
+      (assoc ::database-name database-name
+             ::entry-state (derived-entry-state entry)
+             ::coordinate (current-coordinate entry))))
 
 (defn- summary
   "Public view of an entry, sans live conn."
@@ -343,6 +394,16 @@
     path (assoc ::backend/path path)
     attachment (assoc ::coordinate/attachment attachment)
     (seq initial-tx) (assoc ::backend/initial-tx initial-tx)))
+
+(defn- entry-config
+  [database-name {::keys [attachment backend path]}]
+  (id/allocation-connect-config
+   (backend/datahike-config
+    (backend-request
+     {::database-name database-name
+      ::backend backend
+      ::path path
+      ::attachment attachment}))))
 
 (defn- fail-attachment!
   [message data]
@@ -407,7 +468,8 @@
       ::existing-attachment (::attachment entry)
       ::existing-backend (::backend entry)
       ::existing-path (::path entry)}))
-  (if (cleanup-required? entry)
+  (cond
+    (cleanup-required? entry)
     (throw
      (ex-info "A failed database open still requires resource cleanup."
               {:seon.error/kind :seon.db.registry.error/cleanup-required
@@ -416,6 +478,15 @@
                ::coordinate (current-coordinate entry)
                ::release-error (::release-error entry)
                ::initialization-error (::initialization-error entry)}))
+
+    (::release-completion entry)
+    (throw
+     (ex-info "The database connection is being released."
+              {:seon.error/kind :seon.db.registry.error/releasing
+               ::database-name database-name
+               ::attachment (::attachment entry)}))
+
+    :else
     (entry-view database-name entry)))
 
 (defn- branch-source
@@ -426,6 +497,27 @@
                      (::coordinate/database-id (::attachment entry)))
               (::conn entry)))
           registry)))
+
+(defn- ensure-existing-reference!
+  [database-name entry attachment backend-kind path]
+  (validate-existing-route!
+   database-name entry attachment backend-kind path)
+  (if (get entry ::ensured? true)
+    (entry-view database-name entry)
+    (let [acquired (d/connect (entry-config database-name entry))]
+      (when-not (identical? (::conn entry) acquired)
+        (try
+          (d/release acquired)
+          (catch Throwable _))
+        (throw
+         (ex-info "Datahike returned a different connection for one database route."
+                  {:seon.error/kind
+                   :seon.db.registry.error/connection-mismatch
+                   ::database-name database-name
+                   ::attachment (::attachment entry)})))
+      (let [updated (assoc entry ::ensured? true)]
+        (swap! !registry assoc database-name updated)
+        (entry-view database-name updated)))))
 
 (defn- open-entry!
   "Open and validate one exact Datahike attachment."
@@ -458,7 +550,9 @@
     (let [conn (d/connect (id/allocation-connect-config cfg))
           entry (cond-> {::conn conn
                          ::attachment attachment
-                         ::backend backend-kind}
+                         ::backend backend-kind
+                         ::ensured? true
+                         ::transport-connections #{}}
                   path (assoc ::path path))]
       (try
         (id/assert-allocation-writer! conn)
@@ -523,10 +617,17 @@
         attachment* (::coordinate/attachment facts)
         backend-path (::backend/path facts)]
     (if-let [entry (get @!registry database-name)]
-      (validate-existing-route! database-name entry attachment* backend backend-path)
+      (if (get entry ::ensured? true)
+        (validate-existing-route!
+         database-name entry attachment* backend backend-path)
+        (locking !registry
+          (ensure-existing-reference!
+           database-name (get @!registry database-name)
+           attachment* backend backend-path)))
       (locking !registry
         (if-let [entry (get @!registry database-name)]
-          (validate-existing-route! database-name entry attachment* backend backend-path)
+          (ensure-existing-reference!
+           database-name entry attachment* backend backend-path)
           (let [registry @!registry]
             (validate-route-bijection!
              registry database-name attachment* backend backend-path)
@@ -579,6 +680,132 @@
                           throwable)))))
                   (throw throwable))))))))))
 
+(declare require-ready-entry!)
+
+(defn acquire-database!
+  "Acquire one database for one live transport connection.
+
+   The transport connection object remains process-local. Repeating the same
+   acquisition is an idempotent no-op. The first connection takes ownership of
+   an existing administrative ensure reference; later connections acquire one
+   matching reference through Datahike's own connection registry."
+  {:malli/schema [:=> [:cat ::acquire-database!-request]
+                  ::acquire-database!-response]}
+  [{::keys [database-name transport-connection]}]
+  (locking !registry
+    (let [entry (require-ready-entry! database-name)
+          connections (::transport-connections entry #{})]
+      (if (contains? connections transport-connection)
+        (assoc (entry-view database-name entry) ::acquired? false)
+        (let [transfer-ensure? (get entry ::ensured? true)
+              acquired
+              (when-not transfer-ensure?
+                (d/connect (entry-config database-name entry)))]
+          (when (and acquired (not (identical? (::conn entry) acquired)))
+            (try
+              (d/release acquired)
+              (catch Throwable _))
+            (throw
+             (ex-info
+              "Datahike returned a different connection for one database route."
+              {:seon.error/kind
+               :seon.db.registry.error/connection-mismatch
+               ::database-name database-name
+               ::attachment (::attachment entry)})))
+          (let [updated
+                (-> entry
+                    (assoc ::ensured? false)
+                    (update ::transport-connections (fnil conj #{})
+                            transport-connection))]
+            (swap! !registry assoc database-name updated)
+            (assoc (entry-view database-name updated) ::acquired? true)))))))
+
+(defn- retain-release-failure!
+  [database-name completion entry throwable]
+  (let [message (.toString throwable)]
+    (log/error throwable "database connection release failed"
+               {::database-name database-name})
+    (locking !registry
+      (when (identical? completion
+                        (::release-completion (get @!registry database-name)))
+        (swap! !registry assoc database-name
+               (-> entry
+                   (dissoc ::release-completion)
+                   (assoc ::release-error message)))))
+    (deliver completion {::database-name database-name
+                         ::released? false
+                         ::release-error message})
+    {::database-name database-name
+     ::released? false
+     ::release-error message}))
+
+(defn- finish-final-release!
+  [database-name completion entry drain!]
+  (try
+    (drain! {::database-name database-name
+             ::attachment (::attachment entry)})
+    (d/release (::conn entry))
+    (locking !registry
+      (when (identical? completion
+                        (::release-completion (get @!registry database-name)))
+        (swap! !registry dissoc database-name)))
+    (let [result {::database-name database-name ::released? true}]
+      (deliver completion result)
+      result)
+    (catch Throwable throwable
+      (retain-release-failure!
+       database-name completion entry throwable))))
+
+(defn release-database-acquisition!
+  "Release one exact transport connection's acquisition of one database.
+
+   Sibling connections retain their Datahike references. If this is the final
+   reference, the entry is made unavailable before `drain!` and Datahike's
+   final release run outside the registry-wide lock."
+  {:malli/schema [:=> [:cat ::release-database-acquisition!-request]
+                  ::release-database-acquisition!-response]}
+  [{::keys [database-name transport-connection drain!]}]
+  (let [action
+        (locking !registry
+          (if-let [entry (get @!registry database-name)]
+            (let [connections (::transport-connections entry #{})]
+              (cond
+                (::release-completion entry)
+                {::database-name database-name ::released? false}
+
+                (not (contains? connections transport-connection))
+                {::database-name database-name ::released? false}
+
+                :else
+                (let [remaining (disj connections transport-connection)
+                      updated (assoc entry ::transport-connections remaining)
+                      final? (and (not (::ensured? updated))
+                                  (empty? remaining))]
+                  (if final?
+                    (let [completion (promise)
+                          releasing (assoc updated
+                                           ::release-completion completion)]
+                      (swap! !registry assoc database-name releasing)
+                      {::final? true
+                       ::completion completion
+                       ::entry releasing})
+                    (try
+                      (d/release (::conn entry))
+                      (swap! !registry assoc database-name updated)
+                      {::database-name database-name ::released? true}
+                      (catch Throwable throwable
+                        (let [message (.toString throwable)]
+                          (swap! !registry assoc database-name
+                                 (assoc updated ::release-error message))
+                          {::database-name database-name
+                           ::released? false
+                           ::release-error message})))))))
+            {::database-name database-name ::released? false}))]
+    (if (::final? action)
+      (finish-final-release!
+       database-name (::completion action) (::entry action) drain!)
+      (select-keys action [::database-name ::released? ::release-error]))))
+
 (defn- lifecycle-fail!
   [kind message data]
   (throw (ex-info message (assoc data :seon.error/kind kind))))
@@ -603,6 +830,13 @@
         ::attachment (::attachment entry)
         ::coordinate (current-coordinate entry)
         ::release-error (::release-error entry)})
+
+      (::release-completion entry)
+      (lifecycle-fail!
+       :seon.db.registry.error/releasing
+       "The requested database route is being released."
+       {::database-name database-name
+        ::attachment (::attachment entry)})
 
       :else entry)))
 
@@ -1483,6 +1717,12 @@
   (locking !registry
     (if-let [entry (get @!registry target-database-name)]
       (do
+        (when (seq (::transport-connections entry))
+          (lifecycle-fail!
+           :seon.db.protocol.error/database-in-use
+           "The target database is still acquired by live connections."
+           {::target-database-name target-database-name
+            ::attachment (::attachment entry)}))
         (require-attachment!
          "Release target" attachment (::attachment entry)
          {::target-database-name target-database-name})
@@ -1579,7 +1819,10 @@
              ::deleted? true}))))))
 
 (defn release-database!
-  "Release the registered conn for `database-name` and drop the entry.
+  "Release the administrative reference for `database-name`.
+
+   The entry is dropped when no live transport connection retains it; otherwise
+   those connections continue to use their own Datahike references.
    Does NOT delete on-disk data — callers control persistence.
    Idempotent: releasing an absent name returns `{::released? false}`
    without throwing.
@@ -1591,14 +1834,28 @@
                   ::release-database!-response]}
   [{::keys [database-name]}]
   (locking !registry
-    (if-let [{::keys [conn release-error]} (get @!registry database-name)]
-      (if release-error
+    (if-let [{::keys [conn release-error release-completion ensured?
+                      transport-connections]
+              :as entry}
+             (get @!registry database-name)]
+      (cond
+        release-error
         {::database-name database-name
          ::released? false
          ::release-error release-error}
+
+        release-completion
+        {::database-name database-name ::released? false}
+
+        (false? ensured?)
+        {::database-name database-name ::released? false}
+
+        :else
         (try
           (d/release conn)
-          (swap! !registry dissoc database-name)
+          (if (seq transport-connections)
+            (swap! !registry assoc database-name (assoc entry ::ensured? false))
+            (swap! !registry dissoc database-name))
           {::database-name database-name ::released? true}
           (catch Throwable throwable
             (let [message (.toString throwable)]
