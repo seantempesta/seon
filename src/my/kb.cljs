@@ -24,9 +24,8 @@
    `:my.kb.source/*` rows exist only once YOU run a recipe (my.kb-test uses
    its own throwaway db), so never report them as real data.
 
-   Async: reads (`db/query`/`db/pull`/`db/entity`) are SYNC and omit the conn
-   (auto-injected); `db/transact!` returns a Promise — `(await …)` it inside
-   a fn (the REPL top level auto-awaits)."
+   Database reads and writes are asynchronous authority operations. Compose
+   related reads at one explicit coordinate inside an `^:async` function."
   (:require
     [clojure.string :as str]
     [my.data :as data]
@@ -310,22 +309,32 @@
   [s]
   (into #{} (filter #(>= (count %) 2)) (re-seq #"[a-z0-9]+" (str/lower-case s))))
 
-(defn- kb-text-rows
-  "Every `[eid attr text]` of a `my.kb`-family STRING attr on `db` — the
+(defn ^:async ^:private kb-text-rows
+  "Every `[eid attr text]` of a `my.kb`-family STRING attr at one coordinate — the
    deterministic recall corpus: [[remember]] claims AND your own
    `my.kb.<domain>` rows alike. Attrs come from the db's installed schema
    (an attr installs at its first write); sorted for determinism."
-  [db]
+  [coordinate]
   (let [family? (fn [a] (when-let [ns (and (keyword? a) (namespace a))]
                           (or (= ns "my.kb") (str/starts-with? ns "my.kb."))))
-        attrs   (->> (db/installed-schema db)
-                     (filter (fn [[a m]] (and (family? a)
-                                              (= :db.type/string (:db/valueType m)))))
-                     (map first)
-                     sort)]
-    (vec (for [a attrs
-               [e v] (sort (db/query '[:find ?e ?v :in $ ?a :where [?e ?a ?v]] db a))]
-           [e a v]))))
+        installed (await (db/installed-schema {:seon.db/coordinate coordinate}))]
+    (if (:seon.error/message installed)
+      installed
+      (let [attrs (->> installed
+                       (filter (fn [[a m]] (and (family? a)
+                                                (= :db.type/string (:db/valueType m)))))
+                       (map first)
+                       sort
+                       vec)]
+        (if (empty? attrs)
+          []
+          (await
+           (db/query
+            {:seon.db/query '[:find ?e ?a ?v
+                              :in $ [?a ...]
+                              :where [?e ?a ?v]]
+             :seon.db/args [attrs]
+             :seon.db/coordinate coordinate})))))))
 
 (defn- text-matches
   "Rank `[eid attr text]` rows against a question-token set: an entity's
@@ -370,13 +379,24 @@
   [{::keys [about limit]}]
   (try
     (let [limit (or limit 10)
-          db    @db/*conn*
-          rows  (kb-text-rows db)
+          coordinate (await (db/head-coordinate))
+          _ (when (:seon.error/message coordinate)
+              (throw (ex-info "knowledge-base coordinate acquisition failed"
+                              coordinate)))
+          rows  (await (kb-text-rows coordinate))
+          _ (when (:seon.error/message rows)
+              (throw (ex-info "knowledge-base text acquisition failed" rows)))
           hits  (text-matches (tokens about) rows)
-          items (mapv (fn [[e score]]
-                        (assoc (db/pull db '[*] e)
-                               ::match :text ::matched-tokens score))
-                      (take limit hits))
+          selected (vec (take limit hits))
+          pulled (await (db/pull-many
+                         {:seon.db/pull-pattern '[*]
+                          :seon.db/refs (mapv first selected)
+                          :seon.db/coordinate coordinate}))
+          _ (when (:seon.error/message pulled)
+              (throw (ex-info "knowledge-base pull failed" pulled)))
+          items (mapv (fn [[_e score] entity]
+                        (assoc entity ::match :text ::matched-tokens score))
+                      selected pulled)
           want  (- limit (count items))
           seen  (into #{} (map :db/id) items)
           scope (into #{} (map first) rows)
@@ -384,7 +404,7 @@
                   (await (embed/search-pull {:seon.embed/query about
                                              :seon.embed/k     limit
                                              :seon.embed/eids  scope
-                                             :seon.embed/db    db})))
+                                             :seon.embed/coordinate coordinate})))
           items (into items
                       (->> (:seon.embed/hits sem)
                            (remove #(seen (:seon.embed/eid %)))
