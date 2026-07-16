@@ -204,10 +204,11 @@
                  publish-socket-path))))
 
 (defn- open-response
-  [descriptor]
+  [descriptor request-id]
   (let [database-selection (::launch/database descriptor)
         attachment (::coordinate/attachment database-selection)]
     {::protocol/success? true
+     ::protocol/request-id request-id
      ::protocol/database-name (::protocol/database-name database-selection)
      ::coordinate/coordinate
      (merge attachment
@@ -218,7 +219,7 @@
 
 (deftest ensure-response-validation-rejects-every-crossed-selection
   (let [descriptor (branch-launch-descriptor)
-        response (open-response descriptor)
+        response (open-response descriptor "ensure/validation")
         validate #(replica/validate-ensure-response
                    {::launch/descriptor descriptor ::replica/response %})]
     (is (= response (validate response)))
@@ -242,7 +243,6 @@
 (deftest ensure-database-routes-the-exact-branch-selection
   (async done
     (let [descriptor (branch-launch-descriptor)
-          expected-response (open-response descriptor)
           writer-owner (::launch/writer-owner descriptor)]
       (-> (with-rpc-stub
            (fn [socket-path request _]
@@ -251,9 +251,14 @@
                      (assoc (::launch/database descriptor)
                             ::protocol/request-id (::protocol/request-id request)))
                     request))
-             (js/Promise.resolve expected-response))
+             (js/Promise.resolve
+              (open-response descriptor (::protocol/request-id request))))
            #(replica/ensure-database! {::launch/descriptor descriptor}))
-          (.then #(is (= expected-response %)))
+          (.then (fn [response]
+                   (is (string? (::protocol/request-id response)))
+                   (is (= (dissoc (open-response descriptor "ignored")
+                                  ::protocol/request-id)
+                          (dissoc response ::protocol/request-id)))))
           (.catch #(is false (str "exact branch ensure threw: " %)))
           (.finally done)))))
 

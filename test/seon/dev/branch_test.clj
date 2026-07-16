@@ -96,7 +96,8 @@
         handler
         (fn [message]
           (swap! requests conj message)
-          (case (::protocol/operation message)
+          (some->
+           (case (::protocol/operation message)
             :seon.db.protocol.operation/ensure-database
             (if (= "trial-route" (::protocol/database-name message))
               (if @branch-exists?
@@ -140,7 +141,8 @@
                ::protocol/target-attachment target-attachment
                ::protocol/source-head source-head
                ::protocol/released? false
-               ::protocol/deleted? true})))
+               ::protocol/deleted? true}))
+           (assoc ::protocol/request-id (::protocol/request-id message))))
         server (uds/start-request-server!
                 {::uds/socket-path socket ::uds/handler handler})]
     {:seon.dev.branch-test/server server
@@ -431,7 +433,8 @@
         handler
         (fn [message]
           (swap! requests conj message)
-          (case (::protocol/operation message)
+          (some->
+           (case (::protocol/operation message)
             :seon.db.protocol.operation/ensure-database
             (if (= target-name (::protocol/database-name message))
               (if @branch-exists?
@@ -494,7 +497,8 @@
                ::protocol/target-attachment target-attachment
                ::protocol/source-head source-head
                ::protocol/released? false
-               ::protocol/deleted? true})))
+               ::protocol/deleted? true}))
+           (assoc ::protocol/request-id (::protocol/request-id message))))
         server (uds/start-request-server!
                 {::uds/socket-path socket ::uds/handler handler})
         manifest {:seon.dev.artifact/application-digest "application"}]
