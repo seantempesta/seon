@@ -1227,9 +1227,13 @@ fallback is prohibited.
   178 net lines; its CLJ allocation proof passes 12 tests/75 assertions and the
   complete CLJS artifact compiles, while execution of its four focused CLJS
   namespaces remains blocked by the intentionally broken legacy replica import.
-  Integration review is now falsifying whether its cached MCP advertisement
-  membership remains current after post-boot birth/termination; no second
-  registry or synchronous fallback is acceptable. Commit `86db045d` implements
+  Commit `6ccd25df` closes the discovered MCP membership regression with one
+  shared resumable-agent query and one addressed interest whose owner and exact
+  coordinates fence post-boot birth, termination, reverse completion, and
+  detach. Its full focused artifact compiles; runtime remains blocked before
+  namespace start only by the same intentional replica import. No polling,
+  second registry, resume/unhost invalidation, or synchronous database fallback
+  was added. Commit `86db045d` implements
   the one authored-source owner grounded in
   [[research/unit-8-authored-source-loading-seam-2026-07-16]]. Commit
   `0f6d06ea` adds one coordinate-pinned multi-agent preparation, parallel
