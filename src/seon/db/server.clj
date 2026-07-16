@@ -23,7 +23,6 @@
 (schema/register! ::backend :seon.db.writer/backend)
 (schema/register! ::database-path :seon.db.writer/database-path)
 (schema/register! ::request-socket-path :seon.db.writer/request-socket-path)
-(schema/register! ::publish-socket-path :seon.db.writer/publish-socket-path)
 (schema/register! ::repl-port [:int {:min 0 :max 65535}])
 (schema/register! ::repl-port-file [:string {:min 1}])
 (schema/register! ::intent-path [:string {:min 1}])
@@ -40,7 +39,6 @@
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
   [::request-socket-path ::request-socket-path]
-  [::publish-socket-path ::publish-socket-path]
   [::repl-port {:optional true} ::repl-port]
   [::repl-port-file {:optional true} ::repl-port-file]])
 (schema/register! ::repl-server :any)
@@ -149,8 +147,7 @@
   (loop [options
          {::database-name "default"
           ::backend :file
-          ::request-socket-path "tmp/seon-client-runtime-req.sock"
-          ::publish-socket-path "tmp/seon-client-runtime-pub.sock"}
+          ::request-socket-path "tmp/seon-client-runtime-req.sock"}
          remaining arguments]
     (case (first remaining)
       "--backend"
@@ -167,10 +164,6 @@
 
       "--req-sock"
       (recur (assoc options ::request-socket-path (second remaining))
-             (drop 2 remaining))
-
-      "--pub-sock"
-      (recur (assoc options ::publish-socket-path (second remaining))
              (drop 2 remaining))
 
       "--repl-port"
@@ -342,7 +335,7 @@
   (println "[database] booting pid="
            (.pid (java.lang.ProcessHandle/current)))
   (let [{::keys [database-name backend database-path request-socket-path
-                 publish-socket-path repl-port]
+                 repl-port]
          :as options}
         (parse-arguments arguments)
         dependencies (writer-runtime)
@@ -352,8 +345,7 @@
           {::writer/dependencies dependencies
            ::writer/database-name database-name
            ::writer/backend backend
-           ::writer/request-socket-path request-socket-path
-           ::writer/publish-socket-path publish-socket-path}
+           ::writer/request-socket-path request-socket-path}
            database-path
            (assoc ::writer/database-path database-path)))
         resolved-repl-port-file (when repl-port
@@ -372,7 +364,6 @@
             (writer/stop! writer-server)
             (throw throwable)))]
     (println "[database] request socket:" request-socket-path)
-    (println "[database] publish socket:" publish-socket-path)
     (println "[database] ready")
     (cond-> {::writer-server writer-server}
       repl-server

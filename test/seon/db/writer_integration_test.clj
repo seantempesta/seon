@@ -1,5 +1,5 @@
 (ns seon.db.writer-integration-test
-  "End-to-end canonical writer request and publication tests."
+  "End-to-end canonical writer request and addressed-event tests."
   (:require [clojure.edn :as edn]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
@@ -14,7 +14,7 @@
             [seon.embed :as embed]
             [seon.schema :as schema])
   (:import [java.io File]
-           [java.nio.channels Channels SocketChannel]
+           [java.nio.channels SocketChannel]
            [java.util.concurrent CountDownLatch TimeUnit]))
 
 (defn- socket-path
@@ -37,16 +37,6 @@
     ::writer/revalidate-embedding-assertions (fn [_db-value _assertions] [])
     ::writer/query-vec (fn [_] {:seon.embed/vector [0.0]})
     ::writer/knn (fn [_db-value _vector _k _eids] [])}))
-
-(defn- wait-for-subscriber!
-  [publisher]
-  (let [deadline (+ (System/currentTimeMillis) 2000)]
-    (loop []
-      (cond
-        (seq @(::uds/subscribers publisher)) true
-        (> (System/currentTimeMillis) deadline)
-        (throw (ex-info "publisher did not accept its subscriber" {}))
-        :else (do (Thread/sleep 10) (recur))))))
 
 (defn- call!
   [channel request]
@@ -91,14 +81,12 @@
 (deftest capability-discovery-and-head-resolution-return-only-portable-data
   (let [database-name (str "writer-control-" (random-uuid))
         request-path (socket-path "control-request")
-        publish-path (socket-path "control-publish")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         ^SocketChannel request-channel (uds/connect! request-path)]
     (try
       (let [capability-request
@@ -150,19 +138,17 @@
         (try (.close request-channel) (catch Throwable _))
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest physical-connections-own-exact-database-access-and-release
   (let [database-name (str "writer-acquisition-" (random-uuid))
         request-path (socket-path "acquisition-request")
-        publish-path (socket-path "acquisition-publish")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         ^SocketChannel a (uds/connect! request-path)
         ^SocketChannel b (uds/connect! request-path)]
     (try
@@ -236,20 +222,18 @@
         (try (.close b) (catch Throwable _))
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest coordinate-pinned-reads-share-old-commit-and-preserve-datahike-shapes
   (let [database-name (str "writer-read-" (random-uuid))
         request-path (socket-path "read-request")
-        publish-path (socket-path "read-publish")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
           ::writer/selected-processors 2
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         ^SocketChannel request-channel (uds/connect! request-path)]
     (try
       (acquire! request-channel database-name "read/session")
@@ -679,7 +663,7 @@
         (try (.close request-channel) (catch Throwable _))
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest database-result-validation-rejects-host-owners-and-lazy-values
   (is (thrown? clojure.lang.ExceptionInfo
@@ -761,7 +745,6 @@
 (deftest semantic-search-transitions-from-provider-to-coordinate-pinned-knn
   (let [database-name (str "writer-knn-" (random-uuid))
         request-path (socket-path "knn-request")
-        publish-path (socket-path "knn-publish")
         observed (atom {})
         knn-calls (atom 0)
         knn-observations (atom [])
@@ -795,8 +778,7 @@
                  ::writer/database-name database-name
                  ::writer/backend :memory
                  ::writer/selected-processors 2
-                 ::writer/request-socket-path request-path
-                 ::writer/publish-socket-path publish-path})
+                 ::writer/request-socket-path request-path})
         runtime (::writer/runtime server)]
     (try
       (let [search!
@@ -898,12 +880,11 @@
       (finally
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest semantic-search-rejects-a-force-discarded-coordinate-before-provider
   (let [database-name (str "writer-knn-force-" (random-uuid))
         request-path (socket-path "knn-force-request")
-        publish-path (socket-path "knn-force-publish")
         provider-calls (atom 0)
         knn-calls (atom 0)
         server
@@ -920,8 +901,7 @@
                    []))
           ::writer/database-name database-name
           ::writer/backend :memory
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         runtime (::writer/runtime server)]
     (try
       (let [initial
@@ -1030,12 +1010,11 @@
       (finally
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest disconnect-waits-until-a-running-read-relinquishes-the-generation
   (let [database-name (str "writer-read-release-" (random-uuid))
         request-path (socket-path "read-release-request")
-        publish-path (socket-path "read-release-publish")
         entered (java.util.concurrent.CountDownLatch. 1)
         finish (java.util.concurrent.CountDownLatch. 1)
         server
@@ -1043,8 +1022,7 @@
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         ^SocketChannel read-channel (uds/connect! request-path)
         ^SocketChannel control-channel (uds/connect! request-path)]
     (try
@@ -1097,12 +1075,11 @@
         (try (.close control-channel) (catch Throwable _))
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest callback-requests-reject-active-duplicates-and-reuse-cleanly
   (let [database-name (str "writer-callback-reuse-" (random-uuid))
         request-path (socket-path "callback-reuse-request")
-        publish-path (socket-path "callback-reuse-publish")
         entered (java.util.concurrent.CountDownLatch. 1)
         finish (java.util.concurrent.CountDownLatch. 1)
         calls (atom 0)
@@ -1111,8 +1088,7 @@
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         runtime (::writer/runtime server)
         ^SocketChannel request-channel (uds/connect! request-path)]
     (try
@@ -1159,21 +1135,19 @@
         (try (.close request-channel) (catch Throwable _))
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest writer-stop-surfaces-release-failure-and-retains-database-identity
   (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
         database-name (str "writer-release-failure-" (random-uuid))
         database-keyword (keyword database-name)
         request-path (socket-path "release-failure-request")
-        publish-path (socket-path "release-failure-publish")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         coordinate-before
         (::registry/coordinate
          (registry/resolve-connection
@@ -1205,11 +1179,10 @@
         (registry/restore-registry! {::registry/snapshot snapshot})
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest writer-stop-retains-authority-until-request-workers-stop
   (let [executor-stops (atom 0)
-        publisher-stops (atom 0)
         database-lists (atom 0)
         result
         (with-redefs [uds/close-request-server!
@@ -1223,31 +1196,25 @@
                       registry/list-databases
                       (fn [_]
                         (swap! database-lists inc)
-                        {::registry/databases []})
-                      uds/close-publisher!
-                      (fn [_] (swap! publisher-stops inc))]
+                        {::registry/databases []})]
           (writer/stop! {::writer/request-server ::request-server
-                         ::writer/executor ::executor
-                         ::writer/publisher ::publisher}))]
+                         ::writer/executor ::executor}))]
     (is (= {::writer/stopped? false ::writer/release-results []} result))
     (is (schema/valid-candidate-value? ::writer/stop-response result))
     (is (zero? @executor-stops))
-    (is (zero? @database-lists))
-    (is (zero? @publisher-stops))))
+    (is (zero? @database-lists))))
 
 (deftest writer-stop-returns-the-pre-release-coordinate-and-outcome
   (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
         database-name (str "writer-release-success-" (random-uuid))
         database-keyword (keyword database-name)
         request-path (socket-path "release-success-request")
-        publish-path (socket-path "release-success-publish")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         before
         (registry/resolve-connection
          {::registry/database-name database-keyword})]
@@ -1269,7 +1236,7 @@
         (registry/restore-registry! {::registry/snapshot snapshot})
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest existing-database-must-already-match-the-protocol-candidate
   (doseq [[label initial-tx]
@@ -1287,8 +1254,7 @@
            (cond-> {::backend/database-name database-keyword
                     ::backend/backend :memory}
              (seq initial-tx) (assoc ::backend/initial-tx initial-tx)))
-          request-path (socket-path (str label "-request"))
-          publish-path (socket-path (str label "-publish"))]
+          request-path (socket-path (str label "-request"))]
       (try
         (d/create-database config)
         (is (thrown-with-msg?
@@ -1298,28 +1264,25 @@
               {::writer/dependencies (dependencies)
                ::writer/database-name database-name
                ::writer/backend :memory
-               ::writer/request-socket-path request-path
-               ::writer/publish-socket-path publish-path})))
+               ::writer/request-socket-path request-path})))
         (is (empty? (::registry/databases (registry/list-databases {})))
             "a rejected schema never publishes a registry entry")
         (finally
           (when (d/database-exists? config)
             (d/delete-database config))
           (.delete (File. request-path))
-          (.delete (File. publish-path)))))))
+          nil)))))
 
 (deftest writer-opens-and-routes-an-explicit-native-branch-attachment
   (let [database-name (str "writer-branch-main-" (random-uuid))
         branch-name (str "writer-branch-route-" (random-uuid))
         request-path (socket-path "branch-request")
-        publish-path (socket-path "branch-publish")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         main
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)})
@@ -1359,7 +1322,7 @@
       (finally
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest native-branch-open-restores-proximum-without-running-main-initializer
   (let [database-name (str "writer-proximum-main-" (random-uuid))
@@ -1367,7 +1330,6 @@
         database-root (File. "tmp" (str "writer-proximum-" (random-uuid)))
         database-path (.getPath (File. database-root "db"))
         request-path (socket-path "proximum-branch-request")
-        publish-path (socket-path "proximum-branch-publish")
         initializer-calls (atom [])
         server
         (writer/start!
@@ -1379,8 +1341,7 @@
           ::writer/database-name database-name
           ::writer/backend :file
           ::writer/database-path database-path
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         main
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)})
@@ -1416,7 +1377,7 @@
       (finally
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))
+        nil
         (when (.exists database-root)
           (run! (fn [^File file] (.delete file))
                 (reverse (file-seq database-root))))))))
@@ -1425,14 +1386,12 @@
   (let [source-name (str "writer-lifecycle-source-" (random-uuid))
         target-name (str "writer-lifecycle-target-" (random-uuid))
         request-path (socket-path "life-req")
-        publish-path (socket-path "life-pub")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name source-name
           ::writer/backend :memory
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})]
+          ::writer/request-socket-path request-path})]
     (try
       (with-open [channel (uds/connect! request-path)]
         (acquire! channel source-name "lifecycle/session")
@@ -1575,26 +1534,22 @@
       (finally
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
-(deftest canonical-writes-route-commit-and-publish-exactly-once
+
+(deftest canonical-writes-route-commit-and-recover-exactly-once
   (let [database-name (str "writer-integration-" (random-uuid))
         request-path (socket-path "request")
-        publish-path (socket-path "publish")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
-        ^SocketChannel request-channel (uds/connect! request-path)
-        ^SocketChannel publish-channel (uds/connect! publish-path)]
+          ::writer/request-socket-path request-path})
+        ^SocketChannel request-channel (uds/connect! request-path)]
     (try
       (acquire! request-channel database-name "writer/session")
-      (wait-for-subscriber! (::writer/publisher server))
-      (let [publish-input (Channels/newInputStream publish-channel)
-            ping-response
+      (let [ping-response
             (call! request-channel
                    (protocol/ping-request
                     {::protocol/request-id "invalid/ping"}))
@@ -1626,22 +1581,22 @@
                     {::protocol/database-name "not-open"
                      ::protocol/request-id "unknown-route"
                      ::protocol/transaction-data []}))
-            schema-request
-            (protocol/transaction-request
-             {::protocol/database-name database-name
-              ::protocol/request-id "writer/schema"
-              ::protocol/transaction-data
-              [{:db/ident :writer.person/id
-                :db/valueType :db.type/string
-                :db/cardinality :db.cardinality/one
-                :db/unique :db.unique/identity}
-               {:db/ident :writer.person/status
-                :db/valueType :db.type/keyword
-                :db/cardinality :db.cardinality/one}
-               {:db/ident :writer.person/score
-                :db/valueType :db.type/double
-                :db/cardinality :db.cardinality/one}]})
-            schema-response (call! request-channel schema-request)
+            schema-response
+            (call! request-channel
+                   (protocol/transaction-request
+                    {::protocol/database-name database-name
+                     ::protocol/request-id "writer/schema"
+                     ::protocol/transaction-data
+                     [{:db/ident :writer.person/id
+                       :db/valueType :db.type/string
+                       :db/cardinality :db.cardinality/one
+                       :db/unique :db.unique/identity}
+                      {:db/ident :writer.person/status
+                       :db/valueType :db.type/keyword
+                       :db/cardinality :db.cardinality/one}
+                      {:db/ident :writer.person/score
+                       :db/valueType :db.type/double
+                       :db/cardinality :db.cardinality/one}]}))
             entity-request
             (protocol/transaction-request
              {::protocol/database-name database-name
@@ -1652,19 +1607,13 @@
                 :writer.person/status :writer.status/ready
                 :writer.person/score 1}]})
             entity-response (call! request-channel entity-request)
-            schema-event (uds/read-frame publish-input)
-            entity-event (uds/read-frame publish-input)
             recovered-response (call! request-channel entity-request)
-            unexpected-event (future (uds/read-frame publish-input))
-            no-event-sentinel ::no-event
-            observed-after-retry (deref unexpected-event 250 no-event-sentinel)
             connection
             (::registry/conn
              (registry/lookup-connection
               {::registry/database-name (keyword database-name)}))
             stored
-            (d/pull (d/db connection) '[*]
-                    [:writer.person/id "alice"])]
+            (d/pull (d/db connection) '[*] [:writer.person/id "alice"])]
         (is (= {::protocol/success? true
                 ::protocol/request-id "invalid/ping"
                 ::protocol/pong? true}
@@ -1676,9 +1625,8 @@
         (is (coordinate/same-attachment?
              (coordinate/resolved (d/db connection))
              (::coordinate/coordinate ensure-response)))
-        (is (= initial-coordinate
-               (::coordinate/coordinate ensure-after-invalid))
-            "an invalid request and an idempotent ensure write nothing")
+        (is (= initial-coordinate (::coordinate/coordinate ensure-after-invalid))
+            "invalid input and idempotent ensure do not advance the database")
         (is (= protocol/protocol-error
                (::protocol/error-kind invalid-response)))
         (is (= protocol/not-found-error
@@ -1688,59 +1636,46 @@
         (is (= protocol/reserved-attributes
                (set (filter #(contains? (:schema (d/db writer-connection)) %)
                             protocol/reserved-attributes)))
-            "the canonical Malli-derived receipt schema exists at publication")
+            "the canonical Malli-derived receipt schema exists before writes")
         (is (true? (::protocol/success? entity-response)))
         (is (pos-int?
              (get (::protocol/temporary-ids entity-response) "person-temp")))
-        (is (= [(::protocol/coordinate schema-response)
-                (::protocol/coordinate entity-response)]
-               (mapv ::protocol/coordinate
-                     [schema-event entity-event])))
-        (is (= ["writer/schema" "writer/entity"]
-               (mapv ::protocol/request-id [schema-event entity-event])))
-        (is (every? #(= protocol/transaction-event (::protocol/event %))
-                    [schema-event entity-event]))
         (is (every?
              empty?
-             (for [message [schema-response entity-response
-                            schema-event entity-event]]
+             (for [message [schema-response entity-response]]
                (filter protocol/reserved-attributes
                        (map second (::protocol/transaction-data message)))))
-            "public response and event datoms omit receipt implementation")
+            "public transaction responses omit receipt implementation datoms")
         (is (every?
              empty?
-             (for [message [schema-response entity-response
-                            schema-event entity-event]]
+             (for [message [schema-response entity-response]]
                (filter protocol/reserved-attributes
                        (keys (or (::protocol/transaction-meta message) {})))))
-            "public response and event metadata omit receipt implementation")
+            "public transaction responses omit receipt implementation metadata")
         (is (= (count (::protocol/transaction-data entity-response))
                (+ (::protocol/datoms-added entity-response)
                   (::protocol/datoms-retracted entity-response))))
         (is (true? (::protocol/recovered? recovered-response)))
-        (is (= no-event-sentinel observed-after-retry)
-            "a recovered delivery emits no duplicate transaction event")
+        (is (= (::protocol/coordinate entity-response)
+               (::protocol/coordinate recovered-response))
+            "an idempotent retry returns the exact committed coordinate")
         (is (= :writer.status/ready (:writer.person/status stored)))
         (is (instance? Double (:writer.person/score stored)))
         (is (= 1.0 (:writer.person/score stored))))
       (finally
         (try (.close request-channel) (catch Throwable _))
-        (try (.close publish-channel) (catch Throwable _))
         (writer/stop! server)
-        (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        (.delete (File. request-path))))))
 
 (deftest expected-basis-is-enforced-inside-the-serialized-writer
   (let [database-name (str "writer-fence-" (random-uuid))
         request-path (socket-path "fence-request")
-        publish-path (socket-path "fence-publish")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         ^SocketChannel a (uds/connect! request-path)
         ^SocketChannel b (uds/connect! request-path)]
     (try
@@ -1850,20 +1785,18 @@
         (try (.close b) (catch Throwable _))
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest canonical-schema-forms-augment-the-same-domain-transaction
   (let [database-name (str "writer-schema-" (random-uuid))
         isolated-name (str "writer-schema-isolated-" (random-uuid))
         request-path (socket-path "schema-request")
-        publish-path (socket-path "schema-publish")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         ^SocketChannel channel (uds/connect! request-path)
         bootstrap-schema
         [{:db/ident :seon.schema/key
@@ -2176,4 +2109,4 @@
         (try (.close channel) (catch Throwable _))
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))

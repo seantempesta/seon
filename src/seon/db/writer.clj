@@ -2,7 +2,7 @@
   "Interpret canonical requests at the authoritative Datahike writer.
 
    This namespace owns database semantics: connection initialization,
-   idempotent writes, generated identities, transaction publication, replay,
+   idempotent writes, generated identities, addressed database interests,
    and embedding search. `seon.db.transport.uds` owns only delivery. Every
    database-scoped request names its database explicitly; there is no ambient
    connection path."
@@ -13,14 +13,12 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.committed-report :as committed-report]
-            [datahike.constants :as datahike.constants]
             [datahike.connector :as datahike.connector]
             [datahike.datom :as datahike.datom]
             [datahike.db.interface :as dbi]
             [datahike.db.utils :as datahike.db]
             [datahike.impl.entity :as datahike.entity]
             [hasch.core :as hasch]
-            [konserve.core :as k]
             [seon.db.coordinate :as coordinate]
             [seon.db.datahike.schema :as datahike.schema]
             [seon.db.executor :as executor]
@@ -53,7 +51,6 @@
 (schema/register! ::interest-state 'some?)
 (schema/register! ::readiness-owner 'some?)
 (schema/register! ::transport-connection 'map?)
-(schema/register! ::publisher :seon.db.transport.uds/publisher)
 (schema/register!
  ::dependencies
   [:map
@@ -80,14 +77,12 @@
   [::active-requests {:optional true} ::active-requests]
   [::query-jobs {:optional true} ::query-jobs]
   [::interest-state {:optional true} ::interest-state]
-  [::readiness-owner {:optional true} ::readiness-owner]
-  [::publisher ::publisher]])
+  [::readiness-owner {:optional true} ::readiness-owner]])
 (schema/register! ::request-server :seon.db.transport.uds/request-server)
 (schema/register! ::database-name :seon.db.protocol/database-name)
 (schema/register! ::backend :seon.db.protocol/backend)
 (schema/register! ::database-path :seon.db.protocol/database-path)
 (schema/register! ::request-socket-path :seon.db.transport.uds/socket-path)
-(schema/register! ::publish-socket-path :seon.db.transport.uds/socket-path)
 (schema/register! ::selected-processors [:int {:min 1}])
 (schema/register!
  ::start-request
@@ -97,13 +92,11 @@
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
   [::selected-processors {:optional true} ::selected-processors]
-  [::request-socket-path ::request-socket-path]
-  [::publish-socket-path ::publish-socket-path]])
+  [::request-socket-path ::request-socket-path]])
 (schema/register!
  ::server
  [:map
   [::request-server ::request-server]
-  [::publisher ::publisher]
   [::executor ::executor]
   [::runtime ::runtime]
   [::database-name ::database-name]])
@@ -569,7 +562,7 @@
               ::restore-admin/connection-state
               :seon.db.restore-admin.connection/cleanup-unproved})))))))
 
-;;; Transaction report and publication
+;;; Transaction reports
 
 (defn- transaction-report-data
   [report request-id]
@@ -595,42 +588,6 @@
      ::protocol/transaction-meta (public-transaction-meta (:tx-meta report))
      ::protocol/request-id request-id}))
 
-(defn- transaction-event-from-data
-  [database-name transaction-data]
-  (let [event
-        {::protocol/event protocol/transaction-event
-         ::protocol/database-name database-name
-         ::protocol/coordinate (::protocol/coordinate transaction-data)
-         ::protocol/previous-coordinate
-         (::protocol/previous-coordinate transaction-data)
-         ::protocol/transaction-data
-         (::protocol/transaction-data transaction-data)
-         ::protocol/datoms-added (::protocol/datoms-added transaction-data)
-         ::protocol/datoms-retracted
-         (::protocol/datoms-retracted transaction-data)}]
-    (cond-> event
-      (seq (::protocol/transaction-meta transaction-data))
-      (assoc ::protocol/transaction-meta
-             (::protocol/transaction-meta transaction-data))
-
-      (seq (::protocol/request-id transaction-data))
-      (assoc ::protocol/request-id
-             (::protocol/request-id transaction-data)))))
-
-(defn- transaction-listener
-  [runtime database-name]
-  (fn [report]
-    (try
-      (let [request-id (::protocol/request-id (:tx-meta report))
-            data (transaction-report-data report request-id)]
-        (uds/publish!
-         {::uds/publisher (::publisher runtime)
-          ::uds/message (transaction-event-from-data database-name data)}))
-      (catch Throwable throwable
-        (log/error throwable
-                   "database transaction publication failed"
-                   {::database-name database-name})))))
-
 (defn initialize-connection!
   "Initialize one database connection from the composed writer runtime."
   {:malli/schema [:=> [:cat ::initialize-request]
@@ -643,8 +600,6 @@
   (assert-protocol-native-schema! (d/db connection))
   (when (= :seon.db.registry.open/branch open-intent)
     (assert-declared-secondary-indices-live! (d/db connection)))
-  (d/listen connection ::transaction-publication
-            (transaction-listener runtime database-name))
   (when (= :seon.db.registry.open/main open-intent)
     ((::database-initializer runtime) connection database-name))
   {::database-initialized? true})
@@ -1380,75 +1335,6 @@
               (catch Throwable throwable throwable)))))
         completion))))
 
-;;; Transaction-history replay
-
-(def ^:private replay-page-size 256)
-
-(schema/register! ::page-size [:int {:min 1}])
-(schema/register!
- ::replay-page-request
- [:map
-  [::connection ::connection]
-  [::database-name ::database-name]
-  [::protocol/since-coordinate :seon.db.protocol/since-coordinate]
-  [::protocol/through-coordinate
-   {:optional true}
-   :seon.db.protocol/through-coordinate]
-  [::page-size ::page-size]])
-(schema/register!
- ::replay-page-response
- [:map
-  [::protocol/since-coordinate :seon.db.protocol/since-coordinate]
-  [::protocol/through-coordinate :seon.db.protocol/through-coordinate]
-  [::protocol/continuation-coordinate
-   :seon.db.protocol/continuation-coordinate]
-  [::protocol/complete? :seon.db.protocol/complete?]
-  [::protocol/events :seon.db.protocol/events]
-  [::protocol/replayed-count :seon.db.protocol/replayed-count]])
-
-(defn- replay-error
-  [message data]
-  (throw
-   (ex-info message (assoc data ::failure-kind protocol/protocol-error))))
-
-(defn- replay-coordinate
-  [request]
-  (try
-    (coordinate/at request)
-    (catch clojure.lang.ExceptionInfo exception
-      (replay-error (.getMessage exception) (ex-data exception)))))
-
-(defn- retained-stored-commit
-  [store commit-id missing!]
-  (or (k/get store commit-id nil {:sync? true})
-      (missing! commit-id)))
-
-(defn- stored-ancestor?
-  [store container-id ancestor-id missing!]
-  (loop [pending [container-id]
-         visited #{}]
-    (if-let [commit-id (first pending)]
-      (cond
-        (= commit-id ancestor-id) true
-        (contains? visited commit-id)
-        (recur (next pending) visited)
-        :else
-        (let [stored (retained-stored-commit store commit-id missing!)]
-          (recur (concat (next pending)
-                         (get-in stored [:meta :datahike/parents]))
-                 (conj visited commit-id))))
-      false)))
-
-(defn- ancestor-commit?
-  "True when `ancestor-id` is reachable from the frozen container commit."
-  [container-db ancestor-id]
-  (stored-ancestor?
-   (:store container-db) (d/commit-id container-db) ancestor-id
-   (fn [commit-id]
-     (replay-error
-      "Replay ancestry contains an unavailable commit."
-      {::coordinate/commit-id commit-id}))))
-
 (defn- handle-resolve-transaction-coordinate
   [connection request]
   (protocol/success
@@ -1457,183 +1343,6 @@
      {::registry/conn connection
       ::registry/main-coordinate (::protocol/head-coordinate request)
       ::registry/transaction-id (::protocol/transaction-id request)})}))
-
-(defn- transaction-id
-  [^datahike.datom.Datom datom]
-  (Math/abs (long (.-tx datom))))
-
-(defn- page-transaction-ids
-  [since-t through-t page-size]
-  (->> (range (max (inc since-t) (inc datahike.constants/tx0))
-              (inc through-t))
-       (take (inc page-size))
-       vec))
-
-(defn- history-by-transaction
-  [db since-t selected-transaction-ids]
-  (let [selected (set selected-transaction-ids)]
-    (reduce
-     (fn [by-transaction ^datahike.datom.Datom datom]
-       (let [transaction (transaction-id datom)]
-         (if (contains? selected transaction)
-           (update by-transaction transaction (fnil conj []) datom)
-           by-transaction)))
-     {}
-     (-> db d/history (d/since since-t) (d/datoms :eavt)))))
-
-(defn- replay-events
-  [db attachment database-name since-t selected-transaction-ids]
-  (let [by-transaction
-        (history-by-transaction db since-t selected-transaction-ids)]
-    (::events
-     (reduce
-      (fn [{events ::events previous-t ::previous-t}
-           transaction]
-        (let [datoms (get by-transaction transaction)]
-          (when (empty? datoms)
-            (replay-error
-             "Replay could not reconstruct a selected transaction."
-             {::coordinate/t transaction}))
-          (let [stored-transaction-meta
-                (into {}
-                      (map
-                       (fn [^datahike.datom.Datom datom]
-                         [(.-a datom) (.-v datom)]))
-                      (filter
-                       (fn [^datahike.datom.Datom datom]
-                         (= (long (.-e datom)) transaction))
-                       datoms))
-                request-id (::protocol/request-id stored-transaction-meta)
-                transaction-meta
-                (public-transaction-meta stored-transaction-meta)
-                data
-                {::protocol/transaction-data
-                 (transaction-data->protocol
-                  (public-transaction-datoms datoms))
-                 ::protocol/datoms-added (count (filter :added datoms))
-                 ::protocol/datoms-retracted
-                 (count (remove :added datoms))
-                 ::protocol/coordinate
-                 (replay-coordinate
-                  {::coordinate/db-value db
-                   ::coordinate/attachment attachment
-                   ::coordinate/target-t transaction})
-                 ::protocol/previous-coordinate
-                 (replay-coordinate
-                  {::coordinate/db-value db
-                   ::coordinate/attachment attachment
-                   ::coordinate/target-t previous-t})
-                 ::protocol/transaction-meta transaction-meta
-                 ::protocol/request-id request-id}]
-            {::events
-             (conj events
-                   (transaction-event-from-data database-name data))
-             ::previous-t transaction})))
-      {::events [] ::previous-t since-t}
-      selected-transaction-ids))))
-
-(defn replay-transactions-page
-  "Return one bounded page of committed transaction events."
-  {:malli/schema [:=> [:cat ::replay-page-request]
-                  ::replay-page-response]}
-  [{::keys [connection database-name page-size]
-    ::protocol/keys [since-coordinate through-coordinate]}]
-  (let [current-db (d/db connection)
-        current-coordinate (coordinate/resolved current-db)
-        attachment (coordinate/attachment current-coordinate)
-        _ (when-not (coordinate/same-attachment?
-                     current-coordinate since-coordinate)
-            (replay-error "Replay cursor belongs to another attachment."
-                          {::protocol/since-coordinate since-coordinate
-                           ::protocol/coordinate current-coordinate}))
-        frozen-db
-        (if through-coordinate
-          (do
-            (when-not (coordinate/same-attachment?
-                       current-coordinate through-coordinate)
-              (replay-error "Replay watermark belongs to another attachment."
-                            {::protocol/through-coordinate through-coordinate
-                             ::protocol/coordinate current-coordinate}))
-            (or (d/commit-as-db current-db
-                                (::coordinate/commit-id through-coordinate))
-                (replay-error "Replay watermark commit is unavailable."
-                              {::protocol/through-coordinate
-                               through-coordinate})))
-          current-db)
-        through-t (long (or (::coordinate/t through-coordinate)
-                            (::coordinate/t current-coordinate)))
-        through-coordinate*
-        (replay-coordinate
-         {::coordinate/db-value frozen-db
-          ::coordinate/attachment attachment
-          ::coordinate/target-t through-t})
-        _ (when (and through-coordinate
-                     (not= through-coordinate through-coordinate*))
-            (replay-error "Replay watermark does not match its stored commit."
-                          {::protocol/through-coordinate through-coordinate
-                           ::protocol/coordinate through-coordinate*}))
-        since-t (long (::coordinate/t since-coordinate))
-        since-db
-        (if (= (::coordinate/commit-id since-coordinate)
-               (::coordinate/commit-id through-coordinate*))
-          frozen-db
-          (or (d/commit-as-db current-db
-                              (::coordinate/commit-id since-coordinate))
-              (replay-error "Replay cursor commit is unavailable."
-                            {::protocol/since-coordinate since-coordinate})))
-        verified-since
-        (replay-coordinate
-         {::coordinate/db-value since-db
-          ::coordinate/attachment attachment
-          ::coordinate/target-t since-t})
-        _ (when-not (= since-coordinate verified-since)
-            (replay-error "Replay cursor does not match its stored commit."
-                          {::protocol/since-coordinate since-coordinate
-                           ::protocol/coordinate verified-since}))
-        _ (when-not (ancestor-commit?
-                     frozen-db (::coordinate/commit-id since-coordinate))
-            (replay-error "Replay cursor is not an ancestor of its watermark."
-                          {::protocol/since-coordinate since-coordinate
-                           ::protocol/through-coordinate
-                           through-coordinate*}))
-        since-coordinate*
-        (replay-coordinate
-         {::coordinate/db-value frozen-db
-          ::coordinate/attachment attachment
-          ::coordinate/target-t since-t})]
-    (when (> since-t through-t)
-      (replay-error "Replay cursor is ahead of its watermark."
-                    {::protocol/since-coordinate since-coordinate
-                     ::protocol/through-coordinate through-coordinate*}))
-    (if (= since-t through-t)
-      {::protocol/since-coordinate since-coordinate*
-       ::protocol/through-coordinate through-coordinate*
-       ::protocol/continuation-coordinate through-coordinate*
-       ::protocol/complete? true
-       ::protocol/events []
-       ::protocol/replayed-count 0}
-      (let [candidate-ids
-            (page-transaction-ids since-t through-t page-size)
-            selected-ids (vec (take page-size candidate-ids))
-            more? (> (count candidate-ids) page-size)]
-        (when (empty? selected-ids)
-          (replay-error "Replay found no transaction before its watermark."
-                        {::protocol/since-coordinate since-coordinate*
-                         ::protocol/through-coordinate through-coordinate*}))
-        (let [events (replay-events frozen-db attachment database-name
-                                    since-t selected-ids)
-              continuation-t (if more? (peek selected-ids) through-t)
-              continuation-coordinate
-              (replay-coordinate
-               {::coordinate/db-value frozen-db
-                ::coordinate/attachment attachment
-                ::coordinate/target-t continuation-t})]
-          {::protocol/since-coordinate since-coordinate*
-           ::protocol/through-coordinate through-coordinate*
-           ::protocol/continuation-coordinate continuation-coordinate
-           ::protocol/complete? (not more?)
-           ::protocol/events events
-           ::protocol/replayed-count (count events)})))))
 
 ;;; Canonical operation handlers
 
@@ -1936,21 +1645,6 @@
             attachment ::coordinate/attachment
             request ::request}]
   (handle-transact-async runtime connection database-name attachment request))
-
-(defn- handle-replay-transactions
-  [connection database-name request]
-  (protocol/success
-   (assoc
-    (replay-transactions-page
-     (cond->
-      {::connection connection
-       ::database-name database-name
-       ::protocol/since-coordinate (::protocol/since-coordinate request)
-       ::page-size replay-page-size}
-       (contains? request ::protocol/through-coordinate)
-       (assoc ::protocol/through-coordinate
-              (::protocol/through-coordinate request))))
-    ::protocol/database-name database-name)))
 
 (defn- execute-knn-provider!
   [dependencies {request ::request :as work}]
@@ -3229,9 +2923,6 @@
              :seon.db.protocol.operation/transact
              (handle-transact runtime connection database-name attachment request)
 
-             :seon.db.protocol.operation/replay-transactions
-             (handle-replay-transactions connection database-name request)
-
              :seon.db.protocol.operation/resolve-transaction-coordinate
              (handle-resolve-transaction-coordinate connection request)
 
@@ -3598,12 +3289,11 @@
 ;;; Explicit server lifecycle
 
 (defn start!
-  "Start the request and publication sockets for one writer runtime."
+  "Start the addressed request server for one writer runtime."
   {:malli/schema [:=> [:cat ::start-request] ::server]}
   [{::keys [dependencies database-name backend database-path selected-processors
-            request-socket-path publish-socket-path]}]
-  (let [publisher (uds/start-publisher! publish-socket-path)
-        active-requests (atom {})
+            request-socket-path]}]
+  (let [active-requests (atom {})
         interest-state (atom (empty-interest-state))
         interest-lock (Object.)
         runtime-ref (atom nil)
@@ -3625,7 +3315,6 @@
             (complete-executor! @runtime-ref completion))})
         query-jobs (atom {::by-owner {} ::by-job {}})
         runtime (assoc dependencies
-                       ::publisher publisher
                        ::executor dispatcher
                        ::active-requests active-requests
                        ::query-jobs query-jobs
@@ -3656,7 +3345,6 @@
            ::uds/close-connection!
            (partial close-transport-connection! runtime)
            ::uds/handler (partial handle-request! runtime)})
-         ::publisher publisher
          ::executor dispatcher
          ::runtime runtime
          ::database-name database-name})
@@ -3665,7 +3353,6 @@
               (registry/release-database!
                {::registry/database-name (keyword database-name)})]
           (unregister-readiness! runtime)
-          (uds/close-publisher! publisher)
           (executor/stop! {::executor/executor dispatcher})
           (if (::registry/release-error release)
             (throw
@@ -3714,6 +3401,5 @@
                       (registry/release-database!
                        {::registry/database-name database-name})))
                    databases)]
-              (uds/close-publisher! (::publisher server))
               {::stopped? (every? ::registry/released? release-results)
                ::release-results release-results})))))))

@@ -92,7 +92,7 @@
 (defn- index-roots [db-value]
   (mapv #(get db-value %) [:eavt :aevt :avet]))
 
-(defn- run-wave! [database-name request-path publish-path child-count]
+(defn- run-wave! [database-name request-path child-count]
   (dq/clear-query-cache!)
   (let [barrier-ms (+ (System/currentTimeMillis) 8000)
         processes (mapv (fn [_]
@@ -114,12 +114,6 @@
                   processes)
             _ (is (every? pos-int?
                           (map :seon.authority-density/rss-kib process-evidence)))
-            _ (is (every?
-                   #(not (str/includes?
-                          (:seon.authority-density/descriptors %)
-                          publish-path))
-                   process-evidence)
-                  "Bun clients never open the transaction publication socket")
             _ (is (identical? connection
                               (::registry/conn (registry-entry database-name)))
                   "all physical sessions retain one registry connection")
@@ -180,15 +174,13 @@
            "clj -M:cljs compile authority-density-client"))
   (let [database-name (str "authority-density-" (random-uuid))
         request-path (socket-path "request")
-        publish-path (socket-path "publish")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
           ::writer/selected-processors 8
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})]
+          ::writer/request-socket-path request-path})]
     (try
       (let [transaction
             (writer/handle-request
@@ -210,11 +202,10 @@
                 (range 400))}))]
         (is (::protocol/success? transaction) (pr-str transaction)))
       (testing "one child establishes the cold-owner and hit baseline"
-        (run-wave! database-name request-path publish-path 1))
+        (run-wave! database-name request-path 1))
       (testing "eight independent Bun sessions share that JVM state"
-        (let [proof (run-wave! database-name request-path publish-path 8)]
+        (let [proof (run-wave! database-name request-path 8)]
           (is (= 8 (:seon.authority-density/children proof)))))
       (finally
         (writer/stop! server)
-        (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        (.delete (File. request-path))))))

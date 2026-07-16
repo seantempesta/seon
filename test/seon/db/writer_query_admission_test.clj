@@ -78,13 +78,11 @@
   (let [database-a (str "query-admission-a-" (random-uuid))
         database-b (str "query-admission-b-" (random-uuid))
         request-path (socket-path "request")
-        publish-path (socket-path "publish")
         server (writer/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-a
                                ::writer/backend :memory
                                ::writer/selected-processors 4
-                               ::writer/request-socket-path request-path
-                               ::writer/publish-socket-path publish-path})
+                               ::writer/request-socket-path request-path})
         runtime (::writer/runtime server)
         transport (#'writer/transport-connection
                    {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
@@ -155,19 +153,17 @@
         (#'writer/close-transport-connection! runtime transport)
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest execute-many-query-members-share-one-physical-owner
   (let [database-a (str "query-many-a-" (random-uuid))
         database-b (str "query-many-b-" (random-uuid))
         request-path (socket-path "many-request")
-        publish-path (socket-path "many-publish")
         server (writer/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-a
                                ::writer/backend :memory
                                ::writer/selected-processors 4
-                               ::writer/request-socket-path request-path
-                               ::writer/publish-socket-path publish-path})
+                               ::writer/request-socket-path request-path})
         runtime (::writer/runtime server)
         transport (#'writer/transport-connection
                    {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
@@ -241,18 +237,16 @@
         (#'writer/close-transport-connection! runtime transport)
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest execute-many-result-limit-bounds-a-slow-position-gap
   (let [database-name (str "many-result-limit-" (random-uuid))
         request-path (socket-path "mlr")
-        publish-path (socket-path "mlp")
         server (writer/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
                                ::writer/selected-processors 3
-                               ::writer/request-socket-path request-path
-                               ::writer/publish-socket-path publish-path})
+                               ::writer/request-socket-path request-path})
         runtime (::writer/runtime server)
         transport (#'writer/transport-connection
                    {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
@@ -337,7 +331,7 @@
         (#'writer/close-transport-connection! runtime transport)
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest execute-many-members-inherit-and-enforce-the-outer-result-limit
   (let [request-id "many/member-bound"
@@ -394,13 +388,11 @@
 (deftest final-unstarted-cancel-removes-the-exact-owner-job
   (let [database-name (str "query-cancel-" (random-uuid))
         request-path (socket-path "cancel-request")
-        publish-path (socket-path "cancel-publish")
         server (writer/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
                                ::writer/selected-processors 4
-                               ::writer/request-socket-path request-path
-                               ::writer/publish-socket-path publish-path})
+                               ::writer/request-socket-path request-path})
         runtime (::writer/runtime server)
         transport (#'writer/transport-connection
                    {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
@@ -448,18 +440,16 @@
         (#'writer/close-transport-connection! runtime transport)
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest detached-owner-retains-its-database-until-joined-computation-finishes
   (let [database-name (str "query-owner-release-" (random-uuid))
         request-path (socket-path "rel-req")
-        publish-path (socket-path "rel-pub")
         server (writer/start! {::writer/dependencies (dependencies)
                                ::writer/database-name database-name
                                ::writer/backend :memory
                                ::writer/selected-processors 4
-                               ::writer/request-socket-path request-path
-                               ::writer/publish-socket-path publish-path})
+                               ::writer/request-socket-path request-path})
         runtime (::writer/runtime server)
         transport (#'writer/transport-connection
                    {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
@@ -530,4 +520,4 @@
         (#'writer/close-transport-connection! runtime transport)
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))

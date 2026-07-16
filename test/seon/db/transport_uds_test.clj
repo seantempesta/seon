@@ -20,16 +20,6 @@
     (.getAbsolutePath
      (File. directory (str "seon-" label "-" (random-uuid) ".sock")))))
 
-(defn- wait-for-subscriber!
-  [publisher]
-  (let [deadline (+ (System/currentTimeMillis) 2000)]
-    (loop []
-      (cond
-        (seq @(::uds/subscribers publisher)) true
-        (> (System/currentTimeMillis) deadline)
-        (throw (ex-info "publisher did not accept its subscriber" {}))
-        :else (do (Thread/sleep 10) (recur))))))
-
 (defn- wait-until!
   [description predicate]
   (let [deadline (+ (System/currentTimeMillis) 2000)]
@@ -197,7 +187,7 @@
                   ::protocol/attachment attachment
                   ::protocol/coordinate point
                   ::protocol/members members})]
-    (is (= 7 protocol/current-version))
+    (is (= 8 protocol/current-version))
     (is (protocol/valid-request? request))
     (is (= request (uds/decode (uds/encode request))))
     (is (false? (protocol/valid-request?
@@ -1296,21 +1286,4 @@
         (reset! release-encode true)
         (.close channel)
         (uds/close-request-server! server)
-        (.delete (File. path))))))
-
-(deftest publisher-delivers-a-complete-large-frame
-  (let [path (socket-path "transport-publish")
-        publisher (uds/start-publisher! path)
-        ^SocketChannel channel (uds/connect! path)
-        message {::large-payload (apply str (repeat (* 3 1024 1024) "x"))}]
-    (try
-      (wait-for-subscriber! publisher)
-      (let [received
-            (future
-              (uds/read-frame (Channels/newInputStream channel)))]
-        (uds/publish! {::uds/publisher publisher ::uds/message message})
-        (is (= message (deref received 5000 ::timed-out))))
-      (finally
-        (.close channel)
-        (uds/close-publisher! publisher)
         (.delete (File. path))))))

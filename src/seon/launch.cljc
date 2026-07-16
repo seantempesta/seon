@@ -30,7 +30,6 @@
 (schema/register! ::http-port-file ::path)
 (schema/register! ::writer-repl-port-file ::path)
 (schema/register! ::request-socket-path ::socket-path)
-(schema/register! ::publish-socket-path ::socket-path)
 
 (schema/register!
  ::runtime
@@ -56,7 +55,6 @@
   [::writer-cluster ::writer-cluster]
   [::writer-process-dir ::writer-process-dir]
   [::request-socket-path ::request-socket-path]
-  [::publish-socket-path ::publish-socket-path]
   [::writer-repl-port-file ::writer-repl-port-file]])
 (schema/register!
  ::process
@@ -122,7 +120,6 @@
   [::execution-build-id {:optional true} ::execution-build-id]
   [::execution-output {:optional true} ::execution-output]
   [::request-socket-path ::request-socket-path]
-  [::publish-socket-path ::publish-socket-path]
   [::writer-repl-port-file ::writer-repl-port-file]
   [::process-dir ::process-dir]
   [::log-dir ::log-dir]
@@ -233,7 +230,7 @@
   {:malli/schema [:=> [:cat ::default-descriptor-request] ::descriptor]}
   [{::keys [cluster-dir artifact-flavor client-build-id execution-build-id
             execution-output request-socket-path
-            publish-socket-path writer-repl-port-file process-dir log-dir
+            writer-repl-port-file process-dir log-dir
             http-port http-port-file]}]
   (let [cluster-dir (normalize-path cluster-dir)
         cluster (basename cluster-dir)]
@@ -257,7 +254,6 @@
       {::writer-cluster cluster
        ::writer-process-dir (normalize-path process-dir)
        ::request-socket-path request-socket-path
-       ::publish-socket-path publish-socket-path
        ::writer-repl-port-file writer-repl-port-file}
       ::process
       {::process-dir (normalize-path process-dir)
@@ -430,9 +426,6 @@
            (or (platform/env-val "SEON_DB_SOCK")
                (platform/env-val "SEON_REQ_SOCK")
                (str "tmp/seon-cluster-" cluster "-db.sock"))
-           ::publish-socket-path
-           (or (platform/env-val "SEON_PUB_SOCK")
-               (str "tmp/seon-cluster-" cluster "-pub.sock"))
            ::writer-repl-port-file
            (or (platform/env-val "SEON_WRITER_REPL_PORT_FILE")
                (str "tmp/seon-writer-repl-port-" cluster))

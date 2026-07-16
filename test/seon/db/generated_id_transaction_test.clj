@@ -6,7 +6,6 @@
             [seon.db.id :as id]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
-            [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer]))
 
 (def ^:private schema-transaction
@@ -77,11 +76,7 @@
    ::writer/embedding-assertions (fn [_inputs] [])
    ::writer/revalidate-embedding-assertions (fn [_db-value _assertions] [])
    ::writer/query-vec (fn [_] {:seon.embed/vector [0.0]})
-   ::writer/knn (fn [_db-value _vector _k _eids] [])
-   ::writer/publisher
-   {::uds/channel (Object.)
-    ::uds/subscribers (atom #{})
-    ::uds/closed? (atom false)}})
+   ::writer/knn (fn [_db-value _vector _k _eids] [])})
 
 (defn- open-database!
   []

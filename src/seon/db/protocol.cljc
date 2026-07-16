@@ -43,13 +43,10 @@
   :seon.db.protocol.operation/release-database)
 (def delete-branch-operation :seon.db.protocol.operation/delete-branch)
 (def transact-operation :seon.db.protocol.operation/transact)
-(def replay-transactions-operation
-  :seon.db.protocol.operation/replay-transactions)
 (def resolve-transaction-coordinate-operation
   :seon.db.protocol.operation/resolve-transaction-coordinate)
 (def knn-search-operation :seon.db.protocol.operation/knn-search)
 
-(def transaction-event :seon.db.protocol.event/transaction)
 (def datoms-event :seon.db.protocol.event/datoms)
 (def resynchronization-event :seon.db.protocol.event/resynchronization)
 
@@ -98,7 +95,7 @@
 (def unknown-status :seon.db.protocol.status/unknown)
 (def feed-behind-status :seon.db.protocol.status/feed-behind)
 
-(def current-version 7)
+(def current-version 8)
 
 ;; One wire contract must reject the same legal frame on every host. Paging and
 ;; operation-level result bounds remain the preferred way to stay well below it.
@@ -192,7 +189,6 @@
   release-database-operation
   delete-branch-operation
   transact-operation
-  replay-transactions-operation
   resolve-transaction-coordinate-operation
   knn-search-operation])
 (schema/register! ::success? :boolean)
@@ -220,8 +216,6 @@
 (schema/register! ::backend [:enum :memory :file])
 (schema/register! ::coordinate ::coordinate/coordinate)
 (schema/register! ::previous-coordinate ::coordinate/coordinate)
-(schema/register! ::since-coordinate ::coordinate/coordinate)
-(schema/register! ::through-coordinate ::coordinate/coordinate)
 (schema/register!
  ::head-coordinate
  [:map {:closed true}
@@ -230,7 +224,6 @@
   [::coordinate/commit-id ::coordinate/commit-id]
   [::coordinate/t ::coordinate/t]])
 (schema/register! ::transaction-id ::coordinate/t)
-(schema/register! ::continuation-coordinate ::coordinate/coordinate)
 (schema/register! ::expected-coordinate ::coordinate/coordinate)
 (schema/register! ::current-coordinate ::coordinate/coordinate)
 (schema/register! ::source-coordinate ::coordinate/coordinate)
@@ -254,7 +247,6 @@
 (schema/register! ::released? :boolean)
 (schema/register! ::deleted? :boolean)
 (schema/register! ::complete? :boolean)
-(schema/register! ::replayed-count [:int {:min 0}])
 (schema/register! ::datoms-added [:int {:min 0}])
 (schema/register! ::datoms-retracted [:int {:min 0}])
 (schema/register! ::request-id
@@ -281,9 +273,7 @@
 (schema/register! ::generated-entity-ids
                   [:map-of :qualified-keyword :int])
 (schema/register! ::recovered? :boolean)
-(schema/register! ::event
-                  [:enum transaction-event datoms-event
-                   resynchronization-event])
+(schema/register! ::event [:enum datoms-event resynchronization-event])
 (schema/register! ::query [:string {:min 1}])
 (schema/register! ::limit [:int {:min 1}])
 (schema/register! ::index [:enum :eavt :aevt :avet])
@@ -348,7 +338,7 @@
 (schema/register! ::transport-failure :keyword)
 
 ;; The containment owner transports this application value as opaque EDN.
-;; Keep the complete database-release shape portable so the JVM publisher and
+;; Keep the complete database-release shape portable so the JVM writer and
 ;; Babashka operator validate the same value without loading writer resources.
 (schema/register!
  ::writer-release-result
@@ -397,20 +387,6 @@
 (schema/register!
  ::writer-terminal-result
  [:or ::completed-writer-terminal-result ::failed-writer-terminal-result])
-
-(schema/register!
- ::transaction-event-map
- [:map
-  [::event [:= transaction-event]]
-  [::database-name ::database-name]
-  [::coordinate ::coordinate]
-  [::previous-coordinate ::previous-coordinate]
-  [::transaction-data ::transaction-data]
-  [::transaction-meta {:optional true} ::transaction-meta]
-  [::request-id {:optional true} ::request-id]
-  [::datoms-added ::datoms-added]
-  [::datoms-retracted ::datoms-retracted]])
-(schema/register! ::events [:vector ::transaction-event-map])
 
 (schema/register! :seon.db.protocol.tempid/key-edn :string)
 (schema/register! :seon.db.protocol.tempid/entity :seon.db/ref)
@@ -690,14 +666,6 @@
   [::transaction-meta {:optional true} ::transaction-meta]
   [::generated-candidates {:optional true} ::generated-candidates]])
 (schema/register!
-  ::replay-transactions-request
-  [:map {:closed true}
-  [::operation [:= replay-transactions-operation]]
-  [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::since-coordinate ::since-coordinate]
-  [::through-coordinate {:optional true} ::through-coordinate]])
-(schema/register!
  ::resolve-transaction-coordinate-request
  [:map {:closed true}
   [::operation [:= resolve-transaction-coordinate-operation]]
@@ -740,7 +708,6 @@
   [release-database-operation ::release-database-request]
   [delete-branch-operation ::delete-branch-request]
   [transact-operation ::transaction-request]
-  [replay-transactions-operation ::replay-transactions-request]
   [resolve-transaction-coordinate-operation
    ::resolve-transaction-coordinate-request]
   [knn-search-operation ::knn-search-request]])
@@ -978,18 +945,6 @@
   [::generated-entity-ids {:optional true} ::generated-entity-ids]
   [::recovered? {:optional true} ::recovered?]])
 (schema/register!
- ::replay-transactions-response
- [:map {:closed true}
-  [::success? [:= true]]
-  [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::since-coordinate ::since-coordinate]
-  [::through-coordinate ::through-coordinate]
-  [::continuation-coordinate ::continuation-coordinate]
-  [::complete? ::complete?]
-  [::events ::events]
-  [::replayed-count ::replayed-count]])
-(schema/register!
  ::resolve-transaction-coordinate-response
  [:map {:closed true}
   [::success? [:= true]]
@@ -1028,7 +983,6 @@
   ::release-database-response
   ::delete-branch-response
   ::transaction-response
-  ::replay-transactions-response
   ::resolve-transaction-coordinate-response
   ::knn-search-response])
 
@@ -1207,13 +1161,6 @@
   [::transaction-meta {:optional true} ::transaction-meta]
   [::generated-candidates {:optional true} ::generated-candidates]])
 (schema/register!
-  ::replay-request-input
-  [:map {:closed true}
-  [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::since-coordinate ::since-coordinate]
-  [::through-coordinate {:optional true} ::through-coordinate]])
-(schema/register!
  ::resolve-transaction-coordinate-request-input
  [:map {:closed true}
   [::request-id ::request-id]
@@ -1376,18 +1323,6 @@
     (seq transaction-meta) (assoc ::transaction-meta transaction-meta)
     (contains? input ::generated-candidates)
     (assoc ::generated-candidates generated-candidates)))
-
-(defn replay-transactions-request
-  "Construct one bounded transaction-history page request."
-  {:malli/schema [:=> [:cat ::replay-request-input]
-                  ::replay-transactions-request]}
-  [{::keys [request-id database-name since-coordinate through-coordinate]}]
-  (cond-> {::operation replay-transactions-operation
-           ::request-id request-id
-           ::database-name database-name
-           ::since-coordinate since-coordinate}
-    (some? through-coordinate)
-    (assoc ::through-coordinate through-coordinate)))
 
 (defn resolve-transaction-coordinate-request
   "Construct one frozen-head transaction-coordinate request."

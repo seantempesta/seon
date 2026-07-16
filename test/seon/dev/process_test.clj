@@ -171,8 +171,6 @@
      (:seon.dev.config/execution-output target)
      ::launch/request-socket-path
      (:seon.dev.config/request-socket target)
-     ::launch/publish-socket-path
-     (:seon.dev.config/publish-socket target)
      ::launch/writer-repl-port-file
      (:seon.dev.config/writer-repl-port-file target)
      ::launch/process-dir (:seon.dev.config/process-dir target)
@@ -204,8 +202,6 @@
                 :seon.dev.config/cluster-name "test"
                 :seon.dev.config/request-socket
                 (str (fs/path directory "req.sock"))
-                :seon.dev.config/publish-socket
-                (str (fs/path directory "pub.sock"))
                 :seon.dev.config/writer-repl-port 0
                 :seon.dev.config/writer-repl-port-file
                 (str (fs/path directory "writer-port"))

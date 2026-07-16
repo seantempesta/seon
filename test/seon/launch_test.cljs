@@ -71,7 +71,6 @@
     ::launch/artifact-flavor flavor
     ::launch/client-build-id build-id
     ::launch/request-socket-path "tmp/source-req.sock"
-    ::launch/publish-socket-path "tmp/source-pub.sock"
     ::launch/writer-repl-port-file "tmp/source-writer.port"
     ::launch/process-dir "tmp/source-process"
     ::launch/log-dir "logs/source"

@@ -15,7 +15,7 @@
            [java.nio.channels Channels SelectionKey Selector ServerSocketChannel
             SocketChannel]
            [java.util ArrayDeque]
-           [java.util.concurrent ArrayBlockingQueue BlockingQueue
+           [java.util.concurrent ArrayBlockingQueue
             ConcurrentLinkedQueue RejectedExecutionException ThreadFactory
             ThreadPoolExecutor ThreadPoolExecutor$AbortPolicy TimeUnit]
            [java.util.concurrent.atomic AtomicBoolean]))
@@ -48,7 +48,6 @@
 (schema/register! ::cleanup-stopped? :boolean)
 (schema/register! ::channel 'some?)
 (schema/register! ::output-stream 'some?)
-(schema/register! ::subscribers 'some?)
 (schema/register! ::connections 'some?)
 (schema/register! ::selector 'some?)
 (schema/register! ::workers 'some?)
@@ -56,12 +55,6 @@
 (schema/register! ::queue 'some?)
 (schema/register! ::worker 'some?)
 (schema/register! ::nil-result 'nil?)
-(schema/register!
- ::publisher
- [:map
-  [::channel ::channel]
-  [::subscribers ::subscribers]
-  [::closed? ::closed?]])
 (schema/register!
  ::request-server
  [:map
@@ -98,12 +91,8 @@
 (schema/register!
  ::call-input
  [:map [::channel ::channel] [::message ::message]])
-(schema/register!
- ::publish-input
- [:map [::publisher ::publisher] [::message ::message]])
 
 (def ^:private maximum-frame-bytes protocol/maximum-frame-bytes)
-(def ^:private subscriber-queue-capacity 16)
 (def ^:private codec-worker-queue-capacity 256)
 (def ^:private default-shutdown-timeout-ms 5000)
 (def ^:private default-maximum-input-bytes (* 32 1024 1024))
@@ -1033,117 +1022,3 @@
            ::selector-stopped? selector-stopped?
            ::workers-stopped? workers-stopped?
            ::cleanup-stopped? cleanup-stopped?})))))
-
-(defn- close-subscriber!
-  [{::keys [channel worker]}]
-  (when channel
-    (try (.close ^SocketChannel channel) (catch Throwable _)))
-  (when worker
-    (.interrupt ^Thread worker)))
-
-(defn- start-subscriber!
-  [subscribers closed? ^SocketChannel channel]
-  (.configureBlocking channel true)
-  (let [queue (ArrayBlockingQueue. subscriber-queue-capacity)
-        subscriber-holder (atom nil)
-        worker
-        (Thread.
-         ^Runnable
-         (fn []
-           (try
-             (loop []
-               (let [^ByteBuffer frame (.take ^BlockingQueue queue)]
-                 (loop []
-                   (when (.hasRemaining frame)
-                     (.write channel frame)
-                     (recur)))
-                 (recur)))
-             (catch InterruptedException _ nil)
-             (catch Throwable throwable
-               (when-not (or @closed? (asynchronous-close? throwable))
-                 (binding [*out* *err*]
-                   (println "[database-publish] subscriber closed:"
-                            (.getMessage throwable)))))
-             (finally
-               (when-let [subscriber @subscriber-holder]
-                 (swap! subscribers disj subscriber))
-               (try (.close channel) (catch Throwable _)))))
-         "database-publish-subscriber")
-        subscriber {::channel channel ::queue queue ::worker worker}]
-    (reset! subscriber-holder subscriber)
-    (locking subscribers
-      (if @closed?
-        (close-subscriber! subscriber)
-        (do
-          (swap! subscribers conj subscriber)
-          (doto worker (.setDaemon true) (.start)))))))
-
-(defn start-publisher!
-  "Start a fanout socket and return its explicit publisher resource."
-  {:malli/schema [:=> [:catn [::socket-path ::socket-path]] ::publisher]}
-  [socket-path]
-  (try (.delete (java.io.File. ^String socket-path)) (catch Throwable _))
-  (let [^UnixDomainSocketAddress address
-        (UnixDomainSocketAddress/of ^String socket-path)
-        ^ServerSocketChannel server
-        (ServerSocketChannel/open StandardProtocolFamily/UNIX)
-        subscribers (atom #{})
-        closed? (atom false)]
-    (.bind server address)
-    (doto
-      (Thread.
-       ^Runnable
-       (fn []
-         (try
-           (loop []
-             (start-subscriber! subscribers closed? (.accept server))
-             (recur))
-           (catch Throwable throwable
-             (when-not (asynchronous-close? throwable)
-               (binding [*out* *err*]
-                 (println "[database-publish] accept loop stopped:"
-                          (.getMessage throwable)))))))
-       "database-publish-accept")
-      (.setDaemon true)
-      (.start))
-    {::channel server ::subscribers subscribers ::closed? closed?}))
-
-(defn publish!
-  "Offer one event to each subscriber without blocking the writer.
-
-   Each subscriber has one daemon writer and a fixed-capacity queue. The writer
-   completes every accepted frame even when the socket accepts only a partial
-   write. A subscriber that cannot keep up with the bounded queue is closed;
-   its normal reconnect and transaction replay recover the exact missed range."
-  {:malli/schema [:=> [:cat ::publish-input] ::nil-result]}
-  [{::keys [publisher message]}]
-  (let [subscribers (::subscribers publisher)
-        snapshot (if @(::closed? publisher) #{} @subscribers)]
-    (when (seq snapshot)
-      (let [^ByteBuffer frame (message-frame message)
-            dead
-            (reduce
-             (fn [failed {::keys [queue] :as subscriber}]
-               (if (.offer ^BlockingQueue queue (.duplicate frame))
-                 failed
-                 (conj failed subscriber)))
-             []
-             snapshot)]
-        (when (seq dead)
-          (swap! subscribers #(reduce disj % dead))
-          (run! close-subscriber! dead))))
-    nil))
-
-(defn close-publisher!
-  "Close the publisher socket and every connected subscriber."
-  {:malli/schema [:=> [:catn [::publisher ::publisher]] ::nil-result]}
-  [publisher]
-  (let [subscribers (::subscribers publisher)
-        closed? (::closed? publisher)]
-    (locking subscribers
-      (reset! closed? true)
-      (try (.close ^ServerSocketChannel (::channel publisher))
-           (catch Throwable _))
-      (run! close-subscriber! @subscribers)
-      (reset! subscribers #{}))
-    nil))

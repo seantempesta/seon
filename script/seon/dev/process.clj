@@ -332,8 +332,6 @@
                            "SEON_LAUNCH_DESCRIPTOR" (pr-str descriptor)
                            "SEON_REQ_SOCK"
                            (::launch/request-socket-path descriptor-writer)
-                           "SEON_PUB_SOCK"
-                           (::launch/publish-socket-path descriptor-writer)
                            "SEON_WRITER_REPL_PORT_FILE"
                            (::launch/writer-repl-port-file descriptor-writer)
                            "SEON_PROC_DIR"
@@ -402,7 +400,6 @@
        "--db-name" (:seon.dev.config/cluster-name config)
        "--path" (str (fs/path (:seon.dev.config/cluster-dir config) "db"))
        "--req-sock" (:seon.dev.config/request-socket config)
-       "--pub-sock" (:seon.dev.config/publish-socket config)
        "--repl-port" (str (:seon.dev.config/writer-repl-port config))
        "--repl-port-file" (:seon.dev.config/writer-repl-port-file config)]
       :seon.dev.process/environment environment
@@ -714,7 +711,6 @@
   (case id
     :seon.dev.process/writer
     (->> [(:seon.dev.config/request-socket config)
-          (:seon.dev.config/publish-socket config)
           (:seon.dev.config/writer-repl-port-file config)]
          (filterv string?))
     :seon.dev.process/pod
@@ -906,8 +902,6 @@
         (assoc config
                :seon.dev.config/request-socket
                (::launch/request-socket-path writer-owner)
-               :seon.dev.config/publish-socket
-               (::launch/publish-socket-path writer-owner)
                :seon.dev.config/writer-repl-port-file
                (::launch/writer-repl-port-file writer-owner))]
     (and (= :seon.dev.process.status/alive (process-status record))

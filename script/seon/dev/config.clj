@@ -17,7 +17,6 @@
    [:seon.dev.config/cluster-dir :string]
    [:seon.dev.config/cluster-name :string]
    [:seon.dev.config/request-socket :string]
-   [:seon.dev.config/publish-socket :string]
    [:seon.dev.config/http-port [:int {:min 0 :max 65535}]]
    [:seon.dev.config/http-port-file :string]
    [:seon.dev.config/writer-repl-port [:int {:min 0 :max 65535}]]
@@ -272,8 +271,6 @@
                      (str (fs/path root "logs/operator")))
         req-sock (get environment "SEON_REQ_SOCK"
                       (str (fs/path root "tmp/seon-cluster-default-req.sock")))
-        pub-sock (get environment "SEON_PUB_SOCK"
-                      (str (fs/path root "tmp/seon-cluster-default-pub.sock")))
         port-file (get environment "SEON_PORT_FILE"
                        (str (fs/path root "tmp/seon-port")))
         writer-port-file
@@ -282,7 +279,6 @@
         environment (assoc environment
                       "SEON_CLUSTER_DIR" cluster-dir
                       "SEON_REQ_SOCK" req-sock
-                      "SEON_PUB_SOCK" pub-sock
                       "SEON_PORT_FILE" port-file
                       "SEON_WRITER_REPL_PORT_FILE" writer-port-file
                       "SEON_FS_ROOT" root
@@ -300,7 +296,6 @@
           ::launch/execution-output
           (:seon.dev.config/execution-output artifact)
           ::launch/request-socket-path req-sock
-          ::launch/publish-socket-path pub-sock
           ::launch/writer-repl-port-file writer-port-file
           ::launch/process-dir proc-dir
           ::launch/log-dir log-dir
@@ -319,7 +314,6 @@
          :seon.dev.config/cluster-dir cluster-dir
          :seon.dev.config/cluster-name cluster-name
          :seon.dev.config/request-socket req-sock
-         :seon.dev.config/publish-socket pub-sock
          :seon.dev.config/http-port http-port
          :seon.dev.config/http-port-file port-file
          :seon.dev.config/writer-repl-port

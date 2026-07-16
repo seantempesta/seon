@@ -79,7 +79,7 @@
           ::protocol/query-form '[:find ?e :where [?e :person/name]]
           ::protocol/arguments []
           ::protocol/history? true})]
-    (is (= 7 protocol/current-version))
+    (is (= 8 protocol/current-version))
     (is (every? protocol/valid-request? [schema-request query-request]))
     (is (protocol/valid-response? schema-response))
     (is (= schema-request (transit-roundtrip schema-request)))

@@ -94,15 +94,13 @@
 (deftest duplicate-live-listen-id-preserves-the-original-interest
   (let [database-name (str "writer-interest-duplicate-" (random-uuid))
         request-path (socket-path "duplicate-request")
-        publish-path (socket-path "duplicate-publish")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
           ::writer/selected-processors 3
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         ^SocketChannel listener (uds/connect! request-path)
         ^SocketChannel writer-channel (uds/connect! request-path)
         request-id "duplicate/listen"]
@@ -179,20 +177,18 @@
         (try (.close writer-channel) (catch Throwable _))
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest physical-connections-receive-only-matching-committed-datoms
   (let [database-name (str "writer-interest-" (random-uuid))
         request-path (socket-path "request")
-        publish-path (socket-path "publish")
         server
         (writer/start!
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
           ::writer/selected-processors 3
-          ::writer/request-socket-path request-path
-          ::writer/publish-socket-path publish-path})
+          ::writer/request-socket-path request-path})
         ^SocketChannel a (uds/connect! request-path)
         ^SocketChannel b (uds/connect! request-path)
         ^SocketChannel writer-channel (uds/connect! request-path)]
@@ -277,7 +273,7 @@
         (try (.close writer-channel) (catch Throwable _))
         (writer/stop! server)
         (.delete (File. request-path))
-        (.delete (File. publish-path))))))
+        nil))))
 
 (deftest a-report-gap-replaces-the-source-and-addresses-one-resynchronization
   (let [configuration {:store {:backend :memory :id (random-uuid)}

@@ -139,7 +139,6 @@
   (let [directory (doto (io/file "tmp" (str "wt-" (random-uuid)))
                     .mkdirs)
         request-socket (io/file directory "request.sock")
-        publish-socket (io/file directory "publish.sock")
         result-file (io/file directory "application.edn")
         log-file (io/file directory "writer.log")
         generation (str (random-uuid))
@@ -150,8 +149,7 @@
                  "clojure.main" "-m" "seon.db.server"
                  "--backend" "memory"
                  "--db-name" (str "terminal-process-" (random-uuid))
-                 "--req-sock" (.getPath request-socket)
-                 "--pub-sock" (.getPath publish-socket)]
+                 "--req-sock" (.getPath request-socket)]
         builder (ProcessBuilder. ^java.util.List command)
         environment (.environment builder)]
     (.put environment "SEON_PROCESS_GENERATION" generation)
@@ -194,11 +192,9 @@
                             "seon-writer-prepl" (make-array java.nio.file.attribute.FileAttribute 0)))
         port-file (io/file directory "writer.port")
         request-socket (io/file directory "request.sock")
-        publish-socket (io/file directory "publish.sock")
         runtime (server/start! ["--backend" "memory"
                                 "--db-name" (str "prepl-" (random-uuid))
                                 "--req-sock" (.getPath request-socket)
-                                "--pub-sock" (.getPath publish-socket)
                                 "--repl-port" "0"
                                 "--repl-port-file" (.getPath port-file)])]
     (try
@@ -225,12 +221,10 @@
                             "seon-writer-stop" (make-array java.nio.file.attribute.FileAttribute 0)))
         database-name (str "server-release-failure-" (random-uuid))
         request-socket (io/file directory "request.sock")
-        publish-socket (io/file directory "publish.sock")
         runtime
         (server/start! ["--backend" "memory"
                         "--db-name" database-name
-                        "--req-sock" (.getPath request-socket)
-                        "--pub-sock" (.getPath publish-socket)])
+                        "--req-sock" (.getPath request-socket)])
         before
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)})]

@@ -68,7 +68,6 @@
   {::launch/writer-cluster "default"
    ::launch/writer-process-dir "/process/writer"
    ::launch/request-socket-path "/process/request.sock"
-   ::launch/publish-socket-path "/process/publish.sock"
    ::launch/writer-repl-port-file "/process/writer.port"})
 
 (def main-descriptor
