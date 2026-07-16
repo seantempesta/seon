@@ -1176,8 +1176,54 @@ coordinates invoke neither provider nor KNN; current-head and historical
 native-index behavior is covered by the 45-test/914-assertion writer and
 executor checkpoint.
 
-The earliest unsettled Unit 7 contract is the async `seon.db` facade and route
-consumer cut. Source audit found that the JVM discarded the existing
+The earlier Unit 7 facade checkpoint below is superseded by the source-grounded
+database-value contract in
+[[research/datomic-client-database-value-seam-2026-07-16]] and
+[[research/public-seon-db-facade-compatibility-matrix-2026-07-16]]. The public
+value is now an ordinary Datomic-shaped database map; `coordinate`, attachment,
+and compact transaction projections are implementation debt to delete rather
+than facade semantics to preserve. Query database values occupy their parsed
+Datahike `:in` source positions, so zero, one, or several named/temporal
+databases use the same function and wire argument model. Query forms already
+are runtime data; no macro or second query language is introduced.
+
+The earliest unsettled contract is now maintained Datahike's multi-source
+query-cache ownership. Its current completed-cache and single-flight keys own
+only `(first args)` and can retain another native database value as an ordinary
+argument. The one replacement uses every parsed source's ordered exact
+identity, the existing conservative attribute-dependency union, and reverse
+membership in every contributing connection generation. Closing any member
+generation fences publication, evicts completed entries, and detaches active
+callers. A source without an exact committed identity makes the whole query
+uncacheable; there is no separate long-lived multi-source cache path. The open
+dependency issue is
+[[../../seon/issues/multi-source-query-cache-retains-foreign-database-values]].
+
+The integrated proof that closes this contract ports Datahike's existing
+remote HTTP compatibility suite and selected public API tests into two focused
+existing-runner namespaces: a real JVM writer/UDS contract and a CLJS public
+facade contract. It adds two- and three-named-database queries, current plus
+`since`/`as-of`/history values, interleaved ordinary inputs, nested
+descriptor-shaped data that must not be rewritten, exact result shapes,
+cross-source cache hit/single-flight, and release after success, failure,
+cancellation, and disconnect. The smallest selectors remain the focused writer
+namespace `seon.db.remote-contract-test` and an exact `bin/test-cljs --test=...`
+var; no runner or full-suite tax is added.
+
+Current parallel portfolio: the dependency lane owns only the Datahike
+composite cache/lifetime patch and focused proofs; the documentation lane owns
+only the always-current architecture replacement from public coordinates to
+database values; the top level owns protocol/facade fixtures and integration
+judgment. The stopped plan-consumer draft remains an explicit uncommitted
+handoff because its pure row transformations are reusable but its coordinate
+and compact-envelope transport is not. After the dependency proof, refill that
+slot with the real writer/UDS remote-contract tests; after architecture review,
+refill with the namespaced public facade schemas and CLJS compatibility tests.
+Only then replace protocol, resolver, reports/listeners, and consumers in one
+dependency-ordered cut.
+
+The previous facade history remains as implementation evidence. Source audit
+found that the JVM discarded the existing
 `:seon.error/kind` while constructing protocol failures, so version 7 first
 preserves that ordinary field on outer and grouped-member errors. The facade
 then replaces local handles with one process session; route is the first
