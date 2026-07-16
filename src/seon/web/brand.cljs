@@ -101,32 +101,11 @@
 
 ;; --- The row read + effective brand.
 
-(defn- row
-  "The brand row's attrs from db value `db` as a `::row` map, or nil
-   when no `::id` \"brand\" entity exists. An existing entity with no
-   brand attrs returns {} (distinct from nil — retracts may target it)."
-  [db]
-  (when-let [e (ffirst (db/query {:seon.db/query '[:find ?e
-                                                   :where [?e ::id "brand"]]
-                                  :seon.db/db db}))]
-    (let [ent (db/entity {:seon.db/db db :seon.db/ref e})]
-      (into {}
-            (keep (fn [attr]
-                    (when-some [v (get ent attr)] [attr v])))
-            [::name ::tagline ::theme]))))
-
 (defn info
-  "The effective brand — [[defaults]] overridden by the stored row.
-
-   The `:seon.web.brand` row in the store overrides [[defaults]]; every
-   key present. 0-arity reads the ambient `seon.db/*conn*`; 1-arity takes
-   an explicit db value. Render fns call this at render time
-   (reactive-context — no cache)."
-  {:malli/schema [:function
-                  [:=> [:cat] ::info]
-                  [:=> [:catn [::db :seon.db/db-val]] ::info]]}
-  ([] (info @db/*conn*))
-  ([db] (merge defaults (row db))))
+  "Merge one already-acquired ordinary brand row onto the shipped defaults."
+  {:malli/schema [:=> [:catn [::row [:maybe ::row]]] ::info]}
+  [row]
+  (merge defaults row))
 
 ;; --- Render helpers (pure).
 

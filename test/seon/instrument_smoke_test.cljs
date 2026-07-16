@@ -348,9 +348,8 @@
     ;; my.kb.shared / seon.web.brand — db-reading multi-arity fns.
     (check-clean! "kb/instructions 0-arity"   #(kb/instructions))
     (check-clean! "kb/instructions 1-arity"   #(kb/instructions D))
-    (check-clean! "brand/info 0-arity"        #(brand/info))
-    (check-clean! "brand/info 1-arity"        #(brand/info D))
-    (check-clean! "brand/page-title"          #(brand/page-title (brand/info D) "agents"))
+    (check-clean! "brand/info"                #(brand/info nil))
+    (check-clean! "brand/page-title"          #(brand/page-title (brand/info nil) "agents"))
 
     ;; seon.agent.ctx — the readers, 0-arity (ALS id) AND explicit-id forms.
     (check-clean! "ctx/messages 0-arity"      #(ctx/messages))
