@@ -21,8 +21,7 @@
     metosin/malli {:mvn/version "0.20.0"}
 
     org.replikativ/datahike
-    {:git/url "https://github.com/seantempesta/datahike"
-     :git/sha "670cd1ada40462cb5927f0dc687f6b3a95f9e13f"
+    {:local/root "reference-code/datahike"
      :exclusions [org.clojure/clojurescript
                   com.github.pkpkpk/cljs-cache]}
     org.replikativ/konserve
@@ -150,8 +149,7 @@
          ;; persistent-sorted-set + datahike's superv.async). Both are
          ;; PR-shaped pending upstream review.
          :override-deps {org.replikativ/datahike
-                         {:git/url "https://github.com/seantempesta/datahike"
-                          :git/sha "670cd1ada40462cb5927f0dc687f6b3a95f9e13f"}
+                         {:local/root "reference-code/datahike"}
                          ;; Konserve 0.9.359 plus the shared CLJ/CLJS legacy
                          ;; header reader and idempotent Node filestore deletion.
                          org.replikativ/konserve

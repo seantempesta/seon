@@ -612,6 +612,16 @@
      ::executor/connection-id (:datahike.value/connection-id identity)
      ::executor/generation (:datahike.value/generation identity)}))
 
+(defn- database-value
+  "Describe one raw committed Datahike value as ordinary transport data."
+  [database-name db-value]
+  {:db-name database-name
+   :t (basis-t-of db-value)
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id (d/commit-id db-value)})
+
 (def ^:private byte-array-class (Class/forName "[B"))
 
 (defn- forbidden-host-value?
@@ -676,6 +686,45 @@
        (ex-info "A database read request contained a host-owned or lazy value."
                 {::failure-kind protocol/protocol-error})))
     request))
+
+(defn- query-plan
+  "Align query inputs and identify only Datahike source argument positions."
+  [request]
+  (let [query (::protocol/query-form request)
+        supplied (vec (::protocol/arguments request))
+        input-count (d/query-input-count query)
+        sources (d/query-source-bindings query)
+        default-sources
+        (filterv #(= '$ (:datahike.query.source/symbol %)) sources)
+        implicit-source?
+        (and (= input-count (inc (count supplied)))
+             (= 1 (count default-sources))
+             (some? (:seon.db/db request)))
+        arguments
+        (cond
+          (= input-count (count supplied)) supplied
+          implicit-source?
+          (let [position (:datahike.query.source/argument-position
+                          (first default-sources))]
+            (into (conj (subvec supplied 0 position) (:seon.db/db request))
+                  (subvec supplied position)))
+          :else
+          (throw
+           (ex-info "The query arguments do not match its parsed :in inputs."
+                    {::failure-kind protocol/protocol-error
+                     ::protocol/expected-count input-count
+                     ::protocol/actual-count (count supplied)})))
+        source-descriptors
+        (into []
+              (keep
+               (fn [{:datahike.query.source/keys [argument-position] :as source}]
+                 (let [value (nth arguments argument-position)]
+                   (when (protocol/database-value? value)
+                     (assoc source ::database-descriptor value)))))
+              sources)]
+    {::query-arguments arguments
+     ::query-sources source-descriptors
+     ::routing-descriptors (mapv ::database-descriptor source-descriptors)}))
 
 (declare ancestor-commit?)
 
@@ -771,10 +820,7 @@
 
 (defn- read-response-base
   [request]
-  {::protocol/request-id (::protocol/request-id request)
-   ::protocol/database-name (::protocol/database-name request)
-   ::protocol/attachment (::protocol/attachment request)
-   ::protocol/coordinate (::protocol/coordinate request)})
+  {::protocol/request-id (::protocol/request-id request)})
 
 (def ^:private read-operations
   #{protocol/query-operation
@@ -783,39 +829,21 @@
     protocol/schema-operation
     protocol/index-page-operation})
 
-(defn- datom-map
-  [^datahike.datom.Datom datom]
-  {:seon.db/e (.-e datom)
-   :seon.db/a (.-a datom)
-   :seon.db/v (.-v datom)
-   :seon.db/tx (datahike.datom/datom-tx datom)
-   :seon.db/added? (boolean (:added datom))})
-
-(defn- datahike-cursor
-  [cursor]
-  (when cursor
-    [(:seon.db/e cursor)
-     (:seon.db/a cursor)
-     (:seon.db/v cursor)
-     (:seon.db/tx cursor)
-     (:seon.db/added? cursor)]))
-
 (defn- index-page
   [db-value request]
-  (let [history? (true? (::protocol/history? request))
-        index (::protocol/index request)
+  (let [index (::protocol/index request)
         direction (::protocol/direction request)
         page
         (try
           (d/index-page
-           (if history? (d/history db-value) db-value)
+           db-value
            (cond->
              {:index index
               :components (::protocol/prefix request)
               :direction direction
               :limit (::protocol/limit request)}
              (::protocol/cursor request)
-             (assoc :cursor (datahike-cursor (::protocol/cursor request)))
+             (assoc :cursor (::protocol/cursor request))
              (:datahike.resource/max-result-weight request)
              (assoc :max-result-weight
                     (:datahike.resource/max-result-weight request))))
@@ -827,18 +855,24 @@
                         (assoc (ex-data throwable)
                                ::failure-kind protocol/protocol-error)
                         throwable))
-              (throw throwable))))
-        datoms (mapv datom-map (:datahike.index-page/datoms page))
-        next-cursor
-        (when (:datahike.index-page/cursor page)
-          (merge (datom-map (peek (:datahike.index-page/datoms page)))
-                 {::protocol/coordinate (::protocol/coordinate request)
-                  ::protocol/index index
-                  ::protocol/direction direction
-                  ::protocol/history? history?}))]
-    (cond-> {::protocol/datoms datoms
-             ::protocol/complete? (:datahike.index-page/complete? page)}
-      next-cursor (assoc ::protocol/cursor next-cursor))))
+              (throw throwable))))]
+    (cond->
+      {:datahike.index-page/datoms
+       (mapv datom->protocol (:datahike.index-page/datoms page))
+       :datahike.index-page/complete?
+       (:datahike.index-page/complete? page)}
+      (:datahike.index-page/cursor page)
+      (assoc :datahike.index-page/cursor
+             (:datahike.index-page/cursor page)))))
+
+(defn- datom-map
+  "Describe a committed datom for the existing selective-interest matcher."
+  [^datahike.datom.Datom datom]
+  {:seon.db/e (.-e datom)
+   :seon.db/a (.-a datom)
+   :seon.db/v (.-v datom)
+   :seon.db/tx (datahike.datom/datom-tx datom)
+   :seon.db/added? (boolean (:added datom))})
 
 (defn- execute-db-read
   [db-value request caller-id temporal?]
@@ -884,13 +918,10 @@
       (materialize-result (index-page db-value request)))))
 
 (defn- query-arguments
-  [db-value request caller-id]
+  [arguments request caller-id]
   (merge
    {:query (::protocol/query-form request)
-    :args (into [(if (true? (::protocol/history? request))
-                  (d/history db-value)
-                  db-value)]
-                (::protocol/arguments request))
+    :args arguments
     :request-id caller-id}
    (resource-options request)))
 
@@ -904,7 +935,9 @@
             (update value :datahike.query/result materialize-result)))
     (request-failure-response throwable)))
 
-(declare acquire-query-call!)
+(declare acquire-query-call!
+         resolve-database-value!
+         release-resolved-database-values!)
 
 (defn- execute-read!
   [runtime {request ::request :as work}]
@@ -912,6 +945,20 @@
     (::run-query-call? work) (d/run-q! (::query-call work))
     (::acquire-query? work) (acquire-query-call! runtime work)
     (::resolve-only? work) (pinned-database work)
+    (::transport-connection work)
+    (let [resolved
+          (resolve-database-value! (::transport-connection work)
+                                   (:seon.db/db request)
+                                   false)]
+      (try
+        (merge (read-response-base request)
+               (execute-db-read (::database-value resolved) request
+                                (::protocol/request-id request)
+                                (boolean (or (:as-of (:seon.db/db request))
+                                             (:since (:seon.db/db request))
+                                             (:history (:seon.db/db request))))))
+        (finally
+          (release-resolved-database-values! [resolved]))))
     (::database-value work)
     (protocol/success
      (execute-db-read (::database-value work) request (::caller-id work)
@@ -1381,8 +1428,9 @@
     (protocol/success
      (cond->
        {::protocol/database-name database-name
-       ::coordinate/coordinate (::registry/coordinate entry)
-       ::protocol/backend backend-kind}
+        :seon.db/db (database-value database-name
+                                    (d/db (::registry/conn entry)))
+        ::protocol/backend backend-kind}
        database-path
        (assoc ::protocol/database-path database-path)))))
 
@@ -1434,6 +1482,10 @@
 
 (declare await-active-scope!)
 
+(defn- entry-owns-scope?
+  [entry scope]
+  (contains? (or (::scopes entry) #{(::scope entry)}) scope))
+
 (defn- database-scope
   [database-name expected-attachment]
   (let [{::registry/keys [conn attachment]}
@@ -1449,7 +1501,8 @@
           (locking active
             (let [request-ids
                   (into [] (keep (fn [[request-id entry]]
-                                   (when (= scope (::scope entry)) request-id)))
+                                   (when (entry-owns-scope? entry scope)
+                                     request-id)))
                         @active)]
               (doseq [request-id request-ids]
                 (swap! active assoc-in [request-id ::canceled?] true))
@@ -1533,12 +1586,31 @@
 
 (defn- connection-for-request
   [transport-connection request]
-  (let [database-name (::protocol/database-name request)
+  (let [database-name (or (get-in request [:seon.db/db :db-name])
+                          (::protocol/database-name request))
+        route (when database-name
+                (registry/resolve-connection
+                 {::registry/database-name (keyword database-name)}))
+        _
+        (when (and transport-connection (::registry/conn route))
+          (locking (::connection-lock transport-connection)
+            (when @(::closed? transport-connection)
+              (throw
+               (ex-info "The transport connection closed before database acquisition."
+                        {::failure-kind protocol/not-found-error
+                         ::protocol/database-name database-name})))
+            (registry/acquire-database!
+             {::registry/database-name (keyword database-name)
+              ::registry/attachment (::registry/attachment route)
+              ::registry/transport-connection transport-connection})
+            (swap! (::acquisitions transport-connection)
+                   conj [database-name (::registry/attachment route)])))
         {::registry/keys [conn attachment coordinate error-kind error]}
-        (registry/resolve-connection
-         (cond-> {::registry/database-name (keyword database-name)}
-           transport-connection
-           (assoc ::registry/transport-connection transport-connection)))]
+        (if transport-connection
+          (registry/resolve-connection
+           {::registry/database-name (keyword database-name)
+            ::registry/transport-connection transport-connection})
+          route)]
     (if conn
       {::connection conn
        ::database-name database-name
@@ -1551,6 +1623,156 @@
                    protocol/cleanup-required-error
                    protocol/not-found-error)
                  ::protocol/database-name database-name})))))
+
+(defn- query-admission
+  "Acquire every routed query database and derive its current executor scope."
+  [transport-connection plan]
+  (let [routes
+        (mapv
+         (fn [descriptor]
+           (let [{::keys [connection database-name]
+                  attachment ::coordinate/attachment}
+                 (connection-for-request transport-connection
+                                         {:seon.db/db descriptor})]
+             {::database-descriptor descriptor
+              ::database-name database-name
+              ::connection connection
+              ::coordinate/attachment attachment
+              ::scope (committed-scope database-name attachment
+                                       (d/db connection))}))
+         (distinct (::routing-descriptors plan)))
+        primary (first routes)]
+    (assoc plan
+           ::database-name (::database-name primary)
+           ::scope (::scope primary)
+           ::scopes (into #{} (map ::scope) routes))))
+
+(defn- require-numeric-temporal-point!
+  [db-value point]
+  (when (and (integer? point)
+             (or (> point (basis-t-of db-value))
+                 (nil?
+                  (d/q '[:find ?instant .
+                         :in $ ?tx
+                         :where [?tx :db/txInstant ?instant]]
+                       db-value point))))
+    (throw
+     (ex-info "The database temporal point is unavailable."
+              {::failure-kind protocol/not-found-error
+               ::protocol/transaction-id point}))))
+
+(defn- resolve-database-value!
+  "Resolve and retain one ordinary database value for a physical request."
+  [transport-connection descriptor primary-only?]
+  (when-not (protocol/database-value? descriptor)
+    (throw
+     (ex-info "The request contains an invalid database value."
+              {::failure-kind protocol/protocol-error
+               :seon.db/db descriptor})))
+  (let [{::keys [connection database-name]
+         attachment ::coordinate/attachment}
+        (connection-for-request transport-connection {:seon.db/db descriptor})
+        head (d/db connection)
+        requested-commit (:datahike/commit-id descriptor)
+        head? (= requested-commit (d/commit-id head))
+        _ (when-not (or head?
+                        (registry/commit-reachable?
+                         {::registry/conn connection
+                          ::registry/commit-id requested-commit}))
+            (throw
+             (ex-info "The database value is not reachable from its current head."
+                      {::failure-kind protocol/not-found-error
+                       :seon.db/db descriptor})))
+        containing
+        (if head?
+          head
+          (d/commit-as-db
+           connection requested-commit
+           (cond-> {} primary-only? (assoc :secondary-indices? false))))
+        release? (not head?)]
+    (try
+      (when-not (and containing
+                     (= requested-commit (d/commit-id containing))
+                     (= (:t descriptor) (basis-t-of containing)))
+        (throw
+         (ex-info "The database value does not match its retained commit."
+                  {::failure-kind protocol/not-found-error
+                   :seon.db/db descriptor})))
+      (let [as-of (:as-of descriptor)
+            since (:since descriptor)
+            _ (when as-of (require-numeric-temporal-point! containing as-of))
+            _ (when since (require-numeric-temporal-point! containing since))
+            temporal (cond
+                       as-of (d/as-of containing as-of)
+                       since (d/since containing since)
+                       :else containing)
+            operation-value (if (:history descriptor)
+                              (d/history temporal)
+                              temporal)]
+        {::connection connection
+         ::database-name database-name
+         ::coordinate/attachment attachment
+         ::scope (committed-scope database-name attachment containing)
+         ::database-value operation-value
+         ::containing-database-value containing
+         ::release-containing-database? release?})
+      (catch Throwable throwable
+        (when release?
+          (try
+            (d/release-materialized-db containing)
+            (catch Throwable release-error
+              (log/error release-error "failed rejected database value release"
+                         {:seon.db/db descriptor}))))
+        (throw throwable)))))
+
+(defn- release-resolved-database-values!
+  [resolved-values]
+  (doseq [db-value
+          (->> resolved-values
+               (keep (fn [{::keys [containing-database-value
+                                   release-containing-database?]}]
+                       (when release-containing-database?
+                         containing-database-value)))
+               (reduce (fn [values value]
+                         (if (some #(identical? % value) values)
+                           values
+                           (conj values value)))
+                       []))]
+    (try
+      (d/release-materialized-db db-value)
+      (catch Throwable throwable
+        (log/error throwable "database value release failed"))))
+  nil)
+
+(defn- resolve-query-plan!
+  "Rehydrate only parsed source positions and preserve every other argument."
+  [transport-connection plan]
+  (let [descriptors (distinct (map ::database-descriptor
+                                   (::query-sources plan)))
+        resolved-by-descriptor
+        (reduce
+         (fn [result descriptor]
+           (assoc result descriptor
+                  (resolve-database-value! transport-connection descriptor false)))
+         {}
+         descriptors)]
+    (try
+      (let [arguments
+            (reduce
+             (fn [values
+                  {:datahike.query.source/keys [argument-position]
+                   ::keys [database-descriptor]}]
+               (assoc values argument-position
+                      (::database-value
+                       (get resolved-by-descriptor database-descriptor))))
+             (::query-arguments plan)
+             (::query-sources plan))]
+        (assoc plan
+               ::query-arguments arguments
+               ::resolved-database-values (vec (vals resolved-by-descriptor))))
+      (catch Throwable throwable
+        (release-resolved-database-values! (vals resolved-by-descriptor))
+        (throw throwable)))))
 
 (defn- generated-candidate-conflict
   [candidate]
@@ -2218,7 +2440,7 @@
   (when-let [active (::active-requests runtime)]
     (locking active
       (loop []
-        (when (some (fn [[_ entry]] (= scope (::scope entry))) @active)
+        (when (some (fn [[_ entry]] (entry-owns-scope? entry scope)) @active)
           (.wait ^Object active)
           (recur))))))
 
@@ -2235,7 +2457,7 @@
           (recur))))))
 
 (defn- register-query-job!
-  [runtime owner-request-id job-id db-value]
+  [runtime owner-request-id job-id resolved-values]
   (let [jobs (::query-jobs runtime)]
     (locking jobs
       (swap! jobs
@@ -2243,7 +2465,9 @@
                (-> state
                    (assoc-in [::by-owner owner-request-id]
                              (cond-> {::job-id job-id ::canceled? false}
-                               db-value (assoc ::database-value db-value)))
+                               (seq resolved-values)
+                               (assoc ::resolved-database-values
+                                      resolved-values)))
                    (assoc-in [::by-job job-id] owner-request-id)))))))
 
 (defn- continue-query-job?
@@ -2269,12 +2493,8 @@
                            (update ::by-owner dissoc owner-request-id)
                            (update ::by-job dissoc job-id))))
               entry)))]
-    (when-let [db-value (::database-value entry)]
-      (try
-        (d/release-materialized-db db-value)
-        (catch Throwable throwable
-          (log/error throwable "query owner database release failed"
-                     {::job-id job-id}))))
+    (release-resolved-database-values!
+     (::resolved-database-values entry))
     entry))
 
 (defn- cancel-unstarted-owner-job!
@@ -2302,7 +2522,7 @@
 
 (defn- complete-query-call!
   [runtime request-id owner job-id request execute-many?
-   release-on-callback? containing-db completion]
+   release-on-callback? resolved-values completion]
   (if execute-many?
     (complete-execute-many-query! runtime request-id owner job-id completion)
     (try
@@ -2310,27 +2530,24 @@
                                (query-response request completion))
       (finally
         (when release-on-callback?
-          (try
-            (d/release-materialized-db containing-db)
-            (catch Throwable throwable
-              (log/error throwable "query caller database release failed"
-                         {::protocol/request-id request-id}))))))))
+          (release-resolved-database-values! resolved-values))))))
 
 (defn- acquire-query-call!
-  [runtime {::keys [request database-value containing-database-value
-                    caller-id job-id]
+  [runtime {::keys [request database-value caller-id job-id query-plan
+                    transport-connection]
             :as work}]
-  (let [pinned (when-not database-value (pinned-database work))
-        db-value (or database-value (::database-value pinned))
-        containing-db (or containing-database-value
-                          (::containing-database-value pinned))
-        release-on-error? (nil? database-value)
-        physical-db-owned? (atom false)
+  (let [resolved-plan (when query-plan
+                        (resolve-query-plan! transport-connection query-plan))
+        arguments (if resolved-plan
+                    (::query-arguments resolved-plan)
+                    (into [database-value] (::protocol/arguments request)))
+        resolved-values (or (::resolved-database-values resolved-plan) [])
+        physical-values-owned? (atom false)
         request-id (or (::public-request-id work)
                        (::protocol/request-id request))
         execute-many? (true? (::execute-many-member? work))]
     (try
-      (let [call (d/acquire-q! (query-arguments db-value request caller-id))
+      (let [call (d/acquire-q! (query-arguments arguments request caller-id))
             state (d/q-call-state call)
             completed? (java.util.concurrent.atomic.AtomicBoolean. false)
             active (::active-requests runtime)
@@ -2351,22 +2568,20 @@
         (if-not installed?
           (do
             (cancel-query-caller! runtime caller-id)
-            (when release-on-error?
-              (d/release-materialized-db containing-db))
+            (release-resolved-database-values! resolved-values)
             {::query-acquired? true})
           (do
             (when (= :run state)
-              (register-query-job! runtime caller-id job-id
-                                   (when release-on-error? containing-db))
-              (reset! physical-db-owned? release-on-error?))
+              (register-query-job! runtime caller-id job-id resolved-values)
+              (reset! physical-values-owned? true))
             (d/on-q-complete!
              call
              (fn [completion]
                (when (.compareAndSet completed? false true)
                  (complete-query-call! runtime request-id (::owner work) job-id
                                        request execute-many?
-                                       (and release-on-error? (not= :run state))
-                                       containing-db
+                                       (not= :run state)
+                                       resolved-values
                                        completion))))
             (let [canceled?
                   (locking active
@@ -2381,12 +2596,8 @@
                  #(continue-query-job? runtime caller-id job-id))
                 {::query-acquired? true})))))
       (catch Throwable throwable
-        (when (and release-on-error? (not @physical-db-owned?))
-          (try
-            (d/release-materialized-db containing-db)
-            (catch Throwable release-error
-              (log/error release-error "failed query acquisition database release"
-                         {::protocol/request-id request-id}))))
+        (when-not @physical-values-owned?
+          (release-resolved-database-values! resolved-values))
         (throw throwable)))))
 
 (defn- release-connection-acquisition!
@@ -2460,13 +2671,13 @@
       value)))
 
 (defn- reserve-single-job!
-  [runtime request-id owner scope job-id]
+  [runtime request-id owner scope scopes job-id]
   (let [active (::active-requests runtime)]
     (locking active
       (when (identical? owner (get-in @active [request-id ::owner]))
         (let [request-bytes (get-in @active [request-id ::request-bytes] 0)]
         (swap! active update request-id assoc
-               ::scope scope ::jobs #{job-id})
+               ::scope scope ::scopes (or scopes #{scope}) ::jobs #{job-id})
           request-bytes)))))
 
 (declare complete-executor! drive-execute-many!)
@@ -2952,6 +3163,7 @@
   [runtime request-id owner scope submission]
   (when-let [request-bytes
              (reserve-single-job! runtime request-id owner scope
+                                  (::executor/scopes submission)
                                   (::executor/job-id submission))]
     (try
       (executor/try-submit!
@@ -2966,32 +3178,36 @@
 (defn- start-read-request!
   [runtime transport-connection request request-id owner]
   (validate-read-input! request)
-  (if-let [{::keys [scope connection]
-            attachment ::coordinate/attachment}
-           (scope-for-read transport-connection request)]
+  (let [query? (= protocol/query-operation (::protocol/operation request))
+        plan (if query?
+               (query-plan request)
+               {::routing-descriptors [(:seon.db/db request)]})
+        {::keys [database-name scope scopes] :as admission}
+        (query-admission transport-connection plan)]
     (submit-single!
      runtime request-id owner scope
      (cond->
-      {::executor/executor (::executor runtime)
-       ::executor/work-class :read
-       ::executor/database-name (::protocol/database-name request)
-       ::executor/scope scope
-       ::executor/job-id request-id
-       ::executor/request-id request-id
-       ::executor/request {::database-name (::protocol/database-name request)
-                           ::scope scope
-                           ::connection connection
-                           ::coordinate/attachment attachment
-                           ::owner owner
-                           ::job-id request-id
-                           ::caller-id request-id
-                           ::request request}}
-       (= protocol/query-operation (::protocol/operation request))
+       {::executor/executor (::executor runtime)
+        ::executor/work-class :read
+        ::executor/database-name database-name
+        ::executor/scope scope
+        ::executor/scopes scopes
+        ::executor/job-id request-id
+        ::executor/request-id request-id
+        ::executor/request {::database-name database-name
+                            ::scope scope
+                            ::scopes scopes
+                            ::transport-connection transport-connection
+                            ::owner owner
+                            ::job-id request-id
+                            ::caller-id request-id
+                            ::request request}}
+       query?
        (assoc ::executor/reserved-work-class :read)
-       (= protocol/query-operation (::protocol/operation request))
-       (assoc-in [::executor/request ::acquire-query?] true)))
-    (deliver-active-request! runtime request-id owner
-                             (stale-coordinate-response request))))
+       query?
+       (assoc-in [::executor/request ::acquire-query?] true)
+       query?
+       (assoc-in [::executor/request ::query-plan] admission)))))
 
 (defn- start-execute-many-request!
   [runtime transport-connection request request-id owner]

@@ -415,7 +415,7 @@
  [:map {:closed true}
   [::operation [:= query-operation]]
   [::request-id ::request-id]
-  [:seon.db/db :seon.db/db]
+  [:seon.db/db {:optional true} :seon.db/db]
   [::query-form ::query-form]
   [::arguments ::arguments]
   [:datahike.resource/max-work {:optional true}
@@ -475,7 +475,7 @@
  ::query-member
  [:map {:closed true}
   [::operation [:= query-operation]]
-  [:seon.db/db :seon.db/db]
+  [:seon.db/db {:optional true} :seon.db/db]
   [::query-form ::query-form]
   [::arguments ::arguments]
   [:datahike.resource/max-work {:optional true} :datahike.resource/max-work]
@@ -913,7 +913,7 @@
  ::query-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [:seon.db/db :seon.db/db]
+  [:seon.db/db {:optional true} :seon.db/db]
   [::query-form ::query-form]
   [::arguments ::arguments]
   [:datahike.resource/max-work {:optional true}

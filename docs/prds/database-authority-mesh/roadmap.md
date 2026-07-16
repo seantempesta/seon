@@ -1231,6 +1231,29 @@ The suite also proves the desired multi-source, temporal, eager pull/entity,
 native index-order, listener-isolation, joined-cancellation, sibling-release,
 and terminal-cleanup behavior as those source contracts turn green.
 
+The ordinary-value read cut now runs against the maintained Datahike submodule
+itself rather than the stale pre-helper Git dependency. Query input count and
+source positions come from Datahike's parser; the writer injects an optional
+current `$` only when exactly one parsed input is missing, rehydrates only
+top-level source values, acquires every participating database on the physical
+session, admits the request against every database generation, and transfers
+all owned historical values to Datahike's existing single-flight owner. Pull,
+pull-many, schema, and index paging use the same descriptor resolver and return
+native ordinary shapes.
+
+That integration exposed a Datahike planner defect rather than a transport
+defect. A disconnected multi-source query projecting a scalar, tuple,
+collection, or relation supplied only through `:in` had no Cartesian-component
+output position and threw while indexing with nil. Datahike `a464cd88` delegates
+that exact shape to its existing relation engine; no Seon query fallback or
+cache was added. The focused multi-source test passes one test/nine assertions
+under persistent-sorted-set, hitchhiker-tree, and specification configurations.
+The real JVM/UDS contract now reaches 56 assertions with zero harness errors and
+11 remaining failures, all confined to the next ordered transaction, listener,
+and explicit-release contract cut. Every query result shape, two- and
+three-database placement, descriptor-shaped nested input, temporal composition,
+pull/pull-many nesting, and native index cursor assertion is green.
+
 The source-grounded database-value seam is
 [[research/datahike-remote-database-value-seam-2026-07-16]]. Datahike's native
 `RemoteDB`, `RemoteHistoricalDB`, `RemoteAsOfDB`, and `RemoteSinceDB` records
