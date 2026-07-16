@@ -91,7 +91,7 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `04213e17` (graduated Units 1–3 at `940810f5`, plus attached
+- Datahike `7eb1b849` (graduated Units 1–3 at `940810f5`, plus attached
   exact-commit cache identity, atop
   `9ada755087228e10cfb179fa5779ce227a6ed220`):
   `db.cljc`, `connections.cljc`, `connector.cljc`, `core.cljc`,
@@ -417,7 +417,9 @@ Datahike queries currently bypass both completed caching and single-flight.
 The selected dependency fix keeps completed semantic identity independent of
 limits, certifies hits per caller, and includes the three resource limits only
 in cold in-flight identity. A successful bounded computation then populates
-the ordinary completed cache without any Seon cache.
+the ordinary completed cache without any Seon cache. Datahike `7eb1b849`
+implements that seam; the focused cache, single-flight, and resource proof
+passes 84 tests and 405 assertions across PSS, HHT, and API specifications.
 
 Exit proof: transport-neutral fixtures cover schemas, values, identity,
 query/pull/history, branches, fencing, batching, member errors, cancellation,
