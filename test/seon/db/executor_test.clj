@@ -10,34 +10,14 @@
   [name & arguments]
   (apply (var-get (ns-resolve 'seon.db.executor name)) arguments))
 
-(defn- empty-ready [] (call-private 'empty-ready))
-(defn- add-database [state database-name]
-  (call-private 'add-database state database-name))
-(defn- enqueue [state database-name request maximum-queued]
-  (call-private 'enqueue state database-name request maximum-queued))
-(defn- take-ready [state] (call-private 'take-ready state))
-(defn- remove-database [state database-name]
-  (call-private 'remove-database state database-name))
+(defn- test-capacity [processors]
+  (executor/capacity processors))
 
-(defn- accepted
-  [state database-name requests]
-  (reduce
-   (fn [current request]
-     (let [[next-state accepted?]
-           (enqueue current database-name request 32)]
-       (is accepted?)
-       next-state))
-   state
-   requests))
-
-(defn- drain
-  [state]
-  (loop [current state
-         requests []]
-    (let [[next-state request] (take-ready current)]
-      (if request
-        (recur next-state (conj requests request))
-        [next-state requests]))))
+(defn- start-worker
+  ([execute] (start-worker 1 execute))
+  ([processors execute]
+   (executor/start! {::executor/capacity (test-capacity processors)
+                     ::executor/execute execute})))
 
 (defn- await-queued
   [worker expected]
@@ -47,84 +27,22 @@
       (< attempt 10000) (do (Thread/yield) (recur (inc attempt)))
       :else false)))
 
-(deftest one-database-retains-arrival-order
-  (let [state (accepted (empty-ready) "a" [:a1 :a2 :a3])
-        [_ requests] (drain state)]
-    (is (= [:a1 :a2 :a3] requests))))
-
-(deftest databases-take-equal-turns
-  (let [state (-> (empty-ready)
-                  (accepted "a" [:a1 :a2 :a3])
-                  (accepted "b" [:b1 :b2 :b3])
-                  (accepted "c" [:c1 :c2 :c3]))
-        [_ requests] (drain state)]
-    (is (= [:a1 :b1 :c1 :a2 :b2 :c2 :a3 :b3 :c3]
-           requests))))
-
-(deftest a-busy-database-does-not-delay-a-sparse-database
-  (loop [state (-> (empty-ready)
-                   (accepted "a" [:a1])
-                   (accepted "b" [:b1])
-                   (accepted "c" [:c1]))
-         selected []
-         next-a 2]
-    (if (= 5 (count selected))
-      (is (= [:a1 :b1 :c1 :a2 :a3] selected))
-      (let [[after-take request] (take-ready state)
-            [after-enqueue accepted?]
-            (enqueue after-take "a" (keyword (str "a" next-a)) 32)]
-        (is accepted?)
-        (recur after-enqueue (conj selected request) (inc next-a))))))
-
-(deftest empty-databases-are-skipped-without-changing-requests
-  (let [state (-> (empty-ready)
-                  (add-database "a")
-                  (add-database "b")
-                  (accepted "c" [{:request/value 1}]))
-        [after request] (take-ready state)]
-    (is (= {:request/value 1} request))
-    (is (= 0 (::executor/cursor after)))))
-
-(deftest removing-a-database-adjusts-the-next-turn-and-reports-abandonment
-  (let [state (-> (empty-ready)
-                  (accepted "a" [:a1])
-                  (accepted "b" [:b1 :b2])
-                  (accepted "c" [:c1]))
-        [after-a request] (take-ready state)
-        [after-remove abandoned] (remove-database after-a "b")
-        [_ remaining] (drain after-remove)]
-    (is (= :a1 request))
-    (is (= [:b1 :b2] (vec abandoned)))
-    (is (= [:c1] remaining))))
-
-(deftest bounded-enqueue-rejects-without-changing-the-queue
-  (let [[one accepted?] (enqueue (empty-ready) "a" :a1 1)
-        [rejected second-accepted?] (enqueue one "a" :a2 1)
-        [_ requests] (drain rejected)]
-    (is accepted?)
-    (is (false? second-accepted?))
-    (is (= one rejected))
-    (is (= [:a1] requests))))
-
-(deftest taking-from-an-empty-state-is-an-identity-transition
-  (let [state (-> (empty-ready)
-                  (add-database "a")
-                  (add-database "b"))
-        [same request] (take-ready state)]
-    (is (identical? state same))
-    (is (nil? request))))
-
-(deftest independent-values-share-no-queue-state
-  (let [left (accepted (empty-ready) "a" [:left])
-        right (accepted (empty-ready) "a" [:right])
-        [_ left-values] (drain left)
-        [_ right-values] (drain right)]
-    (is (= [:left] left-values))
-    (is (= [:right] right-values))))
+(deftest capacity-is-one-bounded-startup-decision
+  (let [two (test-capacity 2)
+        four (test-capacity 4)
+        eight (test-capacity 8)]
+    (is (= [1 3 7] (mapv ::executor/cpu-workers [two four eight])))
+    (is (= [2 4 6]
+           (mapv #(get-in % [::executor/classes :provider
+                             ::executor/maximum-active])
+                 [two four eight])))
+    (is (every? #(= (* 4 1024 1024) (::executor/maximum-request-bytes %))
+                [two four eight]))))
 
 (defn- request
   [worker database-name scope job-id value]
   {::executor/executor worker
+   ::executor/work-class :read
    ::executor/database-name database-name
    ::executor/scope scope
    ::executor/job-id job-id
@@ -150,10 +68,7 @@
      ::executor/generation (:datahike.value/generation identity)}))
 
 (deftest one-start-owned-execute-function-serves-data-only-jobs
-  (let [worker (executor/start! {::executor/name :query
-                                 ::executor/workers 1
-                                 ::executor/maximum-queued 4
-                                 ::executor/execute :request/value})
+  (let [worker (start-worker {:read :request/value})
         scope (scope "a" (random-uuid) (random-uuid))]
     (try
       (is (= :value (executor/submit!
@@ -168,15 +83,12 @@
   (let [entered (CountDownLatch. 1)
         release (CountDownLatch. 1)
         calls (atom 0)
-        worker (executor/start! {::executor/name :query
-                                 ::executor/workers 1
-                                 ::executor/maximum-queued 4
-                                 ::executor/execute
-                                 (fn [request]
-                                   (swap! calls inc)
-                                   (.countDown entered)
-                                   (.await release)
-                                   (:request/value request))})
+        worker (start-worker
+                {:read (fn [request]
+                         (swap! calls inc)
+                         (.countDown entered)
+                         (.await release)
+                         (:request/value request))})
         scope (scope "a" (random-uuid) (random-uuid))
         submission (request worker "a" scope "same-job" :value)]
     (try
@@ -198,15 +110,12 @@
 (deftest exact-scope-close-settles-queued-and-fences-running-without-aba
   (let [entered (CountDownLatch. 1)
         release (CountDownLatch. 1)
-        worker (executor/start! {::executor/name :background
-                                 ::executor/workers 1
-                                 ::executor/maximum-queued 4
-                                 ::executor/execute
-                                 (fn [request]
-                                   (when (:request/block? request)
-                                     (.countDown entered)
-                                     (.await release))
-                                   (:request/value request))})
+        worker (start-worker
+                {:read (fn [request]
+                         (when (:request/block? request)
+                           (.countDown entered)
+                           (.await release))
+                         (:request/value request))})
         database-id (random-uuid)
         old-scope (scope "a" database-id (random-uuid))
         new-scope (scope "a" database-id (random-uuid))
@@ -250,15 +159,11 @@
         release (CountDownLatch. 1)
         canceled (atom [])
         worker
-        (executor/start!
-         {::executor/name :read
-          ::executor/workers 1
-          ::executor/maximum-queued 4
-          ::executor/execute
-          (fn [request]
-            (.countDown entered)
-            (.await release)
-            (:request/value request))})
+        (start-worker
+         {:read (fn [request]
+                  (.countDown entered)
+                  (.await release)
+                  (:request/value request))})
         scope (scope "a" (random-uuid) (random-uuid))
         running (executor/submit-async!
                  (request worker "a" scope "read/running" :value))]
@@ -291,15 +196,11 @@
   (let [entered (CountDownLatch. 1)
         release (CountDownLatch. 1)
         worker
-        (executor/start!
-         {::executor/name :read
-          ::executor/workers 1
-          ::executor/maximum-queued 4
-          ::executor/execute
-          (fn [request]
-            (.countDown entered)
-            (.await release)
-            (:request/value request))})
+        (start-worker
+         {:read (fn [request]
+                  (.countDown entered)
+                  (.await release)
+                  (:request/value request))})
         scope (scope "a" (random-uuid) (random-uuid))
         running-request (request worker "a" scope "cancel/running" :running)
         running (executor/submit-async! running-request)]
@@ -327,6 +228,113 @@
         @running
         (executor/stop! {::executor/executor worker})))))
 
+(deftest provider-waits-do-not-consume-the-cpu-worker
+  (let [read-entered (CountDownLatch. 1)
+        provider-entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        worker (start-worker
+                2
+                {:read (fn [_]
+                         (.countDown read-entered)
+                         (.await release)
+                         :read)
+                 :provider (fn [_]
+                             (.countDown provider-entered)
+                             (.await release)
+                             :provider)})
+        read-scope (scope "read" (random-uuid) (random-uuid))
+        provider-scope (scope "provider" (random-uuid) (random-uuid))]
+    (try
+      (let [read-result (executor/submit-async!
+                         (request worker "read" read-scope "cpu/read" :read))
+            provider-result
+            (executor/submit-async!
+             (assoc (request worker "provider" provider-scope
+                             "provider/wait" :provider)
+                    ::executor/work-class :provider))]
+        (is (.await read-entered 5 TimeUnit/SECONDS))
+        (is (.await provider-entered 5 TimeUnit/SECONDS))
+        (is (= {:read 1 :provider 1}
+               (::executor/running-by-class (executor/evidence worker))))
+        (.countDown release)
+        (is (= [::executor/value :read] @read-result))
+        (is (= [::executor/value :provider] @provider-result)))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
+(deftest queued-request-bytes-are-bounded-globally
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        cap (assoc (test-capacity 2)
+                   ::executor/maximum-request-bytes 10
+                   ::executor/maximum-queued-request-bytes 10)
+        worker (executor/start!
+                {::executor/capacity cap
+                 ::executor/execute
+                 {:read (fn [request]
+                          (when (:request/block? request)
+                            (.countDown entered)
+                            (.await release))
+                          (:request/value request))}})
+        one-scope (scope "a" (random-uuid) (random-uuid))]
+    (try
+      (let [running (executor/submit-async!
+                     (assoc-in (request worker "a" one-scope "bytes/running" :a)
+                               [::executor/request :request/block?] true))]
+        (is (.await entered 5 TimeUnit/SECONDS))
+        (is (= {::executor/accepted? true ::executor/joined? false}
+               (executor/try-submit!
+                (assoc (request worker "a" one-scope "bytes/queued" :b)
+                       ::executor/request-bytes 8))))
+        (is (= 8 (::executor/queued-request-bytes
+                  (executor/evidence worker))))
+        (is (= {::executor/accepted? false ::executor/joined? false}
+               (executor/try-submit!
+                (assoc (request worker "a" one-scope "bytes/rejected" :c)
+                       ::executor/request-bytes 3))))
+        (.countDown release)
+        (is (= [::executor/value :a] @running)))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
+(deftest cpu-selection-rotates-class-then-database
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        selected (atom [])
+        execute (fn [work-class]
+                  (fn [request]
+                    (swap! selected conj [work-class (:request/value request)])
+                    (when (= :first (:request/value request))
+                      (.countDown entered)
+                      (.await release))
+                    (:request/value request)))
+        worker (start-worker 2 {:read (execute :read)
+                                :knn (execute :knn)
+                                :encode (execute :encode)})
+        a (scope "a" (random-uuid) (random-uuid))
+        b (scope "b" (random-uuid) (random-uuid))]
+    (try
+      (let [first (executor/submit-async! (request worker "a" a "fair/first" :first))]
+        (is (.await entered 5 TimeUnit/SECONDS))
+        (let [jobs [(executor/submit-async!
+                     (assoc (request worker "a" a "fair/knn" :knn)
+                            ::executor/work-class :knn))
+                    (executor/submit-async!
+                     (assoc (request worker "b" b "fair/encode" :encode)
+                            ::executor/work-class :encode))
+                    (executor/submit-async!
+                     (request worker "b" b "fair/read" :read))]]
+          (.countDown release)
+          @first
+          (run! deref jobs)
+          (is (= [[:read :first] [:knn :knn] [:encode :encode] [:read :read]]
+                 @selected))))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
 (deftest real-independent-database-reads-use-the-shared-workers-in-parallel
   (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
         database-names (mapv #(str "executor-real-" % "-" (random-uuid))
@@ -336,11 +344,9 @@
         running (atom 0)
         peak (atom 0)
         worker
-        (executor/start!
-         {::executor/name :read
-          ::executor/workers 4
-          ::executor/maximum-queued 8
-          ::executor/execute
+        (start-worker
+         5
+         {:read
           (fn [{:request/keys [database-name]}]
             (let [{::registry/keys [conn]}
                   (registry/resolve-connection
@@ -354,7 +360,7 @@
                        :where [?entity :executor.test/value]]
                      (d/db conn))
                 (finally
-                  (swap! running dec)))))})]
+                  (swap! running dec)))))} )]
     (try
       (doseq [[index database-name] (map-indexed vector database-names)]
         (let [entry
@@ -376,6 +382,7 @@
              (fn [database-name]
                (executor/submit-async!
                 {::executor/executor worker
+                 ::executor/work-class :read
                  ::executor/database-name database-name
                  ::executor/scope (registry-scope database-name)
                  ::executor/job-id (str "read/" database-name)

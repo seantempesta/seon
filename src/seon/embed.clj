@@ -96,11 +96,7 @@
            [com.google.genai.types EmbedContentConfig EmbedContentResponse]
            [java.io File]
            [java.security MessageDigest]
-           [java.util UUID]
-           [java.util.concurrent ArrayBlockingQueue Callable ExecutorService
-            Future ThreadFactory ThreadPoolExecutor
-            ThreadPoolExecutor$AbortPolicy TimeUnit]
-           [java.util.concurrent.atomic AtomicLong]))
+           [java.util UUID]))
 
 ;;; --- Locked constants ------------------------------------------------------
 
@@ -563,14 +559,13 @@
 (schema/register! :seon.embed/embed-text-response
                   [:map [:seon.embed/vector :seon.embed/vector]])
 
-;;; --- Bulk embedding: batching, bounded parallelism, rate-limit backoff ------
+;;; --- Bulk embedding: batching and rate-limit backoff ------------------------
 ;;;
 ;;; Gemini caps a SINGLE input at 8,192 tokens (hard) and a request at
 ;;; ~250 texts / ~20k tokens (undocumented, community-observed). `embed-texts`
 ;;; is therefore BULK-SAFE for an arbitrarily large input: every text is
 ;;; truncated under the per-input cap, texts are packed into requests under BOTH
-;;; a count and a token budget, requests run with BOUNDED parallelism (a fixed
-;;; thread pool, so a huge bulk embed never spawns thousands of threads), and a
+;;; a count and a token budget, and a
 ;;; 429/RESOURCE_EXHAUSTED / transient-5xx request is retried with exponential
 ;;; backoff + jitter (slow the embed, never lose a batch). Token counts use the
 ;;; project chars/4 estimate (no tokenizer dep); over-conservative is fine.
@@ -591,72 +586,6 @@
    cap). Whichever of this and `max-batch-tokens` binds first closes a batch."
   100)
 
-(def ^:const max-embed-concurrency
-  "Max Gemini requests in flight at once during a bulk embed. A fixed thread
-   pool of this size bounds BOTH concurrency and thread count, so embedding a
-   huge corpus never spawns thousands of threads."
-  6)
-
-(def ^:private embed-queue-capacity
-  "Maximum Gemini batches waiting behind the process-wide active requests."
-  64)
-
-(def ^:private embed-shutdown-timeout-ms
-  "Bound for graceful embedding-executor shutdown before interruption."
-  1000)
-
-(defonce ^:private !embedding-executor (atom nil))
-(defonce ^:private embedding-thread-sequence (AtomicLong. 0))
-
-(defn- embedding-thread-factory
-  []
-  (reify ThreadFactory
-    (newThread [_ runnable]
-      (doto (Thread. ^Runnable runnable
-                     (str "seon-embedding-"
-                          (.incrementAndGet embedding-thread-sequence)))
-        (.setDaemon true)))))
-
-(defn- new-embedding-executor
-  []
-  (ThreadPoolExecutor.
-   max-embed-concurrency max-embed-concurrency
-   0 TimeUnit/MILLISECONDS
-   (ArrayBlockingQueue. embed-queue-capacity)
-   (embedding-thread-factory)
-   (ThreadPoolExecutor$AbortPolicy.)))
-
-(defn- embedding-executor
-  "Return the one lazily constructed process-wide embedding executor."
-  ^ThreadPoolExecutor []
-  (or @!embedding-executor
-      (locking !embedding-executor
-        (or @!embedding-executor
-            (let [executor (new-embedding-executor)]
-              (reset! !embedding-executor executor)
-              executor)))))
-
-(defn- shutdown-embedding-executor!
-  "Boundedly stop and forget the current embedding executor. Private lifecycle
-   and test seam; database release never owns this process-wide resource."
-  ([] (shutdown-embedding-executor! embed-shutdown-timeout-ms))
-  ([timeout-ms]
-   (when-let [^ExecutorService executor
-              (locking !embedding-executor
-                (let [executor @!embedding-executor]
-                  (reset! !embedding-executor nil)
-                  executor))]
-     (.shutdown executor)
-     (when-not (.awaitTermination executor timeout-ms TimeUnit/MILLISECONDS)
-       (.shutdownNow executor)
-       (.awaitTermination executor timeout-ms TimeUnit/MILLISECONDS)))
-   nil))
-
-(defn- reset-embedding-executor!
-  "Boundedly reset the private process-wide executor for hermetic tests."
-  []
-  (shutdown-embedding-executor! 100))
-
 (schema/register! :seon.embed/stopped? :boolean)
 (schema/register! :seon.embed/stop-request [:map])
 (schema/register! :seon.embed/stop-response
@@ -665,12 +594,11 @@
 (defn stop!
   "Stop process-wide embedding resources.
 
-   Normal database-server shutdown calls this only after accepted requests
-   finish. Releasing one database never stops resources shared by the others."
+   Normal database-server shutdown calls this only after admitted provider
+   requests finish. Releasing one database never closes the shared client."
   {:malli/schema [:=> [:cat :seon.embed/stop-request]
                   :seon.embed/stop-response]}
   [_]
-  (shutdown-embedding-executor!)
   (when-let [^Client client
              (locking !client
                (let [client @!client]
@@ -792,44 +720,14 @@
                                  :seon.embed/retryable  retryable}
                                 t))))))))))
 
-(defn- cancel-embedding-futures!
-  [^ThreadPoolExecutor executor futures]
-  (doseq [^Future future futures]
-    (.cancel future true))
-  (.purge executor))
-
 (defn- embed-batches!
-  [^ThreadPoolExecutor executor client batches out]
-  (doseq [batch-window (partition-all max-embed-concurrency batches)]
-    (let [futures
-          (reduce
-           (fn [accepted batch]
-             (try
-               (conj accepted
-                     [batch
-                      (.submit executor
-                               ^Callable
-                               (reify Callable
-                                 (call [_]
-                                   (embed-batch! client (mapv second batch)))) )])
-               (catch Throwable throwable
-                 (cancel-embedding-futures! executor (mapv second accepted))
-                 (throw throwable))))
-           [] batch-window)]
-      (try
-        (doseq [[batch ^Future future] futures]
-          (let [vectors (.get future)]
-            (dorun
-             (map (fn [[index _] vector]
-                    (aset out (int index) vector))
-                  batch vectors))))
-        (catch InterruptedException interrupted
-          (cancel-embedding-futures! executor (mapv second futures))
-          (.interrupt (Thread/currentThread))
-          (throw interrupted))
-        (catch Throwable throwable
-          (cancel-embedding-futures! executor (mapv second futures))
-          (throw throwable)))))
+  [client batches out]
+  (doseq [batch batches]
+    (let [vectors (embed-batch! client (mapv second batch))]
+      (dorun
+       (map (fn [[index _] vector]
+              (aset out (int index) vector))
+            batch vectors))))
   out)
 
 (defn embed-texts
@@ -839,8 +737,8 @@
 
    BULK-SAFE for an arbitrarily large input: each text is truncated under the
    per-input token cap (`max-text-tokens`); texts are packed into requests
-   honoring BOTH `max-batch-texts` and `max-batch-tokens`; requests run with
-   bounded parallelism (`max-embed-concurrency`); each request retries
+   honoring BOTH `max-batch-texts` and `max-batch-tokens`; authority admission
+   bounds parallel provider requests across all databases; each request retries
    429/RESOURCE_EXHAUSTED + transient 5xx with exponential backoff. A small
    input is still a single request."
   {:malli/schema [:=> [:cat :seon.embed/embed-texts-request]
@@ -854,10 +752,9 @@
       (let [truncated (mapv truncate-to-token-cap texts)
             indexed   (vec (map-indexed vector truncated))
             batches   (plan-batches indexed)
-            ^ThreadPoolExecutor executor (embedding-executor)
             out       (object-array (count truncated))]
         (try
-          (embed-batches! executor client batches out)
+          (embed-batches! client batches out)
           (catch InterruptedException interrupted
             (.interrupt (Thread/currentThread))
             (throw interrupted)))

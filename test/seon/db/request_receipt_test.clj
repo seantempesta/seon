@@ -169,13 +169,12 @@
     (install-schema! base-runtime database-name)
     (let [execute (var-get (ns-resolve 'seon.db.writer 'execute-embedding!))
           worker (executor/start!
-                   {::executor/name :embedding-test
-                    ::executor/workers 1
-                   ::executor/maximum-queued 1
-                   ::executor/execute (partial execute provider-runtime)})
+                  {::executor/capacity (executor/capacity 2)
+                   ::executor/execute
+                   {:provider (partial execute provider-runtime)}})
           provider-runtime (assoc provider-runtime
                                   ::writer/embedding-enabled? true
-                                  ::writer/embedding-executor worker)]
+                                  ::writer/executor worker)]
       (try
         (let [blocked
               (future
@@ -257,12 +256,11 @@
                  :db/cardinality :db.cardinality/one}])
     (let [execute (var-get (ns-resolve 'seon.db.writer 'execute-embedding!))
           worker (executor/start!
-                  {::executor/name :stale-embedding-test
-                   ::executor/workers 1
-                   ::executor/maximum-queued 4
-                   ::executor/execute (partial execute embedding-runtime)})
+                  {::executor/capacity (executor/capacity 2)
+                   ::executor/execute
+                   {:provider (partial execute embedding-runtime)}})
           embedding-runtime (assoc embedding-runtime
-                                   ::writer/embedding-executor worker)]
+                                   ::writer/executor worker)]
       (try
         (is (true?
              (::protocol/success?
@@ -321,12 +319,11 @@
                  :db/cardinality :db.cardinality/one}])
     (let [execute (var-get (ns-resolve 'seon.db.writer 'execute-embedding!))
           worker (executor/start!
-                  {::executor/name :released-embedding-test
-                   ::executor/workers 1
-                   ::executor/maximum-queued 4
-                   ::executor/execute (partial execute embedding-runtime)})
+                  {::executor/capacity (executor/capacity 2)
+                   ::executor/execute
+                   {:provider (partial execute embedding-runtime)}})
           embedding-runtime (assoc embedding-runtime
-                                   ::writer/embedding-executor worker)]
+                                   ::writer/executor worker)]
       (try
         (is (true?
              (::protocol/success?

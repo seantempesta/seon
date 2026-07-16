@@ -337,6 +337,25 @@ passes 24 tests and 198 assertions. Seon's single-read path releases every
 historical materialization in `finally`; arbitrary Datalog is not guessed to
 be primary-only because the planner may legitimately select a secondary index.
 
+The first one-host replacement is now built in `seon.db.executor`. One
+immutable startup map owns the CPU ceiling, per-class/per-database queue
+bounds, and decoded-request byte bound. CPU work rotates class then database;
+provider waits use separately admitted virtual threads and do not consume CPU
+workers. `writer/start!` constructs one dispatcher rather than independent
+read and embedding executors, and `embed-texts` no longer hides another
+six-thread pool behind one admitted provider job. Exact-scope release drains
+reads while abandoning repairable provider work. Ten executor tests prove
+capacity defaults, CPU/provider independence, class/database fairness, byte
+admission, cancellation, generation fencing, and four concurrent immutable
+database reads. The affected gate passes 54 tests and 317 assertions.
+
+[[research/one-host-dispatcher-replacement-design-2026-07-16]],
+[[research/datahike-mutation-admission-2026-07-16]], and
+[[research/proximum-dispatcher-seams-2026-07-16]] define the remaining Unit 4
+work: move mutation admission before the current connection lock, route KNN
+bounds and external entity IDs, supply HNSW construction capacity, and add
+encode/session byte ownership.
+
 This is not Unit 4 graduation because query, KNN, encode/delivery, mutation, and
 control capacity are not all wired and 2/4/8-database adversarial proof remains.
 

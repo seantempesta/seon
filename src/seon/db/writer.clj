@@ -41,8 +41,7 @@
 (schema/register! ::embedding-inputs-for-eids 'fn?)
 (schema/register! ::embedding-assertions 'fn?)
 (schema/register! ::revalidate-embedding-assertions 'fn?)
-(schema/register! ::embedding-executor ::executor/executor)
-(schema/register! ::read-executor ::executor/executor)
+(schema/register! ::executor ::executor/executor)
 (schema/register! ::knn-search 'fn?)
 (schema/register! ::publisher :seon.db.transport.uds/publisher)
 (schema/register!
@@ -65,8 +64,7 @@
   [::embedding-assertions ::embedding-assertions]
   [::revalidate-embedding-assertions ::revalidate-embedding-assertions]
   [::knn-search ::knn-search]
-  [::read-executor ::read-executor]
-  [::embedding-executor ::embedding-executor]
+  [::executor ::executor]
   [::publisher ::publisher]])
 (schema/register! ::request-server :seon.db.transport.uds/request-server)
 (schema/register! ::database-name :seon.db.protocol/database-name)
@@ -88,8 +86,7 @@
  [:map
   [::request-server ::request-server]
   [::publisher ::publisher]
-  [::read-executor ::read-executor]
-  [::embedding-executor ::embedding-executor]
+  [::executor ::executor]
   [::database-name ::database-name]])
 (schema/register! ::stopped? :boolean)
 (schema/register! ::release-result :seon.db.protocol/writer-release-result)
@@ -607,7 +604,8 @@
   (if-let [scope (scope-for-read request)]
     (protocol/success
      (executor/submit!
-      {::executor/executor (::read-executor runtime)
+      {::executor/executor (::executor runtime)
+       ::executor/work-class :read
        ::executor/database-name (::protocol/database-name request)
        ::executor/scope scope
        ::executor/job-id (::protocol/request-id request)
@@ -621,7 +619,7 @@
       {::protocol/request-id (::protocol/request-id request)}})))
 
 (defn- cancel-running-query
-  [read-executor target-request-id]
+  [dispatcher target-request-id]
   (let [deadline (+ (System/nanoTime) 100000000)]
     (loop []
       (let [result (d/cancel-query! target-request-id)]
@@ -630,7 +628,7 @@
           result
           (let [cancel-outcome
                 (executor/cancel!
-                 {::executor/executor read-executor
+                 {::executor/executor dispatcher
                   ::executor/job-id target-request-id})
                 cancellation (::executor/cancellation cancel-outcome)
                 protocol-request
@@ -644,10 +642,10 @@
 (defn- handle-cancel
   [runtime request]
   (let [target-request-id (::protocol/target-request-id request)
-        read-executor (::read-executor runtime)
+        dispatcher (::executor runtime)
         cancel-outcome
         (executor/cancel!
-         {::executor/executor read-executor
+         {::executor/executor dispatcher
           ::executor/job-id target-request-id})
         cancellation (::executor/cancellation cancel-outcome)
         protocol-request (::request (::executor/request cancel-outcome))
@@ -655,7 +653,7 @@
         (when (and (= :running cancellation)
                    (= protocol/query-operation
                       (::protocol/operation protocol-request)))
-          (cancel-running-query read-executor target-request-id))]
+          (cancel-running-query dispatcher target-request-id))]
     (protocol/success
      {::protocol/request-id (::protocol/request-id request)
       ::protocol/target-request-id target-request-id
@@ -709,11 +707,12 @@
 (defn- submit-embedding!
   [runtime database-name scope request-id entity-ids]
   (when (and (::embedding-enabled? runtime)
-             (::embedding-executor runtime)
+             (::executor runtime)
              scope
              (seq entity-ids))
     (executor/try-submit!
-     {::executor/executor (::embedding-executor runtime)
+     {::executor/executor (::executor runtime)
+      ::executor/work-class :provider
       ::executor/database-name database-name
       ::executor/scope scope
       ::executor/job-id request-id
@@ -1294,15 +1293,12 @@
          {::registry/database-name (keyword database-name)})]
     (when (and conn (= expected-attachment attachment))
       (when-let [scope (committed-scope database-name attachment (d/db conn))]
-        (when-let [read-executor (::read-executor runtime)]
+        (when-let [dispatcher (::executor runtime)]
           (executor/fence-and-drain!
-           {::executor/executor read-executor
+           {::executor/executor dispatcher
             ::executor/scope scope
-            ::executor/cancel d/cancel-query!}))
-        (when-let [embedding-executor (::embedding-executor runtime)]
-          (executor/remove-database!
-           {::executor/executor embedding-executor
-            ::executor/scope scope}))))))
+            ::executor/cancel d/cancel-query!
+            ::executor/abandon-work-classes #{:provider}}))))))
 
 (defn- handle-release-database
   [runtime request]
@@ -1580,35 +1576,21 @@
 
 ;;; Explicit server lifecycle
 
-(defn- read-worker-count
-  []
-  (-> (.availableProcessors (Runtime/getRuntime))
-      dec
-      (max 1)
-      (min 8)))
-
 (defn start!
   "Start the request and publication sockets for one writer runtime."
   {:malli/schema [:=> [:cat ::start-request] ::server]}
   [{::keys [dependencies database-name backend database-path
             request-socket-path publish-socket-path]}]
   (let [publisher (uds/start-publisher! publish-socket-path)
-        read-executor
+        dispatcher
         (executor/start!
-         {::executor/name :read
-          ::executor/workers (read-worker-count)
-          ::executor/maximum-queued 64
-          ::executor/execute execute-read!})
-        embedding-executor
-        (executor/start!
-         {::executor/name :embedding
-          ::executor/workers 6
-          ::executor/maximum-queued 64
-          ::executor/execute (partial execute-embedding! dependencies)})
+         {::executor/capacity (executor/capacity)
+          ::executor/execute
+          {:read execute-read!
+           :provider (partial execute-embedding! dependencies)}})
         runtime (assoc dependencies
                        ::publisher publisher
-                       ::read-executor read-executor
-                       ::embedding-executor embedding-executor)]
+                       ::executor dispatcher)]
     (try
       (let [ensure-response
             (handle-request
@@ -1628,16 +1610,14 @@
           {::uds/socket-path request-socket-path
            ::uds/handler (partial handle-request runtime)})
          ::publisher publisher
-         ::read-executor read-executor
-         ::embedding-executor embedding-executor
+         ::executor dispatcher
          ::database-name database-name})
       (catch Throwable throwable
         (let [release
               (registry/release-database!
                {::registry/database-name (keyword database-name)})]
           (uds/close-publisher! publisher)
-          (executor/stop! {::executor/executor read-executor})
-          (executor/stop! {::executor/executor embedding-executor})
+          (executor/stop! {::executor/executor dispatcher})
           (if (::registry/release-error release)
             (throw
              (ex-info "Writer start failed and database release was unproved."
@@ -1651,8 +1631,7 @@
   {:malli/schema [:=> [:catn [::server ::server]] ::stop-response]}
   [server]
   (uds/close-request-server! (::request-server server))
-  (executor/stop! {::executor/executor (::read-executor server)})
-  (executor/stop! {::executor/executor (::embedding-executor server)})
+  (executor/stop! {::executor/executor (::executor server)})
   (let [{::registry/keys [databases]} (registry/list-databases {})
         release-results
         (mapv

@@ -1,13 +1,9 @@
 (ns seon.db.executor
-  "Bounded JVM execution of authoritative database requests.
-
-   The public owner is `seon.db.writer`. This namespace keeps the queue
-   selection and Java executor resources private. Requests retain their
-   existing database name, operation, and request id; execution does not add a
-   second routing or protocol vocabulary."
+  "One bounded capacity and fairness owner for JVM database work."
   (:require [seon.db.coordinate :as coordinate]
             [seon.db.protocol]
-            [seon.schema :as schema]))
+            [seon.schema :as schema])
+  (:import [java.util.concurrent Executors ExecutorService]))
 
 (set! *warn-on-reflection* true)
 
@@ -15,462 +11,473 @@
 (schema/register! ::request :map)
 (schema/register! ::connection-id [:tuple :uuid :keyword])
 (schema/register! ::generation :uuid)
-(schema/register!
- ::scope
- [:map {:closed true}
-  [::database-name ::database-name]
-  [::coordinate/attachment ::coordinate/attachment]
-  [::connection-id ::connection-id]
-  [::generation ::generation]])
+(schema/register! ::scope
+                  [:map {:closed true}
+                   [::database-name ::database-name]
+                   [::coordinate/attachment ::coordinate/attachment]
+                   [::connection-id ::connection-id]
+                   [::generation ::generation]])
 (schema/register! ::job-id :seon.db.protocol/request-id)
+(schema/register! ::work-class :keyword)
+(schema/register! ::request-bytes [:int {:min 0}])
+(schema/register! ::maximum-active [:int {:min 1}])
 (schema/register! ::maximum-queued [:int {:min 1}])
+(schema/register! ::maximum-queued-by-database [:int {:min 1}])
 (schema/register! ::accepted? :boolean)
 (schema/register! ::joined? :boolean)
 (schema/register! ::abandoned-count [:int {:min 0}])
-(schema/register! ::execute 'fn?)
-(schema/register! ::workers [:int {:min 1}])
-(schema/register! ::name :keyword)
-(schema/register!
- ::start-request
- [:map
-  [::name ::name]
-  [::workers ::workers]
-  [::maximum-queued ::maximum-queued]
-  [::execute ::execute]])
+(schema/register! ::execute [:map-of ::work-class 'fn?])
+(schema/register! ::capacity :map)
 (schema/register! ::executor 'map?)
-(schema/register!
- ::submit-request
- [:map
-  [::executor ::executor]
-  [::database-name ::database-name]
-  [::scope ::scope]
-  [::job-id ::job-id]
-  [::request ::request]])
-(schema/register!
- ::remove-database-request
- [:map [::executor ::executor] [::scope ::scope]])
+(schema/register! ::start-request [:map [::capacity ::capacity] [::execute ::execute]])
+(schema/register! ::submit-request
+                  [:map
+                   [::executor ::executor]
+                   [::work-class ::work-class]
+                   [::database-name ::database-name]
+                   [::scope ::scope]
+                   [::job-id ::job-id]
+                   [::request ::request]
+                   [::request-bytes {:optional true} ::request-bytes]])
+(schema/register! ::remove-database-request
+                  [:map [::executor ::executor] [::scope ::scope]])
 (schema/register! ::cancel 'fn?)
 (schema/register! ::cancellation [:enum :not-found :queued :running])
-(schema/register! ::cancel-request
-                  [:map [::executor ::executor] [::job-id ::job-id]])
+(schema/register! ::cancel-request [:map [::executor ::executor] [::job-id ::job-id]])
 (schema/register! ::cancel-response
-                  [:map
-                   [::cancellation ::cancellation]
+                  [:map [::cancellation ::cancellation]
                    [::request {:optional true} ::request]])
-(schema/register!
- ::fence-and-drain-request
- [:map [::executor ::executor] [::scope ::scope] [::cancel ::cancel]])
-(schema/register!
- ::remove-database-response
- [:map [::abandoned-count ::abandoned-count]])
+(schema/register! ::fence-and-drain-request
+                  [:map [::executor ::executor] [::scope ::scope]
+                   [::cancel ::cancel]
+                   [::abandon-work-classes {:optional true} [:set ::work-class]]])
+(schema/register! ::remove-database-response
+                  [:map [::abandoned-count ::abandoned-count]])
 (schema/register! ::stop-request [:map [::executor ::executor]])
 (schema/register! ::stopped? :boolean)
 (schema/register! ::stop-response [:map [::stopped? ::stopped?]])
 (schema/register! ::queued [:int {:min 0}])
 (schema/register! ::running [:int {:min 0}])
 (schema/register! ::running-by-database [:map-of ::database-name ::running])
+(schema/register! ::running-by-class [:map-of ::work-class ::running])
+(schema/register! ::queued-by-class [:map-of ::work-class ::queued])
+(schema/register! ::queued-request-bytes [:int {:min 0}])
 (schema/register! ::retained-identities [:int {:min 0}])
 (schema/register! ::fenced [:int {:min 0}])
 (schema/register! ::completed [:int {:min 0}])
 (schema/register! ::rejected [:int {:min 0}])
-(schema/register!
- ::evidence
- [:map
-  [::name ::name]
-  [::queued ::queued]
-  [::running ::running]
-  [::running-by-database ::running-by-database]
-  [::retained-identities ::retained-identities]
-  [::fenced ::fenced]
-  [::completed ::completed]
-  [::rejected ::rejected]
-  [::stopped? ::stopped?]])
+(schema/register! ::evidence
+                  [:map
+                   [::capacity ::capacity]
+                   [::queued ::queued]
+                   [::queued-by-class ::queued-by-class]
+                   [::queued-request-bytes ::queued-request-bytes]
+                   [::running ::running]
+                   [::running-by-class ::running-by-class]
+                   [::running-by-database ::running-by-database]
+                   [::retained-identities ::retained-identities]
+                   [::fenced ::fenced]
+                   [::completed ::completed]
+                   [::rejected ::rejected]
+                   [::stopped? ::stopped?]])
 
 (def ^:private empty-queue clojure.lang.PersistentQueue/EMPTY)
+(def ^:private cpu-classes #{:read :knn :encode :hnsw})
 
-(defn- empty-ready
-  []
-  {::database-order []
-   ::ready {}
+(defn capacity
+  "Return one immutable authority capacity map from the selected processors."
+  ([] (capacity (.availableProcessors (Runtime/getRuntime))))
+  ([selected-processors]
+   (let [processors (max 1 selected-processors)
+         cpu-workers (max 1 (dec processors))
+         knn (max 1 (min 2 (quot cpu-workers 2)))
+         encode (max 1 (min 2 (quot cpu-workers 2)))
+         mutation (max 1 (min 4 (quot (inc processors) 2)))
+         provider (min 6 processors)]
+     {::available-processors (.availableProcessors (Runtime/getRuntime))
+      ::selected-processors processors
+      ::cpu-workers cpu-workers
+      ::maximum-request-bytes (* 4 1024 1024)
+      ::maximum-queued-request-bytes (* (cond (<= processors 2) 8
+                                                (<= processors 4) 16
+                                                :else 32)
+                                             1024 1024)
+      ::classes
+      {:read {::maximum-active cpu-workers
+              ::maximum-queued (max 16 (* 8 cpu-workers))
+              ::maximum-queued-by-database 8}
+       :knn {::maximum-active knn
+             ::maximum-queued (max 4 (* 2 knn))
+             ::maximum-queued-by-database 2}
+       :encode {::maximum-active encode
+                ::maximum-queued (max 8 (* 4 encode))
+                ::maximum-queued-by-database 4}
+       :provider {::maximum-active provider
+                  ::maximum-queued (* 2 provider)
+                  ::maximum-queued-by-database 2}
+       :mutation {::maximum-active mutation
+                  ::maximum-queued (max 8 (* 4 mutation))
+                  ::maximum-queued-by-database 8}
+       :hnsw {::maximum-active 1
+              ::maximum-queued 1
+              ::maximum-queued-by-database 1}}})))
+
+(defn- empty-class-ready []
+  {::database-order [] ::database-cursor 0 ::by-database {}})
+
+(defn- empty-state [classes]
+  {::class-order (vec classes)
+   ::class-cursor 0
+   ::ready (zipmap classes (repeat (empty-class-ready)))
    ::jobs {}
    ::closed-scopes #{}
-   ::cursor 0})
+   ::running-by-class {}
+   ::running-by-database {}})
 
-(defn- add-database
-  [state database-name]
-  (if (contains? (::ready state) database-name)
-    state
-    (-> state
+(defn- add-database [ready database-name]
+  (if (contains? (::by-database ready) database-name)
+    ready
+    (-> ready
         (update ::database-order conj database-name)
-        (assoc-in [::ready database-name] empty-queue))))
+        (assoc-in [::by-database database-name] empty-queue))))
 
-(defn- enqueue
-  [state database-name request maximum-queued]
-  (let [state* (add-database state database-name)
-        queue (get-in state* [::ready database-name])]
-    (if (>= (count queue) maximum-queued)
-      [state* false]
-      [(update-in state* [::ready database-name] conj request) true])))
+(defn- enqueue [state work-class database-name work]
+  (update-in state [::ready work-class]
+             (fn [ready]
+               (-> (add-database ready database-name)
+                   (update-in [::by-database database-name] conj work)))))
 
-(defn- take-ready
-  [state]
-  (let [database-order (::database-order state)
-        database-count (count database-order)]
-    (if (zero? database-count)
-      [state nil]
-      (loop [offset 0]
-        (if (= offset database-count)
-          [state nil]
-          (let [index (mod (+ (::cursor state) offset) database-count)
-                database-name (nth database-order index)
-                queue (get-in state [::ready database-name])]
-            (if (seq queue)
-              [(-> state
-                   (assoc ::cursor (mod (inc index) database-count))
-                   (assoc-in [::ready database-name] (pop queue)))
-               (peek queue)]
-              (recur (inc offset)))))))))
+(defn- take-database [ready]
+  (let [order (::database-order ready)
+        n (count order)]
+    (loop [offset 0]
+      (if (= offset n)
+        [ready nil]
+        (let [index (mod (+ (::database-cursor ready) offset) n)
+              database-name (nth order index)
+              queue (get-in ready [::by-database database-name])]
+          (if (seq queue)
+            [(-> ready
+                 (assoc ::database-cursor (mod (inc index) n))
+                 (assoc-in [::by-database database-name] (pop queue)))
+             (peek queue)]
+            (recur (inc offset))))))))
 
-(defn- remove-database
-  [state database-name]
-  (let [database-order (::database-order state)
-        removed-index (.indexOf ^java.util.List database-order database-name)]
-    (if (neg? removed-index)
-      [state []]
-      (let [abandoned (vec (get-in state [::ready database-name]))
-            remaining (into (subvec database-order 0 removed-index)
-                            (subvec database-order (inc removed-index)))
-            old-cursor (::cursor state)
-            cursor (cond
-                     (empty? remaining) 0
-                     (< removed-index old-cursor) (dec old-cursor)
-                     (= old-cursor (count remaining)) 0
-                     :else old-cursor)]
-        [(-> state
-             (assoc ::database-order remaining
-                    ::cursor cursor)
-             (update ::ready dissoc database-name))
-         abandoned]))))
+(defn- eligible-class? [state capacity work-class]
+  (let [active (get-in state [::running-by-class work-class] 0)
+        maximum (get-in capacity [::classes work-class ::maximum-active])
+        cpu-running (reduce + 0 (map #(get-in state [::running-by-class %] 0)
+                                     cpu-classes))]
+    (and (< active maximum)
+         (or (not (cpu-classes work-class))
+             (< cpu-running (::cpu-workers capacity))))))
 
-(defn- queued-count
-  [state]
-  (transduce (map (comp count val)) + 0 (::ready state)))
+(defn- take-ready [state capacity allowed-classes]
+  (let [order (::class-order state)
+        n (count order)]
+    (loop [offset 0]
+      (if (= offset n)
+        [state nil]
+        (let [index (mod (+ (::class-cursor state) offset) n)
+              work-class (nth order index)]
+          (if (and (allowed-classes work-class)
+                   (eligible-class? state capacity work-class))
+            (let [[ready work] (take-database (get-in state [::ready work-class]))]
+              (if work
+                [(-> state
+                     (assoc ::class-cursor (mod (inc index) n))
+                     (assoc-in [::ready work-class] ready)
+                     (assoc-in [::jobs (::job-id work) ::status] :running)
+                     (update-in [::running-by-class work-class] (fnil inc 0))
+                     (update-in [::running-by-database (::database-name work)]
+                                (fnil inc 0)))
+                 work]
+                (recur (inc offset))))
+            (recur (inc offset))))))))
 
-(defn- increment-running
-  [counts database-name]
-  (-> counts
-      (update ::running inc)
-      (update-in [::running-by-database database-name] (fnil inc 0))))
+(defn- queued-jobs [state]
+  (filter (fn [[_ job]] (= :queued (::status job))) (::jobs state)))
 
-(defn- decrement-running
-  [counts database-name]
-  (let [remaining (dec (get-in counts [::running-by-database database-name]))]
-    (cond-> (-> counts
-                (update ::running dec)
-                (update ::completed inc))
-      (zero? remaining) (update ::running-by-database dissoc database-name)
-      (pos? remaining) (assoc-in [::running-by-database database-name]
-                                 remaining))))
+(defn- queued-count [state] (count (queued-jobs state)))
+(defn- queued-by-class [state]
+  (frequencies (map (comp ::work-class val) (queued-jobs state))))
+(defn- queued-by-class-database [state work-class database-name]
+  (count (filter (fn [[_ job]]
+                   (and (= :queued (::status job))
+                        (= work-class (::work-class job))
+                        (= database-name (::database-name job))))
+                 (::jobs state))))
+(defn- queued-request-bytes [state]
+  (reduce + 0 (map (comp ::request-bytes val) (queued-jobs state))))
 
-(defn- take-work!
-  [executor]
-  (let [lock (::lock executor)
-        state (::state executor)
-        stopped? (::stopped executor)]
-    (locking lock
-      (loop []
-        (let [[next-state work] (take-ready @state)]
-          (cond
-            work
-            (do
-              (reset! state next-state)
-              (swap! state assoc-in [::jobs (::job-id work) ::status] :running)
-              (swap! (::counts executor) increment-running
-                     (::database-name work))
-              work)
+(defn- remove-queued-results [state results]
+  (update state ::ready
+          (fn [ready]
+            (into {}
+                  (map (fn [[work-class class-ready]]
+                         [work-class
+                          (update class-ready ::by-database
+                                  (fn [by-database]
+                                    (into {}
+                                          (map (fn [[database-name queue]]
+                                                 [database-name
+                                                  (into empty-queue
+                                                        (remove #(contains? results
+                                                                            (::result %)))
+                                                        queue)]))
+                                          by-database)))])
+                       ready)))))
 
-            @stopped?
-            nil
-
-            :else
-            (do
-              (.wait ^Object lock)
-              (recur))))))))
-
-(defn- finish-work!
-  [executor database-name job-id result]
+(defn- take-work! [executor allowed-classes]
   (locking (::lock executor)
-    (swap! (::state executor)
-           (fn [state]
-             (if (identical? result (get-in state [::jobs job-id ::result]))
-               (update state ::jobs dissoc job-id)
-               state)))
-    (swap! (::counts executor) decrement-running database-name)
-    (.notifyAll ^Object (::lock executor))))
+    (loop []
+      (let [[state work] (take-ready @(::state executor) (::capacity executor)
+                                     allowed-classes)]
+        (cond
+          work (do (reset! (::state executor) state) work)
+          @(::stopped executor) nil
+          :else (do (.wait ^Object (::lock executor)) (recur)))))))
 
-(defn- run-worker!
-  [executor]
+(defn- finish-work! [executor work]
+  (locking (::lock executor)
+    (let [{::keys [job-id result work-class database-name]} work]
+      (swap! (::state executor)
+             (fn [state]
+               (if (identical? result (get-in state [::jobs job-id ::result]))
+                 (let [class-left (dec (get-in state [::running-by-class work-class]))
+                       db-left (dec (get-in state [::running-by-database database-name]))]
+                   (cond-> (update state ::jobs dissoc job-id)
+                     (zero? class-left) (update ::running-by-class dissoc work-class)
+                     (pos? class-left) (assoc-in [::running-by-class work-class] class-left)
+                     (zero? db-left) (update ::running-by-database dissoc database-name)
+                     (pos? db-left) (assoc-in [::running-by-database database-name] db-left)))
+                 (let [class-left (dec (get-in state [::running-by-class work-class]))
+                       db-left (dec (get-in state [::running-by-database database-name]))]
+                   (cond-> state
+                     (zero? class-left) (update ::running-by-class dissoc work-class)
+                     (pos? class-left) (assoc-in [::running-by-class work-class] class-left)
+                     (zero? db-left) (update ::running-by-database dissoc database-name)
+                     (pos? db-left) (assoc-in [::running-by-database database-name] db-left))))))
+      (swap! (::counts executor) update ::completed inc)
+      (.notifyAll ^Object (::lock executor)))))
+
+(defn- run-work! [executor work]
+  (let [result (::result work)
+        execute (get (::execute executor) (::work-class work))]
+    (try
+      (deliver result [::value (execute (::request work))])
+      (catch Throwable throwable
+        (deliver result [::throwable throwable]))
+      (finally (finish-work! executor work)))))
+
+(defn- run-worker! [executor allowed-classes]
   (loop []
-    (when-let [{::keys [database-name request result job-id]}
-               (take-work! executor)]
-      (try
-        (deliver result [::value ((::execute executor) request)])
-        (catch Throwable throwable
-          (deliver result [::throwable throwable]))
-        (finally
-          (finish-work! executor database-name job-id result)))
+    (when-let [work (take-work! executor allowed-classes)]
+      (if (= :provider (::work-class work))
+        (.submit ^ExecutorService (::provider-executor executor)
+                 ^Runnable #(run-work! executor work))
+        (run-work! executor work))
       (recur))))
 
 (defn start!
-  "Start one bounded shared executor.
-
-   Database selection happens before a worker begins the request."
+  "Start the authority-wide bounded dispatcher."
   {:malli/schema [:=> [:cat ::start-request] ::executor]}
-  [{::keys [name workers maximum-queued execute]}]
-  (let [executor
-        {::name name
-         ::maximum-queued maximum-queued
-         ::execute execute
-         ::lock (Object.)
-         ::state (atom (empty-ready))
-         ::stopped (atom false)
-         ::counts (atom {::running 0
-                         ::running-by-database {}
-                         ::completed 0
-                         ::rejected 0
-                         ::fenced 0})}
-        worker-threads
-        (mapv
-         (fn [index]
-           (doto
-            (Thread. ^Runnable #(run-worker! executor)
-                     (str "seon-database-" (clojure.core/name name) "-" index))
-             (.setDaemon true)
-             (.start)))
-         (range workers))]
-    (assoc executor ::worker-threads worker-threads)))
+  [{::keys [capacity execute]}]
+  (let [classes (vec (keys execute))
+        unknown (remove #(contains? (::classes capacity) %) classes)
+        _ (when (seq unknown)
+            (throw (ex-info "Executor classes are absent from capacity."
+                            {::work-classes unknown})))
+        provider-executor (Executors/newVirtualThreadPerTaskExecutor)
+        executor {::capacity capacity
+                  ::execute execute
+                  ::provider-executor provider-executor
+                  ::lock (Object.)
+                  ::state (atom (empty-state classes))
+                  ::stopped (atom false)
+                  ::counts (atom {::completed 0 ::rejected 0 ::fenced 0})}
+        workers (mapv (fn [index]
+                        (doto (Thread. ^Runnable #(run-worker! executor cpu-classes)
+                                       (str "seon-database-cpu-" index))
+                          (.setDaemon true)
+                          (.start)))
+                      (range (::cpu-workers capacity)))
+        provider-dispatcher
+        (doto (Thread. ^Runnable #(run-worker! executor #{:provider})
+                       "seon-database-provider-dispatch")
+          (.setDaemon true)
+          (.start))]
+    (assoc executor ::worker-threads (conj workers provider-dispatcher))))
 
-(defn- admit!
-  [{::keys [executor database-name scope job-id request]}]
+(defn- rejection! [executor result database-name work-class message]
+  (swap! (::counts executor) update ::rejected inc)
+  (deliver result [::throwable (ex-info message
+                                        {::database-name database-name
+                                         ::work-class work-class})])
+  [{::accepted? false ::joined? false} result])
+
+(defn- admit! [{::keys [executor work-class database-name scope job-id request
+                         request-bytes]
+                  :or {request-bytes 0}}]
   (locking (::lock executor)
     (let [state @(::state executor)]
       (if-let [existing (get-in state [::jobs job-id])]
         [{::accepted? false ::joined? true} (::result existing)]
         (let [result (promise)
-              work {::database-name database-name
-                    ::scope scope
-                    ::job-id job-id
-                    ::request request
-                    ::result result}
-              [next-state accepted?]
-              (if (or @(::stopped executor)
-                      (contains? (::closed-scopes state) scope))
-                [state false]
-                (enqueue state database-name work
-                         (::maximum-queued executor)))]
-          (if accepted?
-            (do
+              class-capacity (get-in (::capacity executor) [::classes work-class])
+              class-count (get (queued-by-class state) work-class 0)
+              database-count (queued-by-class-database state work-class database-name)
+              queued-bytes (queued-request-bytes state)
+              valid? (and class-capacity
+                          (not @(::stopped executor))
+                          (not (contains? (::closed-scopes state) scope))
+                          (<= request-bytes (::maximum-request-bytes (::capacity executor)))
+                          (< class-count (::maximum-queued class-capacity))
+                          (< database-count (::maximum-queued-by-database class-capacity))
+                          (<= (+ queued-bytes request-bytes)
+                              (::maximum-queued-request-bytes (::capacity executor))))]
+          (if-not valid?
+            (rejection! executor result database-name work-class
+                        "The database work queue is full, fenced, or stopped.")
+            (let [work {::work-class work-class
+                        ::database-name database-name
+                        ::scope scope
+                        ::job-id job-id
+                        ::request request
+                        ::request-bytes request-bytes
+                        ::result result}]
               (reset! (::state executor)
-                      (assoc-in next-state [::jobs job-id]
-                                {::scope scope ::status :queued
-                                 ::request request
-                                 ::result result}))
+                      (-> state
+                          (enqueue work-class database-name work)
+                          (assoc-in [::jobs job-id]
+                                    (assoc work ::status :queued))))
               (.notifyAll ^Object (::lock executor))
-              [{::accepted? true ::joined? false} result])
-            (do
-              (swap! (::counts executor) update ::rejected inc)
-              (deliver
-               result
-               [::throwable
-                (ex-info "The database request queue is full or stopped."
-                         {::name (::name executor)
-                          ::database-name database-name})])
-              [{::accepted? false ::joined? false} result])))))))
+              [{::accepted? true ::joined? false} result])))))))
 
 (defn try-submit!
-  "Try to admit one job and return only ordinary admission evidence."
-  {:malli/schema [:=> [:cat ::submit-request]
-                  [:map [::accepted? ::accepted?] [::joined? ::joined?]]]}
-  [request]
-  (first (admit! request)))
-
+  "Try to admit work and return ordinary admission evidence."
+  [request] (first (admit! request)))
 (defn submit-async!
-  "Submit or join one job and return its internal result promise immediately."
-  {:malli/schema [:=> [:cat ::submit-request] :any]}
-  [request]
-  (second (admit! request)))
-
+  "Admit or join work and return its internal result promise."
+  [request] (second (admit! request)))
 (defn submit!
-  "Submit one request under its existing database name and await its result."
-  {:malli/schema [:=> [:cat ::submit-request] :any]}
+  "Admit or join work and await its result."
   [request]
   (let [[outcome value] @(submit-async! request)]
-    (if (= ::throwable outcome)
-      (throw value)
-      value)))
+    (if (= ::throwable outcome) (throw value) value)))
 
-(defn remove-database!
-  "Fence one exact scope and settle every queued or running request."
-  {:malli/schema
-   [:=> [:cat ::remove-database-request] ::remove-database-response]}
-  [{::keys [executor scope]}]
+(defn- fence-scope! [executor scope abandon-work-classes]
   (locking (::lock executor)
     (let [state @(::state executor)
-          matching-jobs
+          matching (into {} (filter (fn [[_ job]] (= scope (::scope job))))
+                         (::jobs state))
+          queued (into {} (filter (fn [[_ job]] (= :queued (::status job)))) matching)
+          abandoned-running
           (into {}
-                (filter (fn [[_ job]] (= scope (::scope job))))
-                (::jobs state))
-          queued-results
-          (into #{}
-                (keep (fn [[_ {::keys [status result]}]]
-                        (when (= :queued status) result)))
-                matching-jobs)
-          next-ready
-          (into {}
-                (map (fn [[database-name queue]]
-                       [database-name
-                        (into empty-queue
-                              (remove #(contains? queued-results (::result %)))
-                              queue)]))
-                (::ready state))
-          [next-state _]
-          (remove-database
-           (-> state
-               (assoc ::ready next-ready)
-               (update ::closed-scopes conj scope)
-               (update ::jobs #(apply dissoc % (keys matching-jobs))))
-           (::database-name scope))
-          abandoned (count queued-results)]
+                (filter (fn [[_ job]]
+                          (and (= :running (::status job))
+                               (abandon-work-classes (::work-class job)))))
+                matching)
+          removed (merge queued abandoned-running)
+          results (set (map (comp ::result val) removed))
+          next-state (-> state
+                         (remove-queued-results results)
+                         (update ::closed-scopes conj scope)
+                         (update ::jobs #(apply dissoc % (keys removed))))]
       (reset! (::state executor) next-state)
-      (swap! (::counts executor) update ::fenced + (count matching-jobs))
-      (doseq [[_ {::keys [result]}] matching-jobs]
-        (deliver
-         result
-         [::throwable
-          (ex-info "The database scope closed before request completion."
-                   {::scope scope})]))
-      {::abandoned-count abandoned})))
+      (swap! (::counts executor) update ::fenced + (count matching))
+      (doseq [[_ {::keys [result]}] removed]
+        (deliver result [::throwable
+                         (ex-info "The database scope closed before completion."
+                                  {::scope scope})]))
+      (.notifyAll ^Object (::lock executor))
+      {::matching matching ::queued queued})))
+
+(defn remove-database!
+  "Fence a scope and abandon all of its queued and running work."
+  {:malli/schema [:=> [:cat ::remove-database-request]
+                  ::remove-database-response]}
+  [{::keys [executor scope]}]
+  (let [{::keys [queued]} (fence-scope! executor scope #{:read :provider :knn
+                                                         :encode :hnsw
+                                                         :mutation})]
+    {::abandoned-count (count queued)}))
 
 (defn fence-and-drain!
-  "Fence one exact scope, reject queued work, cancel running work, and wait.
-   until every worker has relinquished the scope."
-  {:malli/schema
-   [:=> [:cat ::fence-and-drain-request] ::remove-database-response]}
-  [{::keys [executor scope cancel]}]
-  (let [{::keys [running-job-ids abandoned-count]}
-        (locking (::lock executor)
-          (let [state @(::state executor)
-                matching-jobs
-                (into {}
-                      (filter (fn [[_ job]] (= scope (::scope job))))
-                      (::jobs state))
-                queued-job-ids
-                (into #{}
-                      (keep (fn [[job-id {::keys [status]}]]
-                              (when (= :queued status) job-id)))
-                      matching-jobs)
-                running-job-ids
-                (into []
-                      (keep (fn [[job-id {::keys [status]}]]
-                              (when (= :running status) job-id)))
-                      matching-jobs)
-                queued-results
-                (into #{}
-                      (keep (fn [[job-id {::keys [result]}]]
-                              (when (contains? queued-job-ids job-id) result)))
-                      matching-jobs)
-                next-ready
-                (into {}
-                      (map (fn [[database-name queue]]
-                             [database-name
-                              (into empty-queue
-                                    (remove #(contains? queued-results
-                                                        (::result %)))
-                                    queue)]))
-                      (::ready state))
-                [next-state _]
-                (remove-database
-                 (-> state
-                     (assoc ::ready next-ready)
-                     (update ::closed-scopes conj scope)
-                     (update ::jobs #(apply dissoc % queued-job-ids)))
-                 (::database-name scope))]
-            (reset! (::state executor) next-state)
-            (swap! (::counts executor) update ::fenced +
-                   (count matching-jobs))
-            (doseq [result queued-results]
-              (deliver
-               result
-               [::throwable
-                (ex-info "The database scope closed before request execution."
-                         {::scope scope})]))
-            {::running-job-ids running-job-ids
-             ::abandoned-count (count queued-job-ids)}))]
-    (doseq [job-id running-job-ids]
-      (try
-        (cancel job-id)
-        (catch Throwable _)))
+  "Fence a scope, cancel and drain reads, and abandon selected classes."
+  {:malli/schema [:=> [:cat ::fence-and-drain-request]
+                  ::remove-database-response]}
+  [{::keys [executor scope cancel abandon-work-classes]
+    :or {abandon-work-classes #{}}}]
+  (let [{::keys [matching queued] :as fenced}
+        (fence-scope! executor scope abandon-work-classes)
+        removed (set (keys (merge queued
+                                  (into {}
+                                        (filter (fn [[_ job]]
+                                                  (abandon-work-classes
+                                                   (::work-class job))))
+                                        matching))))
+        running (remove (fn [[job-id _]] (contains? removed job-id)) matching)]
+    (doseq [[job-id _] running]
+      (try (cancel job-id) (catch Throwable _)))
     (locking (::lock executor)
       (loop []
         (when (some (fn [[_ job]] (= scope (::scope job)))
                     (::jobs @(::state executor)))
           (.wait ^Object (::lock executor))
           (recur))))
-    {::abandoned-count abandoned-count}))
+    {::abandoned-count (count queued)}))
 
 (defn cancel!
-  "Cancel one queued job or report that its worker is already running."
+  "Cancel queued work or return the running request for native cancellation."
   {:malli/schema [:=> [:cat ::cancel-request] ::cancel-response]}
   [{::keys [executor job-id]}]
   (locking (::lock executor)
-    (if-let [{::keys [status result request]}
+    (if-let [{::keys [status result request] :as job}
              (get-in @(::state executor) [::jobs job-id])]
       (if (= :queued status)
-        (let [next-ready
-              (into {}
-                    (map (fn [[database-name queue]]
-                           [database-name
-                            (into empty-queue
-                                  (remove #(identical? result (::result %)))
-                                  queue)]))
-                    (::ready @(::state executor)))]
+        (do
           (swap! (::state executor)
                  #(-> %
-                      (assoc ::ready next-ready)
+                      (remove-queued-results #{result})
                       (update ::jobs dissoc job-id)))
           (swap! (::counts executor) update ::fenced inc)
-          (deliver
-           result
-           [::throwable
-            (ex-info "The database request was canceled before execution."
-                     {::job-id job-id})])
+          (deliver result [::throwable
+                           (ex-info "The database request was canceled."
+                                    {::job-id job-id})])
           {::cancellation :queued})
         {::cancellation :running ::request request})
       {::cancellation :not-found})))
 
 (defn evidence
-  "Return bounded executor counts without retaining requests or results."
+  "Return bounded dispatcher counts without retaining request values."
   {:malli/schema [:=> [:cat ::executor] ::evidence]}
   [executor]
-  (let [counts @(::counts executor)]
-    {::name (::name executor)
-     ::queued (locking (::lock executor)
-                (queued-count @(::state executor)))
-     ::running (::running counts)
-     ::running-by-database (::running-by-database counts)
-     ::retained-identities (locking (::lock executor)
-                             (count (::jobs @(::state executor))))
-     ::fenced (::fenced counts)
-     ::completed (::completed counts)
-     ::rejected (::rejected counts)
-     ::stopped? @(::stopped executor)}))
+  (locking (::lock executor)
+    (let [state @(::state executor)
+          counts @(::counts executor)
+          running-by-class (::running-by-class state)]
+      {::capacity (::capacity executor)
+       ::queued (queued-count state)
+       ::queued-by-class (queued-by-class state)
+       ::queued-request-bytes (queued-request-bytes state)
+       ::running (reduce + 0 (vals running-by-class))
+       ::running-by-class running-by-class
+       ::running-by-database (::running-by-database state)
+       ::retained-identities (count (::jobs state))
+       ::fenced (::fenced counts)
+       ::completed (::completed counts)
+       ::rejected (::rejected counts)
+       ::stopped? @(::stopped executor)})))
 
 (defn stop!
-  "Reject new requests, drain accepted requests, and join the bounded workers."
+  "Stop admission, drain accepted work, and close owned executors."
   {:malli/schema [:=> [:cat ::stop-request] ::stop-response]}
   [{::keys [executor]}]
   (locking (::lock executor)
     (reset! (::stopped executor) true)
     (.notifyAll ^Object (::lock executor)))
   (run! #(.join ^Thread %) (::worker-threads executor))
+  (.shutdown ^ExecutorService (::provider-executor executor))
+  (.close ^ExecutorService (::provider-executor executor))
   {::stopped? true})
