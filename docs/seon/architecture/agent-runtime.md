@@ -748,10 +748,15 @@ one separately supervised Bun child per active agent. The child owns one
 compiler state and one direct authority session, and the parent owns lifecycle,
 deadline, cancellation, bounded IPC, and terminal `proc.exited` evidence. A
 changed loaded source retires the child instead of attempting to unload stale
-process-global definitions. SCI is not the isolation mechanism. Worker pools,
-platform-specific microVMs, and stricter kernel resource limits remain measured
-implementations of the same contract, not another function or database path.
-The architecture retains three independent requirements:
+process-global definitions. An idle agent retains durable database facts, not a
+process; a measured bounded warm set may retain children only when cold-ready
+latency justifies its memory. One host-level Bun memory-pressure listener sheds
+idle capacity or skips admission without a heartbeat or recurring RSS poller.
+Parent loss is bounded by the existing process group and Bun no-orphans mode.
+SCI is not the isolation mechanism. Worker pools, platform-specific microVMs,
+and stricter kernel resource limits remain measured implementations of the same
+contract, not another function or database path. The architecture retains three
+independent requirements:
 
 - **capability isolation** exposes only explicitly granted functions;
 - **fault isolation** lets a hung execution be terminated without wedging other
