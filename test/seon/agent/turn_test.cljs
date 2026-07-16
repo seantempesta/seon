@@ -118,3 +118,42 @@
             (fn []
               (set! execution.host/invoke-compiled! original)
               (done)))))))
+
+(deftest parsed-reply-uses-the-same-agent-child-and-frozen-coordinate
+  (async done
+    (let [original execution.host/invoke-compiled!
+          observed (atom nil)
+          parsed [{:seon.repl/kind :form
+                   :seon.repl/source "(+ 1 2)"}]]
+      (set! execution.host/invoke-compiled!
+            (fn [coordinate agent-id function-symbol arguments]
+              (reset! observed [coordinate agent-id function-symbol arguments])
+              (js/Promise.resolve
+               {::execution/message execution/result-message
+                ::execution/coordinate coordinate
+                ::execution/result {:seon.eval/n-ok 1
+                                    :seon.eval/n-fail 0
+                                    :seon.eval/ids ["eval-1"]}})))
+      (-> (js/Promise.resolve
+           (@#'turn/eval-parsed! "agent-1" point parsed 'my.agent.agent-1
+                                 "turn-1" "run-1"))
+          (.then
+           (fn [result]
+             (is (= {:seon.eval/n-ok 1
+                     :seon.eval/n-fail 0
+                     :seon.eval/ids ["eval-1"]}
+                    result))
+             (is (= [point "agent-1"
+                     'seon.execution.runtime/eval-batch!
+                     [{:seon.eval/parsed parsed
+                       :seon.eval/starting-ns 'my.agent.agent-1
+                       :seon.agent.turn/id-of-turn "turn-1"
+                       :seon.agent.run/id-of-run "run-1"}]]
+                    @observed))))
+          (.catch
+           (fn [error]
+             (is false (str "eval invocation rejected: " error))))
+          (.finally
+           (fn []
+             (set! execution.host/invoke-compiled! original)
+             (done)))))))

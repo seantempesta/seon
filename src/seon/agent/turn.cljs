@@ -320,6 +320,9 @@
 (def ^:private render-prompt-function
   'seon.execution.runtime/render-prompt!)
 
+(def ^:private eval-batch-function
+  'seon.execution.runtime/eval-batch!)
+
 (defn ^:async render-prompt
   "Render one agent prompt inside its isolated execution child.
 
@@ -374,6 +377,35 @@
        (or (::execution/error response)
            {:seon.error/message "The execution child did not return a prompt."
             :seon.error/kind :core-bug})))))
+
+(defn ^:async ^:private eval-parsed!
+  "Evaluate parsed model output in the agent's existing execution child."
+  [agent-id point parsed starting-ns turn-id run-id]
+  (let [request (cond-> {:seon.eval/parsed parsed
+                         :seon.eval/starting-ns starting-ns
+                         :seon.agent.turn/id-of-turn turn-id}
+                  run-id (assoc :seon.agent.run/id-of-run run-id))
+        response
+        (await
+         (execution.host/invoke-compiled!
+          point agent-id eval-batch-function [request]))]
+    (cond
+      (not= point (::execution/coordinate response))
+      {:seon.error/message
+       "The execution child returned eval results from another database coordinate."
+       :seon.error/kind :core-bug
+       :seon.error/data
+       {:seon.db/expected-coordinate point
+        :seon.db/current-coordinate (::execution/coordinate response)}}
+
+      (and (= execution/result-message (::execution/message response))
+           (map? (::execution/result response)))
+      (::execution/result response)
+
+      :else
+      (or (::execution/error response)
+          {:seon.error/message "The execution child did not return eval results."
+           :seon.error/kind :core-bug}))))
 
 ;; ============================================================
 ;; The turn bracket — open-turn! folds the prompt projection + the current
@@ -510,7 +542,7 @@
    reply and eval-batch the forms. `id` / `id-of-turn` are LOCALS threaded
    down from `run-turn!` (captured before the LLM await), so the always-on
    blob capture pairs this verbatim reply with the same turn's prompt."
-  [resp id id-of-turn compile-state run-id stream? start-ns]
+  [resp id id-of-turn run-id stream? start-ns point]
   (let [raw-reply  (or (:text resp) "")
         ;; Always-on reply capture — the provider string is the byte ground
         ;; truth that goes to the blob store unchanged (best-effort; a lost
@@ -557,9 +589,11 @@
         ;; (namespaces-milestone rung-1 root cause, 2026-07-10: seeding home here made every
         ;; `:stream` turn silently define into my.agent.*, cursor flip-flop,
         ;; ns-interns nil, cross-ns resolution failures).
-        batch      (await (seval/eval-batch! compile-state parsed
-                                             (or start-ns (home/home-ns id))
-                                             id id-of-turn run-id))]
+        batch      (await (eval-parsed! id point parsed
+                                        (or start-ns (home/home-ns id))
+                                        id-of-turn run-id))
+        _          (when (:seon.error/message batch)
+                     (throw (ex-info (:seon.error/message batch) batch)))]
     (cond->
       ;; ATTEMPTED forms (ok + failed), not just n-ok: the loop's zero-forms
       ;; halt means "no actionable forms" — NOT "every form errored". A
@@ -787,10 +821,11 @@
    (`:seon.ai/error`) closes the turn `:status :error` (render derives a
    system line from the status — no self→self message row)."
   {:malli/schema [:=> [:catn [:input :map]] :map]}
-  [{:seon.agent/keys [id llm-fn compile-state]
+  [{:seon.agent/keys [id llm-fn]
     run-id :seon.agent.run/id
     stream? :seon.ai/stream?
     start-ns :seon.eval/start-ns
+    point ::coordinate/coordinate
     system-prompt :seon.ai/system-prompt
     :seon.agent.turn/keys  [id-of-turn turn-idx prompt-text]}]
   (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text
@@ -814,8 +849,8 @@
            :seon.agent.turn/error  (turn-error-str err)
            :seon.agent.turn/llm-attempts attempts}
           retries (assoc :seon.agent.turn/llm-retries retries)))
-      (cond-> (await (ask-and-eval-reply! resp id id-of-turn compile-state run-id
-                                          (boolean stream?) start-ns))
+      (cond-> (await (ask-and-eval-reply! resp id id-of-turn run-id
+                                          (boolean stream?) start-ns point))
         true        (assoc :seon.agent.turn/llm-attempts attempts)
         retries     (assoc :seon.agent.turn/llm-retries retries)
         (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
@@ -828,7 +863,6 @@
    Input keys:
      :seon.agent/id             agent id string
      :seon.agent/llm-fn         ctx-string -> Promise<{:text \"…\"}>
-     :seon.agent/compile-state  bootstrap compile-state
      :seon.agent.run/id         the OPEN run this turn belongs to (the loop
                                 passes its run-id; stamped on the turn)
      :seon.db/db                the FROZEN db value the loop pinned for this
@@ -843,7 +877,7 @@
    `{:seon.agent.turn/status :error :seon.error/data <str>}` and retains
    `:seon.agent.turn/id` when the turn row was already committed."
   {:malli/schema [:=> [:catn [:input :map]] :map]}
-  [{:seon.agent/keys [id llm-fn compile-state] run-id :seon.agent.run/id db :seon.db/db}]
+  [{:seon.agent/keys [id llm-fn] run-id :seon.agent.run/id db :seon.db/db}]
   (let [db         (or db @db/*conn*)
         ;; repl-mode read off the DB DATOM (config-through-DB), pinned to
         ;; the SAME frozen db the prompt renders from — the turn loop never
@@ -901,8 +935,8 @@
                                    (ask-and-eval!
                                      {:seon.agent/id            id
                                       :seon.agent/llm-fn        llm-fn
-                                      :seon.agent/compile-state compile-state
                                       :seon.agent.run/id        run-id
+                                      ::coordinate/coordinate  rendered-coordinate
                                       :seon.ai/stream?          stream?
                                       :seon.ai/system-prompt    system-prompt
                                       :seon.eval/start-ns       start-ns

@@ -1317,8 +1317,8 @@ package-size measurement is added for this test.
   acquired data. No compatibility connection, query-result replay map, public
   namespace alias, or second database facade may make old local-Datahike call
   shapes appear synchronous.
-- **Earliest unsettled contract:** move the remaining parent eval, scheduled
-  eval, stored-test, authored-route, and direct-render execution into the
+- **Earliest unsettled contract:** move scheduled eval, stored-test,
+  authored-route, and direct-render execution into the
   existing per-agent child, then delete pod-wide program replay and the local
   replica/feed in the same clean break. Client session open, restore completion,
   readiness, startup birth, and singleton configuration are now ordinary-data,
@@ -1636,10 +1636,27 @@ package-size measurement is added for this test.
   The trusted eval artifact acquires one coordinate-pinned authored program,
   installs it in that retained compiler, and invokes the existing eval batch
   owner. Prompt acquisition remains pinned to its invocation coordinate;
-  mutating eval deliberately is not, so its fenced authority writes and one
-  stale-coordinate retry can advance. Focused connection-free loading,
+  mutating eval deliberately is not, so its fenced authority writes and
+  stale-coordinate reacquisition can advance. Focused connection-free loading,
   acquisition, coordinate, and adapter proof passes 6 tests/21 assertions.
-- **Next refill:** move the remaining parent eval/schedule/test/authored-route
+- Production turn eval now sends the parsed model reply to that same per-agent
+  child at the exact prompt coordinate. The pod no longer evaluates model
+  output or receives a compiler state on this path. The child returns only the
+  ordinary existing eval result; coordinate, artifact, agent, deadline, and
+  result bounds remain the existing execution-host contracts. All five focused
+  prompt/eval dispatch tests pass 5 tests/9 assertions, and the frozen client
+  artifact compiles with its existing migration-warning inventory.
+- Special `in-ns`, `alias`, `ns-unmap`, and `ns-unalias` handling no longer
+  reads the pod's local database. Namespace movement consumes the explicit
+  accepted source map. The two read-dependent mutations acquire their ordinary
+  authority facts at one coordinate, compile idempotent transactions, record
+  behind that coordinate fence, reacquire on stale data, and apply the
+  child-local compiler change exactly once only after an accepted record.
+  Focused transaction and retry proof passes 3 tests/8 assertions. Legacy
+  local-Datahike REPL fixtures currently fail during their obsolete provenance
+  bootstrap before reaching these forms; the active atomic-client issue owns
+  their deletion or authority-session rewrite and prohibits a local fallback.
+- **Next refill:** move the remaining schedule/test/authored-route
   consumers onto the existing per-agent child execution owner, delete global
   pod replay rather than adapting it, finish the remaining web synchronous
   consumers, and

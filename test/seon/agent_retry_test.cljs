@@ -33,7 +33,10 @@
     [seon.agent.turn :as turn]
     [seon.ai :as ai]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
+    [seon.execution :as execution]
+    [seon.execution.host :as execution.host]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixtures — pid-scoped blob dir (reply capture on the success path),
@@ -123,19 +126,32 @@
                    :seon.config.model-transport/endpoint-cap endpoint-cap}]}))]
     (when-not (:seon.db/ok? env)
       (throw (ex-info "agent-retry-test: seed transact failed" env)))
-    (await
-      (turn/open-turn!
-        {:seon.agent/id agent-id
-         :seon.agent.turn/prompt-text "ctx"}
-        (fn ^:async run-test-turn! [turn-id]
-          (await
-            (turn/ask-and-eval!
+    (let [point (coordinate/resolved @db/*conn*)
+          original execution.host/invoke-compiled!]
+      (set! execution.host/invoke-compiled!
+            (fn [requested-point _agent-id _function-symbol _arguments]
+              (js/Promise.resolve
+               {::execution/message execution/result-message
+                ::execution/coordinate requested-point
+                ::execution/result {:seon.eval/n-ok 0
+                                    :seon.eval/n-fail 0
+                                    :seon.eval/ids []}})))
+      (try
+        (await
+         (turn/open-turn!
+          {:seon.agent/id agent-id
+           :seon.agent.turn/prompt-text "ctx"}
+          (fn ^:async run-test-turn! [turn-id]
+            (await
+             (turn/ask-and-eval!
               {:seon.agent/id              agent-id
                :seon.agent/llm-fn          llm-fn
-               :seon.agent/compile-state   nil
+               ::coordinate/coordinate     point
                :seon.agent.turn/id-of-turn turn-id
                :seon.agent.turn/turn-idx   1
-               :seon.agent.turn/prompt-text "ctx"})))))))
+               :seon.agent.turn/prompt-text "ctx"})))))
+        (finally
+          (set! execution.host/invoke-compiled! original))))))
 
 (defn- persisted-attempts
   [turn-id]
