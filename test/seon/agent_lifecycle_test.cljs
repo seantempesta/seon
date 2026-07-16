@@ -30,6 +30,8 @@
     [seon.agent.testrun :as testrun]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.coordinate :as db.coordinate]
+    [seon.db.protocol :as db.protocol]
     [seon.db.replica :as replica]
     [seon.derive :as derive]
     [seon.launch :as launch]))
@@ -616,31 +618,78 @@
 
 (deftest resume-reconstructs-process-state-without-writing-database-state
   (async done
-    (-> (with-conn
-          (fn ^:async run []
-            (let [id "AGTresume00001"]
-              (await (agent/create! {:seon.agent/id id}))
-              (let [birth-t (db/basis-t)
-                    resumed (await (agent/resume! {:seon.agent/id id}))]
-                (is (true? (:seon.agent.runtime/resumed? resumed)))
-                (is (some #{id}
-                          (:seon.dev.runtime-id/ids
-                           (client/runtime-advertisement)))
-                    "runtime addressing projects the durable agent query")
-                (is (= birth-t (db/basis-t))
-                    "compiler/listener reconstruction adds no database facts")
-                (is (= :terminated
-                       (await
-                         (db/with-agent
-                           "root"
-                           (fn ^:async terminate-agent []
-                             (await (lifecycle/terminate id)))))))
-                (is (not (some #{id}
-                               (:seon.dev.runtime-id/ids
-                                (client/runtime-advertisement))))
-                    "termination disappears from the database-derived advertisement")))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [previous-state @client/!state
+          original-listen db/listen!
+          original-query db/query
+          original-unlisten db/unlisten!
+          !handler (atom nil)]
+      (-> (with-conn
+            (fn ^:async run []
+              (reset! client/!state
+                      (-> previous-state
+                          (dissoc ::client/advertisement-owner
+                                  ::client/advertisement-interest-key
+                                  ::client/advertisement-desired-coordinate
+                                  ::client/advertisement-accepted-coordinate
+                                  ::client/resumable-agent-ids-coordinate)
+                          (assoc ::client/resumable-agent-ids [])))
+              (set! db/listen!
+                    (fn [request]
+                      (reset! !handler (::db/handler request))
+                      (js/Promise.resolve
+                       {::db/key ::advertisement-proof
+                        ::db/coordinate
+                        (db.coordinate/resolved @db/*conn*)})))
+              (set! db/query
+                    (fn [& args]
+                      (let [request (first args)]
+                        (if (and (= 1 (count args))
+                                 (map? request)
+                                 (::db/coordinate request))
+                          (original-query
+                           (-> request
+                               (dissoc ::db/coordinate)
+                               (assoc ::db/db @db/*conn*)))
+                          (apply original-query args)))))
+              (set! db/unlisten!
+                    (fn [_] (js/Promise.resolve {::db/ok? true})))
+              (await ((deref #'client/attach-runtime-advertisement!)))
+              (let [id "AGTresume00001"]
+                (await (agent/create! {:seon.agent/id id}))
+                (await (@!handler
+                        {::db.protocol/coordinate
+                         (db.coordinate/resolved @db/*conn*)}))
+                (let [birth-t (db/basis-t)
+                      resumed (await (agent/resume! {:seon.agent/id id}))]
+                  (is (true? (:seon.agent.runtime/resumed? resumed)))
+                  (is (some #{id}
+                            (:seon.dev.runtime-id/ids
+                             (client/runtime-advertisement)))
+                      "post-boot birth refreshes the addressed projection")
+                  (is (= birth-t (db/basis-t))
+                      "compiler/listener reconstruction adds no database facts")
+                  (is (= :terminated
+                         (await
+                           (db/with-agent
+                             "root"
+                             (fn ^:async terminate-agent []
+                               (await (lifecycle/terminate id)))))))
+                  (await (@!handler
+                          {::db.protocol/coordinate
+                           (db.coordinate/resolved @db/*conn*)}))
+                  (is (not (some #{id}
+                                 (:seon.dev.runtime-id/ids
+                                  (client/runtime-advertisement))))
+                      "termination disappears from the addressed projection")))
+              (await ((deref #'client/detach-runtime-advertisement!)))))
+          (.catch (fn [e] (is false (str "threw — " e))))
+          (.finally
+           (fn []
+             (set! db/listen! original-listen)
+             (set! db/query original-query)
+             (set! db/unlisten! original-unlisten)
+             (reset! client/!state previous-state)
+             (done)))))))
 
 (deftest create!-completes-the-bare-provenance-root-once
   (async done

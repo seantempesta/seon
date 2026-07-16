@@ -11,6 +11,7 @@
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.coordinate :as db.coordinate]
+    [seon.db.protocol :as db.protocol]
     [seon.error :as error]
     [seon.eval :as seval]
     [seon.instrument :as instrument]
@@ -177,8 +178,9 @@
         original-recovery recovery/recover!
         original-create agent/create!
         original-initial agent/ensure-initial-agent!
-        original-resumable agent/resumable-agent-ids!
         original-query db/query
+        original-listen db/listen!
+        original-unlisten db/unlisten!
         original-transact db/transact!
         original-begin admission/begin-publication!
         original-replay client/replay-program-graph!
@@ -259,15 +261,17 @@
           (fn [_]
             (swap! effects conj :forbidden/initial-agent)
             (promise-value {:seon.db/ok? true})))
-    (set! agent/resumable-agent-ids!
-          (fn []
-            (swap! effects conj :available-agents)
-            (promise-value
-             {::agent/resumable-agent-ids ["root" "worker"]})))
     (set! db/query
           (fn [& _]
             (swap! effects conj :read-agents)
             ["root" "worker"]))
+    (set! db/listen!
+          (fn [_]
+            (promise-value {::db/key ::test-advertisement
+                            ::db/coordinate forced})))
+    (set! db/unlisten!
+          (fn [_]
+            (promise-value {::db/ok? true})))
     (set! db/transact!
           (fn [_]
             (swap! effects conj :forbidden/transaction)
@@ -367,8 +371,9 @@
            (set! recovery/recover! original-recovery)
            (set! agent/create! original-create)
            (set! agent/ensure-initial-agent! original-initial)
-           (set! agent/resumable-agent-ids! original-resumable)
            (set! db/query original-query)
+           (set! db/listen! original-listen)
+           (set! db/unlisten! original-unlisten)
            (set! db/transact! original-transact)
            (set! admission/begin-publication! original-begin)
            (set! client/replay-program-graph! original-replay)
@@ -846,6 +851,121 @@
       (finally
         (reset! client/!state previous-state)))))
 
+(deftest runtime-advertisement-interest-tracks-birth-termination-and-late-reads
+  (async done
+    (let [previous-state @client/!state
+          original-attached? db/attached?
+          original-listen db/listen!
+          original-query db/query
+          original-unlisten db/unlisten!
+          database-id #uuid "a9ae7980-856b-4ec9-8697-a47d672dcb11"
+          point (fn [t]
+                  {::db.coordinate/database-id database-id
+                   ::db.coordinate/branch :db
+                   ::db.coordinate/commit-id (random-uuid)
+                   ::db.coordinate/t t})
+          c0 (point 40)
+          c1 (point 41)
+          c2 (point 42)
+          c3 (point 43)
+          c4 (point 44)
+          !handler (atom nil)
+          !interest-query (atom nil)
+          !queries (atom [])
+          !unlistened (atom [])
+          !resolve-c2 (atom nil)
+          c2-result
+          (js/Promise.
+           (fn [resolve _reject]
+             (reset! !resolve-c2 resolve)))]
+      (reset! client/!state
+              (-> previous-state
+                  (dissoc ::client/advertisement-owner
+                          ::client/advertisement-interest-key
+                          ::client/advertisement-desired-coordinate
+                          ::client/advertisement-accepted-coordinate
+                          ::client/resumable-agent-ids-coordinate)
+                  (assoc ::client/resumable-agent-ids ["root"])))
+      (set! db/attached? (constantly true))
+      (set! db/listen!
+            (fn [request]
+              (reset! !handler (::db/handler request))
+              (reset! !interest-query (::db/query request))
+              (promise-value {::db/key ::test-advertisement
+                              ::db/coordinate c0})))
+      (set! db/query
+            (fn [request]
+              (swap! !queries conj request)
+              (let [coordinate (::db/coordinate request)]
+                (cond
+                  (= c0 coordinate) (promise-value ["root"])
+                  (= c1 coordinate) (promise-value ["child" "root"])
+                  (= c2 coordinate) c2-result
+                  (= c3 coordinate) (promise-value ["root"])
+                  (= c4 coordinate) (promise-value ["late"])
+                  :else (promise-value [])))))
+      (set! db/unlisten!
+            (fn [request]
+              (swap! !unlistened conj request)
+              (promise-value {::db/ok? true})))
+      (-> ((deref #'client/attach-runtime-advertisement!))
+          (.then
+           (fn [_]
+             (testing "listen precedes the initial query at its ack coordinate"
+               (is (= @!interest-query
+                      (::db/query (first @!queries))))
+               (is (= c0 (::db/coordinate (first @!queries))))
+               (is (= ["root"]
+                      (:seon.dev.runtime-id/ids
+                       (client/runtime-advertisement)))))
+             (@!handler {::db.protocol/coordinate c1})))
+          (.then
+           (fn [_]
+             (testing "a post-boot birth enters the synchronous projection"
+               (is (= ["child" "root"]
+                      (:seon.dev.runtime-id/ids
+                       (client/runtime-advertisement)))))
+             (let [late (@!handler {::db.protocol/coordinate c2})]
+               (-> (@!handler {::db.protocol/coordinate c3})
+                   (.then
+                    (fn [_]
+                      (testing "termination removes the durable member"
+                        (is (= ["root"]
+                               (:seon.dev.runtime-id/ids
+                                (client/runtime-advertisement)))))
+                      (@!resolve-c2 ["child" "root"])
+                      late))))))
+          (.then
+           (fn [_]
+             (testing "a late older query cannot replace the newer coordinate"
+               (is (= ["root"]
+                      (:seon.dev.runtime-id/ids
+                       (client/runtime-advertisement)))))
+             ((deref #'client/detach-runtime-advertisement!))))
+          (.then
+           (fn [_]
+             (testing "detach unlistens and makes the old generation inert"
+               (is (= [{::db/key ::test-advertisement}] @!unlistened))
+               (let [before (count @!queries)]
+                 (-> (@!handler {::db.protocol/coordinate c4})
+                     (.then
+                      (fn [_]
+                        (is (= before (count @!queries)))
+                        (is (= []
+                               (:seon.dev.runtime-id/ids
+                                (client/runtime-advertisement)))))))))))
+          (.catch
+           (fn [error]
+             (is false (str "runtime advertisement interest threw " error))))
+          (.finally
+           (fn []
+             (set! db/attached? original-attached?)
+             (set! db/listen! original-listen)
+             (set! db/query original-query)
+             (set! db/unlisten! original-unlisten)
+             (reset! client/!state previous-state)
+             (done)))))))
+
 (deftest attached-running-start-is-an-idempotent-read-surface-refresh
   (async done
     (let [previous-state @client/!state
@@ -853,21 +973,41 @@
           connection (atom {})
           effects (atom [])
           original-attached? db/attached?
-          original-resumable agent/resumable-agent-ids!
+          original-listen db/listen!
+          original-query db/query
+          original-unlisten db/unlisten!
           original-replica-attach replica/attach!
           original-web-start web.serve/start!
           original-replay client/replay-program-graph!
           original-begin admission/begin-publication!]
       (set! db/*conn* connection)
       (reset! client/!state
-              (assoc previous-state
-                     ::client/launch-capability non-autonomous-capability
-                     ::client/runtime-phase :seon.client.runtime/running))
+              (-> previous-state
+                  (dissoc ::client/advertisement-owner
+                          ::client/advertisement-interest-key
+                          ::client/advertisement-desired-coordinate
+                          ::client/advertisement-accepted-coordinate
+                          ::client/resumable-agent-ids
+                          ::client/resumable-agent-ids-coordinate)
+                  (assoc ::client/launch-capability non-autonomous-capability
+                         ::client/runtime-phase
+                         :seon.client.runtime/running)))
       (set! db/attached? (constantly true))
-      (set! agent/resumable-agent-ids!
-            (fn []
+      (set! db/listen!
+            (fn [_]
+              (promise-value
+               {::db/key ::test-attached-advertisement
+                ::db/coordinate
+                {::db.coordinate/database-id (random-uuid)
+                 ::db.coordinate/branch :db
+                 ::db.coordinate/commit-id (random-uuid)
+                 ::db.coordinate/t 44}})))
+      (set! db/query
+            (fn [_]
               (swap! effects conj :status)
-              (promise-value {::agent/resumable-agent-ids ["root"]})))
+              (promise-value ["root"])))
+      (set! db/unlisten!
+            (fn [_] (promise-value {::db/ok? true})))
       (set! replica/attach!
             (fn [_]
               (swap! effects conj :replica)
@@ -900,7 +1040,9 @@
           (.finally
            (fn []
              (set! db/attached? original-attached?)
-             (set! agent/resumable-agent-ids! original-resumable)
+             (set! db/listen! original-listen)
+             (set! db/query original-query)
+             (set! db/unlisten! original-unlisten)
              (set! replica/attach! original-replica-attach)
              (set! web.serve/start! original-web-start)
              (set! client/replay-program-graph! original-replay)

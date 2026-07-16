@@ -344,6 +344,14 @@
   [{:seon.db/keys [db]}]
   (derive/armable-agent-ids (or db @db/*conn*)))
 
+(def resumable-agent-ids-query
+  "Born, nonterminated process hosts used by cold resume and runtime discovery."
+  '[:find [?id ...]
+    :where
+    [?agent :seon.agent/id ?id]
+    [?agent :seon.eval/home-requires _]
+    (not [?agent :seon.agent/terminated-at _])])
+
 (defn ^:async resumable-agent-ids!
   "Read born, nonterminated process hosts at one database coordinate.
 
@@ -360,11 +368,7 @@
           {::db/members
            [{::db.protocol/operation db.protocol/query-operation
              ::db.protocol/query-form
-             '[:find [?id ...]
-               :where
-               [?agent :seon.agent/id ?id]
-               [?agent :seon.eval/home-requires _]
-               (not [?agent :seon.agent/terminated-at _])]
+             resumable-agent-ids-query
              ::db.protocol/arguments []}]}))
         member (first (::db/results result))]
     (when (and (map? result) (:seon.error/message result))

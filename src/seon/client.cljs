@@ -323,10 +323,13 @@
                  :seon.error/kind :core-bug})))))
 
 (defn runtime-advertisement
-  "Project this pod's MCP addressable agents directly from its database.
+  "Project this pod's MCP addressable agents from its database interest.
 
    Runtime and writer coordinates are immutable launch configuration. Agent
-   membership is the same nonterminated, born-agent query used by cold resume.
+   membership is the last accepted result of the same nonterminated,
+   born-agent query used by cold resume. One addressed database interest keeps
+   that ordinary projection current without making this synchronous MCP probe
+   perform I/O.
    Before the database attaches, the pod still advertises its runtime and
    writer owner with no agent ids so an ordinary cluster-pinned REPL can
    connect during boot."
@@ -352,14 +355,128 @@
                   [::launch/writer-cluster
                    ::launch/writer-repl-port-file]))))
 
+(defn- newer-advertisement-coordinate?
+  [candidate current]
+  (or (nil? current)
+      (and (db.coordinate/same-attachment? candidate current)
+           (>= (::db.coordinate/t candidate)
+               (::db.coordinate/t current)))))
+
+(defn- ^:async reconcile-runtime-advertisement!
+  [owner coordinate]
+  (let [ids (await (db/query {::db/query agent/resumable-agent-ids-query
+                              ::db/coordinate coordinate}))]
+    (when (:seon.error/message ids)
+      (throw (ex-info "Runtime advertisement projection failed." ids)))
+    (let [projection (->> ids sort vec)]
+      (when (and (identical? owner (::advertisement-owner @!state))
+                 (= coordinate (::advertisement-desired-coordinate @!state)))
+        (swap! !state assoc
+               ::resumable-agent-ids projection
+               ::resumable-agent-ids-coordinate coordinate
+               ::advertisement-accepted-coordinate coordinate)
+        true))))
+
+(defn- refresh-runtime-advertisement!
+  [owner coordinate]
+  (let [accepted? (atom false)]
+    (swap! !state
+           (fn [state]
+             (let [desired (::advertisement-desired-coordinate state)]
+               (if (and (identical? owner (::advertisement-owner state))
+                        (newer-advertisement-coordinate? coordinate desired))
+                 (do (reset! accepted? true)
+                     (assoc state ::advertisement-desired-coordinate coordinate))
+                 state))))
+    (if @accepted?
+      (-> (reconcile-runtime-advertisement! owner coordinate)
+          (.catch
+           (fn [error]
+             (log/error-console! "seon.client"
+                                 "runtime advertisement refresh failed" error))))
+      (js/Promise.resolve false))))
+
+(defn- ^:async settle-runtime-advertisement!
+  [owner]
+  (await
+   (loop []
+     (let [{::keys [advertisement-owner
+                    advertisement-desired-coordinate
+                    advertisement-accepted-coordinate]}
+           @!state]
+       (cond
+         (not (identical? owner advertisement-owner)) false
+         (= advertisement-desired-coordinate advertisement-accepted-coordinate)
+         true
+         :else
+         (do
+           (await
+            (reconcile-runtime-advertisement!
+             owner advertisement-desired-coordinate))
+           (recur)))))))
+
+(defn- ^:async attach-runtime-advertisement!
+  []
+  (if-let [interest-key (::advertisement-interest-key @!state)]
+    (let [owner (::advertisement-owner @!state)]
+      (await (settle-runtime-advertisement! owner))
+      {::db/key interest-key
+       ::db/coordinate (::advertisement-accepted-coordinate @!state)})
+    (let [owner (js-obj)]
+      (swap! !state assoc
+             ::advertisement-owner owner
+             ::advertisement-desired-coordinate nil
+             ::advertisement-accepted-coordinate nil)
+      (let [listening
+            (await
+             (db/listen!
+              {::db/key ::runtime-advertisement
+               ::db/query agent/resumable-agent-ids-query
+               ::db/handler
+               (fn [event]
+                 (refresh-runtime-advertisement!
+                  owner (::db.protocol/coordinate event)))}))]
+        (when (:seon.error/message listening)
+          (swap! !state
+                 (fn [state]
+                   (if (identical? owner (::advertisement-owner state))
+                     (dissoc state
+                             ::advertisement-owner
+                             ::advertisement-desired-coordinate
+                             ::advertisement-accepted-coordinate)
+                     state)))
+          (throw (ex-info "Runtime advertisement interest failed." listening)))
+        (swap! !state
+               (fn [state]
+                 (if (identical? owner (::advertisement-owner state))
+                   (cond->
+                     (assoc state
+                            ::advertisement-interest-key (::db/key listening))
+                     (nil? (::advertisement-desired-coordinate state))
+                     (assoc ::advertisement-desired-coordinate
+                            (::db/coordinate listening)))
+                   state)))
+        (await (settle-runtime-advertisement! owner))
+        listening))))
+
 (defn- ^:async acquire-resumable-agent-ids!
   []
-  (let [result (await (agent/resumable-agent-ids!))
-        ids (::agent/resumable-agent-ids result)]
-    (swap! !state assoc
-           ::resumable-agent-ids ids
-           ::resumable-agent-ids-coordinate (::db/coordinate result))
-    ids))
+  (await (attach-runtime-advertisement!))
+  (or (::resumable-agent-ids @!state) []))
+
+(defn- ^:async detach-runtime-advertisement!
+  []
+  (let [interest-key (::advertisement-interest-key @!state)]
+    (swap! !state dissoc
+           ::advertisement-owner
+           ::advertisement-interest-key
+           ::advertisement-desired-coordinate
+           ::advertisement-accepted-coordinate
+           ::resumable-agent-ids
+           ::resumable-agent-ids-coordinate)
+    (if interest-key
+      (await (db/unlisten! {::db/key interest-key}))
+      {::db/ok? true})))
 
 (defn start-heartbeat!
   "Holds the Node event loop open with a minute-cadence heartbeat. The
@@ -3136,7 +3253,8 @@
         state (swap! !state update ::quiesce-progress
                      merge-quiesce-progress
                      {::agent-runtime/unhosted-ids host-ids})
-        progress (::quiesce-progress state)]
+        progress (::quiesce-progress state)
+        _ (await (detach-runtime-advertisement!))]
     (replica/detach!)
     ;; Resolve the final immutable point while the active schema projection is
     ;; still installed. `admission/detach!` intentionally activates the empty
