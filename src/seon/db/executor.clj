@@ -1,6 +1,8 @@
 (ns seon.db.executor
   "One bounded capacity and fairness owner for JVM database work."
-  (:require [seon.db.coordinate :as coordinate]
+  (:require [clojure.core.async :as async]
+            [clojure.core.async.impl.protocols :as async-protocols]
+            [seon.db.coordinate :as coordinate]
             [seon.db.protocol]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
@@ -382,12 +384,8 @@
           (.notifyAll ^Object (::lock executor))
           true)))))
 
-(defn- run-work! [executor work]
+(defn- finish-outcome! [executor work outcome]
   (let [result (::result work)
-        execute (get (::execute executor) (::work-class work))
-        outcome (try
-                  [::value (execute (::request work))]
-                  (catch Throwable throwable [::throwable throwable]))
         continuation (when (= ::value (first outcome))
                        (let [value (second outcome)]
                          (when (and (map? value)
@@ -411,6 +409,28 @@
         (deliver result outcome)
         (when owns-completion?
           (publish-completion! executor work outcome))))))
+
+(defn- run-work! [executor work]
+  (let [execute (get (::execute executor) (::work-class work))
+        outcome (try
+                  [::value (execute (::request work))]
+                  (catch Throwable throwable [::throwable throwable]))
+        value (second outcome)]
+    (if (and (= ::value (first outcome))
+             (satisfies? async-protocols/ReadPort value))
+      (async/take!
+       value
+       (fn [completed]
+         (finish-outcome!
+          executor work
+          (cond
+            (instance? Throwable completed) [::throwable completed]
+            (nil? completed)
+            [::throwable
+             (ex-info "Asynchronous database work closed without a result."
+                      {::job-id (::job-id work)})]
+            :else [::value completed]))))
+      (finish-outcome! executor work outcome))))
 
 (defn- run-worker! [executor allowed-classes]
   (loop []

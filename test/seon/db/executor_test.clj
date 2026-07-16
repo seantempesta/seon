@@ -1,5 +1,6 @@
 (ns seon.db.executor-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.core.async :as async]
+            [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db.coordinate :as coordinate]
             [seon.db.executor :as executor]
@@ -265,6 +266,57 @@
              (executor/submit!
               (request worker "a" exact-scope "callback/throws" :value))))
       (is (zero? (::executor/retained-identities (executor/evidence worker))))
+      (is (zero? (::executor/running (executor/evidence worker))))
+      (finally
+        (executor/stop! {::executor/executor worker})))))
+
+(deftest nonblocking-results-retain-capacity-through-physical-completion
+  (let [result-port (async/promise-chan)
+        completions (atom [])
+        worker (start-worker 1 {:mutation (fn [_request] result-port)}
+                             #(swap! completions conj %))
+        exact-scope (scope "a" (random-uuid) (random-uuid))
+        result
+        (executor/submit-async!
+         (assoc (request worker "a" exact-scope "mutation/async" nil)
+                ::executor/work-class :mutation))]
+    (try
+      (loop [attempt 0]
+        (when (and (< attempt 10000)
+                   (zero? (::executor/running (executor/evidence worker))))
+          (Thread/yield)
+          (recur (inc attempt))))
+      (is (= {:mutation 1}
+             (::executor/running-by-class (executor/evidence worker))))
+      (is (empty? @completions))
+      (is (async/put! result-port :committed))
+      (is (= [::executor/value :committed] (deref result 5000 nil)))
+      (loop [attempt 0]
+        (when (and (< attempt 10000)
+                   (pos? (::executor/running (executor/evidence worker))))
+          (Thread/yield)
+          (recur (inc attempt))))
+      (is (= ["mutation/async"] (mapv ::executor/job-id @completions)))
+      (is (zero? (::executor/running (executor/evidence worker))))
+      (finally
+        (async/close! result-port)
+        (executor/stop! {::executor/executor worker})))))
+
+(deftest closed-nonblocking-result-completes-as-an-error
+  (let [result-port (async/promise-chan)
+        completion (promise)
+        worker (start-worker 1 {:mutation (fn [_request] result-port)}
+                             #(deliver completion %))
+        exact-scope (scope "a" (random-uuid) (random-uuid))
+        result
+        (executor/submit-async!
+         (assoc (request worker "a" exact-scope "mutation/closed" nil)
+                ::executor/work-class :mutation))]
+    (try
+      (async/close! result-port)
+      (is (= ::executor/throwable (first (deref result 5000 nil))))
+      (is (= ::executor/throwable
+             (first (::executor/outcome (deref completion 5000 nil)))))
       (is (zero? (::executor/running (executor/evidence worker))))
       (finally
         (executor/stop! {::executor/executor worker})))))

@@ -604,6 +604,15 @@ future selection scans. The retained 512-database churn regression plus the
 focused executor gate pass 23 tests/650 assertions; the changed writer boundary
 passes 69 tests/968 assertions.
 
+The same executor now consumes a returned core.async `ReadPort` without parking
+a worker: the job and its class/database capacity remain physically active until
+the port yields a result, Throwable, or closes, and only then enter the one
+completion path. The focused executor gate passes 25 tests/659 assertions and
+the changed writer boundary passes 71 tests/977 assertions. Migrating
+`execute-mutation!` from blocking `d/transact` to existing `d/transact!` is the
+next writer-owned step; the compatibility result promises are still removed
+only with the active-request cut.
+
 Exit proof: 1/8/32 children, multiplex limits, fragmented frames, partial
 writes, large pages, slow recipients, cancellation, child crash, reconnect,
 and release preserve bounded independent progress and outperform the removed
