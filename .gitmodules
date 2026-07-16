@@ -144,7 +144,7 @@
 	ignore = dirty
 [submodule "reference-code/proximum"]
 	path = reference-code/proximum
-	url = https://github.com/replikativ/proximum.git
+	url = https://github.com/seantempesta/proximum.git
 	ignore = dirty
 [submodule "reference-code/js-genai"]
 	path = reference-code/js-genai
