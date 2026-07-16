@@ -15,9 +15,11 @@
     [clojure.string :as str]
     [clojure.walk :as walk]
     [datahike.api :as d]
+    [datahike.query :as datahike-query]
     [seon.client :as client]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as protocol]
     [seon.instrument :as inst]
     [seon.schema :as schema]
     [my.plan :as plan]
@@ -29,6 +31,12 @@
 (def ^:private b-id "plantestagentB")
 (def ^:private a-ref [:seon.agent/id a-id])
 (def ^:private b-ref [:seon.agent/id b-id])
+
+(def ^:private coordinate
+  {:seon.db.coordinate/database-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+   :seon.db.coordinate/branch :db
+   :seon.db.coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+   :seon.db.coordinate/t 42})
 
 (defn- allocate-facts!
   "Mint one identity per keyed fact and commit all facts atomically."
@@ -855,6 +863,250 @@
                                  "the overflow is narrated, not silently dropped")))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(defn- query-member-result [result]
+  {::protocol/success? true :datahike.query/result result})
+
+(defn- pull-member-result [result]
+  {::protocol/success? true ::protocol/result result})
+
+(deftest remote-plan-acquisition-is-two-coordinate-pinned-batches
+  (async done
+    (let [at (js/Date. 1000)
+          requests (atom [])
+          responses
+          (atom
+            [{::db/coordinate coordinate
+              ::db/results
+              [(query-member-result
+                 [["active-step" "do it" "verify it" at false 31]])
+               (query-member-result
+                 [["ready-step" "then this" "" at false]])
+               (query-member-result
+                 [["done-step" "already done" at]])
+               (pull-member-result {:db/id 1 :seon.agent/id a-id})]}
+             {::db/coordinate coordinate
+              ::db/results
+              [(pull-member-result
+                 {:my.plan/id "active-step"
+                  :my.plan/title "do it"
+                  :my.plan/parent
+                  {:my.plan/id "root-step"
+                   :my.plan/title "the goal"
+                   :my.plan/goal "ship it"}})
+               (query-member-result [[:done 2] [:active 1]])]}])
+          original-execute-many db/execute-many]
+      (set! db/execute-many
+            (fn [request]
+              (swap! requests conj request)
+              (let [response (first @responses)]
+                (swap! responses subvec 1)
+                (js/Promise.resolve response))))
+      (-> ((deref #'plan-int/acquire-plan-block)
+           {::db/coordinate coordinate :seon.agent/id a-id})
+          (.then
+            (fn [acquired]
+              (is (= 2 (count @requests)))
+              (is (every? #(= coordinate (::db/coordinate %)) @requests)
+                  "both dependent reads retain the inherited coordinate")
+              (is (= [4 2] (mapv (comp count ::db/members) @requests)))
+              (is (= [protocol/query-operation protocol/query-operation
+                      protocol/query-operation protocol/pull-operation]
+                     (mapv ::protocol/operation
+                           (::db/members (first @requests)))))
+              (is (= [protocol/pull-operation protocol/query-operation]
+                     (mapv ::protocol/operation
+                           (::db/members (second @requests)))))
+              (is (= ["root-step" "active-step"]
+                     (mapv :my.plan/id
+                           (get-in acquired
+                                   [::plan-int/anchor :my.plan/chain]))))
+              (is (= {:my.plan/done 2 :my.plan/total 3
+                      :my.plan/done? false}
+                     (get-in acquired
+                             [::plan-int/anchor :my.plan/progress])))
+              (let [rendered ((deref #'plan-int/format-plan-body) acquired)]
+                (is (str/includes? rendered "ship it"))
+                (is (str/includes? rendered "verify it"))
+                (is (str/includes? rendered "already done")))))
+          (.catch (fn [error] (is false (str "threw — " error))))
+          (.finally
+            (fn []
+              (set! db/execute-many original-execute-many)
+              (done)))))))
+
+(deftest remote-plan-acquisition-returns-coordinate-and-member-errors
+  (async done
+    (let [responses
+          (atom
+            [{::db/coordinate (assoc coordinate :seon.db.coordinate/t 43)
+              ::db/results []}
+             {::db/coordinate coordinate
+              ::db/results
+              [{::protocol/success? false
+                ::protocol/error "bounded active query failed"}
+               (query-member-result [])
+               (query-member-result [])
+               (pull-member-result {:db/id 1 :seon.agent/id a-id})]}])
+          original-execute-many db/execute-many]
+      (set! db/execute-many
+            (fn [_]
+              (let [response (first @responses)]
+                (swap! responses subvec 1)
+                (js/Promise.resolve response))))
+      (-> ((deref #'plan-int/acquire-plan-block)
+           {::db/coordinate coordinate :seon.agent/id a-id})
+          (.then
+            (fn [mismatch]
+              (is (= "Plan coordinate check failed."
+                     (:seon.error/message mismatch)))
+              ((deref #'plan-int/acquire-plan-block)
+               {::db/coordinate coordinate :seon.agent/id a-id})))
+          (.then
+            (fn [member-failure]
+              (is (= "Plan initial member failed."
+                     (:seon.error/message member-failure)))
+              (is (= "bounded active query failed"
+                     (get-in member-failure
+                             [:seon.error/data 0 ::protocol/error])))))
+          (.catch (fn [error] (is false (str "threw — " error))))
+          (.finally
+            (fn []
+              (set! db/execute-many original-execute-many)
+              (done)))))))
+
+(deftest acquired-plan-formatting-is-the-existing-pure-tail
+  (let [at (js/Date. 1000)
+        anchor {:my.plan/step
+                {:my.plan/id "active" :my.plan/title "work"
+                 :my.plan/expect "proof"}
+                :my.plan/chain
+                [{:my.plan/id "root" :my.plan/title "goal"
+                  :my.plan/goal "ship"}]
+                :my.plan/active? true
+                :my.plan/progress {:my.plan/done 2 :my.plan/total 4}}
+        actives [{:my.plan/id "active" :my.plan/title "work"
+                  :my.plan/created-at at}]
+        readies [{:my.plan/id "ready" :my.plan/title "next"
+                  :my.plan/created-at at}]
+        dones [{:my.plan/id "done" :my.plan/title "landed"
+                :my.plan/completed-at at}]
+        escalation-text "; escalation stays owner-formatted"
+        original-execute-many db/execute-many
+        original-query db/query
+        original-pull db/pull
+        touched (atom [])
+        fail-read (fn [& args]
+                    (swap! touched conj args)
+                    (throw (js/Error. "unexpected database read")))]
+    (try
+      (set! db/execute-many fail-read)
+      (set! db/query fail-read)
+      (set! db/pull fail-read)
+      (let [input {::plan-int/anchor anchor
+                   ::plan-int/actives actives
+                   ::plan-int/readies readies
+                   ::plan-int/dones dones
+                   ::plan-int/escalation-text escalation-text}
+            expected
+            (str/join "\n"
+                      [(plan-int/anchor-section anchor)
+                       escalation-text
+                       (plan-int/frontier-section actives readies)
+                       (plan-int/done-section dones)])]
+        (is (= expected ((deref #'plan-int/format-plan-body) input)))
+        (is (empty? @touched) "the shared formatter performs no database I/O"))
+      (finally
+        (set! db/execute-many original-execute-many)
+        (set! db/query original-query)
+        (set! db/pull original-pull)))))
+
+(deftest thousand-step-plan-uses-bounded-datalog-queries
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (let [root-id "bulkroot000000"
+                  child-id (fn [i] (str "p" (.padStart (str i) 13 "0")))
+                  at (js/Date. 1000)]
+              (-> (db/transact!
+                    {:seon.db/tx-data
+                     [{:my.plan/id root-id
+                       :my.plan/title "bulk root"
+                       :my.plan/status :open
+                       :my.plan/created-at at
+                       :my.plan/agent a-ref}]})
+                  (.then
+                    (fn [{ok? :seon.db/ok? :as envelope}]
+                      (is (true? ok?) (pr-str envelope))
+                      (db/transact!
+                        {:seon.db/tx-data
+                         (mapv (fn [i]
+                                 {:my.plan/id (child-id i)
+                                  :my.plan/title (str "step " i)
+                                  :my.plan/status :open
+                                  :my.plan/created-at (js/Date. (+ 1001 i))
+                                  :my.plan/agent a-ref
+                                  :my.plan/parent [:my.plan/id root-id]})
+                               (range 999))})))
+                  (.then
+                    (fn [{ok? :seon.db/ok? :as envelope}]
+                      (is (true? ok?) (pr-str envelope))
+                      (let [database @conn
+                            initial-members
+                            ((deref #'plan-int/initial-acquisition-members) a-id)
+                            run-query
+                            (fn [member]
+                              (datahike-query/q-with-evidence
+                                {:query (::protocol/query-form member)
+                                 :args (into [database]
+                                             (::protocol/arguments member))
+                                 :max-work
+                                 (:datahike.resource/max-work member)
+                                 :max-results
+                                 (:datahike.resource/max-results member)
+                                 :max-result-weight
+                                 (:datahike.resource/max-result-weight member)}))
+                            initial-evidence
+                            (mapv run-query (take 3 initial-members))
+                            ready-result
+                            (get-in initial-evidence
+                                    [1 :datahike.query/result])
+                            selected-id (ffirst ready-result)
+                            selected-members
+                            ((deref #'plan-int/selected-acquisition-members)
+                             selected-id)
+                            rollup-evidence (run-query (second selected-members))
+                            evidence (conj initial-evidence rollup-evidence)
+                            resource (mapv :datahike.query/resource-evidence
+                                           evidence)]
+                        (is (= (inc plan-int/frontier-limit)
+                               (count ready-result))
+                            "the authority returns only the frontier plus overflow witness")
+                        (is (= #{[:open 999]}
+                               (set (get rollup-evidence
+                                         :datahike.query/result))))
+                        (is (= 4 (count evidence))
+                            "1,000 steps still execute four normal-path queries")
+                        (is (= [1001 21067 1 10017]
+                               (mapv :datahike.resource/work resource)))
+                        (is (= [0 1999 0 999]
+                               (mapv :datahike.resource/result-count resource)))
+                        (is (= [0 60753 0 2997]
+                               (mapv :datahike.resource/result-weight resource)))
+                        (is (every?
+                              (fn [entry]
+                                (let [limits (:datahike.resource/limits entry)]
+                                  (and
+                                    (<= (:datahike.resource/work entry)
+                                        (:datahike.resource/max-work limits))
+                                    (<= (:datahike.resource/result-count entry)
+                                        (:datahike.resource/max-results limits))
+                                    (<= (:datahike.resource/result-weight entry)
+                                        (:datahike.resource/max-result-weight
+                                          limits)))))
+                              resource)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error] (is false (str "threw — " error)) (done))))))
 
 (deftest entity-ref-direction-and-agent-retract-semantics
   ;; The settled `my.*` scoping shape: per-agent data points DATA→AGENT

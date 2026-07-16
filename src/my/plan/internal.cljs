@@ -28,6 +28,7 @@
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
+    [seon.db.protocol :as protocol]
     [seon.repair.candidates :as cand]
     [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]))
@@ -1185,6 +1186,215 @@
    keeping the block cache-stable across renders."
   5)
 
+(def ^:private active-query
+  {:find '[?id ?title ?expect ?created ?message ?active-tx]
+   :in '[$ ?agent-id]
+   :where '[[?agent :seon.agent/id ?agent-id]
+            [?step :my.plan/agent ?agent]
+            [?step :my.plan/status :active ?active-tx]
+            [?step :my.plan/id ?id]
+            [?step :my.plan/title ?title]
+            [?step :my.plan/created-at ?created]
+            [(get-else $ ?step :my.plan/expect "") ?expect]
+            [(get-else $ ?step :my.plan/message false) ?message]]
+   :order-by '[?created :asc ?id :asc]
+   :limit (inc frontier-limit)})
+
+(def ^:private ready-query
+  {:find '[?id ?title ?expect ?created ?message]
+   :in '[$ % ?agent-id]
+   :where '[[?agent :seon.agent/id ?agent-id]
+            [?step :my.plan/agent ?agent]
+            (ready ?step)
+            [?step :my.plan/id ?id]
+            [?step :my.plan/title ?title]
+            [?step :my.plan/created-at ?created]
+            [(get-else $ ?step :my.plan/expect "") ?expect]
+            [(get-else $ ?step :my.plan/message false) ?message]]
+   :order-by '[?created :asc ?id :asc]
+   :limit (inc frontier-limit)})
+
+(def ^:private recent-done-query
+  {:find '[?id ?title ?completed]
+   :in '[$ ?agent-id]
+   :where '[[?agent :seon.agent/id ?agent-id]
+            [?step :my.plan/agent ?agent]
+            [?step :my.plan/status :done]
+            [?step :my.plan/id ?id]
+            [?step :my.plan/title ?title]
+            [?step :my.plan/completed-at ?completed]]
+   :order-by '[?completed :desc ?id :asc]
+   :limit recent-done-limit})
+
+(def ^:private ancestor-selector
+  '[:my.plan/id :my.plan/title :my.plan/goal :my.plan/pace
+    {:my.plan/parent ...}])
+
+(def ^:private root-rollup-query
+  '[:find ?status (count ?leaf)
+    :in $ % ?selected-id
+    :where
+    [?selected :my.plan/id ?selected-id]
+    [?root :my.plan/id _]
+    (or-join [?root ?selected]
+      [(= ?root ?selected)]
+      (descendant ?root ?selected))
+    (not-join [?root] [?root :my.plan/parent _])
+    [?leaf :my.plan/status ?status]
+    (or-join [?leaf ?root]
+      [(= ?leaf ?root)]
+      (descendant ?root ?leaf))
+    (leaf ?leaf)])
+
+(defn- query-member
+  [query arguments max-work max-results max-result-weight]
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form query
+   ::protocol/arguments arguments
+   :datahike.resource/max-work max-work
+   :datahike.resource/max-results max-results
+   :datahike.resource/max-result-weight max-result-weight})
+
+(defn- initial-acquisition-members
+  [agent-id]
+  [(query-member active-query [agent-id]
+                 2000000 2000000 65536)
+   (query-member ready-query [rules agent-id]
+                 5000000 5000000 131072)
+   (query-member recent-done-query [agent-id]
+                 2000000 2000000 65536)
+   {::protocol/operation protocol/pull-operation
+    ::protocol/selector [:db/id :seon.agent/id]
+    ::protocol/entity-id [:seon.agent/id agent-id]
+    :datahike.resource/max-work 10000
+    :datahike.resource/max-results 8
+    :datahike.resource/max-result-weight 1024}])
+
+(defn- selected-acquisition-members
+  [step-id]
+  [{::protocol/operation protocol/pull-operation
+    ::protocol/selector ancestor-selector
+    ::protocol/entity-id [:my.plan/id step-id]
+    :datahike.resource/max-work 100000
+    :datahike.resource/max-results 2048
+    :datahike.resource/max-result-weight 65536}
+   (query-member root-rollup-query [rules step-id]
+                 5000000 5000000 4096)])
+
+(defn- member-result
+  [member]
+  (when (true? (::protocol/success? member))
+    (or (::protocol/result member)
+        (:datahike.query/result member))))
+
+(defn- acquisition-error
+  [stage value]
+  {:seon.error/message (str "Plan " stage " failed.")
+   :seon.error/data value
+   :seon.error/kind :core-bug})
+
+(defn- step-row
+  [[id title expect created message & [active-tx]]]
+  (cond-> {:my.plan/id id
+           :my.plan/title title
+           :my.plan/created-at created}
+    (seq expect) (assoc :my.plan/expect expect)
+    message (assoc :my.plan/message message)
+    active-tx (assoc :seon.db/tx active-tx)))
+
+(defn- ancestor-chain-from-pull
+  [selected]
+  (loop [node selected chain []]
+    (if-not node
+      (vec (reverse chain))
+      (recur (:my.plan/parent node)
+             (conj chain (dissoc node :my.plan/parent))))))
+
+(defn- rollup-from-rows
+  [rows]
+  (let [counts (into {} rows)
+        total (reduce + 0 (vals counts))
+        done (get counts :done 0)]
+    {:my.plan/done done
+     :my.plan/total total
+     :my.plan/done? (and (pos? total) (= done total))}))
+
+(defn ^:async ^:private acquire-plan-block
+  "Acquire the bounded normal plan prompt data at one database coordinate."
+  [{agent-id :seon.agent/id :as input}]
+  (let [coordinate (or (::db/coordinate input)
+                       (::db/coordinate (db/current-tx-context)))]
+    (if-not coordinate
+      (acquisition-error
+        "acquisition"
+        {:seon.error/message
+         "Plan acquisition requires an exact database coordinate."})
+      (let [initial (await (db/execute-many
+                             {::db/coordinate coordinate
+                              ::db/members
+                              (initial-acquisition-members agent-id)
+                              ::db/max-result-weight 262144}))]
+        (if-not (= coordinate (::db/coordinate initial))
+          (acquisition-error
+            "coordinate check"
+            {:seon.db/expected-coordinate coordinate
+             :seon.db/actual-coordinate (::db/coordinate initial)})
+          (let [[active-member ready-member done-member agent-member]
+                (::db/results initial)]
+            (if-not (every? #(true? (::protocol/success? %))
+                            [active-member ready-member done-member agent-member])
+              (acquisition-error "initial member" (::db/results initial))
+              (let [agent (member-result agent-member)
+                    actives (mapv step-row (member-result active-member))
+                    readies (mapv step-row (member-result ready-member))
+                    dones (mapv (fn [[id title completed-at]]
+                                  {:my.plan/id id
+                                   :my.plan/title title
+                                   :my.plan/completed-at completed-at})
+                                (member-result done-member))
+                    active (first actives)
+                    step (or active (first readies))]
+                (if-not step
+                  {::db/coordinate coordinate
+                   :seon.agent/entity agent
+                   ::anchor nil
+                   ::actives actives
+                   ::readies readies
+                   ::dones dones}
+                  (let [selected
+                        (await (db/execute-many
+                                 {::db/coordinate coordinate
+                                  ::db/members
+                                  (selected-acquisition-members
+                                    (:my.plan/id step))
+                                  ::db/max-result-weight 131072}))]
+                    (if-not (= coordinate (::db/coordinate selected))
+                      (acquisition-error
+                        "selected coordinate check"
+                        {:seon.db/expected-coordinate coordinate
+                         :seon.db/actual-coordinate (::db/coordinate selected)})
+                      (let [[ancestor-member rollup-member]
+                            (::db/results selected)]
+                        (if-not (and
+                                  (true? (::protocol/success? ancestor-member))
+                                  (true? (::protocol/success? rollup-member)))
+                          (acquisition-error "selected member"
+                                             (::db/results selected))
+                          {::db/coordinate coordinate
+                           :seon.agent/entity agent
+                           ::anchor
+                           {:my.plan/step step
+                            :my.plan/chain
+                            (ancestor-chain-from-pull
+                              (member-result ancestor-member))
+                            :my.plan/active? (some? active)
+                            :my.plan/progress
+                            (rollup-from-rows
+                              (member-result rollup-member))}
+                           ::actives actives
+                           ::readies readies
+                           ::dones dones})))))))))))))
+
 (defn recent-done
   "The `agent-eid`'s most-recently-completed steps (newest first), capped at
    [[recent-done-limit]] — a derived memory of what was just accomplished so
@@ -1302,6 +1512,15 @@
        "; UNDER the plan: (my.plan/step! {:my.plan/title \"…\"\n"
        ";                                 :my.plan/parent [:my.plan/id \"<id>\"]})."))
 
+(defn- format-plan-body
+  [{::keys [anchor actives readies dones escalation-text]}]
+  (let [body (str/join "\n" (remove str/blank?
+                                      [(anchor-section anchor)
+                                       escalation-text
+                                       (frontier-section actives readies)
+                                       (done-section dones)]))]
+    (if (str/blank? body) empty-plan-teaching body)))
+
 (defn plan-body
   "Windowed plan text for `agent` in db value `db`.
 
@@ -1315,26 +1534,25 @@
    as eval'able Clojure. NO plan data ⇒ [[empty-plan-teaching]] — the
    block teaches its own workflow exactly when nothing else can."
   [db agent]
-  (let [body
-        (if-let [oe (agent-eid db agent)]
-          (let [a          (anchor db oe)
-                aid        (:seon.agent/id (db/entity db agent))
-                actives    (active-steps db oe)
-                active-ids (into #{} (map :my.plan/id) actives)
-                unfinished (open-steps db oe)
-                actives*   (filterv #(active-ids (:my.plan/id %)) unfinished)
-                readies    (filterv (fn [{:my.plan/keys [id status]}]
-                                      (and (not (active-ids id))
-                                           (= :open status)
-                                           (ready? db id)))
-                                    unfinished)]
-            (str/join "\n" (remove str/blank?
-                                   [(anchor-section a)
-                                    (escalation-section db oe aid)
-                                    (frontier-section actives* readies)
-                                    (done-section (recent-done db oe))])))
-          "")]
-    (if (str/blank? body) empty-plan-teaching body)))
+  (if-let [oe (agent-eid db agent)]
+    (let [a          (anchor db oe)
+          aid        (:seon.agent/id (db/entity db agent))
+          actives    (active-steps db oe)
+          active-ids (into #{} (map :my.plan/id) actives)
+          unfinished (open-steps db oe)
+          actives*   (filterv #(active-ids (:my.plan/id %)) unfinished)
+          readies    (filterv (fn [{:my.plan/keys [id status]}]
+                                (and (not (active-ids id))
+                                     (= :open status)
+                                     (ready? db id)))
+                              unfinished)]
+      (format-plan-body
+        {::anchor a
+         ::actives actives*
+         ::readies readies
+         ::dones (recent-done db oe)
+         ::escalation-text (escalation-section db oe aid)}))
+    empty-plan-teaching))
 
 (defn plan-block
   "Context-section fn (`:plan`, config manifest priority 45):
