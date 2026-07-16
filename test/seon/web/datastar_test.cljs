@@ -488,7 +488,7 @@
                           (is (= 1 (count left)))
                           (is (= left right)
                               "one transition distributes identical bytes to both views")
-                          (is (str/includes? (first left) "after"))
+                          (is (str/includes? (get left token) "after"))
                           (is (= 1 @replays)
                               "a related complete change replays one shared unit")
                           (is (= 2 @renders))
@@ -504,10 +504,10 @@
                             (is (= 1 (::view-unit/serializations metrics)))
                             (is (= :seon.web.view-unit.suppression/emitted
                                    (::view-unit/suppression metrics)))))
-                        (is (= ["same-element"]
+                        (is (= {token "same-element"}
                                (@#'datastar/emitted-elements-for-subscription
-                                {view-id ["same-element"]
-                                 other-view-id ["same-element"]}
+                                {view-id {token "same-element"}
+                                 other-view-id {token "same-element"}}
                                 #{view-id other-view-id}))
                             "one subscription patches a shared unit once")
                         (swap! datastar/!feeds @#'datastar/detach-view view-id)
@@ -1392,6 +1392,192 @@
       (@#'datastar/push-full! conn-b)
       (is (= 2 @renders)
           "a transaction invalidates the shared first paint before reconnect"))))
+
+(deftest equivalent-open-views-share-one-deferred-first-paint
+  (async done
+    (let [resolve-render! (atom nil)
+          rendered (js/Promise.
+                    (fn [resolve _reject]
+                      (reset! resolve-render! resolve)))
+          renders (atom 0)
+          pushes (atom [])
+          feed-a (test-feed
+                  "deferred-first-a"
+                  {:seon.web.feed/render-full
+                   (fn []
+                     (swap! renders inc)
+                     rendered)})
+          feed-b (assoc feed-a ::datastar/view-id "deferred-first-b")
+          registry (atom (feed-registry [feed-a feed-b]))
+          conn-a (registry-view @registry "deferred-first-a")
+          conn-b (registry-view @registry "deferred-first-b")]
+      (with-redefs [datastar/!feeds registry
+                    datastar/push-event!
+                    (fn [conn event]
+                      (swap! pushes conj [(::datastar/view-id conn) event]))]
+        (@#'datastar/push-full! conn-a)
+        (@#'datastar/push-full! conn-b)
+        (is (= 1 @renders)
+            "equivalent consumers join the normalized in-flight render")
+        (is (empty? @pushes) "no socket sees an unresolved first paint")
+        (@resolve-render! [:main {:id "app-view"} "ready"])
+        (-> rendered
+            (.then
+             (fn [_]
+               (js/Promise.resolve nil)))
+            (.then
+             (fn [_]
+               (is (= #{"deferred-first-a" "deferred-first-b"}
+                      (into #{} (map first) @pushes))
+                   "one accepted completion fans identical bytes to both consumers")
+               (is (= 1 (count (into #{} (map second) @pushes))))
+               (done)))
+            (.catch (fn [error] (is false (str error)) (done))))))))
+
+(deftest deferred-transition-keeps-only-the-newest-coherent-change
+  (async done
+    (let [resolvers (atom [])
+          calls (atom [])
+          concurrent (atom 0)
+          maximum-concurrent (atom 0)
+          pushes (atom [])
+          render-change
+          (fn [_subscription change]
+            (swap! calls conj change)
+            (swap! concurrent inc)
+            (swap! maximum-concurrent max @concurrent)
+            (js/Promise.
+             (fn [resolve _reject]
+               (swap! resolvers conj
+                      (fn [transition]
+                        (swap! concurrent dec)
+                        (resolve transition))))))
+          feed (test-feed
+                "deferred-change"
+                {:seon.web.feed/render-change render-change})
+          registry
+          (atom
+           (update-in (feed-registry [feed])
+                      [::datastar/subscriptions
+                       ((juxt :seon.web.feed/key
+                              #(datastar/active-fingerprint
+                                (::datastar/active-tokens %)))
+                        feed)]
+                      assoc ::datastar/full-event-committed? true))]
+      (with-redefs [datastar/!feeds registry
+                    datastar/push-event!
+                    (fn [_ event] (swap! pushes conj event))]
+        (@#'datastar/broadcast!
+         {:seon.db/changed-attrs #{:example/t10}})
+        (@#'datastar/broadcast!
+         {:seon.db/changed-attrs #{:example/t11}})
+        (@#'datastar/broadcast!
+         {:seon.db/changed-attrs #{:example/t12}})
+        (is (= 1 (count @calls)) "one render is active")
+        ((first @resolvers)
+         {::datastar/elements [[:div {:id "target"} "stale-t10"]]})
+        (-> (js/Promise.resolve nil)
+            (.then
+             (fn [_]
+               (is (= 2 (count @calls))
+                   "the pending changes become one newest render")
+               (is (= #{:example/t10 :example/t11 :example/t12}
+                      (:seon.db/changed-attrs (second @calls)))
+                   "the pending render retains every change since the last emitted result")
+               (is (empty? @pushes) "the superseded completion is discarded")
+               ((second @resolvers)
+                {::datastar/elements [[:div {:id "target"} "current-t12"]]})))
+            (.then (fn [_] (js/Promise.resolve nil)))
+            (.then
+             (fn [_]
+               (is (= 1 @maximum-concurrent))
+               (is (= 1 (count @pushes)))
+               (is (str/includes? (first @pushes) "current-t12"))
+               (is (not (str/includes? (first @pushes) "stale-t10")))
+               (done)))
+            (.catch (fn [error] (is false (str error)) (done))))))))
+
+(deftest pending-transition-keeps-latest-element-per-managed-unit
+  (let [token-a "unit-a"
+        token-b "unit-b"
+        active {::datastar/render-full? false
+                ::datastar/change
+                {:seon.db/changed-attrs #{:example/t10}}
+                ::datastar/serialized-elements-by-token
+                {token-a "a-at-t10" token-b "b-at-t10"}}
+        newest {::datastar/render-full? false
+                ::datastar/render-id (random-uuid)
+                ::datastar/render-number 2
+                ::datastar/change
+                {:seon.db/changed-attrs #{:example/t12}}
+                ::datastar/serialized-elements-by-token
+                {token-a "a-at-t12"}}
+        pending (@#'datastar/pending-render-request
+                 {::datastar/full-event-committed? true}
+                 active nil newest)]
+    (is (= #{:example/t10 :example/t12}
+           (get-in pending [::datastar/change :seon.db/changed-attrs])))
+    (is (= {token-a "a-at-t12" token-b "b-at-t10"}
+           (::datastar/serialized-elements-by-token pending))
+        "latest bytes replace the same unit while unrelated emitted units survive")))
+
+(deftest rejected-render-without-a-reason-recovers-the-subscription
+  (async done
+    (let [pushes (atom [])
+          feed (test-feed
+                "reasonless-rejection"
+                {:seon.web.feed/render-full
+                 (fn [] (js/Promise.reject))})
+          registry (atom (feed-registry [feed]))
+          conn (registry-view @registry "reasonless-rejection")]
+      (with-redefs [datastar/!feeds registry
+                    datastar/push-event! (fn [_ event]
+                                           (swap! pushes conj event))]
+        (@#'datastar/push-full! conn)
+        (-> (js/Promise.resolve nil)
+            (.then (fn [_] (js/Promise.resolve nil)))
+            (.then
+             (fn [_]
+               (is (= 1 (count @pushes)))
+               (is (str/includes? (first @pushes) "app-error"))
+               (is (nil? (get-in @registry
+                                 [::datastar/subscriptions
+                                  (::datastar/subscription-key conn)
+                                  ::datastar/active-render]))
+                   "the visible error completes rather than wedging ownership")
+               (done)))
+            (.catch (fn [error] (is false (str error)) (done))))))))
+
+(deftest database-valued-first-paint-does-not-require-an-active-unit
+  (let [EventEmitter (.-EventEmitter (js/require "node:events"))
+        PassThrough (.-PassThrough (js/require "node:stream"))
+        req (new EventEmitter)
+        res (new PassThrough)
+        _write-head (aset res "writeHead" (fn [_ _] nil))
+        original db/*conn*
+        database {:example/database :captured}
+        received (atom [])
+        feed (test-feed
+              "database-first-paint"
+              {::datastar/render-full-with-db? true
+               :seon.web.feed/render-full
+               (fn [dbv]
+                 (swap! received conj dbv)
+                 [:main {:id "app-view"} "database"])
+               ::datastar/catalog []
+               ::datastar/active-tokens #{}})]
+    (set! db/*conn* (atom database))
+    (try
+      (with-redefs [datastar/!feeds (atom @#'datastar/empty-feed-registry)
+                    datastar/install! (constantly nil)
+                    datastar/uninstall! (constantly nil)
+                    datastar/push-event! (fn [_ _] nil)]
+        (@#'datastar/open-feed! req res feed)
+        (is (= [database] @received)
+            "DB-valued first paint captures the database without lazy units")
+        (.emit res "close"))
+      (finally
+        (set! db/*conn* original)))))
 
 (deftest open-feed-first-paint-uses-the-attached-subscription
   (let [EventEmitter (.-EventEmitter (js/require "node:events"))

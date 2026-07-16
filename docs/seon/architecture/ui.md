@@ -427,6 +427,13 @@ implements the `view = f(db)` model through `seon.web.datastar`.
   (unit id + params + attachment/commit), so truly shared units such as the header own
   one read/output cache across different page keys and render once. Frozen as-of
   subscriptions do no current work.
+- **Async work is bounded by the normalized subscription.** One subscription
+  runs at most one coordinate-pinned async render and retains at most the newest
+  coherent pending database change. A completion publishes only while the same
+  subscription still owns the latest request; a transaction racing the initial
+  paint requires a new complete `#app-view`. Equivalent sockets share the one
+  invocation and its serialized bytes. Closing the final consumer releases the
+  active/pending ownership, and any later Promise completion is inert.
 - **Lazy activation uses the same protocol.** A collapsed debug or database
   unit is only a stable stub. Its Datastar fetch action calls `/view/unit`,
   which returns one `text/event-stream` response containing a

@@ -324,26 +324,46 @@
 ;; view = f(db) — the live agents view as `[:main#app-view …rows…]`.
 ;; ============================================================
 
+(defn- render-error-patch [error]
+  (let [message (if (some? error)
+                  (or (try (.-message error) (catch :default _ nil))
+                      (str error))
+                  "unknown render failure")]
+    {::event
+     (-> [:main {:id "app-view"}
+          [:div {:id "app-error" :class "text-error text-xs font-mono"}
+           (str "render error: " message)]]
+         html/->string
+         patch-elements)
+     ::target-count 1}))
+
+(defn- rendered-view-patch [rendered]
+  (let [observed? (and (map? rendered) (contains? rendered ::element))
+        element (if observed? (::element rendered) rendered)]
+    (cond-> {::event (-> element html/->string patch-elements)
+             ::target-count 1}
+      (and observed? (contains? rendered ::dependencies))
+      (assoc ::dependencies (::dependencies rendered)))))
+
+(defn- promise-like? [value]
+  (and (some? value)
+       (or (object? value) (fn? value))
+       (fn? (.-then value))))
+
 (defn- view-fn-patch
   "Render a bound full-view fn into one event plus learned dependencies.
 
    A plain hiccup result remains valid. A database-observed view returns
-   `::element` and `::dependencies`; the normalized subscription owns both."
+   `::element` and `::dependencies`; the normalized subscription owns both.
+   Async views retain the same result shape and visible error boundary."
   [view-fn]
   (try
-    (let [rendered (view-fn)
-          observed? (and (map? rendered) (contains? rendered ::element))
-          element (if observed? (::element rendered) rendered)]
-      (cond-> {::event (-> element html/->string patch-elements)}
-        (and observed? (contains? rendered ::dependencies))
-        (assoc ::dependencies (::dependencies rendered))))
-    (catch :default e
-      {::event
-       (-> [:main {:id "app-view"}
-            [:div {:id "app-error" :class "text-error text-xs font-mono"}
-             (str "render error: " (.-message e))]]
-           html/->string
-           patch-elements)})))
+    (let [rendered (view-fn)]
+      (if (promise-like? rendered)
+        (.then rendered rendered-view-patch render-error-patch)
+        (rendered-view-patch rendered)))
+    (catch :default error
+      (render-error-patch error))))
 
 ;; ============================================================
 ;; Per-connection push + broadcast. Equivalent feeds share a render; each
@@ -430,48 +450,217 @@
     (clear-heartbeat-interval! timer)
     (reset! !heartbeat-timer nil)))
 
-(defn- shared-full-event!
-  "Return one current full patch shared by equivalent open views.
+(declare merge-change start-render!)
 
-   A normalized subscription is already the render authority for equivalent
-   sockets. Its first consumer renders the full view; later consumers reuse
-   those exact bytes until a database transaction invalidates the value. The
-   cache is bounded by live subscriptions and disappears with the final
-   consumer—there is no second cache registry or retained closed view."
-  [{render-full :seon.web.feed/render-full
-    render-full-with-db? ::render-full-with-db?
-    subscription-key ::subscription-key}
-   dbv]
-  (let [subscription (get-in @!feeds [::subscriptions subscription-key])]
-    (or (::full-event subscription)
-        (let [rendered (view-fn-patch
-                         #(if render-full-with-db?
-                            (render-full dbv)
-                            (render-full)))
-              event (::event rendered)
-              subscription-id (::subscription-id subscription)]
-          (swap! !feeds
-                 (fn [registry]
-                   (if (= subscription-id
-                          (get-in registry [::subscriptions subscription-key
-                                            ::subscription-id]))
-                     (cond-> (assoc-in registry
-                                       [::subscriptions subscription-key
-                                        ::full-event]
-                                       event)
-                       (contains? rendered ::dependencies)
-                       (assoc-in [::subscriptions subscription-key
-                                  ::dependencies]
-                                 (::dependencies rendered)))
-                     registry)))
-          event))))
+(defn- transition-patch [transition serialized-elements-by-token]
+  (when-not (map? transition)
+    (throw (js/Error. "subscription render must return a map")))
+  (let [elements (::elements transition)
+        serialized (into (vec (::serialized-elements transition))
+                         (vals serialized-elements-by-token))
+        event (when (or (seq elements) (seq serialized))
+                (patch-rendered-elements elements serialized))]
+    (cond-> {::event event
+             ::target-count (+ (count elements) (count serialized))}
+      (contains? transition ::dependencies)
+      (assoc ::dependencies (::dependencies transition)))))
+
+(defn- render-request-result [subscription request]
+  (try
+    (if (::render-full? request)
+      (view-fn-patch
+       #(if (::render-full-with-db? subscription)
+          ((:seon.web.feed/render-full subscription) (:seon.db/db request))
+          ((:seon.web.feed/render-full subscription))))
+      (let [rendered ((::render-change subscription)
+                      subscription (::change request))]
+        (if (promise-like? rendered)
+          (.then rendered
+                 #(transition-patch % (::serialized-elements-by-token request))
+                 render-error-patch)
+          (transition-patch rendered (::serialized-elements-by-token request)))))
+    (catch :default error
+      (render-error-patch error))))
+
+(defn- pending-render-request [subscription active pending request]
+  (cond
+    (or (::render-full? request)
+        (not (::full-event-committed? subscription)))
+    (cond-> (assoc request ::render-full? true)
+      (contains? (::change request) :seon.db/db)
+      (assoc :seon.db/db (get-in request [::change :seon.db/db])))
+
+    (::render-full? pending)
+    (assoc pending
+           ::render-id (::render-id request)
+           ::render-number (::render-number request)
+           :seon.db/db (get-in request [::change :seon.db/db]))
+
+    :else
+    (let [prior (or pending active)]
+      (assoc request
+             ::change (merge-change (::change prior) (::change request))
+             ::serialized-elements-by-token
+             (merge (::serialized-elements-by-token prior)
+                    (::serialized-elements-by-token request))))))
+
+(defn- finish-render!
+  [subscription-key subscription-id render-id rendered]
+  (let [[before after]
+        (swap-vals!
+         !feeds
+         (fn [registry]
+           (let [path [::subscriptions subscription-key]
+                 subscription (get-in registry path)
+                 active (::active-render subscription)]
+             (if (and (= subscription-id (::subscription-id subscription))
+                      (= render-id (::render-id active)))
+               (if-let [pending (::pending-render subscription)]
+                 (assoc-in registry path
+                           (-> subscription
+                               (assoc ::active-render pending)
+                               (dissoc ::pending-render)))
+                 (assoc-in
+                  registry path
+                  (cond-> (dissoc subscription ::active-render)
+                    (contains? rendered ::dependencies)
+                    (assoc ::dependencies (::dependencies rendered))
+
+                    (::render-full? active)
+                    (assoc ::full-event (::event rendered)
+                           ::full-event-committed? true)
+
+                    (and (not (::render-full? active))
+                         (::event rendered)
+                         (not= (::event rendered) (::last-event subscription)))
+                    (assoc ::last-event (::event rendered)))))
+               registry))))
+        before-subscription (get-in before [::subscriptions subscription-key])
+        after-subscription (get-in after [::subscriptions subscription-key])
+        active-before (::active-render before-subscription)
+        promoted (::active-render after-subscription)
+        completed? (and (= subscription-id (::subscription-id after-subscription))
+                        (= render-id (::render-id active-before))
+                        (nil? promoted))
+        event (::event rendered)
+        emit? (and completed?
+                   event
+                   (or (::render-full? active-before)
+                       (not= (::last-event before-subscription)
+                             (::last-event after-subscription))))
+        connections
+        (when emit?
+          (keep #(get-in after [::views %])
+                (::consumer-view-ids after-subscription)))]
+    (doseq [conn connections]
+      (push-event! conn event))
+    (when (and emit? (not (::render-full? active-before)))
+      (let [diagnostics (view-unit/diagnostics (::view-unit/state after))
+            transition-metrics (::view-unit/last-transition diagnostics)
+            unit-metrics (vals (::view-unit/metrics-by-token transition-metrics))]
+        (log/info-console!
+         "seon.web.datastar" "broadcast"
+         {:seon.web.broadcast/view (first subscription-key)
+          :seon.web.broadcast/connections (count connections)
+          :seon.web.broadcast/targets (::target-count rendered)
+          :seon.web.broadcast/changed-attrs
+          (sort (get-in active-before [::change :seon.db/changed-attrs]))
+          :seon.web.broadcast/active-units
+          (::view-unit/active-unit-count diagnostics)
+          :seon.web.broadcast/candidate-units
+          (::view-unit/candidate-unit-count transition-metrics)
+          :seon.web.broadcast/read-replays
+          (transduce (map ::view-unit/read-replays) + 0 unit-metrics)
+          :seon.web.broadcast/producer-invocations
+          (transduce (map ::view-unit/producer-invocations) + 0 unit-metrics)
+          :seon.web.broadcast/serializations
+          (transduce (map ::view-unit/serializations) + 0 unit-metrics)
+          :seon.web.broadcast/suppressions
+          (frequencies (map ::view-unit/suppression unit-metrics))
+          :seon.web.broadcast/retained-output-bytes
+          (::view-unit/retained-output-bytes diagnostics)
+          :seon.web.broadcast/render-ms
+          (.round js/Math
+                  (- (.now js/performance)
+                     (or (::render-started-at active-before)
+                         (.now js/performance))))})))
+    (when (and promoted
+               (not= render-id (::render-id promoted)))
+      (start-render! subscription-key subscription-id))))
+
+(defn- start-render! [subscription-key subscription-id]
+  (let [subscription (get-in @!feeds [::subscriptions subscription-key])
+        request (some-> (::active-render subscription)
+                        (assoc ::render-started-at (.now js/performance)))]
+    (when (and (= subscription-id (::subscription-id subscription)) request)
+      (swap! !feeds
+             (fn [registry]
+               (if (= (::render-id request)
+                      (get-in registry [::subscriptions subscription-key
+                                        ::active-render ::render-id]))
+                 (assoc-in registry
+                           [::subscriptions subscription-key ::active-render]
+                           request)
+                 registry)))
+      (let [rendered (render-request-result subscription request)]
+        (if (promise-like? rendered)
+          (.then rendered
+                 #(finish-render! subscription-key subscription-id
+                                  (::render-id request) %)
+                 #(finish-render! subscription-key subscription-id
+                                  (::render-id request)
+                                  (render-error-patch %)))
+          (finish-render! subscription-key subscription-id
+                          (::render-id request) rendered))))))
+
+(defn- enqueue-render! [subscription-key request]
+  (let [subscription (get-in @!feeds [::subscriptions subscription-key])
+        subscription-id (::subscription-id subscription)
+        render-number (inc (or (::render-number subscription) 0))
+        request (assoc request
+                       ::render-id (random-uuid)
+                       ::render-number render-number)
+        [_ after]
+        (swap-vals!
+         !feeds
+         (fn [registry]
+           (let [path [::subscriptions subscription-key]
+                 current (get-in registry path)]
+             (if (= subscription-id (::subscription-id current))
+               (assoc-in
+                registry path
+                (if (::active-render current)
+                  (-> current
+                      (assoc ::render-number render-number)
+                      (assoc ::pending-render
+                             (pending-render-request
+                              current (::active-render current)
+                              (::pending-render current) request)))
+                  (assoc current
+                         ::render-number render-number
+                         ::active-render request)))
+               registry))))
+        active (get-in after [::subscriptions subscription-key ::active-render])]
+    (when (= (::render-id request) (::render-id active))
+      (start-render! subscription-key subscription-id))))
 
 (defn- push-full!
-  "Write one connection's normalized subscription full view."
+  "Write one shared full view, or join the normalized render already in flight."
   ([conn]
    (push-full! conn nil))
   ([conn dbv]
-   (push-event! conn (shared-full-event! conn dbv))))
+   (let [subscription-key (::subscription-key conn)
+         subscription (get-in @!feeds [::subscriptions subscription-key])
+         event (::full-event subscription)
+         full-rendering?
+         (or (::render-full? (::active-render subscription))
+             (::render-full? (::pending-render subscription)))]
+     (cond
+       event (push-event! conn event)
+       full-rendering? nil
+       :else (enqueue-render! subscription-key
+                              {::render-full? true
+                               :seon.db/db dbv})))))
 
 (defn- subscription-key-for
   "Normalized subscription coordinate for one feed or socket view."
@@ -486,6 +675,10 @@
    ::subscription-key subscription-key
    ::consumer-view-ids #{}
    ::live? (:seon.web.feed/live? feed)
+   ::render-number 0
+   ::full-event-committed? false
+   :seon.web.feed/render-full (:seon.web.feed/render-full feed)
+   ::render-full-with-db? (true? (::render-full-with-db? feed))
    ::render-change (:seon.web.feed/render-change feed)
    ::dependencies (or (::dependencies feed) {})})
 
@@ -496,7 +689,9 @@
       (assoc ::subscription-key subscription-key)
       (dissoc :seon.web.feed/key
               :seon.web.feed/live?
+              :seon.web.feed/render-full
               :seon.web.feed/render-change
+              ::render-full-with-db?
               ::dependencies)))
 
 (defn- detach-subscription
@@ -563,8 +758,12 @@
                              (-> old-subscription
                                  (assoc ::subscription-id (random-uuid)
                                         ::subscription-key next-key
+                                        ::render-number 0
+                                        ::full-event-committed? false
                                         ::consumer-view-ids #{})
-                                 (dissoc ::full-event)))
+                                 (dissoc ::full-event
+                                         ::active-render
+                                         ::pending-render)))
             consumer (assoc updated-view ::subscription-key next-key)]
         (-> detached
             (assoc-in [::views view-id] consumer)
@@ -585,10 +784,10 @@
 (defn- emitted-elements-for-subscription
   "Distinct managed elements emitted for one subscription's consumers."
   [emitted-by-view consumer-view-ids]
-  (into []
-        (comp (mapcat #(get emitted-by-view % []))
-              (distinct))
-        consumer-view-ids))
+  (reduce (fn [elements-by-token view-id]
+            (merge elements-by-token (get emitted-by-view view-id {})))
+          {}
+          consumer-view-ids))
 
 (defn- broadcast!
   "Transition shared units and each live subscription once, then fan patches."
@@ -597,105 +796,15 @@
         (if (:seon.db/db change)
           (commit-registry! #(transition-active-units % change))
           {})]
-   (doseq [[subscription-key subscription] (::subscriptions @!feeds)
-           :when (::live? subscription)]
-    (try
-      (let [started (.now js/performance)
-              transition ((::render-change subscription) subscription change)
-              _ (when-not (map? transition)
-                  (throw (js/Error. "subscription render must return a map")))
-              elements (::elements transition)
-              serialized-elements
-              (into (vec (::serialized-elements transition))
-                    (emitted-elements-for-subscription
-                     emitted-by-view (::consumer-view-ids subscription)))
-              event (when (or (seq elements) (seq serialized-elements))
-                      (patch-rendered-elements elements serialized-elements))
-              render-ms (- (.now js/performance) started)
-              subscription-id (::subscription-id subscription)]
-          (when (contains? transition ::dependencies)
-            (swap! !feeds
-                   (fn [registry]
-                     (if (= subscription-id
-                            (get-in registry [::subscriptions subscription-key
-                                              ::subscription-id]))
-                       (assoc-in registry [::subscriptions subscription-key
-                                           ::dependencies]
-                                 (::dependencies transition))
-                       registry))))
-          (when event
-            ;; Re-read ownership after rendering. A unit activation or reconnect
-            ;; can rebind this view while the transition is running; an obsolete
-            ;; subscription id must never push its stale patch into the new
-            ;; socket, even when the semantic key happens to be identical.
-            (let [[before registry]
-                  (swap-vals!
-                    !feeds
-                    (fn [registry]
-                      (if (and (= subscription-id
-                                  (get-in registry
-                                          [::subscriptions subscription-key
-                                           ::subscription-id]))
-                               (not= event
-                                     (get-in registry
-                                             [::subscriptions subscription-key
-                                              ::last-event])))
-                        (assoc-in registry
-                                  [::subscriptions subscription-key ::last-event]
-                                  event)
-                        registry)))
-                  current-subscription
-                  (get-in registry [::subscriptions subscription-key])
-                  previous-event
-                  (get-in before [::subscriptions subscription-key ::last-event])
-                  current-event (::last-event current-subscription)
-                  changed-event? (and (= subscription-id
-                                         (::subscription-id current-subscription))
-                                      (not= previous-event current-event))
-                  connections
-                  (when changed-event?
-                    (keep #(get-in registry [::views %])
-                          (::consumer-view-ids current-subscription)))]
-              (doseq [conn connections] (push-event! conn event))
-              (when changed-event?
-                (let [diagnostics
-                      (view-unit/diagnostics (::view-unit/state @!feeds))
-                      transition-metrics (::view-unit/last-transition diagnostics)
-                      unit-metrics
-                      (vals (::view-unit/metrics-by-token transition-metrics))]
-                  (log/info-console! "seon.web.datastar" "broadcast"
-                                   {:seon.web.broadcast/view (first subscription-key)
-                                    :seon.web.broadcast/connections (count connections)
-                                    :seon.web.broadcast/targets
-                                    (+ (count elements)
-                                       (count serialized-elements))
-                                    :seon.web.broadcast/changed-attrs
-                                    (sort (:seon.db/changed-attrs change))
-                                    :seon.web.broadcast/active-units
-                                    (::view-unit/active-unit-count diagnostics)
-                                    :seon.web.broadcast/candidate-units
-                                    (::view-unit/candidate-unit-count
-                                     transition-metrics)
-                                    :seon.web.broadcast/read-replays
-                                    (transduce (map ::view-unit/read-replays)
-                                               + 0 unit-metrics)
-                                    :seon.web.broadcast/producer-invocations
-                                    (transduce
-                                     (map ::view-unit/producer-invocations)
-                                     + 0 unit-metrics)
-                                    :seon.web.broadcast/serializations
-                                    (transduce (map ::view-unit/serializations)
-                                               + 0 unit-metrics)
-                                    :seon.web.broadcast/suppressions
-                                    (frequencies
-                                     (map ::view-unit/suppression unit-metrics))
-                                    :seon.web.broadcast/retained-output-bytes
-                                    (::view-unit/retained-output-bytes diagnostics)
-                                    :seon.web.broadcast/render-ms
-                                    (.round js/Math render-ms)}))))))
-      (catch :default e
-        (log/error-console! "seon.web.datastar"
-                            (str "broadcast failed for " subscription-key) e))))))
+    (doseq [[subscription-key subscription] (::subscriptions @!feeds)
+            :when (::live? subscription)]
+      (enqueue-render!
+       subscription-key
+       {::render-full? false
+        ::change change
+        ::serialized-elements-by-token
+        (emitted-elements-for-subscription
+         emitted-by-view (::consumer-view-ids subscription))}))))
 
 ;; ============================================================
 ;; Coalescing — one lifecycle-owned state collapses a tx burst into one
@@ -1193,7 +1302,8 @@
       (close-feed-socket! replaced))
     (let [attached (get-in @!feeds [::views view-id])
           managed? (seq (active-managed-descriptors attached))
-          dbv (when managed? @db/*conn*)]
+          database-render? (::render-full-with-db? attached)
+          dbv (when (or managed? database-render?) @db/*conn*)]
       (commit-registry!
         (fn [registry]
           [(reconcile-active-managed-units registry view-id dbv) nil]))
@@ -1201,7 +1311,7 @@
       ;; paint and its demanded units must use the registry-owned descriptor
       ;; and the same immutable database value.
       (let [current (get-in @!feeds [::views view-id])]
-        (if managed?
+        (if (or managed? database-render?)
           (push-full! current dbv)
           (push-full! current))))
     (ensure-heartbeat!)
@@ -1436,7 +1546,7 @@
                  serialized (::view-unit/serialized-element transition)]
              [(::view-unit/state transition)
               (if (::view-unit/emitted? transition)
-                (reduce #(update %1 %2 (fnil conj []) serialized)
+                (reduce #(assoc-in %1 [%2 token] serialized)
                         emitted consumers)
                 emitted)
               (assoc metrics token (::view-unit/unit-metrics transition))]))
@@ -1466,9 +1576,11 @@
 (defn- transition-view-units!
   "Advance all shared units once and return elements emitted for `view-id`."
   [view-id dbv]
-  (get (commit-registry!
-        #(transition-active-units % {:seon.db/db dbv}))
-       view-id []))
+  (vec
+   (vals
+    (get (commit-registry!
+          #(transition-active-units % {:seon.db/db dbv}))
+         view-id {}))))
 
 (defn- write-unit-response!
   "Finish one unit-control response with explicit status and content type."

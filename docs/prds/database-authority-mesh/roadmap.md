@@ -1242,9 +1242,13 @@ is prohibited.
   LLM turn. Commit `e5556524` restores derived auto-run blocks from namespace
   rows and canvas selection already acquired in the child, so discovery adds no
   duplicate database request. Recursive formatting receives only ordinary
-  precomputed results and remains synchronous. The current Datastar debug
-  transition callback is synchronous; its async child result must cross the one
-  reactive owner rather than being hidden in a prompt-specific process cache.
+  precomputed results and remains synchronous. The normalized Datastar
+  subscription now admits a value or Promise while retaining one active render,
+  at most the newest coherently merged pending change, shared equivalent
+  consumers, initial-full upgrade, and subscription-id fencing. The current
+  debug transition callback remains synchronous; its async child result must
+  now cross that settled reactive owner rather than being hidden in a
+  prompt-specific process cache.
   No caller invokes SCI, discovers a local database value for prompt rendering,
   or introduces a render-only executor.
 - **Integrated proof that closes it:** commit `86db045d` supplies deterministic
@@ -1387,6 +1391,11 @@ is prohibited.
   The six focused test namespaces compile in a 527-file artifact, then the
   runner stops before any namespace starts on the intentionally broken legacy
   `seon.db.replica.js` import.
+- The async Datastar subscription cut adds deferred-first-paint sharing and
+  stale-result/newest-change regressions. `bench-client` compiles 516 files with
+  the unchanged 46-warning migration inventory. The changed-test artifact also
+  compiles before the same obsolete `seon.db.replica.js` load failure starts
+  zero test namespaces; no runtime pass is claimed.
 - **Next refill:** make the existing Datastar debug transition owner honestly
   asynchronous and consume the same child result, then move the coordinate-
   pinned system prompt through capture and provider delivery. In parallel,
