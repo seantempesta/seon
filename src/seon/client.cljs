@@ -2144,7 +2144,8 @@
   "Return the exact core-program transaction for the current source.
 
    [[index-core!]] and [[index-schemas]] are evaluated once to form one desired
-   compiled program graph. Against `conn`, this function derives
+   compiled program graph. Against the acquired ordinary database data, this
+   function derives
    the complete atomic delta: add missing declarations, replace drifted
    declaration fields, retract omitted optional fields/components, and remove
    boot-authored declarations absent from the desired graph. A fresh store
@@ -2369,10 +2370,42 @@
                    [:seon.db/coordinate :seon.db.coordinate/coordinate]
                    [:seon.db/tx-data [:vector :any]]]]}
   []
-  (let [all (concat (index-core!) (index-schemas))
+  (let [all (vec (concat (index-core!) (index-schemas)))
         acquired (await (acquire-core-program!))]
     {::db/coordinate (::db/coordinate acquired)
      ::db/tx-data (compile-core-program-tx all acquired)}))
+
+(def ^:private max-core-program-attempts 3)
+
+(defn- stale-core-program-coordinate?
+  [envelope]
+  (= db.protocol/stale-coordinate-error
+     (get-in envelope
+             [:seon.db/error :seon.error/data
+              :seon.db.protocol/error-kind])))
+
+(defn- ^:async commit-core-program!
+  "Compile and commit one frozen desired core-program snapshot.
+
+   Only the canonical stale-coordinate response reacquires and recompiles.
+   Every other authority error returns immediately to the boot step checker.
+   A converged compilation returns success at the acquired coordinate without
+   creating a transaction."
+  [all]
+  (loop [attempt 1]
+    (let [acquired (await (acquire-core-program!))
+          coordinate (::db/coordinate acquired)
+          tx-data (compile-core-program-tx all acquired)]
+      (if (empty? tx-data)
+        {::db/ok? true ::db/coordinate coordinate}
+        (let [envelope
+              (await (db/transact!
+                       {::db/expected-coordinate coordinate
+                        ::db/tx-data tx-data}))]
+          (if (and (stale-core-program-coordinate? envelope)
+                   (< attempt max-core-program-attempts))
+            (recur (inc attempt))
+            envelope))))))
 
 (schema/register! ::llm-fn        'fn?)
 (schema/register! ::compile-state :any)
@@ -2510,23 +2543,20 @@
                     (check! :core-seed
                             (await (db/transact!
                                      {:seon.db/tx-data (seed-core!)}))))))
-          ;; Acquire the complete current program only after the core seed
-          ;; commit. The returned coordinate fences this exact compilation;
-          ;; a concurrent writer cannot make a stale diff land.
-          (let [{coordinate ::db/coordinate
-                 index-tx ::db/tx-data} (await (core-program-tx))]
+          ;; Freeze source-derived desired data once per boot. A concurrent
+          ;; database winner may force the current-state acquisition and pure
+          ;; diff to repeat, but never re-runs the index builders mid-boot.
+          (let [all (vec (concat (index-core!) (index-schemas)))]
             (await
               (db/with-tx-context
                 {:seon.db/user [:seon.agent/id "root"]
                  :seon.db/process
-                 (db.process/lookup-ref :seon.db.process/boot)}
+                (db.process/lookup-ref :seon.db.process/boot)}
                 (fn ^:async index! []
-                    ;; No soul seed: the agent's identity is read LIVE from
-                    ;; (seon.agent.ctx/file-block), never seeded into the database.
+                    ;; No soul seed: identity is read live from context files,
+                    ;; never seeded into the database.
                     (check! :core-index
-                            (await (db/transact!
-                                     {:seon.db/expected-coordinate coordinate
-                                      :seon.db/tx-data index-tx})))))))
+                            (await (commit-core-program! all))))))
               ;; DECLARATIVE DESIRED SET (origin :config): the routes
               ;; (`:seon.route/*`, identity `:seon.route/name`), the scanned
               ;; skills corpus (`:my.skills/*`, identity `:my.skills/name`),
@@ -2551,7 +2581,7 @@
                                 (:seon.state/error recon))
                            {:seon.client/seed-step :core-declarative
                             :seon.state/error      (:seon.state/error recon)})))))
-          {::seeded? true})))))
+          {::seeded? true}))))))
 
 (schema/register! ::start-runtime-request
   [:map {:closed true}
