@@ -75,11 +75,21 @@
         #{}))
     (catch :default _ #{})))
 
-(defn- render-fn-rows
-  "The current ns's public, specced fns whose output schema declares a
+(defn- select-render-fn-rows
+  "The public, specced rows whose output schema declares a
    render twin — `[{::sym ::twins}]`, name-sorted (deterministic block
-   order within the group). Pure program-graph query; `[]` when `cur-ns`
-   is nil or nothing matches."
+   order within the group). Pure over eager ordinary namespace data."
+  [rows]
+  (->> rows
+       (keep (fn [{:seon.fn/keys [sym spec private?]}]
+               (when (and sym spec (not private?))
+                 (let [twins (output-twin-keys spec)]
+                   (when (seq twins)
+                     {::sym (symbol sym) ::twins twins})))))
+       (sort-by (comp str ::sym))
+       vec))
+
+(defn- render-fn-rows
   [db cur-ns]
   (if-not cur-ns
     []
@@ -112,6 +122,7 @@
 (schema/register! ::fn-sym :symbol)
 (schema/register! ::current-ns :seon.ns/name)
 (schema/register! ::pinned-syms [:set :symbol])
+(schema/register! ::fn-rows [:vector :map])
 
 ;; `:seon.agent/id` — registered HERE (not in its owning ns `seon.agent`)
 ;; because this is the FIRST-loading ns whose load-time schema references
@@ -136,9 +147,10 @@
 
 (schema/register! ::derived-blocks-request
   [:map
-   [:seon.db/db    :seon.db/db]
+   [:seon.db/db    {:optional true} :seon.db/db]
    [:seon.agent/id {:optional true} :seon.agent/id]
    [::current-ns   {:optional true} ::current-ns]
+   [::fn-rows      {:optional true} ::fn-rows]
    [::pinned-syms  {:optional true} ::pinned-syms]])
 
 ;; ============================================================
@@ -400,8 +412,10 @@
    STORED block — the `install!` override) is skipped. Computed per render,
    never persisted."
   {:malli/schema [:=> [:cat ::derived-blocks-request] [:vector :map]]}
-  [{db :seon.db/db cur-ns ::current-ns pinned ::pinned-syms}]
-  (->> (render-fn-rows db cur-ns)
+  [{db :seon.db/db cur-ns ::current-ns rows ::fn-rows pinned ::pinned-syms}]
+  (->> (if (some? rows)
+         (select-render-fn-rows rows)
+         (render-fn-rows db cur-ns))
        (remove #(contains? (or pinned #{}) (::sym %)))
        (mapv (fn [{sym ::sym twins ::twins}]
                (cond-> {:seon.agent.ctx/name     (keyword "render-fn" (name sym))

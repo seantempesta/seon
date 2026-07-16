@@ -42,6 +42,7 @@
     [seon.agent.home :as home]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.db.protocol :as protocol]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
     [seon.schema :as schema]))
@@ -49,7 +50,7 @@
 ;; The compact card renderer is defined at the BOTTOM of this file (its
 ;; helpers cluster there); [[namespaces-block]] above it dispatches the long
 ;; tail to it, so forward-declare it here.
-(declare render-one-ns-compact)
+(declare render-one-ns-compact resolve-cfg)
 
 ;; ============================================================
 ;; Config interface — the namespaces-block render dials, as reactive
@@ -206,7 +207,7 @@
    Multiple refer edges union. Any whole-surface edge wins. `:as-alias` is a
    keyword-resolution edge only and contributes no callable card. The absence
    of `:seon.ns.require/refers` in a value means whole surface."
-  [db cur-ns]
+  [edges cur-ns]
   (if-not cur-ns
     {}
     (reduce
@@ -229,7 +230,188 @@
                       (into (or (:seon.ns.require/refers current) #{})
                             refers)})))))
       {}
-      (seval/persisted-require-edges db cur-ns))))
+      edges)))
+
+(def ^:private latest-successful-ns-query
+  '{:find [?ns ?at ?eval-tx]
+    :in [$ ?aid]
+    :where [[?agent :seon.agent/id ?aid]
+            [?run :seon.agent.run/agent ?agent]
+            [?turn :seon.agent.turn/run ?run]
+            [?turn :seon.agent.turn/evals ?eval]
+            [?eval :seon.eval/ok? true]
+            [?eval :seon.eval/at ?at ?eval-tx]
+            [?eval :seon.eval/ns ?ns]]
+    :order-by [?at :desc ?eval-tx :desc]
+    :limit 1})
+
+(def ^:private require-edge-selector
+  '[:seon.ns.require/target
+    :seon.ns.require/alias
+    :seon.ns.require/refers
+    :seon.ns.require/refer-all?
+    :seon.ns.require/as-alias?])
+
+(def ^:private namespace-selector
+  `[:seon.ns/name
+    :seon.ns/source
+    {:seon.ns/require-edges ~require-edge-selector}
+    {:seon.fn/_ns [:seon.fn/sym :seon.fn/arglists :seon.fn/doc
+                   :seon.fn/source :seon.fn/spec :seon.fn/private?
+                   :seon.fn/fn-var? :seon.fn/schema-error]}
+    {:seon.schema/_ns [:seon.schema/key :seon.schema/form]}
+    {:seon.test/_ns [:seon.test/sym :seon.test/source
+                     :seon.test/last-passed-at :seon.test/last-failed-at
+                     :seon.test/last-failure-summary]}])
+
+(def ^:private agent-selector
+  `[:seon.agent/id
+    ::full-source
+    ::with-tests
+    ::current-full?
+    ::current-tests?
+    {:seon.agent/ctx [:db/id :seon.agent.ctx/name
+                      ::full-source ::with-tests
+                      ::current-full? ::current-tests?]}])
+
+(defn- initial-acquisition-members
+  [id]
+  [{::protocol/operation protocol/pull-operation
+    ::protocol/selector agent-selector
+    ::protocol/entity-id [:seon.agent/id id]
+    :datahike.resource/max-work 100000
+    :datahike.resource/max-results 2048
+    :datahike.resource/max-result-weight 262144}
+   {::protocol/operation protocol/query-operation
+    ::protocol/query-form latest-successful-ns-query
+    ::protocol/arguments [id]
+    :datahike.resource/max-work 1000000
+    ;; Datahike counts intermediate relation rows before order/limit. This
+    ;; admits roughly 8,000 successful evals and fails explicitly beyond it.
+    :datahike.resource/max-results 32768
+    :datahike.resource/max-result-weight 262144}
+   {::protocol/operation protocol/pull-operation
+    ::protocol/selector [:seon.config/current-ns]
+    ::protocol/entity-id [:seon.config/id config/cluster-config-id]
+    :datahike.resource/max-work 10000
+    :datahike.resource/max-results 8
+    :datahike.resource/max-result-weight 1024}])
+
+(defn- selected-acquisition-members
+  [names]
+  [{::protocol/operation protocol/pull-many-operation
+    ::protocol/selector namespace-selector
+    ::protocol/entity-ids
+    (mapv (fn [nm] [:seon.ns/name nm]) names)
+    :datahike.resource/max-work 2000000
+    :datahike.resource/max-results 50000
+    :datahike.resource/max-result-weight 3145728}
+   {::protocol/operation protocol/query-operation
+    ::protocol/query-form
+    '[:find ?name ?tx
+      :in $ [?name ...]
+      :where
+      [?namespace :seon.ns/name ?name ?tx]]
+    ::protocol/arguments [names]
+    :datahike.resource/max-work 500000
+    :datahike.resource/max-results 256
+    :datahike.resource/max-result-weight 8192}])
+
+(defn- member-result
+  [member]
+  (when (true? (::protocol/success? member))
+    (or (::protocol/result member)
+        (:datahike.query/result member))))
+
+(defn- acquisition-error
+  [stage value]
+  {:seon.error/message (str "Namespace " stage " failed.")
+   :seon.error/data value
+   :seon.error/kind :core-bug})
+
+(defn ^:async ^:private acquire-namespace-rows!
+  "Acquire namespace rows at one database coordinate."
+  [id]
+  (let [initial (await (db/execute-many
+                         {::db/members (initial-acquisition-members id)
+                          ::db/max-result-weight 786432}))]
+    (if-not (::db/coordinate initial)
+      (acquisition-error "initial acquisition" initial)
+      (let [coordinate (::db/coordinate initial)
+            [agent-member ns-member config-member] (::db/results initial)
+            agent (member-result agent-member)
+            latest-ns (some-> (member-result ns-member) first first)
+            config-row (member-result config-member)]
+        (if-not (and (true? (::protocol/success? agent-member))
+                     (true? (::protocol/success? ns-member))
+                     (true? (::protocol/success? config-member)))
+          (acquisition-error "initial member" (::db/results initial))
+          (let [cur-ns (keyword (name (or latest-ns (home/home-ns id))))
+                current-row
+                (await (db/pull {::db/coordinate coordinate
+                                 ::db/pull-pattern
+                                 [:seon.ns/name
+                                  {:seon.ns/require-edges require-edge-selector}]
+                                 ::db/ref [:seon.ns/name cur-ns]
+                                 ::db/max-work 100000
+                                 ::db/max-results 512
+                                 ::db/max-result-weight 65536}))]
+            (if (and (map? current-row) (:seon.error/message current-row))
+              (acquisition-error "require-edge acquisition" current-row)
+              (let [block (some (fn [candidate]
+                                  (when (= :namespaces
+                                           (:seon.agent.ctx/name candidate))
+                                    candidate))
+                                (:seon.agent/ctx agent))
+                    full-source-cfg
+                    (set (resolve-cfg block agent ::full-source #{}))
+                    with-tests-cfg
+                    (set (resolve-cfg block agent ::with-tests #{}))
+                    current-full?
+                    (resolve-cfg block agent ::current-full? true)
+                    current-tests?
+                    (resolve-cfg block agent ::current-tests? true)
+                    required
+                    (required-ns-selections
+                      (:seon.ns/require-edges current-row) cur-ns)
+                    names (->> (cond-> (into (set (keys required))
+                                               full-source-cfg)
+                                 cur-ns (conj cur-ns))
+                               (filter included-ns?)
+                               (sort-by name)
+                               vec)
+                    selected
+                    (await (db/execute-many
+                             {::db/coordinate coordinate
+                              ::db/members (selected-acquisition-members names)
+                              ;; Leave 448 KiB beneath the 4 MiB frame ceiling
+                              ;; for the coordinate and protocol envelope.
+                              ::db/max-result-weight 3735552}))]
+                (if-not (= coordinate (::db/coordinate selected))
+                  (acquisition-error
+                    "selected coordinate check"
+                    {:seon.db/expected-coordinate coordinate
+                     :seon.db/actual-coordinate (::db/coordinate selected)})
+                  (let [[rows-member tx-member] (::db/results selected)]
+                    (if-not (and (true? (::protocol/success? rows-member))
+                                 (true? (::protocol/success? tx-member)))
+                      (acquisition-error "selected member" (::db/results selected))
+                      (let [rows (member-result rows-member)
+                            txs (into {} (member-result tx-member))]
+                        {:seon.db/coordinate coordinate
+                         :seon.agent/id id
+                         :seon.agent.ctx.render-fns/current-ns cur-ns
+                         :seon.config/current-ns
+                         (or (:seon.config/current-ns config-row) :full)
+                         ::full-source full-source-cfg
+                         ::with-tests with-tests-cfg
+                         ::current-full? current-full?
+                         ::current-tests? current-tests?
+                         ::namespace-rows
+                         (mapv (fn [nm row]
+                                 (cond-> (or row {:seon.ns/name nm})
+                                   (get txs nm) (assoc :seon.db/tx (get txs nm))))
+                               names rows)}))))))))))))
 
 (defn- full?
   "True when an included ns `nm` renders FULL (its whole real source); false
@@ -472,7 +654,9 @@
                          (and cur-ns current-tests?) (conj cur-ns))
         ;; The CURRENT ns's persisted require edges, retaining their callable
         ;; selection semantics for each compact card.
-        required       (required-ns-selections db cur-ns)
+        required       (required-ns-selections
+                         (seval/persisted-require-edges db cur-ns)
+                         cur-ns)
         ;; The INCLUDE set — PURELY: the current ns ∪ its requires ∪ the
         ;; per-agent ::full-source pins. Everything else is DROPPED.
         include-set    (cond-> (into (set (keys required)) full-source-cfg)

@@ -18,6 +18,7 @@
     [clojure.string :as str]
     [cljs.reader :as edn]
     [cljs.test :refer [deftest is testing async]]
+    [datahike.api :as d]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as nss]
     [seon.agent.home :as home]
@@ -25,6 +26,7 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as protocol]
     [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]))
 
@@ -107,6 +109,146 @@
 
 (defn- block [conn]
   (block-for conn agent-id))
+
+(deftest remote-acquisition-is-bounded-and-selection-scoped
+  (let [initial (@#'nss/initial-acquisition-members agent-id)
+        selected (@#'nss/selected-acquisition-members
+                   [:my.agent.tst-2606260000 :my.helper])
+        [pull-member latest-member config-member] initial
+        [pull-many-member tx-member] selected]
+    (testing "initial discovery is one pull plus the bounded latest query"
+      (is (= [protocol/pull-operation protocol/query-operation
+              protocol/pull-operation]
+             (mapv ::protocol/operation initial)))
+      (is (= 32768 (:datahike.resource/max-results latest-member))
+          "the bound admits about 8,000 successful evals before explicit failure")
+      (is (pos? (:datahike.resource/max-work latest-member)))
+      (is (pos? (:datahike.resource/max-result-weight latest-member)))
+      (let [query (::protocol/query-form latest-member)]
+        (is (= '[?at :desc ?eval-tx :desc] (:order-by query)))
+        (is (= 1 (:limit query)))
+        (is (some #{'[?eval :seon.eval/at ?at ?eval-tx]} (:where query))))
+      (is (= [:seon.agent/id agent-id] (::protocol/entity-id pull-member)))
+      (is (= [:seon.config/id config/cluster-config-id]
+             (::protocol/entity-id config-member)))
+      (is (= [:seon.config/current-ns]
+             (::protocol/selector config-member))))
+    (testing "selected rows use one pull-many and one selected tx query"
+      (is (= [protocol/pull-many-operation protocol/query-operation]
+             (mapv ::protocol/operation selected)))
+      (is (= [[:seon.ns/name :my.agent.tst-2606260000]
+              [:seon.ns/name :my.helper]]
+             (::protocol/entity-ids pull-many-member)))
+      (let [selector-values
+            (set (tree-seq coll? seq (::protocol/selector pull-many-member)))]
+        (is (contains? selector-values :seon.test/last-passed-at))
+        (is (contains? selector-values :seon.test/last-failed-at))
+        (is (contains? selector-values :seon.test/last-failure-summary)))
+      (is (= [[:my.agent.tst-2606260000 :my.helper]]
+             (::protocol/arguments tx-member)))
+      (is (not-any? #{'?all-names}
+                    (tree-seq coll? seq (::protocol/query-form tx-member)))))))
+
+(defn- fresh-latest-ns-conn
+  []
+  (let [cfg {:store {:backend :memory :id (random-uuid)}
+             :schema-flexibility :write
+             :keep-history? true}
+        attrs [:seon.agent/id
+               :seon.agent.run/agent
+               :seon.agent.turn/run
+               :seon.agent.turn/evals
+               :seon.eval/at
+               :seon.eval/ok?
+               :seon.eval/ns]]
+    (-> (d/create-database cfg)
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [conn]
+                 (-> (d/transact! conn
+                       {:tx-data (db/malli->datahike-schema attrs)})
+                     (.then (constantly conn))))))))
+
+(defn- append-eval!
+  [conn turn-eid eval-id at ok? ns]
+  (d/transact! conn
+    {:tx-data [{:db/id eval-id
+                :seon.eval/at at
+                :seon.eval/ok? ok?
+                :seon.eval/ns ns}
+               {:db/id turn-eid
+                :seon.agent.turn/evals eval-id}]}))
+
+(deftest latest-successful-ns-orders-time-then-transaction
+  (async done
+    (-> (fresh-latest-ns-conn)
+        (.then
+          (fn [conn]
+            (-> (d/transact! conn
+                  {:tx-data [{:db/id "agent" :seon.agent/id agent-id}
+                             {:db/id "run" :seon.agent.run/agent "agent"}
+                             {:db/id "turn" :seon.agent.turn/run "run"}
+                             {:db/id "no-success-agent"
+                              :seon.agent/id "no-success-agent"}
+                             {:db/id "no-success-run"
+                              :seon.agent.run/agent "no-success-agent"}
+                             {:db/id "no-success-turn"
+                              :seon.agent.turn/run "no-success-run"}]})
+                (.then
+                  (fn [report]
+                    (let [turn-eid (get (:tempids report) "turn")
+                          no-success-turn-eid
+                          (get (:tempids report) "no-success-turn")]
+                      (-> (append-eval! conn turn-eid "first"
+                            (js/Date. 2000) true :my.first)
+                          (.then (fn [_]
+                                   (append-eval! conn no-success-turn-eid
+                                     "only-failure" (js/Date. 5000) false
+                                     :my.failed)))
+                          (.then (fn [_]
+                                   (append-eval! conn turn-eid "later-but-older"
+                                     (js/Date. 1000) true :my.older-late)))
+                          (.then (fn [_]
+                                   (append-eval! conn turn-eid "same-time-later"
+                                     (js/Date. 2000) true :my.equal-later)))
+                          (.then (fn [_]
+                                   (let [ids (mapv #(str "failed-" %) (range 128))]
+                                     (d/transact! conn
+                                       {:tx-data
+                                        (conj
+                                          (mapv (fn [n eval-id]
+                                                  {:db/id eval-id
+                                                   :seon.eval/at (js/Date. (+ 3000 n))
+                                                   :seon.eval/ok? false
+                                                   :seon.eval/ns :my.failed})
+                                                (range 128) ids)
+                                          {:db/id turn-eid
+                                           :seon.agent.turn/evals ids})}))))
+                          (.then
+                            (fn [_]
+                              (let [query (@#'nss/latest-successful-ns-query)
+                                    result
+                                    (d/q {:query query
+                                          :args [@conn agent-id]
+                                          :max-work 1000000
+                                          :max-results 32768
+                                          :max-result-weight 262144})
+                                    missing
+                                    (d/q {:query query
+                                          :args [@conn "no-success-agent"]
+                                          :max-work 1000000
+                                          :max-results 32768
+                                          :max-result-weight 262144})]
+                                (testing "equal timestamps break on transaction"
+                                  (is (= :my.equal-later (ffirst result))))
+                                (testing "a later transaction with an older timestamp loses"
+                                  (is (not= :my.older-late (ffirst result))))
+                                (testing "no successful eval returns no namespace"
+                                  (is (empty? missing)))))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e]
+                  (is false (str "ordered latest-namespace query threw: "
+                                 (.-message e)))
+                  (done))))))
 
 (deftest current-full-required-compact-else-dropped
   (async done

@@ -142,6 +142,29 @@
                                             ::rf/current-ns :my.nowhere}))))))
         (.then done))))
 
+(deftest derived-blocks-select-from-acquired-ordinary-rows
+  (let [rows [{:seon.fn/sym "my.view/z-view"
+               :seon.fn/spec render-spec
+               :seon.fn/private? false}
+              {:seon.fn/sym "my.view/a-view"
+               :seon.fn/spec ai-only-spec}
+              {:seon.fn/sym "my.view/plain"
+               :seon.fn/spec plain-spec}
+              {:seon.fn/sym "my.view/private-view"
+               :seon.fn/spec render-spec
+               :seon.fn/private? true}]
+        blocks (rf/derived-blocks {::rf/fn-rows rows})]
+    (testing "ordinary acquired rows need no database value or second query"
+      (is (= [:render-fn/a-view :render-fn/z-view]
+             (mapv :seon.agent.ctx/name blocks))))
+    (testing "the acquired schema still controls each twin slot"
+      (is (= #{:seon.render/ai}
+             (->> blocks first keys (filter #{:seon.render/ai
+                                               :seon.render/html}) set)))
+      (is (= #{:seon.render/ai :seon.render/html}
+             (->> blocks second keys (filter #{:seon.render/ai
+                                                :seon.render/html}) set))))))
+
 ;; ============================================================
 ;; The runner — bounded, errors-as-values, output extraction + clip.
 ;; ============================================================
