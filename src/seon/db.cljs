@@ -70,7 +70,7 @@
   [::opts {:optional true} ::opts]
   [::expected-coordinate {:optional true} ::expected-coordinate]
   [:seon.db.id/generated-candidates {:optional true}
-   :seon.db.id.schema/generated-candidates]])
+   :seon.db.id/generated-candidates]])
 (schema/register!
  ::transact-response
  [:or
