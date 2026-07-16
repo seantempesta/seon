@@ -1208,17 +1208,20 @@ descriptor-shaped data that must not be rewritten, exact result shapes,
 cross-source cache hit/single-flight, and release after success, failure,
 cancellation, and disconnect. The smallest selectors remain the focused writer
 namespace `seon.db.remote-contract-test` and an exact `bin/test-cljs --test=...`
-var; no runner or full-suite tax is added.
+var; no runner or full-suite tax is added. The exact upstream-test mapping,
+test inventory, exclusions, selectors, and graduation matrix are
+[[research/datahike-selective-compatibility-proof-2026-07-16]].
 
 Current parallel portfolio: the dependency lane owns only the Datahike
-composite cache/lifetime patch and focused proofs; the documentation lane owns
-only the always-current architecture replacement from public coordinates to
-database values; the top level owns protocol/facade fixtures and integration
-judgment. The stopped plan-consumer draft remains an explicit uncommitted
+composite cache/lifetime patch and focused proofs. Commits `74953530`,
+`ae43154c`, and `022c09ef` settle the always-current database-value
+architecture, explicit secondary-database lifetime, and selective upstream
+compatibility proof respectively. The top level owns protocol/facade fixtures
+and integration judgment. The stopped plan-consumer draft remains an explicit uncommitted
 handoff because its pure row transformations are reusable but its coordinate
 and compact-envelope transport is not. After the dependency proof, refill that
-slot with the real writer/UDS remote-contract tests; after architecture review,
-refill with the namespaced public facade schemas and CLJS compatibility tests.
+slot with the real writer/UDS remote-contract tests; the next independent
+refill is the namespaced public facade schemas and CLJS compatibility tests.
 Only then replace protocol, resolver, reports/listeners, and consumers in one
 dependency-ordered cut.
 
