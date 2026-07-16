@@ -11,7 +11,9 @@
    [seon.agent.ctx.transcript]
    [seon.agent.ctx.typeahead-steps]
    [seon.agent.ctx.warnings]
+   [seon.config :as config]
    [seon.db :as db]
+   [seon.db.protocol :as protocol]
    [seon.execution :as execution]
    [seon.schema :as schema]))
 
@@ -21,6 +23,12 @@
    [:seon.agent.ctx/profile
     {:optional true}
     :seon.agent.ctx/profile]])
+
+(schema/register! ::prompt-error
+  [:map
+   [:seon.error/message :string]
+   [:seon.error/kind :keyword]
+   [:seon.error/data {:optional true} :map]])
 
 (defn- block-error-text
   [block result]
@@ -110,58 +118,99 @@
     :seon.render/ai
     {:seon.agent/ctx [*]}])
 
-(defn- database-error-entity
-  [error]
-  {:seon.agent/ctx
-   [{:seon.agent.ctx/name :database
-     :seon.agent.ctx/priority 0
-     :seon.render/ai (pr-str (str ";; " (pr-str error)))}]})
+(def ^:private prompt-acquisition-members
+  [{::protocol/operation protocol/pull-operation
+    ::protocol/selector prompt-pull-pattern
+    ::protocol/entity-id nil
+    :datahike.resource/max-work 5000000
+    :datahike.resource/max-results 65536
+    :datahike.resource/max-result-weight 3145728}
+   {::protocol/operation protocol/pull-operation
+    ::protocol/selector [:seon.config/system-text]
+    ::protocol/entity-id [:seon.config/id config/cluster-config-id]
+    :datahike.resource/max-work 100000
+    :datahike.resource/max-results 1
+    :datahike.resource/max-result-weight 65536}])
+
+(defn- acquired-member [member]
+  (when (true? (::protocol/success? member))
+    (::protocol/result member)))
+
+(defn- prompt-acquisition-error [acquired members]
+  (let [error
+        (or (when (and (map? acquired)
+                       (string? (:seon.error/message acquired)))
+              acquired)
+            (some (fn [member]
+                    (let [failure (::protocol/error member)]
+                      (cond
+                        (and (map? failure)
+                             (string? (:seon.error/message failure)))
+                        failure
+
+                        (string? failure)
+                        {:seon.error/message failure}
+
+                        :else nil)))
+                  members)
+            {:seon.error/message "Prompt database acquisition failed."
+             :seon.error/data {::db/results (::db/results acquired)}})]
+    (cond-> error
+      (not (keyword? (:seon.error/kind error)))
+      (assoc :seon.error/kind :core-bug))))
 
 (defn ^:async render-prompt!
   "Acquire and invoke selected prompt blocks at the active coordinate."
   {:malli/schema [:=> [:cat ::render-prompt-request :any]
-                  :seon.agent.ctx/rendered-context]}
+                  [:or :seon.agent.ctx/rendered-context ::prompt-error]]}
   [{:seon.agent/keys [id] profile :seon.agent.ctx/profile} invoke-selected!]
-  (let [result (await (db/pull {::db/pull-pattern prompt-pull-pattern
-                                ::db/ref [:seon.agent/id id]}))
-        entity (cond
-                 (and (map? result)
-                      (string? (:seon.error/message result)))
-                 (database-error-entity result)
-
-                 (map? result) result
-                 :else {})
-        whole-prompt (when-not (seq profile)
-                       (some->> (:seon.render/ai entity)
-                                (db/decode-edn-value :seon.render/ai)))
-        blocks (if (some? whole-prompt)
-                 []
-                 (ctx/selected-agent-blocks entity profile))
-        stored-resolution (await (resolve-blocks! id entity blocks
-                                                  invoke-selected!))
-        stored-blocks (:seon.execution.runtime/blocks stored-resolution)
-        derived (when (and (not (seq profile)) (nil? whole-prompt))
-                  (derived-blocks blocks
-                                  (:seon.execution.runtime/values
-                                    stored-resolution)))
-        derived-resolution (await (resolve-blocks! id entity (vec derived)
-                                                   invoke-selected!))
-        resolved-blocks
-        (->> (concat stored-blocks
-                     (:seon.execution.runtime/blocks derived-resolution))
-             (sort-by (juxt :seon.agent.ctx/priority
-                            (comp str :seon.agent.ctx/name)))
-             vec)
-        resolved-whole-prompt
-        (when (some? whole-prompt)
-          (await (resolve-whole-prompt! id entity whole-prompt
-                                        invoke-selected!)))]
-    (ctx/rendered-context-from-entity
-     (cond-> {:seon.agent/entity entity
-              :seon.agent.ctx/selected-blocks resolved-blocks}
-       (seq profile) (assoc :seon.agent.ctx/profile (vec profile))
-       (some? whole-prompt)
-       (assoc :seon.agent.ctx/whole-prompt resolved-whole-prompt)))))
+  (let [members (assoc-in prompt-acquisition-members
+                          [0 ::protocol/entity-id]
+                          [:seon.agent/id id])
+        acquired (await (db/execute-many {::db/members members
+                                          ::db/max-result-weight 3670016}))
+        [agent-member config-member] (::db/results acquired)
+        member-failure? (not (and (true? (::protocol/success? agent-member))
+                                  (true? (::protocol/success? config-member))))]
+    (if member-failure?
+      (prompt-acquisition-error acquired [agent-member config-member])
+      (let [entity (or (acquired-member agent-member) {})
+            system-prompt (or (:seon.config/system-text
+                               (acquired-member config-member))
+                              ctx/system-text)
+            whole-prompt (when-not (seq profile)
+                           (some->> (:seon.render/ai entity)
+                                    (db/decode-edn-value :seon.render/ai)))
+            blocks (if (some? whole-prompt)
+                     []
+                     (ctx/selected-agent-blocks entity profile))
+            stored-resolution (await (resolve-blocks! id entity blocks
+                                                      invoke-selected!))
+            stored-blocks (:seon.execution.runtime/blocks stored-resolution)
+            derived (when (and (not (seq profile)) (nil? whole-prompt))
+                      (derived-blocks blocks
+                                      (:seon.execution.runtime/values
+                                        stored-resolution)))
+            derived-resolution (await (resolve-blocks! id entity (vec derived)
+                                                       invoke-selected!))
+            resolved-blocks
+            (->> (concat stored-blocks
+                         (:seon.execution.runtime/blocks derived-resolution))
+                 (sort-by (juxt :seon.agent.ctx/priority
+                                (comp str :seon.agent.ctx/name)))
+                 vec)
+            resolved-whole-prompt
+            (when (some? whole-prompt)
+              (await (resolve-whole-prompt! id entity whole-prompt
+                                            invoke-selected!)))]
+        (assoc
+         (ctx/rendered-context-from-entity
+          (cond-> {:seon.agent/entity entity
+                   :seon.agent.ctx/selected-blocks resolved-blocks}
+            (seq profile) (assoc :seon.agent.ctx/profile (vec profile))
+            (some? whole-prompt)
+            (assoc :seon.agent.ctx/whole-prompt resolved-whole-prompt)))
+         :seon.ai/system-prompt system-prompt)))))
 
 (defn -main
   "Start the execution child from the complete runtime composition root."

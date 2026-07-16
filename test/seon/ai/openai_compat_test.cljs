@@ -621,6 +621,25 @@
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
+(deftest agent-adapter-preserves-the-frozen-system-prompt
+  (async done
+    (let [captured (atom nil)]
+      (-> (with-conn
+            (fn [_conn]
+              (with-stubbed
+                (streaming-fetch captured (sse-completion))
+                #((openai/agent-adapter)
+                  (resolved-request
+                   {:seon.ai/ctx "context"
+                    :seon.ai/system-prompt "frozen system"})))))
+          (.then
+           (fn [_]
+             (is (= "frozen system"
+                    (get-in @captured [:body :messages 0 :content]))
+                 "the bridge does not drop the child-owned system bytes")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
 (deftest base-url-strip-reconciliation
   (async done
     (let [captured (atom nil)]

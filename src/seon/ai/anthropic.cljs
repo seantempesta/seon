@@ -377,8 +377,11 @@
   [opts arg]
   (let [ctx-text (ai/llm-arg->ctx arg)
         signal   (ai/llm-arg->abort-signal arg)
+        system-prompt (when (map? arg) (:seon.ai/system-prompt arg))
         resp (await (complete (cond-> (assoc opts :seon.ai/ctx ctx-text)
-                                signal (assoc :seon.ai/abort-signal signal))))]
+                                signal (assoc :seon.ai/abort-signal signal)
+                                system-prompt
+                                (assoc :seon.ai/system-prompt system-prompt))))]
     (cond-> {:text        (:seon.ai/text resp)
              :seon.ai/raw resp}
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))

@@ -546,6 +546,12 @@ freezes and validates the selected files, stores their canonical source facts,
 and then forgets the path. A later config-free boot reads those facts from the
 database and adds no skill block on its own.
 
+Prompt acquisition resolves the system text and the agent's selected context
+inside the same compiled child operation at one database coordinate. That one
+ordinary result flows unchanged through turn capture, token accounting, every
+retry, the provider adapter, and the debug view. None of those consumers
+re-resolves live config after the prompt coordinate has been chosen.
+
 ## See also
 
 - [[ui]] — the block, its two renders, the surface catalog, `install!`/`remove!`,

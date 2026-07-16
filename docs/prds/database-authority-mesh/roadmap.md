@@ -1249,6 +1249,11 @@ is prohibited.
   debug transition callback remains synchronous; its async child result must
   now cross that settled reactive owner rather than being hidden in a
   prompt-specific process cache.
+  The compiled owner now acquires the agent and `:seon.config/system-text` in
+  one inherited-coordinate `execute-many` and returns the established
+  `:seon.ai/system-prompt` beside the rendered context. Turn capture, token
+  accounting, retry requests, dispatch, and both OpenAI-compatible and
+  Anthropic bridges preserve that exact value; none rereads the system text.
   No caller invokes SCI, discovers a local database value for prompt rendering,
   or introduces a render-only executor.
 - **Integrated proof that closes it:** commit `86db045d` supplies deterministic
@@ -1396,10 +1401,13 @@ is prohibited.
   the unchanged 46-warning migration inventory. The changed-test artifact also
   compiles before the same obsolete `seon.db.replica.js` load failure starts
   zero test namespaces; no runtime pass is claimed.
+- The frozen-system cut keeps the child execution warning inventory at 18 and
+  `bench-client` at 46 while both artifacts compile. Focused runtime, turn, and
+  provider bridge regressions compile in the test artifact; their runtime proof
+  remains behind the same legacy replica import until the atomic client cut.
 - **Next refill:** make the existing Datastar debug transition owner honestly
-  asynchronous and consume the same child result, then move the coordinate-
-  pinned system prompt through capture and provider delivery. In parallel,
-  finish restore/readiness,
+  asynchronous and consume the same child result, then remove the synchronous
+  debug and autocomplete composition paths. In parallel, finish restore/readiness,
   quiescence, and session close. Only then switch client open atomically and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
   synchronous database-value arities, and compatibility reachability.

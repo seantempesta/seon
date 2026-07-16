@@ -22,6 +22,7 @@
 (schema/register! ::request
   [:map
    [:seon.ai/ctx :seon.ai/ctx]
+   [:seon.ai/system-prompt {:optional true} :seon.ai/system-prompt]
    [:seon.ai/stream? {:optional true} :seon.ai/stream?]
    [:seon.ai/abort-signal {:optional true} :seon.ai/abort-signal]
    [:seon.ai/config-resolution

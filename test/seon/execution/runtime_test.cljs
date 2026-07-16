@@ -5,6 +5,7 @@
    [seon.agent.ctx :as ctx]
    [seon.db :as db]
    [seon.db.coordinate :as coordinate]
+   [seon.db.protocol :as protocol]
    [seon.execution.runtime :as runtime]))
 
 (def point
@@ -13,9 +14,9 @@
    ::coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
    ::coordinate/t 42})
 
-(defn- call-with-pull-result
+(defn- call-with-acquired-agent
   ([result request observed]
-   (call-with-pull-result
+   (call-with-acquired-agent
      result request observed
      (fn [calls]
        (swap! observed assoc :seon.execution.runtime-test/calls calls)
@@ -28,22 +29,26 @@
                         " is not loaded")}})
                calls)))))
   ([result request observed invoke-selected!]
-   (let [original db/pull]
-     (set! db/pull
-           (fn
-             ([pull-request]
-              (reset! observed
-                      {:seon.execution.runtime-test/request pull-request
-                       :seon.execution.runtime-test/context
-                       (db/current-tx-context)})
-              (js/Promise.resolve result))
-             ([_ _]
-              (js/Promise.reject
-               (js/Error. "runtime prompt used positional pull")))))
+   (let [original db/execute-many]
+     (set! db/execute-many
+           (fn [acquisition-request]
+             (reset! observed
+                     {:seon.execution.runtime-test/request acquisition-request
+                      :seon.execution.runtime-test/context
+                      (db/current-tx-context)})
+             (js/Promise.resolve
+              (if (and (map? result) (:seon.error/message result))
+                result
+                {::db/coordinate point
+                 ::db/results
+                 [{::protocol/success? true ::protocol/result result}
+                  {::protocol/success? true
+                   ::protocol/result
+                   {:seon.config/system-text "frozen system"}}]}))))
      (-> (db/with-tx-context
            {::db/coordinate point}
            #(runtime/render-prompt! request invoke-selected!))
-         (.finally (fn [] (set! db/pull original)))))))
+         (.finally (fn [] (set! db/execute-many original)))))))
 
 (deftest literal-whole-prompt-uses-the-inherited-coordinate
   (async done
@@ -51,11 +56,12 @@
           entity {:db/id 1
                   :seon.agent/id "agent-1"
                   :seon.render/ai (pr-str "literal whole prompt")}]
-      (-> (call-with-pull-result
+      (-> (call-with-acquired-agent
            entity {:seon.agent/id "agent-1"} observed)
           (.then
            (fn [rendered]
              (is (= "literal whole prompt" (:seon.render/text rendered)))
+             (is (= "frozen system" (:seon.ai/system-prompt rendered)))
              (is (= [:prompt]
                     (mapv :seon.agent.ctx/name
                           (:seon.agent.ctx/rendered-blocks rendered))))
@@ -71,11 +77,16 @@
                  "a literal whole prompt invokes no selected function")
              (is (= [:seon.agent/id "agent-1"]
                     (get-in @observed
-                            [:seon.execution.runtime-test/request ::db/ref])))
+                            [:seon.execution.runtime-test/request ::db/members
+                             0 ::protocol/entity-id])))
              (is (some #(= '{:seon.agent/ctx [*]} %)
                        (get-in @observed
-                               [:seon.execution.runtime-test/request
-                                ::db/pull-pattern])))
+                               [:seon.execution.runtime-test/request ::db/members
+                                0 ::protocol/selector])))
+             (is (= [:seon.config/id "cluster"]
+                    (get-in @observed
+                            [:seon.execution.runtime-test/request ::db/members
+                             1 ::protocol/entity-id])))
              (done)))
           (.catch
            (fn [error]
@@ -104,7 +115,7 @@
             :seon.render/ai "profile alpha"}
            {:seon.agent.ctx/name :beta
             :seon.agent.ctx/priority 5}]]
-      (-> (call-with-pull-result
+      (-> (call-with-acquired-agent
            entity
            {:seon.agent/id "agent-1" :seon.agent.ctx/profile profile}
            observed)
@@ -140,7 +151,7 @@
           database-error
           {:seon.error/message "authority unavailable"
            :seon.error/kind :core-bug}]
-      (-> (call-with-pull-result
+      (-> (call-with-acquired-agent
            entity {:seon.agent/id "agent-1"} observed)
           (.then
            (fn [rendered]
@@ -155,7 +166,7 @@
                   (get-in rendered
                           [:seon.agent.ctx/rendered-blocks 1 :seon.render/text])
                   "my.prompt/render"))
-             (call-with-pull-result
+             (call-with-acquired-agent
               database-error {:seon.agent/id "agent-1"} observed)))
           (.then
            (fn [rendered]
@@ -196,7 +207,7 @@
                 :seon.execution/source "(defn first [_] \"first result\")"}
                {:seon.execution/ok? true
                 :seon.execution/value {:seon.render/ai "second result"}}]))]
-      (-> (call-with-pull-result
+      (-> (call-with-acquired-agent
             entity {:seon.agent/id "agent-1"} observed invoke-selected!)
           (.then
             (fn [rendered]
@@ -247,7 +258,7 @@
                      :seon.fn/private? false}]}}]
                 [{:seon.execution/ok? true
                   :seon.execution/value "derived result"}])))]
-      (-> (call-with-pull-result
+      (-> (call-with-acquired-agent
             entity {:seon.agent/id "agent-1"} observed invoke-selected!)
           (.then
             (fn [rendered]
@@ -277,14 +288,15 @@
   (async done
     (let [observed (atom nil)
           empty-render {:seon.render/text ""
-                        :seon.agent.ctx/rendered-blocks []}]
-      (-> (call-with-pull-result
+                        :seon.agent.ctx/rendered-blocks []
+                        :seon.ai/system-prompt "frozen system"}]
+      (-> (call-with-acquired-agent
            {} {:seon.agent/id "empty"} observed)
           (.then
            (fn [rendered]
              (testing "an existing agent with no prompt data"
                (is (= empty-render rendered)))
-             (call-with-pull-result
+             (call-with-acquired-agent
               nil {:seon.agent/id "missing"} observed)))
           (.then
            (fn [rendered]
@@ -295,3 +307,57 @@
            (fn [error]
              (is false (str "empty/missing render rejected: " error))
              (done)))))))
+
+(deftest absent-system-config-uses-the-shipped-system-text
+  (async done
+    (let [original db/execute-many]
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               {::db/coordinate point
+                ::db/results
+                [{::protocol/success? true
+                  ::protocol/result {:seon.agent/id "agent-1"}}
+                 {::protocol/success? true ::protocol/result nil}]})))
+      (-> (db/with-tx-context
+            {::db/coordinate point}
+            #(runtime/render-prompt!
+              {:seon.agent/id "agent-1"}
+              (fn [_] (js/Promise.resolve []))))
+          (.then
+           (fn [rendered]
+             (is (= ctx/system-text (:seon.ai/system-prompt rendered)))
+             (done)))
+          (.catch (fn [error] (is false (str error)) (done)))
+          (.finally (fn [] (set! db/execute-many original)))))))
+
+(deftest failed-prompt-acquisition-invokes-no-selected-functions
+  (async done
+    (let [original db/execute-many
+          calls (atom 0)]
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               {::db/coordinate point
+                ::db/results
+                [{::protocol/success? false
+                  ::protocol/error {:seon.error/message "authority failed"}}
+                 {::protocol/success? true
+                  ::protocol/result
+                  {:seon.config/system-text "frozen system"}}]})))
+      (-> (db/with-tx-context
+            {::db/coordinate point}
+            #(runtime/render-prompt!
+              {:seon.agent/id "agent-1"}
+              (fn [_]
+                (swap! calls inc)
+                (js/Promise.resolve []))))
+          (.then
+           (fn [rendered]
+             (is (zero? @calls))
+             (is (= "authority failed" (:seon.error/message rendered)))
+             (is (= :core-bug (:seon.error/kind rendered)))
+             (is (nil? (:seon.ai/system-prompt rendered)))
+             (done)))
+          (.catch (fn [error] (is false (str error)) (done)))
+          (.finally (fn [] (set! db/execute-many original)))))))

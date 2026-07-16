@@ -54,7 +54,8 @@ result through the now-bounded normalized Datastar subscription without a
 prompt-specific cache. The remaining
 optional prompt owners are closed at `2dc9b44a`, `0602b8a0`, and `93d8e0b0`.
 The real turn caller is closed at `43645eaa`; derived auto-run rendering is
-closed at `e5556524`. Authored source
+closed at `e5556524`. The same child result now carries the coordinate-pinned
+system text through capture, retries, and provider delivery. Authored source
 loading, compiled execution identity, the static prompt composition root, and
 the namespace, transcript, plan, and canvas async owners are settled. Commits
 `6ff02c0a` and `60d9582e` keep the

@@ -309,7 +309,13 @@
    [:seon.error/message :string]
    [:seon.error/kind :keyword]
    [:seon.error/data {:optional true} :map]])
-(schema/register! ::prompt-result [:or :string ::prompt-error])
+(schema/register!
+  ::rendered-prompt
+  [:map
+   [:seon.render/text :string]
+   [:seon.ai/system-prompt :string]
+   [:seon.agent.ctx/rendered-blocks {:optional true} [:vector :map]]])
+(schema/register! ::prompt-result [:or ::rendered-prompt ::prompt-error])
 
 (defn ^:async render-prompt
   "Render one agent prompt inside its isolated execution child.
@@ -318,7 +324,7 @@
    compiled prompt owner performs every prompt read and selected function call
    at that coordinate and returns the ordinary rendered-context value. This
    orchestration tail validates that the child did not move coordinates and
-   returns only the exact context text consumed by the LLM."
+   preserves the exact context and system text consumed by the LLM."
   {:malli/schema [:=> [:cat :seon.agent/id
                        :seon.db.coordinate/coordinate]
                   ::prompt-result]}
@@ -338,9 +344,16 @@
 
       (= execution/result-message (::execution/message response))
       (let [rendered (::execution/result response)
-            text (:seon.render/text rendered)]
-        (if (string? text)
-          text
+            text (:seon.render/text rendered)
+            system-prompt (:seon.ai/system-prompt rendered)]
+        (cond
+          (and (map? rendered) (string? (:seon.error/message rendered)))
+          rendered
+
+          (and (string? text) (string? system-prompt))
+          rendered
+
+          :else
           {:seon.error/message
            "The execution child returned an invalid rendered prompt."
            :seon.error/kind :core-bug}))
@@ -682,7 +695,7 @@
    canonical request map. In repl-mode `:stream`, `:seon.ai/stream? true` asks
    the adapter to consume the SDK stream and stop it at the first complete
    form. Every retry gets a fresh controller."
-  [id ordinal llm-fn prompt-text stream?]
+  [id ordinal llm-fn prompt-text system-prompt stream?]
   (let [database   @db/*conn*
         resolution (ai/resolved-config
                      {:seon.db/db database :seon.agent/id id})
@@ -693,6 +706,8 @@
         arg        (cond-> {:seon.ai/ctx          prompt-text
                             :seon.ai/abort-signal signal
                             :seon.ai/config-resolution resolution}
+                     (string? system-prompt)
+                     (assoc :seon.ai/system-prompt system-prompt)
                      stream? (assoc :seon.ai/stream? true))
         v          (await (seval/race-timeout
                             (llm-fn arg)
@@ -723,7 +738,7 @@
    flows through unchanged — the turn surfaces its `:seon.ai/error` as a
    value, never a throw. When any retry fired, the resp carries
   `:seon.agent.turn/llm-retries n` so the turn record is honest."
-  [id id-of-turn llm-fn prompt-text stream?]
+  [id id-of-turn llm-fn prompt-text system-prompt stream?]
   (let [!attempts (atom [])
         {:seon.retry/keys [result retries]}
         (await
@@ -732,7 +747,8 @@
              (fn ^:async run-attempt! []
                (let [ordinal (count @!attempts)
                      response
-                     (await (bounded-llm-attempt! id ordinal llm-fn prompt-text stream?))]
+                     (await (bounded-llm-attempt! id ordinal llm-fn prompt-text
+                                                  system-prompt stream?))]
                  (swap! !attempts conj (::attempt-row response))
                  (dissoc response ::attempt-row)))
              :seon.retry/strategy (llm-retry-strategy id)
@@ -763,8 +779,10 @@
     run-id :seon.agent.run/id
     stream? :seon.ai/stream?
     start-ns :seon.eval/start-ns
+    system-prompt :seon.ai/system-prompt
     :seon.agent.turn/keys  [id-of-turn turn-idx prompt-text]}]
-  (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text (boolean stream?)))
+  (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text
+                                  system-prompt (boolean stream?)))
         retries (:seon.agent.turn/llm-retries resp)
         attempts (:seon.agent.turn/llm-attempts resp)
         raw     (:seon.ai/raw resp)
@@ -822,11 +840,13 @@
         turn-idx   (turn-index id)
         rendered-coordinate (coordinate/resolved db)
         prompt-result (await (render-prompt id rendered-coordinate))
-        _ (when (map? prompt-result)
+        _ (when (:seon.error/message prompt-result)
             (throw (ex-info (:seon.error/message prompt-result)
                             prompt-result)))
-        prompt     prompt-result
-        full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt})
+        prompt (:seon.render/text prompt-result)
+        system-prompt (:seon.ai/system-prompt prompt-result)
+        full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt
+                                           :seon.ai/system-prompt system-prompt})
         ;; Always-on observability capture: the frozen db's complete coordinate
         ;; (resolved through `db/at-coordinate`) + the assembled prompt verbatim
         ;; as a blob. Both land on the turn's
@@ -863,7 +883,7 @@
                                  (log id turn-idx "open" turn-id "+"
                                       (tokens/estimate prompt) "ctx-tokens" "+"
                                       (tokens/estimate
-                                        (ai/effective-system-prompt {}))
+                                        system-prompt)
                                       "system-tokens")
                                  (await
                                    (ask-and-eval!
@@ -872,6 +892,7 @@
                                       :seon.agent/compile-state compile-state
                                       :seon.agent.run/id        run-id
                                       :seon.ai/stream?          stream?
+                                      :seon.ai/system-prompt    system-prompt
                                       :seon.eval/start-ns       start-ns
                                       :seon.agent.turn/id-of-turn turn-id
                                       :seon.agent.turn/turn-idx turn-idx
