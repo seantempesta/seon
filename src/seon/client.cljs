@@ -225,9 +225,8 @@
     ;; state. Required here so the build includes it; item 10's
     ;; detect-and-tee in seon.eval/eval-batch! consumes it.
     [seon.analyzer-info :as analyzer-info]
-    ;; Local reads plus the sole-writer transaction and feed attachment.
+    ;; One multiplexed authority session owns reads, writes, and interests.
     [seon.db.protocol :as db.protocol]
-    [seon.db.replica :as replica]
     [seon.db.restore :as db.restore]
     ;; Use Shadow's own reload-source selection for build notifications;
     ;; this must stay identical to the files its Node client actually loaded.
@@ -615,8 +614,8 @@
 ;; ---------------------------------------------------------------------------
 ;; Cluster runtime
 ;;
-;; start-runtime! opens the cluster connection, bootstraps the Datahike schema,
-;; binds seon.db/*conn* at the var root, and resumes the durable agents.
+;; start-runtime! opens the authority session, installs the database schema,
+;; and resumes the durable agents.
 ;; Repeated calls consult that one live attachment and return status without
 ;; repeating cold work; hot reload reconstructs only process-local runtimes.
 ;; ---------------------------------------------------------------------------
@@ -924,7 +923,7 @@
 (defn ^:async open-agent-conn!
   "Open a FRESH ISOLATED `:memory` conn carrying the pod's full
    bootstrap schema. Test/diagnostic surface ONLY — the pod itself
-   boots through its local replica via [[open-database-connection!]].
+   is separate from the production authority session.
    Isolated-by-construction: tests that build agents on this conn can
    never touch the cluster database."
   {:malli/schema [:=> [:cat] :any]}
@@ -963,57 +962,53 @@
       conn)))
 
 (schema/register! ::prepare-writes? :boolean)
-(schema/register! ::open-database-connection-request
+(schema/register! ::open-database-session-request
   [:map {:closed true}
    [::prepare-writes? ::prepare-writes?]])
 
-(defn ^:async open-database-connection!
-  "Open the pod's local database replica and attach its transaction feed.
+(defn- session-selection
+  "Project one validated launch descriptor into a database session request."
+  [descriptor]
+  (let [writer-owner (::launch/writer-owner descriptor)
+        database (::launch/database descriptor)
+        coordinate (::db.coordinate/coordinate database)]
+    (cond-> {::db/socket-path (::launch/request-socket-path writer-owner)
+             ::db/database-name (::db.protocol/database-name database)
+             ::db/backend (::db.protocol/backend database)}
+      (::db.protocol/database-path database)
+      (assoc ::db/database-path (::db.protocol/database-path database))
+      coordinate
+      (assoc ::db/attachment (db.coordinate/attachment coordinate)))))
+
+(defn ^:async open-database-session!
+  "Open this process's one persistent database authority session.
 
    Order is load-bearing:
-     1. `ping!` — FAIL LOUD if the database writer is down (no local
-        fallback, no dual backend).
-     2. `ensure-database!` — idempotently open the authoritative database and
-        return its writer-owned identity.
-     3. `d/connect` — reads go local from here; writes dispatch to the
-        remote writer, explicitly routed to this database.
-     4. when `prepare-writes?`, provenance genesis/migration and full runtime
-        schema installation run before autonomous work. A non-autonomous
-        attachment validates inherited state without either write.
-     5. feed attachment — foreign writers' txs fire this conn's native
-        listeners (wake triggers + web UI SSE)."
+     1. `db/open-session!` connects, negotiates capabilities, ensures the
+        selected database, and acquires its immutable attachment.
+     2. when `prepare-writes?`, provenance and runtime schema preparation use
+        that same session before autonomous work begins.
+
+   The result is ordinary namespaced data. Bun retains no local Datahike
+   connection, index, replay cursor, or publisher socket."
   {:malli/schema
-   [:=> [:cat ::open-database-connection-request] :any]}
+   [:=> [:cat ::open-database-session-request] :any]}
   [{::keys [prepare-writes?]}]
   (let [descriptor launch/process-launch-descriptor
         writer-owner (::launch/writer-owner descriptor)
-        database-selection (::launch/database descriptor)]
-    (await (replica/ping! {::launch/descriptor descriptor}))
-    (let [opened (await (replica/ensure-database!
-                         {::launch/descriptor descriptor}))
-        resolved-coordinate (::db.coordinate/coordinate opened)
-        descriptor (launch/with-coordinate
-                    {::launch/descriptor descriptor
-                     ::db.coordinate/coordinate resolved-coordinate})
-        conn (await
-              (d/connect
-               (replica/database-config
-                {::launch/descriptor descriptor})))]
-      (id/assert-allocation-writer! conn)
-      (log/info-console! "seon.client/open-database-connection!"
-                         (str "database "
-                              (::db.protocol/database-name database-selection)
-                              ": "
-                              (::db.protocol/database-path database-selection)
-                              " (writer: "
-                              (::launch/request-socket-path writer-owner) ")"))
-      (when prepare-writes?
-        (await (db/ensure-provenance! {:seon.db/conn conn}))
-        (await (install-runtime-schema! conn false)))
-      (await (replica/attach!
-              {::replica/conn conn
-               ::launch/descriptor descriptor}))
-      conn)))
+        database (::launch/database descriptor)
+        opened (await (db/open-session! (session-selection descriptor)))]
+    (log/info-console! "seon.client/open-database-session!"
+                       (str "database "
+                            (::db.protocol/database-name database)
+                            ": "
+                            (::db.protocol/database-path database)
+                            " (writer: "
+                            (::launch/request-socket-path writer-owner) ")"))
+    (when prepare-writes?
+      (await (db/ensure-provenance! {}))
+      (await (install-runtime-schema!)))
+    opened))
 
 ;; ---------------------------------------------------------------------------
 ;; Resume — replay-program-graph! (the DB-is-the-running-system spine)
@@ -2877,15 +2872,16 @@
          :seon.client/created-ids []
          :seon.web/port port
          :seon.web/port-file port-file})
-      (let [conn (await
-                   (open-database-connection!
+      (let [session-open (await
+                   (open-database-session!
                     {::prepare-writes? (and autonomous?
                                             (nil? restore-startup))}))
-            _ (set! db/*conn* conn)
             _ (await
                (validate-restore-attachment!
                 descriptor restore-startup restore-completion-claim))
-            _ (db/assert-preconditions! {:seon.db/conn conn})
+            _ (await
+               (db/assert-preconditions!
+                {::db/coordinate (::db/coordinate session-open)}))
             ;; Bootstrap compilation can overlap autonomous database work.
             compile-promise (repl/ensure-bootstrap!)]
         (when (and autonomous? (nil? restore-startup))
@@ -2963,7 +2959,7 @@
           (let [replay-stats
                 (await
                  (replay-program-graph!
-                  {::conn conn
+                  {::conn session-open
                    ::compile-state compile-state
                    ::agent-id primary
                    ::record-failures? autonomous?}))
@@ -3276,7 +3272,7 @@
 
 (defn ^:async ^:private drain-runtime-owners!
   "Drain every runtime owner below the optional HTTP listener inverse."
-  [conn capability capture-coordinate?]
+  [capability capture-coordinate?]
   (agent-loop/uninstall-ticker!)
   (let [{wake-ids ::agent-loop/uninstalled-ids}
         (agent-loop/uninstall-all-wake-triggers!)
@@ -3301,7 +3297,6 @@
                  merge-quiesce-progress
                  {::agent-runtime/unhosted-ids host-ids})
         _ (await (detach-runtime-advertisement!))]
-    (replica/detach!)
     ;; The final empty-work acquisition already resolved the exact immutable
     ;; point while the active schema projection was installed. Carry it into
     ;; planned-quiesce evidence rather than resolving head a second time.
@@ -3327,8 +3322,7 @@
         (when (false? (::admission/detached? detached))
           (throw (ex-info "Runtime projection detach failed." detached))))
       (let [generation (process-generation)]
-        (await (db/release-connection! {::db/conn conn}))
-        (set! db/*conn* nil)
+        (db/close-session!)
         (swap! !state dissoc
                ::launch-capability
                ::cleanup-requires-connection?
@@ -3352,7 +3346,7 @@
 
    The first caller closes executable admission synchronously. Overlapping
    calls fail closed through the retained lifecycle phase; a completed call
-   returns the same typed result. Failures retain the connection, launch
+   returns the same typed result. Failures retain the session, launch
    capability, and cleanup-required occurrence for an explicit retry. The web
    server remains alive so the operator can receive the complete EDN result."
   {:malli/schema [:=> [:cat] ::runtime.lifecycle/quiesce-response]}
@@ -3360,7 +3354,7 @@
   (let [state @!state
         phase (::runtime-phase state)
         completed (::quiesce-result state)
-        conn db/*conn*
+        attached? (db/attached?)
         capability (::launch-capability state)
         retry? (and (= :seon.client.runtime/cleanup-required phase)
                     (::quiesce-started? state))]
@@ -3374,13 +3368,13 @@
       (not (or (= :seon.client.runtime/running phase) retry?))
       (quiesce-failure "The runtime is not in a quiesceable lifecycle phase.")
 
-      (or (nil? conn) (nil? capability))
+      (or (not attached?) (nil? capability))
       (do
         (swap! !state assoc
                ::runtime-phase :seon.client.runtime/cleanup-required
                ::cleanup-requires-connection? true)
         (quiesce-failure
-         "The runtime has no retained connection and launch capability."))
+         "The runtime has no retained session and launch capability."))
 
       :else
       (do
@@ -3400,7 +3394,7 @@
           (try
             (swap! !state assoc ::quiesce-started? true)
             (let [result
-                  (await (drain-runtime-owners! conn capability true))]
+                  (await (drain-runtime-owners! capability true))]
               (swap! !state
                      (fn [state]
                        (-> state
@@ -3416,20 +3410,20 @@
               (quiesce-failure (or (.-message error) (str error))))))))))
 
 (defn ^:async stop-runtime!
-  "Stop every runtime owner and release the local database connection.
+  "Stop every runtime owner and close the database authority session.
 
    A wholly absent runtime is already stopped. Every other transition is
-   serialized by `stopping`; web/SSE, ticker/hosts, replica, executable
-   admission/projection, and Datahike release are one ordered inverse. Failures
-   retain the capability, connection, and `cleanup-required` phase so the same
+   serialized by `stopping`; web/SSE, ticker/hosts, interests, executable
+   admission/projection, and session close are one ordered inverse. Failures
+   retain the capability, session, and `cleanup-required` phase so the same
    idempotent owners can be retried from the beginning."
   {:malli/schema [:=> [:cat] ::stop-runtime-response]}
   []
   (let [state @!state
         phase (::runtime-phase state)
         capability (::launch-capability state)
-        conn db/*conn*
-        wholly-absent? (and (nil? phase) (nil? capability) (nil? conn))
+        attached? (db/attached?)
+        wholly-absent? (and (nil? phase) (nil? capability) (not attached?))
         quiesce-result (::quiesce-result state)
         transition-active? (contains? #{:seon.client.runtime/starting
                                         :seon.client.runtime/quiescing
@@ -3465,14 +3459,14 @@
            ::stop-error (or (.-message error) (str error))}))
 
       (and connection-required?
-           (or (nil? conn) (not (db/attached?))))
+           (not attached?))
       (do
         (swap! !state assoc
                ::runtime-phase :seon.client.runtime/cleanup-required
                ::cleanup-requires-connection? true)
         {::stopped? false
          ::stop-error
-         "The running runtime has no releasable database connection."})
+         "The running runtime has no open database session."})
 
       :else
       (do
@@ -3482,8 +3476,8 @@
             (admission/begin-quiesce!))
           (await (web.serve/stop!))
           (let [drained
-                (if conn
-                  (await (drain-runtime-owners! conn capability false))
+                (if attached?
+                  (await (drain-runtime-owners! capability false))
                   {::agent-runtime/unhosted-ids []})]
             (swap! !state dissoc
                    ::launch-capability

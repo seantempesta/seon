@@ -1445,6 +1445,14 @@ is prohibited.
   replica no longer owns configuration needed after its deletion. This ports
   the previously proven `068c41a3` seam without restoring its stale bootstrap
   call shapes.
+- Production client open now uses the one persistent `seon.db/open-session!`
+  transition for capability negotiation, database ensure/acquire, provenance,
+  schema installation, reads, writes, and interests. Planned quiesce and stop
+  close that session only after projection and interest teardown. The client
+  no longer imports the replica; `bench-client` compiles 515 files with 30
+  synchronous-consumer warnings, down from 40. The exposed next blockers are
+  exactly startup birth/replay/resume and web/config consumers, not transport
+  compatibility.
 - **Next refill:** finish the remaining startup/web synchronous consumers,
   move launch-descriptor ownership out of the replica, switch client open
   atomically, and
