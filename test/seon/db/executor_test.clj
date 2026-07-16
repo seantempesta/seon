@@ -887,3 +887,117 @@
           (registry/release-database!
            {::registry/database-name (keyword database-name)}))
         (registry/restore-registry! {::registry/snapshot snapshot})))))
+
+(deftest datahike-single-flight-waiters-currently-occupy-read-workers
+  (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
+        database-a (str "executor-flight-a-" (random-uuid))
+        database-b (str "executor-flight-b-" (random-uuid))
+        owner-entered (CountDownLatch. 1)
+        release-owner (CountDownLatch. 1)
+        b-entered (CountDownLatch. 1)
+        predicate-calls (atom 0)
+        trace (atom [])
+        predicate (fn [_]
+                    (swap! predicate-calls inc)
+                    (swap! trace conj :a-owner-entered)
+                    (.countDown owner-entered)
+                    (.await release-owner)
+                    true)
+        query '[:find ?note
+                :in $ ?predicate
+                :where [_ :executor.test/note ?note]
+                       [(?predicate ?note)]]
+        worker
+        (start-worker
+         4
+         {:read
+          (fn [{:request/keys [database-name request-id]}]
+            (let [{::registry/keys [conn]}
+                  (registry/resolve-connection
+                   {::registry/database-name (keyword database-name)})]
+              (if (= database-name database-b)
+                (do
+                  (swap! trace conj :b-entered)
+                  (.countDown b-entered)
+                  (d/q '[:find (count ?entity) .
+                         :where [?entity :executor.test/note]]
+                       (d/db conn)))
+                (d/q-with-evidence
+                 {:query query
+                  :args [(d/db conn) predicate]
+                  :request-id request-id}))))})]
+    (try
+      (doseq [database-name [database-a database-b]]
+        (registry/ensure-database!
+         {::registry/database-name (keyword database-name)
+          ::registry/backend :memory
+          ::registry/initialize-connection!
+          (fn [{::registry/keys [conn]}]
+            (d/transact
+             conn
+             [{:db/ident :executor.test/note
+               :db/valueType :db.type/string
+               :db/cardinality :db.cardinality/one}
+              {:executor.test/note database-name}]))}))
+      (let [submit-a
+            (fn [job-id]
+              (submit-async!
+               {::executor/executor worker
+                ::executor/work-class :read
+                ::executor/database-name database-a
+                ::executor/scope (registry-scope database-a)
+                ::executor/job-id job-id
+                ::executor/request {:request/database-name database-a
+                                    :request/request-id (random-uuid)}}))
+            owner (submit-a "single-flight/a-owner")]
+        (is (.await owner-entered 5 TimeUnit/SECONDS))
+        (let [waiter-1 (submit-a "single-flight/a-waiter-1")
+              waiter-2 (submit-a "single-flight/a-waiter-2")]
+          (is (loop [attempt 0]
+                (cond
+                  (= 3 (:datahike.single-flight/active-callers
+                        (d/query-cache-evidence))) true
+                  (< attempt 10000) (do (Thread/yield) (recur (inc attempt)))
+                  :else false))
+              "the owner and both executor jobs reached one Datahike flight")
+          (swap! trace conj :a-owner-and-waiters-active)
+          (let [b-result
+                (submit-async!
+                 {::executor/executor worker
+                  ::executor/work-class :read
+                  ::executor/database-name database-b
+                  ::executor/scope (registry-scope database-b)
+                  ::executor/job-id "single-flight/b-distinct"
+                  ::executor/request {:request/database-name database-b
+                                      :request/request-id (random-uuid)}})]
+            (is (await-queued worker 1))
+            (is (= 3 (::executor/running (executor/evidence worker))))
+            (is (= 1 (.getCount b-entered))
+                "B cannot enter while A's owner and two joined callers own all read workers")
+            (is (= [:a-owner-entered :a-owner-and-waiters-active] @trace))
+            (.countDown release-owner)
+            (let [a-results (mapv deref [owner waiter-1 waiter-2])]
+              (is (= 1 @predicate-calls)
+                  "the fixture reached Datahike single-flight, not duplicate query work")
+              (is (= 1 (count (filter #(= :datahike.cache.outcome/miss-owner
+                                          (get-in % [1 :datahike.query/cache-evidence
+                                                     :datahike.cache/outcome]))
+                                     a-results))))
+              (is (= 2 (count (filter #(= :datahike.cache.outcome/miss-joined
+                                          (get-in % [1 :datahike.query/cache-evidence
+                                                     :datahike.cache/outcome]))
+                                     a-results)))))
+            (is (= [::executor/value 1] @b-result))
+            (is (= [:a-owner-entered :a-owner-and-waiters-active :b-entered]
+                   @trace))
+            (is (zero? (:datahike.single-flight/active-flights
+                        (d/query-cache-evidence))))
+            (is (zero? (::executor/retained-identities
+                        (executor/evidence worker)))))))
+      (finally
+        (.countDown release-owner)
+        (executor/stop! {::executor/executor worker})
+        (doseq [database-name [database-a database-b]]
+          (registry/release-database!
+           {::registry/database-name (keyword database-name)}))
+        (registry/restore-registry! {::registry/snapshot snapshot})))))
