@@ -181,8 +181,9 @@ matrix are
 [[research/bun-child-modest-hardware-supervision-policy-2026-07-16]]. It selects
 one parent-owned invocation deadline, `proc.exited` terminal truth, immediate
 idle retirement, no heartbeat, and no production RSS poller. Final density
-numbers wait for a remote-only execution artifact because the current child
-still packages the monolithic `seon.db` Datahike dependency graph.
+numbers wait until the execution child is authority-only, because today's
+child can still construct and retain local Datahike state. Static dependency
+reachability and generated JavaScript size are not density evidence.
 The exact Shadow reachability and launch-environment seam is
 [[research/execution-artifact-database-dependency-seam-2026-07-16]]: 81 heavy
 database implementation imports occupy 8,293,078 of 18,810,383 live
@@ -1375,11 +1376,10 @@ second owner.
   supervision audit rejects heartbeats and polling: the host absolute deadline
   must cancel and retire the exact child, `proc.exited` closes the slot, and an
   abnormal post-ready exit runs exact fenced recovery without replay. A
-  source-grounded remote-client dependency audit proves that the current child
-  spends 44.1% of its live JS bytes on local database implementation code. Its
-  audit proves a private build-role selection is possible, but the full-control
-  cut does not need that temporary dual implementation: it removes local CLJS
-  Datahike reachability and leaves the remote owner behind the unchanged public
+  source-grounded remote-client dependency audit identifies the local Datahike
+  construction path that must become unreachable. The full-control cut does
+  not need a temporary build-role implementation: it removes that second live
+  database owner and leaves the remote owner behind the unchanged public
   `seon.db` interface. Eval-limit environment reads move into closed
   startup/config data before enforcing the explicit child environment.
   Commit `ecead888` advances the closer data-driven seam with execution
@@ -1592,11 +1592,15 @@ second owner.
   frozen data without rerunning agent code. The matching acquisition groups the
   only two remaining read-dependent facts—boot-owned changed functions and a
   bare-require namespace declaration/provenance—into one bounded authority
-  request, while declaration merging is pure over its ordinary result. Focused
-  fence/acquisition/merge proof passes 3 tests/10 assertions. The next slice
-  moves the inline transaction compiler into the acquire/compile/record retry
-  loop and deletes the old local calls; unwired helpers or unfenced local
-  snapshot reads are not accepted as the completed design.
+  request, while declaration merging is pure over its ordinary result. The
+  successful eval path now freezes the executed result, analyzer edges, schema
+  state, output, and captured database operations once, then retries only
+  authority acquisition, pure transaction compilation, and coordinate-fenced
+  recording. Stale authority movement cannot rerun agent code or publish a
+  provisional schema projection, and the normal path no longer reads local
+  Datahike state for either fact. Focused fence/acquisition/merge/retry proof
+  passes 4 tests/14 assertions. The remaining special REPL forms are the next
+  local eval-read boundary before the child adapter can own all eval.
 - Cold authored-program reconstruction now uses one seven-member
   coordinate-pinned authority request for the agent's namespace sources,
   require-edge links, functions, tests, home namespace, schemas, and function

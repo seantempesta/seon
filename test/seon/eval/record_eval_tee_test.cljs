@@ -451,6 +451,67 @@
              (set! db/execute-many original)
              (done)))))))
 
+(deftest stale-eval-record-reacquires-without-changing-the-frozen-outcome
+  (async done
+    (let [point-1 {:seon.db.coordinate/database-id
+                   #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+                   :seon.db.coordinate/branch :db
+                   :seon.db.coordinate/commit-id
+                   #uuid "11111111-1111-4111-8111-111111111111"
+                   :seon.db.coordinate/t 1}
+          point-2 (assoc point-1
+                         :seon.db.coordinate/commit-id
+                         #uuid "22222222-2222-4222-8222-222222222222"
+                         :seon.db.coordinate/t 2)
+          frozen {:seon.eval/tee-entities [{:seon.fn/sym "my.agent/f"}]
+                  :seon.eval/ending-ns 'my.agent
+                  :seon.eval/source "(defn f [] :ok)"
+                  :seon.eval/eval-id "eval-1"
+                  :seon.eval/at (js/Date. 0)
+                  :seon.eval/duration-ms 4
+                  :seon.eval/narration ""
+                  :seon.eval/output "printed"
+                  :seon.eval/database-operations [{:probe/op 1}]
+                  :seon.agent.turn/id-of-turn "turn-1"}
+          !acquisitions (atom 0)
+          !records (atom [])
+          acquire!
+          (fn [_]
+            (js/Promise.resolve
+             {::db/coordinate
+              (if (= 1 (swap! !acquisitions inc)) point-1 point-2)}))
+          compile-tee
+          (fn [seen acquired]
+            {:seon.eval/tee [[:probe/coordinate (::db/coordinate acquired)]]
+             :seon.eval/result {:seon.eval/ok? true :seon.eval/value :ok}
+             :seon.eval/pending? false
+             :probe/frozen seen})
+          record!
+          (fn [request]
+            (swap! !records conj request)
+            (js/Promise.resolve
+             (if (= point-1 (::db/expected-coordinate request))
+               {:seon.db/ok? false
+                :seon.db/error
+                {:seon.error/data
+                 {::protocol/error-kind protocol/stale-coordinate-error}}}
+               {:seon.db/ok? true :seon.eval/id "eval-1"})))]
+      (-> (js/Promise.resolve
+           (@#'seval/retry-eval-record!
+            frozen acquire! compile-tee record!))
+          (.then
+           (fn [outcome]
+             (is (= 2 @!acquisitions))
+             (is (= [point-1 point-2]
+                    (mapv ::db/expected-coordinate @!records)))
+             (is (every? #(= "eval-1" (:seon.eval/eval-id %)) @!records))
+             (is (= frozen
+                    (:probe/frozen (:seon.eval/compiled outcome))))))
+          (.catch
+           (fn [error]
+             (is false (str "eval record retry threw: " error))))
+          (.finally done)))))
+
 (deftest ambiguous-wire-result-never-starts-a-second-allocation
   (async done
     (let [!calls (atom 0)

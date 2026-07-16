@@ -3976,6 +3976,124 @@
          ::stored-source stored-source
          ::source-process source-process}))))
 
+(defn- compile-eval-tee
+  "Compile one complete eval program transaction from frozen and acquired data."
+  [{::keys [tee-entities schemas-after old-projection changed-schemas source
+            ending-ns require-edges result pending?]}
+   acquired]
+  (let [tee-entities
+        (reject-core-overrides
+         (vec tee-entities)
+         (::core-boot-function-symbols acquired))
+        tee-entities
+        (into tee-entities
+              (omitted-fn-projection-retractions tee-entities))
+        contract-transition
+        (function-contract-transition old-projection tee-entities)
+        changed-function-syms (::changed-syms contract-transition)
+        candidate-outcome
+        (when (or (seq changed-schemas) (seq changed-function-syms))
+          (try
+            {::candidate-projection
+             (schema/build-projection
+              schemas-after
+              (::function-contracts contract-transition))}
+            (catch :default candidate-error
+              {::candidate-error candidate-error})))
+        candidate-error (::candidate-error candidate-outcome)
+        result
+        (if candidate-error
+          {::ok? false
+           :seon/error
+           (error/->map
+            (ex-info
+             (str "Program change rejected before commit: "
+                  (ex-message candidate-error))
+             {:seon.error/kind :user-input
+              :seon.schema/candidate-rejected? true}
+             candidate-error))}
+          result)
+        pending? (and pending? (nil? candidate-error))
+        tee-entities (if candidate-error [] tee-entities)
+        namespace (when (and (::ok? result)
+                             (symbol? ending-ns)
+                             (not (contains? transient-ns-syms ending-ns)))
+                    (keyword (str ending-ns)))
+        require-edge-tx
+        (when namespace
+          (ns-require-edges-tx namespace require-edges))
+        keyword-resolution
+        (when (symbol? ending-ns)
+          {:seon.repl/current-ns ending-ns
+           :seon.repl/aliases (::aliases (edges->require-info require-edges))})
+        read-attribute-tx
+        (into []
+              (mapcat
+               (fn [entity]
+                 (when-let [function-symbol
+                            (and (map? entity) (:seon.fn/sym entity))]
+                   (fn-read-attrs-tx
+                    function-symbol
+                    (source-qualified-kws
+                     (:seon.fn/source entity)
+                     keyword-resolution)))))
+              tee-entities)
+        require-declaration-tx
+        (when namespace
+          (require-decl-tx namespace source
+                           (::stored-source acquired)
+                           (::source-process acquired)))]
+    {::tee (vec (concat tee-entities require-edge-tx
+                        require-declaration-tx read-attribute-tx))
+     ::result result
+     ::pending? pending?
+     ::candidate-outcome candidate-outcome
+     ::candidate-error candidate-error
+     ::changed-schemas changed-schemas}))
+
+(defn- ^:async retry-eval-record!
+  [frozen acquire! compile-tee record!]
+  (loop []
+    (let [function-symbols
+          (into []
+                (keep #(when (map? %) (:seon.fn/sym %)))
+                (::tee-entities frozen))
+          acquired
+          (await (acquire!
+                  {::function-symbols function-symbols
+                   ::ending-ns (::ending-ns frozen)
+                   ::source (::source frozen)}))
+          compiled (compile-tee frozen acquired)
+          recorded
+          (await
+           (record!
+            (cond->
+              {:seon.agent.turn/id-of-turn
+               (:seon.agent.turn/id-of-turn frozen)
+               ::eval-id (::eval-id frozen)
+               ::at (::at frozen)
+               ::duration-ms (::duration-ms frozen)
+               ::narration (::narration frozen)
+               ::source (::source frozen)
+               ::ending-ns (::ending-ns frozen)
+               ::result (::result compiled)
+               ::pending? (::pending? compiled)
+               ::output (::output frozen)
+               ::tee (::tee compiled)}
+              (seq (::database-operations frozen))
+              (assoc ::database-operations (::database-operations frozen))
+              (::db/coordinate acquired)
+              (assoc ::db/expected-coordinate (::db/coordinate acquired)))))]
+      (if (stale-coordinate-failure? recorded)
+        (recur)
+        {::recorded recorded ::compiled compiled}))))
+
+(defn- ^:async record-eval-with-authority!
+  "Acquire, compile, and terminalize one already-executed eval outcome."
+  [frozen]
+  (await (retry-eval-record! frozen acquire-eval-tee-inputs!
+                             compile-eval-tee record-eval!)))
+
 (defn- unalias-decl-tx
   "Tx upserting `ns-kw`'s stored `:seon.ns/source` with `alias-sym`
    removed: an `:as`/`:as-alias` opt naming it is dropped (the ns stays
@@ -4667,146 +4785,45 @@
                                 ::source         source
                                 ::at             at
                                 ::eval-ns        @current-ns}))
-              ;; Agent-no-override-core guard (db-is-the-running-
-              ;; system PRD; Sean): drop any tee'd :seon.fn row that
-              ;; would REDEFINE an existing compiled-core fn (a sym
-              ;; whose current source datom's tx is `:core-seed`), so
-              ;; the core display row stays intact and the override
-              ;; takes no ephemeral live effect. A NEW sym or an
-              ;; agent-origin sym is NOT removed — agents define and
-              ;; redefine freely in their OWN namespaces. `@db/*conn*`
-              ;; is the live db value here (same as the edge tee below).
-              tee-entities
-              (let [fn-syms (->> tee-entities
-                                 (keep #(when (map? %) (:seon.fn/sym %)))
-                                 vec)]
-                (if (and db/*conn* (seq fn-syms))
-                  (reject-core-overrides
-                    (vec tee-entities)
-                    (core-boot-fn-syms @db/*conn* fn-syms))
-                  tee-entities))
-              omitted-fn-tx
-              (omitted-fn-projection-retractions tee-entities)
-              tee-entities (into (vec tee-entities) omitted-fn-tx)
               changed-schemas (schema/changed-keys schemas-before)
               old-projection (schema/current-projection)
-              contract-transition
-              (function-contract-transition old-projection tee-entities)
-              changed-function-syms (::changed-syms contract-transition)
-              candidate-outcome
-              (when (or (seq changed-schemas)
-                        (seq changed-function-syms))
-                (try
-                  {::candidate-projection
-                   (schema/build-projection
-                     (schema/snapshot)
-                     (::function-contracts contract-transition))}
-                  (catch :default candidate-error
-                    {::candidate-error candidate-error})))
-              candidate-error (::candidate-error candidate-outcome)
-              _ (when candidate-error
-                  ;; Candidate construction is pure and happens before the
-                  ;; transaction. Restore the declaration collector so the
-                  ;; rejected generation is absent from both DB and runtime.
-                  (schema/restore! schemas-before))
-              result
-              (if candidate-error
-                {::ok? false
-                 :seon/error
-                 (error/->map
-                   (ex-info
-                     (str "Program change rejected before commit: "
-                          (ex-message candidate-error))
-                     {:seon.error/kind :user-input
-                      :seon.schema/candidate-rejected? true}
-                     candidate-error))}
-                result)
-              pending? (and pending? (nil? candidate-error))
-              tee-entities (if candidate-error [] tee-entities)
-              ;; Capture the `:seon.ns/require-edges` for the ENDING ns
-              ;; on EVERY successful eval — not only `(ns …)` forms —
-              ;; so a re-eval'd ns form or a bare `(require '[x])`
-              ;; keeps the ONE persisted dep-edge representation current;
-              ;; flat views derive from it via
-              ;; [[persisted-require-targets]] — C36). Skip the transient
-              ;; eval-scaffolding nses (`cljs.user` / `seon.dynamic`)
-              ;; so we never mint a `:seon.ns` row for them.
-              ;; Exact whole-attribute replacement rides in record-eval!'s
-              ;; atomic tee transaction and requires no local database value.
               ending-ns (when (::ok? result) @current-ns)
-              req-tx    (when (and ending-ns
-                                   (symbol? ending-ns)
-                                   (not (contains? transient-ns-syms
-                                                   ending-ns)))
-                          (ns-require-edges-tx
-                            (keyword (str ending-ns))
-                            (analyzer-info/ns-require-edges
-                              compile-state ending-ns)))
-              ;; Declared read-set replacement (C28) for every teed :seon.fn
-              ;; row — scalar additions and whole-attribute retraction
-              ;; follow the owning fn entity in this same ordered tx.
-              ;; Scalar adds avoid Datahike's two-item collection /
-              ;; lookup-ref ambiguity; diffing avoids cardinality-many
-              ;; accumulation.
-              ;; `::kw`/`::alias/kw` literals resolve against the ENDING
-              ;; ns's analyzer require-edges (C37) — the same facts the
-              ;; M4 require-edge facts, read once per entry.
-              kw-resolve
+              require-edges
               (when (symbol? ending-ns)
-                {:seon.repl/current-ns ending-ns
-                 :seon.repl/aliases
-                 (::aliases (edges->require-info
-                              (analyzer-info/ns-require-edges
-                                compile-state ending-ns)))})
-              read-attr-tx
-              (into []
-                    (mapcat (fn [ent]
-                              (when-let [s (and (map? ent)
-                                                (:seon.fn/sym ent))]
-                                (fn-read-attrs-tx
-                                  s
-                                  (source-qualified-kws
-                                    (:seon.fn/source ent)
-                                    kw-resolve)))))
-                    tee-entities)
-              ;; Durable-by-default (owner ruling 2026-07-10): a bare
-              ;; top-level `(require …)` — incl. the `alias` rewrite —
-              ;; persists its specs into the CURRENT ns's
-              ;; declaration so a resume replay carries them. `[]` for
-              ;; every non-require form (one read, cheap).
-              req-decl-tx (when (and (::ok? result) ending-ns db/*conn*
-                                     (not (contains? transient-ns-syms
-                                                     ending-ns)))
-                            (let [ns-kw (keyword (str ending-ns))]
-                              (require-decl-tx
-                               ns-kw
-                               source
-                               (stored-ns-source @db/*conn* ns-kw)
-                               (if (ns-source-core-boot? @db/*conn* ns-kw)
-                                 :seon.db.process/boot
-                                 :seon.db.process/repl))))
-              tee (vec (concat tee-entities req-tx req-decl-tx read-attr-tx))
-              ;; Durable record — always. Identity allocation and accepted tee
-              ;; commit before a process-local result handle can exist.
-              recorded (if (:seon.db/ok? started)
-                         (await
-                           (record-eval!
-                             (cond->
-                               {:seon.agent.turn/id-of-turn turn-id
-                                ::eval-id      eval-id
-                                ::at           at
-                                ::duration-ms  duration-ms
-                                ::narration    narration
-                                ::source       source
-                                ::ending-ns    @current-ns
-                                ::result       result
-                                ::pending?     pending?
-                                ::output       output
-                                ::tee          tee}
-                               (seq database-operations)
-                               (assoc ::database-operations
-                                      database-operations))))
-                         started)
+                (analyzer-info/ns-require-edges compile-state ending-ns))
+              frozen
+              {::tee-entities (vec tee-entities)
+               ::schemas-after (schema/snapshot)
+               ::old-projection old-projection
+               ::changed-schemas changed-schemas
+               ::source source
+               ::ending-ns ending-ns
+               ::require-edges (or require-edges #{})
+               ::result result
+               ::pending? pending?
+               ::eval-id eval-id
+               ::at at
+               ::duration-ms duration-ms
+               ::narration narration
+               ::output output
+               ::database-operations database-operations
+               :seon.agent.turn/id-of-turn turn-id}
+              attempt
+              (if (:seon.db/ok? started)
+                (await (record-eval-with-authority! frozen))
+                {::recorded started
+                 ::compiled {::result result
+                             ::pending? pending?
+                             ::changed-schemas changed-schemas}})
+              recorded (::recorded attempt)
+              compiled (::compiled attempt)
+              result (::result compiled)
+              pending? (::pending? compiled)
+              candidate-outcome (::candidate-outcome compiled)
+              candidate-error (::candidate-error compiled)
+              changed-schemas (::changed-schemas compiled)
+              _ (when candidate-error
+                  (schema/restore! schemas-before))
               eval-id (:seon.eval/id recorded)
               new-projection
               (when (and (::candidate-projection candidate-outcome)
