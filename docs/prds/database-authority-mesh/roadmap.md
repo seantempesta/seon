@@ -1231,7 +1231,12 @@ fallback is prohibited.
   membership remains current after post-boot birth/termination; no second
   registry or synchronous fallback is acceptable. Commit `86db045d` implements
   the one authored-source owner grounded in
-  [[research/unit-8-authored-source-loading-seam-2026-07-16]]. The independent
+  [[research/unit-8-authored-source-loading-seam-2026-07-16]]. Commit
+  `0f6d06ea` adds one coordinate-pinned multi-agent preparation, parallel
+  distinct-agent/sequential same-agent child scheduling with positional
+  results, and moves the capability-approved `/call` action off in-pod
+  lookup/apply; its runnable execution proof passes 18 tests/86 assertions and
+  the action-bearing artifact compiles without a new warning. The independent
   supervision audit rejects heartbeats and polling: the host absolute deadline
   must cancel and retire the exact child, `proc.exited` closes the slot, and an
   abnormal post-ready exit runs exact fenced recovery without replay. A
