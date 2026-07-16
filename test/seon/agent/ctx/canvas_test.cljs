@@ -1,0 +1,218 @@
+(ns seon.agent.ctx.canvas-test
+  "Remote canvas acquisition without changing the retained local renderer."
+  (:require
+    [cljs.test :refer [async deftest is testing]]
+    [datahike.api :as d]
+    [seon.agent.ctx.canvas :as canvas-ctx]
+    [seon.db :as db]
+    [seon.db.protocol :as protocol]
+    [seon.render.canvas :as canvas]))
+
+(def ^:private agent-id "tst-canvas-remote")
+
+(def ^:private coordinate
+  {:seon.db.coordinate/database-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+   :seon.db.coordinate/branch :db
+   :seon.db.coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+   :seon.db.coordinate/t 42})
+
+(def ^:private other-coordinate
+  (assoc coordinate :seon.db.coordinate/t 43))
+
+(defn- fresh-conn
+  []
+  (let [config {:store {:backend :memory :id (random-uuid)}
+                :schema-flexibility :write
+                :keep-history? true}
+        attrs [:seon.agent/id
+               :seon.agent/purpose
+               :seon.db/user
+               :seon.db/process
+               :seon.db.process/id
+               :seon.fn/sym
+               :seon.fn/source
+               :seon.fn/spec
+               :seon.fn/private?
+               :seon.fn/read-attrs]]
+    (-> (d/create-database config)
+        (.then (fn [_] (d/connect config {:sync? false})))
+        (.then (fn [conn]
+                 (-> (d/transact! conn
+                       {:tx-data (db/malli->datahike-schema attrs)})
+                     (.then (constantly conn))))))))
+
+(deftest remote-members-are-bounded-and-history-is-explicit
+  (let [candidate (@#'canvas-ctx/candidate-member agent-id)
+        history (@#'canvas-ctx/history-member
+                 agent-id [:seon.agent/purpose])]
+    (testing "candidate discovery is one bounded relation"
+      (is (= protocol/query-operation (::protocol/operation candidate)))
+      (is (= [agent-id] (::protocol/arguments candidate)))
+      (is (pos? (:datahike.resource/max-work candidate)))
+      (is (pos? (:datahike.resource/max-results candidate)))
+      (is (pos? (:datahike.resource/max-result-weight candidate)))
+      (is (some #{'(pull ?fn [:seon.fn/read-attrs])}
+                (tree-seq coll? seq (::protocol/query-form candidate)))))
+    (testing "all watched attrs share one history query"
+      (is (= protocol/query-operation (::protocol/operation history)))
+      (is (true? (::protocol/history? history)))
+      (is (= [agent-id [:seon.agent/purpose]]
+             (::protocol/arguments history)))
+      (is (some #{'(max ?tx)}
+                (tree-seq coll? seq (::protocol/query-form history)))))))
+
+(deftest explicit-and-configured-pins-skip-candidate-acquisition
+  (async done
+    (let [calls (atom 0)
+          original-execute-many db/execute-many
+          acquire! (fn [agent]
+                     (@#'canvas-ctx/acquire-canvas! agent-id agent))]
+      (set! db/execute-many
+            (fn [_]
+              (swap! calls inc)
+              (js/Promise.reject (js/Error. "pin performed a query"))))
+      (-> (js/Promise.all
+            #js [(acquire! {:seon.agent/id agent-id
+                            :seon.render.canvas/content [:p "explicit"]})
+                 (acquire! {:seon.agent/id agent-id
+                            :seon.agent/ctx
+                            [{:seon.agent.ctx/name :canvas
+                              :seon.render.canvas/content [:p "configured"]}]})])
+          (.then
+            (fn [results]
+              (let [explicit (aget results 0)
+                    configured (aget results 1)]
+                (is (zero? @calls))
+                (is (= ::canvas/content
+                       (get-in explicit [::canvas/wired ::canvas/source])))
+                (is (= ::canvas/configured
+                       (get-in configured [::canvas/wired ::canvas/source]))))))
+          (.catch (fn [error]
+                    (is false (str "pin acquisition threw: " (.-message error)))))
+          (.finally (fn []
+                      (set! db/execute-many original-execute-many)
+                      (done)))))))
+
+(deftest coordinate-mismatch-and-member-failure-are-data
+  (async done
+    (let [original-execute-many db/execute-many
+          responses
+          (atom
+            [{::db/coordinate coordinate
+              ::db/results
+              [{::protocol/success? true
+                :datahike.query/result
+                #{["my.canvas/view"
+                   "[:=> [:cat :map] [:map [:seon.render/hiccup [:vector :any]]]]"
+                   100 false {:seon.fn/read-attrs [:seon.agent/purpose]}]}}]}
+             {::db/coordinate other-coordinate
+              ::db/results
+              [{::protocol/success? true
+                :datahike.query/result
+                #{[:seon.agent/purpose 101]}}]}])]
+      (set! db/execute-many
+            (fn [_]
+              (let [response (first @responses)]
+                (swap! responses subvec 1)
+                (js/Promise.resolve response))))
+      (-> (@#'canvas-ctx/acquire-canvas!
+            agent-id {:seon.agent/id agent-id})
+          (.then
+            (fn [result]
+              (is (= "Canvas history acquisition failed."
+                     (:seon.error/message result)))
+              (reset! responses
+                      [{::db/coordinate coordinate
+                        ::db/results
+                        [{::protocol/success? false
+                          ::protocol/error
+                          {:seon.error/message "candidate failed"}}]}])
+              (@#'canvas-ctx/acquire-canvas!
+                agent-id {:seon.agent/id agent-id})))
+          (.then
+            (fn [result]
+              (is (= "Canvas candidate member failed."
+                     (:seon.error/message result)))))
+          (.catch (fn [error]
+                    (is false (str "error-path probe threw: " (.-message error)))))
+          (.finally (fn []
+                      (set! db/execute-many original-execute-many)
+                      (done)))))))
+
+(defn- probe-candidate-history!
+  [conn]
+  (let [subject-ids (mapv #(str "subject-" %) (range 800))]
+    (-> (d/transact! conn
+          {:tx-data
+           (into [{:db/id "agent" :seon.agent/id agent-id}
+                  {:db/id "repl"
+                   :seon.db.process/id :seon.db.process/repl}]
+                 (map (fn [subject-id]
+                        {:db/id subject-id :seon.agent/purpose "first"}))
+                 subject-ids)})
+      (.then
+        (fn [report]
+          (let [agent-eid (get (:tempids report) "agent")
+                repl-eid (get (:tempids report) "repl")
+                subject-eids (mapv #(get (:tempids report) %) subject-ids)
+                tx-meta {:seon.db/user agent-eid
+                         :seon.db/process repl-eid}]
+            (-> (d/transact! conn
+                  {:tx-data
+                   (mapv (fn [n]
+                           {:seon.fn/sym (str "my.canvas/view-" n)
+                            :seon.fn/source (str "(defn view-" n " [_] {})")
+                            :seon.fn/spec
+                            "[:=> [:cat :map] [:map [:seon.render/hiccup [:vector :any]]]]"
+                            :seon.fn/private? false
+                            :seon.fn/read-attrs [:seon.agent/purpose]})
+                         (range 256))
+                   :tx-meta tx-meta})
+                (.then
+                  (fn [source-report]
+                    (-> (d/transact! conn
+                          {:tx-data
+                           (mapv (fn [subject-eid]
+                                   [:db/add subject-eid
+                                    :seon.agent/purpose "second"])
+                                 subject-eids)
+                           :tx-meta tx-meta})
+                        (.then
+                          (fn [touch-report]
+                            {:seon.canvas-test/candidate
+                             (d/q {:query (@#'canvas-ctx/candidate-query)
+                                   :args [@conn agent-id]
+                                   :max-work 2000000
+                                   :max-results 32768
+                                   :max-result-weight 1048576})
+                             :seon.canvas-test/history
+                             (d/q {:query (@#'canvas-ctx/history-query)
+                                   :args [(d/history @conn) agent-id
+                                          [:seon.agent/purpose]]
+                                   :max-work 4000000
+                                   :max-results 65536
+                                   :max-result-weight 1048576})
+                             :seon.canvas-test/source-tx
+                             (get-in source-report [:db-after :max-tx])
+                             :seon.canvas-test/touch-tx
+                             (get-in touch-report [:db-after :max-tx])}))))))))))))
+
+(deftest datahike-candidate-and-grouped-history-semantics
+  (async done
+    (-> (fresh-conn)
+        (.then probe-candidate-history!)
+        (.then
+          (fn [{candidate :seon.canvas-test/candidate
+                history :seon.canvas-test/history
+                source-tx :seon.canvas-test/source-tx
+                touch-tx :seon.canvas-test/touch-tx}]
+            (is (= 256 (count candidate)))
+            (is (every? #(re-find #"^my\.canvas/view-" (first %)) candidate))
+            (is (= #{:seon.agent/purpose}
+                   (set (:seon.fn/read-attrs (nth (first candidate) 4)))))
+            (is (= #{[:seon.agent/purpose touch-tx]} history))
+            (is (< source-tx touch-tx))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "Datahike probe threw: " (.-message error)))
+                  (done))))))

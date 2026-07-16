@@ -13,11 +13,169 @@
   (:require
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.render-fns :as render-fns]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.db.protocol :as protocol]
     [seon.error :as err]
     [seon.render :as render]
     [seon.render.canvas :as canvas]))
+
+(def ^:private candidate-query
+  '[:find ?sym ?spec ?source-tx ?private
+    (pull ?fn [:seon.fn/read-attrs])
+    :in $ ?agent-id
+    :where
+    [?fn :seon.fn/source _ ?source-tx]
+    [?source-tx :seon.db/user ?author]
+    [?author :seon.agent/id ?agent-id]
+    [?source-tx :seon.db/process ?process]
+    [?process :seon.db.process/id :seon.db.process/repl]
+    [?fn :seon.fn/sym ?sym]
+    [?fn :seon.fn/spec ?spec]
+    [(get-else $ ?fn :seon.fn/private? false) ?private]])
+
+(def ^:private history-query
+  '[:find ?attr (max ?tx)
+    :in $ ?agent-id [?attr ...]
+    :where
+    [?entity ?attr _ ?tx]
+    [?tx :seon.db/user ?author]
+    [?author :seon.agent/id ?agent-id]
+    [?tx :seon.db/process ?process]
+    [?process :seon.db.process/id :seon.db.process/repl]])
+
+(def ^:private unwatched-attrs
+  "Render outputs and transaction plumbing do not select a canvas."
+  #{:seon.render/ai
+    :seon.render/hiccup
+    :db/txInstant
+    :seon.db/user
+    :seon.db/process
+    :seon.db.protocol/request-id})
+
+(defn- candidate-member
+  [id]
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form candidate-query
+   ::protocol/arguments [id]
+   :datahike.resource/max-work 2000000
+   :datahike.resource/max-results 32768
+   :datahike.resource/max-result-weight 1048576})
+
+(defn- history-member
+  [id attrs]
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form history-query
+   ::protocol/arguments [id (vec attrs)]
+   ::protocol/history? true
+   :datahike.resource/max-work 4000000
+   :datahike.resource/max-results 65536
+   :datahike.resource/max-result-weight 1048576})
+
+(defn- member-result
+  [member]
+  (when (true? (::protocol/success? member))
+    (or (::protocol/result member)
+        (:datahike.query/result member))))
+
+(defn- acquisition-error
+  [stage value]
+  {:seon.error/message (str "Canvas " stage " failed.")
+   :seon.error/data value
+   :seon.error/kind :core-bug})
+
+(defn- discovery-state
+  "Canvas resolution facts already carried by prompt discovery."
+  [agent]
+  (let [configured
+        (some (fn [block]
+                (when (= :canvas (:seon.agent.ctx/name block))
+                  (let [value (some->>
+                                (:seon.render.canvas/content block)
+                                (db/decode-edn-value ::canvas/content))]
+                    (when (and (some? value) (not= :none value)) value))))
+              (:seon.agent/ctx agent))]
+    (cond-> {:seon.render/entity (dissoc agent :seon.agent/ctx)}
+      (some? configured) (assoc ::canvas/configured configured))))
+
+(defn- candidate-rows
+  [rows]
+  (->> rows
+       (keep
+         (fn [[sym spec source-tx private? pulled]]
+           (when (and (not private?)
+                      (contains? (render-fns/output-twin-keys spec)
+                                 :seon.render/hiccup))
+             {::surface-sym (symbol sym)
+              ::source-tx source-tx
+              ::attrs (->> (:seon.fn/read-attrs pulled)
+                           (remove unwatched-attrs)
+                           distinct
+                           vec)})))
+       vec))
+
+(defn- selected-surface
+  [rows attr-txs]
+  (->> rows
+       (map (fn [{::keys [surface-sym source-tx attrs]}]
+              {::surface-sym surface-sym
+               ::touch (reduce max source-tx (keep attr-txs attrs))}))
+       (sort-by (juxt ::touch (comp str ::surface-sym)))
+       last
+       ::surface-sym))
+
+(defn ^:async ^:private acquire-canvas!
+  "Acquire the canvas identity from ordinary discovery data at one coordinate."
+  [id agent]
+  (let [{entity :seon.render/entity
+         :as state} (discovery-state agent)
+        base-wired (canvas/wired-content state)]
+    (cond
+      (nil? (:seon.agent/id entity))
+      {:seon.render/entity entity}
+
+      (not= ::canvas/welcome (::canvas/source base-wired))
+      {:seon.render/entity entity ::canvas/wired base-wired}
+
+      :else
+      (let [candidates-response
+            (await (db/execute-many
+                     {::db/members [(candidate-member id)]
+                      ::db/max-result-weight 1179648}))]
+        (if-not (::db/coordinate candidates-response)
+          (acquisition-error "candidate acquisition" candidates-response)
+          (let [coordinate (::db/coordinate candidates-response)
+                member (first (::db/results candidates-response))]
+            (if-not (true? (::protocol/success? member))
+              (acquisition-error "candidate member" member)
+              (let [rows (candidate-rows (member-result member))
+                    attrs (into #{} (mapcat ::attrs) rows)
+                    history-response
+                    (when (seq attrs)
+                      (await (db/execute-many
+                               {::db/coordinate coordinate
+                                ::db/members [(history-member id attrs)]
+                                ::db/max-result-weight 1179648})))
+                    attr-txs
+                    (cond
+                      (empty? attrs) {}
+                      (not= coordinate (::db/coordinate history-response)) nil
+                      :else
+                      (let [history-member-result
+                            (first (::db/results history-response))]
+                        (when (true? (::protocol/success?
+                                      history-member-result))
+                          (into {} (member-result history-member-result)))))]
+                (if (nil? attr-txs)
+                  (acquisition-error "history acquisition" history-response)
+                  (let [derived (selected-surface rows attr-txs)
+                        wired (canvas/wired-content
+                                (cond-> state
+                                  derived (assoc ::canvas/derived derived)))]
+                    {:seon.db/coordinate coordinate
+                     :seon.render/entity entity
+                     ::canvas/wired wired}))))))))))
 
 (defn- clip-marker
   "A loud, token-denominated cut marker for one canvas-context value."
@@ -25,6 +183,10 @@
   (str "\n…⟨" what " clipped at " budget " of " total
        " tokens — narrow the canvas render⟩"))
 
+;; TEMPORARY LOCAL BRANCH: current prompt callers still supply a Datahike value
+;; to [[canvas-block]]. Delete this lookup with that branch when the compiled
+;; coordinator wires [[acquire-canvas!]] and the shared ordinary-data invocation
+;; seam; do not adapt this synchronous path to remote reads.
 (defn- wired-fn-source
   "The program-graph source of the qualified fn `sym` driving the agent's
    canvas, or nil. Code-as-data: read the seeded `:seon.fn/source` row
