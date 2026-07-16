@@ -63,6 +63,8 @@ by `seon.launch`; client consumers no longer depend on the replica for launch
 configuration. Production open/close now use the one persistent authority
 session and the client no longer imports the replica; remaining local reads are
 the explicit startup/replay/resume and web/config migration inventory.
+The existing remote query surface now exposes its protocol-native historical
+view, closing the only facade gap needed by coordinate-pinned startup birth.
 Autocomplete/export and the debug feed already consume the same coordinate-
 pinned compiled child result; the obsolete synchronous AI composer is deleted.
 Stale debug completions cannot install candidate catalogs, and raw AI

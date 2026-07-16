@@ -203,6 +203,7 @@
 (schema/register! ::max-work [:int {:min 1}])
 (schema/register! ::max-results [:int {:min 1}])
 (schema/register! ::max-result-weight [:int {:min 1}])
+(schema/register! ::history? :boolean)
 
 ;; An entity ADDRESS as an agent writes one: a raw eid (int) or a
 ;; lookup-ref `[identity-attr value]`. THE shape to pass in `::ref` /
@@ -219,6 +220,7 @@
    [::max-work {:optional true} ::max-work]
    [::max-results {:optional true} ::max-results]
    [::max-result-weight {:optional true} ::max-result-weight]
+   [::history? {:optional true} ::history?]
    [::coordinate {:optional true} ::coordinate]
    [::db    {:optional true} :any]
    [::conn  {:optional true} ::conn]])
@@ -781,7 +783,8 @@
    [::args [:vector :any]]
    [::max-work ::max-work]
    [::max-results ::max-results]
-   [::max-result-weight ::max-result-weight]])
+   [::max-result-weight ::max-result-weight]
+   [::history? {:optional true} ::history?]])
 (schema/register! ::pull-read-request
   [:map {:closed true}
    [::pull-pattern [:vector :any]]
@@ -796,7 +799,6 @@
 (schema/register! ::components [:vector :any])
 (schema/register! ::index-limit [:int {:min 1 :max 200}])
 (schema/register! ::direction :seon.db.protocol/direction)
-(schema/register! ::history? :boolean)
 (schema/register! ::cursor :seon.db.protocol/cursor)
 (schema/register! ::complete? :boolean)
 (schema/register!
@@ -1435,10 +1437,12 @@
       base
       (let [wire-request
             (protocol/query-request
-             (merge base
-                    {::protocol/query-form (::query request)
-                     ::protocol/arguments (vec (or (::args request) []))}
-                    (read-resource-options request)))
+             (cond->
+               (merge base
+                      {::protocol/query-form (::query request)
+                       ::protocol/arguments (vec (or (::args request) []))}
+                      (read-resource-options request))
+               (::history? request) (assoc ::protocol/history? true)))
             response (await (send-request! wire-request 30000))]
         (cond
           (error-value? response) response
@@ -1532,10 +1536,12 @@
       base
       (let [wire-request
             (protocol/query-request
-             (merge base
-                    {::protocol/query-form (::query request)
-                     ::protocol/arguments (vec (or (::args request) []))}
-                    (read-resource-options request)))
+             (cond->
+               (merge base
+                      {::protocol/query-form (::query request)
+                       ::protocol/arguments (vec (or (::args request) []))}
+                      (read-resource-options request))
+               (::history? request) (assoc ::protocol/history? true)))
             response (await (send-request! wire-request 30000))]
         (cond
           (error-value? response) response

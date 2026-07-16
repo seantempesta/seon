@@ -1453,6 +1453,11 @@ is prohibited.
   synchronous-consumer warnings, down from 40. The exposed next blockers are
   exactly startup birth/replay/resume and web/config consumers, not transport
   compatibility.
+- The public asynchronous query request now carries Datahike's existing
+  `history?` capability through the same protocol request. Startup birth can
+  derive whether any non-root agent has ever existed without a local history
+  value, a replica, or a second query interface; focused session proof checks
+  the exact flag and coordinate on the wire.
 - **Next refill:** finish the remaining startup/web synchronous consumers,
   move launch-descriptor ownership out of the replica, switch client open
   atomically, and

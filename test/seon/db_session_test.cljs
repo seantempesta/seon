@@ -477,6 +477,15 @@
                    (is (= coordinate-0
                           (::protocol/coordinate (first @requests))))
                    (reset! requests [])
+                   (db/query {::db/query '[:find ?e :where [?e :db/ident]]
+                              ::db/history? true
+                              ::db/coordinate coordinate-0})))
+                (.then
+                 (fn [_]
+                   (is (true? (::protocol/history? (first @requests))))
+                   (is (= coordinate-0
+                          (::protocol/coordinate (first @requests))))
+                   (reset! requests [])
                    (db/with-tx-context
                      {::db/coordinate coordinate-0}
                      (fn []
