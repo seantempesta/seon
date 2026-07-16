@@ -39,6 +39,7 @@
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as db.protocol]
     [seon.derive :as derive]
     [seon.error :as error]
     [seon.schema :as schema]))
@@ -245,49 +246,76 @@
     [:seon.agent.turn/id :string]]])
 (schema/register! ::quiescence-work
   [:map
+   [:seon.db/coordinate :seon.db.coordinate/coordinate]
    [::current-runs ::current-runs]
    [::running-turns ::running-turns]])
 
-(defn quiescence-work
-  "Current run ownership and running turn brackets in one database value.
+(def ^:private current-runs-query
+  '[:find ?agent-id ?run-id
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?agent :seon.agent/run ?run]
+    [?run :seon.agent.run/id ?run-id]
+    [?run :seon.agent.run/status :open]])
+
+(def ^:private running-turns-query
+  '[:find ?run-id ?turn-id
+    :where
+    [?run :seon.agent.run/id ?run-id]
+    [?turn :seon.agent.turn/run ?run]
+    [?turn :seon.agent.turn/id ?turn-id]
+    [?turn :seon.agent.turn/status :running]])
+
+(defn- query-member
+  [query]
+  {::db.protocol/operation db.protocol/query-operation
+   ::db.protocol/query-form query
+   ::db.protocol/arguments []})
+
+(defn- member-value!
+  [label member]
+  (if (true? (::db.protocol/success? member))
+    (:datahike.query/result member)
+    (throw (ex-info (str "Quiescence " label " failed.")
+                    {:seon.db/error member
+                     :seon.error/kind :core-bug}))))
+
+(defn ^:async quiescence-work!
+  "Read current run ownership and running turn brackets at one coordinate.
 
    The current-run projection includes only open runs still pointed to by an
    agent. The running-turn projection deliberately includes every running
    turn, even when a concurrent lifecycle close has already removed its run
    pointer. Planned drain callers close pointer-owned runs without a running
    turn, then re-read this projection until both vectors are empty."
-  {:malli/schema [:=> [:catn [:database :seon.db/db]] ::quiescence-work]}
-  [database]
-  {::current-runs
-   (->> (db/query
-          {:seon.db/db database
-           :seon.db/query
-           '[:find ?agent-id ?run-id
-             :where
-             [?agent :seon.agent/id ?agent-id]
-             [?agent :seon.agent/run ?run]
-             [?run :seon.agent.run/id ?run-id]
-             [?run :seon.agent.run/status :open]]})
-        (map (fn [[agent-id run-id]]
-               {:seon.agent/id agent-id
-                :seon.agent.run/id run-id}))
-        (sort-by (juxt :seon.agent/id :seon.agent.run/id))
-        vec)
-   ::running-turns
-   (->> (db/query
-          {:seon.db/db database
-           :seon.db/query
-           '[:find ?run-id ?turn-id
-             :where
-             [?run :seon.agent.run/id ?run-id]
-             [?turn :seon.agent.turn/run ?run]
-             [?turn :seon.agent.turn/id ?turn-id]
-             [?turn :seon.agent.turn/status :running]]})
-        (map (fn [[run-id turn-id]]
-               {:seon.agent.run/id run-id
-                :seon.agent.turn/id turn-id}))
-        (sort-by (juxt :seon.agent.run/id :seon.agent.turn/id))
-        vec)})
+  {:malli/schema [:=> [:cat] ::quiescence-work]}
+  []
+  (let [acquired
+        (await
+         (db/execute-many
+          {::db/members
+           [(query-member current-runs-query)
+            (query-member running-turns-query)]}))]
+    (when (schema/valid-candidate-value? :seon.db/error acquired)
+      (throw (ex-info "Quiescence database acquisition failed."
+                      {:seon.db/error acquired
+                       :seon.error/kind :core-bug})))
+    (let [[current-runs running-turns] (::db/results acquired)]
+      {::db/coordinate (::db/coordinate acquired)
+       ::current-runs
+       (->> (member-value! "current-run acquisition" current-runs)
+            (map (fn [[agent-id run-id]]
+                   {:seon.agent/id agent-id
+                    :seon.agent.run/id run-id}))
+            (sort-by (juxt :seon.agent/id :seon.agent.run/id))
+            vec)
+       ::running-turns
+       (->> (member-value! "running-turn acquisition" running-turns)
+            (map (fn [[run-id turn-id]]
+                   {:seon.agent.run/id run-id
+                    :seon.agent.turn/id turn-id}))
+            (sort-by (juxt :seon.agent.run/id :seon.agent.turn/id))
+            vec)})))
 
 (defn turn-limit-reached?
   "Work bound: has `turn-count` reached `turn-limit`?

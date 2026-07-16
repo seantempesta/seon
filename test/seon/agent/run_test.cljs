@@ -15,6 +15,7 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as db.protocol]
     [seon.runtime.recovery :as recovery]))
 
 (def ^:private a-id "runtest-260625")   ; exactly 14 chars (:seon.db/id)
@@ -43,6 +44,36 @@
                  (set! db/*conn* conn)
                  (-> (js/Promise.resolve (body conn))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
+
+(defn- local-quiescence-work
+  "Derive quiescence rows in the isolated Datahike fixture."
+  [database]
+  {::run/current-runs
+   (->> (d/q '[:find ?agent-id ?run-id
+               :where
+               [?agent :seon.agent/id ?agent-id]
+               [?agent :seon.agent/run ?run]
+               [?run :seon.agent.run/id ?run-id]
+               [?run :seon.agent.run/status :open]]
+             database)
+        (map (fn [[agent-id run-id]]
+               {:seon.agent/id agent-id
+                :seon.agent.run/id run-id}))
+        (sort-by (juxt :seon.agent/id :seon.agent.run/id))
+        vec)
+   ::run/running-turns
+   (->> (d/q '[:find ?run-id ?turn-id
+               :where
+               [?run :seon.agent.run/id ?run-id]
+               [?turn :seon.agent.turn/run ?run]
+               [?turn :seon.agent.turn/id ?turn-id]
+               [?turn :seon.agent.turn/status :running]]
+             database)
+        (map (fn [[run-id turn-id]]
+               {:seon.agent.run/id run-id
+                :seon.agent.turn/id turn-id}))
+        (sort-by (juxt :seon.agent.run/id :seon.agent.turn/id))
+        vec)})
 
 (defn ^:async supersede!
   "Open a fresh CURRENT run for agent A, leaving the prior run OPEN but no
@@ -162,7 +193,7 @@
                       ::run/running-turns
                       [{:seon.agent.run/id run-id
                         :seon.agent.turn/id turn-id}]}
-                     (run/quiescence-work @conn)))
+                     (local-quiescence-work @conn)))
               (await
                 (d/transact!
                   conn
@@ -172,7 +203,7 @@
                       ::run/running-turns
                       [{:seon.agent.run/id run-id
                         :seon.agent.turn/id turn-id}]}
-                     (run/quiescence-work @conn))
+                     (local-quiescence-work @conn))
                   "a pointer loss does not hide the accepted turn bracket")
               (await
                 (d/transact!
@@ -181,10 +212,54 @@
                    [{:seon.agent.turn/id turn-id
                      :seon.agent.turn/status :done}]}))
               (is (= {::run/current-runs [] ::run/running-turns []}
-                     (run/quiescence-work @conn))
+                     (local-quiescence-work @conn))
                   "drain is derived from the next immutable database value"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest quiescence-work-acquires-both-projections-at-one-coordinate
+  (async done
+    (let [original-execute-many db/execute-many
+          coordinate {:seon.db.coordinate/database-id (random-uuid)
+                      :seon.db.coordinate/branch :db
+                      :seon.db.coordinate/commit-id (random-uuid)
+                      :seon.db.coordinate/t 72}
+          request (atom nil)]
+      (set! db/execute-many
+            (fn [value]
+              (reset! request value)
+              (js/Promise.resolve
+               {::db/coordinate coordinate
+                ::db/results
+                [{::db.protocol/success? true
+                  :datahike.query/result #{["agent-b" "run-b"]
+                                           ["agent-a" "run-a"]}}
+                 {::db.protocol/success? true
+                  :datahike.query/result #{["run-b" "turn-b"]}}]})))
+      (-> (run/quiescence-work!)
+          (.then
+           (fn [work]
+             (is (= 2 (count (::db/members @request))))
+             (is (every? #(= db.protocol/query-operation
+                             (::db.protocol/operation %))
+                         (::db/members @request)))
+             (is (= {::db/coordinate coordinate
+                     ::run/current-runs
+                     [{:seon.agent/id "agent-a"
+                       :seon.agent.run/id "run-a"}
+                      {:seon.agent/id "agent-b"
+                       :seon.agent.run/id "run-b"}]
+                     ::run/running-turns
+                     [{:seon.agent.run/id "run-b"
+                       :seon.agent.turn/id "turn-b"}]}
+                    work))))
+          (.catch
+           (fn [error]
+             (is false (str "quiescence acquisition threw " error))))
+          (.finally
+           (fn []
+             (set! db/execute-many original-execute-many)
+             (done)))))))
 
 (deftest renew!-bumps-both-bounds-and-fences
   (async done

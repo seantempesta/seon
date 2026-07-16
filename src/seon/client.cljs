@@ -3122,21 +3122,45 @@
   []
   (+ (.now js/Date) (config/turn-timeout-ms)))
 
-(defn- settled-turns
-  "Partition observed turn ids by their terminal durable status."
-  [database turn-ids]
-  (reduce
-   (fn [result turn-id]
-     (case (:seon.agent.turn/status
-            (db/entity {:seon.db/db database
-                        :seon.db/ref [:seon.agent.turn/id turn-id]}))
-       :done (update result ::completed-turn-ids conj turn-id)
-       :error (update result ::errored-turn-ids conj turn-id)
-       (throw
-        (ex-info "A drained turn has no terminal durable status."
-                 {:seon.agent.turn/id turn-id}))))
-   {::completed-turn-ids [] ::errored-turn-ids []}
-   (sort turn-ids)))
+(defn- ^:async settled-turns!
+  "Partition observed turn ids by terminal status at one coordinate."
+  [coordinate turn-ids]
+  (let [turn-ids (vec (sort turn-ids))
+        rows
+        (if (seq turn-ids)
+          (await
+           (db/pull-many
+            {::db/coordinate coordinate
+             ::db/pull-pattern
+             [:seon.agent.turn/id :seon.agent.turn/status]
+             ::db/refs
+             (mapv (fn [turn-id]
+                     [:seon.agent.turn/id turn-id])
+                   turn-ids)}))
+          [])]
+    (when (schema/valid-candidate-value? :seon.db/error rows)
+      (throw (ex-info "Terminal turn acquisition failed."
+                      {:seon.db/error rows
+                       :seon.error/kind :core-bug})))
+    (when-not (= (count turn-ids) (count rows))
+      (throw
+       (ex-info "Terminal turn acquisition lost input alignment."
+                {:seon.agent.turn/ids turn-ids
+                 :seon.agent.turn/values rows
+                 ::db/coordinate coordinate
+                 :seon.error/kind :core-bug})))
+    (reduce
+     (fn [result [turn-id row]]
+       (case (:seon.agent.turn/status row)
+         :done (update result ::completed-turn-ids conj turn-id)
+         :error (update result ::errored-turn-ids conj turn-id)
+         (throw
+          (ex-info "A drained turn has no terminal durable status."
+                   {:seon.agent.turn/id turn-id
+                    :seon.agent.turn/value row
+                    ::db/coordinate coordinate}))))
+     {::completed-turn-ids [] ::errored-turn-ids []}
+     (map vector turn-ids rows))))
 
 (defn ^:async ^:private close-quiescent-runs!
   "Close the supplied pointer-owned runs and retain their results."
@@ -3155,11 +3179,11 @@
 
 (defn ^:async ^:private drain-agent-work!
   "Close idle current runs and wait for every running turn bracket."
-  [conn deadline]
+  [deadline]
   (await
    (loop [quiesced-run-ids #{}
           observed-turn-ids #{}]
-     (let [work (agent-run/quiescence-work @conn)
+     (let [work (await (agent-run/quiescence-work!))
            current-runs (::agent-run/current-runs work)
            running-turns (::agent-run/running-turns work)
            running-run-ids (into #{} (map :seon.agent.run/id) running-turns)
@@ -3167,7 +3191,7 @@
                                         (:seon.agent.run/id %))
                             current-runs)
            close-results (await (close-quiescent-runs! closable))
-           refreshed (agent-run/quiescence-work @conn)
+           refreshed (await (agent-run/quiescence-work!))
            remaining-run-ids
            (into #{}
                  (map :seon.agent.run/id)
@@ -3195,8 +3219,12 @@
        (if (and (empty? (::agent-run/current-runs refreshed))
                 (empty? (::agent-run/running-turns refreshed)))
          (merge
-          {::quiesced-run-ids (vec (sort quiesced-run-ids))}
-          (settled-turns @conn observed-turn-ids))
+          {::db/coordinate (::db/coordinate refreshed)
+           ::quiesced-run-ids (vec (sort quiesced-run-ids))}
+          (await
+           (settled-turns!
+            (::db/coordinate refreshed)
+            observed-turn-ids)))
          (if (<= deadline (.now js/Date))
            (throw
             (ex-info "Planned quiesce timed out waiting for durable work."
@@ -3208,22 +3236,26 @@
 (defn- merge-quiesce-progress
   "Union retry-safe lifecycle evidence accumulated by completed inverses."
   [left right]
-  {::quiesced-run-ids
-   (vec (sort (set/union
-               (set (::quiesced-run-ids left))
-               (set (::quiesced-run-ids right)))))
-   ::completed-turn-ids
-   (vec (sort (set/union
-               (set (::completed-turn-ids left))
-               (set (::completed-turn-ids right)))))
-   ::errored-turn-ids
-   (vec (sort (set/union
-               (set (::errored-turn-ids left))
-               (set (::errored-turn-ids right)))))
-   ::agent-runtime/unhosted-ids
-   (vec (sort (set/union
-               (set (::agent-runtime/unhosted-ids left))
-               (set (::agent-runtime/unhosted-ids right)))))})
+  (cond->
+   {::quiesced-run-ids
+    (vec (sort (set/union
+                (set (::quiesced-run-ids left))
+                (set (::quiesced-run-ids right)))))
+    ::completed-turn-ids
+    (vec (sort (set/union
+                (set (::completed-turn-ids left))
+                (set (::completed-turn-ids right)))))
+    ::errored-turn-ids
+    (vec (sort (set/union
+                (set (::errored-turn-ids left))
+                (set (::errored-turn-ids right)))))
+    ::agent-runtime/unhosted-ids
+    (vec (sort (set/union
+                (set (::agent-runtime/unhosted-ids left))
+                (set (::agent-runtime/unhosted-ids right)))))}
+    (or (::db/coordinate right) (::db/coordinate left))
+    (assoc ::db/coordinate
+           (or (::db/coordinate right) (::db/coordinate left)))))
 
 (defn- process-generation []
   (some-> js/process .-env (aget "SEON_PROCESS_GENERATION")))
@@ -3237,9 +3269,10 @@
         _ (swap! !state update ::quiesce-progress
                  merge-quiesce-progress
                  {::agent-runtime/unhosted-ids wake-ids})
-        {::keys [quiesced-run-ids completed-turn-ids errored-turn-ids]}
+        {::keys [quiesced-run-ids completed-turn-ids errored-turn-ids]
+         coordinate ::db/coordinate}
         (if (true? (::autonomous? capability))
-          (await (drain-agent-work! conn (quiescence-deadline)))
+          (await (drain-agent-work! (quiescence-deadline)))
           {::quiesced-run-ids []
            ::completed-turn-ids []
            ::errored-turn-ids []})
@@ -3250,18 +3283,32 @@
                   ::errored-turn-ids errored-turn-ids})
         {host-ids ::agent-runtime/unhosted-ids}
         (agent-runtime/unhost-all!)
-        state (swap! !state update ::quiesce-progress
-                     merge-quiesce-progress
-                     {::agent-runtime/unhosted-ids host-ids})
-        progress (::quiesce-progress state)
+        _ (swap! !state update ::quiesce-progress
+                 merge-quiesce-progress
+                 {::agent-runtime/unhosted-ids host-ids})
         _ (await (detach-runtime-advertisement!))]
     (replica/detach!)
-    ;; Resolve the final immutable point while the active schema projection is
-    ;; still installed. `admission/detach!` intentionally activates the empty
-    ;; projection; a later coordinate validation would then resolve its
-    ;; symbolic schema against that empty registry and fail the otherwise
-    ;; complete quiesce with `:malli.core/invalid-schema`.
-    (let [coordinate (when capture-coordinate? (db/head-coordinate @conn))]
+    ;; The final empty-work acquisition already resolved the exact immutable
+    ;; point while the active schema projection was installed. Carry it into
+    ;; planned-quiesce evidence rather than resolving head a second time.
+    (let [coordinate
+          (when capture-coordinate?
+            (or coordinate
+                (::db/coordinate (::quiesce-progress @!state))
+                (let [resolved (await (db/head-coordinate))]
+                  (when (schema/valid-candidate-value?
+                         :seon.db/error resolved)
+                    (throw
+                     (ex-info "Final database coordinate acquisition failed."
+                              {:seon.db/error resolved
+                               :seon.error/kind :core-bug})))
+                  resolved)))
+          state (if coordinate
+                  (swap! !state assoc-in
+                         [::quiesce-progress ::db/coordinate]
+                         coordinate)
+                  @!state)
+          progress (dissoc (::quiesce-progress state) ::db/coordinate)]
       (let [detached (admission/detach!)]
         (when (false? (::admission/detached? detached))
           (throw (ex-info "Runtime projection detach failed." detached))))

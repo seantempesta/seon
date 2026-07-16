@@ -1444,13 +1444,12 @@
                       :seon.db.coordinate/t 42}
           original-ticker agent-loop/uninstall-ticker!
           original-wakes agent-loop/uninstall-all-wake-triggers!
-          original-work agent-run/quiescence-work
+          original-work agent-run/quiescence-work!
           original-close agent-run/close-run!
           original-unhost agent-runtime/unhost-all!
           original-replica replica/detach!
           original-admission admission/detach!
-          original-entity db/entity
-          original-head db/head-coordinate
+          original-pull-many db/pull-many
           original-release db/release-connection!]
       (aset (.-env js/process) "SEON_PROCESS_GENERATION" process-generation)
       (set! db/*conn* connection)
@@ -1466,27 +1465,31 @@
             (fn []
               (swap! effects conj :wakes)
               {::agent-loop/uninstalled-ids ["root"]}))
-      (set! agent-run/quiescence-work
-            (fn [_]
+      (set! agent-run/quiescence-work!
+            (fn []
               (let [call (swap! work-call inc)]
                 (swap! effects conj [:work call])
-                (case call
-                  (1 2)
-                  {::agent-run/current-runs
-                   [{:seon.agent/id "root"
-                     :seon.agent.run/id "run-1"}]
-                   ::agent-run/running-turns
-                   [{:seon.agent.run/id "run-1"
-                     :seon.agent.turn/id "turn-1"}]}
+                (promise-value
+                 (case call
+                   (1 2)
+                   {::db/coordinate coordinate
+                    ::agent-run/current-runs
+                    [{:seon.agent/id "root"
+                      :seon.agent.run/id "run-1"}]
+                    ::agent-run/running-turns
+                    [{:seon.agent.run/id "run-1"
+                      :seon.agent.turn/id "turn-1"}]}
 
-                  3
-                  {::agent-run/current-runs
-                   [{:seon.agent/id "root"
-                     :seon.agent.run/id "run-1"}]
-                   ::agent-run/running-turns []}
+                   3
+                   {::db/coordinate coordinate
+                    ::agent-run/current-runs
+                    [{:seon.agent/id "root"
+                      :seon.agent.run/id "run-1"}]
+                    ::agent-run/running-turns []}
 
-                  {::agent-run/current-runs []
-                   ::agent-run/running-turns []}))))
+                   {::db/coordinate coordinate
+                    ::agent-run/current-runs []
+                    ::agent-run/running-turns []})))))
       (set! agent-run/close-run!
             (fn [request]
               (swap! effects conj [:close request])
@@ -1500,21 +1503,15 @@
             (fn []
               (swap! effects conj :projection)
               {::admission/detached? true}))
-      (set! db/entity
-            (fn
-              ([{:seon.db/keys [ref]}]
-               (is (= [:seon.agent.turn/id "turn-1"] ref))
-               {:seon.agent.turn/status :done})
-              ([_database ref]
-               (is (= [:seon.agent.turn/id "turn-1"] ref))
-               {:seon.agent.turn/status :done})))
-      (set! db/head-coordinate
-            (fn
-              ([] coordinate)
-              ([database]
-               (is (identical? @connection database))
-               (swap! effects conj :coordinate)
-               coordinate)))
+      (set! db/pull-many
+            (fn [request]
+              (is (= coordinate (::db/coordinate request)))
+              (is (= [[:seon.agent.turn/id "turn-1"]]
+                     (::db/refs request)))
+              (swap! effects conj :terminal-turns)
+              (promise-value
+               [{:seon.agent.turn/id "turn-1"
+                 :seon.agent.turn/status :done}])))
       (set! db/release-connection!
             (fn [{::db/keys [conn]}]
               (is (identical? connection conn))
@@ -1548,9 +1545,9 @@
                (is (= :seon.client.runtime/quiesced
                       ((deref #'client/runtime-phase))))
                (let [positions (zipmap @effects (range))]
-                 (is (< (get positions :coordinate)
+                 (is (< (get positions :terminal-turns)
                         (get positions :projection))
-                     "the final coordinate validates before schema projection detach"))
+                     "terminal turns resolve before schema projection detach"))
                (is (nil? db/*conn*))
                (is (not (contains? @client/!state
                                    ::client/launch-capability)))
@@ -1567,13 +1564,12 @@
              (fn []
                (set! agent-loop/uninstall-ticker! original-ticker)
                (set! agent-loop/uninstall-all-wake-triggers! original-wakes)
-               (set! agent-run/quiescence-work original-work)
+               (set! agent-run/quiescence-work! original-work)
                (set! agent-run/close-run! original-close)
                (set! agent-runtime/unhost-all! original-unhost)
                (set! replica/detach! original-replica)
                (set! admission/detach! original-admission)
-               (set! db/entity original-entity)
-               (set! db/head-coordinate original-head)
+               (set! db/pull-many original-pull-many)
                (set! db/release-connection! original-release)
                (if previous-generation
                  (aset (.-env js/process) "SEON_PROCESS_GENERATION"
@@ -1592,6 +1588,7 @@
           connection (atom {})
           release-calls (atom 0)
           wake-calls (atom 0)
+          head-calls (atom 0)
           coordinate {:seon.db.coordinate/database-id (random-uuid)
                       :seon.db.coordinate/branch :db
                       :seon.db.coordinate/commit-id (random-uuid)
@@ -1621,9 +1618,9 @@
       (set! admission/detach!
             (fn [] {::admission/detached? true}))
       (set! db/head-coordinate
-            (fn
-              ([] coordinate)
-              ([_database] coordinate)))
+            (fn []
+              (swap! head-calls inc)
+              (promise-value coordinate)))
       (set! db/release-connection!
             (fn [_]
               (if (= 1 (swap! release-calls inc))
@@ -1642,6 +1639,9 @@
           (.then
            (fn [retried]
              (is (true? (::client/quiesced? retried)))
+             (is (= coordinate (::db/coordinate retried)))
+             (is (= 1 @head-calls)
+                 "retry reuses the coordinate retained before projection detach")
              (is (= 2 @release-calls))
              (is (= ["root"] (::agent-runtime/unhosted-ids retried))
                  "retry preserves the first attempt's completed inverse data")
@@ -1663,6 +1663,42 @@
              (reset! (deref #'admission/!state) previous-admission)
              (done)))))))
 
+(deftest terminal-turn-classification-skips-empty-and-rejects-missing-turns
+  (async done
+    (let [original-pull-many db/pull-many
+          calls (atom [])
+          coordinate {:seon.db.coordinate/database-id (random-uuid)
+                      :seon.db.coordinate/branch :db
+                      :seon.db.coordinate/commit-id (random-uuid)
+                      :seon.db.coordinate/t 63}]
+      (set! db/pull-many
+            (fn [request]
+              (swap! calls conj request)
+              (promise-value [nil])))
+      (-> ((deref #'client/settled-turns!) coordinate #{})
+          (.then
+           (fn [empty-result]
+             (is (= {::client/completed-turn-ids []
+                     ::client/errored-turn-ids []}
+                    empty-result))
+             (is (empty? @calls))
+             ((deref #'client/settled-turns!)
+              coordinate #{"missing-turn"})))
+          (.then
+           (fn [_]
+             (is false "a missing terminal turn unexpectedly settled")))
+          (.catch
+           (fn [error]
+             (is (= "missing-turn"
+                    (:seon.agent.turn/id (ex-data error))))
+             (is (= coordinate (::db/coordinate (ex-data error))))
+             (is (= [[:seon.agent.turn/id "missing-turn"]]
+                    (::db/refs (first @calls))))))
+          (.finally
+           (fn []
+             (set! db/pull-many original-pull-many)
+             (done)))))))
+
 (deftest planned-quiesce-deadline-fails-closed-with-retained-authority
   (async done
     (let [previous-state @client/!state
@@ -1672,7 +1708,7 @@
           original-timeout config/turn-timeout-ms
           original-ticker agent-loop/uninstall-ticker!
           original-wakes agent-loop/uninstall-all-wake-triggers!
-          original-work agent-run/quiescence-work]
+          original-work agent-run/quiescence-work!]
       (set! db/*conn* connection)
       (reset! client/!state
               (assoc previous-state
@@ -1684,13 +1720,20 @@
       (set! agent-loop/uninstall-ticker! (constantly nil))
       (set! agent-loop/uninstall-all-wake-triggers!
             (fn [] {::agent-loop/uninstalled-ids ["root"]}))
-      (set! agent-run/quiescence-work
-            (fn [_]
-              {::agent-run/current-runs
-               [{:seon.agent/id "root" :seon.agent.run/id "run-blocked"}]
-               ::agent-run/running-turns
-               [{:seon.agent.run/id "run-blocked"
-                 :seon.agent.turn/id "turn-blocked"}]}))
+      (set! agent-run/quiescence-work!
+            (fn []
+              (promise-value
+               {::db/coordinate
+                {:seon.db.coordinate/database-id (random-uuid)
+                 :seon.db.coordinate/branch :db
+                 :seon.db.coordinate/commit-id (random-uuid)
+                 :seon.db.coordinate/t 91}
+                ::agent-run/current-runs
+                [{:seon.agent/id "root"
+                  :seon.agent.run/id "run-blocked"}]
+                ::agent-run/running-turns
+                [{:seon.agent.run/id "run-blocked"
+                  :seon.agent.turn/id "turn-blocked"}]})))
       (-> (client/quiesce-runtime!)
           (.then
            (fn [result]
@@ -1711,7 +1754,7 @@
              (set! config/turn-timeout-ms original-timeout)
              (set! agent-loop/uninstall-ticker! original-ticker)
              (set! agent-loop/uninstall-all-wake-triggers! original-wakes)
-             (set! agent-run/quiescence-work original-work)
+             (set! agent-run/quiescence-work! original-work)
              (set! db/*conn* previous-connection)
              (reset! client/!state previous-state)
              (reset! (deref #'admission/!state) previous-admission)

@@ -18,6 +18,7 @@
   (:require
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing async use-fixtures]]
+    [datahike.api :as d]
     [my.blob :as blob]
     [seon.agent :as agent]
     [seon.agent.home :as home]
@@ -46,6 +47,23 @@
 (defonce ^:private !saved-blob-storage-view (atom nil))
 
 (def ^:private agent-id "AGTlooprun0001")          ; 14 chars (:seon.db/id)
+
+(defn- running-turn-ids
+  []
+  (d/q '[:find [?turn-id ...]
+         :where
+         [?turn :seon.agent.turn/id ?turn-id]
+         [?turn :seon.agent.turn/status :running]]
+       @db/*conn*))
+
+(defn- current-run-ids
+  []
+  (d/q '[:find [?run-id ...]
+         :where
+         [?agent :seon.agent/run ?run]
+         [?run :seon.agent.run/id ?run-id]
+         [?run :seon.agent.run/status :open]]
+       @db/*conn*))
 
 (use-fixtures :once
   {:before (fn []
@@ -325,8 +343,7 @@
                   running?
                   (await
                     (wait-until
-                      #(seq (::run/running-turns
-                               (run/quiescence-work @db/*conn*)))
+                      #(seq (running-turn-ids))
                       5000 10))]
               (is (true? running?) "the turn bracket commits before the body blocks")
               (is (true? (admission/begin-quiesce!)))
@@ -334,8 +351,7 @@
                      (:seon.agent.run/status
                        (run/snapshot {:seon.agent.run/id run-id})))
                   "quiesce never closes a body that is still running")
-              (is (= 1 (count (::run/running-turns
-                                (run/quiescence-work @db/*conn*)))))
+              (is (= 1 (count (running-turn-ids))))
               (@!release {:text "(+ 1 1)"})
               (is (= :idle (await loop-result)))
               (let [snapshot (run/snapshot {:seon.agent.run/id run-id})
@@ -353,8 +369,8 @@
                     "the real turn close commits before the run close")
                 (is (= :quiesced (:seon.agent.run/closed-reason snapshot)))
                 (is (nil? (run/current-run {:seon.agent/id agent-id})))
-                (is (= {::run/current-runs [] ::run/running-turns []}
-                       (run/quiescence-work @db/*conn*)))
+                (is (empty? (current-run-ids)))
+                (is (empty? (running-turn-ids)))
                 (is (empty?
                       (db/query
                         {:seon.db/query
