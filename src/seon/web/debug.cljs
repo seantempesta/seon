@@ -16,21 +16,23 @@
    (`seon.web.datastar`), which own `/`, `/agents`, `/agent/<id>`. The routes
    are wired into `seon.web.router`'s static supplement as plain reitit routes.
 
-   Both panes derive from `agent-debug/ctx-preview`, whose rendered context blocks
-   come from the same frozen DB projection as the prompt. The left pane shows
-   exact AI text; the right pane shows only blocks declaring an HTML twin.
+   Both panes derive from the one coordinate-pinned compiled child result.
+   The left pane shows exact AI text; the right pane shows only blocks
+   declaring an HTML twin.
 
    Debug is dormant until its route is opened. It uses the same view-unit
    catalog, gzip feed registry, tx listener, backpressure, and morph framing as
    every normal page. Raw AI bodies and HTML twins are inactive stubs until the
   operator expands them."
   (:require
+    [clojure.set :as set]
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.usage :as ctx-usage]
     [seon.db :as db]
     [seon.db.browser :as db-browser]
+    [seon.db.coordinate :as coordinate]
     [seon.derive :as derive]
     [seon.agent.debug :as agent-debug]
     [seon.log :as log]
@@ -158,12 +160,10 @@
 
    HTML twins and the canvas are deliberately absent: each is an independent
    view-unit producer and is invoked only while its `<details>` is open."
-  [dbv agent-id]
+  [dbv agent-id preview]
   (let [{:seon.render/keys [text token-estimate]
          rendered-blocks :seon.agent.ctx/rendered-blocks}
-        (agent-debug/ctx-preview {:seon.agent/id agent-id
-                                  :seon.db/db dbv
-                                  :seon.render/formats #{:ai}})
+        preview
         ;; Display-only: the single 49k-token :namespaces blob dwarfs every
         ;; other block into an unreadable sliver — split it into one entry
         ;; per ns so the breakdown (both panes + the bottom bar) shows the
@@ -176,6 +176,7 @@
         state (derive/derive-state dbv agent-id)
         turn-count (derive/agent-turn-count dbv agent-id)]
     {:ai-text   (or text "")
+     :prompt-error (:seon.error/message preview)
      :agent-state state
      :agent-turn-count turn-count
      :block-texts (or block-texts [])
@@ -265,9 +266,8 @@
 
 (defn- raw-block-body
   "Current exact AI body for one stable snapshot block coordinate."
-  [dbv agent-id block-index block-name]
-  (let [snap (snapshot dbv agent-id)
-        blocks (:block-texts snap)
+  [snap block-index block-name]
+  (let [blocks (:block-texts snap)
         indexed (when (<= 0 block-index) (nth blocks block-index nil))
         block (cond
                 (= -1 block-index)
@@ -292,10 +292,9 @@
           :seon.agent.ctx/name :exact-prompt}
          ::datastar/label "exact prompt"
          ::datastar/order 0
-         ::datastar/view-unit? true
          ::datastar/renderer-token "debug-ai-v2:exact"
          ::datastar/producer
-         #(raw-block-body % agent-id -1 :exact-prompt)}
+         #(raw-block-body snap -1 :exact-prompt)}
         raw-defs
         (map-indexed
           (fn [index {block-name :seon.agent.ctx/name}]
@@ -306,10 +305,9 @@
               :seon.agent.ctx/name block-name}
              ::datastar/label (name block-name)
              ::datastar/order (inc index)
-             ::datastar/view-unit? true
              ::datastar/renderer-token (str "debug-ai-v2:" index ":" block-name)
              ::datastar/producer
-             #(raw-block-body % agent-id index block-name)})
+             #(raw-block-body snap index block-name)})
           (:block-texts snap))
         html-defs
         (->> surface-catalog
@@ -337,8 +335,8 @@
 
 (defn- debug-projection
   "One exact AI snapshot plus the non-rendering HTML surface catalog."
-  [dbv agent-id]
-  (let [snap (snapshot dbv agent-id)
+  [dbv agent-id preview]
+  (let [snap (snapshot dbv agent-id preview)
         surfaces (surface/surface-catalog dbv agent-id)
         catalog (datastar/unit-catalog
                   (debug-definitions agent-id snap surfaces))]
@@ -365,7 +363,8 @@
       (datastar/unit-element-html-in-view view-id descriptor active?))]))
 
 (defn- ai-pane-fragment
-  [agent-id view-id {:keys [ai-text block-texts]} catalog active-tokens]
+  [agent-id view-id {:keys [ai-text block-texts prompt-error]}
+   catalog active-tokens]
   (let [descriptors (descriptors-for catalog :ai)
         displayed-blocks
         (into [{:seon.agent.ctx/name :exact-prompt
@@ -374,8 +373,13 @@
   [:div {:id (ai-pane-id agent-id)
          :class "flex flex-col h-full overflow-hidden border-r border-base-800"}
    [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
-    ":seon.render/ai  (exact prompt and source-block breakdown)"]
+   ":seon.render/ai  (exact prompt and source-block breakdown)"]
    (cond
+     prompt-error
+     [:div {:id "debug-prompt-error"
+            :class "flex-1 overflow-auto p-3 text-xs font-mono text-error"}
+      (str "prompt unavailable: " prompt-error)]
+
      (str/blank? ai-text)
      [:pre {:class (str "flex-1 overflow-auto p-3 text-xs font-mono "
                         "whitespace-pre-wrap text-text-100 bg-base-950")}
@@ -944,37 +948,56 @@
 
 (defn- debug-feed-definition
   [agent-id view-id]
-  (let [initial-db @db/*conn*
-        initial (debug-projection initial-db agent-id)
-        initial-catalog (:seon.web.debug/catalog initial)
-        render-debug
-        (fn [dbv]
-          (let [projection (debug-projection dbv agent-id)
-                catalog (:seon.web.debug/catalog projection)
-                active (datastar/reconcile-view-catalog!
-                         {::datastar/view-id view-id
-                          ::datastar/catalog catalog})]
-            (debug-app-view dbv agent-id view-id
-                            (:seon.web.debug/snapshot projection)
-                            catalog active)))]
+  (let [render-debug
+        (fn ^:async render-debug! [dbv]
+          (let [point (coordinate/resolved dbv)
+                preview
+                (await
+                  (agent-debug/ctx-preview
+                    {:seon.agent/id agent-id
+                     :seon.db.coordinate/coordinate point}))]
+            (if (:seon.error/message preview)
+              {::datastar/element
+               [:main {:id "app-view"}
+                [:div {:id "app-error"
+                       :class "text-error text-xs font-mono"}
+                 (str "prompt unavailable: "
+                      (:seon.error/message preview))]]}
+              (let [captured
+                    (db/capture-reads
+                      {:seon.db/db dbv
+                       :seon.db/thunk
+                       (fn []
+                         (let [projection (debug-projection dbv agent-id preview)
+                               catalog (:seon.web.debug/catalog projection)
+                               available (into #{} (map ::datastar/token) catalog)
+                               active (set/intersection
+                                        (datastar/view-active-tokens view-id)
+                                        available)]
+                           {::datastar/element
+                            (debug-app-view
+                              dbv agent-id view-id
+                              (:seon.web.debug/snapshot projection)
+                              catalog active)
+                            ::datastar/catalog catalog}))})
+                    rendered (:seon.db/result captured)]
+                (assoc rendered
+                       ::datastar/dependencies
+                       (:seon.db/read-observations captured)
+                       ::datastar/view-id view-id)))))]
     {:seon.web.feed/key [:seon.web.feed/debug agent-id view-id]
      :seon.web.feed/live? true
      ::datastar/view-id view-id
-     ::datastar/catalog initial-catalog
      ::datastar/active-tokens #{}
      ::datastar/render-full-with-db? true
-     :seon.web.feed/render-full
-     (fn [dbv]
-       (datastar/render-observed
-        {:seon.db/db dbv
-         ::datastar/render-thunk #(render-debug dbv)}))
+     :seon.web.feed/render-full render-debug
      :seon.web.feed/render-change
-     (fn [{observations ::datastar/dependencies}
-         {dbv :seon.db/db}]
-       (datastar/transition-observed
-        {:seon.db/db dbv
-         ::datastar/dependencies observations
-         ::datastar/render-thunk #(render-debug dbv)}))}))
+     (fn [_ {dbv :seon.db/db}]
+       (-> (render-debug dbv)
+           (.then (fn [rendered]
+                    (assoc rendered
+                           ::datastar/elements
+                           [(::datastar/element rendered)])))))}))
 
 (defn- render-data-browser
   "Render `/data` and capture reads against the exact same database value."

@@ -343,7 +343,13 @@
     (cond-> {::event (-> element html/->string patch-elements)
              ::target-count 1}
       (and observed? (contains? rendered ::dependencies))
-      (assoc ::dependencies (::dependencies rendered)))))
+      (assoc ::dependencies (::dependencies rendered))
+
+      (and observed? (contains? rendered ::catalog))
+      (assoc ::catalog (::catalog rendered))
+
+      (and observed? (contains? rendered ::view-id))
+      (assoc ::view-id (::view-id rendered)))))
 
 (defn- promise-like? [value]
   (and (some? value)
@@ -450,7 +456,7 @@
     (clear-heartbeat-interval! timer)
     (reset! !heartbeat-timer nil)))
 
-(declare merge-change start-render!)
+(declare merge-change start-render! reconcile-view-catalog!)
 
 (defn- transition-patch [transition serialized-elements-by-token]
   (when-not (map? transition)
@@ -463,7 +469,13 @@
     (cond-> {::event event
              ::target-count (+ (count elements) (count serialized))}
       (contains? transition ::dependencies)
-      (assoc ::dependencies (::dependencies transition)))))
+      (assoc ::dependencies (::dependencies transition))
+
+      (contains? transition ::catalog)
+      (assoc ::catalog (::catalog transition))
+
+      (contains? transition ::view-id)
+      (assoc ::view-id (::view-id transition)))))
 
 (defn- render-request-result [subscription request]
   (try
@@ -548,10 +560,16 @@
                    (or (::render-full? active-before)
                        (not= (::last-event before-subscription)
                              (::last-event after-subscription))))
+        consumer-view-ids (::consumer-view-ids after-subscription)
+        _ (when (and completed?
+                     (contains? rendered ::catalog)
+                     (::view-id rendered))
+            (reconcile-view-catalog!
+              {::view-id (::view-id rendered)
+               ::catalog (::catalog rendered)}))
         connections
         (when emit?
-          (keep #(get-in after [::views %])
-                (::consumer-view-ids after-subscription)))]
+          (keep #(get-in @!feeds [::views %]) consumer-view-ids))]
     (doseq [conn connections]
       (push-event! conn event))
     (when (and emit? (not (::render-full? active-before)))

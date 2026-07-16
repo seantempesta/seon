@@ -1,71 +1,65 @@
 (ns seon.agent.debug-test
-  "Point-in-time database contract for agent context preview."
+  "Point-in-time compiled-child contract for agent context preview."
   (:require
     [cljs.test :refer [async deftest is]]
     [clojure.string :as str]
     [seon.agent.debug :as debug]
-    [seon.client :as client]
-    [seon.config :as config]
-    [seon.db :as db]
-    [seon.db.id :as db.id]))
+    [seon.agent.turn :as turn]
+    [seon.db.coordinate :as coordinate]))
+
+(def point
+  {::coordinate/database-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+   ::coordinate/branch :db
+   ::coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+   ::coordinate/t 42})
 
 (deftest preview-keeps-system-and-context-on-one-database-point
   (async done
-    (let [original db/*conn*]
-      (-> (client/open-agent-conn!)
+    (let [original turn/render-prompt
+          calls (atom [])]
+      (set! turn/render-prompt
+            (fn [agent-id coordinate]
+              (swap! calls conj [agent-id coordinate])
+              (js/Promise.resolve
+                {:seon.render/text "context bytes"
+                 :seon.ai/system-prompt "frozen system"
+                 :seon.agent.ctx/rendered-blocks
+                 [{:seon.agent.ctx/name :context
+                   :seon.agent.ctx/priority 10
+                   :seon.render/text "context bytes"}]})))
+      (-> (debug/ctx-preview
+            {:seon.agent/id "agent-1"
+             :seon.db.coordinate/coordinate point})
           (.then
-            (fn [conn]
-              (set! db/*conn* conn)
-              (-> (db.id/allocate!
-                    {::db.id/allocations
-                     [{::db.id/key ::agent
-                       ::db.id/identity-attr :seon.agent/id}]
-                     ::db.id/transaction-builder
-                     (fn [ids]
-                       {:seon.db/tx-data
-                        [{:seon.agent/id (::agent ids)}
-                         {:seon.config/id config/cluster-config-id
-                          :seon.config/system-text "frozen system"}]})
-                     :seon.db/conn conn})
-                  (.then
-                    (fn [allocation]
-                      (let [agent-id (get-in allocation [::db.id/ids ::agent])
-                            frozen @conn
-                            config-eid
-                            (db/query
-                              {:seon.db/db frozen
-                               :seon.db/query
-                               '[:find ?config .
-                                 :in $ ?config-id
-                                 :where
-                                 [?config :seon.config/id ?config-id]]
-                               :seon.db/args [config/cluster-config-id]})]
-                        (-> (db/transact!
-                              {:seon.db/conn conn
-                               :seon.db/tx-data
-                               [{:db/id config-eid
-                                 :seon.config/system-text "live system"}]})
-                            (.then
-                              (fn [_]
-                                (let [preview
-                                      (debug/ctx-preview
-                                        {:seon.db/db frozen
-                                         :seon.agent/id agent-id
-                                         :seon.render/formats #{:ai}})
-                                      system-block
-                                      (first
-                                        (:seon.agent.ctx/rendered-blocks
-                                          preview))]
-                                  (is (= "frozen system"
-                                         (:seon.render/text system-block)))
-                                  (is (str/starts-with?
-                                        (:seon.render/text preview)
-                                        "frozen system")
-                                      "the full prompt uses the same point")
-                                  (is (not (str/starts-with?
-                                            (:seon.render/text preview)
-                                            "live system"))
-                                      "the newer ambient value cannot leak")))))))))))
-          (.then (fn [_] (done)))
-          (.catch (fn [error] (is false (str error)) (done)))
-          (.finally (fn [] (set! db/*conn* original)))))))
+            (fn [preview]
+              (let [system-block
+                    (first (:seon.agent.ctx/rendered-blocks preview))]
+                (is (= [["agent-1" point]] @calls))
+                (is (= "frozen system" (:seon.render/text system-block)))
+                (is (str/starts-with? (:seon.render/text preview)
+                                      "frozen system"))
+                (is (str/ends-with? (:seon.render/text preview)
+                                    "context bytes")))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+            (fn []
+              (set! turn/render-prompt original)
+              (done)))))))
+
+(deftest preview-preserves-the-compiled-child-error
+  (async done
+    (let [original turn/render-prompt
+          child-error {:seon.error/message "authority unavailable"
+                       :seon.error/kind :core-bug
+                       :seon.error/data {:seon.db/results []}}]
+      (set! turn/render-prompt
+            (fn [_ _] (js/Promise.resolve child-error)))
+      (-> (debug/ctx-preview
+            {:seon.agent/id "agent-1"
+             :seon.db.coordinate/coordinate point})
+          (.then (fn [result] (is (= child-error result))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+            (fn []
+              (set! turn/render-prompt original)
+              (done)))))))

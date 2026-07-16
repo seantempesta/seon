@@ -24,9 +24,9 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
   `install!`/`remove!`, period. No render-merge, no default set, no provider.
   Each `ctx/*` file is one installed block family (namespaces, transcript,
   warnings, canvas, menu, subagents, typeahead-steps).
-- **`debug.cljs`** — `ctx-preview` renders the agent's context through the
-  SAME `render-context` path (byte-identical to the real prompt). Extend
-  inspection here (`turn`, `turn-diff`), never as a second render path.
+- **`debug.cljs`** — `ctx-preview` formats the same coordinate-pinned compiled
+  child result the turn consumes (byte-identical system + context bytes).
+  Extend inspection here (`turn`, `turn-diff`), never as a second render path.
 - **`fs.cljs`** — THE capability-fn template: allowlist gating via
   `configure!`/grants, errors-as-values result envelope, honest paging.
   Every new tool (shell, python, web, blob) copies this shape exactly —

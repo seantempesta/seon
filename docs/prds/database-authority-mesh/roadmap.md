@@ -1405,9 +1405,16 @@ is prohibited.
   `bench-client` at 46 while both artifacts compile. Focused runtime, turn, and
   provider bridge regressions compile in the test artifact; their runtime proof
   remains behind the same legacy replica import until the atomic client cut.
-- **Next refill:** make the existing Datastar debug transition owner honestly
-  asynchronous and consume the same child result, then remove the synchronous
-  debug and autocomplete composition paths. In parallel, finish restore/readiness,
+- The debug feed now awaits that same compiled child result once at the event's
+  immutable coordinate. Raw AI disclosures close over its ordinary bytes and
+  make no second child call; HTML twins remain managed database units. Candidate
+  catalogs flow through the normalized async render result and install only
+  after its subscription/render-id fence accepts the completion. The complete
+  execution and bench-client artifacts compile at the unchanged 18/46 warning
+  inventories; the focused test artifact compiles before the known replica
+  import stops namespace startup.
+- **Next refill:** move autocomplete/export to the same coordinate-pinned child
+  result, then delete the synchronous AI composition path. In parallel, finish restore/readiness,
   quiescence, and session close. Only then switch client open atomically and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
   synchronous database-value arities, and compatibility reachability.

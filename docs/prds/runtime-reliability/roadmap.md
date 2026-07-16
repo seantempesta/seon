@@ -49,9 +49,11 @@ order: exact Datahike identity and capability ownership; fair multi-database
 execution; protocol and persistent native sessions; asynchronous `seon.db`;
 isolated Bun children; atomic replica/feed removal; then density, packaging, and
 the measured one-versus-2/4-authority-shard decision. Its current earliest
-unsettled contract is letting the debug feed consume the same async child
-result through the now-bounded normalized Datastar subscription without a
-prompt-specific cache. The remaining
+unsettled contract is moving autocomplete/export to the same coordinate-pinned
+compiled child result so the synchronous AI composition path can be deleted.
+The debug feed already consumes that result once through the bounded normalized
+Datastar subscription; stale completions cannot install candidate catalogs and
+raw AI disclosures make no second child call. The remaining
 optional prompt owners are closed at `2dc9b44a`, `0602b8a0`, and `93d8e0b0`.
 The real turn caller is closed at `43645eaa`; derived auto-run rendering is
 closed at `e5556524`. The same child result now carries the coordinate-pinned

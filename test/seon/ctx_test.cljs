@@ -21,9 +21,7 @@
     [clojure.test.check.properties :as prop :include-macros true]
     [datahike.api :as d]
     [seon.agent :as agent]
-    [seon.agent.debug :as agent-debug]
     [seon.agent.run :as run]
-    [seon.agent.turn :as turn]
     [seon.ai :as llm]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
@@ -87,15 +85,6 @@
                  (set! db/*conn* conn)
                  (-> (js/Promise.resolve (body conn))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
-
-(defonce ^:private !debug-ai-render-count (atom 0))
-
-(defn counted-debug-ai
-  "Test renderer used to prove debug prompt assembly does not rerun AI blocks."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [_]
-  (swap! !debug-ai-render-count inc)
-  "test-rendered-ai-block")
 
 (defn- allocate-turn!
   "Allocate and commit one turn fixture."
@@ -721,105 +710,6 @@
                       (is (= (:seon.render/stable-text r1)
                              (:seon.render/stable-text r2))
                           "cacheable prefix is byte-identical across assemblies")))))))
-        (.then (fn [] (done)))
-        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
-
-;; ------------------------------------------------------------
-;; THE single render path — prompt == view, byte-identical by
-;; construction. The model's prompt (the loop's `render-prompt`) and the
-;; human debug view's context pane (`ctx-preview`) both route through the
-;; ONE producer `seon.agent.ctx/render-context` over the SAME unfiltered db, so
-;; the `:ai` side is byte-identical by construction. Asserted THROUGH the
-;; real fns — never a hand-built ctx string (the trap that let the old
-;; tests lie). The only per-render-moment difference is the single live
-;; `now` in the transcript readline; normalize that one line away.
-;; ------------------------------------------------------------
-
-(defn- strip-readline-now
-  "Normalize the ONE wall-clock line in a rendered context — the transcript
-   readline status line (`; <ns> · turn N · loop K/cap · <state> · <now> ·
-   agent <id>`), the only render output that depends on `now` rather than
-   the db (transcript ns docstring). Everything else is a pure fn of the db
-   value and must be byte-identical across the prompt + debug view paths."
-  [s]
-  (str/replace s #"(?m)^;[^\n]* · loop [^\n]*$" "; <READLINE NOW NORMALIZED>"))
-
-(deftest prompt-and-debug-view-are-byte-identical
-  ;; THE headline property. `render-context` is the SINGLE producer; the
-  ;; loop's `render-prompt` and the debug view's `ctx-preview` both call it
-  ;; over the SAME `@*conn*`. Prove: (1) render-prompt IS render-context;
-  ;; (2) the debug view's full prompt text ENDS WITH the exact prompt bytes
-  ;; (system + boundary + context, the context byte-identical); (3) every
-  ;; per-section `:ai` twin appears verbatim in the prompt (one render, two
-  ;; consumers); (4) derived-never-stored — rendering writes NO datoms.
-  (async done
-    (-> (with-conn
-          (fn [_conn]
-            (-> (agent/create! {:seon.agent/id "AGTbyteid00001"})
-                (.then (fn [_] (transact-full-ns! "my.client" "(def x 1)")))
-                (.then
-                  (fn [_]
-                    (let [id      "AGTbyteid00001"
-                          loop-txt (strip-readline-now (turn/render-prompt id))
-                          prod-txt (strip-readline-now
-                                     (ctx/render-context {:seon.agent/id id}))
-                          preview  (agent-debug/ctx-preview {:seon.agent/id id})
-                          full     (strip-readline-now (:seon.render/text preview))]
-                      (is (pos? (count prod-txt)) "the prompt is non-empty")
-                      (is (= loop-txt prod-txt)
-                          "render-prompt IS render-context (the loop routes through the one producer)")
-                      (is (str/ends-with? full prod-txt)
-                          "debug view context pane is byte-identical to the prompt (full = system + boundary + the EXACT context bytes)")
-                      (doseq [{nm  :seon.agent.ctx/name
-                               txt :seon.render/text} (:seon.render/section-texts preview)
-                              :when (not= nm :system)]
-                        (is (str/includes? prod-txt (strip-readline-now txt))
-                            (str "section " nm " :ai twin appears verbatim in the prompt")))
-                      (let [before (count (d/datoms @db/*conn* :eavt))]
-                        (turn/render-prompt id)
-                        (agent-debug/ctx-preview {:seon.agent/id id})
-                        (ctx/render-context {:seon.agent/id id})
-                        (is (= before (count (d/datoms @db/*conn* :eavt)))
-                            "rendering wrote NO datoms — derived, never stored"))
-                      ;; the word "malli" appears legitimately (the system
-                      ;; text teaches :malli/schema; error lines carry the
-                      ;; HUMANIZED explain) — the leak signature is raw
-                      ;; validator internals, never the taught vocabulary
-                      (is (not (str/includes? prod-txt ":malli.core/"))
-                          "no raw malli internals leak into the prompt")))))))
-        (.then (fn [] (done)))
-        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
-
-(deftest debug-preview-reuses-the-ai-block-render
-  (async done
-    (-> (with-conn
-          (fn [_conn]
-            (-> (agent/create! {:seon.agent/id "AGTdebugonce01"})
-                (.then
-                  (fn [_]
-                    (db/with-agent
-                      "AGTdebugonce01"
-                      (fn ^:async []
-                        (ctx/install!
-                          {:seon.agent.ctx/name :debug-count-probe
-                           :seon.agent.ctx/priority 25
-                           :seon.render/ai 'seon.ctx-test/counted-debug-ai})))))
-                (.then
-                  (fn [_]
-                    (reset! !debug-ai-render-count 0)
-                    (let [preview (agent-debug/ctx-preview
-                                    {:seon.agent/id "AGTdebugonce01"})
-                          block (some #(when (= :debug-count-probe
-                                                (:seon.agent.ctx/name %))
-                                         %)
-                                      (:seon.agent.ctx/rendered-blocks preview))]
-                      (is (= 1 @!debug-ai-render-count)
-                          "one debug snapshot invokes each AI producer once")
-                      (is (string? (:seon.render/text block))
-                          "the rendered block string is retained for the breakdown")
-                      (is (str/includes? (:seon.render/text preview)
-                                         (:seon.render/text block))
-                          "the full prompt is assembled from that retained string")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 

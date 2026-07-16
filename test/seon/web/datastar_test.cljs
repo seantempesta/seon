@@ -238,40 +238,48 @@
     (-> (with-conn [agent-a]
           (fn [conn]
             (let [original db/*conn*
-                  ai-renders (atom 0)
-                  html-renders (atom 0)]
+                  original-preview agent-debug/ctx-preview
+                  original-catalog surface/surface-catalog
+                  original-materialize surface/materialize-surface
+                  child-calls (atom [])
+                  html-renders (atom 0)
+                  preview {:seon.agent.debug/ok? true
+                           :seon.render/text "system\n\ncontext"
+                           :seon.render/token-estimate 5
+                           :seon.agent.ctx/rendered-blocks
+                           [{:seon.agent.ctx/name :system
+                             :seon.agent.ctx/priority 0
+                             :seon.render/text "system"}
+                            {:seon.agent.ctx/name :probe
+                             :seon.agent.ctx/priority 1
+                             :seon.render/text "context"}]}]
               (set! db/*conn* conn)
-              (try
-                (with-redefs
-                  [agent-debug/ctx-preview
-                   (fn [request]
-                     (is (= #{:ai} (:seon.render/formats request)))
-                     (swap! ai-renders inc)
-                     {:seon.agent.debug/ok? true
-                      :seon.render/text "ai"
-                      :seon.render/token-estimate 5
-                      :seon.agent.ctx/rendered-blocks
-                      [{:seon.agent.ctx/name :probe
-                        :seon.agent.ctx/priority 1
-                        :seon.render/text "ai"}]})
-                   surface/surface-catalog
-                   (fn [_ _]
-                     [{::surface/selection "context-probe"
-                       ::surface/label "probe"
-                       ::surface/read-attrs #{}
-                       ::surface/touch 0
-                       ::surface/focus-touch 0}
-                      {::surface/selection "canvas"
-                       ::surface/label "canvas"
-                       ::surface/read-attrs #{}
-                       ::surface/touch 0
-                       ::surface/focus-touch 0}])
-                   surface/materialize-surface
-                   (fn [_]
-                     (swap! html-renders inc)
-                     [:div "html"])]
-                  (let [projection (@#'debug/debug-projection @conn agent-a)
-                        catalog (:seon.web.debug/catalog projection)
+              (set! agent-debug/ctx-preview
+                    (fn [request]
+                      (swap! child-calls conj request)
+                      (js/Promise.resolve preview)))
+              (set! surface/surface-catalog
+                    (fn [_ _]
+                      [{::surface/selection "context-probe"
+                        ::surface/label "probe"
+                        ::surface/read-attrs #{}
+                        ::surface/touch 0
+                        ::surface/focus-touch 0}
+                       {::surface/selection "canvas"
+                        ::surface/label "canvas"
+                        ::surface/read-attrs #{}
+                        ::surface/touch 0
+                        ::surface/focus-touch 0}]))
+              (set! surface/materialize-surface
+                    (fn [_]
+                      (swap! html-renders inc)
+                      [:div "html"]))
+              (let [view-id "debug-test-view"
+                    feed (@#'debug/debug-feed-definition agent-a view-id)]
+                (-> ((:seon.web.feed/render-full feed) @conn)
+                    (.then
+                     (fn [rendered]
+                      (let [catalog (::datastar/catalog rendered)
                         exact-unit (some #(when (= -1
                                                     (get (::datastar/coordinate %)
                                                          :seon.web.debug/debug-block-index))
@@ -281,36 +289,30 @@
                                                    (get (::datastar/coordinate %)
                                                         :seon.web.debug/debug-format))
                                            %)
-                                        catalog)]
-                    (@#'debug/debug-app-view
-                      @conn agent-a "debug-test-view"
-                      (:seon.web.debug/snapshot projection)
-                      catalog #{})
-                    (is (= 1 @ai-renders)
-                        "AI blocks are projected once for prompt and diagnostics")
+                                         catalog)]
+                    (is (= 1 (count @child-calls))
+                        "one compiled child result owns prompt and diagnostics")
+                    (is (= (db.coordinate/resolved @conn)
+                           (:seon.db.coordinate/coordinate
+                            (first @child-calls))))
                     (is (zero? @html-renders)
                         "all closed HTML twins remain producer-free stubs")
                     (is (str/includes?
                           (html/->string
-                           ((::datastar/producer exact-unit) @conn))
-                          "ai")
-                        "the exact assembled prompt is available behind one lazy unit")
-                    (let [bar (get-in projection
-                                      [:seon.web.debug/snapshot :context-bar])]
-                      (is (= (::debug/total-tokens bar)
-                             (reduce + 0 (map ::debug/tokens
-                                              (::debug/segments bar))))
-                          "the visible breakdown sums to the exact prompt total"))
-                    (is (every? ::datastar/view-unit? catalog)
-                        "every debug body uses the shared lifecycle")
-                    (@#'debug/debug-app-view
-                     @conn agent-a "debug-test-view"
-                     (:seon.web.debug/snapshot projection)
-                     catalog #{(::datastar/token html-unit)})
-                    (is (zero? @html-renders)
-                        "an active token without committed unit state stays a stub")))
-                (finally
-                  (set! db/*conn* original))))))
+                           ((::datastar/producer exact-unit)))
+                          "system")
+                        "raw AI content reuses the accepted ordinary result")
+                    (is (not (::datastar/view-unit? exact-unit))
+                        "raw AI is a lazy slice, not a second database unit")
+                    (is (true? (::datastar/view-unit? html-unit))
+                        "HTML twins retain managed database-unit lifecycle")
+                    (is (some? (::datastar/element rendered))))))
+                    (.finally
+                     (fn []
+                       (set! agent-debug/ctx-preview original-preview)
+                       (set! surface/surface-catalog original-catalog)
+                       (set! surface/materialize-surface original-materialize)
+                       (set! db/*conn* original))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 
@@ -1441,6 +1443,12 @@
           concurrent (atom 0)
           maximum-concurrent (atom 0)
           pushes (atom [])
+          catalog-a (datastar/unit-catalog
+                      [{::datastar/coordinate {:example/unit :stale}
+                        ::datastar/producer (fn [] [:div "stale"])}])
+          catalog-b (datastar/unit-catalog
+                      [{::datastar/coordinate {:example/unit :current}
+                        ::datastar/producer (fn [] [:div "current"])}])
           render-change
           (fn [_subscription change]
             (swap! calls conj change)
@@ -1475,7 +1483,9 @@
          {:seon.db/changed-attrs #{:example/t12}})
         (is (= 1 (count @calls)) "one render is active")
         ((first @resolvers)
-         {::datastar/elements [[:div {:id "target"} "stale-t10"]]})
+         {::datastar/elements [[:div {:id "target"} "stale-t10"]]
+          ::datastar/catalog catalog-a
+          ::datastar/view-id "deferred-change"})
         (-> (js/Promise.resolve nil)
             (.then
              (fn [_]
@@ -1485,8 +1495,14 @@
                       (:seon.db/changed-attrs (second @calls)))
                    "the pending render retains every change since the last emitted result")
                (is (empty? @pushes) "the superseded completion is discarded")
+               (is (empty? (get-in @registry
+                                   [::datastar/views "deferred-change"
+                                    ::datastar/catalog]))
+                   "a superseded completion cannot install its catalog")
                ((second @resolvers)
-                {::datastar/elements [[:div {:id "target"} "current-t12"]]})))
+                {::datastar/elements [[:div {:id "target"} "current-t12"]]
+                 ::datastar/catalog catalog-b
+                 ::datastar/view-id "deferred-change"})))
             (.then (fn [_] (js/Promise.resolve nil)))
             (.then
              (fn [_]
@@ -1494,6 +1510,11 @@
                (is (= 1 (count @pushes)))
                (is (str/includes? (first @pushes) "current-t12"))
                (is (not (str/includes? (first @pushes) "stale-t10")))
+               (is (= catalog-b
+                      (get-in @registry
+                              [::datastar/views "deferred-change"
+                               ::datastar/catalog]))
+                   "only the accepted completion owns catalog mutation")
                (done)))
             (.catch (fn [error] (is false (str error)) (done))))))))
 

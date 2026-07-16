@@ -265,6 +265,8 @@ render-unit, routing, and live-morph mechanism in one route tree:
   once, retains the exact assembled prompt behind a lazy raw unit, and exposes
   source-block bodies plus HTML twins as closed stubs. HTML discovery projects
   metadata only; opening one twin materializes only that current renderer.
+  Raw AI disclosures are lazy slices of the already acquired prompt result,
+  not independent database render units; opening one performs no child call.
   It uses the same Datastar subscription graph and activation door as every
   other live page, not a provenance-routed debug interest. With no open page it
   owns no database interest or render work.
@@ -434,6 +436,8 @@ implements the `view = f(db)` model through `seon.web.datastar`.
   paint requires a new complete `#app-view`. Equivalent sockets share the one
   invocation and its serialized bytes. Closing the final consumer releases the
   active/pending ownership, and any later Promise completion is inert.
+  Catalog changes are result data and become live only at that same acceptance
+  fence; a stale async render cannot mutate a view catalog or unit ownership.
 - **Lazy activation uses the same protocol.** A collapsed debug or database
   unit is only a stable stub. Its Datastar fetch action calls `/view/unit`,
   which returns one `text/event-stream` response containing a
