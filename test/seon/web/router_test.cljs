@@ -2,16 +2,13 @@
   "Behavioral tests for database-derived reitit cache invalidation."
   (:require
     [cljs.test :refer [async deftest is testing]]
-    [datahike.api :as d]
     [seon.agent.message]
     [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
     [seon.route]
     [seon.runtime.admission :as admission]
-    [seon.schema :as schema]
     [seon.test.async :refer [settle!]]
     [seon.web.router :as router]))
-
-(schema/register! ::note :string)
 
 (defn temporary-handler!
   "Write the temporary route's observable response."
@@ -20,17 +17,64 @@
     (.writeHead response 200 #js {"Content-Type" "text/plain"})
     (.end response "temporary route")))
 
-(defn- fresh-conn
-  "Promise of an isolated in-memory database connection."
+
+(def ^:private route-query
+  '[:find [(pull ?route [:seon.route/pattern
+                         :seon.route/method
+                         :seon.route/handler
+                         :seon.route/middleware]) ...]
+    :where [?route :seon.route/pattern]])
+
+(defn- database-coordinate
+  "One complete immutable database coordinate for route tests."
+  [transaction]
+  {::coordinate/database-id (random-uuid)
+   ::coordinate/branch :db
+   ::coordinate/commit-id (random-uuid)
+   ::coordinate/t transaction})
+
+(defn- route-row
+  "One ordinary database route projection row."
+  [pattern]
+  {:seon.route/pattern pattern
+   :seon.route/method :get
+   :seon.route/handler 'seon.web.router-test/temporary-handler!})
+
+(defn- deferred
+  "A Promise and the function that resolves it."
   []
-  (let [config {:store              {:backend :memory :id (random-uuid)}
-                :schema-flexibility :write
-                :keep-history?      true}]
-    (-> (d/create-database config)
-        (.then (fn [_] (d/connect config {:sync? false})))
-        (.then (fn [conn]
-                 (-> (db/ensure-provenance! {:seon.db/conn conn})
-                     (.then (fn [_] conn))))))))
+  (let [!resolve (atom nil)
+        promise (js/Promise. (fn [resolve _reject]
+                               (reset! !resolve resolve)))]
+    {::promise promise
+     ::resolve! (fn [value] (@!resolve value))}))
+
+(defn- next-turn
+  "Yield until queued Promise continuations have run."
+  []
+  (js/Promise. (fn [resolve _reject]
+                 (js/setTimeout resolve 0))))
+
+(defn- with-route-db-fakes
+  "Run one Promise body with direct database functions replaced and restored."
+  [{::keys [query listen unlisten]} body]
+  (let [original-query db/query
+        original-listen db/listen!
+        original-unlisten db/unlisten!
+        state-atom @#'router/!router-state
+        prior-state @state-atom]
+    (set! db/query query)
+    (set! db/listen! listen)
+    (set! db/unlisten! unlisten)
+    (reset! state-atom {})
+    (-> (js/Promise.resolve nil)
+        (.then (fn [] (body)))
+        (.finally
+          (fn []
+            (set! db/query original-query)
+            (set! db/listen! original-listen)
+            (set! db/unlisten! original-unlisten)
+            (reset! state-atom prior-state))))))
 
 (defn- response-probe
   "Node response double and its namespaced observation atom."
@@ -55,12 +99,6 @@
          request #js {:url path :method method :headers #js {}}]
      (router/handle-request request response)
      @observed)))
-
-(defn- cached-ring-handler
-  "The current compiled handler identity, used to prove cache reuse."
-  []
-  (let [state-atom @#'router/!router-state]
-    (:seon.web.router/ring-handler @state-atom)))
 
 (deftest operator-config-route-reaches-the-injected-live-operation
   (router/install!
@@ -149,62 +187,123 @@
       (finally
         (reset! @#'admission/!state prior)))))
 
-(deftest route-facts-update-the-live-router-without-explicit-rebuild
+(deftest route-interest-queries-the-acknowledged-and-later-coordinates
   (async done
-    (-> (fresh-conn)
-        (.then
-          (fn [conn]
-            (let [prior-conn db/*conn*]
-              (set! db/*conn* conn)
-              (router/attach!)
-              (-> (js/Promise.resolve nil)
-                  (.then
-                    (fn [_]
-                      (testing "the temporary path starts at the default not-found handler"
-                        (let [response (request! "/temporary-route")]
-                          (is (= 302 (::response-status response)))
-                          (is (= "/" (get (::response-headers response) "Location")))))
-                      (db/transact!
-                        {:seon.db/conn conn
-                         :seon.db/tx-data
-                         [{:seon.route/name    ::temporary-route
-                           :seon.route/pattern "/temporary-route"
-                           :seon.route/method  :get
-                           :seon.route/handler
-                           'seon.web.router-test/temporary-handler!}]})))
-                  (.then
-                    (fn [result]
-                      (is (true? (:seon.db/ok? result)))
-                      (testing "a committed route is requestable immediately"
-                        (let [response (request! "/temporary-route")]
-                          (is (= 200 (::response-status response)))
-                          (is (= "temporary route" (::response-body response)))))
-                      (let [handler-before (cached-ring-handler)]
-                        (-> (db/transact!
-                              {:seon.db/conn conn
-                               :seon.db/tx-data [{::note "unrelated"}]})
-                            (.then
-                              (fn [unrelated-result]
-                                (is (true? (:seon.db/ok? unrelated-result)))
-                                (is (identical? handler-before
-                                                (cached-ring-handler))
-                                    "an unrelated commit reuses the compiled router")))))))
-                  (.then
-                    (fn [_]
-                      (db/transact!
-                        {:seon.db/conn conn
-                         :seon.db/tx-data
-                         [[:db.fn/retractEntity
-                           [:seon.route/name ::temporary-route]]]})))
-                  (.then
-                    (fn [result]
-                      (is (true? (:seon.db/ok? result)))
-                      (testing "retraction immediately restores not-found"
-                        (let [response (request! "/temporary-route")]
-                          (is (= 302 (::response-status response)))
-                          (is (= "/" (get (::response-headers response) "Location")))))))
-                  (.finally
-                    (fn []
-                      (router/detach!)
-                      (set! db/*conn* prior-conn)))))))
-        (settle! done))))
+    (let [ack-coordinate (database-coordinate 10)
+          event-coordinate (assoc ack-coordinate
+                                  ::coordinate/commit-id (random-uuid)
+                                  ::coordinate/t 11)
+          interest-key "database-interest/routes-17"
+          !queries (atom [])
+          !listen-request (atom nil)
+          !unlisten-request (atom nil)
+          !handler (atom nil)]
+      (->
+        (with-route-db-fakes
+          {::query
+           (fn [request]
+             (swap! !queries conj request)
+             (js/Promise.resolve
+               (if (= event-coordinate (:seon.db/coordinate request))
+                 [(route-row "/temporary-route")]
+                 [])))
+           ::listen
+           (fn [request]
+             (reset! !listen-request request)
+             (reset! !handler (:seon.db/handler request))
+             (js/Promise.resolve {:seon.db/key interest-key
+                                  :seon.db/coordinate ack-coordinate}))
+           ::unlisten
+           (fn [request]
+             (reset! !unlisten-request request)
+             (js/Promise.resolve {:seon.db/ok? true}))}
+          (fn []
+            (router/install! {})
+            (-> (router/attach!)
+                (.then
+                  (fn [_]
+                    (testing "the exact route query defines the interest"
+                      (is (= route-query
+                             (:seon.db/query @!listen-request))))
+                    (testing "initial projection is read at the ack coordinate"
+                      (is (= [{:seon.db/query route-query
+                               :seon.db/coordinate ack-coordinate}]
+                             @!queries)))
+                    (@!handler
+                      {:seon.db.protocol/coordinate event-coordinate})
+                    (next-turn)))
+                (.then
+                  (fn [_]
+                    (testing "a later event reads and publishes its exact point"
+                      (is (= event-coordinate
+                             (:seon.db/coordinate (peek @!queries))))
+                      (is (= 200
+                             (::response-status
+                               (request! "/temporary-route")))))
+                    (router/detach!)))
+                (.then
+                  (fn [_]
+                    (testing "detach uses the authority-returned interest key"
+                      (is (= {:seon.db/key interest-key}
+                             @!unlisten-request))))))))
+        (settle! done)))))
+
+(deftest stale-route-query-completion-cannot-replace-a-newer-projection
+  (async done
+    (let [ack-coordinate (database-coordinate 20)
+          stale-coordinate (assoc ack-coordinate
+                                  ::coordinate/commit-id (random-uuid)
+                                  ::coordinate/t 21)
+          current-coordinate (assoc ack-coordinate
+                                    ::coordinate/commit-id (random-uuid)
+                                    ::coordinate/t 22)
+          stale-query (deferred)
+          current-query (deferred)
+          !handler (atom nil)]
+      (->
+        (with-route-db-fakes
+          {::query
+           (fn [{actual-coordinate :seon.db/coordinate}]
+             (cond
+               (= stale-coordinate actual-coordinate) (::promise stale-query)
+               (= current-coordinate actual-coordinate) (::promise current-query)
+               :else (js/Promise.resolve [])))
+           ::listen
+           (fn [request]
+             (reset! !handler (:seon.db/handler request))
+             (js/Promise.resolve {:seon.db/key "database-interest/routes-18"
+                                  :seon.db/coordinate ack-coordinate}))
+           ::unlisten
+           (fn [_request]
+             (js/Promise.resolve {:seon.db/ok? true}))}
+          (fn []
+            (router/install! {})
+            (-> (router/attach!)
+                (.then
+                  (fn [_]
+                    (@!handler
+                      {:seon.db.protocol/coordinate stale-coordinate})
+                    (@!handler
+                      {:seon.db.protocol/coordinate current-coordinate})
+                    ((::resolve! current-query)
+                     [(route-row "/current-route")])
+                    (next-turn)))
+                (.then
+                  (fn [_]
+                    (testing "the newer completed projection is active"
+                      (is (= 200
+                             (::response-status
+                               (request! "/current-route")))))
+                    ((::resolve! stale-query)
+                     [(route-row "/stale-route")])
+                    (next-turn)))
+                (.then
+                  (fn [_]
+                    (testing "late older work cannot regress the route cache"
+                      (is (= 200
+                             (::response-status
+                               (request! "/current-route"))))
+                      (is (= 302
+                             (::response-status
+                               (request! "/stale-route"))))))))))
+        (settle! done)))))
