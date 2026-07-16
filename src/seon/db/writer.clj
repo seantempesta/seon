@@ -16,6 +16,7 @@
             [datahike.db.interface :as dbi]
             [datahike.db.utils :as datahike.db]
             [datahike.impl.entity :as datahike.entity]
+            [hasch.core :as hasch]
             [konserve.core :as k]
             [seon.db.coordinate :as coordinate]
             [seon.db.datahike.schema :as datahike.schema]
@@ -664,6 +665,8 @@
                        (< (count active) active-limit))
                 (let [member (nth members position)
                       job-id [request-id position]
+                      caller-id (str "execute-many/"
+                                     (hasch/uuid [request-id position]))
                       [admission result]
                       (executor/submit-async-with-evidence!
                        {::executor/executor dispatcher
@@ -676,7 +679,8 @@
                         {::database-name database-name
                          ::scope scope
                          ::database-value db-value
-                         ::caller-id job-id
+                         ::job-id job-id
+                         ::caller-id caller-id
                          ::request member}})]
                   (if (::executor/accepted? admission)
                     (recur (inc position) (assoc active job-id [position result])
@@ -760,6 +764,33 @@
               (do (Thread/sleep 1) (recur))
               result)))))))
 
+(defn- cancel-running-queries
+  [dispatcher jobs]
+  (let [deadline (+ (System/nanoTime) 100000000)]
+    (loop [remaining (set jobs)
+           outcomes []]
+      (if (or (empty? remaining) (>= (System/nanoTime) deadline))
+        outcomes
+        (let [[remaining outcomes]
+              (reduce
+               (fn [[pending results] [job-id caller-id :as job]]
+                 (let [result (d/cancel-query! caller-id)
+                       running?
+                       (= :running
+                          (::executor/cancellation
+                           (executor/cancel!
+                            {::executor/executor dispatcher
+                             ::executor/job-id job-id})))]
+                   [(if (and running?
+                             (not (:datahike.query.cancel/found? result)))
+                      (conj pending job)
+                      pending)
+                    (conj results result)]))
+               [#{} outcomes]
+               remaining)]
+          (when (seq remaining) (Thread/sleep 1))
+          (recur remaining outcomes))))))
+
 (defn- handle-cancel
   [runtime request]
   (let [target-request-id (::protocol/target-request-id request)
@@ -779,11 +810,13 @@
         query-cancellation
         (cond
           (seq (::executor/requests grouped))
-          (mapv (fn [internal]
-                  (when (= protocol/query-operation
-                           (::protocol/operation (::request internal)))
-                    (d/cancel-query! (::caller-id internal))))
-                (::executor/requests grouped))
+          (cancel-running-queries
+           dispatcher
+           (keep (fn [internal]
+                   (when (= protocol/query-operation
+                            (::protocol/operation (::request internal)))
+                     [(::job-id internal) (::caller-id internal)]))
+                 (::executor/requests grouped)))
 
           (and (= :running cancellation)
                (= protocol/query-operation
@@ -797,6 +830,7 @@
       ::protocol/canceled?
       (boolean
        (or (= :queued cancellation)
+           (::executor/canceled? grouped)
            (some :datahike.query.cancel/detached? query-cancellation)))
       ::protocol/running? (= :running cancellation)})))
 

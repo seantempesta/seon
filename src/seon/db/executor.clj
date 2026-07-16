@@ -495,10 +495,21 @@
                 matching)
           removed (merge queued abandoned-running)
           results (set (map (comp ::result val) removed))
-          next-state (-> state
-                         (remove-queued-results results)
-                         (update ::closed-scopes conj scope)
-                         (update ::jobs #(apply dissoc % (keys removed))))]
+          next-state
+          (reduce
+           (fn [current [job-id job]]
+             (if-let [request-id (::request-id job)]
+               (if (get-in current [::retained-requests request-id])
+                 (update-in current
+                            [::retained-requests request-id ::completed-jobs]
+                            conj job-id)
+                 current)
+               current))
+           (-> state
+               (remove-queued-results results)
+               (update ::closed-scopes conj scope)
+               (update ::jobs #(apply dissoc % (keys removed))))
+           queued)]
       (reset! (::state executor) next-state)
       (swap! (::counts executor) update ::fenced + (count matching))
       (doseq [[_ {::keys [result]}] removed]
@@ -614,6 +625,7 @@
                         (seq queued) :queued
                         retained :queued
                         :else :not-found)
+       ::canceled? (boolean retained)
        ::requests (mapv ::request running)})))
 
 (defn evidence

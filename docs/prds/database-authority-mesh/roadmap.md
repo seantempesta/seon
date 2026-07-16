@@ -474,6 +474,15 @@ The affected executor, writer, protocol, embedding, replay, and transaction
 gate passes 60 tests and 357 assertions. Running-query cancellation and
 release-race fixtures remain before Unit 5 graduation.
 
+The first release-race audit found and closed a coordinator deadlock: a scope
+fence now records every removed member as completed before settling its result,
+so the retained outer request cannot wait for an identity the fence discarded.
+Grouped query cancellation uses bounded retry across the dispatcher-to-Datahike
+registration interval, Datahike caller IDs remain strings distinct from
+executor tuple identities, and mixed cancellation truthfully reports both
+stopped queued work and still-running uncancelable work. The focused executor,
+writer, and transport gate passes 39 tests and 248 assertions.
+
 Exit proof: transport-neutral fixtures cover schemas, values, identity,
 query/pull/history, branches, fencing, batching, member errors, cancellation,
 listener ordering, paging, release, malformed input, and version negotiation.

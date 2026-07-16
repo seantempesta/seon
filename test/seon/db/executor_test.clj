@@ -301,6 +301,49 @@
         (.countDown release)
         (executor/stop! {::executor/executor worker})))))
 
+(deftest scope-fence-reports-removed-members-to-the-retained-request
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        worker (start-worker
+                {:read (fn [request]
+                         (.countDown entered)
+                         (.await release)
+                         (:request/value request))})
+        one-scope (scope "a" (random-uuid) (random-uuid))
+        request-id "many/release"
+        submit (fn [job-id]
+                 (executor/submit-async!
+                  (assoc (request worker "a" one-scope job-id job-id)
+                         ::executor/request-id request-id)))]
+    (try
+      (executor/retain-request!
+       {::executor/executor worker ::executor/scope one-scope
+        ::executor/request-id request-id})
+      (let [running (submit "many/release-running")
+            _ (is (.await entered 5 TimeUnit/SECONDS))
+            queued (submit "many/release-queued")
+            _ (is (await-queued worker 1))
+            drained (future
+                      (executor/fence-and-drain!
+                       {::executor/executor worker
+                        ::executor/scope one-scope
+                        ::executor/cancel (constantly nil)}))]
+        (is (= "many/release-queued"
+               (executor/await-completed!
+                {::executor/executor worker ::executor/request-id request-id})))
+        (is (= ::executor/throwable (first @queued)))
+        (.countDown release)
+        (is (= [::executor/value "many/release-running"] @running))
+        (is (= "many/release-running"
+               (executor/await-completed!
+                {::executor/executor worker ::executor/request-id request-id})))
+        (executor/release-request!
+         {::executor/executor worker ::executor/request-id request-id})
+        (is (= {::executor/abandoned-count 1} @drained)))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
 (deftest cancellation-distinguishes-queued-running-and-absent-jobs
   (let [entered (CountDownLatch. 1)
         release (CountDownLatch. 1)
