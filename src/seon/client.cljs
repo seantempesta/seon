@@ -27,7 +27,6 @@
         :seon.agent.message/to      [[:seon.agent/id \"<agent-id>\"]]
         :seon.agent.message/content \"hello\"})"
   (:require
-    [cljs.reader :as reader]
     [clojure.set :as set]
     [clojure.string :as str]
     ;; malli.core/form round-trips a fn's `:malli/schema` to the stable
@@ -65,7 +64,6 @@
     [seon.db.id :as id]
     [seon.db.process :as db.process]
     [seon.error :as error]
-    [seon.eval :as seval]
     [seon.log :as log]
     ;; Render protocol — A-2. Required here so the build includes it.
     ;; Symbol-lookup for render slots lives in seon.eval/lookup-value
@@ -933,313 +931,6 @@
     opened))
 
 ;; ---------------------------------------------------------------------------
-;; Resume — replay-program-graph! (the DB-is-the-running-system spine)
-;;
-;; Load the agent-authored DB LAYER (agent code + overrides) on top of the
-;; compiled package after a pod restart, restoring the agent's namespaces /
-;; vars / Malli registrations into the live compile-state + globalThis.
-;;
-;; The compiled package (kernel + core + third-party) is ALREADY in the
-;; runtime from module-load — its rows are DISPLAY-only and are NOT loaded.
-;; Only the agent DB layer loads, whole-namespace + dependency-ordered:
-;;
-;;   - `agent-ns-set` — every `:seon.ns/name` row minus `(core-ns-set)`.
-;;   - `topo-sort-nses` over persisted `:seon.ns/require-edges`
-;;     (targets intersected with the agent-ns-set — intra-agent edges
-;;     only; core deps load on-demand via the DB load-fn). A dep loads
-;;     before its dependent.
-;;   - For each ns in topo order, eval its reconstituted whole source
-;;     (`seon.eval/reconstitute-ns-source`: the verbatim (ns … (:require …))
-;;     form + every current :seon.fn/:seon.schema/:seon.test source). The
-;;     ns form is the head, so the ns is created first by construction;
-;;     cljs.js's load-fn (the DB branch of `seon.eval/guarded-load`)
-;;     supplies any transitive agent require's source on demand, with
-;;     cycle detection + load-once.
-;;   - Per-ns try/catch: a failing ns logs a `:seon.log` :warn and the load
-;;     CONTINUES to the next ns. NO 2-pass retry, NO per-fn fallback.
-;;   - Declaration loading runs as the owning agent through the REPL process.
-;;     Its runtime-only `:seon.eval/replay?` flag suppresses eval tee writes;
-;;     the flag never enters transaction metadata.
-;; ---------------------------------------------------------------------------
-
-(declare core-ns-set)
-
-;; Forward decls: the SEON_EXTRA_SRC scanning helpers are defined far below
-;; (alongside `config/extra-src`, after the form/arglist parsers they reuse), but
-;; `core-ns-set`/`ns-row`/`index-core!` reference them. Fn-body references
-;; resolve at call time; the declare silences the compile-time :undeclared-var
-;; warning.
-(declare extra-src-ns-strs extra-fn-rows extra-src-ns->file)
-
-(defn ^:private agent-ns-set
-  "The set of agent-authored namespace keywords in the DB layer — every
-   `:seon.ns/name` row whose ns is NOT in `(core-ns-set)`. Core nses are
-   COMPILED (present in the bundle, indexed for DISPLAY only); only the
-   agent-authored DB layer is LOADED on boot. Read against the db value."
-  {:malli/schema [:=> [:catn [::db :any]] :any]}
-  [db]
-  (let [all (into #{}
-                  (map first)
-                  (db/query '[:find ?n :where [?e :seon.ns/name ?n]] db))]
-    (set/difference all (core-ns-set))))
-
-(defn ^:private agent-ns-requires
-  "Map of `agent-ns-kw → #{intra-agent require ns-kws}` for topo-sort.
-   Derives each ns's required set from persisted
-   `:seon.ns/require-edges` (captured at tee from the analyzer, NOT
-   re-parsed here — `seon.eval/persisted-require-targets`), INTERSECTED
-   with `agent-nses` so only intra-agent edges order the load kick.
-   Core/third-party deps are NOT edges here — they are satisfied
-   on-demand by the compiled bundle via the DB load-fn
-   (`seon.eval/guarded-load`) DURING each ns's eval. An agent ns with no
-   stored edges (or only core deps) has an empty edge set."
-  {:malli/schema [:=> [:catn [::db :any] [::agent-nses :any]] :any]}
-  [db agent-nses]
-  (into {}
-        (map (fn [ns-kw]
-               [ns-kw (set/intersection
-                        (seval/persisted-require-targets db ns-kw)
-                        agent-nses)]))
-        agent-nses))
-
-(defn ^:private topo-sort-nses
-  "Dependency-ordered vector of the keys of `edges` (a `ns → #{dep-ns}`
-   map) — a dep comes before its dependent (DFS post-order).
-   Deterministic (sorted within each level). A require cycle is broken by
-   the `visiting` guard (a back-edge to a node already on the DFS stack
-   is skipped) so this always terminates; cljs.js then detects the actual
-   circular dep and errors that ns during its per-ns eval (user
-   directive: broken input just errors that ns and moves on)."
-  {:malli/schema [:=> [:catn [::edges :any]] :any]}
-  [edges]
-  (let [!order   (volatile! [])
-        !seen    (volatile! #{})
-        visit    (fn visit [ns-kw visiting]
-                   (when-not (or (@!seen ns-kw) (visiting ns-kw))
-                     (let [visiting' (conj visiting ns-kw)]
-                       (doseq [dep (sort (get edges ns-kw))]
-                         (visit dep visiting'))
-                       (vswap! !seen conj ns-kw)
-                       (vswap! !order conj ns-kw))))]
-    (doseq [ns-kw (sort (keys edges))]
-      (visit ns-kw #{}))
-    @!order))
-
-(defn ^:private schema-forms-in-db
-  "Canonical `{schema-key form}` read from one immutable database value."
-  [db]
-  (into {}
-        (map (fn [[k form]] [k (reader/read-string form)]))
-        (db/query '[:find ?k ?form
-                    :where
-                    [?s :seon.schema/key ?k]
-                    [?s :seon.schema/form ?form]]
-                  db)))
-
-(defn ^:private function-contracts-in-db
-  "Canonical `{qualified-symbol function-form}` from one database value."
-  [db]
-  (into {}
-        (map (fn [[sym form]]
-               [(symbol sym) (reader/read-string form)]))
-        (db/query '[:find ?sym ?form
-                    :where
-                    [?function :seon.fn/sym ?sym]
-                    [?function :seon.fn/spec ?form]]
-                  db)))
-
-(defn- error-chain-message
-  "Human-readable message for a `seon.error/->map` map, composed from
-   the WHOLE `:seon.error/cause` chain (deduped, joined with ` <- `).
-   Fail-loud: cljs.js wraps analysis errors in ex-info layers whose
-   top-level message is the literal string \"ERROR\" — the real defect
-   (e.g. schema/register!'s legible invalid-schema explanation) lives
-   one or two causes down. Surfacing only the top message produced
-   warn lines like `replay of schema :seon.workout/date failed: ERROR`
-   (live incident 2026-06-10)."
-  [err-map]
-  (->> (iterate :seon.error/cause err-map)
-       (take-while some?)
-       (map :seon.error/message)
-       (remove str/blank?)
-       (distinct)
-       (str/join " <- ")))
-
-(defn- error-chain-stack
-  "Deepest available `:seon.error/stack` in the cause chain — the
-   original throw site, not cljs.js's compile-loop trampoline."
-  [err-map]
-  (->> (iterate :seon.error/cause err-map)
-       (take-while some?)
-       (keep :seon.error/stack)
-       (last)))
-
-(defn ^:async ^:private log-replay-failure!
-  {:malli/schema [:=> [:catn [::agent-id :any] [::ns-kw :any] [::err-map :any]] :any]}
-  [agent-id ns-kw {:seon.error/keys [message stack]}]
-  (await
-    (log/warn! {:seon.log/source  ::log-replay-failure!
-                :seon.log/agent   agent-id
-                :seon.log/message (str "load of ns " (pr-str ns-kw)
-                                       " failed: " message)
-                :seon.log/stack   (or stack "")})))
-
-(defn ^:private load-error->log
-  "Normalize a load failure `err` (a `seon.error/->map` from
-   `seon.eval/eval`'s `{:seon.eval/ok? false :seon/error …}`, or a raw
-   caught JS error)
-   into the `{:seon.error/message <string> :seon.error/stack <string>}`
-   shape `log-replay-failure!` expects (the :seon/error vocabulary — a
-   projection, not a full `->map`). `:seon.error/message` carries the
-   full cause-chain message ([[error-chain-message]]);
-   `:seon.error/stack` the deepest cause's stack
-   — chosen so a load-failure warn names the actual defect, not cljs.js's
-   \"ERROR\" wrapper."
-  {:malli/schema [:=> [:catn [::err :any]] :any]}
-  [err]
-  {:seon.error/message (or (some-> err error-chain-message not-empty)
-                           (some-> err .-message)
-                           (str err))
-   :seon.error/stack   (or (some-> err error-chain-stack)
-                           (some-> err .-stack)
-                           "")})
-
-(defn- ^:async report-replay-failure!
-  [agent-id ns-kw replay-error record-failures?]
-  (if record-failures?
-    (try
-      (await (log-replay-failure!
-              agent-id ns-kw (load-error->log replay-error)))
-      (catch :default error
-        (error/record! {:seon.error/raw error :seon.error/fault :core})))
-    (log/error-console!
-     "seon.client/replay-program-graph!"
-     (str "non-autonomous replay failed for " ns-kw)
-     (load-error->log replay-error))))
-
-(defn- ^:async evaluate-replay-source!
-  [compile-state authored-sources source record-failures?]
-  (try
-    (await (seval/eval compile-state source
-                       {:seon.eval/starting-ns 'cljs.user
-                        :seon.eval/authored-sources authored-sources}))
-    (catch :default error
-      (when-not (error/recorded? error)
-        (if record-failures?
-          (error/record! {:seon.error/raw error :seon.error/fault :core})
-          (log/error-console!
-           "seon.client/replay-program-graph!"
-           "non-autonomous replay machinery failed"
-           error)))
-      {:seon.eval/ok? false :seon/error error})))
-
-(defn- ^:async replay-ordered-sources!
-  [compile-state authored-sources ordered-sources agent-id record-failures?]
-  (let [!n-fail (volatile! 0)]
-    (doseq [[ns-kw source] ordered-sources]
-      (let [result
-            (await
-             (evaluate-replay-source!
-              compile-state authored-sources source record-failures?))]
-        (when-not (:seon.eval/ok? result)
-          (vswap! !n-fail inc)
-          (await
-           (report-replay-failure!
-            agent-id ns-kw (:seon/error result) record-failures?)))))
-    @!n-fail))
-
-(defn ^:async replay-program-graph!
-  "Load the DB layer (agent-authored code + overrides) on top of the
-   compiled package — db-is-the-running-system PRD, the spine.
-
-   The whole-namespace, dependency-ordered load (DELETES the old
-   per-definition replay loop, the tx-order sort, the 2-pass retry, and
-   `ensure-target-ns!`):
-
-     1. `agent-ns-set` — every `:seon.ns/name` row minus `(core-ns-set)`.
-        Core/third-party are COMPILED (in the bundle), indexed for
-        DISPLAY only; only the agent DB layer is loaded.
-     2. `topo-sort-nses` over persisted `:seon.ns/require-edges`
-        targets intersected with the agent-ns-set (intra-agent edges
-        only — core deps load on-demand via the load-fn). A dep loads
-        before its dependent.
-     3. For each ns in topo order, `(seval/eval compile-state
-        (seval/reconstitute-ns-source db ns-kw)
-        {:seon.eval/starting-ns 'cljs.user})`. The
-        reconstituted source's head is the `(ns … (:require …))` form, so
-        the ns is created first by construction (no `ensure-target-ns!`).
-        cljs.js's load-fn (`guarded-load`'s DB branch) supplies any
-        transitive agent require's source on demand, with cycle detection
-        + load-once — we write no ordering beyond the topo kick.
-
-   Per-ns try/catch: a failing ns (broken stored code, require cycle)
-   reports the failure and the load CONTINUES to the next ns — no retry, no
-   per-fn fallback. Autonomous boot records the existing database log;
-   non-autonomous reconstruction reports only to the process console.
-
-   Returns a Promise of
-     {:seon.client/replay-n-total <int>
-      :seon.client/replay-n-ok    <int>
-      :seon.client/replay-n-fail  <int>}.
-
-   Call sites:
-     - Cold path in start-runtime!, before per-agent setup.
-     - REPL probe via the same-pod-session test pattern — see
-       research/resume-findings-2026-05-23.md §'Same-pod-session test'."
-  {:malli/schema [:=> [:catn [::args [:map [::conn :any]
-                                            [::compile-state :any]
-                                            [::agent-id :string]
-                                            [::record-failures?
-                                             {:optional true} :boolean]]]]
-                  :any]}
-  [{::keys [conn compile-state agent-id record-failures?] :as request}]
-  (db/with-tx-context
-    {:seon.db/user       [:seon.agent/id agent-id]
-     :seon.db/process    (db.process/lookup-ref :seon.db.process/repl)
-     :seon.eval/replay?  true}
-    (fn ^:async run-replay! []
-      (let [record-failures? (if (contains? request ::record-failures?)
-                               record-failures?
-                               true)
-            db       @conn
-            ;; Schema facts are data, not replayable code. Validate and
-            ;; activate the complete immutable projection before loading any
-            ;; stored namespace/function source.
-            _        (schema/activate-projection!
-                       (schema/build-projection
-                         (schema-forms-in-db db)
-                         (function-contracts-in-db db)))
-            agents   (agent-ns-set db)
-            ;; Reconstitute each agent ns ONCE (frozen db value). A BLANK
-            ;; source = nothing to replay: a member-less sourceless
-            ;; keyword-namespace STUB (C30). `index-schemas` mints a
-            ;; `:seon.ns/name` row per NAMESPACED schema key as a
-            ;; `:seon.schema/ns` backref (`:seon.fn`, `:seon.ns`,
-            ;; `:seon.error.malli`, …); those are NOT compiled nses, so
-            ;; `agent-ns-set` (which subtracts only `core-ns-set`) can't
-            ;; drop them, and `reconstitute-ns-source` yields "" (no
-            ;; `:seon.ns/source` and no fn/test members). Schema membership
-            ;; never makes a namespace replayable.
-            ;; Eval'ing "" is a harmless no-op — skipping it (computed, no
-            ;; name list) keeps replay-n honest. A REAL agent ns always
-            ;; reconstitutes non-blank (source or a fn/test member), so
-            ;; nothing real is skipped.
-            src-of   (into {}
-                           (map (fn [k] [k (seval/reconstitute-ns-source db k)]))
-                           agents)
-            order    (->> (topo-sort-nses (agent-ns-requires db agents))
-                          (filterv (fn [k] (not (str/blank? (get src-of k))))))
-            ordered-sources (mapv (fn [ns-kw] [ns-kw (get src-of ns-kw)]) order)
-            n-fail (await
-                    (replay-ordered-sources!
-                     compile-state src-of ordered-sources agent-id
-                     record-failures?))]
-        (let [total (count order)]
-          {:seon.client/replay-n-total total
-           :seon.client/replay-n-ok    (- total n-fail)
-           :seon.client/replay-n-fail  n-fail})))))
-
-;; ---------------------------------------------------------------------------
 ;; Core boot seed (P2, 2026-05-27)
 ;;
 ;; Per docs/prds/agent-runtime/mvp-completion-plan-2026-05-27.md §Phase 2
@@ -1387,8 +1078,7 @@
    this bundle (`seon.indexing/first-party-ns-strs` over this ns's
    compile-time require closure). The computed replacement for the
    hand-maintained `fn-less-compiled-roots #{\"my.kb\"}` exception: a
-   compiled ns joins [[core-ns-set]] (replay-skip: re-evaling its
-   shipped source would shadow compiled fns / re-run register! forms)
+   compiled ns joins [[core-ns-set]] and
    and gets an [[index-core!]] ns-row BY CONSTRUCTION — whether or not
    any fn-row names it (a register!-only root has no indexed var but is
    still compiled, and its name-set membership is now a build fact, not
@@ -1398,14 +1088,9 @@
 (defn core-ns-set
   "The set of namespace keywords owned by the COMPILED core, derived
    from the build closure and downstream extension vars — the SAME sources
-   of truth the boot indexer writes from, so they can never drift. Used by
-   [[agent-ns-set]] as the DB-layer load discriminator: a `:seon.ns/name`
-   row whose ns is in this set is a COMPILED core ns (already in the
-   bundle from module-load; indexed for DISPLAY only) and is EXCLUDED
-   from the load — only the agent-authored DB layer loads. Re-evaling a
-   core row's source — e.g. `(defn ^:async transact! …)` — would shadow
-   the real compiled fn, so core is never loaded; only agent-authored
-   corpus (in `my.agent.<id>` / agent domain nses) loads.
+   of truth the boot indexer writes from, so they can never drift. These are
+   the compiled namespaces indexed for display and dependency grounding;
+   agent-authored source is reconstructed only inside its supervised child.
 
    A fn (not a def) because downstream extension vars load at runtime. It is
    NOT tx-meta and NOT a hand-typed ns list. Three computed sources union:
@@ -1518,9 +1203,7 @@
    siblings included) carry the REAL FULL FILE TEXT as
    `:seon.ns/source`: the boot indexer is the ONE file-reader; the
    `:namespaces` context section (and anything else downstream) renders
-   that attr from the graph, never re-reading files. Safe because core
-   rows are NOT loaded ([[agent-ns-set]] excludes any ns in `(core-ns-set)`
-   from the DB-layer load). A
+   that attr from the graph, never re-reading files. A
    full-source ns whose file can't be read falls back to the stub and
    logs fail-loud — the corpus stays honest.
 
@@ -1989,10 +1672,7 @@
    Per owning ns, emits a `:seon.ns/name` + `:seon.ns/source` row (via
    [[ns-row]]) so the `[:seon.ns/name <kw>]` lookup-ref on `:seon.fn/ns`
    resolves. EXEMPLAR nses (context-focus-redesign root set) carry the
-   REAL FULL FILE TEXT; all other core nses keep the minimal
-   `(ns x)` stub. Both are load-safe: core rows are NOT loaded
-   ([[agent-ns-set]] excludes any ns in `(core-ns-set)` from the
-   DB-layer load).
+   REAL FULL FILE TEXT; all other core nses keep the minimal `(ns x)` stub.
 
    Always emits the FULL core row set — a function of `core-vars`
    + the registered `!extra-core-vars` + the on-disk source,
