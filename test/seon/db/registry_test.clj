@@ -75,6 +75,7 @@
                 {::registry/database-name database-name
                  ::registry/backend :memory})
         conn (::registry/conn opened)
+        attachment (::registry/attachment opened)
         connection-a (Object.)
         connection-b (Object.)
         connect-calls (atom 0)
@@ -93,20 +94,58 @@
       (let [first-acquire
             (registry/acquire-database!
              {::registry/database-name database-name
+              ::registry/attachment attachment
               ::registry/transport-connection connection-a})
+            snapshot-after-first
+            (::registry/snapshot (registry/snapshot-registry {}))
             duplicate-acquire
             (registry/acquire-database!
              {::registry/database-name database-name
+              ::registry/attachment attachment
               ::registry/transport-connection connection-a})
+            snapshot-after-duplicate
+            (::registry/snapshot (registry/snapshot-registry {}))
+            snapshot-before-wrong
+            (::registry/snapshot (registry/snapshot-registry {}))
+            wrong-attachment (assoc attachment ::coordinate/branch
+                                    :registry.branch/wrong)
+            duplicate-wrong
+            (try
+              (registry/acquire-database!
+               {::registry/database-name database-name
+                ::registry/attachment wrong-attachment
+                ::registry/transport-connection connection-a})
+              nil
+              (catch clojure.lang.ExceptionInfo exception exception))
+            fresh-wrong
+            (try
+              (registry/acquire-database!
+               {::registry/database-name database-name
+                ::registry/attachment wrong-attachment
+                ::registry/transport-connection connection-b})
+              nil
+              (catch clojure.lang.ExceptionInfo exception exception))
+            snapshot-after-wrong
+            (::registry/snapshot (registry/snapshot-registry {}))
             second-acquire
             (registry/acquire-database!
              {::registry/database-name database-name
+              ::registry/attachment attachment
               ::registry/transport-connection connection-b})]
         (is (::registry/acquired? first-acquire))
         (is (false? (::registry/acquired? duplicate-acquire)))
+        (is (= snapshot-after-first snapshot-after-duplicate)
+            "a duplicate correct acquire changes neither membership nor Datahike ownership")
+        (is (= :seon.db.registry.error/attachment-conflict
+               (:seon.error/kind (ex-data duplicate-wrong)))
+            "attachment validation precedes duplicate membership")
+        (is (= :seon.db.registry.error/attachment-conflict
+               (:seon.error/kind (ex-data fresh-wrong))))
+        (is (= snapshot-before-wrong snapshot-after-wrong)
+            "wrong attachments change neither exact transport membership nor the ensured reference")
         (is (::registry/acquired? second-acquire))
         (is (= 1 @connect-calls)
-            "the first connection takes the ensured reference; only its sibling reconnects")
+            "wrong attachments never connect; only the correct sibling reconnects")
         (is (identical? conn
                         (::registry/conn
                          (registry/resolve-connection
@@ -158,11 +197,13 @@
 
 (deftest administrative-reference-is-independent-of-live-connections
   (let [database-name :registry/admin-and-transport
-        connection (Object.)]
-    (ensure-database!
-     {::registry/database-name database-name ::registry/backend :memory})
+        connection (Object.)
+        opened (ensure-database!
+                {::registry/database-name database-name
+                 ::registry/backend :memory})]
     (registry/acquire-database!
      {::registry/database-name database-name
+      ::registry/attachment (::registry/attachment opened)
       ::registry/transport-connection connection})
     (ensure-database!
      {::registry/database-name database-name ::registry/backend :memory})
@@ -193,6 +234,7 @@
         first-conn (::registry/conn first)]
     (registry/acquire-database!
      {::registry/database-name database-name
+      ::registry/attachment (::registry/attachment first)
       ::registry/transport-connection connection-a})
     (let [release
           (future
@@ -208,6 +250,7 @@
             (try
               (registry/acquire-database!
                {::registry/database-name database-name
+                ::registry/attachment (::registry/attachment first)
                 ::registry/transport-connection connection-b})
               nil
               (catch clojure.lang.ExceptionInfo exception exception))]
@@ -223,6 +266,7 @@
           "reopen creates a new Datahike connection generation")
       (registry/acquire-database!
        {::registry/database-name database-name
+        ::registry/attachment (::registry/attachment reopened)
         ::registry/transport-connection connection-b})
       (is (false?
            (::registry/released?
@@ -238,11 +282,13 @@
 
 (deftest failed-final-connection-drain-retains-cleanup-required
   (let [database-name :registry/final-drain-failure
-        connection (Object.)]
-    (ensure-database!
-     {::registry/database-name database-name ::registry/backend :memory})
+        connection (Object.)
+        opened (ensure-database!
+                {::registry/database-name database-name
+                 ::registry/backend :memory})]
     (registry/acquire-database!
      {::registry/database-name database-name
+      ::registry/attachment (::registry/attachment opened)
       ::registry/transport-connection connection})
     (let [result
           (registry/release-database-acquisition!
