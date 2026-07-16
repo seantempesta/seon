@@ -1293,6 +1293,20 @@ Datahike connection, and cluster count does not multiply indexed database
 state. Static reachability is only a guard against accidentally restoring a
 second owner.
 
+The retained-state density gate uses real Bun OS children and the canonical
+persistent database session. Existing query replies already expose exact
+attachment/coordinate plus `miss-owner`, `miss-joined`, and `hit` cache
+evidence; the JVM already exposes registry, committed-value identity,
+query-cache/single-flight, and executor evidence. The missing proof harness is
+test-only: hold 1 then 8 Bun children behind a barrier, issue the same expensive
+query at one coordinate, and sample JVM connection/index-root identity plus
+child PID/RSS/heap and open descriptors. One connection/generation and one cold
+owner must serve all children; the second pass is all hits; child count must not
+change index-root identity; children must hold no database-file or publication
+descriptor; all flights/executor requests return to zero; and child retained
+heap stays invariant as the database grows. No production evidence API or
+package-size measurement is added for this test.
+
 - **Stable integration boundary:** application and agent code continues to use
   the existing `seon.db` functions. Only `seon.db` owns the persistent Bun
   session, protocol requests, cancellation, and ordinary response decoding;
