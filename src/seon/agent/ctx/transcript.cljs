@@ -1085,66 +1085,15 @@
                     :seon.agent.run/form-count
                     (or (query-result run-form-member) 0)})))))))
 
-(declare transcript-block)
+(declare format-transcript-block)
 
-(defn ^:async transcript-block!
+(defn ^:async transcript-block
   "Acquire and render the transcript at the active database coordinate."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [input]
-  (transcript-block (await (acquire-transcript input))))
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [input _invoke-selected!]
+  (format-transcript-block (await (acquire-transcript input))))
 
-(defn- local-transcript-input
-  "Temporarily adapt the current local prompt call to ordinary transcript data."
-  [{:seon.agent/keys [id] db-value :seon.db/db :as input}]
-  (let [db-value (or db-value @db/*conn*)
-        agent (agent-rec id db-value)
-        my-eid (:db/id agent)
-        turns (ctx/agent-turns id db-value)
-        events (let [turn-ats (mapv :seon.agent.turn/at turns)
-                     msgs (or (message-events db-value my-eid id turn-ats) [])
-                     evals (eval-events db-value id)
-                     rank {:message 0 :eval 1}]
-                 (->> (concat msgs evals)
-                      (sort-by (juxt #(.getTime ^js (::at %))
-                                     #(rank (::kind %) 9)))
-                      with-ns-markers))
-        last-action-at (some->> events
-                                (filter #(or (= :eval (::kind %))
-                                             (::outbound? %)))
-                                last
-                                ::at)
-        run (derive/current-run db-value id)
-        run-id (:seon.agent.run/id run)
-        stored-node (block-ent db-value my-eid :transcript)
-        node (merge (into {} stored-node) (:seon.render/node input))
-        policy (ctx/run-policy db-value)]
-    (merge input policy
-           {:seon.agent/entity
-            (cond-> {:db/id my-eid :seon.agent/id id}
-              (:seon.agent/terminated-at agent)
-              (assoc :seon.agent/terminated-at
-                     (:seon.agent/terminated-at agent))
-              run (assoc :seon.agent/run (into {} run)))
-            :seon.render/node
-            (assoc node :seon.agent.ctx/escape-clipping?
-                   (if (contains? node :seon.agent.ctx/escape-clipping?)
-                     (:seon.agent.ctx/escape-clipping? node)
-                     (ctx/escape-clipping? id)))
-            :seon.config/repl-mode (ctx/repl-mode db-value)
-            :seon.derive/state (derive/derive-state db-value id)
-            :seon.eval/ns (ctx/current-ns {:seon.agent/id id
-                                           :seon.db/db db-value})
-            ::turn-count (count turns)
-            ::events events
-            ::turns []
-            ::messages []
-            ::last-action-at last-action-at
-            :seon.agent.run/turn-count
-            (if run-id (derive/run-turn-count db-value run-id) 0)
-            :seon.agent.run/form-count
-            (if run-id (derive/run-form-count db-value run-id) 0)})))
-
-(defn transcript-block
+(defn- format-transcript-block
   "The WHOLE bottom of the context: the [[masthead]], then the agent's
    flat TIME-ORDERED EVENT LOG (messages + evals, oldest-first, each
    rendered through the recursive [[seon.render/render]] handle via its
@@ -1166,18 +1115,13 @@
    or summarized. Within a decay band and between rotation boundaries, every
    past event is byte-identical; only the append-only edge and free dynamic
    readline move."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.agent/keys [id entity]
     cur-ns :seon.eval/ns
     last-action-at ::last-action-at
     turn-count ::turn-count
     render-fn :seon.render/render
     :as input}]
-  (if-not (or (contains? input ::turns) (contains? input ::error))
-    ;; Delete this local compatibility acquisition when the compiled prompt
-    ;; owner invokes `transcript-block!` for every symbol-backed block.
-    (transcript-block (local-transcript-input input))
-    (if-let [error (::error input)]
+  (if-let [error (::error input)]
     (str "[transcript] render failed: " (pr-str error))
     (let [node     (:seon.render/node input)
         ns-str   (if (keyword? cur-ns) (name cur-ns) (str cur-ns))
@@ -1286,7 +1230,7 @@
         tail (when readline? (readline input))]
       (->> [head body tail]
            (remove str/blank?)
-           (str/join "\n\n"))))))
+           (str/join "\n\n")))))
 
 ;; ------------------------------------------------------------
 ;; HTML twin — the debug view's right-pane transcript card. The same flat

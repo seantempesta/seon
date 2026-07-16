@@ -1694,18 +1694,16 @@
          ::escalation-text (escalation-section db oe aid)}))
     empty-plan-teaching))
 
-(defn plan-block
-  "Context-section fn (`:plan`, config manifest priority 45):
-   [[plan-body]] for the CALLING agent — the `:seon.agent/id` in the render
-   input, resolved as a `[:seon.agent/id id]` ref against the render's db
-   value — absent `:seon.db/db` defaults to the current conn, the same
-   convention as every other core section fn. An agent with no plan data
-   gets [[empty-plan-teaching]] — the block's own decompose-first
-   workflow header (colocation, 2026-07-10); everything else is derived,
-   nothing stored, nothing to acknowledge."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (plan-body (or db @db/*conn*) [:seon.agent/id id]))
+(defn ^:async plan-block
+  "Acquire and render the calling agent's bounded plan at the active database
+   coordinate. An agent with no plan data gets [[empty-plan-teaching]];
+   everything else is derived and nothing is acknowledged or stored."
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [input _invoke-selected!]
+  (let [acquired (await (acquire-plan-block input))]
+    (if-let [error (:seon.error/message acquired)]
+      (str "[plan] render failed: " (pr-str acquired))
+      (format-plan-body acquired))))
 
 ;; --- The `:seon.render/html` twin — the human's live plan surface. --------
 ;; --- Colocated with [[plan-block]] (the transcript precedent). Zero prompt

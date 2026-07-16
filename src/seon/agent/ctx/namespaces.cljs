@@ -50,7 +50,7 @@
 ;; The compact card renderer is defined at the BOTTOM of this file (its
 ;; helpers cluster there); [[namespaces-block]] above it dispatches the long
 ;; tail to it, so forward-declare it here.
-(declare namespaces-block render-one-ns-compact render-one-ns-compact-row
+(declare format-namespaces-block render-one-ns-compact render-one-ns-compact-row
          resolve-cfg)
 
 ;; ============================================================
@@ -677,74 +677,15 @@
                   (str/includes? card "(not in db"))
       card)))
 
-(defn- local-namespaces-input
-  "Temporarily adapt the local database value to eager namespace rows."
-  [{:seon.db/keys [db] id :seon.agent/id :as input}]
-  (let [policy (config/namespaces-policy)
-        cur-ns (when id
-                 (try
-                   (some-> (ctx/current-ns {:seon.agent/id id :seon.db/db db})
-                           name keyword)
-                   (catch :default _ nil)))
-        block (ns-block-entity db id)
-        agent (when id (db/entity {:seon.db/db db
-                                   :seon.db/ref [:seon.agent/id id]}))
-        full-source (set (resolve-cfg block agent ::full-source #{}))
-        required (required-ns-selections
-                   (seval/persisted-require-edges db cur-ns) cur-ns)
-        names (->> (cond-> (into (set (keys required)) full-source)
-                     cur-ns (conj cur-ns))
-                   (filter included-ns?)
-                   (sort-by name)
-                   vec)
-        txs (into {}
-                  (db/query
-                    {:seon.db/db db
-                     :seon.db/query
-                     '[:find ?name ?tx
-                       :in $ [?name ...]
-                       :where
-                       [?namespace :seon.ns/name ?name ?tx]]
-                     :seon.db/args [names]}))
-        namespace-rows
-        (mapv (fn [nm]
-                (let [row (try
-                            (db/pull {:seon.db/db db
-                                      :seon.db/ref [:seon.ns/name nm]
-                                      :seon.db/pull-pattern namespace-selector})
-                            (catch :default _ nil))]
-                  (cond-> (or row {:seon.ns/name nm})
-                    (get txs nm) (assoc :seon.db/tx (get txs nm)))))
-              names)
-        schema-rows
-        (->> (db/query
-               {:seon.db/db db
-                :seon.db/query
-                '[:find ?key ?form
-                  :where
-                  [?schema :seon.schema/key ?key]
-                  [?schema :seon.schema/form ?form]]})
-             (mapv (fn [[k form]]
-                     {:seon.schema/key k :seon.schema/form form})))]
-    (merge input
-           {:seon.config/current-ns (:seon.config/current-ns policy)
-            :seon.agent.ctx.render-fns/current-ns cur-ns
-            ::full-source full-source
-            ::with-tests (set (resolve-cfg block agent ::with-tests #{}))
-            ::current-full? (resolve-cfg block agent ::current-full? true)
-            ::current-tests? (resolve-cfg block agent ::current-tests? true)
-            ::namespace-rows namespace-rows
-            :seon.agent.ctx/schema-rows schema-rows})))
-
-(defn ^:async namespaces-block!
+(defn ^:async namespaces-block
   "Acquire and render namespaces at the active database coordinate."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [input]
-  (namespaces-block
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [input _invoke-selected!]
+  (format-namespaces-block
     (await (acquire-schema-rows! (await (acquire-namespace-rows!
                                          (:seon.agent/id input)))))))
 
-(defn namespaces-block
+(defn- format-namespaces-block
   "The namespaces body — the CURRENT ns full, its requires as cards.
 
    COMPACT EVERYTHING EXCEPT THE CURRENT NS — no hardcoded
@@ -783,12 +724,8 @@
 
    NEVER a render-time file read — the boot indexer is the one reader; both the
    full renderer and the compact card read only indexed rows."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [raw-input]
-  (let [{id :seon.agent/id :as input}
-        (if (contains? raw-input ::namespace-rows)
-          raw-input
-          (local-namespaces-input raw-input))]
+  [input]
+  (let [{id :seon.agent/id} input]
     (if-let [error (or (::error input) (database-error input))]
       (str "[namespaces] render failed: " (pr-str error))
       (let [policy {:seon.config/current-ns (:seon.config/current-ns input)}
