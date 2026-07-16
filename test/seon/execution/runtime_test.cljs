@@ -217,6 +217,62 @@
               (is false (str "selected invocation rejected: " error))
               (done)))))))
 
+(deftest derived-renderers-reuse-acquired-namespace-rows
+  (async done
+    (let [observed (atom nil)
+          calls (atom [])
+          entity
+          {:seon.agent/id "agent-1"
+           :seon.agent/ctx
+           [{:seon.agent.ctx/name :namespaces
+             :seon.agent.ctx/priority 20
+             :seon.render/ai
+             (pr-str 'seon.agent.ctx.namespaces/namespaces-block)}]}
+          invoke-selected!
+          (fn [selected]
+            (swap! calls conj selected)
+            (js/Promise.resolve
+              (if (= 'seon.agent.ctx.namespaces/namespaces-block
+                     (:seon.execution/function-symbol (first selected)))
+                [{:seon.execution/ok? true
+                  :seon.execution/value
+                  {:seon.render/ai "namespace result"
+                   :seon.agent.ctx.render-fns/current-ns :my.test
+                   :seon.agent.ctx.render-fns/fn-rows
+                   [{:seon.fn/sym "my.test/view"
+                     :seon.fn/spec
+                     (pr-str
+                       '[:=> [:cat :map]
+                         [:map [:seon.render/ai :string]]])
+                     :seon.fn/private? false}]}}]
+                [{:seon.execution/ok? true
+                  :seon.execution/value "derived result"}])))]
+      (-> (call-with-pull-result
+            entity {:seon.agent/id "agent-1"} observed invoke-selected!)
+          (.then
+            (fn [rendered]
+              (is (= 2 (count @calls))
+                  "stored acquisition and derived execution are two bounded batches")
+              (is (= ['seon.agent.ctx.namespaces/namespaces-block
+                      'seon.agent.ctx.render-fns/render-fn-block-ai]
+                     (mapv (comp :seon.execution/function-symbol first)
+                           @calls)))
+              (is (= [:namespaces :render-fn/view]
+                     (mapv :seon.agent.ctx/name
+                           (:seon.agent.ctx/rendered-blocks rendered))))
+              (is (= ["namespace result" "derived result"]
+                     (mapv :seon.render/text
+                           (:seon.agent.ctx/rendered-blocks rendered))))
+              (is (every?
+                    #(nil? (get-in % [:seon.execution/arguments 0 :seon.db/db]))
+                    (mapcat identity @calls))
+                  "no derived call receives a local database value")
+              (done)))
+          (.catch
+            (fn [error]
+              (is false (str "derived renderer acquisition rejected: " error))
+              (done)))))))
+
 (deftest empty-and-missing-agents-render-the-empty-existing-shape
   (async done
     (let [observed (atom nil)

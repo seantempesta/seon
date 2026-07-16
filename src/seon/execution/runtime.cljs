@@ -6,6 +6,7 @@
    [seon.agent.ctx.canvas]
    [seon.agent.ctx.menu]
    [seon.agent.ctx.namespaces]
+   [seon.agent.ctx.render-fns :as render-fns]
    [seon.agent.ctx.subagents]
    [seon.agent.ctx.transcript]
    [seon.agent.ctx.typeahead-steps]
@@ -53,16 +54,41 @@
                             :call (block-call id entity block)})))
                      vec)]
     (if (empty? targets)
-      blocks
+      {:seon.execution.runtime/blocks blocks
+       :seon.execution.runtime/values []}
       (let [results (await (invoke-selected! (mapv :call targets)))]
-        (reduce
-          (fn [resolved [{:keys [index block]} result]]
-            (assoc-in resolved [index :seon.render/ai]
-                      (if (::execution/ok? result)
-                        (ai-value (::execution/value result))
-                        (block-error-text block result))))
-          blocks
-          (map vector targets results))))))
+        {:seon.execution.runtime/blocks
+         (reduce
+           (fn [resolved [{:keys [index block]} result]]
+             (assoc-in resolved [index :seon.render/ai]
+                       (if (::execution/ok? result)
+                         (ai-value (::execution/value result))
+                         (block-error-text block result))))
+           blocks
+           (map vector targets results))
+         :seon.execution.runtime/values
+         (mapv #(when (::execution/ok? %) (::execution/value %)) results)}))))
+
+(defn- derived-blocks
+  [stored values]
+  (when-let [namespace-value
+             (some #(when (and (map? %)
+                               (contains? % ::render-fns/fn-rows))
+                      %)
+                   values)]
+    (let [stored-pins (into #{}
+                            (comp (mapcat (juxt :seon.render/ai
+                                                :seon.render/html))
+                                  (filter symbol?))
+                            stored)
+          canvas-pins (into #{} (mapcat #(if (map? %)
+                                           (or (::render-fns/pinned-syms %) #{})
+                                           #{}))
+                            values)]
+      (render-fns/derived-blocks
+        {::render-fns/current-ns (::render-fns/current-ns namespace-value)
+         ::render-fns/fn-rows (::render-fns/fn-rows namespace-value)
+         ::render-fns/pinned-syms (into stored-pins canvas-pins)}))))
 
 (defn ^:async ^:private resolve-whole-prompt!
   [id entity value invoke-selected!]
@@ -111,8 +137,21 @@
         blocks (if (some? whole-prompt)
                  []
                  (ctx/selected-agent-blocks entity profile))
-        resolved-blocks (await (resolve-blocks! id entity blocks
-                                                invoke-selected!))
+        stored-resolution (await (resolve-blocks! id entity blocks
+                                                  invoke-selected!))
+        stored-blocks (:seon.execution.runtime/blocks stored-resolution)
+        derived (when (and (not (seq profile)) (nil? whole-prompt))
+                  (derived-blocks blocks
+                                  (:seon.execution.runtime/values
+                                    stored-resolution)))
+        derived-resolution (await (resolve-blocks! id entity (vec derived)
+                                                   invoke-selected!))
+        resolved-blocks
+        (->> (concat stored-blocks
+                     (:seon.execution.runtime/blocks derived-resolution))
+             (sort-by (juxt :seon.agent.ctx/priority
+                            (comp str :seon.agent.ctx/name)))
+             vec)
         resolved-whole-prompt
         (when (some? whole-prompt)
           (await (resolve-whole-prompt! id entity whole-prompt

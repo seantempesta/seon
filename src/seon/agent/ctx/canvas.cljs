@@ -315,7 +315,9 @@
                             ::canvas/wired wired})
           source (when (and result (err/agent-authored-sym? value))
                    (:seon.execution/source result))]
-      (rendered-canvas-text response source 2000))
+      {:seon.render/ai (rendered-canvas-text response source 2000)
+       ::render-fns/pinned-syms
+       (cond-> #{} (symbol? value) (conj value))})
     ;; CONTRACT: this section NEVER vanishes and NEVER surfaces a bare
     ;; ⚠/malli code. `render-agent-canvas` is already throw-safe, so this
     ;; backstop only fires on an UNEXPECTED failure (e.g. a db read) —

@@ -472,7 +472,7 @@
   (str " …⟨⚠ clipped at " budget " of " total
        " tokens — narrow this render fn's output⟩"))
 
-(defn render-fn-block-ai
+(defn ^:async render-fn-block-ai
   "The derived auto-run block's `:seon.render/ai` slot — run the fn, keep
    its ai twin.
 
@@ -481,19 +481,24 @@
    `seon.config/render-fn-token-cap` tokens. An interrupt / error / wrong
    shape becomes a `;; ⚠` line naming the fn — the agent sees exactly what
    to fix, in place, and the render pass survives (errors-as-values)."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [in]
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [in invoke-selected!]
   (let [sym (::fn-sym (:seon.render/node in))
-        r   (run-render-fn in :seon.render/ai)]
+        result (first
+                 (await
+                   (invoke-selected!
+                     [{:seon.execution/function-symbol sym
+                       :seon.execution/arguments
+                       [(cond-> {:seon.render/entity (:seon.agent/entity in)}
+                          (:seon.agent/id in)
+                          (assoc :seon.agent/id (:seon.agent/id in)))]}])))]
     (cond
-      (and (map? r) (:seon.render.sci/interrupt r))
-      (str ";; ⚠ render fn " sym " did not terminate within its budget and was "
-           "skipped — render fns must be fast, terminating db→view derivations")
-      (and (map? r) (:seon.render.sci/error r))
+      (not (:seon.execution/ok? result))
       (str ";; ⚠ render fn " sym " failed: "
-           (get-in r [:seon.render.sci/error :seon.error/message]))
+           (get-in result [:seon.execution/error :seon.error/message]))
       :else
-      (let [s (if (map? r) (:seon.render/ai r) r)]
+      (let [r (:seon.execution/value result)
+            s (if (map? r) (:seon.render/ai r) r)]
         (cond
           (nil? s)    ""
           (string? s) (tokens/clip-str s (config/render-fn-token-cap) clip-marker)

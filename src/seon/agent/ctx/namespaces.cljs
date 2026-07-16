@@ -679,11 +679,18 @@
 
 (defn ^:async namespaces-block
   "Acquire and render namespaces at the active database coordinate."
-  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :map]}
   [input _invoke-selected!]
-  (format-namespaces-block
-    (await (acquire-schema-rows! (await (acquire-namespace-rows!
-                                         (:seon.agent/id input)))))))
+  (let [acquired
+        (await (acquire-schema-rows! (await (acquire-namespace-rows!
+                                             (:seon.agent/id input)))))
+        current-ns (:seon.agent.ctx.render-fns/current-ns acquired)
+        current-row (some #(when (= current-ns (:seon.ns/name %)) %)
+                          (::namespace-rows acquired))]
+    {:seon.render/ai (format-namespaces-block acquired)
+     :seon.agent.ctx.render-fns/current-ns current-ns
+     :seon.agent.ctx.render-fns/fn-rows
+     (vec (:seon.fn/_ns current-row))}))
 
 (defn- format-namespaces-block
   "The namespaces body — the CURRENT ns full, its requires as cards.
