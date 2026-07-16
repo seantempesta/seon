@@ -3297,6 +3297,12 @@
                      db.protocol/committed-status}
                    transaction-status))))
 
+(defn- stale-coordinate-failure?
+  [envelope]
+  (= db.protocol/stale-coordinate-error
+     (get-in envelope [::db/error :seon.error/data
+                       ::db.protocol/error-kind])))
+
 (declare canonical-edn)
 
 (defn- canonical-order-key
@@ -3411,6 +3417,7 @@
   {:malli/schema [:=> [:catn [::record-request :map]] :any]}
   [{::keys [at narration source result duration-ms tee output pending?
             database-operations eval-id]
+    expected-coordinate ::db/expected-coordinate
     turn-id :seon.agent.turn/id-of-turn
     ns      ::ending-ns}]
   (let [operation-publication
@@ -3504,15 +3511,20 @@
                    :seon.eval/status status})]
             (await
               (db/transact!
-                {:seon.db/tx-data
-                 (into [fence (merge (eval-row-for eval-id) terminal-row)]
-                       accepted-tee)}))))
+                (cond->
+                  {:seon.db/tx-data
+                   (into [fence (merge (eval-row-for eval-id) terminal-row)]
+                         accepted-tee)}
+                  expected-coordinate
+                  (assoc ::db/expected-coordinate expected-coordinate))))))
         transact-record! (if eval-id terminalize-record! allocate-record!)
         primary (await (transact-record! (vec (or tee []))))
         committed-id (or eval-id
                          (get-in primary [::db.id/ids ::eval-allocation]))
         settled-read
-        (when (and eval-id (not (:seon.db/ok? primary)))
+        (when (and eval-id
+                   (not (:seon.db/ok? primary))
+                   (not (stale-coordinate-failure? primary)))
           (await
             (db/pull
               {::db/pull-pattern [:seon.eval/status]
@@ -3528,6 +3540,13 @@
          ::tee-recorded? true}
         (and (::ok? result) (not pending?))
         (assoc ::retained-value (::value result)))
+
+      (stale-coordinate-failure? primary)
+      ;; The caller may reacquire the small read-dependent program state and
+      ;; recompile this frozen outcome. Do not inspect the receipt or enter the
+      ;; transcript-without-tee fallback: neither can make a stale transaction
+      ;; correct, and the agent form must never run again.
+      primary
 
       (:seon.error/message settled-read)
       {:seon.db/ok? false

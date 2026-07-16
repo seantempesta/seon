@@ -40,6 +40,7 @@
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.internal :as db.internal]
+    [seon.db.protocol :as protocol]
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.repl.internal :as repl-internal]
@@ -416,6 +417,54 @@
           (.catch (fn [error]
                     (is false (str "ambiguous allocation test threw: " error))))
           (.finally done)))))
+
+(deftest stale-terminal-coordinate-is-returned-without-reading-or-dropping-tee
+  (async done
+    (let [expected {:seon.db.coordinate/database-id
+                    #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+                    :seon.db.coordinate/branch :db
+                    :seon.db.coordinate/commit-id
+                    #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+                    :seon.db.coordinate/t 7}
+          !request (atom nil)
+          !pulls (atom 0)
+          original-transact db/transact!
+          original-pull db/pull
+          stale {:seon.db/ok? false
+                 :seon.db/error
+                 {:seon.error/message "database moved"
+                  :seon.error/kind :core-bug
+                  :seon.error/data
+                  {::protocol/error-kind protocol/stale-coordinate-error}}}]
+      (set! db/transact!
+            (fn [& [request]]
+              (reset! !request request)
+              (js/Promise.resolve stale)))
+      (set! db/pull
+            (fn [_]
+              (swap! !pulls inc)
+              (js/Promise.reject
+               (js/Error. "stale terminalization must not pull"))))
+      (-> (seval/record-eval!
+             (assoc (eval-args "(defn f [] :ok)"
+                               [{:seon.fn/sym "my.agent/f"}])
+                    :seon.eval/eval-id "eval-stale"
+                    :seon.agent.turn/id-of-turn "turn-stale"
+                    ::db/expected-coordinate expected))
+            (.then
+             (fn [response]
+               (is (= stale response))
+               (is (= expected (::db/expected-coordinate @!request)))
+               (is (zero? @!pulls)
+                   "stale acquisition is retried by the caller, not hidden")))
+            (.catch
+             (fn [error]
+               (is false (str "stale coordinate test threw: " error))))
+            (.finally
+             (fn []
+               (set! db/transact! original-transact)
+               (set! db/pull original-pull)
+               (done)))))))
 
 (deftest allocation-retries-reuse-one-lazy-value-rejection-without-realizing-it
   (async done

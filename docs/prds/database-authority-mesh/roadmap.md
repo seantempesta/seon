@@ -1585,6 +1585,14 @@ second owner.
   This deletes three local snapshot dependencies from accepted program changes
   and removes stale-diff/component-ID code without adding a remote read.
   Focused pure transaction proof passes 3 tests/6 assertions.
+- Prestarted eval receipt terminalization now accepts the authority coordinate
+  used to compile its program transaction. A stale coordinate writes nothing
+  and returns immediately before receipt inspection, logging, or the
+  transcript-without-tee fallback, so the caller can reacquire and recompile
+  frozen data without rerunning agent code. Focused proof passes 1 test/3
+  assertions. The next slice supplies that retry loop and the remaining two
+  authority-dependent facts; unfenced local snapshot reads are not accepted as
+  the completed design.
 - Cold authored-program reconstruction now uses one seven-member
   coordinate-pinned authority request for the agent's namespace sources,
   require-edge links, functions, tests, home namespace, schemas, and function
