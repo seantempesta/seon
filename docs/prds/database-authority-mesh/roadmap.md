@@ -848,14 +848,11 @@ and require B to progress before A releases. Their results decide whether join
 coordination moves before CPU admission and whether control needs its own decode
 floor; worker-count tuning cannot answer either question.
 
-The first falsifier now confirms the gate. With three read workers, one A owner
-and two identical A joiners occupy all three while distinct database B remains
-queued. Datahike reports one `miss-owner`, two `miss-joined`, and executes the
-predicate once; only after A releases does B enter. The focused executor gate
-passes 24 tests/658 assertions. The repair must expose Datahike's existing
-single-flight acquisition before scarce Seon CPU admission: the owner consumes
-one read worker, while joiners await the same Datahike completion outside CPU
-capacity. Seon must not reproduce Datahike's cache key or coordination.
+The first falsifier confirmed the gate. With three read workers, one A owner
+and two identical A joiners occupied all three while distinct database B
+remained queued. Datahike reported one `miss-owner`, two `miss-joined`, and one
+predicate execution; B entered only after A released. This was an admission
+defect rather than a query-compute defect.
 
 The selected repair is a host-only opaque Datahike query call acquired after
 exact-value resolution but before query-compute admission. A completed hit
@@ -865,6 +862,24 @@ joiners retain ordinary request/cancellation lifetime without an executor job.
 sound. Final cancellation of an acquired but unstarted owner compare-removes
 it; run versus cancel is one phase CAS. Cache identity, evidence, completion,
 release, and ABA fencing remain entirely inside Datahike.
+
+The repair is now integrated at `3297b4be` plus the physical-lifetime follow-up
+`e4b80c96`. Standalone and `execute-many` query calls briefly acquire under
+fair read admission; completed hits finish directly, waiting callers yield
+their worker immediately, and only one `:run` owner continues in place. With
+one blocked A owner plus 32 identical callers, exactly one read job remains,
+zero joiner jobs queue, and database B completes before A releases. The same
+proof covers 33 query members in one `execute-many` request. Final unstarted
+cancellation removes the exact owner job without polling.
+
+Logical caller completion no longer releases a historical database value still
+used by the physical single-flight owner. The bounded owner-job map retains that
+exact value until executor completion; waiting/completed callers release from
+their own callback, and `execute-many` retains its one outer owner. The focused
+gate passes 4 tests/37 assertions, and query admission plus writer integration
+and executor pass 45 tests/858 assertions. Cancellation, injected release
+failure, and completion leave zero writer requests, executor jobs, Datahike
+calls, owner-job mappings, and retained database values.
 
 ### Unit 7 — remote `seon.db` and coarse core reads
 
@@ -951,8 +966,10 @@ protocol and database APIs do not change.
 The implementation is ordered by semantic dependency, while independent proof
 and consumer inventory may run in parallel:
 
-- Spine: move Datahike single-flight joiners outside scarce Seon read-worker
-  admission; process-global committed-report readiness ownership is complete.
+- Spine: implement the grounded ordered `pull-many`, strict temporal read, and
+  deterministic aggregate `execute-many` result boundaries; query
+  single-flight pre-admission and process-global committed-report readiness are
+  complete.
 - Slot 2: exact addressed-delivery accounting is complete: response slots
   bound unencoded work, fixed codec workers bound transient copies, and only
   exact framed bytes consume retained global/session output capacity.
