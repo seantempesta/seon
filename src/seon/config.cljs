@@ -869,7 +869,7 @@
 ;;;      `:seon.ai/config` row — its own consolidated env→DB surface; per-agent
 ;;;      overrides + retries are agent-entity datoms, not env);
 ;;;   2. process-launch / infra wiring read at its point of use (SEON_PORT[_FILE],
-;;;      SEON_CLUSTER_DIR, SEON_REQ_SOCK/SEON_PUB_SOCK, SEON_AGENT_ID, and the
+;;;      SEON_CLUSTER_DIR, SEON_REQ_SOCK, SEON_AGENT_ID, and the
 ;;;      SEON_EMBED feature gate) — launch wiring, not agent-tunable knobs;
 ;;;   3. `platform`'s own pre-config SEON_RUNTIME_ROOT path resolution — it is
 ;;;      the leaf this ns sits on, so it cannot require config without a cycle.

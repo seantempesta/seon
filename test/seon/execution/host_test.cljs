@@ -24,7 +24,6 @@
       ::launch/execution-build-id "execution"
       ::launch/execution-output "out/execution/main.js"
       ::launch/request-socket-path "tmp/test.req.sock"
-      ::launch/publish-socket-path "tmp/test.pub.sock"
       ::launch/writer-repl-port-file "tmp/test.writer.port"
       ::launch/process-dir "tmp/test-processes"
       ::launch/log-dir "logs/test"
