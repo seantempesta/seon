@@ -63,7 +63,13 @@
         original-unlisten db/unlisten!
         state-atom @#'router/!router-state
         prior-state @state-atom]
-    (set! db/query query)
+    ;; Preserve the public function's CLJS fixed/variadic dispatch properties.
+    ;; Replacing a multi-arity var with a plain one-arity function makes a
+    ;; compiled `(db/query request)` call fail before the fake is invoked.
+    (set! db/query
+          (fn
+            ([request] (query request))
+            ([query-form & inputs] (apply query query-form inputs))))
     (set! db/listen! listen)
     (set! db/unlisten! unlisten)
     (reset! state-atom {})

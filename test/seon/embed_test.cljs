@@ -5,17 +5,23 @@
    specced `^:async` fn must NEVER reject with an expected error — a writer
    knn-search failure RESOLVES to `{::embed/hits [] :seon/error {…}}`.
 
-   The database operation is stubbed by `set!` on `replica/knn-search!`
+   The database operation is stubbed by `set!` on `db/knn-search!`
    (restored in a
    `.finally` link), NOT `with-redefs`: this fork's `with-redefs` AWAITS an
    async body (so the form yields the resolved value and asyncifies the
    enclosing fn, breaking the `(async done …)` contract)."
   (:require
     [cljs.test :refer-macros [deftest is async]]
-    [seon.db.protocol :as protocol]
-    [seon.db.replica :as replica]
+    [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
     [seon.embed :as embed]
     [seon.test.async :refer [settle!]]))
+
+(def ^:private point
+  {::coordinate/database-id #uuid "00000000-0000-0000-0000-000000000101"
+   ::coordinate/branch :db
+   ::coordinate/commit-id #uuid "00000000-0000-0000-0000-000000000102"
+   ::coordinate/t 536870912})
 
 (defn- stub-search
   "A map-in KNN stub resolving to `reply`."
@@ -26,21 +32,21 @@
   "Run `f` (→ Promise) with knn-search stubbed to resolve `reply`; the
    original is restored when the returned Promise settles."
   [reply f]
-  (let [orig replica/knn-search!]
-    (set! replica/knn-search! (stub-search reply))
-    (.finally (f) (fn [] (set! replica/knn-search! orig)))))
+  (let [orig db/knn-search!]
+    (set! db/knn-search! (stub-search reply))
+    (.finally (f) (fn [] (set! db/knn-search! orig)))))
 
 (def ^:private failed-reply
-  {::protocol/success? false
-   ::protocol/error-kind protocol/database-error
-   ::protocol/error "writer down (stub)"})
+  {:seon.error/kind :core-bug
+   :seon.error/message "writer down (stub)"})
 
 (deftest search-resolves-error-envelope-on-wire-failure
   ;; The old behavior THREW (→ rejected Promise → instrument wrapper records
   ;; a :core fault → :crash exits the dev pod). The fix: resolve an envelope.
   (async done
     (-> (with-search-stub failed-reply
-          #(embed/search {:seon.embed/query "anything" :seon.embed/db {}}))
+          #(embed/search {:seon.embed/query "anything"
+                          :seon.embed/coordinate point}))
         (.then (fn [{:seon.embed/keys [hits] :as res}]
                  (is (= [] hits) "hits key present and empty on failure")
                  (let [err (:seon/error res)]
@@ -55,7 +61,7 @@
   (async done
     (-> (with-search-stub failed-reply
           #(embed/search-pull {:seon.embed/query "anything"
-                               :seon.embed/db {}}))
+                               :seon.embed/coordinate point}))
         (.then (fn [res]
                  (is (= [] (:seon.embed/hits res)))
                  (is (some? (:seon/error res))
@@ -67,7 +73,7 @@
     (let [hits [{:seon.embed/eid 7 :seon.embed/distance 0.25}]]
       (-> (with-search-stub hits
             #(embed/search {:seon.embed/query "anything"
-                            :seon.embed/db {}}))
+                            :seon.embed/coordinate point}))
           (.then (fn [res]
                    (is (= hits (:seon.embed/hits res)))
                    (is (nil? (:seon/error res)))))

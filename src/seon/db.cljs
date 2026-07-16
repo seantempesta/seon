@@ -72,7 +72,7 @@
     [seon.db.internal :as internal]
     [seon.db.protocol :as protocol]
     [seon.db.process :as process]
-    [seon.db.replica :as replica]
+    [seon.db.transport.uds :as uds]
     [seon.error :as error]
     [seon.schema :as schema]))
 
@@ -219,6 +219,7 @@
    [::max-work {:optional true} ::max-work]
    [::max-results {:optional true} ::max-results]
    [::max-result-weight {:optional true} ::max-result-weight]
+   [::coordinate {:optional true} ::coordinate]
    [::db    {:optional true} :any]
    [::conn  {:optional true} ::conn]])
 
@@ -233,13 +234,41 @@
    [::max-work {:optional true} ::max-work]
    [::max-results {:optional true} ::max-results]
    [::max-result-weight {:optional true} ::max-result-weight]
+   [::coordinate {:optional true} ::coordinate]
    [::db           {:optional true} :any]
    [::conn         {:optional true} ::conn]])
+
+(schema/register! ::refs [:vector :any])
+(schema/register! ::members :seon.db.protocol/members)
+(schema/register! ::results :seon.db.protocol/results)
+(schema/register!
+ ::execute-many-request
+ [:map {:closed true}
+  [::members ::members]
+  [::coordinate {:optional true} ::coordinate]
+  [::max-result-weight {:optional true} ::max-result-weight]])
+(schema/register!
+ ::knn-search-request
+ [:map {:closed true}
+  [::protocol/query ::protocol/query]
+  [::protocol/limit ::protocol/limit]
+  [::protocol/entity-ids {:optional true} ::protocol/entity-ids]
+  [::coordinate {:optional true} ::coordinate]])
+(schema/register!
+ ::pull-many-request
+ [:map
+  [::pull-pattern [:vector :any]]
+  [::refs ::refs]
+  [::max-work {:optional true} ::max-work]
+  [::max-results {:optional true} ::max-results]
+  [::max-result-weight {:optional true} ::max-result-weight]
+  [::coordinate {:optional true} ::coordinate]])
 
 (schema/register!
   ::entity-request
   [:map
    [::ref  ::entity-ref]
+   [::coordinate {:optional true} ::coordinate]
    [::db   {:optional true} :any]
    [::conn {:optional true} ::conn]])
 
@@ -317,11 +346,15 @@
    ;; a register! form).
    [::handler 'fn?]
    [::key     {:optional true} :any]
+   [::query   {:optional true} ::query-form]
+   [::datom-patterns {:optional true} :seon.db.protocol/datom-patterns]
    [::conn    {:optional true} ::conn]])
 
 (schema/register!
   ::listen-response
-  [:map [::key :any]])
+  [:map
+   [::key :any]
+   [::coordinate {:optional true} ::coordinate]])
 
 (schema/register!
   ::unlisten-request
@@ -365,17 +398,295 @@
   *conn*
   nil)
 
+(schema/register! ::session :seon.db.transport.uds/session)
+(schema/register! ::socket-path :seon.db.transport.uds/socket-path)
+(schema/register! ::database-name :seon.db.protocol/database-name)
+(schema/register! ::backend :seon.db.protocol/backend)
+(schema/register! ::database-path :seon.db.protocol/database-path)
+(schema/register! ::attachment :seon.db.coordinate/attachment)
+(schema/register! ::capabilities :seon.db.protocol/capabilities)
+(schema/register!
+ ::open-session-request
+ [:map {:closed true}
+  [::socket-path ::socket-path]
+  [::database-name ::database-name]
+  [::backend ::backend]
+  [::database-path {:optional true} ::database-path]
+  [::attachment {:optional true} ::attachment]])
+(schema/register!
+ ::open-session-response
+ [:map {:closed true}
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::capabilities ::capabilities]])
+
+(defonce ^:private !session (atom nil))
+
+(defn- session-error
+  [message data]
+  {:seon.error/message message
+   :seon.error/kind :core-bug
+   :seon.error/data data})
+
+(defn- response-error
+  [response]
+  {:seon.error/message (::protocol/error response)
+   :seon.error/kind (or (:seon.error/kind response) :core-bug)
+   :seon.error/data
+   (cond-> {::protocol/error-kind (::protocol/error-kind response)
+            ::protocol/request-id (::protocol/request-id response)}
+     (::protocol/expected-coordinate response)
+     (assoc ::protocol/expected-coordinate
+            (::protocol/expected-coordinate response))
+     (::protocol/current-coordinate response)
+     (assoc ::protocol/current-coordinate
+            (::protocol/current-coordinate response)))})
+
+(defn- valid-response-for?
+  [request response]
+  (and (protocol/valid-response? response)
+       (= (::protocol/request-id request)
+          (::protocol/request-id response))))
+
+(defn- request-on-session!
+  [session request timeout-ms]
+  (if-not (protocol/valid-request? request)
+    (js/Promise.resolve
+     (session-error "The database request is invalid."
+                    {::protocol/request-id (::protocol/request-id request)
+                     ::protocol/error (protocol/explain-request request)}))
+    (-> (uds/request! {::uds/session session
+                       ::uds/message request
+                       ::uds/timeout-ms timeout-ms})
+        (.then
+         (fn [response]
+           (if (valid-response-for? request response)
+             response
+             (session-error
+              "The database authority returned an invalid response."
+              {::protocol/request-id (::protocol/request-id request)
+               ::protocol/error (protocol/explain-response response)}))))
+        (.catch
+         (fn [exception]
+           (session-error
+            (or (.-message exception) "The database session failed.")
+            (cond-> {::protocol/request-id (::protocol/request-id request)}
+              (ex-data exception)
+              (assoc :seon.error/ex-data (ex-data exception)))))))))
+
+(defn- session-event!
+  [event]
+  (when-let [handler (get-in @!session
+                             [::interest-handlers
+                              (::protocol/request-id event) ::handler])]
+    ;; The transport treats its owner callback as a process invariant and
+    ;; closes the physical session if that callback throws or rejects. Keep
+    ;; agent/application listener mistakes on the value side of this boundary
+    ;; so one bad interest cannot disconnect every database operation in the
+    ;; process.
+    (try
+      (let [result (handler event)]
+        (when (instance? js/Promise result)
+          (.catch result
+                  (fn [exception]
+                    (js/console.warn
+                     "[seon.db/listen!" (pr-str (::protocol/request-id event))
+                     "] async-rejected:" (error/->message exception))))))
+      (catch :default exception
+        (js/console.warn
+         "[seon.db/listen!" (pr-str (::protocol/request-id event))
+         "] threw:" (error/->message exception))))))
+
+(defn ^:async open-session!
+  "Open and acquire this process's one multiplexed database session."
+  {:malli/schema [:=> [:cat ::open-session-request] ::open-session-response]}
+  [{::keys [socket-path database-name backend database-path attachment]
+    :as selection}]
+  (let [owner (js-obj)
+        claimed? (atom false)
+        opened-session (atom nil)]
+    (swap! !session
+           (fn [current]
+             (cond
+               (nil? current)
+               (do (reset! claimed? true)
+                   {::owner owner ::selection selection
+                    ::interest-handlers {}})
+
+               (and (= selection (::selection current))
+                    (::session current)
+                    (uds/connected? (::session current)))
+               current
+
+               :else current)))
+    (if-not @claimed?
+      (let [current @!session]
+        (if (and (= selection (::selection current))
+                 (::session current)
+                 (uds/connected? (::session current)))
+          {::database-name (::database-name current)
+           ::attachment (::attachment current)
+           ::coordinate (::opened-coordinate current)
+           ::capabilities (::capabilities current)}
+          (throw (ex-info "Another database session owns this process."
+                          {::selection selection
+                           :seon.error/kind :core-bug}))))
+      (try
+        (let [session
+              (await
+               (uds/connect!
+                {::uds/socket-path socket-path
+                 ::uds/on-event! session-event!
+                 ::uds/on-close!
+                 (fn [_]
+                   (swap! !session
+                          (fn [current]
+                            (if (identical? owner (::owner current))
+                              nil
+                              current))))}))
+              _ (reset! opened-session session)
+              capabilities-request
+              (protocol/capabilities-request
+               {::protocol/request-id (str (random-uuid))})
+              capabilities-response
+              (await (request-on-session! session capabilities-request 5000))
+              _ (when-not (::protocol/success? capabilities-response)
+                  (throw (ex-info "Database capability negotiation failed."
+                                  capabilities-response)))
+              ensure-request
+              (protocol/ensure-database-request
+               (cond-> {::protocol/request-id (str (random-uuid))
+                        ::protocol/database-name database-name
+                        ::protocol/backend backend}
+                 database-path (assoc ::protocol/database-path database-path)
+                 attachment (assoc ::db.coordinate/attachment attachment)))
+              ensure-response
+              (await (request-on-session! session ensure-request 15000))
+              _ (when-not (::protocol/success? ensure-response)
+                  (throw (ex-info "Opening the database failed."
+                                  ensure-response)))
+              coordinate (::db.coordinate/coordinate ensure-response)
+              attachment (db.coordinate/attachment coordinate)
+              acquire-request
+              (protocol/acquire-database-request
+               {::protocol/request-id (str (random-uuid))
+                ::protocol/database-name database-name
+                ::protocol/attachment attachment})
+              acquire-response
+              (await (request-on-session! session acquire-request 15000))
+              _ (when-not (::protocol/success? acquire-response)
+                  (throw (ex-info "Acquiring the database failed."
+                                  acquire-response)))
+              opened-coordinate (::protocol/coordinate acquire-response)
+              state {::owner owner
+                     ::selection selection
+                     ::session session
+                     ::database-name database-name
+                     ::attachment attachment
+                     ::capabilities (::protocol/capabilities
+                                     capabilities-response)
+                     ::opened-coordinate opened-coordinate
+                     ::interest-handlers {}}]
+          (swap! !session
+                 (fn [current]
+                   (if (identical? owner (::owner current)) state current)))
+          {::database-name database-name
+           ::attachment attachment
+           ::coordinate opened-coordinate
+           ::capabilities (::capabilities state)})
+        (catch :default exception
+          (when-let [session @opened-session]
+            (uds/close! session))
+          (swap! !session
+                 (fn [current]
+                   (if (identical? owner (::owner current)) nil current)))
+          (throw exception))))))
+
+(defn close-session!
+  "Close this process's database session before settling pending work."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (let [closed (atom nil)]
+    (swap! !session (fn [current] (reset! closed current) nil))
+    (if-let [session (::session @closed)]
+      (uds/close! session)
+      false)))
+
+(defn- error-value?
+  [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
+(defn- active-session
+  []
+  (let [state @!session]
+    (when (and (::session state) (uds/connected? (::session state)))
+      state)))
+
+(defn- send-request!
+  [request timeout-ms]
+  (if-let [state (active-session)]
+    (request-on-session! (::session state) request timeout-ms)
+    (js/Promise.resolve
+     (session-error "This process has no open database session."
+                    {::protocol/request-id (::protocol/request-id request)}))))
+
+(defn- resolve-head-response!
+  []
+  (if-let [{::keys [database-name]} (active-session)]
+    (send-request!
+     (protocol/resolve-head-request
+      {::protocol/request-id (str (random-uuid))
+       ::protocol/database-name database-name})
+     15000)
+    (js/Promise.resolve
+     (session-error "This process has no open database session." {}))))
+
+(declare current-tx-context)
+
+(defn- read-coordinate!
+  [request]
+  (if-let [coordinate (or (::coordinate request)
+                          (::coordinate (current-tx-context)))]
+    (js/Promise.resolve coordinate)
+    (-> (resolve-head-response!)
+        (.then
+         (fn [response]
+           (if (or (error-value? response)
+                   (not (::protocol/success? response)))
+             (if (error-value? response) response (response-error response))
+             (::protocol/coordinate response)))))))
+
+(defn- read-request-base!
+  [request]
+  (if-let [{::keys [database-name attachment]} (active-session)]
+    (-> (read-coordinate! request)
+        (.then
+         (fn [coordinate]
+           (if (error-value? coordinate)
+             coordinate
+             {::protocol/request-id (str (random-uuid))
+              ::protocol/database-name database-name
+              ::protocol/attachment attachment
+              ::protocol/coordinate coordinate}))))
+    (js/Promise.resolve
+     (session-error "This process has no open database session." {}))))
+
+(defn- read-resource-options
+  [request]
+  (cond-> {}
+    (::max-work request)
+    (assoc :datahike.resource/max-work (::max-work request))
+    (::max-results request)
+    (assoc :datahike.resource/max-results (::max-results request))
+    (::max-result-weight request)
+    (assoc :datahike.resource/max-result-weight (::max-result-weight request))))
+
 (defn attached?
   "True when this process has one live database attachment."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (let [conn *conn*]
-    ;; Datahike owns the connection lifecycle. Its final `release` changes the
-    ;; connection's wrapped cell to exactly `:released`; this is the same fact
-    ;; its own connection spec uses (`datahike.connector/::connection`). Do not
-    ;; mirror that state in another Seon atom.
-    (and (connector/connection? conn)
-         (not= :released @(:wrapped-atom conn)))))
+  (some? (active-session)))
 
 (schema/register! ::released? :boolean)
 (schema/register! ::release-connection-request
@@ -450,7 +761,22 @@
    [::ref :any]])
 (schema/register! ::index [:enum :eavt :aevt :avet])
 (schema/register! ::components [:vector :any])
-(schema/register! ::index-limit [:int {:min 1 :max 1000}])
+(schema/register! ::index-limit [:int {:min 1 :max 200}])
+(schema/register! ::direction :seon.db.protocol/direction)
+(schema/register! ::history? :boolean)
+(schema/register! ::cursor :seon.db.protocol/cursor)
+(schema/register! ::complete? :boolean)
+(schema/register!
+ ::index-page-request
+ [:map {:closed true}
+  [::index ::index]
+  [::components {:optional true} ::components]
+  [::direction ::direction]
+  [::index-limit ::index-limit]
+  [::history? {:optional true} ::history?]
+  [::cursor {:optional true} ::cursor]
+  [::coordinate {:optional true} ::coordinate]
+  [::max-result-weight {:optional true} ::max-result-weight]])
 (schema/register! ::seek? :boolean)
 (schema/register! ::index-prefix? :boolean)
 (schema/register! ::index-read-request
@@ -728,33 +1054,74 @@
   {:malli/schema
    [:function
     [:=> [:catn [::request ::transact-request]] ::transact-response]
-    [:=> [:catn [::conn ::conn] [::tx-data ::tx-data]] ::transact-response]
-    [:=> [:catn [::conn ::conn] [::tx-data ::tx-data] [::tx-meta ::tx-meta]]
-         ::transact-response]]}
+    [:=> [:catn [::tx-data ::tx-data]] ::transact-response]]}
   [& call-args]
-  (let [captures (internal/current-operation-captures)
-        [arg actual-db result]
-        (try
-          (let [arg (internal/normalize-transact-args call-args)]
-            (internal/assert-invocation-shape! arg)
-            (let [arg (update arg ::conn #(or % *conn*))
-                  actual-db @(internal/resolve-conn (::conn arg))]
-              ;; AWAIT is load-bearing: rejections must resolve to the envelope.
-              [arg actual-db (await (internal/transact!* arg))]))
-          (catch :default e
-            [nil nil (internal/commit-error-envelope e)]))]
-    (when captures
-      (internal/record-operation!
-        captures :seon.db.read.operation/transact actual-db
-        (dissoc (or arg {::tx-data (vec call-args)})
-                ::conn ::return-report?)
-        (dissoc result ::tx-report)
-        false
-        (or (::coordinate result)
-            (when actual-db
-              (try (db.coordinate/resolved actual-db)
-                   (catch :default _ nil))))))
-    result))
+  (try
+    (let [arg (cond
+                (and (= 1 (count call-args))
+                     (map? (first call-args)))
+                (first call-args)
+
+                (and (= 1 (count call-args))
+                     (vector? (first call-args)))
+                {::tx-data (first call-args)}
+
+                :else
+                {::tx-data (vec call-args)})
+          _ (when (or (::conn arg) (::return-report? arg))
+              (throw
+               (ex-info
+                "Remote transactions do not accept a connection or raw report."
+                {::request arg :seon.error/kind :user-input})))
+          tx-data (-> (::tx-data arg)
+                      internal/coerce-identity-symbol-idents
+                      internal/normalize-entity-ref-keys)
+          merged-opts (internal/merge-tx-context-into-opts (::opts arg))
+          tx-meta (:tx-meta merged-opts)
+          attrs (into (internal/extract-tx-attrs tx-data) (keys tx-meta))
+          _ (internal/validate-attrs! attrs)
+          _ (internal/validate-values! tx-data)
+          _ (internal/validate-values! [tx-meta])
+          request-id (str (random-uuid))
+          generated? (contains? arg :seon.db.id/generated-candidates)
+          request
+          (protocol/transaction-request
+           (cond-> {::protocol/request-id request-id
+                    ::protocol/database-name
+                    (::database-name (active-session))
+                    ::protocol/transaction-data
+                    (internal/encode-edn-slot-values tx-data)}
+             (seq tx-meta)
+             (assoc ::protocol/transaction-meta tx-meta)
+             (::expected-coordinate arg)
+             (assoc ::protocol/expected-coordinate
+                    (::expected-coordinate arg))
+             generated?
+             (assoc ::protocol/generated-candidates
+                    (:seon.db.id/generated-candidates arg))))
+          response (await (send-request! request 120000))]
+      (cond
+        (error-value? response)
+        {::ok? false ::error response}
+
+        (not (::protocol/success? response))
+        {::ok? false ::error (response-error response)}
+
+        :else
+        (let [point (::protocol/coordinate response)
+              transaction-data (::protocol/transaction-data response)]
+          (cond-> {::ok? true
+                   ::coordinate point
+                   ::tempids (::protocol/temporary-ids response)
+                   ::tx (::db.coordinate/t point)
+                   ::tx-count (count transaction-data)
+                   ::added (::protocol/datoms-added response)
+                   ::retracted (::protocol/datoms-retracted response)}
+            (seq (::protocol/generated-entity-ids response))
+            (assoc :seon.db.id/eids
+                   (::protocol/generated-entity-ids response))))))
+    (catch :default exception
+      (internal/commit-error-envelope exception))))
 
 ;; ---------------------------------------------------------------------------
 ;; Provenance genesis.
@@ -907,7 +1274,24 @@
         result true))
     result))
 
-(defn ^:seon.fn/agent-facing? query
+(defn ^:async ^:private query-result!
+  [request]
+  (let [base (await (read-request-base! request))]
+    (if (error-value? base)
+      base
+      (let [wire-request
+            (protocol/query-request
+             (merge base
+                    {::protocol/query-form (::query request)
+                     ::protocol/arguments (vec (or (::args request) []))}
+                    (read-resource-options request)))
+            response (await (send-request! wire-request 30000))]
+        (cond
+          (error-value? response) response
+          (not (::protocol/success? response)) (response-error response)
+          :else (:datahike.query/result response))))))
+
+(defn ^{:async true :seon.fn/agent-facing? true} query
   "Ask the database a question: find, count, or sum stored facts.
 
    Runs a Datalog query and returns the result set. Two call shapes:
@@ -976,51 +1360,41 @@
     [:=> [:catn [::request [:or ::query-request ::query-form]]] :any]
     [:=> [:catn [::query ::query-form]
                 [::rest [:+ :any]]] :any]]}
-  [& args]
-  (let [a0 (first args)]
-    (cond
-      ;; Seon's map-in request is identified by its fully qualified key.
-      (and (map? a0) (contains? a0 ::query))
-      (let [{::keys [query args db conn] :or {conn *conn* args []}} a0
-            db (or db @(internal/resolve-conn conn))]
-        (execute-query db query args a0))
+  ([request]
+   (await
+    (query-result!
+     (if (and (map? request) (contains? request ::query))
+       request
+       {::query request ::args []}))))
+  ([query-form & inputs]
+   (await (query-result! {::query query-form ::args (vec inputs)}))))
 
-      ;; Datahike's raw map query is a separate supported query form. Every
-      ;; map-form query carries :find; do not confuse it with a malformed
-      ;; Seon request map.
-      (and (map? a0) (contains? a0 :find))
-      (let [q a0]
-        (if (internal/db-value? (second args))
-          (let [[_ db & inputs] args]
-            (execute-query db q inputs q))
-          (let [db     @(internal/resolve-conn *conn*)
-                inputs (rest args)]
-            (execute-query db q inputs q))))
-
-      ;; A map that is neither supported shape is almost always a bare-key
-      ;; typo such as {:query ...}. Passing it to Datahike used to return #{}
-      ;; silently, turning an invalid request into a plausible answer.
-      (map? a0)
-      (throw
-        (ex-info
-          (str "seon.db/query request maps require :seon.db/query. "
-               "Use {:seon.db/query '[:find ...]} or a raw Datahike map "
-               "query containing :find.")
-          {:seon.error/kind :user-input
-           ::error          :seon.db/invalid-query-request
-           ::request        a0}))
-
-      ;; Positional: a0 IS the vector/string query. If the next arg is a db
-      ;; VALUE it is explicit; otherwise inject *conn* and treat the rest as
-      ;; :in inputs.
-      :else
-      (let [q a0]
-        (if (internal/db-value? (second args))
-          (let [[_ db & inputs] args]
-            (execute-query db q inputs q))
-          (let [db     @(internal/resolve-conn *conn*)
-                inputs (rest args)]
-            (execute-query db q inputs q)))))))
+(defn ^{:async true :seon.fn/agent-facing? true} query-with-evidence
+  "Query one exact database coordinate and retain its execution evidence."
+  {:malli/schema [:=> [:cat ::query-request] :any]}
+  [request]
+  (let [base (await (read-request-base! request))]
+    (if (error-value? base)
+      base
+      (let [wire-request
+            (protocol/query-request
+             (merge base
+                    {::protocol/query-form (::query request)
+                     ::protocol/arguments (vec (or (::args request) []))}
+                    (read-resource-options request)))
+            response (await (send-request! wire-request 30000))]
+        (cond
+          (error-value? response) response
+          (not (::protocol/success? response)) (response-error response)
+          :else
+          {::coordinate (::protocol/coordinate response)
+           :datahike.query/result (:datahike.query/result response)
+           :datahike.query/attribute-dependencies
+           (:datahike.query/attribute-dependencies response)
+           :datahike.query/cache-evidence
+           (:datahike.query/cache-evidence response)
+           :datahike.query/resource-evidence
+           (:datahike.query/resource-evidence response)})))))
 
 (defn- raw-index-datoms
   "Read and normalize one bounded Datahike index window without observing it."
@@ -1102,7 +1476,7 @@
         (try (dbi/-schema db) (catch :default _ nil)))
       {}))
 
-(defn ^:seon.fn/agent-facing? installed-schema
+(defn ^{:async true :seon.fn/agent-facing? true} installed-schema
   "The datahike schema map actually INSTALLED on `db`.
 
    Attrs the conn has seen, keyed by ident keyword. FilteredDB-safe and nil-safe.
@@ -1141,13 +1515,21 @@
              (keys (db/installed-schema @db/*conn*)))
      ; ⟹ «(:my.plan/id :my.plan/title :my.plan/status …)»
      ;   — registered, queryable, just no rows yet. Reuse it; don't fork."
-  {:malli/schema [:=> [:catn [::db :any]] :map]}
-  [db]
-  (let [result (installed-schema* db)]
-    (when-let [captures (internal/current-operation-captures)]
-      (internal/record-operation!
-        captures :seon.db.read.operation/installed-schema db {} result true))
-    result))
+  {:malli/schema
+   [:function
+    [:=> [:cat] :any]
+    [:=> [:catn [::request :map]] :any]]}
+  ([] (await (installed-schema {})))
+  ([request]
+   (let [base (await (read-request-base! request))]
+     (if (error-value? base)
+       base
+       (let [wire-request (protocol/schema-request base)
+             response (await (send-request! wire-request 15000))]
+         (cond
+           (error-value? response) response
+           (not (::protocol/success? response)) (response-error response)
+           :else (::protocol/schema response)))))))
 
 ;; --- pull-pattern guard -----------------------------------------------------
 ;; datahike-cljs throws the cryptic resolve-datom error above when an
@@ -1386,7 +1768,7 @@
         result true))
     result))
 
-(defn ^:seon.fn/agent-facing? pull
+(defn ^{:async true :seon.fn/agent-facing? true} pull
   "Pull an entity by ref using a pull pattern (sync).
 
    Returns the pulled map, or nil if the ref doesn't resolve.
@@ -1426,16 +1808,121 @@
   {:malli/schema
    [:function
     [:=> [:cat ::pull-request] :any]
-    [:=> [:catn [::selector [:vector :any]] [::eid :any]] :any]
-    [:=> [:catn [::db ::db-val] [::selector [:vector :any]] [::eid :any]] :any]]}
+    [:=> [:catn [::selector [:vector :any]] [::eid :any]] :any]]}
   ([req]
-   (let [{::keys [pull-pattern ref db conn] :or {conn *conn*}} req
-         db (or db @(internal/resolve-conn conn))]
-     (execute-pull db pull-pattern ref req)))
+   (let [base (await (read-request-base! req))]
+     (if (error-value? base)
+       base
+       (let [wire-request
+             (protocol/pull-request
+              (merge base
+                     {::protocol/selector (::pull-pattern req)
+                      ::protocol/entity-id (::ref req)}
+                     (read-resource-options req)))
+             response (await (send-request! wire-request 30000))]
+         (cond
+           (error-value? response) response
+           (not (::protocol/success? response)) (response-error response)
+           :else (::protocol/result response))))))
   ([selector eid]
-   (execute-pull @(internal/resolve-conn *conn*) selector eid {}))
-  ([db selector eid]
-   (execute-pull db selector eid {})))
+   (await (pull {::pull-pattern selector ::ref eid}))))
+
+(defn ^{:async true :seon.fn/agent-facing? true} pull-many
+  "Pull several entity refs in input order at one exact coordinate."
+  {:malli/schema [:=> [:cat ::pull-many-request] :any]}
+  [request]
+  (let [base (await (read-request-base! request))]
+    (if (error-value? base)
+      base
+      (let [wire-request
+            (protocol/pull-many-request
+             (merge base
+                    {::protocol/selector (::pull-pattern request)
+                     ::protocol/entity-ids (::refs request)}
+                    (read-resource-options request)))
+            response (await (send-request! wire-request 30000))]
+        (cond
+          (error-value? response) response
+          (not (::protocol/success? response)) (response-error response)
+          :else (::protocol/result response))))))
+
+(defn ^{:async true :seon.fn/agent-facing? true} execute-many
+  "Run independent database reads in parallel against one immutable point.
+
+   Members are ordinary protocol query, pull, pull-many, schema, or index-page
+   maps and results retain their vector positions. The authority applies one
+   aggregate result bound in addition to every member's own resource bounds."
+  {:malli/schema [:=> [:cat ::execute-many-request] :any]}
+  [request]
+  (let [base (await (read-request-base! request))]
+    (if (error-value? base)
+      base
+      (let [wire-request
+            (protocol/execute-many-request
+             (cond-> (assoc base ::protocol/members (::members request))
+               (::max-result-weight request)
+               (assoc :datahike.resource/max-result-weight
+                      (::max-result-weight request))))
+            response (await (send-request! wire-request 60000))]
+        (cond
+          (error-value? response) response
+          (not (::protocol/success? response)) (response-error response)
+          :else {::coordinate (::protocol/coordinate response)
+                 ::results (::protocol/results response)})))))
+
+(defn ^{:async true :seon.fn/agent-facing? true} index-page
+  "Read one eager bounded page in Datahike's native index order."
+  {:malli/schema [:=> [:cat ::index-page-request] :any]}
+  [request]
+  (let [base (await (read-request-base! request))]
+    (if (error-value? base)
+      base
+      (let [wire-request
+            (protocol/index-page-request
+             (cond-> (assoc base
+                            ::protocol/index (::index request)
+                            ::protocol/prefix (vec (or (::components request) []))
+                            ::protocol/direction (::direction request)
+                            ::protocol/limit (::index-limit request))
+               (::history? request)
+               (assoc ::protocol/history? true)
+               (::cursor request)
+               (assoc ::protocol/cursor (::cursor request))
+               (::max-result-weight request)
+               (assoc :datahike.resource/max-result-weight
+                      (::max-result-weight request))))
+            response (await (send-request! wire-request 30000))]
+        (cond
+          (error-value? response) response
+          (not (::protocol/success? response)) (response-error response)
+          :else
+          (cond-> {::coordinate (::protocol/coordinate response)
+                   ::datoms (::protocol/datoms response)
+                   ::complete? (::protocol/complete? response)}
+            (::protocol/cursor response)
+            (assoc ::cursor (::protocol/cursor response))))))))
+
+(defn ^:async knn-search!
+  "Run one coordinate-pinned semantic search through the database authority.
+
+   This is the database boundary used by `seon.embed`; agents use the higher
+   level embedding functions rather than this protocol-shaped operation."
+  {:malli/schema [:=> [:cat ::knn-search-request] :any]}
+  [request]
+  (let [base (await (read-request-base! request))]
+    (if (error-value? base)
+      base
+      (let [wire-request
+            (protocol/knn-search-request
+             (merge base
+                    (select-keys request
+                                 [::protocol/query ::protocol/limit
+                                  ::protocol/entity-ids])))
+            response (await (send-request! wire-request 60000))]
+        (cond
+          (error-value? response) response
+          (not (::protocol/success? response)) (response-error response)
+          :else (::protocol/hits response))))))
 
 (defn- raw-entity
   "Resolve a Datahike Entity without crossing the public observation boundary."
@@ -1495,7 +1982,7 @@
         captures :seon.db.read.operation/entity db {::ref ref} result true))
     result))
 
-(defn ^:seon.fn/agent-facing? entity
+(defn ^{:async true :seon.fn/agent-facing? true} entity
   "Fetch one stored record by its id, with all its fields.
 
    Looks up an entity by eid or lookup-ref, as a plain map (sync).
@@ -1520,17 +2007,12 @@
   ;; (auto-inject from *conn*) — one arity-1 `:=>` (the body branches on
   ;; map?); a separate eid-only `:=>` would collide with the request arity.
   {:malli/schema
-   [:function
-    [:=> [:cat [:or ::entity-request :any]] :any]
-    [:=> [:catn [::db ::db-val] [::eid :any]] :any]]}
-  ([req]
-   (if (map? req)
-     (let [{::keys [ref db conn] :or {conn *conn*}} req
-           db (or db @(internal/resolve-conn conn))]
-       (execute-entity db ref))
-     (execute-entity @(internal/resolve-conn *conn*) req)))
-  ([db eid]
-   (execute-entity db eid)))
+   [:=> [:cat [:or ::entity-request ::entity-ref]] :any]}
+  [request]
+  (await
+   (pull (if (map? request)
+           (assoc request ::pull-pattern '[*])
+           {::pull-pattern '[*] ::ref request}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Temporal — derive a db VALUE at another point in time. Reads normally run
@@ -1608,9 +2090,17 @@
   (try
     (let [response
           (await
-           (replica/resolve-transaction-coordinate!
-            {::protocol/head-coordinate head-coordinate
-             ::protocol/transaction-id transaction-id}))]
+           (if-let [{::keys [database-name]} (active-session)]
+             (send-request!
+              (protocol/resolve-transaction-coordinate-request
+               {::protocol/request-id (str (random-uuid))
+                ::protocol/database-name database-name
+                ::protocol/head-coordinate head-coordinate
+                ::protocol/transaction-id transaction-id})
+              30000)
+             (js/Promise.resolve
+              (session-error "This process has no open database session."
+                             {}))))]
       (if (::protocol/success? response)
         (let [resolved (::protocol/coordinate response)]
           (if (and (= (db.coordinate/attachment head-coordinate)
@@ -1624,14 +2114,9 @@
                ::transaction-id transaction-id
                ::coordinate resolved
                :seon.error/kind :core-bug}))))
-        (error/->map
-         (ex-info
-          (or (::protocol/error response)
-              "Transaction-coordinate resolution failed.")
-          {::head-coordinate head-coordinate
-           ::transaction-id transaction-id
-           ::protocol/error-kind (::protocol/error-kind response)
-           :seon.error/kind :core-bug}))))
+        (if (error-value? response)
+          response
+          (response-error response))))
     (catch :default exception
       (error/->map exception))))
 
@@ -1746,17 +2231,19 @@
     (dbi/-time-point db)
     (dbi/-max-tx db)))
 
-(defn ^:seon.fn/agent-facing? head-coordinate
+(defn ^{:async true :seon.fn/agent-facing? true} head-coordinate
   "The complete coordinate of one committed database value.
 
    Omit db to identify the current immutable head. Temporal `as-of` wrappers
    are not committed containers and fail; pin a complete coordinate before
    constructing a filtered historical view."
-  {:malli/schema [:function
-                  [:=> [:cat] ::coordinate]
-                  [:=> [:catn [::db ::db-val]] ::coordinate]]}
-  ([] (head-coordinate @(internal/resolve-conn *conn*)))
-  ([db] (db.coordinate/resolved db)))
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (let [response (await (resolve-head-response!))]
+    (cond
+      (error-value? response) response
+      (not (::protocol/success? response)) (response-error response)
+      :else (::protocol/coordinate response))))
 
 (defn ^:seon.fn/agent-facing? basis-t
   "The selected tx coordinate of a db value.
@@ -1935,7 +2422,9 @@
 ;; Listeners
 ;; ---------------------------------------------------------------------------
 
-(defn listen!
+(declare unlisten!)
+
+(defn ^:async listen!
   "Install a tx-listener; safe by default, never crashes the pod.
 
    Handler throws / rejections are caught and logged. `::db/handler` is a fn
@@ -1951,34 +2440,81 @@
    Sync handler return blocks transact (back-pressure); Promise return
    is fire-and-forget. Without `::db/key` a random-uuid is used; the
    same key replaces. Returns `{:seon.db/key <key>}` for [[unlisten!]]."
-  {:malli/schema [:=> [:cat ::listen-request] ::listen-response]}
-  [{::keys [handler key conn] :or {conn *conn*}}]
-  (let [c (internal/resolve-conn conn)
-        k (or key (random-uuid))]
-    (d/listen c k (internal/wrap-listen-handler k handler))
-    {::key k}))
+  {:malli/schema [:=> [:cat ::listen-request] :any]}
+  [{::keys [handler key query datom-patterns]}]
+  (if-let [{::keys [session database-name attachment] :as state}
+           (active-session)]
+    (let [request-id (if key (str key) (str (random-uuid)))
+          prior (get-in state [::interest-handlers request-id])
+          _ (when prior (await (unlisten! {::key request-id})))
+          owner (js-obj)
+          request
+          (protocol/listen-request
+           (cond-> {::protocol/request-id request-id
+                    ::protocol/database-name database-name
+                    ::protocol/attachment attachment}
+             query (assoc ::protocol/query-form query)
+             datom-patterns
+             (assoc ::protocol/datom-patterns datom-patterns)))]
+      (swap! !session assoc-in [::interest-handlers request-id]
+             {::owner owner ::handler handler})
+      (let [response (await (request-on-session! session request 15000))]
+        (if (and (not (error-value? response))
+                 (::protocol/success? response))
+          {::key request-id ::coordinate (::protocol/coordinate response)}
+          (do
+            (swap! !session
+                   (fn [current]
+                     (if (identical?
+                          owner
+                          (get-in current
+                                  [::interest-handlers request-id ::owner]))
+                       (update current ::interest-handlers dissoc request-id)
+                       current)))
+            (if (error-value? response) response (response-error response))))))
+    (session-error "This process has no open database session." {})))
 
-(defn listen-sync!
+(defn ^:async listen-sync!
   "Intent-revealing alias for [[listen!]] (sync handler, back-pressure)."
   {:malli/schema [:=> [:cat ::listen-request] ::listen-response]}
   [request]
-  (listen! request))
+  (await (listen! request)))
 
-(defn listen-async!
+(defn ^:async listen-async!
   "Alias of [[listen!]] for a Promise handler (fire-and-forget)."
   {:malli/schema [:=> [:cat ::listen-request] ::listen-response]}
   [request]
-  (listen! request))
+  (await (listen! request)))
 
-(defn unlisten!
+(defn ^:async unlisten!
   "Remove a listener by key; returns `{:seon.db/ok? true}`.
 
    Idempotent — unknown keys are a silent no-op."
-  {:malli/schema [:=> [:cat ::unlisten-request] ::unlisten-response]}
-  [{::keys [key conn] :or {conn *conn*}}]
-  (let [c (internal/resolve-conn conn)]
-    (d/unlisten c key)
-    {::ok? true}))
+  {:malli/schema [:=> [:cat ::unlisten-request] :any]}
+  [{::keys [key]}]
+  (let [request-id (str key)]
+    (if-let [{::keys [session]} (active-session)]
+      (if-let [entry (get-in @!session [::interest-handlers request-id])]
+        (let [request
+              (protocol/unlisten-request
+               {::protocol/request-id (str (random-uuid))
+                ::protocol/target-request-id request-id})
+              response (await (request-on-session! session request 15000))]
+          (if (and (not (error-value? response))
+                   (::protocol/success? response))
+            (do
+              (swap! !session
+                     (fn [current]
+                       (if (identical?
+                            (::owner entry)
+                            (get-in current
+                                    [::interest-handlers request-id ::owner]))
+                         (update current ::interest-handlers dissoc request-id)
+                         current)))
+              {::ok? true})
+            (if (error-value? response) response (response-error response))))
+        {::ok? true})
+      {::ok? true})))
 
 ;; ---------------------------------------------------------------------------
 ;; Schema-bridge + boot faces (impls in seon.db.internal)
@@ -2186,7 +2722,7 @@
                              (transact! {::tx-data tx-data})))
    :seon.error/coordinate (fn []
                             (when *conn*
-                              (head-coordinate @*conn*)))})
+                              (db.coordinate/resolved @*conn*)))})
 
 ;; ---------------------------------------------------------------------------
 ;; Config-view seam — `seon.config`'s accessors read the `:seon.config`
@@ -2224,7 +2760,7 @@
     ([]
      (when *conn*
        (let [db @*conn*
-             coordinate (head-coordinate db)
+             coordinate (db.coordinate/resolved db)
              c  @!config-view-cache]
          (if (= coordinate (::cached-config-coordinate c))
            (::cached-config-view c)

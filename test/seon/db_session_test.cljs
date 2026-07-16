@@ -67,6 +67,48 @@
     :seon.db.protocol.operation/query
     (query-response request [::query-result])
 
+    :seon.db.protocol.operation/transact
+    (protocol/success
+     {::protocol/request-id (::protocol/request-id request)
+      ::protocol/coordinate coordinate-1
+      ::protocol/previous-coordinate coordinate-0
+      ::protocol/temporary-ids {"value" 42}
+      ::protocol/transaction-data []
+      ::protocol/datoms-added 3
+      ::protocol/datoms-retracted 0})
+
+    :seon.db.protocol.operation/execute-many
+    (protocol/success
+     {::protocol/request-id (::protocol/request-id request)
+      ::protocol/database-name database-name
+      ::protocol/attachment (coordinate/attachment coordinate-0)
+      ::protocol/coordinate (::protocol/coordinate request)
+      ::protocol/results
+      [(protocol/success
+        {:datahike.query/result [::grouped-result]
+         :datahike.query/attribute-dependencies #{}
+         :datahike.query/cache-evidence {}
+         :datahike.query/resource-evidence {}})]})
+
+    :seon.db.protocol.operation/index-page
+    (protocol/success
+     {::protocol/request-id (::protocol/request-id request)
+      ::protocol/database-name database-name
+      ::protocol/attachment (coordinate/attachment coordinate-0)
+      ::protocol/coordinate (::protocol/coordinate request)
+      ::protocol/datoms [{:seon.db/e 1 :seon.db/a :db/ident
+                          :seon.db/v :example/value :seon.db/tx 1
+                          :seon.db/added? true}]
+      ::protocol/complete? true})
+
+    :seon.db.protocol.operation/knn-search
+    (protocol/success
+     {::protocol/request-id (::protocol/request-id request)
+      ::protocol/database-name database-name
+      ::protocol/attachment (coordinate/attachment coordinate-0)
+      ::protocol/coordinate (::protocol/coordinate request)
+      ::protocol/hits [{:seon.embed/eid 1 :seon.embed/distance 0.25}]})
+
     :seon.db.protocol.operation/listen
     (protocol/success
      {::protocol/request-id (::protocol/request-id request)
@@ -258,8 +300,20 @@
                        (on-event {::protocol/event protocol/resynchronization-event
                                   ::protocol/request-id request-id
                                   ::protocol/coordinate coordinate-1})
-                       (is (= [coordinate-1]
+                   (is (= [coordinate-1]
                               (mapv ::protocol/coordinate @events)))
+                       ;; A listener mistake must not escape into the native
+                       ;; session callback, whose contract closes the whole
+                       ;; physical session on an owner callback failure.
+                       (swap! @#'db/!session assoc-in
+                              [::db/interest-handlers request-id ::db/handler]
+                              (fn [_] (throw (js/Error. "listener failed"))))
+                       (is (nil? (on-event
+                                  {::protocol/event
+                                   protocol/resynchronization-event
+                                   ::protocol/request-id request-id
+                                   ::protocol/coordinate coordinate-1})))
+                       (is (true? (db/attached?)))
                        (db/unlisten! {::db/key request-id}))))
                   (.then
                    (fn [result]
@@ -280,4 +334,74 @@
         (.then (fn [_] (done)))
         (.catch (fn [error]
                   (is false (str "interest lifecycle rejected: " error))
+                  (done))))))
+
+(deftest transaction-keeps-the-compact-application-envelope
+  (async done
+    (-> (with-fake-authority
+          (fn [{::keys [requests]}]
+            (-> (open!)
+                (.then
+                 (fn [_]
+                   (reset! requests [])
+                   (db/transact!
+                    {:seon.db/tx-data
+                     [{:db/ident :example/value
+                       :db/valueType :db.type/string
+                       :db/cardinality :db.cardinality/one}]})))
+                (.then
+                 (fn [result]
+                   (is (true? (::db/ok? result)))
+                   (is (= coordinate-1 (::db/coordinate result)))
+                   (is (= 536870913 (::db/tx result)))
+                   (is (= 3 (::db/added result)))
+                   (is (= :seon.db.protocol.operation/transact
+                          (::protocol/operation (first @requests)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "transaction facade rejected: " error))
+                  (done))))))
+
+(deftest grouped-index-and-knn-reads-stay-coordinate-pinned
+  (async done
+    (-> (with-fake-authority
+          (fn [_]
+            (let [member {::protocol/operation protocol/query-operation
+                          ::protocol/query-form
+                          '[:find ?e :where [?e :db/ident]]
+                          ::protocol/arguments []}]
+              (-> (open!)
+                  (.then
+                   (fn [_]
+                     (db/execute-many
+                      {::db/members [member]
+                       ::db/coordinate coordinate-0})))
+                  (.then
+                   (fn [result]
+                     (is (= coordinate-0 (::db/coordinate result)))
+                     (is (= [::grouped-result]
+                            (get-in result [::db/results 0
+                                            :datahike.query/result])))
+                     (db/index-page
+                      {::db/index :eavt
+                       ::db/direction :forward
+                       ::db/index-limit 10
+                       ::db/coordinate coordinate-0})))
+                  (.then
+                   (fn [page]
+                     (is (true? (::db/complete? page)))
+                     (is (= :db/ident (get-in page [::db/datoms 0
+                                                    :seon.db/a])))
+                     (db/knn-search!
+                      {::protocol/query "related"
+                       ::protocol/limit 3
+                       ::db/coordinate coordinate-0})))
+                  (.then
+                   (fn [hits]
+                     (is (= [{:seon.embed/eid 1
+                              :seon.embed/distance 0.25}]
+                            hits))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "coarse read facade rejected: " error))
                   (done))))))

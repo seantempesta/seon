@@ -1,39 +1,36 @@
 (ns seon.embed
   "Embedding SEARCH API for the pod (P2-C, the agent-facing query side).
 
-   The pod is READ-ONLY and carries NO Proximum/Gemini — query embedding + KNN
+   The pod carries no Proximum or embedding model — query embedding and KNN
    live on the JVM database writer (it owns the embeddings key + HNSW index).
    This sibling of `seon.embed` is the pod's thin client for that operation:
 
      pod                                database server (JVM)
      ───                                ─────────────────
      search {query, k, where?, eids?}
-       │  resolve :where → eids on the LOCAL db value
+       │  resolve :where → eids at one authority coordinate
        │  send {query, k, eids} over UDS ─────────────►  embed query (Gemini,
        │                                                  retrieval prefix) +
        │                                                  KNN (eid entity-filter)
        │  ◄──────────────────────────  [{eid distance} …]  (distance-ascending)
-       │  search-pull: d/pull each hit's eid LOCALLY (reads are local lazy
-       │  db values) and rank → enriched hits
+       │  search-pull: one ordered pull-many at that same coordinate
        ▼
      [{:seon.embed/eid :seon.embed/distance (:seon.embed/entity …)} …]
 
    `search` returns the raw `{eid distance}` hits (the pod NEVER embeds — the
    query text goes over the wire as plain text). `search-pull` is the agent-
-   facing convenience: it pulls full source for each hit from the LOCAL db
+   facing convenience: it pulls full source for each hit at the same coordinate
    (default pattern covers `:seon.fn/*` source + the kb shape; pass your own).
 
-   TYPE-SCOPING (`:where`): the pod resolves a datalog `:where` to an eid set on
-   its local db and sends those eids; the database server restricts KNN to them via a
+   TYPE-SCOPING (`:where`): the pod resolves a datalog `:where` to an eid set at
+   the selected coordinate; the database server restricts KNN to them via a
    Proximum entity-filter. A new scope is just a different `:where` — no schema
    change. `:eids` may also be passed directly (already-resolved).
 
    Native `^:async`/`await` throughout (the pod is core.async-free)."
   (:require
-    [datahike.api :as d]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
-    [seon.db.replica :as replica]
     [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
@@ -47,9 +44,7 @@
 (schema/register! ::distance :double)
 (schema/register! ::where [:vector :any])         ; datalog :where clauses
 (schema/register! ::pull-pattern [:vector :any])
-(schema/register! ::sock-path [:string {:min 1}])
-;; A datahike db value — third-party runtime handle (see seon.db/::db-val).
-(schema/register! ::db 'map?)
+(schema/register! ::coordinate :seon.db.coordinate/coordinate)
 
 (schema/register! ::hit
                   [:map
@@ -64,8 +59,7 @@
    [::k     {:optional true} ::k]
    [::where {:optional true} ::where]
    [::eids  {:optional true} ::eids]
-   [::db    {:optional true} ::db]
-   [::sock-path {:optional true} ::sock-path]])
+   [::coordinate {:optional true} ::coordinate]])
 
 ;; A pulled entity map — its keys vary by kind (fn / kb / …), so the value
 ;; shape is a plain map of namespaced keys; the third-party-boundary pull
@@ -87,8 +81,7 @@
    [::where {:optional true} ::where]
    [::eids  {:optional true} ::eids]
    [::pull-pattern {:optional true} ::pull-pattern]
-   [::db    {:optional true} ::db]
-   [::sock-path {:optional true} ::sock-path]])
+   [::coordinate {:optional true} ::coordinate]])
 
 ;; ---------------------------------------------------------------------------
 ;; Defaults
@@ -119,27 +112,22 @@
   (some? (.. js/process -env -SEON_EMBED)))
 
 ;; ---------------------------------------------------------------------------
-;; :where → eids (LOCAL db resolution — the type-scope)
+;; :where → eids at one immutable coordinate (the type-scope)
 ;; ---------------------------------------------------------------------------
 
-(defn- local-db
-  "The db value to resolve a `:where` against / pull from: an explicit `db` or
-   the pod's `*conn*` current value. Throws if neither is available."
-  [db]
-  (cond
-    (some? db)        db
-    (some? db/*conn*) @db/*conn*
-    :else (throw (ex-info "seon.embed: *conn* is unbound and no :seon.embed/db was provided" {}))))
+(defn ^:async where->eids
+  "Resolve datalog `:where` clauses to a set of entity IDs.
 
-(defn where->eids
-  "Resolve datalog `:where` clauses to a SET of entity-ids on `db`.
-
-   The LOCAL pod db value. The clauses bind `?e`; we wrap them in a
-   `[:find ?e :where …]` query. Returns the matched eids (possibly empty).
-   This is the type-scope the database server restricts KNN to."
-  {:malli/schema [:=> [:catn [:db ::db] [:where ::where]] ::eids]}
-  [db where]
-  (into #{} (map first) (db/query (into '[:find ?e :where] where) db)))
+   The clauses bind `?e`; the authority query and subsequent KNN use the same
+   complete coordinate."
+  {:malli/schema [:=> [:cat ::where ::coordinate] :any]}
+  [where point]
+  (let [result (await (db/query {:seon.db/query
+                                 (into '[:find ?e :where] where)
+                                 :seon.db/coordinate point}))]
+    (if (:seon.error/message result)
+      result
+      (into #{} (map first) result))))
 
 ;; ---------------------------------------------------------------------------
 ;; search / search-pull
@@ -149,7 +137,7 @@
   "Find stored entities semantically similar to a text query.
 
    Embedding KNN search. Resolves `:seon.embed/where` (datalog clauses
-   binding `?e`) to an eid type-scope on the LOCAL db, then sends the query TEXT
+   binding `?e`) to an eid type-scope at one coordinate, then sends the query text
    + `k` + the eid scope over the protocol — the database server embeds the query (with
    the retrieval instruction) and runs KNN, returning the nearest eids. The pod
    does NOT embed.
@@ -162,45 +150,31 @@
    RESOLVES to `{:seon.embed/hits [] :seon/error {…}}` — errors are values,
    never a rejection."
   {:malli/schema [:=> [:cat ::search-request] :any]}
-  [{::keys [query k where eids db sock-path]}]
-  (let [k     (or k default-k)
-        ldb   (local-db db)
-        scope (cond-> (or eids #{})
-                (seq where) (into (where->eids ldb where)))
-        hits
-        (await
-         (replica/knn-search!
-          (cond-> {::protocol/query query
-                   ::protocol/limit k}
-            (seq scope)
-            (assoc ::protocol/entity-ids (vec scope))
-            sock-path
-            (assoc ::replica/request-socket-path sock-path))))]
-    ;; `knn-search!` resolves to the hits vector or the canonical failed
-    ;; protocol map. A writer failure
-    ;; (server down, embeddings disabled, index error) is an EXPECTED error and
-    ;; rides the VALUE channel — a specced ^:async fn must never reject with an
-    ;; expected error (docs/conventions.md "Errors Are Values", consequence 3).
-    (if (and (map? hits) (false? (::protocol/success? hits)))
-      {::hits []
-       :seon/error {:seon.error/kind    :core-bug
-                    :seon.error/message (str "seon.embed/search: knn-search failed — "
-                                             (or (::protocol/error hits)
-                                                 (pr-str hits)))}}
-      {::hits (vec hits)})))
-
-(defn- enrich-hit
-  "Attach the locally-pulled entity to a `{eid distance}` hit. A hit whose eid no
-   longer resolves on the local db (raced retraction) keeps just eid+distance."
-  [db pull-pattern {::keys [eid distance]}]
-  (let [ent (db/pull db pull-pattern eid)]
-    (cond-> {::eid eid ::distance distance}
-      (seq ent) (assoc ::entity ent))))
+  [{::keys [query k where eids coordinate]}]
+  (let [point (or coordinate (await (db/head-coordinate)))]
+    (if (:seon.error/message point)
+      {::hits [] :seon/error point}
+      (let [where-eids (if (seq where)
+                         (await (where->eids where point))
+                         #{})]
+        (if (:seon.error/message where-eids)
+          {::hits [] :seon/error where-eids}
+          (let [scope (into (or eids #{}) where-eids)
+                hits (await
+                      (db/knn-search!
+                       (cond-> {::protocol/query query
+                                ::protocol/limit (or k default-k)
+                                :seon.db/coordinate point}
+                         (seq scope)
+                         (assoc ::protocol/entity-ids (vec scope)))))]
+            (if (:seon.error/message hits)
+              {::hits [] :seon/error hits}
+              {::coordinate point ::hits (vec hits)})))))))
 
 (defn ^:async search-pull
   "Like [[search]] but ENRICHES each hit with the full pulled entity.
 
-   Pulled from the LOCAL db (reads are local lazy db values). This is the
+   Pulled in one ordered authority request at the search coordinate. This is the
    agent-facing convenience — one call from NL query to ranked,
    source-bearing hits.
 
@@ -210,21 +184,26 @@
                         :seon.embed/entity {…}} …]}`, distance-ascending. A
    [[search]] error envelope (`:seon/error`) passes through UNCHANGED."
   {:malli/schema [:=> [:cat ::search-pull-request] :any]}
-  [{::keys [query k where eids pull-pattern db sock-path]}]
-  ;; Resolve the LOCAL db value ONCE and forward it to `search` so the
-  ;; `:where`→eids scope and the pull-enrichment read the SAME db value — never
-  ;; two independent `*conn*` resolutions that could drift (the scope would be
-  ;; resolved against one db, the source pulled from another).
-  (let [ldb     (local-db db)
-        pattern (or pull-pattern default-pull-pattern)
+  [{::keys [query k where eids pull-pattern coordinate]}]
+  (let [pattern (or pull-pattern default-pull-pattern)
         {::keys [hits] :as res}
-        (await (search (cond-> {::query query ::db ldb}
+        (await (search (cond-> {::query query}
                          k         (assoc ::k k)
                          where     (assoc ::where where)
                          eids      (assoc ::eids eids)
-                         sock-path (assoc ::sock-path sock-path))))]
+                         coordinate (assoc ::coordinate coordinate))))]
     (if (:seon/error res)
-      ;; Wire-failure envelope from `search` — pass it through unchanged
-      ;; (hits already empty); never enrich, never reject.
       res
-      {::hits (mapv #(enrich-hit ldb pattern %) hits)})))
+      (let [entities
+            (await
+             (db/pull-many
+              {:seon.db/pull-pattern pattern
+               :seon.db/refs (mapv ::eid hits)
+               :seon.db/coordinate (::coordinate res)}))]
+        (if (:seon.error/message entities)
+          {::hits [] :seon/error entities}
+          {::hits
+           (mapv (fn [{::keys [eid distance]} entity]
+                   (cond-> {::eid eid ::distance distance}
+                     (seq entity) (assoc ::entity entity)))
+                 hits entities)})))))

@@ -2,7 +2,7 @@
   "The pod's HTTP front door — reitit over a route vector DERIVED from the
    `:seon.route/*` datoms.
 
-   The route vector is `(into (db->routes db) (static-supplement h))`:
+   The route vector is `(into (db->routes rows) (static-supplement h))`:
    [[db->routes]] is a PURE projection of the seeded `:seon.route/*` datoms
    (the core routes — `/`, `/view/unit`,
    `/agent/{id}`, `/agent/{id}/feed`, `/agent/{id}/call`), and the static
@@ -11,9 +11,10 @@
    doors, the loopback operator config door, and the flat `/call`). The
    compiled router is a discardable
    cache keyed by the exact route projection plus the static supplement
-   config. [[attach!]] installs one stable listener on the database connection;
-   route transactions reconcile that cache synchronously, while unrelated
-   transactions do no routing work. Build-time path/name conflict detection
+   config. [[attach!]] installs one query-derived authority interest and reads
+   the initial projection at its acknowledgement coordinate. Later matching
+   commits reconcile that exact coordinate, while unrelated transactions do no
+   routing work. Build-time path/name conflict detection
    catches overlaps the old `cond` silently shadowed.
 
    ## Handlers resolve LATE — a symbol per route
@@ -215,33 +216,22 @@
           (write-text! (node-res r) 500 (str "route handler unresolved: " sym))
           hijacked))))
 
-(defn- route-projection
-  "Canonical routing facts projected from one immutable database value.
+(def ^:private route-query
+  '[:find [(pull ?route [:seon.route/pattern
+                         :seon.route/method
+                         :seon.route/handler
+                         :seon.route/middleware]) ...]
+    :where [?route :seon.route/pattern]])
 
-   Only attributes that affect dispatch are retained. Stable sorting makes the
-   projection an exact, collision-free cache fingerprint; no database object
-   or transaction coordinate is retained by the router cache."
-  [db]
-  (if-not db
-    []
-    (let [pull-pattern
-          (cond-> [:seon.route/pattern
-                   :seon.route/method
-                   :seon.route/handler]
-            (contains? (db/installed-schema db) :seon.route/middleware)
-            (conj :seon.route/middleware))]
-      (->> (db/query
-             {:seon.db/db db
-              :seon.db/query
-              '[:find [(pull ?e ?pattern) ...]
-                :in $ ?pattern
-                :where [?e :seon.route/pattern]]
-              :seon.db/args [pull-pattern]})
-           (sort-by (juxt :seon.route/pattern
-                          :seon.route/method
-                          #(str (:seon.route/handler %))
-                          #(pr-str (:seon.route/middleware %))))
-           vec))))
+(defn- route-projection
+  "Canonical route rows sorted into one exact cache fingerprint."
+  [rows]
+  (->> rows
+       (sort-by (juxt :seon.route/pattern
+                      :seon.route/method
+                      #(str (:seon.route/handler %))
+                      #(pr-str (:seon.route/middleware %))))
+       vec))
 
 (defn- projection->routes
   "Compile a canonical route projection into reitit's route data."
@@ -259,7 +249,7 @@
                       rows)]))))
 
 (defn db->routes
-  "Project the `:seon.route/*` datoms in `db` into a reitit route vector.
+  "Compile ordinary `:seon.route/*` rows into a reitit route vector.
 
    GROUP the route entities by `:seon.route/pattern`, nest per
    `:seon.route/method`, wrap `:seon.route/handler` (the late-bound symbol)
@@ -267,9 +257,9 @@
    [[mw-registry]]. A pure value of the route datoms — a nil/route-less `db`
    yields `[]` (the static supplement keeps the pod serving until the seed
    lands)."
-  {:malli/schema [:=> [:catn [::db [:maybe :seon.db/db-val]]] [:vector :any]]}
-  [db]
-  (projection->routes (route-projection db)))
+  {:malli/schema [:=> [:catn [::projection [:vector :map]]] [:vector :any]]}
+  [projection]
+  (projection->routes (route-projection projection)))
 
 ;; ============================================================
 ;; The static supplement — the routes NOT (yet) seeded as `:seon.route/*`
@@ -381,69 +371,114 @@
   {::route-projection projection
    ::config           config})
 
-(defn- reconcile-cache!
-  "Recompile only when the exact route projection or runtime config changed."
-  [db]
-  (let [projection (route-projection db)
-        config     (::config @!router-state)
-        next-key   (cache-key projection config)]
-    (when-not (= next-key (::cache-key @!router-state))
-      (let [handler (build-ring-handler projection config)]
-        (swap! !router-state assoc
-               ::cache-key next-key
-               ::ring-handler handler)
+(defn ^:async ^:private reconcile-cache!
+  "Acquire and accept one exact route projection when it is still current."
+  [owner coordinate]
+  (let [rows (await (db/query {:seon.db/query route-query
+                               :seon.db/coordinate coordinate}))]
+    (when (:seon.error/message rows)
+      (throw (ex-info "Route projection failed." rows)))
+    (let [projection (route-projection rows)
+          config (::config @!router-state)
+          next-key (cache-key projection config)]
+      (when (and (identical? owner (::interest-owner @!router-state))
+                 (= coordinate (::desired-coordinate @!router-state)))
+        (when-not (= next-key (::cache-key @!router-state))
+          (swap! !router-state assoc
+                 ::cache-key next-key
+                 ::ring-handler (build-ring-handler projection config)))
+        (swap! !router-state assoc ::accepted-coordinate coordinate)
         true))))
 
-(def ^:private routing-attrs
-  "Attributes whose effective datoms can change the compiled route projection."
-  #{:seon.route/pattern
-    :seon.route/method
-    :seon.route/handler
-    :seon.route/middleware})
+(defn- refresh-routes!
+  [owner coordinate]
+  (swap! !router-state
+         (fn [state]
+           (if (identical? owner (::interest-owner state))
+             (assoc state ::desired-coordinate coordinate)
+             state)))
+  (-> (reconcile-cache! owner coordinate)
+      (.catch
+       (fn [error]
+         (log/error-console! "seon.web.router"
+                             "route projection refresh failed" error)))))
 
-(defn- route-change?
-  "Whether one rich database listener event can alter route dispatch."
-  [{:seon.db/keys [attr-index]}]
-  (boolean (some routing-attrs (keys attr-index))))
+(defn ^:async ^:private settle-routes!
+  [owner]
+  (await
+   (loop []
+     (let [{::keys [interest-owner desired-coordinate accepted-coordinate]}
+           @!router-state]
+       (cond
+         (not (identical? owner interest-owner)) false
+         (= desired-coordinate accepted-coordinate) true
+         :else
+         (do
+           (await (reconcile-cache! owner desired-coordinate))
+           (recur)))))))
 
-(defn- on-route-tx
-  "Reconcile from the post-commit database only for routing datoms."
-  [{post-db :seon.db/db :as change}]
-  (when (route-change? change)
-    (reconcile-cache! post-db)))
-
-(defn attach!
+(defn ^:async attach!
   "Attach route-cache invalidation to the canonical database listener bus.
 
    The stable listener key makes repeated attach and hot reload replacement
    idempotent in Datahike itself. No parallel registry or installed flag is
    maintained. The current database projection is reconciled before return."
-  {:malli/schema [:=> [:cat] :nil]}
+  {:malli/schema [:=> [:cat] :any]}
   []
-  (if-let [conn db/*conn*]
-    (do
-      (db/listen! {:seon.db/key     ::routes
-                   :seon.db/handler on-route-tx
-                   :seon.db/conn    conn})
-      (reconcile-cache! @conn))
-    (reconcile-cache! nil))
-  nil)
+  (if-let [interest-key (::interest-key @!router-state)]
+    {::db/key interest-key
+     ::db/coordinate (::accepted-coordinate @!router-state)}
+    (let [owner (js-obj)]
+      (swap! !router-state assoc
+             ::interest-owner owner
+             ::desired-coordinate nil
+             ::accepted-coordinate nil)
+      (let [listening
+            (await
+             (db/listen!
+              {:seon.db/key ::routes
+               :seon.db/query route-query
+               :seon.db/handler
+               (fn [event]
+                 (refresh-routes! owner
+                                  (:seon.db.protocol/coordinate event)))}))]
+        (when (:seon.error/message listening)
+          (swap! !router-state
+                 (fn [state]
+                   (if (identical? owner (::interest-owner state))
+                     (dissoc state ::interest-owner ::desired-coordinate
+                             ::accepted-coordinate)
+                     state)))
+          (throw (ex-info "Route interest failed." listening)))
+        (swap! !router-state
+               (fn [state]
+                 (if (identical? owner (::interest-owner state))
+                   (cond-> (assoc state ::interest-key (::db/key listening))
+                     (nil? (::desired-coordinate state))
+                     (assoc ::desired-coordinate (::db/coordinate listening)))
+                   state)))
+        (await (settle-routes! owner))
+        listening))))
 
-(defn detach!
+(defn ^:async detach!
   "Detach route-cache invalidation from the canonical database listener bus."
-  {:malli/schema [:=> [:cat] :nil]}
+  {:malli/schema [:=> [:cat] :any]}
   []
-  (when db/*conn*
-    (db/unlisten! {:seon.db/key ::routes :seon.db/conn db/*conn*}))
-  nil)
+  (let [interest-key (::interest-key @!router-state)]
+    (swap! !router-state dissoc
+           ::interest-owner ::interest-key ::desired-coordinate
+           ::accepted-coordinate)
+    (if interest-key
+      (await (db/unlisten! {:seon.db/key interest-key}))
+      {:seon.db/ok? true})))
 
 (defn install!
   "Inject serve's handlers and rebuild the cached reitit ring-handler.
 
-   Injects serve's handler set + same-origin predicate, then (re)builds the
-   cached router from the current route datoms. serve calls this
-   at load (re-runs on hot-reload, so the cached router tracks reloaded
-   handlers + the latest route datoms). `config` keys:
+   Injects serve's handler set + same-origin predicate. serve calls this at
+   load and [[attach!]] acquires the route projection before HTTP admission;
+   hot reload rebuilds the compiled handler from the already accepted ordinary
+   projection. `config` keys:
    `:seon.web.router/{static chat stop resume clear log complete agent-run
    config-apply operator-quiesce operator-blobs}` (the serve handler fns) +
    `:seon.web.router/same-origin?` and `:seon.web.router/loopback-peer?`
@@ -452,12 +487,18 @@
    `:seon.route/*` datoms via [[db->routes]]."
   {:malli/schema [:=> [:catn [::config :map]] :nil]}
   [config]
-  (swap! !router-state assoc
-         ::config config
-         ::same-origin-pred (or (::same-origin? config) (constantly true))
-         ::loopback-peer-pred (or (::loopback-peer? config)
-                                  (constantly false)))
-  (attach!)
+  (swap! !router-state
+         (fn [state]
+           (let [projection (or (get-in state [::cache-key
+                                               ::route-projection]) [])]
+             (assoc state
+                    ::config config
+                    ::same-origin-pred
+                    (or (::same-origin? config) (constantly true))
+                    ::loopback-peer-pred
+                    (or (::loopback-peer? config) (constantly false))
+                    ::cache-key (cache-key projection config)
+                    ::ring-handler (build-ring-handler projection config)))))
   (log/info-console! "seon.web.router" "router installed"
                      {:supplement (count (static-supplement config))})
   nil)
@@ -472,9 +513,7 @@
    (never crash the single pod thread)."
   [^js req ^js res]
   (try
-    (let [rh (or (::ring-handler @!router-state)
-                 (do (reconcile-cache! (some-> db/*conn* deref))
-                     (::ring-handler @!router-state)))
+    (let [rh (::ring-handler @!router-state)
           result (rh (node->ring req res))]
       (cond
         (nil? result)                  (write-text! res 404 (str "Not found: " (or (.-url req) "/")))

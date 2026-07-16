@@ -38,7 +38,6 @@
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
-    [seon.db.replica :as replica]
     [seon.db.restore :as db.restore]
     [seon.derive :as derive]
     [seon.eval :as seval]
@@ -107,8 +106,7 @@
                               restore-completion-result)
          restore-readiness
          (when (and restore?
-                    (db/attached?)
-                    (true? (::replica/connected? (replica/status))))
+                    (db/attached?))
            (db.restore/readiness
              {::db.restore/completion restore-completion
               ::db.restore/completion-coordinate restore-coordinate
@@ -1710,7 +1708,7 @@
                    [::restore-completion-result
                     {:optional true} ::restore-completion-result]])
 
-(defn start!
+(defn ^:async start!
   "Start the HTTP+SSE server on a loopback port.
 
    Returns a Promise resolving to:
@@ -1733,22 +1731,21 @@
    To run multiple pods, set SEON_PORT=0 for ephemeral allocation."
   {:malli/schema [:=> [:cat ::start-request] :any]}
   [{::keys [readiness-only? restore-completion-result]}]
-  (js/Promise.
+  (when-not (= (boolean readiness-only?)
+               (boolean restore-completion-result))
+    (throw
+     (ex-info "Restore readiness requires exact completion evidence."
+              {::readiness-only? readiness-only?
+               ::restore-completion-result restore-completion-result
+               :seon.error/kind :core-bug})))
+  ;; The authority acknowledges the selective route interest at one immutable
+  ;; coordinate. Compile that exact projection before HTTP admission so request
+  ;; dispatch never performs a database read.
+  (when-not readiness-only?
+    (await (router/attach!)))
+  (await
+   (js/Promise.
     (fn [resolve reject]
-      (when-not (= (boolean readiness-only?)
-                   (boolean restore-completion-result))
-        (throw
-          (ex-info "Restore readiness requires exact completion evidence."
-                   {::readiness-only? readiness-only?
-                    ::restore-completion-result restore-completion-result
-                    :seon.error/kind :core-bug})))
-      ;; Attach the router's stable database listener and reconcile the
-      ;; NOW-SEEDED route projection before accepting a request. The top-level
-      ;; install ran before boot-seed! and therefore initially compiled only
-      ;; the static supplement; route transactions after this point update the
-      ;; cache through the same Datahike listener bus as the rest of the pod.
-      (when-not readiness-only?
-        (router/attach!))
       (if-let [live-addr (some-> @!server .address)]
         ;; Already listening — reuse (see docstring; a second
         ;; start-runtime! on the same pod must NOT bounce the server).
@@ -1807,25 +1804,26 @@
                                             (str "listening on http://127.0.0.1:" bound)
                                             {:port-file port-file})
                          (resolve {:seon.web/port bound
-                                   :seon.web/port-file port-file}))))))))))
+                                   :seon.web/port-file port-file})))))))))))
 
-(defn stop!
+(defn ^:async stop!
   "Close every SSE feed and await HTTP server shutdown."
   {:malli/schema [:=> [:cat] :any]}
   []
   (datastar/close-all-feeds!)
-  (router/detach!)
-  (if-let [server @!server]
-    (js/Promise.
-     (fn [resolve reject]
-       (try
-         (.close server
-                 (fn [error]
-                   (if error
-                     (reject error)
-                     (do
-                       (reset! !server nil)
-                       (resolve nil)))))
-         (catch :default error
-           (reject error)))))
-    (js/Promise.resolve nil)))
+  (await (router/detach!))
+  (await
+   (if-let [server @!server]
+     (js/Promise.
+      (fn [resolve reject]
+        (try
+          (.close server
+                  (fn [error]
+                    (if error
+                      (reject error)
+                      (do
+                        (reset! !server nil)
+                        (resolve nil)))))
+          (catch :default error
+            (reject error)))))
+     (js/Promise.resolve nil))))
