@@ -212,7 +212,7 @@
 ;; owner's pending three-fates call — added here the same way once decided.)
 ;; The persisted agent-level dials (`:seon.agent.runtime/wake?`, `:seon.eval/home-requires`)
 ;; carry NO schema `:default` here — their DEFAULT lives ONCE at the CONSUMER
-;; (`seon.agent.runtime/wake-armed?` → true; `seon.agent.home/home-requires-for` → the
+;; (the runtime's acquired wake value → true; `seon.agent.home/home-requires-for` → the
 ;; `home-ns-require-specs` const). So a no-config agent never gets the datom
 ;; (the consumer's fallback = byte-parity), and the manifest sets the key ONLY to
 ;; OVERRIDE. Declared LEAF-shaped (NOT a keyword ref — `seon.config` is a leaf

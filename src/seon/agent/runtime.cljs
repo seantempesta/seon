@@ -48,22 +48,13 @@
   [:map {:closed true}
    [::unhosted-ids ::unhosted-ids]])
 
-(defn wake-armed?
-  "Whether `id` should install its automatic inbound-message listener.
+(defn- wake-armed?
+  "Whether an acquired agent row enables its automatic message interest."
+  [entity]
+  (not= false (::wake? entity)))
 
-   The durable `::wake?` fact defaults to true when the attribute or value is
-   absent. It gates only the listener; MCP addressability is projected from
-   durable agent facts and does not depend on this process handle."
-  {:malli/schema [:=> [:catn [:seon.agent/id :seon.agent/id]] :boolean]}
-  [id]
-  (let [db-value (some-> db/*conn* deref)]
-    (if (and db-value
-             (contains? (db/installed-schema db-value) ::wake?))
-      (let [value (::wake?
-                    (db/entity {:seon.db/db db-value
-                                :seon.db/ref [:seon.agent/id id]}))]
-        (if (boolean? value) value true))
-      true)))
+(defn- database-error? [value]
+  (and (map? value) (string? (:seon.error/message value))))
 
 (defn unhost!
   "Remove every process-local handle for one agent; idempotent."
@@ -94,8 +85,18 @@
      ::resumed? false
      ::error "resume!: runtime program generation is unavailable"
      :seon/error (:seon/error (admission/unavailable))}
-    (let [entity (db/entity {:seon.db/ref [:seon.agent/id id]})]
+    (let [entity (await
+                  (db/pull
+                   {::db/pull-pattern
+                    [:seon.agent/id :seon.agent/terminated-at ::wake?]
+                    ::db/ref [:seon.agent/id id]}))]
       (cond
+        (database-error? entity)
+        {:seon.agent/id id
+         ::resumed? false
+         ::error "resume!: database authority read failed"
+         :seon/error entity}
+
         (nil? entity)
         {:seon.agent/id id
          ::resumed? false
@@ -115,7 +116,7 @@
             (db/with-agent id
               (fn ^:async resume-agent! []
                 (when (admission/available?)
-                  (if (wake-armed? id)
+                  (if (wake-armed? entity)
                     (loop/install-wake-trigger!
                       {:seon.agent/id id
                        :seon.agent/llm-fn llm})
