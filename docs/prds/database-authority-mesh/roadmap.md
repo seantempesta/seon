@@ -931,8 +931,8 @@ protocol and database APIs do not change.
 The implementation is ordered by semantic dependency, while independent proof
 and consumer inventory may run in parallel:
 
-- Spine: close process-global committed-report readiness ownership, then move
-  Datahike single-flight joiners outside scarce Seon read-worker admission.
+- Spine: move Datahike single-flight joiners outside scarce Seon read-worker
+  admission; process-global committed-report readiness ownership is complete.
 - Slot 2: exact addressed-delivery accounting is complete: response slots
   bound unencoded work, fixed codec workers bound transient copies, and only
   exact framed bytes consume retained global/session output capacity.
@@ -954,14 +954,14 @@ checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
 The callback deletion and physical-connection acquisition boundaries are closed:
 the writer is the only public request-lifetime owner, and the socket is the one
 internal authority token with no wire session ID or second reference count.
-Physical-connection-owned selective `listen`/`unlisten` is source-complete over
+Physical-connection-owned selective `listen`/`unlisten` is complete over
 the completed `schema`, operation-local `history?`, native `index-page`, and
-fair committed-report batch/requeue seams. Integration review found one final
-ownership correction before graduation: Datahike readiness is process-global,
-so exactly one authority dispatcher must route every ready source; a thread per
-writer runtime can consume another runtime's wake-up. The correction and a
-concurrent-runtime falsifier are active before any synchronous local read is
-made asynchronous.
+fair committed-report batch/requeue seams. One process-wide dispatcher now
+routes Datahike's global readiness sources through the exact source-to-scope
+owner. A source ready during ownership publication is requeued without
+consuming a report; the final runtime interrupts and joins the sole thread.
+Concurrent-runtime and integrated interest proof passes 46 tests and 849
+assertions. No synchronous local read is made asynchronous before this seam.
 
 The source-grounded split is now exact. `schema` calls Datahike's existing
 public `d/schema`; no parallel schema projection is built. Executable probes
