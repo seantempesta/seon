@@ -48,6 +48,7 @@
 (schema/register! ::query-vec 'fn?)
 (schema/register! ::knn 'fn?)
 (schema/register! ::active-requests 'some?)
+(schema/register! ::transport-connection 'map?)
 (schema/register! ::publisher :seon.db.transport.uds/publisher)
 (schema/register!
  ::dependencies
@@ -513,10 +514,10 @@
     request))
 
 (defn- pinned-database
-  [{::keys [database-name scope] request ::request}]
-  (let [{::registry/keys [conn attachment]}
-        (registry/resolve-connection
-         {::registry/database-name (keyword database-name)})
+  [{::keys [database-name scope connection]
+    attachment ::coordinate/attachment
+    request ::request}]
+  (let [conn connection
         expected-attachment (::protocol/attachment request)
         expected-coordinate (::protocol/coordinate request)]
     (when-not (and conn (= attachment expected-attachment))
@@ -605,14 +606,17 @@
         (finally
           (d/release-materialized-db db-value))))))
 
+(declare connection-for-request)
+
 (defn- scope-for-read
-  [request]
+  [transport-connection request]
   (let [database-name (::protocol/database-name request)
-        {::registry/keys [conn attachment]}
-        (registry/resolve-connection
-         {::registry/database-name (keyword database-name)})]
-    (when (and conn (= attachment (::protocol/attachment request)))
-      (committed-scope database-name attachment (d/db conn)))))
+        {::keys [connection] :as resolved
+         attachment ::coordinate/attachment}
+        (connection-for-request transport-connection request)]
+    (when (= attachment (::protocol/attachment request))
+      (assoc resolved ::scope
+             (committed-scope database-name attachment (d/db connection))))))
 
 (defn- member-failure
   [throwable]
@@ -1375,34 +1379,45 @@
 
 (declare await-active-scope!)
 
-(defn- fence-database-work!
-  [runtime database-name expected-attachment]
+(defn- database-scope
+  [database-name expected-attachment]
   (let [{::registry/keys [conn attachment]}
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)})]
     (when (and conn (= expected-attachment attachment))
-      (when-let [scope (committed-scope database-name attachment (d/db conn))]
-        (when-let [dispatcher (::executor runtime)]
-          (executor/fence-and-drain!
-           {::executor/executor dispatcher
-            ::executor/scope scope
-            ::executor/cancel d/cancel-query!
-            ::executor/abandon-work-classes #{:provider}}))
-        (await-active-scope! runtime scope)
-        scope))))
+      (committed-scope database-name attachment (d/db conn)))))
+
+(defn- drain-database-scope!
+  [runtime scope]
+  (when-let [dispatcher (::executor runtime)]
+    (executor/fence-and-drain!
+     {::executor/executor dispatcher
+      ::executor/scope scope
+      ::executor/cancel d/cancel-query!
+      ::executor/abandon-work-classes #{:provider}}))
+  (await-active-scope! runtime scope)
+  scope)
+
+(defn- fence-database-work!
+  [runtime database-name expected-attachment]
+  (when-let [scope (database-scope database-name expected-attachment)]
+    (drain-database-scope! runtime scope)))
 
 (defn- handle-release-database
   [runtime request]
-  (let [scope (fence-database-work! runtime
-                                    (::protocol/target-database-name request)
-                                    (::protocol/target-attachment request))
+  (let [database-name (::protocol/target-database-name request)
+        attachment (::protocol/target-attachment request)
+        scope (database-scope database-name attachment)
         result
         (registry/release-attachment!
          {::registry/target-database-name
-          (keyword (::protocol/target-database-name request))
-          ::registry/attachment (::protocol/target-attachment request)
+          (keyword database-name)
+          ::registry/attachment attachment
           ::registry/expected-target-head
-          (::protocol/expected-target-head request)})]
+          (::protocol/expected-target-head request)
+          ::registry/drain!
+          (fn [_release]
+            (when scope (drain-database-scope! runtime scope)))})]
     (when (and scope (::registry/released? result) (::executor runtime))
       (executor/release-scope!
        {::executor/executor (::executor runtime) ::executor/scope scope}))
@@ -1414,37 +1429,61 @@
 
 (defn- handle-delete-branch
   [runtime request]
-  (fence-database-work! runtime
-                        (::protocol/target-database-name request)
-                        (::protocol/target-attachment request))
-  (let [result
+  (let [database-name (::protocol/target-database-name request)
+        attachment (::protocol/target-attachment request)
+        scope (database-scope database-name attachment)
+        released
+        (registry/release-attachment!
+         {::registry/target-database-name (keyword database-name)
+          ::registry/attachment attachment
+          ::registry/expected-target-head
+          (::protocol/expected-target-head request)
+          ::registry/drain!
+          (fn [_release]
+            (when scope (drain-database-scope! runtime scope)))})
+        _
+        (when (and scope (::registry/released? released) (::executor runtime))
+          (executor/release-scope!
+           {::executor/executor (::executor runtime) ::executor/scope scope}))
+        result
         (registry/delete-branch!
          {::registry/source-database-name
           (keyword (::protocol/source-database-name request))
           ::registry/target-database-name
-          (keyword (::protocol/target-database-name request))
-          ::registry/attachment (::protocol/target-attachment request)
+          (keyword database-name)
+          ::registry/attachment attachment
           ::registry/expected-target-head
-          (::protocol/expected-target-head request)})]
+          (::protocol/expected-target-head request)
+          ::registry/drain! (fn [_release] nil)})]
     (protocol/success
      {::protocol/target-database-name
       (::protocol/target-database-name request)
       ::protocol/target-attachment (::registry/attachment result)
       ::protocol/source-head (::registry/coordinate result)
-      ::protocol/released? (::registry/released? result)
+      ::protocol/released? (or (::registry/released? released)
+                               (::registry/released? result))
       ::protocol/deleted? (::registry/deleted? result)})))
 
 (defn- connection-for-request
-  [request]
+  [transport-connection request]
   (let [database-name (::protocol/database-name request)
-        {::registry/keys [conn attachment coordinate]}
+        {::registry/keys [conn attachment coordinate error-kind error]}
         (registry/resolve-connection
-         {::registry/database-name (keyword database-name)})]
-    (when conn
+         (cond-> {::registry/database-name (keyword database-name)}
+           transport-connection
+           (assoc ::registry/transport-connection transport-connection)))]
+    (if conn
       {::connection conn
        ::database-name database-name
        ::coordinate/attachment attachment
-       ::coordinate/coordinate coordinate})))
+       ::coordinate/coordinate coordinate}
+      (throw
+       (ex-info (or error (str "Unknown or unacquired database: " database-name))
+                {::failure-kind
+                 (if (= :seon.db.registry.error/cleanup-required error-kind)
+                   protocol/cleanup-required-error
+                   protocol/not-found-error)
+                 ::protocol/database-name database-name})))))
 
 (defn- generated-candidate-conflict
   [candidate]
@@ -1535,15 +1574,10 @@
       (transaction-outcome request result))))
 
 (defn- execute-mutation!
-  [runtime request]
-  (if-let [{::keys [connection database-name]
-            attachment ::coordinate/attachment}
-           (connection-for-request request)]
-    (handle-transact-async runtime connection database-name attachment request)
-    (protocol/failure
-     {::protocol/error-kind protocol/not-found-error
-      ::protocol/error (str "Unknown database: "
-                            (::protocol/database-name request))})))
+  [runtime {::keys [connection database-name]
+            attachment ::coordinate/attachment
+            request ::request}]
+  (handle-transact-async runtime connection database-name attachment request))
 
 (defn- handle-replay-transactions
   [connection database-name request]
@@ -1633,12 +1667,32 @@
             (contains? protocol/lifecycle-error-kinds kind))
         kind
 
+        (= :seon.db.registry.error/releasing kind)
+        protocol/release-error
+
         :else protocol/database-error))
     ::protocol/error
     (str (.getMessage throwable) " " (pr-str (ex-data throwable)))}))
 
+(declare claim-request!)
+
+(defn- transport-connection
+  [close!]
+  {::connection-lock (Object.)
+   ::closed? (atom false)
+   ::acquisitions (atom #{})
+   ::close! close!})
+
+(defn- claim-connection-request!
+  [runtime transport-connection request complete!]
+  (if transport-connection
+    (locking (::connection-lock transport-connection)
+      (when-not @(::closed? transport-connection)
+        (claim-request! runtime transport-connection request complete!)))
+    (claim-request! runtime nil request complete!)))
+
 (defn- claim-request!
-  [runtime request complete!]
+  [runtime transport-connection request complete!]
   (let [active (::active-requests runtime)
         request-id (::protocol/request-id request)
         owner (Object.)]
@@ -1647,6 +1701,7 @@
         (swap! active assoc request-id
                {::owner owner
                 ::request request
+                ::transport-connection transport-connection
                 ::complete! complete!
                 ::jobs #{}
                 ::canceled? false})
@@ -1685,6 +1740,80 @@
         (when (some (fn [[_ entry]] (= scope (::scope entry))) @active)
           (.wait ^Object active)
           (recur))))))
+
+(defn- await-active-connection!
+  [runtime transport-connection]
+  (let [active (::active-requests runtime)]
+    (locking active
+      (loop []
+        (when (some (fn [[_ entry]]
+                      (identical? transport-connection
+                                  (::transport-connection entry)))
+                    @active)
+          (.wait ^Object active)
+          (recur))))))
+
+(defn- release-connection-acquisition!
+  [runtime transport-connection database-name attachment]
+  (let [scope (database-scope database-name attachment)
+        drained? (atom false)
+        result
+        (registry/release-database-acquisition!
+         {::registry/database-name (keyword database-name)
+          ::registry/transport-connection transport-connection
+          ::registry/drain!
+          (fn [_release]
+            (when-not scope
+              (throw
+               (ex-info "The acquired database scope is unavailable for release."
+                        {::protocol/database-name database-name
+                         ::protocol/attachment attachment})))
+            (reset! drained? true)
+            (drain-database-scope! runtime scope))})]
+    (when (and @drained? (::registry/released? result) (::executor runtime))
+      (executor/release-scope!
+       {::executor/executor (::executor runtime) ::executor/scope scope}))
+    result))
+
+(defn- handle-acquire-database
+  [runtime transport-connection request]
+  (when-not transport-connection
+    (throw (ex-info "Database acquisition requires a live transport connection."
+                    {::protocol/database-name
+                     (::protocol/database-name request)})))
+  (let [database-name (::protocol/database-name request)
+        attachment (::protocol/attachment request)
+        result
+        (locking (::connection-lock transport-connection)
+          (when @(::closed? transport-connection)
+            (throw
+             (ex-info "The transport connection closed before acquisition."
+                      {::protocol/database-name database-name
+                       ::protocol/attachment attachment})))
+          (let [result
+                (try
+                  (registry/acquire-database!
+                   {::registry/database-name (keyword database-name)
+                    ::registry/attachment attachment
+                    ::registry/transport-connection transport-connection})
+                  (catch clojure.lang.ExceptionInfo exception
+                    (if (= :seon.db.registry.error/attachment-conflict
+                           (:seon.error/kind (ex-data exception)))
+                      (throw
+                       (ex-info (.getMessage exception)
+                                (assoc (ex-data exception)
+                                       ::failure-kind
+                                       protocol/attachment-mismatch-error)
+                                exception))
+                      (throw exception))))]
+            (swap! (::acquisitions transport-connection)
+                   conj [database-name attachment])
+            result))]
+    (protocol/success
+     {::protocol/database-name database-name
+      ::protocol/attachment (::registry/attachment result)
+      ::protocol/coordinate (::registry/coordinate result)
+      ::protocol/acquired? (::registry/acquired? result)})))
 
 (defn- single-outcome-response
   [request [outcome value]]
@@ -1883,7 +2012,7 @@
   {:malli/schema [:=> [:catn [::runtime ::runtime]
                             [:seon.db.writer/request :map]]
                   :seon.db.protocol/response]}
-  [runtime request]
+  [runtime transport-connection request]
   (canonical-response request
    (if-not (protocol/valid-request? request)
      (let [explanation
@@ -1920,9 +2049,7 @@
               {::protocol/error-kind protocol/not-found-error
                ::protocol/error
                (str "Unknown database: "
-                    (::protocol/database-name request))
-               ::protocol/body
-               {::protocol/request-id (::protocol/request-id request)}})))
+                    (::protocol/database-name request))})))
 
          :seon.db.protocol.operation/query
          (throw (ex-info "Database reads require callback completion." {}))
@@ -1956,7 +2083,7 @@
 
          (if-let [{::keys [connection database-name]
                    attachment ::coordinate/attachment}
-                  (connection-for-request request)]
+                  (connection-for-request transport-connection request)]
            (case (::protocol/operation request)
              :seon.db.protocol.operation/transact
              (handle-transact runtime connection database-name attachment request)
@@ -2016,9 +2143,11 @@
           ::executor/outcome [::executor/throwable throwable]})))))
 
 (defn- start-read-request!
-  [runtime request request-id owner]
+  [runtime transport-connection request request-id owner]
   (validate-read-input! request)
-  (if-let [scope (scope-for-read request)]
+  (if-let [{::keys [scope connection]
+            attachment ::coordinate/attachment}
+           (scope-for-read transport-connection request)]
     (submit-single!
      runtime request-id owner scope
      {::executor/executor (::executor runtime)
@@ -2029,14 +2158,18 @@
       ::executor/request-id request-id
       ::executor/request {::database-name (::protocol/database-name request)
                           ::scope scope
+                          ::connection connection
+                          ::coordinate/attachment attachment
                           ::request request}})
     (deliver-active-request! runtime request-id owner
                              (stale-coordinate-response request))))
 
 (defn- start-execute-many-request!
-  [runtime request request-id owner]
+  [runtime transport-connection request request-id owner]
   (run! validate-read-input! (::protocol/members request))
-  (if-let [scope (scope-for-read request)]
+  (if-let [{::keys [scope connection]
+            attachment ::coordinate/attachment}
+           (scope-for-read transport-connection request)]
     (let [active (::active-requests runtime)
           resolution-id [request-id :resolve]
           initialized?
@@ -2062,6 +2195,8 @@
             ::executor/request
             {::database-name (::protocol/database-name request)
              ::scope scope
+             ::connection connection
+             ::coordinate/attachment attachment
              ::resolve-only? true
              ::request request}})
           (catch Throwable throwable
@@ -2074,10 +2209,10 @@
                              (stale-coordinate-response request))))
 
 (defn- start-transact-request!
-  [runtime request request-id owner]
+  [runtime transport-connection request request-id owner]
   (if-let [{::keys [connection database-name]
             attachment ::coordinate/attachment}
-           (connection-for-request request)]
+           (connection-for-request transport-connection request)]
     (let [scope (committed-scope database-name attachment (d/db connection))]
       (submit-single!
        runtime request-id owner scope
@@ -2087,7 +2222,10 @@
         ::executor/scope scope
         ::executor/job-id request-id
         ::executor/request-id request-id
-        ::executor/request request}))
+        ::executor/request {::request request
+                            ::connection connection
+                            ::database-name database-name
+                            ::coordinate/attachment attachment}}))
     (deliver-active-request!
      runtime request-id owner
      (protocol/failure
@@ -2096,8 +2234,10 @@
                              (::protocol/database-name request))}))))
 
 (defn- start-knn-request!
-  [runtime request request-id owner]
-  (if-let [scope (scope-for-read request)]
+  [runtime transport-connection request request-id owner]
+  (if-let [{::keys [scope connection]
+            attachment ::coordinate/attachment}
+           (scope-for-read transport-connection request)]
     (submit-single!
      runtime request-id owner scope
      {::executor/executor (::executor runtime)
@@ -2109,6 +2249,8 @@
       ::executor/request
       {::database-name (::protocol/database-name request)
        ::scope scope
+       ::connection connection
+       ::coordinate/attachment attachment
        ::request request}
       ::executor/reserved-work-class :knn
       ::executor/reserved-request-bytes (* 64 1024)})
@@ -2116,73 +2258,161 @@
                              (stale-coordinate-response request))))
 
 (defn- cancel-active-request!
-  [runtime request]
+  [runtime transport-connection request]
   (let [target-request-id (::protocol/target-request-id request)
         active (::active-requests runtime)
         target
         (locking active
           (when-let [entry (get @active target-request-id)]
-            (swap! active assoc-in [target-request-id ::canceled?] true)
-            entry))
+            (when (identical? transport-connection
+                              (::transport-connection entry))
+              (swap! active assoc-in [target-request-id ::canceled?] true)
+              entry)))
         response
-        (if (= (::protocol/request-id request) target-request-id)
+        (cond
+          (= (::protocol/request-id request) target-request-id)
           (protocol/failure
            {::protocol/error-kind protocol/protocol-error
             ::protocol/error "A cancel request cannot cancel itself."})
-          (handle-cancel runtime request))]
+
+          target
+          (handle-cancel runtime request)
+
+          :else
+          (protocol/success
+           {::protocol/request-id (::protocol/request-id request)
+            ::protocol/target-request-id target-request-id
+            ::protocol/canceled? false
+            ::protocol/running? false}))]
     (when (::execute-many? target)
       (drive-execute-many! runtime target-request-id (::owner target)))
     response))
 
+(defn- close-transport-connection!
+  [runtime transport-connection]
+  (let [{:keys [requests acquisitions]}
+        (locking (::connection-lock transport-connection)
+          (when-not @(::closed? transport-connection)
+            (reset! (::closed? transport-connection) true)
+            (let [active (::active-requests runtime)
+                  requests
+                  (locking active
+                    (let [owned
+                          (into []
+                                (keep
+                                 (fn [[request-id entry]]
+                                   (when (identical?
+                                          transport-connection
+                                          (::transport-connection entry))
+                                     {::protocol/request-id request-id
+                                      ::owner (::owner entry)
+                                      ::execute-many? (::execute-many? entry)})))
+                                @active)]
+                      (doseq [{::protocol/keys [request-id]} owned]
+                        (swap! active update request-id assoc
+                               ::complete! (fn [_response] nil)
+                               ::canceled? true))
+                      owned))
+                  acquisitions @(::acquisitions transport-connection)]
+              (reset! (::acquisitions transport-connection) #{})
+              {:requests requests :acquisitions acquisitions})))]
+    (doseq [{request-id ::protocol/request-id
+             owner ::owner
+             execute-many? ::execute-many?}
+            requests]
+      (try
+        (handle-cancel
+         runtime
+         {::protocol/request-id request-id
+          ::protocol/target-request-id request-id})
+        (when execute-many?
+          (drive-execute-many! runtime request-id owner))
+        (catch Throwable throwable
+          (log/error throwable "database connection request cancellation failed"
+                     {::protocol/request-id request-id}))))
+    (when requests
+      (await-active-connection! runtime transport-connection))
+    (doseq [[database-name attachment] acquisitions]
+      (try
+        (let [result (release-connection-acquisition!
+                      runtime transport-connection database-name attachment)]
+          (when-not (::registry/released? result)
+            (log/error "database connection acquisition release was unproved"
+                       {::protocol/database-name database-name
+                        ::protocol/attachment attachment
+                        ::registry/release-error
+                        (::registry/release-error result)})))
+        (catch Throwable throwable
+          (log/error throwable "database connection acquisition release failed"
+                     {::protocol/database-name database-name
+                      ::protocol/attachment attachment}))))))
+
 (defn handle-request!
   "Start one request and invoke complete! exactly once after physical completion."
-  [runtime request complete!]
-  (if-not (protocol/valid-request? request)
-    (try
-      (complete! (handle-request-sync runtime request))
-      (catch Throwable throwable
-        (log/error throwable "invalid database request delivery failed")))
-    (let [request-id (::protocol/request-id request)]
-      (if-let [owner (claim-request! runtime request complete!)]
-        (try
-          (case (::protocol/operation request)
-            :seon.db.protocol.operation/query
-            (start-read-request! runtime request request-id owner)
+  ([runtime request complete!]
+   (handle-request! runtime nil request complete!))
+  ([runtime transport-connection request complete!]
+   (if-not (protocol/valid-request? request)
+     (try
+       (complete! (handle-request-sync runtime transport-connection request))
+       (catch Throwable throwable
+         (log/error throwable "invalid database request delivery failed")))
+     (let [request-id (::protocol/request-id request)]
+       (if-let [owner
+                (claim-connection-request!
+                 runtime transport-connection request complete!)]
+         (try
+           (case (::protocol/operation request)
+             :seon.db.protocol.operation/acquire-database
+             (deliver-active-request!
+              runtime request-id owner
+              (handle-acquire-database runtime transport-connection request))
 
-            :seon.db.protocol.operation/pull
-            (start-read-request! runtime request request-id owner)
+             :seon.db.protocol.operation/query
+             (start-read-request! runtime transport-connection request
+                                  request-id owner)
 
-            :seon.db.protocol.operation/pull-many
-            (start-read-request! runtime request request-id owner)
+             :seon.db.protocol.operation/pull
+             (start-read-request! runtime transport-connection request
+                                  request-id owner)
 
-            :seon.db.protocol.operation/execute-many
-            (start-execute-many-request! runtime request request-id owner)
+             :seon.db.protocol.operation/pull-many
+             (start-read-request! runtime transport-connection request
+                                  request-id owner)
 
-            :seon.db.protocol.operation/transact
-            (start-transact-request! runtime request request-id owner)
+             :seon.db.protocol.operation/execute-many
+             (start-execute-many-request! runtime transport-connection request
+                                          request-id owner)
 
-            :seon.db.protocol.operation/knn-search
-            (start-knn-request! runtime request request-id owner)
+             :seon.db.protocol.operation/transact
+             (start-transact-request! runtime transport-connection request
+                                      request-id owner)
 
-            :seon.db.protocol.operation/cancel
-            (deliver-active-request! runtime request-id owner
-                                     (cancel-active-request! runtime request))
+             :seon.db.protocol.operation/knn-search
+             (start-knn-request! runtime transport-connection request
+                                 request-id owner)
 
-            (deliver-active-request! runtime request-id owner
-                                     (handle-request-sync runtime request)))
-          (catch Throwable throwable
-            (deliver-active-request! runtime request-id owner
-                                     (request-failure-response throwable))))
-        (try
-          (complete!
-           (canonical-response
-            request
-            (protocol/failure
-             {::protocol/error-kind protocol/request-conflict-error
-              ::protocol/error "The request id is already active."})))
-          (catch Throwable throwable
-            (log/error throwable "duplicate database request delivery failed"
-                       {::protocol/request-id request-id})))))))
+             :seon.db.protocol.operation/cancel
+             (deliver-active-request! runtime request-id owner
+                                      (cancel-active-request!
+                                       runtime transport-connection request))
+
+             (deliver-active-request!
+              runtime request-id owner
+              (handle-request-sync runtime transport-connection request)))
+           (catch Throwable throwable
+             (deliver-active-request! runtime request-id owner
+                                      (request-failure-response throwable))))
+         (try
+           (complete!
+            (canonical-response
+             request
+             (protocol/failure
+              {::protocol/error-kind protocol/request-conflict-error
+               ::protocol/error "The request id is already active or closed."})))
+           (catch Throwable throwable
+             (log/error throwable "duplicate database request delivery failed"
+                        {::protocol/request-id request-id}))))))))
 
 (defn handle-request
   "Temporarily adapt callback completion to the blocking request server."
@@ -2191,7 +2421,7 @@
     (let [response (promise)]
       (handle-request! runtime request #(deliver response %))
       @response)
-    (handle-request-sync runtime request)))
+    (handle-request-sync runtime nil request)))
 
 ;;; Explicit server lifecycle
 
@@ -2240,7 +2470,10 @@
         {::request-server
          (uds/start-request-server!
           {::uds/socket-path request-socket-path
-           ::uds/handler (partial handle-request runtime)})
+           ::uds/open-connection! transport-connection
+           ::uds/close-connection!
+           (partial close-transport-connection! runtime)
+           ::uds/handler (partial handle-request! runtime)})
          ::publisher publisher
          ::executor dispatcher
          ::runtime runtime

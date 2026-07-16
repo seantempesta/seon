@@ -48,6 +48,33 @@
   [channel request]
   (uds/call! {::uds/channel channel ::uds/message request}))
 
+(defn- acquire!
+  [channel database-name label]
+  (let [head
+        (call! channel
+               (protocol/resolve-head-request
+                {::protocol/request-id (str label "/head")
+                 ::protocol/database-name database-name}))]
+    (call! channel
+           (protocol/acquire-database-request
+            {::protocol/request-id (str label "/acquire")
+             ::protocol/database-name database-name
+             ::protocol/attachment (::protocol/attachment head)}))))
+
+(defn- await-route!
+  [database-name present?]
+  (let [deadline (+ (System/currentTimeMillis) 5000)]
+    (loop []
+      (let [present-now?
+            (boolean
+             (::registry/conn
+              (registry/resolve-connection
+               {::registry/database-name (keyword database-name)})))]
+        (cond
+          (= present? present-now?) true
+          (> (System/currentTimeMillis) deadline) false
+          :else (do (Thread/sleep 10) (recur)))))))
+
 (deftest capability-discovery-and-head-resolution-return-only-portable-data
   (let [database-name (str "writer-control-" (random-uuid))
         request-path (socket-path "control-request")
@@ -110,6 +137,92 @@
         (.delete (File. request-path))
         (.delete (File. publish-path))))))
 
+(deftest physical-connections-own-exact-database-access-and-release
+  (let [database-name (str "writer-acquisition-" (random-uuid))
+        request-path (socket-path "acquisition-request")
+        publish-path (socket-path "acquisition-publish")
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})
+        ^SocketChannel a (uds/connect! request-path)
+        ^SocketChannel b (uds/connect! request-path)]
+    (try
+      (let [head
+            (call! a
+                   (protocol/resolve-head-request
+                    {::protocol/request-id "acquisition/head"
+                     ::protocol/database-name database-name}))
+            query-input
+            {::protocol/database-name database-name
+             ::protocol/attachment (::protocol/attachment head)
+             ::protocol/coordinate (::protocol/coordinate head)
+             ::protocol/query-form
+             '[:find ?ident :where [?entity :db/ident ?ident]]
+             ::protocol/arguments []}
+            denied-read
+            (call! a
+                   (protocol/query-request
+                    (assoc query-input
+                           ::protocol/request-id "acquisition/denied-read")))
+            denied-write
+            (call! a
+                   (protocol/transaction-request
+                    {::protocol/request-id "acquisition/denied-write"
+                     ::protocol/database-name database-name
+                     ::protocol/transaction-data
+                     [{:db/ident :acquisition/value
+                       :db/valueType :db.type/string
+                       :db/cardinality :db.cardinality/one}]}))
+            acquired-a (acquire! a database-name "acquisition/a")
+            duplicate-a (acquire! a database-name "acquisition/a-duplicate")
+            write
+            (call! a
+                   (protocol/transaction-request
+                    {::protocol/request-id "acquisition/write"
+                     ::protocol/database-name database-name
+                     ::protocol/transaction-data
+                     [{:db/ident :acquisition/value
+                       :db/valueType :db.type/string
+                       :db/cardinality :db.cardinality/one}
+                      {:acquisition/value "owned"}]}))
+            current
+            (assoc query-input ::protocol/coordinate (::protocol/coordinate write))
+            denied-b
+            (call! b
+                   (protocol/query-request
+                    (assoc current
+                           ::protocol/request-id "acquisition/denied-b")))
+            acquired-b (acquire! b database-name "acquisition/b")]
+        (is (= protocol/not-found-error (::protocol/error-kind denied-read)))
+        (is (= protocol/not-found-error (::protocol/error-kind denied-write)))
+        (is (true? (::protocol/acquired? acquired-a)))
+        (is (false? (::protocol/acquired? duplicate-a)))
+        (is (= protocol/not-found-error (::protocol/error-kind denied-b)))
+        (is (true? (::protocol/acquired? acquired-b)))
+        (.close a)
+        (is (await-route! database-name true)
+            "a sibling physical connection retains the shared Datahike owner")
+        (let [read-b
+              (call! b
+                     (protocol/query-request
+                      (assoc current ::protocol/request-id "acquisition/read-b")))]
+          (is (::protocol/success? read-b))
+          (is (some #{[:acquisition/value]}
+                    (:datahike.query/result read-b))))
+        (.close b)
+        (is (await-route! database-name false)
+            "the last physical connection releases the shared indexes"))
+      (finally
+        (try (.close a) (catch Throwable _))
+        (try (.close b) (catch Throwable _))
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
+
 (deftest coordinate-pinned-reads-share-old-commit-and-preserve-datahike-shapes
   (let [database-name (str "writer-read-" (random-uuid))
         request-path (socket-path "read-request")
@@ -124,6 +237,7 @@
           ::writer/publish-socket-path publish-path})
         ^SocketChannel request-channel (uds/connect! request-path)]
     (try
+      (acquire! request-channel database-name "read/session")
       (call! request-channel
              (protocol/transaction-request
               {::protocol/database-name database-name
@@ -307,6 +421,7 @@
                  ::writer/publish-socket-path publish-path})
         ^SocketChannel request-channel (uds/connect! request-path)]
     (try
+      (acquire! request-channel database-name "knn/session")
       (let [frozen (::protocol/coordinate
                     (call! request-channel
                            (protocol/resolve-head-request
@@ -345,7 +460,7 @@
         (.delete (File. request-path))
         (.delete (File. publish-path))))))
 
-(deftest release-waits-until-a-running-read-relinquishes-the-generation
+(deftest disconnect-waits-until-a-running-read-relinquishes-the-generation
   (let [database-name (str "writer-read-release-" (random-uuid))
         request-path (socket-path "read-release-request")
         publish-path (socket-path "read-release-publish")
@@ -361,6 +476,7 @@
         ^SocketChannel read-channel (uds/connect! request-path)
         ^SocketChannel control-channel (uds/connect! request-path)]
     (try
+      (acquire! read-channel database-name "read-release/session")
       (let [head
             (call! control-channel
                    (protocol/resolve-head-request
@@ -375,30 +491,34 @@
                         {:read/value :finished})]
           (let [read-result
                 (future
-                  (call! read-channel
-                         (protocol/pull-request
-                          {::protocol/request-id "read-release/pull"
-                           ::protocol/database-name database-name
-                           ::protocol/attachment attachment
-                           ::protocol/coordinate coordinate
-                           ::protocol/selector [:read/value]
-                           ::protocol/entity-id 1})))]
+                  (try
+                    (call! read-channel
+                           (protocol/pull-request
+                            {::protocol/request-id "read-release/pull"
+                             ::protocol/database-name database-name
+                             ::protocol/attachment attachment
+                             ::protocol/coordinate coordinate
+                             ::protocol/selector [:read/value]
+                             ::protocol/entity-id 1}))
+                    (catch Throwable _ :connection-closed)))]
             (is (.await entered 5 java.util.concurrent.TimeUnit/SECONDS))
-            (let [release-result
-                  (future
-                    (call! control-channel
-                           (protocol/release-database-request
-                            {::protocol/request-id "release/running-read"
-                             ::protocol/target-database-name database-name
-                             ::protocol/target-attachment attachment
-                             ::protocol/expected-target-head coordinate})))]
-              (Thread/sleep 100)
-              (is (not (realized? release-result))
-                  "Datahike resources remain open while a read owns them")
-              (.countDown finish)
-              (is (= {:read/value :finished}
-                     (::protocol/result @read-result)))
-              (is (true? (::protocol/released? @release-result)))))))
+            (let [foreign-cancel
+                  (call! control-channel
+                         (protocol/cancel-request
+                          {::protocol/request-id "read-release/foreign-cancel"
+                           ::protocol/target-request-id "read-release/pull"}))]
+              (is (false? (::protocol/canceled? foreign-cancel)))
+              (is (false? (::protocol/running? foreign-cancel)))
+              (is (not (realized? read-result))
+                  "one socket cannot observe or cancel another socket's work"))
+            (.close read-channel)
+            (Thread/sleep 100)
+            (is (await-route! database-name true)
+                "Datahike resources remain open while a read owns them")
+            (.countDown finish)
+            (is (await-route! database-name false)
+                "the final socket release removes the route after the read")
+            @read-result)))
       (finally
         (.countDown finish)
         (try (.close read-channel) (catch Throwable _))
@@ -616,6 +736,12 @@
                        ::protocol/database-name branch-name
                        ::protocol/backend :memory
                        ::coordinate/attachment attachment}))
+              _
+              (call! channel
+                     (protocol/acquire-database-request
+                      {::protocol/request-id "branch/acquire"
+                       ::protocol/database-name branch-name
+                       ::protocol/attachment attachment}))
               transaction-response
               (call! channel
                      (protocol/transaction-request
@@ -709,6 +835,7 @@
           ::writer/publish-socket-path publish-path})]
     (try
       (with-open [channel (uds/connect! request-path)]
+        (acquire! channel source-name "lifecycle/session")
         (let [initial-head
               (::registry/coordinate
                (registry/resolve-connection
@@ -745,21 +872,27 @@
                        ::protocol/target-branch branch}))
               target-attachment (::protocol/target-attachment created)
               target-write
-              (call! channel
-                     (protocol/transaction-request
-                      {::protocol/database-name target-name
-                       ::protocol/request-id "lifecycle/target-write"
-                       ::protocol/transaction-data
-                       [{:writer.lifecycle/value "target-only"}]}))
+              (with-open [target-channel (uds/connect! request-path)]
+                (call! target-channel
+                       (protocol/acquire-database-request
+                        {::protocol/request-id "lifecycle/target-acquire"
+                         ::protocol/database-name target-name
+                         ::protocol/attachment target-attachment}))
+                (call! target-channel
+                       (protocol/transaction-request
+                        {::protocol/database-name target-name
+                         ::protocol/request-id "lifecycle/target-write"
+                         ::protocol/transaction-data
+                         [{:writer.lifecycle/value "target-only"}]})))
               target-head (::protocol/coordinate target-write)
               source-connection
               (::registry/conn
                (registry/resolve-connection
                 {::registry/database-name (keyword source-name)}))
-              target-connection
-              (::registry/conn
-               (registry/resolve-connection
-                {::registry/database-name (keyword target-name)}))]
+              target-db
+              (d/branch-as-db source-connection branch)]
+          (is (await-route! target-name false)
+              "a target with no live child retains no authority connection")
           (let [unopened-branch :experiment/unopened
                 _ (d/branch! source-connection
                              (::coordinate/commit-id source-head)
@@ -794,18 +927,11 @@
           (is (::protocol/success? target-write))
           (is (some? (d/q '[:find ?entity .
                              :where [?entity :writer.lifecycle/value "target-only"]]
-                           (d/db target-connection))))
+                           target-db)))
           (is (nil? (d/q '[:find ?entity .
                             :where [?entity :writer.lifecycle/value "target-only"]]
                           (d/db source-connection))))
-          (let [released
-                (call! channel
-                       (protocol/release-database-request
-                        {::protocol/request-id "branch/release"
-                         ::protocol/target-database-name target-name
-                         ::protocol/target-attachment target-attachment
-                         ::protocol/expected-target-head target-head}))
-                deleted
+          (let [deleted
                 (call! channel
                        (protocol/delete-branch-request
                         {::protocol/request-id "branch/delete"
@@ -813,8 +939,6 @@
                          ::protocol/target-database-name target-name
                          ::protocol/target-attachment target-attachment
                          ::protocol/expected-target-head target-head}))]
-            (is (::protocol/success? released))
-            (is (true? (::protocol/released? released)))
             (is (::protocol/success? deleted))
             (is (false? (::protocol/released? deleted)))
             (is (true? (::protocol/deleted? deleted)))
@@ -838,6 +962,7 @@
         ^SocketChannel request-channel (uds/connect! request-path)
         ^SocketChannel publish-channel (uds/connect! publish-path)]
     (try
+      (acquire! request-channel database-name "writer/session")
       (wait-for-subscriber! (::writer/publisher server))
       (let [publish-input (Channels/newInputStream publish-channel)
             ping-response
@@ -989,6 +1114,7 @@
           ::writer/publish-socket-path publish-path})
         ^SocketChannel request-channel (uds/connect! request-path)]
     (try
+      (acquire! request-channel database-name "fence/session")
       (let [opened
             (call! request-channel
                    (protocol/ensure-database-request

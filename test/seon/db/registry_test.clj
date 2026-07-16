@@ -570,13 +570,15 @@
             (registry/release-attachment!
              {::registry/target-database-name target-name
               ::registry/attachment (::registry/attachment created)
-              ::registry/expected-target-head target-head})
+              ::registry/expected-target-head target-head
+              ::registry/drain! (fn [_release] nil)})
             deleted
             (registry/delete-branch!
              {::registry/source-database-name source-name
               ::registry/target-database-name target-name
               ::registry/attachment (::registry/attachment created)
-              ::registry/expected-target-head target-head})]
+              ::registry/expected-target-head target-head
+              ::registry/drain! (fn [_release] nil)})]
         (is (true? (::registry/released? release)))
         (is (false? (::registry/released? deleted))
             "delete is retryable after a separately completed release")

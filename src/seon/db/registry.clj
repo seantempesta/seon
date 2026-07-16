@@ -230,7 +230,8 @@
  [:map
   [::target-database-name ::target-database-name]
   [::attachment ::attachment]
-  [::expected-target-head ::expected-target-head]])
+  [::expected-target-head ::expected-target-head]
+  [::drain! ::drain!]])
 (schema/register!
  ::release-attachment!-response
  [:map
@@ -244,7 +245,8 @@
   [::source-database-name ::source-database-name]
   [::target-database-name ::target-database-name]
   [::attachment ::attachment]
-  [::expected-target-head ::expected-target-head]])
+  [::expected-target-head ::expected-target-head]
+  [::drain! ::drain!]])
 (schema/register!
  ::delete-branch!-response
  [:map
@@ -326,7 +328,10 @@
 
 ;; --- Explicit per-request routing ------------------------------------------
 (schema/register! ::resolve-connection-request
-                  [:map [::database-name ::database-name]])
+                  [:map {:closed true}
+                   [::database-name ::database-name]
+                   [::transport-connection {:optional true}
+                    ::transport-connection]])
 
 (schema/register! ::resolve-connection-response
                   [:map
@@ -683,6 +688,14 @@
 
 (declare require-ready-entry!)
 
+(defn- owns-transport-connection?
+  [connections transport-connection]
+  (boolean (some #(identical? transport-connection %) connections)))
+
+(defn- remove-transport-connection
+  [connections transport-connection]
+  (into #{} (remove #(identical? transport-connection %)) connections))
+
 (defn acquire-database!
   "Acquire one database for one live transport connection.
 
@@ -703,7 +716,7 @@
                 ::attachment attachment
                 ::existing-attachment (::attachment entry)}))
           connections (::transport-connections entry #{})]
-      (if (contains? connections transport-connection)
+      (if (owns-transport-connection? connections transport-connection)
         (assoc (entry-view database-name entry) ::acquired? false)
         (let [transfer-ensure? (get entry ::ensured? true)
               acquired
@@ -781,11 +794,13 @@
                 (::release-completion entry)
                 {::database-name database-name ::released? false}
 
-                (not (contains? connections transport-connection))
+                (not (owns-transport-connection?
+                      connections transport-connection))
                 {::database-name database-name ::released? false}
 
                 :else
-                (let [remaining (disj connections transport-connection)
+                (let [remaining (remove-transport-connection
+                                 connections transport-connection)
                       updated (assoc entry ::transport-connections remaining)
                       final? (and (not (::ensured? updated))
                                   (empty? remaining))]
@@ -1721,35 +1736,43 @@
   "Release one exact logical attachment without deleting its native branch."
   {:malli/schema [:=> [:cat ::release-attachment!-request]
                   ::release-attachment!-response]}
-  [{::keys [target-database-name attachment expected-target-head]}]
-  (locking !registry
-    (if-let [entry (get @!registry target-database-name)]
-      (do
-        (when (seq (::transport-connections entry))
+  [{::keys [target-database-name attachment expected-target-head drain!]}]
+  (let [action
+        (locking !registry
+          (if-let [entry (get @!registry target-database-name)]
+            (do
+              (when (seq (::transport-connections entry))
+                (lifecycle-fail!
+                 :seon.db.protocol.error/database-in-use
+                 "The target database is still acquired by live connections."
+                 {::target-database-name target-database-name
+                  ::attachment (::attachment entry)}))
+              (require-attachment!
+               "Release target" attachment (::attachment entry)
+               {::target-database-name target-database-name})
+              (require-head!
+               :seon.db.protocol.error/stale-target-head
+               "Target head" expected-target-head (current-coordinate entry)
+               {::target-database-name target-database-name})
+              (let [completion (promise)
+                    releasing (assoc entry ::release-completion completion)]
+                (swap! !registry assoc target-database-name releasing)
+                {::completion completion ::entry releasing}))
+            nil))]
+    (if action
+      (let [result (finish-final-release!
+                    target-database-name (::completion action)
+                    (::entry action) drain!)]
+        (when-let [release-error (::release-error result)]
           (lifecycle-fail!
-           :seon.db.protocol.error/database-in-use
-           "The target database is still acquired by live connections."
+           :seon.db.protocol.error/release
+           "The target database connection release is unproved."
            {::target-database-name target-database-name
-            ::attachment (::attachment entry)}))
-        (require-attachment!
-         "Release target" attachment (::attachment entry)
-         {::target-database-name target-database-name})
-        (require-head!
-         :seon.db.protocol.error/stale-target-head
-         "Target head" expected-target-head (current-coordinate entry)
-         {::target-database-name target-database-name})
-        (let [{::keys [released? release-error]}
-              (release-database! {::database-name target-database-name})]
-          (when (and (not released?) release-error)
-            (lifecycle-fail!
-             :seon.db.protocol.error/release
-             "The target database connection release is unproved."
-             {::target-database-name target-database-name
-              ::attachment attachment
-              ::release-error release-error}))
-          {::target-database-name target-database-name
-           ::attachment attachment
-           ::released? released?}))
+            ::attachment attachment
+            ::release-error release-error}))
+        {::target-database-name target-database-name
+         ::attachment attachment
+         ::released? (::released? result)})
       {::target-database-name target-database-name
        ::attachment attachment
        ::released? false})))
@@ -1759,7 +1782,7 @@
   {:malli/schema [:=> [:cat ::delete-branch!-request]
                   ::delete-branch!-response]}
   [{::keys [source-database-name target-database-name attachment
-            expected-target-head]}]
+            expected-target-head drain!]}]
   (locking !registry
     (let [source-entry (require-ready-entry! source-database-name)
           source-attachment (::attachment source-entry)
@@ -1797,7 +1820,8 @@
                    (release-attachment!
                     {::target-database-name target-database-name
                      ::attachment attachment
-                     ::expected-target-head expected-target-head})))
+                     ::expected-target-head expected-target-head
+                     ::drain! drain!})))
                 false)
               branches (d/branches source-connection)]
           (when-not (contains? branches branch)
@@ -1950,12 +1974,20 @@
    coordinate with the live connection. An unknown name returns a typed
    not-found value."
   {:malli/schema [:=> [:cat ::resolve-connection-request] ::resolve-connection-response]}
-  [{::keys [database-name]}]
+  [{::keys [database-name transport-connection] :as request}]
   (if-let [entry (get @!registry database-name)]
-    (if-not (cleanup-required? entry)
+    (if (and (not (cleanup-required? entry))
+             (nil? (::release-completion entry))
+             (or (not (contains? request ::transport-connection))
+                 (owns-transport-connection?
+                  (::transport-connections entry #{}) transport-connection)))
       (entry-view database-name entry)
-      {::error-kind :seon.db.registry.error/cleanup-required
-       ::error (str "database open cleanup is unproved: " database-name)})
+      (if (cleanup-required? entry)
+        {::error-kind :seon.db.registry.error/cleanup-required
+         ::error (str "database open cleanup is unproved: " database-name)}
+        {::error-kind :seon.db.registry.error/not-found
+         ::error (str "database is not acquired by this connection: "
+                      database-name)}))
     {::error-kind :seon.db.registry.error/not-found
      ::error (str "unknown database-name: " database-name)}))
 

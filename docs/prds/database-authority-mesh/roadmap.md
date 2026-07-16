@@ -721,6 +721,50 @@ encoding candidates rather than assumptions. Bun socket and server callbacks
 preserve `AsyncLocalStorage`; an interleaved two-context proof remains required
 for first-party usage.
 
+The callback and acquisition cut now binds database authority to the physical
+selector connection itself. `acquire-database` validates the caller-resolved
+attachment before Datahike ownership changes; every network read, transaction,
+replay, transaction-coordinate, and KNN admission resolves exact connection
+membership and captures the connection plus attachment before worker handoff.
+Duplicate acquire is idempotent. Sibling sockets share Datahike's own connection
+reference and indexes, while final socket close cancels only its work, waits for
+physical completion, drains the full connection generation, and releases every
+acquisition exactly once. Cancellation also requires the target request to
+belong to the same physical connection, without revealing another child's
+request. Administrative release claims the route before it drains, so a failed
+release against a live acquisition cannot disrupt valid work. Focused registry
+and real-socket writer proof passes 35 tests/269 assertions, including denied
+pre-acquire reads/writes, duplicate acquire, sibling survival, foreign cancel,
+running-pull disconnect drain, target-branch isolation, and final index-owner
+release.
+
+The request server is now one Java NIO selector rather than one thread per
+socket. It admits frames in connection order, completes responses independently,
+retains exact `ByteBuffer` positions across partial writes, and performs codec
+and handler work off the selector. Fragmentation, coalescing, reverse completion,
+slow readers, graceful drain, owner identity, and exactly-once close pass 16
+tests/54 assertions.
+
+The CLJS transport is now one persistent `Bun.connect` session with a linear
+`Uint8Array` parser, request-ID correlation, immutable output frames plus exact
+write offsets, `drain` resumption, one deadline ticker, and one idempotent close
+transition. The Node socket, Buffer, request-per-socket RPC, and publisher APIs
+are deleted from this owner. A focused release artifact, including a real
+`Bun.listen`/`Bun.connect` UDS roundtrip, passes 7 tests/19 assertions under Bun
+and the same artifact under Node.
+
+Integrated review found five required resilience cuts before this unit can
+graduate: one shared legal frame limit (the JVM currently accepts 16 MiB while
+the Bun parser accepts 1 MiB), exact decoded-input byte admission before payload
+allocation, per-session plus authority-global encoded/output ownership, a
+bounded selector shutdown backstop, and bounded close-cleanup capacity. A
+timed-out Bun request must also retain its correlation slot until its late
+response or connection close, so neither request-ID reuse nor repeated timeouts
+can exceed physical in-flight capacity. Operation policy, not one universal
+five-second default, chooses deadlines; accepted mutations retain an explicitly
+recoverable unknown outcome through their durable request receipt. These are
+transport completion work, not compatibility paths.
+
 ### Unit 7 — remote `seon.db` and coarse core reads
 
 Keep `seon.db` as the sole application interface. Add honest remote async
@@ -797,38 +841,37 @@ protocol and database APIs do not change.
 The implementation is ordered by semantic dependency, while independent proof
 and consumer inventory may run in parallel:
 
-- Spine: finish deleting executor result promises/retained-request waiters now
-  that writer callback ownership is proven, then add explicit connection-owned
-  database acquisition.
-- Slot 2: implement the JVM selector/session owner against the settled callback
-  and acquisition contracts.
-- Slot 3: implement the Bun persistent-session parser, partial-write queue, and
-  terminal transition against exact native semantics.
-- Slot 4: make the bottom-up `seon.db` consumer closure Promise-ready and retain
-  one read-plan/ordinary-result interface before the atomic replica deletion.
+- Spine: close decoded-frame, response-byte, timeout-correlation, and bounded
+  shutdown ownership across the integrated selector and Bun session.
+- Slot 2: add the missing existing Datahike operations needed by real consumers:
+  installed schema, bounded index/rseek pages, operation-local history, and
+  connection-owned selective listen/unlisten interests.
+- Slot 3: make the bottom-up `seon.db` consumer closure Promise-ready around
+  coarse query/pull-many/execute-many plans, then delete lazy entity traversal.
+- Slot 4: prepare the atomic reachability deletion across `db.cljs`,
+  `db/internal.cljs`, `client.cljs`, `repl.cljs`, `embed.cljs`, `handlers/ns.cljs`,
+  `coordinate.cljc`, `id.cljc`, replica, publisher, and replay owners.
 
 After each unit, integrate its retained proof before refilling. A build/restart
 checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
 
 ## Current boundary and final graduation gate
 
-The callback deletion boundary is closed: the writer is the only public
-request-lifetime owner. Earliest unsettled implementation contract: protocol
-version 5 now defines explicit `acquire-database` using the existing request ID,
-database name, and caller-resolved attachment; success returns that attachment,
-the current coordinate, and whether a new Datahike reference was acquired. The
-registry validates the attachment before duplicate membership or `d/connect`.
-The remaining contract is to bind acquisition to the exact internal selector
-connection, require that membership for every network database operation, and
-release its acquisitions exactly once on close—no session ID or second
-reference count.
+The callback deletion and physical-connection acquisition boundaries are closed:
+the writer is the only public request-lifetime owner, and the socket is the one
+internal authority token with no wire session ID or second reference count.
+Earliest unsettled implementation contract: bound bytes and physical request
+identity across the selector/Bun session. One shared maximum frame, exact
+pre-allocation input reservation, retained timed-out correlation slots, bounded
+encoded output, and bounded shutdown must prove that slow, malicious, or dead
+children cannot create unaccounted heap, reuse a live request ID, or wedge the
+authority.
 
 Integrated proof that closes it:
-Callback duplicate/reuse, synchronous rejection reentry, reverse-order
-execute-many completion, throwing delivery, 1,000 pending requests with fixed
-workers, final materialized-value release ordering, and executor ABA replacement
-proof; followed by acquisition/close race, sibling survival, selector framing,
-partial-write, and slow-session byte-bound proof.
+Selector/Bun native integration with one shared frame limit, exact input/output
+byte evidence, retained timeout identity, bounded close, and slow-session proof;
+followed by installed-schema/index/history/selective-interest conformance and the
+first coarse remote `seon.db` consumer plan.
 
 Final graduation requires all ten units, deletion of the replica/feed/Node
 transport mechanisms, clean protocol conformance, real browser and agent
