@@ -30,7 +30,6 @@ JAVA="$SEON_HOME/jre/bin/java"
 NODE="$SEON_HOME/node/bin/node"
 
 REQ_SOCK="${SEON_REQ_SOCK:-$SEON_DATA/tmp/seon-req.sock}"
-PUB_SOCK="${SEON_PUB_SOCK:-$SEON_DATA/tmp/seon-pub.sock}"
 PORT_FILE="${SEON_PORT_FILE:-$SEON_DATA/tmp/seon-port}"
 
 mkdir -p "$CLUSTER_DIR" "$SEON_DATA/tmp" "$SEON_DATA/logs"
@@ -51,7 +50,6 @@ start_database() {
     --db-name "$CLUSTER" \
     --path "$CLUSTER_DIR/db" \
     --req-sock "$REQ_SOCK" \
-    --pub-sock "$PUB_SOCK" \
     >> "$SEON_DATA/logs/database-server.log" 2>&1 &
   DATABASE_PID=$!
   echo "[seon-entrypoint] database server started (pid $DATABASE_PID)"
@@ -102,7 +100,6 @@ start_pod() {
     SEON_CONFIG="${SEON_CONFIG:-$SEON_HOME/config/system.edn}" \
     SEON_CLUSTER_DIR="$CLUSTER_DIR" \
     SEON_REQ_SOCK="$REQ_SOCK" \
-    SEON_PUB_SOCK="$PUB_SOCK" \
     SEON_PORT="${SEON_PORT:-7890}" \
     SEON_PORT_FILE="$PORT_FILE" \
     SEON_BIND="${SEON_BIND:-0.0.0.0}" \

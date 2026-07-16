@@ -43,7 +43,6 @@ else
   ACME_INSTANCE_SUFFIX="-$ACME_CLUSTER_NAME"
 fi
 export SEON_REQ_SOCK="${SEON_REQ_SOCK:-tmp/acme-cluster${ACME_INSTANCE_SUFFIX}-req.sock}"
-export SEON_PUB_SOCK="${SEON_PUB_SOCK:-tmp/acme-cluster${ACME_INSTANCE_SUFFIX}-pub.sock}"
 export SEON_PROC_DIR="${SEON_PROC_DIR:-tmp/proc-acme${ACME_INSTANCE_SUFFIX}}"
 export SEON_LOG_DIR="${SEON_LOG_DIR:-logs/acme${ACME_INSTANCE_SUFFIX}}"
 export SEON_PORT_FILE="${SEON_PORT_FILE:-tmp/seon-port-acme${ACME_INSTANCE_SUFFIX}}"
