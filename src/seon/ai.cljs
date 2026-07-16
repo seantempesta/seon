@@ -7,11 +7,10 @@
    One singleton row (identity `::id` = \"config\") carries up to
    ten attrs: `::provider`, `::model`, `::temperature`,
    `::max-tokens`, `::thinking`, `::timeout-ms`, `::base-url`,
-   `::api-key-env`, `::dg-backend`, and `::extra-body-edn`. Adapters
-   ([[seon.ai.openai-compat]],
-   [[seon.ai.anthropic]]) read it PER CALL via [[current]] —
-   reactive-context: no cached atom, absent row/attr = each adapter's
-   shipped defaults, byte-identical wire bodies to the pre-C-18 output.
+   `::api-key-env`, `::dg-backend`, and `::extra-body-edn`. The execution
+   boundary pulls ordinary config and agent maps from one immutable database
+   coordinate and calls [[resolved-config-from-rows]]. Provider requests carry
+   that `::config-resolution`; adapters never read a local database.
 
    ENV/CONFIG SEEDS ONCE → THE DB OWNS THE ROW. [[sync!]] (called from
    `seon.client/start-agent!` at boot) SEEDS the row from the `SEON_AI_*`
@@ -322,10 +321,9 @@
 ;; chat_template_kwargs) is a [:map] — datahike can't bridge it. The config
 ;; row stores its EDN STRING form under ::extra-body-edn (env:
 ;; SEON_AI_EXTRA_BODY, an EDN map like "{:chat_template_kwargs
-;; {:enable_thinking false}}"); [[config-extra-body]] reads it back into the
-;; map adapters merge. This is the data-only door for the agent turn loop —
-;; the loop builds the adapter with no opts, so the request-opt path is
-;; unreachable there (task #30, 2026-06-16). ::tools / ::tool-choice stay
+;; {:enable_thinking false}}"); the resolver reads it back into the
+;; map adapters merge. [[resolved-config-from-rows]] parses it once into the
+;; authority resolution passed to the provider. ::tools / ::tool-choice stay
 ;; request-opt-only (inherently per-call; no persisted form yet).
 (schema/register! ::extra-body-edn [:string {:min 1}])
 (schema/register! ::extra-body-digest [:string {:min 64 :max 64}])
@@ -339,9 +337,8 @@
 ;; The RESOLVED LLM config as a VALUE — what an agent runs
 ;; under. NEVER stored (owner correction 2026-07-04, derive-don't-store:
 ;; the per-turn `llm-*` stamping this shape once fed is deleted);
-;; [[resolved-config]] derives it from ANY db value on demand — the live
-;; db for current intent, or the immutable value returned by
-;; `seon.db/at-coordinate` for a past turn's complete rendered coordinate.
+;; [[resolved-config-from-rows]] derives it from ordinary maps pulled at one
+;; immutable database coordinate.
 ;; `::thinking` is the row-shape STRING
 ;; ("false"/"true"/effort — the [[thinking-mode]] vocabulary). Keys with
 ;; no value at any resolution tier (anthropic never sends temperature;
@@ -366,8 +363,7 @@
 ;; The SHIPPED per-provider defaults for the `::resolved-config` keys —
 ;; the LAST tier of the ONE resolution chain (request opt → agent
 ;; override → config row → THIS). Single source: the adapters read their
-;; default constants FROM here (seon.ai.openai-compat, seon.ai.anthropic)
-;; and [[resolved-config]] reports them — one map, zero drift.
+;; through [[resolved-config-from-rows]] — one map, zero drift.
 ;; :openai-compat shares the deepseek adapter's wire path and fallbacks.
 ;; The worker still owns DiffusionGemma weights and generation caps. Material
 ;; endpoint/timeout/backend defaults live here too: adapters and historical
@@ -440,14 +436,10 @@
 ;; value arm REUSES the existing global-row value shape by keyword (the
 ;; register-once rule) — `::provider`/`::model`/`::temperature`/
 ;; `::max-tokens`/`::thinking`. `::agent-max-retries` replaces the
-;; SEON_AI_MAX_RETRIES env read (seon.agent.turn). READ per call:
-;; [[current]] lays the ambient agent's overrides over the global row
-;; ([[overlay-agent-overrides]]), so every adapter's resolution chain is
-;; explicit request opt → the AGENT's own config → the global row →
-;; shipped defaults. What an agent resolves to is a QUERY, never a
-;; stored stamp: [[resolved-config]] derives the effective config (with
-;; per-key provenance) from any db value — live, or `db/as-of` a past
-;; turn's basis-t (derive-don't-store).
+;; SEON_AI_MAX_RETRIES env read (seon.agent.turn). The execution boundary
+;; resolves explicit request opt → the agent's own config → the global row →
+;; shipped defaults from ordinary maps pulled at one database coordinate.
+;; What an agent resolves to is derived evidence, never a stored stamp.
 ;; ============================================================
 
 (schema/register! ::agent-provider    [:or {:default :inherit} [:enum :inherit] ::provider])
@@ -539,35 +531,6 @@
     {}
     env-var-specs))
 
-;; ============================================================
-;; The row read + effective config.
-;; ============================================================
-
-(defn- row
-  "The config row's attrs from db value `db` as a `::row` map, or nil
-   when no `::id` \"config\" entity exists. An existing entity with no
-   config attrs returns {} (distinct from nil — retracts may target
-   it)."
-  [db]
-  (when-let [e (ffirst (db/query {:seon.db/query '[:find ?e
-                                                   :where [?e ::id "config"]]
-                                  :seon.db/db db}))]
-    (let [ent (db/entity {:seon.db/db db :seon.db/ref e})]
-      (into {}
-            (keep (fn [attr]
-                    (when-some [v (get ent attr)] [attr v])))
-            config-attrs))))
-
-(defn- global-config
-  "The GLOBAL `::config` row's set attrs — `::row`-shaped, possibly {}. The
-   pure global read (no per-agent overlay); NEVER throws ({} on the conn-not-up
-   boot edge). 0-arity reads the ambient `seon.db/*conn*`, 1-arity an explicit
-   db value."
-  ([] (or (try (some-> db/*conn* deref row)
-               (catch :default _ nil))
-          {}))
-  ([db] (or (row db) {})))
-
 ;; The per-agent LLM override attrs (each `:inherit` by default) mapped to the
 ;; GLOBAL config-row attr they override (config-driven agent-init, move 10).
 ;; `:inherit` (the default) → use the global row's value = byte-parity for a
@@ -609,56 +572,6 @@
     (when (int? value) value)))
 
 (schema/register! ::agent-id [:string {:min 1}])
-(schema/register! ::effective-config-request [:map [::agent-id ::agent-id]])
-
-(defn- agent-override-values
-  "Agent `id`'s non-`:inherit` `::agent-*` override VALUES from db value
-   `db`, keyed by the global attr each overrides. Per-attr install-gated
-   (querying a never-installed attr THROWS on datahike-cljs). Nil db /
-   nil id / no such agent → {}."
-  [db id]
-  (let [installed (when db (db/installed-schema db))
-        agent     (when (and db id)
-                    (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))]
-    (if-not agent
-      {}
-      (agent-row-override-values
-       (select-keys agent (filter #(contains? installed %)
-                                  (keys agent-override-attrs)))))))
-
-(defn- overlay-agent-overrides
-  "Lay agent `id`'s `::agent-*` override datoms over `global` (a `::row`),
-   `:inherit`/absent → keep the global value. Reads the ambient conn's
-   current db. Nil id / no agent → `global` unchanged."
-  [global id]
-  (merge global (agent-override-values (some-> db/*conn* deref) id)))
-
-(defn current
-  "The EFFECTIVE LLM config the adapters read PER CALL.
-
-   Reactive-context (no cache): the GLOBAL `::config` row with the CURRENT agent's `::agent-*`
-   overrides laid over it (config-driven agent-init — per-agent LLM). The agent
-   is the ambient `seon.db/current-agent-id` (fiber-local across the adapter's
-   awaits); OUTSIDE an agent scope (boot or direct render) it is just the global row.
-   `:inherit` (the default) ⇒ the global value = byte-parity for a no-override
-   agent. NEVER throws ({} on the conn-not-up boot edge). 1-arity takes an
-   explicit db value (global-only — a render read, not an agent call)."
-  {:malli/schema [:function
-                  [:=> [:cat] ::row]
-                  [:=> [:catn [::db :seon.db/db-val]] ::row]]}
-  ([] (overlay-agent-overrides (global-config) (db/current-agent-id)))
-  ([db] (global-config db)))
-
-(defn effective-config-for
-  "The EFFECTIVE LLM config for a SPECIFIC agent `id`.
-
-   The explicit-id path — the global `::config` row with the agent's `::agent-*` overrides laid over it
-   (`:inherit`/absent → the global value). Same overlay [[current]] applies for
-   the AMBIENT agent; this arity is for a caller naming an id out of scope.
-   A no-override agent resolves EXACTLY the global row = byte-parity."
-  {:malli/schema [:=> [:cat ::effective-config-request] ::row]}
-  [{::keys [agent-id]}]
-  (overlay-agent-overrides (global-config) agent-id))
 
 ;; WHERE a resolved value came from — provenance by DERIVATION (the
 ;; resolver re-walks the chain), never storage. Same key set as
@@ -678,10 +591,6 @@
    [:seon.config.model-transport/response-identity-cap {:optional true} ::source]
    [:seon.config.model-transport/endpoint-cap {:optional true} ::source]
    [::extra-body-digest {:optional true} ::source]])
-(schema/register! ::resolved-config-request
-  [:map
-   [:seon.db/db :seon.db/db-val]
-   [:seon.agent/id {:optional true} ::agent-id]])
 (schema/register! ::resolved-config-response
   [:map
    [::resolved-config ::resolved-config]
@@ -719,20 +628,6 @@
   {:malli/schema [:=> [:cat] [:vector :keyword]]}
   []
   (vec model-transport-cap-attrs))
-
-(defn- model-transport-cap-resolution
-  "Model-transport caps and provenance from one immutable database value."
-  [database]
-  (let [installed (db/installed-schema database)
-        entity (when (contains? installed :seon.config/id)
-                 (db/entity {:seon.db/db database
-                             :seon.db/ref [:seon.config/id
-                                           config/cluster-config-id]}))]
-    (into {}
-          (keep (fn [attr]
-                  (when (and entity (contains? entity attr))
-                    [attr [(get entity attr) :config-row]])))
-          model-transport-cap-attrs)))
 
 (defn- resolve-config-values
   [row-cfg overrides transport-caps]
@@ -794,34 +689,6 @@
     (some? (agent-row-max-retries agent-row))
     (assoc ::agent-max-retries (agent-row-max-retries agent-row))))
 
-(defn resolved-config
-  "The effective LLM config an agent runs under, derived from a db value.
-
-   Pure fn of `:seon.db/db` — derive-don't-store: nothing persists this,
-   asking again re-derives it. Per key the chain is the agent's own
-   `::agent-*` override datom → the global `::config` row → the
-   provider's [[shipped-defaults]] entry (`::provider` itself falls back
-   to `:deepseek`). Returns the `::resolved-config` VALUE plus
-   `::provenance` — the same keys mapped to where each value came from
-   (`:agent-override` / `:config-row` / `:default`). A key with no value
-   at any tier is absent from both. Omit `:seon.agent/id` for the
-   global-only view. (A section fn surfacing this per agent is the
-   natural UI follow-on.)
-
-   Time travel — resolve a past turn's complete rendered coordinate with
-   `seon.db/at-coordinate`, then pass that returned immutable db value to
-   this same pure function:
-
-     (resolved-config
-       {:seon.db/db    historical-db
-        :seon.agent/id agent-id})"
-  {:malli/schema [:=> [:cat ::resolved-config-request] ::resolved-config-response]}
-  [{db :seon.db/db id :seon.agent/id}]
-  (let [overrides (agent-override-values db id)
-        row-cfg   (global-config db)
-        transport-caps (model-transport-cap-resolution db)]
-    (resolve-config-values row-cfg overrides transport-caps)))
-
 (defn bounded-evidence-error
   "Bound an evidence error using one resolved positive cap."
   {:malli/schema
@@ -844,39 +711,6 @@
    (assoc (config-evidence resolution)
           ::credential-source credential-source)))
 
-(defn agent-max-retries
-  "The per-agent LLM retry COUNT for agent `id`.
-
-   The agent's `::agent-max-retries` datom when set to an int, else
-   `default-n` (`:inherit`, the default, → the env/const default =
-   byte-parity). REPLACES the `SEON_AI_MAX_RETRIES` env read at the sole
-   retry site (move 10)."
-  {:malli/schema [:=> [:catn [::agent-id [:maybe :string]] [::default-n :int]] :int]}
-  [agent-id default-n]
-  (let [db (some-> db/*conn* deref)
-        ;; `::agent-max-retries` is a MIXED-`:or` schema → stored pr-str'd by
-        ;; the bridge; decode on read. `:inherit` (the default) → `default-n`.
-        v  (when (and db agent-id
-                      (contains? (db/installed-schema db) ::agent-max-retries))
-             (some->> (:seon.ai/agent-max-retries
-                        (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]}))
-                      (db/decode-edn-value ::agent-max-retries)))]
-    (if (int? v) v default-n)))
-
-(defn config-extra-body
-  "The `:seon.ai/extra-body` map from the config row's `::extra-body-edn`.
-
-   Sourced from env SEON_AI_EXTRA_BODY — the DATA-ONLY door for the agent
-   turn loop, which builds the adapter with no request opts. `{}` when unset or
-   unreadable (a direct transact of a non-map / malformed EDN is swallowed
-   here, not surfaced as a crash). Adapters merge a non-empty result into
-   the wire body; a per-call `:seon.ai/extra-body` opt still wins."
-  {:malli/schema [:=> [:cat] ::extra-body]}
-  []
-  (let [v (try (some-> (::extra-body-edn (current)) reader/read-string)
-               (catch :default _ nil))]
-    (if (map? v) v {})))
-
 (schema/register! ::thinking-value
   [:or :boolean [:string {:min 1}]])
 
@@ -892,38 +726,6 @@
     (nil "false") false
     "true"        true
     thinking))
-
-(defn provider
-  "The active LLM provider — config row `::provider`, else env, else default.
-
-   The DB-owned config row's `::provider` (read
-   per call via [[current]]), else `SEON_AI_PROVIDER` env (the initial
-   seed source, and the only one readable on the pre-conn boot edge where
-   [[current]] returns `{}`), else `:deepseek`. ROW-FIRST now that the DB
-   owns the row after env seeds it — so a runtime provider switch
-   persists and a later boot honors the row, not a (possibly unset) env."
-  {:malli/schema [:=> [:cat] ::provider]}
-  []
-  (or (::provider (current))
-      (::provider (env-row))
-      :deepseek))
-
-(defn dg-backend
-  "The active DiffusionGemma backend — only when provider is `:diffusiongemma`.
-
-   Consulted only when [[provider]] is `:diffusiongemma`: the DB-owned
-   config row's `::dg-backend` (read
-   per call via [[current]]), else `SEON_DG_BACKEND` env, else
-   `:control` (the transformers worker with the per-step seam). `:vllm`
-   routes the diffusiongemma provider through the OpenAI-compatible
-   serving path (`seon.ai.openai-compat`); `:control` builds the
-   `seon.ai.diffusiongemma` async-job adapter. ROW-FIRST so a runtime
-   backend switch persists (same seed-once contract as [[provider]])."
-  {:malli/schema [:=> [:cat] ::dg-backend]}
-  []
-  (or (::dg-backend (current))
-      (::dg-backend (env-row))
-      (::dg-backend (:diffusiongemma shipped-defaults))))
 
 ;; ============================================================
 ;; Shared system-prompt resolution — request override → the cluster's

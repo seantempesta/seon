@@ -137,7 +137,10 @@
    [::prefills            {:optional true} ::prefills]
    [::policy              {:optional true} ::policy]
    [::null-render         {:optional true} ::null-render]
-   [:seon.ai/abort-signal {:optional true} :seon.ai/abort-signal]])
+   [:seon.ai/abort-signal {:optional true} :seon.ai/abort-signal]
+   [:seon.ai/config-resolution
+    {:optional true}
+    :seon.ai/config-resolution]])
 
 ;; The worker `output` map is Google/RunPod's shape, not seon's — a :map
 ;; boundary (like :seon.ai/provider-fields). We surface a normalized
@@ -149,7 +152,8 @@
   [:map
    [:seon.ai/text :string]                          ; "" on non-text modes / on error
    [::worker-output {:optional true} ::worker-output]
-   [:seon.ai/error  {:optional true} :seon.ai/error]])
+   [:seon.ai/error  {:optional true} :seon.ai/error]
+   [:seon.ai/config-evidence {:optional true} :seon.ai/config-evidence]])
 
 (schema/register! ::opts :map)
 
@@ -185,15 +189,16 @@
 ;; synchronous unwind.
 (def ^:dynamic *fetch* nil)
 
-(defn- endpoint-id
+(defn- endpoint
   "The RunPod endpoint id — `SEON_DG_ENDPOINT`, falling back to
    `DIFFGEMMA_EP` (the diffusion experiment driver's var) so ONE endpoint
    id set in `.env` serves BOTH the Python driver and this provider. nil
    when neither is set."
-  []
+  [resolution]
   ;; SEON_DG_* names kept for continuity — the local process is now
   ;; named `diffusion-server` (bin/seon), but the env contract is frozen.
-  (or (config/env-string "SEON_DG_ENDPOINT")
+  (or (get-in resolution [:seon.ai/resolved-config :seon.ai/base-url])
+      (config/env-string "SEON_DG_ENDPOINT")
       (config/env-string "DIFFGEMMA_EP")))
 
 (defn- base-url
@@ -204,19 +209,33 @@
    AS the base — that is how a LOCAL worker speaking the same wire
    contract (e.g. the dg_mlx MLX worker on
    `http://127.0.0.1:17860`) plugs in with zero other changes."
-  []
-  (when-let [ep (endpoint-id)]
+  [resolution]
+  (when-let [ep (endpoint resolution)]
     (if (str/starts-with? ep "http")
       ep
       (str runpod-root "/" ep))))
 
-(defn- resolved-api-key
-  "The bearer key for this call, or nil — read from process.env at call
-   time off the var NAMED by SEON_DG_API_KEY_ENV (default RUNPOD_API_KEY).
-   The key value is never transacted or logged."
-  []
-  ;; SEON_DG_* env names kept for continuity (process renamed diffusion-server).
-  (platform/env-val (or (config/env-string "SEON_DG_API_KEY_ENV") default-key-env)))
+(defn- resolved-credential
+  "Resolve the bearer key at call time and retain only its non-secret source."
+  [resolution]
+  (let [configured-env (get-in resolution
+                               [:seon.ai/resolved-config
+                                :seon.ai/api-key-env])
+        legacy-env (config/env-string "SEON_DG_API_KEY_ENV")
+        candidates (cond-> []
+                     configured-env
+                     (conj [configured-env :configured-env])
+                     legacy-env
+                     (conj [legacy-env :configured-env])
+                     true
+                     (conj [default-key-env :provider-default-env]))]
+    (some (fn [[env-name class]]
+            (when-let [secret (platform/env-val env-name)]
+              {::api-key secret
+               :seon.ai/credential-source
+               {:seon.ai/credential-class class
+                :seon.ai/api-key-env env-name}}))
+          candidates)))
 
 (defn- local-endpoint?
   "Whether the configured endpoint is a full `http(s)://…` worker URL.
@@ -224,8 +243,8 @@
    A LOCAL worker (e.g. dg_mlx on `http://127.0.0.1:17860`) speaks the
    same wire contract but needs NO RunPod bearer key — the key
    requirement applies only to bare RunPod endpoint ids."
-  []
-  (boolean (some-> (endpoint-id) (str/starts-with? "http"))))
+  [base]
+  (boolean (some-> base (str/starts-with? "http"))))
 
 (defn api-configured?
   "Whether the endpoint id resolves, plus a bearer key when required.
@@ -233,10 +252,12 @@
    A bare RunPod endpoint id needs the bearer key too; a full-URL local
    worker needs no key. `seon.client/current-llm-fn` uses this to fall
    back to the stub llm-fn when the worker isn't configured."
-  {:malli/schema [:=> [:cat] :boolean]}
-  []
-  (boolean (and (endpoint-id)
-                (or (local-endpoint?) (resolved-api-key)))))
+  {:malli/schema [:=> [:cat :seon.ai/config-resolution] :boolean]}
+  [resolution]
+  (let [base (base-url resolution)]
+    (boolean (and base
+                  (or (local-endpoint? base)
+                      (resolved-credential resolution))))))
 
 ;; ============================================================
 ;; Request → the worker's snake_case JSON payload.
@@ -474,10 +495,10 @@
    exhausted; map the terminal state to a `::response`. A throw here
    propagates to [[complete]]'s catch (→ transport, retried)."
   [base key jid mode signal]
-  (let [poll-ms   (if (local-endpoint?)
+  (let [poll-ms   (if (local-endpoint? base)
                     (min *poll-ms* *local-poll-ms*)   ; a test's 0 stays 0
                     *poll-ms*)
-        max-polls (if (local-endpoint?)
+        max-polls (if (local-endpoint? base)
                     (max *max-polls*
                          (quot (* *max-polls* *poll-ms*) (max poll-ms 1)))
                     *max-polls*)]
@@ -511,21 +532,34 @@
    `*_error` → a plain processing error (not retried)."
   {:malli/schema [:=> [:cat ::request] ::response]}
   [{::keys [mode] :as request}]
-  (let [base (base-url)
-        key  (resolved-api-key)
+  (let [resolution (:seon.ai/config-resolution request)
+        base (base-url resolution)
+        credential (resolved-credential resolution)
+        key (::api-key credential)
+        credential-source (:seon.ai/credential-source credential)
+        evidence (when resolution
+                   (if credential-source
+                     (ai/config-evidence resolution credential-source)
+                     (ai/config-evidence resolution)))
         signal (:seon.ai/abort-signal request)]
     (cond
-      (nil? base)
+      (nil? resolution)
       (config-error
-        (str label " endpoint not configured — set SEON_DG_ENDPOINT (or "
-             "DIFFGEMMA_EP) to the RunPod endpoint id (e.g. \"u50y7khhos5t7o\")"))
+        "missing :seon.ai/config-resolution — resolve ordinary authority data before calling DiffusionGemma")
+
+      (nil? base)
+      (assoc (config-error
+               (str label " endpoint not configured — resolve :seon.ai/base-url, "
+                    "or set SEON_DG_ENDPOINT / DIFFGEMMA_EP"))
+             :seon.ai/config-evidence evidence)
 
       ;; A bare RunPod endpoint id needs the bearer key; a full-URL local
       ;; worker does not (its wire has no auth).
-      (and (nil? key) (not (local-endpoint?)))
-      (config-error
-        (str label " API key not found in process.env — set RUNPOD_API_KEY "
-             "(or point SEON_DG_API_KEY_ENV at the env var holding the key)"))
+      (and (nil? key) (not (local-endpoint? base)))
+      (assoc (config-error
+               (str label " API key not found in process.env — set RUNPOD_API_KEY "
+                    "or select an env var with :seon.ai/api-key-env"))
+             :seon.ai/config-evidence evidence)
 
       (ai/aborted? signal)
       (abort-error)
@@ -577,19 +611,20 @@
 (defn ^:async ^:private complete+wrap
   "Call [[complete]] with the FAST gen defaults + `opts`, the ctx as the
    prompt; wrap into the turn-loop shape, lifting `:seon.ai/error` to the
-   top level. Honors the `:seon.ai/config` row's `:seon.ai/max-tokens`
-   (read PER CALL via `seon.ai/current`, reactive-context — no cache) as
-   `::max-new-tokens`, so a downstream deployment retunes the output cap
-   like any other provider; precedence is explicit opt > config row >
-   the worker's gen-config default (no default-gen-opts cap)."
+   top level. Honors the request's authority-resolved
+   `:seon.ai/max-tokens` as `::max-new-tokens`; precedence is explicit opt
+   > resolved config > the worker's generation default."
   [opts arg]
   (let [ctx-text (ai/llm-arg->ctx arg)
         signal   (ai/llm-arg->abort-signal arg)
-        cfg-max (:seon.ai/max-tokens (ai/current))
+        resolution (when (map? arg) (:seon.ai/config-resolution arg))
+        cfg-max (get-in resolution
+                        [:seon.ai/resolved-config :seon.ai/max-tokens])
         request (cond-> (merge default-gen-opts opts {::prompt ctx-text})
                   (and cfg-max (not (contains? opts ::max-new-tokens)))
                   (assoc ::max-new-tokens cfg-max)
-                  signal (assoc :seon.ai/abort-signal signal))
+                  signal (assoc :seon.ai/abort-signal signal)
+                  resolution (assoc :seon.ai/config-resolution resolution))
         resp    (await (complete request))]
     (cond-> {:text        (:seon.ai/text resp)
              :seon.ai/raw resp}

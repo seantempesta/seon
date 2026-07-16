@@ -1,11 +1,10 @@
 (ns seon.ai.dispatch
   "Effective-provider dispatch for the agent LLM boundary.
 
-   Provider and DiffusionGemma backend selection are read for every call,
-   after the agent turn has established its ambient database scope. This
-   keeps per-agent provider overrides reactive and prevents a hosted agent
-   from retaining an adapter chosen at boot. Missing credentials select the
-   deterministic stub; no provider constructor is invoked in that case."
+   Provider and DiffusionGemma backend selection come from the immutable
+   `:seon.ai/config-resolution` captured at the prompt coordinate. Missing
+   credentials select the deterministic stub; missing resolution is an
+   explicit error value."
   (:require
     [seon.ai :as ai]
     [seon.ai.anthropic :as anthropic]
@@ -13,8 +12,6 @@
     [seon.ai.openai-compat :as openai]
     [seon.ai.tokens :as tokens]
     [seon.ai.typeahead :as typeahead]
-    [seon.config :as config]
-    [seon.db :as db]
     [seon.schema :as schema]))
 
 ;; The turn boundary has two intentional call shapes: buffered calls pass the
@@ -53,79 +50,48 @@
            (fn [_] {:text text :seon.ai/adapter :stub}))))
 
 (defn adapter
-  "The agent adapter for the currently effective provider."
-  {:malli/schema
-   [:function
-    [:=> [:cat] ::llm-fn]
-    [:=> [:cat :seon.ai/config-resolution] ::llm-fn]]}
-  ([]
-   ;; Retained for direct operator/debug selection. Provider attempts use the
-   ;; explicit arity below through [[llm-fn]].
-   (case (ai/provider)
-    :anthropic
-    (if (config/anthropic-api-key)
-      (anthropic/agent-adapter)
-      stub)
+  "The agent adapter selected by one authority config resolution."
+  {:malli/schema [:=> [:cat :seon.ai/config-resolution] ::llm-fn]}
+  [resolution]
+  (let [config (:seon.ai/resolved-config resolution)]
+    (case (:seon.ai/provider config)
+      :anthropic
+      (if (anthropic/api-key-configured? resolution)
+        (anthropic/agent-adapter)
+        stub)
 
-    :diffusiongemma
-    (case (ai/dg-backend)
-      :control (if (diffusiongemma/api-configured?)
-                 (diffusiongemma/agent-adapter)
-                 stub)
-      (if (openai/api-key-configured?)
+      :diffusiongemma
+      (case (:seon.ai/dg-backend config)
+        :control (if (diffusiongemma/api-configured? resolution)
+                   (diffusiongemma/agent-adapter)
+                   stub)
+        (if (openai/api-key-configured? resolution)
+          (openai/agent-adapter)
+          stub))
+
+      :typeahead
+      (if (diffusiongemma/api-configured? resolution)
+        (typeahead/agent-adapter)
+        stub)
+
+      (if (openai/api-key-configured? resolution)
         (openai/agent-adapter)
-        stub))
+        stub))))
 
-    :typeahead
-    (if (diffusiongemma/api-configured?)
-      (typeahead/agent-adapter)
-      stub)
-
-    ;; DeepSeek and every OpenAI-compatible gateway share the same adapter.
-    (if (openai/api-key-configured?)
-      (openai/agent-adapter)
-      stub)))
-  ([resolution]
-   (let [config (:seon.ai/resolved-config resolution)]
-     (case (:seon.ai/provider config)
-       :anthropic
-       (if (config/anthropic-api-key)
-         (anthropic/agent-adapter)
-         stub)
-
-       :diffusiongemma
-       (case (:seon.ai/dg-backend config)
-         :control (if (diffusiongemma/api-configured?)
-                    (diffusiongemma/agent-adapter)
-                    stub)
-         (if (openai/api-key-configured? resolution)
-           (openai/agent-adapter)
-           stub))
-
-       :typeahead
-       (if (diffusiongemma/api-configured?)
-         (typeahead/agent-adapter)
-         stub)
-
-       (if (openai/api-key-configured? resolution)
-         (openai/agent-adapter)
-         stub)))))
+(defn- missing-resolution
+  []
+  (.resolve js/Promise
+            {:text ""
+             :seon.ai/error
+             {:seon.ai/msg
+              "missing :seon.ai/config-resolution — resolve ordinary authority data at the prompt coordinate before dispatch"}}))
 
 (defn llm-fn
   "Build a per-call dispatching agent LLM function."
   {:malli/schema [:=> [:cat] ::llm-fn]}
   []
   (fn [arg]
-    (let [supplied-resolution
-          (when (map? arg) (:seon.ai/config-resolution arg))
-          database (when-not supplied-resolution @db/*conn*)
-          agent-id (when-not supplied-resolution (db/current-agent-id))
-          resolution (or supplied-resolution
-                         (ai/resolved-config
-                           (cond-> {:seon.db/db database}
-                             agent-id (assoc :seon.agent/id agent-id))))
-          request (if (map? arg)
-                    (assoc arg :seon.ai/config-resolution resolution)
-                    {:seon.ai/ctx arg
-                     :seon.ai/config-resolution resolution})]
-      ((adapter resolution) request))))
+    (if-let [resolution (when (map? arg)
+                          (:seon.ai/config-resolution arg))]
+      ((adapter resolution) arg)
+      (missing-resolution))))

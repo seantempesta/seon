@@ -99,29 +99,6 @@
 ;; agent-adapter request-option overrides (e.g. {:seon.ai/temperature 0.2}).
 (schema/register! :seon.ai.openai-compat/opts :map)
 
-;; ============================================================
-;; Config — the shipped defaults. The :seon.ai/config row (read per
-;; call) overrides these; explicit request opts override the row.
-;; ============================================================
-
-;; Model/temperature/max-tokens defaults live in the ONE per-provider map
-;; `seon.ai/shipped-defaults` (:deepseek entry — :openai-compat shares
-;; this wire path and the same fallbacks), so the queryable resolver
-;; (`seon.ai/resolved-config`) reports exactly what this adapter falls
-;; back to, including endpoint and timeout.
-(def ^:private defaults            (:deepseek ai/shipped-defaults))
-(def ^:private default-model       (:seon.ai/model defaults))
-;; The /v1 ROOT (not the full chat-completions URL) — the SDK appends
-;; /chat/completions itself.
-(def ^:private default-endpoint    (:seon.ai/base-url defaults))
-(def ^:private default-temperature (:seon.ai/temperature defaults))
-(def ^:private default-max-tokens  (:seon.ai/max-tokens defaults))
-;; Wall-clock timeout for the HTTP call. A hung API stops wedging the
-;; agent loop — turn fails with a timeout error and the next user
-;; message kicks again. Override via the config row's
-;; :seon.ai/timeout-ms (SEON_AI_TIMEOUT_MS).
-(def ^:private default-timeout-ms  (:seon.ai/timeout-ms defaults))
-
 ;; Thinking mode (deepseek-v4-pro). The API DEFAULTS TO ENABLED, which
 ;; is slow — a long-ctx thinking call can blow past the 60s wall-clock
 ;; timeout (observed 2026-06-10). For :deepseek we send {"thinking":
@@ -166,25 +143,10 @@
           candidates)))
 
 (defn api-key-configured?
-  "Whether a bearer API key resolves for the ACTIVE provider.
-
-   See the ns doc's resolution order. `seon.client/current-llm-fn` uses this
-   to fall back to the stub llm-fn when no key is available."
-  {:malli/schema
-   [:function
-    [:=> [:cat] :boolean]
-    [:=> [:cat :seon.ai/config-resolution] :boolean]]}
-  ([]
-   ;; Direct boot/debug compatibility. Provider attempts call the explicit
-   ;; arity with the immutable resolution captured by dispatch.
-   (let [cfg (ai/current)
-         provider (or (:seon.ai/provider cfg) (ai/provider))
-         defaults (get ai/shipped-defaults provider {})
-         resolution {:seon.ai/resolved-config (merge defaults cfg)
-                     :seon.ai/provenance {:seon.ai/provider :default}}]
-     (boolean (resolved-credential resolution))))
-  ([resolution]
-   (boolean (resolved-credential resolution))))
+  "Whether a bearer API key resolves for one authority resolution."
+  {:malli/schema [:=> [:cat :seon.ai/config-resolution] :boolean]}
+  [resolution]
+  (boolean (resolved-credential resolution)))
 
 (defn request-params
   "Build the OpenAI chat-completions request PARAMS as a CLJ map.
@@ -195,8 +157,6 @@
    here — [[complete]] merges it into these params (the SDK's 2nd-arg
    `:body` would REPLACE the body, dropping model/messages).
 
-   Provider attempts use the explicit resolution arity; the one-arity form
-   captures ambient config only for direct REPL/request-shape inspection.
    Explicit request opts win over the resolved value. We always request a stream (no `:stream false`)
    and ask for usage on the final chunk via
    `:stream_options {:include_usage true}`. `:tools` / `:tool_choice`
@@ -204,35 +164,23 @@
    tests and live debugging can inspect exactly what goes over the
    wire."
   {:malli/schema
-   [:function
-    [:=> [:cat :seon.ai.openai-compat/complete-request] :map]
-    [:=> [:catn [:seon.ai.openai-compat/request
-                 :seon.ai.openai-compat/complete-request]
-                [:seon.ai/config-resolution :seon.ai/config-resolution]]
-     :map]]}
-  ([request]
-   ;; Direct REPL/request-shape inspection retains the ambient convenience
-   ;; arity. Provider attempts always use the explicit resolution arity.
-   (let [cfg (ai/current)
-         provider (or (:seon.ai/provider cfg) (ai/provider))
-         defaults (get ai/shipped-defaults provider {})]
-     (request-params
-       request
-       {:seon.ai/resolved-config (merge defaults cfg)
-        :seon.ai/provenance {:seon.ai/provider :default}})))
-  ([{:seon.ai/keys [ctx model temperature max-tokens tools tool-choice] :as request}
-    resolution]
+   [:=> [:catn [:seon.ai.openai-compat/request
+                :seon.ai.openai-compat/complete-request]
+               [:seon.ai/config-resolution :seon.ai/config-resolution]]
+    :map]}
+  [{:seon.ai/keys [ctx model temperature max-tokens tools tool-choice] :as request}
+   resolution]
   (let [cfg      (:seon.ai/resolved-config resolution)
         thinking (ai/thinking-mode cfg)
         compat?  (openai-compat? resolution)
         tools*   (or tools (:seon.ai/tools cfg))
         choice*  (or tool-choice (:seon.ai/tool-choice cfg))]
     (cond->
-      {:model          (or model (:seon.ai/model cfg) default-model)
+      {:model          (or model (:seon.ai/model cfg))
        :messages       [{:role "system" :content (ai/effective-system-prompt request)}
                         {:role "user"   :content ctx}]
-       :temperature    (or temperature (:seon.ai/temperature cfg) default-temperature)
-       :max_tokens     (or max-tokens (:seon.ai/max-tokens cfg) default-max-tokens)
+       :temperature    (or temperature (:seon.ai/temperature cfg))
+       :max_tokens     (or max-tokens (:seon.ai/max-tokens cfg))
        :stream_options {:include_usage true}}
       ;; :deepseek always sends the vendor :thinking toggle (that API
       ;; defaults to enabled); :openai-compat never sends it — only the
@@ -240,7 +188,7 @@
       (not compat?)      (assoc :thinking {:type (if thinking "enabled" "disabled")})
       (string? thinking) (assoc :reasoning_effort thinking)
       (some? tools*)         (assoc :tools tools*)
-      (some? choice*)        (assoc :tool_choice choice*)))))
+      (some? choice*)        (assoc :tool_choice choice*))))
 
 (defn- request-extra-body
   "The generic extra request fields for this call — `:seon.ai/extra-body`
@@ -537,7 +485,7 @@
       ;; a rejection as a :core fault (crashes the dev pod). Same class as the
       ;; stream-until-form! fix (e6295ecd) and the anthropic fix (06615941).
       (try
-        (let [ms      (or (:seon.ai/timeout-ms config) default-timeout-ms)
+        (let [ms      (:seon.ai/timeout-ms config)
               ^js client (make-client url key ms)
               extra   (request-extra-body request resolution)
               ;; :extra-body is MERGED into the request PARAMS (1st arg).

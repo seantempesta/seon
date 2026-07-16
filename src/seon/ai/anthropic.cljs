@@ -9,9 +9,9 @@
    (`.stream` + `.finalMessage`, buffered to one assembled Message) and
    sets the `anthropic-version` header itself.
 
-   Call settings come from the `:seon.ai/config` row, read PER CALL
-   via `seon.ai/current` (C-18). Precedence: explicit request opt >
-   config row > the shipped defaults below.
+   Call settings come from one explicit `:seon.ai/config-resolution`
+   captured before the attempt. Explicit request opts win over that
+   immutable resolved value.
 
    API specifics PINNED from the API reference 2026-06-11 (exact
    strings — do NOT append date suffixes):
@@ -72,7 +72,10 @@
    [:seon.ai/tools         {:optional true} :seon.ai/tools]
    [:seon.ai/tool-choice   {:optional true} :seon.ai/tool-choice]
    [:seon.ai/abort-signal  {:optional true} :seon.ai/abort-signal]
-   [:seon.ai/extra-body    {:optional true} :seon.ai/extra-body]])
+   [:seon.ai/extra-body    {:optional true} :seon.ai/extra-body]
+   [:seon.ai/config-resolution
+    {:optional true}
+    :seon.ai/config-resolution]])
 
 (schema/register! :seon.ai.anthropic/stop-reason :string)
 
@@ -87,30 +90,34 @@
    [:seon.ai.anthropic/stop-reason  {:optional true} :seon.ai.anthropic/stop-reason]
    [:seon.ai/usage                  {:optional true} :seon.ai/usage]
    [:seon.ai/tool-calls             {:optional true} :seon.ai/tool-calls]
-   [:seon.ai/provider-fields        {:optional true} :seon.ai/provider-fields]])
+   [:seon.ai/provider-fields        {:optional true} :seon.ai/provider-fields]
+   [:seon.ai/config-evidence        {:optional true} :seon.ai/config-evidence]])
 
-;; ============================================================
-;; Config — the shipped defaults. The :seon.ai/config row (read per
-;; call) overrides these; explicit request opts override the row.
-;; ============================================================
+(defn- resolved-credential
+  "Resolve a secret at call time and retain only its non-secret source."
+  [resolution]
+  (let [configured-env (get-in resolution
+                               [:seon.ai/resolved-config
+                                :seon.ai/api-key-env])
+        candidates (cond-> []
+                     configured-env
+                     (conj [configured-env :configured-env])
+                     true
+                     (conj ["ANTHROPIC_API_KEY" :provider-default-env]
+                           ["SEON_AI_API_KEY" :conventional-env]))]
+    (some (fn [[env-name class]]
+            (when-let [secret (platform/env-val env-name)]
+              {::api-key secret
+               :seon.ai/credential-source
+               {:seon.ai/credential-class class
+                :seon.ai/api-key-env env-name}}))
+          candidates)))
 
-;; Model/max-tokens defaults live in the ONE per-provider map
-;; `seon.ai/shipped-defaults` (:anthropic entry), so the queryable
-;; resolver (`seon.ai/resolved-config`) reports exactly what this
-;; adapter falls back to. max_tokens is REQUIRED by the Messages API;
-;; 16000 keeps long replies from truncating mid-thought (current API
-;; guidance) while staying under HTTP timeouts.
-(def ^:private defaults           (:anthropic ai/shipped-defaults))
-(def ^:private default-model      (:seon.ai/model defaults))
-(def ^:private default-max-tokens (:seon.ai/max-tokens defaults))
-(def ^:private default-timeout-ms (:seon.ai/timeout-ms defaults))
-
-(defn- api-key
-  "The Anthropic bearer key from `ANTHROPIC_API_KEY` in process.env, or
-   nil — read at call time, never transacted. [[complete]] turns a nil
-   into a legible config-error envelope (never a throw)."
-  []
-  (platform/env-val "ANTHROPIC_API_KEY"))
+(defn api-key-configured?
+  "Whether a bearer API key resolves for one authority resolution."
+  {:malli/schema [:=> [:cat :seon.ai/config-resolution] :boolean]}
+  [resolution]
+  (boolean (resolved-credential resolution)))
 
 (defn- config-error
   "Errors-as-values envelope for a CALL-TIME config gap (no API key).
@@ -134,17 +141,21 @@
    it into these params (the SDK's 2nd-arg `:body` would REPLACE the
    body, dropping model/messages).
 
-   Reads the `:seon.ai/config` row PER CALL (`seon.ai/current`);
-   explicit request opts win over the row, the row wins over the
-   shipped defaults. Thinking: config row truthy → adaptive; falsy →
+   Explicit request opts win over the supplied authority resolution.
+   Thinking: resolved config truthy → adaptive; falsy →
    the :thinking key is ABSENT (never {:type \"disabled\"} — 400s on
    Fable). NEVER carries :temperature/:top_p/:top_k (400 on Opus
    4.7+/Fable). `:tools` / `:tool_choice` included ONLY when present
    (request opt > config row). Public so tests and live debugging can
    inspect exactly what goes over the wire."
-  {:malli/schema [:=> [:cat :seon.ai.anthropic/complete-request] :map]}
-  [{:seon.ai/keys [ctx model max-tokens tools tool-choice] :as request}]
-  (let [cfg (ai/current)
+  {:malli/schema
+   [:=> [:catn [:seon.ai.anthropic/request
+                :seon.ai.anthropic/complete-request]
+               [:seon.ai/config-resolution :seon.ai/config-resolution]]
+    :map]}
+  [{:seon.ai/keys [ctx model max-tokens tools tool-choice] :as request}
+   resolution]
+  (let [cfg (:seon.ai/resolved-config resolution)
         {:seon.render/keys [stable-text volatile-text]} (ctx/split-context ctx)
         ;; Both halves must be non-blank to split — a boundary-less ctx
         ;; (tests, stub prompts) degrades to the pre-split wire shape.
@@ -152,8 +163,8 @@
         tools*  (or tools (:seon.ai/tools cfg))
         choice* (or tool-choice (:seon.ai/tool-choice cfg))]
     (cond->
-      {:model      (or model (:seon.ai/model cfg) default-model)
-       :max_tokens (or max-tokens (:seon.ai/max-tokens cfg) default-max-tokens)
+      {:model      (or model (:seon.ai/model cfg))
+       :max_tokens (or max-tokens (:seon.ai/max-tokens cfg))
        ;; Block array (not a bare string) so the stable prefix carries
        ;; cache breakpoints — see the ns docstring's PROMPT CACHING
        ;; pin. Block 1 = the soul/system prompt; block 2 = the ctx's
@@ -178,14 +189,10 @@
       (some? choice*)        (assoc :tool_choice choice*))))
 
 (defn- request-extra-body
-  "The generic extra request fields for this call — `:seon.ai/extra-body`
-   from the request opt (winning), else the config row's data-only door
-   (`seon.ai/config-extra-body` — env SEON_AI_EXTRA_BODY / the row's
-   ::extra-body-edn, the only path that reaches the agent turn loop). nil
-   when neither set (nothing to merge)."
-  [request]
+  "The request override, else the already resolved config value."
+  [request resolution]
   (or (:seon.ai/extra-body request)
-      (not-empty (ai/config-extra-body))))
+      (:seon.ai/extra-body resolution)))
 
 ;; ============================================================
 ;; Response parsing — :content is an ARRAY of typed blocks; check
@@ -329,10 +336,26 @@
   {:malli/schema [:=> [:cat :seon.ai.anthropic/complete-request]
                   :seon.ai.anthropic/complete-response]}
   [request]
-  (let [key (api-key)]
-    (if (nil? key)
+  (let [resolution (:seon.ai/config-resolution request)
+        config (:seon.ai/resolved-config resolution)
+        credential (resolved-credential resolution)
+        key (::api-key credential)
+        credential-source (:seon.ai/credential-source credential)
+        evidence (when resolution
+                   (if credential-source
+                     (ai/config-evidence resolution credential-source)
+                     (ai/config-evidence resolution)))]
+    (cond
+      (nil? resolution)
       (config-error
-        "ANTHROPIC_API_KEY not set in process.env — set it to the Anthropic bearer key")
+        "missing :seon.ai/config-resolution — resolve ordinary authority data before calling Anthropic")
+
+      (nil? key)
+      (assoc (config-error
+               "Anthropic API key not found in process.env — set ANTHROPIC_API_KEY, SEON_AI_API_KEY, or select an env var with :seon.ai/api-key-env")
+             :seon.ai/config-evidence evidence)
+
+      :else
       ;; The WHOLE build+call rides inside the try — the params build reads
       ;; config-provided data (the config row, SEON_AI_EXTRA_BODY extra-body
       ;; merged into the params, the ctx split), so a throw there is an
@@ -340,14 +363,14 @@
       ;; instrument wrapper records a rejection as a :core fault (crashes
       ;; the dev pod). Same class as the stream-until-form! fix (e6295ecd).
       (try
-        (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
+        (let [ms      (:seon.ai/timeout-ms config)
               ^js client (make-client key ms)
-              extra   (request-extra-body request)
+              extra   (request-extra-body request resolution)
               ;; :extra-body is MERGED into the request PARAMS (1st arg) —
               ;; the SDK's 2nd-arg RequestOptions :body REPLACES the body
               ;; (drops model/messages), so it must NOT be used. Same fix
               ;; as seon.ai.openai-compat (verified live there).
-              params  (clj->js (cond-> (request-params request)
+              params  (clj->js (cond-> (request-params request resolution)
                                  (seq extra) (merge extra)))
               ^js messages (.. client -messages)
               signal (:seon.ai/abort-signal request)
@@ -378,8 +401,11 @@
   (let [ctx-text (ai/llm-arg->ctx arg)
         signal   (ai/llm-arg->abort-signal arg)
         system-prompt (when (map? arg) (:seon.ai/system-prompt arg))
+        resolution (when (map? arg) (:seon.ai/config-resolution arg))
         resp (await (complete (cond-> (assoc opts :seon.ai/ctx ctx-text)
                                 signal (assoc :seon.ai/abort-signal signal)
+                                resolution
+                                (assoc :seon.ai/config-resolution resolution)
                                 system-prompt
                                 (assoc :seon.ai/system-prompt system-prompt))))]
     (cond-> {:text        (:seon.ai/text resp)
