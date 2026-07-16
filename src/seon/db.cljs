@@ -1168,8 +1168,8 @@
 ;; Provenance genesis.
 ;; ---------------------------------------------------------------------------
 
-(declare execute-many head-coordinate installed-schema
-         installed-schema-with-evidence query)
+(declare execute-many head-coordinate installed-schema query)
+(declare ^:private installed-schema-with-evidence)
 
 (schema/register! ::provenance-action
                   [:enum :fresh-genesis :converged])
@@ -1628,15 +1628,8 @@
         (try (dbi/-schema db) (catch :default _ nil)))
       {}))
 
-(schema/register! ::installed-schema-evidence
-  [:map {:closed true}
-   [::coordinate ::coordinate]
-   [::installed-schema :map]])
-
-(defn ^{:async true :seon.fn/agent-facing? true} installed-schema-with-evidence
+(defn- ^:async installed-schema-with-evidence
   "Read installed schema and retain the exact coordinate it describes."
-  {:malli/schema
-   [:=> [:catn [::request :map]] ::installed-schema-evidence]}
   [request]
   (let [base (await (read-request-base! request))]
     (if (error-value? base)
