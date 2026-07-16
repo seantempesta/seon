@@ -1,6 +1,7 @@
 (ns seon.db.writer-integration-test
   "End-to-end canonical writer request and publication tests."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [seon.db.backend :as backend]
             [seon.db.coordinate :as coordinate]
@@ -1782,16 +1783,36 @@
         (let [schema-only
               (transact!
                database-name "schema/lazy/admit"
-               [{:seon.schema/key :writer.schema/lazy
-                 :seon.schema/form ":keyword"}
-                {:seon.schema/key :writer.schema/non-attribute
-                 :seon.schema/form
-                 "[:map [:writer.schema/non-attribute-value :string]]"}])
+               (into
+                [{:seon.schema/key :writer.schema/lazy
+                  :seon.schema/form ":keyword"}
+                 {:seon.schema/key :writer.schema/lazy-parent
+                  :seon.schema/form ":seon.db/ref"}
+                 {:seon.schema/key :writer.schema/non-attribute
+                  :seon.schema/form
+                  "[:map [:writer.schema/non-attribute-value :string]]"}]
+                (map (fn [index]
+                       {:seon.schema/key
+                        (keyword "writer.schema.irrelevant" (str index))
+                        :seon.schema/form "[malformed"}))
+                (range 128)))
               after-schema-only (d/db connection)
+              parsed-forms (atom [])
+              original-read-string edn/read-string
               lazy-use
+              (with-redefs [edn/read-string
+                            (fn [form-string]
+                              (swap! parsed-forms conj form-string)
+                              (original-read-string form-string))]
+                (transact!
+                 database-name "schema/lazy/use"
+                 [{:writer.schema/lazy :ready}]))
+              lazy-ref-use
               (transact!
-               database-name "schema/lazy/use"
-               [{:writer.schema/lazy :ready}])
+               database-name "schema/lazy/ref-use"
+               [{:writer.schema/id "lazy-child"
+                 :writer.schema/lazy-parent
+                 [:writer.schema/id "parent"]}])
               before-unknown (coordinate/resolved (d/db connection))
               unknown
               (transact!
@@ -1812,9 +1833,17 @@
                               :writer.schema/non-attribute))
               "non-attribute schema forms remain ordinary facts")
           (is (true? (::protocol/success? lazy-use)))
+          (is (= [":keyword"] @parsed-forms)
+              "first use parses only its one candidate form")
           (is (= :db.type/keyword
                  (get-in (d/db connection)
                          [:schema :writer.schema/lazy :db/valueType])))
+          (is (true? (::protocol/success? lazy-ref-use))
+              (pr-str lazy-ref-use))
+          (is (= :db.type/ref
+                 (get-in (d/db connection)
+                         [:schema :writer.schema/lazy-parent :db/valueType]))
+              "candidate lookup follows only stored schema references")
           (is (false? (::protocol/success? unknown)))
           (is (= :user-input (:seon.error/kind unknown)))
           (is (= before-unknown (coordinate/resolved (d/db connection)))))

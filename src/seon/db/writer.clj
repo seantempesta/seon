@@ -265,26 +265,64 @@
                 throwable)))))
 
 (defn- stored-schema-form-strings
-  [db-value]
-  (if (and (contains? (:schema db-value) :seon.schema/key)
+  [db-value attributes]
+  (if (and (seq attributes)
+           (contains? (:schema db-value) :seon.schema/key)
            (contains? (:schema db-value) :seon.schema/form))
     (into {}
           (d/q '[:find ?attribute ?form
+                 :in $ [?attribute ...]
                  :where
                  [?schema :seon.schema/key ?attribute]
                  [?schema :seon.schema/form ?form]]
-               db-value))
+               db-value attributes))
     {}))
 
+(defn- schema-form-references
+  [form]
+  (letfn [(references [value]
+            (cond
+              (qualified-keyword? value)
+              #{value}
+
+              (vector? value)
+              (let [[schema-type & children] value
+                    children (if (map? (first children))
+                               (rest children)
+                               children)]
+                (case schema-type
+                  (:enum := :not= :re :fn) #{}
+                  :map (into #{} (mapcat #(references (last %))) children)
+                  (into #{} (mapcat references) children)))
+
+              :else #{}))]
+    (references form)))
+
 (defn- canonical-schema-forms
-  [db-value transaction-data]
-  (let [form-strings
-        (merge (stored-schema-form-strings db-value)
-               (schema-form-strings transaction-data))]
-    (into {}
-          (map (fn [[attribute form-string]]
-                 [attribute (read-schema-form attribute form-string)]))
-          form-strings)))
+  [db-value transaction-data candidates]
+  (let [transaction-forms (schema-form-strings transaction-data)]
+    (loop [pending candidates
+           attempted #{}
+           forms {}]
+      (if (empty? pending)
+        forms
+        (let [same-transaction (select-keys transaction-forms pending)
+              stored
+              (stored-schema-form-strings
+               db-value (set/difference pending (set (keys same-transaction))))
+              parsed
+              (into {}
+                    (map (fn [[attribute form-string]]
+                           [attribute
+                            (read-schema-form attribute form-string)]))
+                    (merge stored same-transaction))
+              attempted (into attempted pending)
+              dependencies
+              (into #{}
+                    (comp (mapcat schema-form-references)
+                          (remove attempted))
+                    (vals parsed))]
+          (recur dependencies attempted (into forms parsed)))))))
 
 (defn- schema-shape
   [declaration]
@@ -309,7 +347,8 @@
                                                 (set (keys installed))))]
     (if (empty? candidates)
       []
-      (let [forms (canonical-schema-forms db-value transaction-data)
+      (let [forms (canonical-schema-forms
+                   db-value transaction-data candidates)
             unresolved (vec (sort-by str (remove #(contains? forms %)
                                                   candidates)))
             _ (when (seq unresolved)
