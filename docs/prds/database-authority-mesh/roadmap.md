@@ -1195,10 +1195,14 @@ render dispatch is now pure over ordinary node data at `1a19c3e7`, but authored
 renderers still execute synchronously in-process and discover source, requires,
 exposed namespaces, and helpers through a local Datahike value. There is no
 existing child invocation surface to bind those open-ended reads to the prompt
-coordinate. Therefore the one 13-member ordinary-agent / 16-member root prompt
-acquisition waits for the canonical Unit 8 child execution service shared by
-eval, authored renderers, and interactions; a render-only executor or local
-fallback is prohibited.
+coordinate. The earlier proposed 13-member ordinary-agent / 16-member root
+vector is a measured seed snapshot, not yet a frozen interface: stored blocks,
+profiles, namespace edges, menus/typeahead, derived render functions, canvas
+selection, and authored slots make acquisition data-dependent. The canonical
+Unit 8 child execution service must therefore prove either coarse queries that
+absorb those joins or a bounded discovery-then-acquisition sequence at the
+same coordinate. A fixed replay table, render-only executor, or local fallback
+is prohibited.
 
 ### 2026-07-16 active implementation card
 
@@ -1261,9 +1265,17 @@ fallback is prohibited.
   Datahike reachability and leaves the remote owner behind the unchanged public
   `seon.db` interface. Eval-limit environment reads move into closed
   startup/config data before enforcing the explicit child environment.
+  Commit `ff87ea2e` moves planned-quiesce reads to the same facade: one
+  two-member `execute-many` supplies current runs, running turns, and its exact
+  coordinate; one aligned `pull-many` classifies observed terminal turns at
+  that coordinate. Autonomous drain carries the final empty-work coordinate,
+  while nonautonomous drain resolves once before projection detach and retains
+  that value across release retry. Its focused artifact compiles; runtime
+  assertions remain blocked before namespace startup by the intentional legacy
+  replica import.
 - **Next refill:** migrate the outer authored render owners first, then
-  interaction and eval through that same child owner and land the 13/16-member
-  prompt acquisition with immutable retry inputs. In parallel, finish
+  interaction and eval through that same child owner and land the smallest
+  data-dependent prompt acquisition with immutable retry inputs. In parallel, finish
   restore/readiness,
   quiescence, and session close. Only then switch client open atomically and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
