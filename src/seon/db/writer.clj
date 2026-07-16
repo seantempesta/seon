@@ -1684,15 +1684,16 @@
    ::close! close!})
 
 (defn- claim-connection-request!
-  [runtime transport-connection request complete!]
+  [runtime transport-connection request frame-bytes complete!]
   (if transport-connection
     (locking (::connection-lock transport-connection)
       (when-not @(::closed? transport-connection)
-        (claim-request! runtime transport-connection request complete!)))
-    (claim-request! runtime nil request complete!)))
+        (claim-request! runtime transport-connection request frame-bytes
+                        complete!)))
+    (claim-request! runtime nil request frame-bytes complete!)))
 
 (defn- claim-request!
-  [runtime transport-connection request complete!]
+  [runtime transport-connection request frame-bytes complete!]
   (let [active (::active-requests runtime)
         request-id (::protocol/request-id request)
         owner (Object.)]
@@ -1701,6 +1702,7 @@
         (swap! active assoc request-id
                {::owner owner
                 ::request request
+                ::request-bytes frame-bytes
                 ::transport-connection transport-connection
                 ::complete! complete!
                 ::jobs #{}
@@ -1831,9 +1833,10 @@
   (let [active (::active-requests runtime)]
     (locking active
       (when (identical? owner (get-in @active [request-id ::owner]))
+        (let [request-bytes (get-in @active [request-id ::request-bytes] 0)]
         (swap! active update request-id assoc
                ::scope scope ::jobs #{job-id})
-        true))))
+          request-bytes)))))
 
 (declare complete-executor! drive-execute-many!)
 
@@ -2032,7 +2035,9 @@
           {::protocol/request-id (::protocol/request-id request)
            ::protocol/capabilities
            (assoc (d/capabilities)
-                  ::protocol/version protocol/current-version)})
+                  ::protocol/version protocol/current-version
+                  ::protocol/maximum-frame-bytes
+                  protocol/maximum-frame-bytes)})
 
          :seon.db.protocol.operation/resolve-head
          (let [{::registry/keys [conn database-name attachment coordinate]}
@@ -2131,10 +2136,12 @@
 
 (defn- submit-single!
   [runtime request-id owner scope submission]
-  (when (reserve-single-job! runtime request-id owner scope
-                             (::executor/job-id submission))
+  (when-let [request-bytes
+             (reserve-single-job! runtime request-id owner scope
+                                  (::executor/job-id submission))]
     (try
-      (executor/try-submit! submission)
+      (executor/try-submit!
+       (assoc submission ::executor/request-bytes request-bytes))
       (catch Throwable throwable
         (complete-executor!
          runtime
@@ -2182,7 +2189,7 @@
                      ::next-position 0
                      ::results (vec (repeat (count (::protocol/members request))
                                             nil)))
-              true))]
+              (get-in @active [request-id ::request-bytes] 0)))]
       (when initialized?
         (try
           (executor/try-submit!
@@ -2192,6 +2199,7 @@
             ::executor/scope scope
             ::executor/job-id resolution-id
             ::executor/request-id request-id
+            ::executor/request-bytes initialized?
             ::executor/request
             {::database-name (::protocol/database-name request)
              ::scope scope
@@ -2350,8 +2358,10 @@
 (defn handle-request!
   "Start one request and invoke complete! exactly once after physical completion."
   ([runtime request complete!]
-   (handle-request! runtime nil request complete!))
+   (handle-request! runtime nil request 0 complete!))
   ([runtime transport-connection request complete!]
+   (handle-request! runtime transport-connection request 0 complete!))
+  ([runtime transport-connection request frame-bytes complete!]
    (if-not (protocol/valid-request? request)
      (try
        (complete! (handle-request-sync runtime transport-connection request))
@@ -2360,7 +2370,7 @@
      (let [request-id (::protocol/request-id request)]
        (if-let [owner
                 (claim-connection-request!
-                 runtime transport-connection request complete!)]
+                 runtime transport-connection request frame-bytes complete!)]
          (try
            (case (::protocol/operation request)
              :seon.db.protocol.operation/acquire-database
@@ -2496,19 +2506,32 @@
   "Close one writer server and report every database release."
   {:malli/schema [:=> [:catn [::server ::server]] ::stop-response]}
   [server]
-  (uds/close-request-server! (::request-server server))
-  (executor/stop! {::executor/executor (::executor server)})
-  (let [{::registry/keys [databases]} (registry/list-databases {})
-        release-results
-        (mapv
-         (fn [{::registry/keys [database-name attachment coordinate]}]
-           (merge
-            {::registry/database-name database-name
-             ::registry/attachment attachment
-             ::registry/coordinate coordinate}
-            (registry/release-database!
-             {::registry/database-name database-name})))
-         databases)]
-    (uds/close-publisher! (::publisher server))
-    {::stopped? (every? ::registry/released? release-results)
-     ::release-results release-results}))
+  (let [request-server-shutdown
+        (uds/close-request-server! (::request-server server))
+        request-server-stopped?
+        (every? true?
+                ((juxt ::uds/selector-stopped?
+                       ::uds/workers-stopped?
+                       ::uds/cleanup-stopped?)
+                 request-server-shutdown))]
+    (if-not request-server-stopped?
+      (do
+        (log/error "Database request server did not stop; retaining database authority"
+                   request-server-shutdown)
+        {::stopped? false ::release-results []})
+      (do
+        (executor/stop! {::executor/executor (::executor server)})
+        (let [{::registry/keys [databases]} (registry/list-databases {})
+              release-results
+              (mapv
+               (fn [{::registry/keys [database-name attachment coordinate]}]
+                 (merge
+                  {::registry/database-name database-name
+                   ::registry/attachment attachment
+                   ::registry/coordinate coordinate}
+                  (registry/release-database!
+                   {::registry/database-name database-name})))
+               databases)]
+          (uds/close-publisher! (::publisher server))
+          {::stopped? (every? ::registry/released? release-results)
+           ::release-results release-results})))))

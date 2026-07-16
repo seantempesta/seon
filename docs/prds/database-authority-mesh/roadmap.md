@@ -14,7 +14,8 @@ Babashka operator, with protocol-level database assignment that preserves a
 future measured move to two or four authority shards.
 
 Each active database owns one Datahike connection, exact cache generation,
-immutable indexed values, keyed listener, and ordered writer. Independent
+immutable indexed values, one generation-fenced committed-report source, and
+ordered writer. Independent
 databases commit concurrently. Query, pull, index, history, and temporal work
 over captured immutable values executes concurrently through fair,
 per-database admission into bounded shared capacity. Exact identical reads
@@ -133,6 +134,12 @@ the zero-copy persistent-result boundary is
 [[research/read-materialization-contract-2026-07-16]]. The one-host capacity
 and oversubscription contract is
 [[research/single-jvm-host-capacity-2026-07-16]].
+Selector byte/identity/shutdown ownership is
+[[research/selector-session-resource-ownership-2026-07-16]], and the smallest
+replica-removal operation surface is
+[[research/remote-datahike-operation-seams-2026-07-16]]. The deterministic
+fairness, resilience, and later one-versus-shards measurement is
+[[research/adversarial-throughput-resilience-proof-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -753,17 +760,51 @@ are deleted from this owner. A focused release artifact, including a real
 `Bun.listen`/`Bun.connect` UDS roundtrip, passes 7 tests/19 assertions under Bun
 and the same artifact under Node.
 
-Integrated review found five required resilience cuts before this unit can
-graduate: one shared legal frame limit (the JVM currently accepts 16 MiB while
-the Bun parser accepts 1 MiB), exact decoded-input byte admission before payload
-allocation, per-session plus authority-global encoded/output ownership, a
-bounded selector shutdown backstop, and bounded close-cleanup capacity. A
-timed-out Bun request must also retain its correlation slot until its late
-response or connection close, so neither request-ID reuse nor repeated timeouts
-can exceed physical in-flight capacity. Operation policy, not one universal
-five-second default, chooses deadlines; accepted mutations retain an explicitly
-recoverable unknown outcome through their durable request receipt. These are
-transport completion work, not compatibility paths.
+The first integrated resource cut now uses one shared four-megabyte protocol
+ceiling across Bun, JVM framing, and executor admission. The selector reserves
+exact `4 + payload` input bytes globally before allocation, passes that charge
+once to the outer writer/executor request, and reserves both response count and
+bytes per session and authority. Unencoded result maps are no longer queued:
+completion encodes off-selector under a conservative two-copy allowance, shrinks
+to exact retained framed bytes, and the selector owns only immutable bytes plus
+write position. Slow readers therefore retain bounded accounted bytes and no
+query permit. The next measured transport optimization is a chunked Transit
+output stream that removes the remaining payload-to-frame copy.
+
+Connection admission and cleanup are also fixed-capacity. Cleanup has two
+dedicated workers and a queue no larger than the accepted-connection ceiling;
+mass disconnect cannot create emergency threads or consume codec progress.
+Admission counts opening, open, closing, response-encoding, and cleanup-in-
+progress sessions until exact database cleanup and every response slot finish,
+so reconnect churn cannot overrun the cleanup queue or silently lose an
+acquisition. Shutdown drains to a configured deadline, force-closes afterward,
+stops response producers before draining their final commands, uses only
+bounded joins, and returns ordinary evidence for graceful versus forced close
+and worker termination. The writer releases no Datahike authority unless the
+selector, codec workers, and cleanup workers all prove stopped. A broken
+handler or encoder cannot wedge the close API or turn a deadline into a false
+success.
+
+On Bun, a timed-out request rejects its caller once but retains its request ID
+and physical capacity until the late response or connection close. Duplicate
+reuse and repeated timeout overflow are therefore impossible. Operation policy,
+not one universal five-second default, chooses deadlines; accepted mutations
+retain an explicitly recoverable unknown outcome through their durable receipt.
+The focused Bun release artifact passes 10 tests/30 assertions under both Bun
+and Node. The final selector checkpoint passes 21 tests/95 assertions alone;
+selector, executor, and writer integration pass 60 tests/884 assertions. The
+broader registry, routing, receipts, generated IDs, transaction coordinates,
+replay, transport, writer, and server gate passes 109 tests/1,196 assertions.
+
+Two shortest throughput falsifiers precede larger tuning. First, Datahike
+single-flight waiters currently join only after Seon's scarce read admission;
+enough identical cold callers may therefore park every read worker while an
+unrelated database waits. Second, decode, connection-open, and handler entry
+share the codec workers; saturated handler entry may delay control even though
+the selector remains responsive. The deterministic proofs hold A with latches
+and require B to progress before A releases. Their results decide whether join
+coordination moves before CPU admission and whether control needs its own decode
+floor; worker-count tuning cannot answer either question.
 
 ### Unit 7 — remote `seon.db` and coarse core reads
 
@@ -860,18 +901,35 @@ checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
 The callback deletion and physical-connection acquisition boundaries are closed:
 the writer is the only public request-lifetime owner, and the socket is the one
 internal authority token with no wire session ID or second reference count.
-Earliest unsettled implementation contract: bound bytes and physical request
-identity across the selector/Bun session. One shared maximum frame, exact
-pre-allocation input reservation, retained timed-out correlation slots, bounded
-encoded output, and bounded shutdown must prove that slow, malicious, or dead
-children cannot create unaccounted heap, reuse a live request ID, or wedge the
-authority.
+Earliest unsettled implementation contract: expose `schema`, bounded
+`index-page`, operation-local `history?`, and physical-connection-owned selective
+`listen`/`unlisten` from the maintained Datahike seams. This closes the actual
+consumer requirements before any synchronous local read is made asynchronous.
+
+The source-grounded split is now exact. `schema` calls Datahike's existing
+public `d/schema`; no parallel schema projection is built. Seon pages the
+existing lazy `seek-datoms`/`rseek-datoms` primitives and seals the complete
+last datom plus coordinate, index, prefix, direction, and `history?` into an
+ordinary cursor. History is an operation option over the captured raw value,
+not another remotely addressable database. One Datahike committed-report source
+per connection generation is the only commit-delivery source; installing a
+listener beside it would duplicate work. Seon owns physical-connection
+interests and addressed delivery.
+
+Two maintained-Datahike gaps precede selective delivery: `q-with-evidence`
+must return its already-analyzed attribute dependencies on miss, joined miss,
+and cache hit, and committed-report sources need one process-wide readiness
+handoff plus close/reopen after a gap. Seon does not parse Datalog, busy-poll
+one thread per database, or keep a terminal gapped source. Registration stores
+the returned coordinate; reports at or below it are already reflected, later
+reports are filtered, and a gap emits resynchronization before reopening at the
+latest coordinate.
 
 Integrated proof that closes it:
-Selector/Bun native integration with one shared frame limit, exact input/output
-byte evidence, retained timeout identity, bounded close, and slow-session proof;
-followed by installed-schema/index/history/selective-interest conformance and the
-first coarse remote `seon.db` consumer plan.
+Schema/index/history/selective-interest conformance, including forward/reverse
+cursor continuity, register/commit/unlisten ordering, addressed one-of-1,000
+delivery, report-gap resynchronization, sibling disconnect, and final release;
+followed by the first coarse remote `seon.db` consumer plan.
 
 Final graduation requires all ten units, deletion of the replica/feed/Node
 transport mechanisms, clean protocol conformance, real browser and agent

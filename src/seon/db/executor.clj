@@ -3,7 +3,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as async-protocols]
             [seon.db.coordinate :as coordinate]
-            [seon.db.protocol]
+            [seon.db.protocol :as protocol]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.util.concurrent Executors ExecutorService TimeUnit]))
@@ -120,7 +120,7 @@
      {::available-processors (.availableProcessors (Runtime/getRuntime))
       ::selected-processors processors
       ::cpu-workers cpu-workers
-      ::maximum-request-bytes (* 4 1024 1024)
+      ::maximum-request-bytes (+ Integer/BYTES protocol/maximum-frame-bytes)
       ::maximum-queued-request-bytes (* (cond (<= processors 2) 8
                                                 (<= processors 4) 16
                                                 :else 32)

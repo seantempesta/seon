@@ -4,7 +4,9 @@
             [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds])
-  (:import [java.io File]
+  (:import [com.sun.management UnixOperatingSystemMXBean]
+           [java.io File]
+           [java.lang.management ManagementFactory]
            [java.nio ByteBuffer]
            [java.nio.channels Channels SocketChannel]
            [java.util Date UUID]))
@@ -35,6 +37,11 @@
         (> (System/currentTimeMillis) deadline)
         (throw (ex-info (str "timed out waiting for " description) {}))
         :else (do (Thread/sleep 5) (recur))))))
+
+(defn- open-file-descriptor-count
+  []
+  (.getOpenFileDescriptorCount
+   ^UnixOperatingSystemMXBean (ManagementFactory/getOperatingSystemMXBean)))
 
 (defn- request-server!
   [path handler close-connection!]
@@ -326,7 +333,7 @@
         server
         (request-server!
          path
-         (fn [_owner message complete!]
+         (fn [_owner message _frame-bytes complete!]
            (swap! seen conj message)
            (complete! response))
          (constantly nil))]
@@ -347,7 +354,7 @@
         server
         (request-server!
          path
-         (fn [_owner request complete!]
+         (fn [_owner request _frame-bytes complete!]
            (swap! seen conj request)
            (complete! (protocol/success {::protocol/pong? true})))
          (constantly nil))]
@@ -364,6 +371,67 @@
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
+(deftest failed-request-server-start-closes-native-resources
+  (let [missing-parent
+        (File. "tmp" (str "missing-socket-parent-" (random-uuid)))
+        path (.getAbsolutePath (File. missing-parent "request.sock"))
+        before (open-file-descriptor-count)]
+    (dotimes [_ 16]
+      (is (thrown?
+           Throwable
+           (uds/start-request-server!
+            {::uds/socket-path path
+             ::uds/open-connection! (fn [_close!] (Object.))
+             ::uds/close-connection! (constantly nil)
+             ::uds/handler
+             (fn [_owner _request _frame-bytes _complete!] nil)}))))
+    (is (<= (open-file-descriptor-count) (+ before 2))
+        "failed bind closes its server channel and selector")))
+
+(deftest request-server-reserves-exact-input-before-payload-allocation
+  (let [path (socket-path "transport-input-reservation")
+        request {::request :reserved}
+        payload (uds/encode request)
+        frame-size (+ Integer/BYTES (alength payload))
+        seen-frame-bytes (promise)
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/maximum-input-bytes frame-size
+          ::uds/open-connection! (fn [_close!] (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner _request frame-bytes complete!]
+            (deliver seen-frame-bytes frame-bytes)
+            (complete! {::response :ok}))})]
+    (try
+      (with-open [first (uds/connect! path)
+                  second (uds/connect! path)]
+        (write-bytes! first
+                      (.array (doto (ByteBuffer/allocate Integer/BYTES)
+                                (.putInt (alength payload))))
+                      Integer/MAX_VALUE)
+        (wait-until! "exact input reservation"
+                     #(= frame-size @(::uds/authority-input-bytes server)))
+        (write-bytes! second
+                      (.array (doto (ByteBuffer/allocate Integer/BYTES)
+                                (.putInt (alength payload))))
+                      Integer/MAX_VALUE)
+        (Thread/sleep 25)
+        (is (= frame-size @(::uds/authority-input-bytes server))
+            "another session cannot allocate beyond the authority byte bound")
+        (write-bytes! first payload Integer/MAX_VALUE)
+        (is (= frame-size (deref seen-frame-bytes 2000 ::missing-frame-size)))
+        (is (= {::response :ok}
+               (uds/read-frame (Channels/newInputStream first))))
+        (wait-until! "input and response release"
+                     #(and (zero? @(::uds/authority-input-bytes server))
+                           (zero? @(::uds/authority-response-slot-count
+                                     server)))))
+      (finally
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
 (deftest request-server-close-drains-admitted-work-and-rejects-later-admission
   (let [path (socket-path "transport-drain")
         request {:transport-drain/request "accepted"}
@@ -372,7 +440,7 @@
         server
         (request-server!
          path
-         (fn [_owner message complete!]
+         (fn [_owner message _frame-bytes complete!]
            (deliver entered message)
            (future
              @release-handler
@@ -391,11 +459,48 @@
         (is (= {:transport-drain/response "committed"}
                (deref client 2000 ::client-timeout))
             "the admitted response is delivered before its connection closes")
-        (is (nil? (deref close 2000 ::close-timeout)))
+        (is (= {::uds/graceful? true
+                ::uds/forced-connections 0
+                ::uds/selector-stopped? true
+                ::uds/workers-stopped? true
+                ::uds/cleanup-stopped? true}
+               (deref close 2000 ::close-timeout)))
         (is (thrown? Throwable (uds/connect! path))
             "a closed request server accepts no later connection"))
       (finally
         (deliver release-handler true)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest request-server-close-has-a-bounded-backstop
+  (let [path (socket-path "transport-bounded-close")
+        entered (promise)
+        closed (atom 0)
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/shutdown-timeout-ms 50
+          ::uds/open-connection! (fn [_close!] (Object.))
+          ::uds/close-connection! (fn [_owner] (swap! closed inc))
+          ::uds/handler
+          (fn [_owner request _frame-bytes _complete!]
+            (deliver entered request))})
+        channel (uds/connect! path)]
+    (try
+      (write-bytes! channel (frame-bytes {::request :never-completes})
+                    Integer/MAX_VALUE)
+      (is (= {::request :never-completes}
+             (deref entered 2000 ::handler-not-entered)))
+      (let [started (System/nanoTime)
+            result (uds/close-request-server! server)]
+        (is (< (/ (- (System/nanoTime) started) 1000000.0) 1000.0)
+            "one broken handler cannot wedge authority shutdown")
+        (is (false? (::uds/graceful? result)))
+        (is (= 1 (::uds/forced-connections result)))
+        (is (true? (::uds/selector-stopped? result))))
+      (wait-until! "forced connection cleanup" #(= 1 @closed))
+      (finally
+        (.close channel)
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
@@ -406,7 +511,7 @@
         server
         (request-server!
          path
-         (fn [owner request complete!]
+         (fn [owner request _frame-bytes complete!]
            (swap! owners conj owner)
            (swap! seen conj (::request request))
            (complete! {::response (::request request)}))
@@ -437,7 +542,7 @@
         server
         (request-server!
          path
-         (fn [_owner request complete!]
+         (fn [_owner request _frame-bytes complete!]
            (swap! completions assoc (::request request) complete!))
          (constantly nil))]
     (try
@@ -461,19 +566,20 @@
 
 (deftest request-server-retains-large-response-suffix-until-writable
   (let [path (socket-path "transport-partial-write")
-        response {::large-payload (apply str (repeat (* 4 1024 1024) "x"))}
+        response {::large-payload (apply str (repeat (* 3 1024 1024) "x"))}
         server
         (request-server!
          path
-         (fn [_owner _request complete!] (complete! response))
+         (fn [_owner _request _frame-bytes complete!] (complete! response))
          (constantly nil))]
     (try
       (with-open [channel (uds/connect! path)]
         (write-bytes! channel (frame-bytes {::request :large})
                       Integer/MAX_VALUE)
-        (Thread/sleep 100)
         (is (= response (uds/read-frame (Channels/newInputStream channel)))
-            "a response larger than the socket buffer is resumed exactly"))
+            "a response larger than the socket buffer is resumed exactly")
+        (wait-until! "large response byte release"
+                     #(zero? @(::uds/authority-output-bytes server))))
       (finally
         (uds/close-request-server! server)
         (.delete (File. path))))))
@@ -491,7 +597,7 @@
               (deliver opened owner)
               owner))
           ::uds/close-connection! #(swap! closed conj %)
-          ::uds/handler (fn [_owner _request _complete!] nil)})
+          ::uds/handler (fn [_owner _request _frame-bytes _complete!] nil)})
         channel (uds/connect! path)
         owner (deref opened 2000 ::not-opened)]
     (try
@@ -506,11 +612,110 @@
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
+(deftest connection-cleanup-has-fixed-capacity-under-disconnect-bursts
+  (let [path (socket-path "transport-cleanup-capacity")
+        release-cleanup (java.util.concurrent.CountDownLatch. 1)
+        active (atom 0)
+        maximum-active (atom 0)
+        closed (atom 0)
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/maximum-connections 8
+          ::uds/open-connection! (fn [_close!] (Object.))
+          ::uds/close-connection!
+          (fn [_owner]
+            (let [current (swap! active inc)]
+              (swap! maximum-active max current)
+              (try
+                (.await release-cleanup)
+                (finally
+                  (swap! active dec)
+                  (swap! closed inc)))))
+          ::uds/handler
+          (fn [_owner _request _frame-bytes _complete!] nil)})
+        channels (mapv (fn [_] (uds/connect! path)) (range 8))]
+    (try
+      (wait-until! "all bounded connections"
+                   #(= 8 (count @(::uds/connections server))))
+      (run! #(.close ^SocketChannel %) channels)
+      (wait-until! "fixed cleanup workers" #(= 2 @active))
+      (is (= 2 @maximum-active))
+      (is (= 8 (count @(::uds/connections server)))
+          "closing sessions retain admission until their database cleanup ends")
+      (let [names (map #(.getName ^Thread %)
+                       (.keySet (Thread/getAllStackTraces)))]
+        (is (= 2 (count (filter #(.startsWith ^String %
+                                             "database-request-cleanup-")
+                                names))))
+        (is (not-any? #(= "database-request-rejected-close" %) names)))
+      (.countDown release-cleanup)
+      (wait-until! "all exact connection cleanup" #(= 8 @closed))
+      (wait-until! "all closing sessions released"
+                   #(empty? @(::uds/connections server)))
+      (finally
+        (.countDown release-cleanup)
+        (run! #(try (.close ^SocketChannel %) (catch Throwable _)) channels)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest forced-close-retains-encoding-until-the-worker-releases-it
+  (let [path (socket-path "transport-encoding-close")
+        encode-entered (promise)
+        release-encode (atom false)
+        original-frame @#'seon.db.transport.uds/message-frame
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/shutdown-timeout-ms 25
+          ::uds/open-connection! (fn [_close!] (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner _request _frame-bytes complete!]
+            (complete! {::response :blocked-encode}))})
+        channel (uds/connect! path)]
+    (try
+      (with-redefs-fn
+        {#'seon.db.transport.uds/message-frame
+         (fn [message]
+           (deliver encode-entered true)
+           (loop []
+             (when-not @release-encode
+               (try
+                 (Thread/sleep 5)
+                 (catch InterruptedException _))
+               (recur)))
+           (original-frame message))}
+        (fn []
+          (write-bytes! channel (frame-bytes {::request :encode})
+                        Integer/MAX_VALUE)
+          (is (= true (deref encode-entered 2000 ::encode-not-entered)))
+          (let [first-close (uds/close-request-server! server)]
+            (is (true? (::uds/selector-stopped? first-close)))
+            (is (false? (::uds/workers-stopped? first-close)))
+            (is (false? (::uds/cleanup-stopped? first-close)))
+            (is (= 1 @(::uds/authority-response-slot-count server)))
+            (is (= 1 (count @(::uds/connections server))))
+            (reset! release-encode true)
+            (let [final-close (uds/close-request-server! server)]
+              (is (true? (::uds/workers-stopped? final-close)))
+              (is (true? (::uds/cleanup-stopped? final-close)))
+              (is (zero? @(::uds/authority-response-slot-count server)))
+              (is (zero? @(::uds/authority-output-bytes server)))
+              (is (empty? @(::uds/connections server)))
+              (is (.isEmpty ^java.util.concurrent.ConcurrentLinkedQueue
+                            (::uds/commands server)))))))
+      (finally
+        (reset! release-encode true)
+        (.close channel)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
 (deftest publisher-delivers-a-complete-large-frame
   (let [path (socket-path "transport-publish")
         publisher (uds/start-publisher! path)
         ^SocketChannel channel (uds/connect! path)
-        message {::large-payload (apply str (repeat (* 4 1024 1024) "x"))}]
+        message {::large-payload (apply str (repeat (* 3 1024 1024) "x"))}]
     (try
       (wait-for-subscriber! publisher)
       (let [received

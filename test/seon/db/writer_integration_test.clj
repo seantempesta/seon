@@ -4,6 +4,7 @@
             [datahike.api :as d]
             [seon.db.backend :as backend]
             [seon.db.coordinate :as coordinate]
+            [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.transport.uds :as uds]
@@ -113,7 +114,9 @@
                     [capabilities head cancellation unknown]))
         (is (= "control/capabilities" (::protocol/request-id capabilities)))
         (is (= (assoc (d/capabilities)
-                      ::protocol/version protocol/current-version)
+                      ::protocol/version protocol/current-version
+                      ::protocol/maximum-frame-bytes
+                      protocol/maximum-frame-bytes)
                (::protocol/capabilities capabilities)))
         (is (= "control/head" (::protocol/request-id head)))
         (is (= database-name (::protocol/database-name head)))
@@ -634,6 +637,34 @@
         (writer/stop! server)
         (.delete (File. request-path))
         (.delete (File. publish-path))))))
+
+(deftest writer-stop-retains-authority-until-request-workers-stop
+  (let [executor-stops (atom 0)
+        publisher-stops (atom 0)
+        database-lists (atom 0)
+        result
+        (with-redefs [uds/close-request-server!
+                      (fn [_]
+                        {::uds/graceful? false
+                         ::uds/forced-connections 1
+                         ::uds/selector-stopped? true
+                         ::uds/workers-stopped? false
+                         ::uds/cleanup-stopped? true})
+                      executor/stop! (fn [_] (swap! executor-stops inc))
+                      registry/list-databases
+                      (fn [_]
+                        (swap! database-lists inc)
+                        {::registry/databases []})
+                      uds/close-publisher!
+                      (fn [_] (swap! publisher-stops inc))]
+          (writer/stop! {::writer/request-server ::request-server
+                         ::writer/executor ::executor
+                         ::writer/publisher ::publisher}))]
+    (is (= {::writer/stopped? false ::writer/release-results []} result))
+    (is (schema/valid-candidate-value? ::writer/stop-response result))
+    (is (zero? @executor-stops))
+    (is (zero? @database-lists))
+    (is (zero? @publisher-stops))))
 
 (deftest writer-stop-returns-the-pre-release-coordinate-and-outcome
   (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})

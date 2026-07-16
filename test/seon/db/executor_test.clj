@@ -4,6 +4,7 @@
             [datahike.api :as d]
             [seon.db.coordinate :as coordinate]
             [seon.db.executor :as executor]
+            [seon.db.protocol :as protocol]
             [seon.db.registry :as registry])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
@@ -78,7 +79,8 @@
            (mapv #(get-in % [::executor/classes :provider
                              ::executor/maximum-active])
                  [two four eight])))
-    (is (every? #(= (* 4 1024 1024) (::executor/maximum-request-bytes %))
+    (is (every? #(= (+ Integer/BYTES protocol/maximum-frame-bytes)
+                    (::executor/maximum-request-bytes %))
                 [two four eight]))))
 
 (deftest invalid-capacity-is-rejected-before-workers-start

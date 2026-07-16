@@ -92,6 +92,10 @@
 
 (def current-version 5)
 
+;; One wire contract must reject the same legal frame on every host. Paging and
+;; operation-level result bounds remain the preferred way to stay well below it.
+(def maximum-frame-bytes (* 4 1024 1024))
+
 (def writer-process :seon.dev.process/writer)
 
 ;;; Shared schemas
@@ -119,6 +123,7 @@
 (schema/register! ::success? :boolean)
 (schema/register! ::pong? :boolean)
 (schema/register! ::capabilities :map)
+(schema/register! ::maximum-frame-bytes [:int {:min 1}])
 ;; Datahike query and pull values are intentionally polymorphic EDN. The JVM
 ;; authority performs the stricter recursive host-value/laziness check before
 ;; encoding while preserving native result shapes and legitimate bare keys.
