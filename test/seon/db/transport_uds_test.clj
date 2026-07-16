@@ -80,6 +80,49 @@
          ::coordinate/t 536870929}]
     (is (= point (uds/decode (uds/encode point))))))
 
+(deftest execute-many-reuses-existing-read-shapes-with-one-public-identity
+  (let [point {::coordinate/database-id (random-uuid)
+               ::coordinate/branch :db
+               ::coordinate/commit-id (random-uuid)
+               ::coordinate/t 42}
+        attachment (coordinate/attachment point)
+        members [{::protocol/operation protocol/query-operation
+                  ::protocol/query-form '[:find ?e :where [?e :db/ident]]
+                  ::protocol/arguments []}
+                 {::protocol/operation protocol/pull-operation
+                  ::protocol/selector '[*]
+                  ::protocol/entity-id 1}
+                 {::protocol/operation protocol/pull-many-operation
+                  ::protocol/selector '[:db/ident]
+                  ::protocol/entity-ids [1 2]}]
+        request (protocol/execute-many-request
+                 {::protocol/request-id "many-1"
+                  ::protocol/database-name "alpha"
+                  ::protocol/attachment attachment
+                  ::protocol/coordinate point
+                  ::protocol/members members})]
+    (is (= 3 protocol/current-version))
+    (is (protocol/valid-request? request))
+    (is (= request (uds/decode (uds/encode request))))
+    (is (false? (protocol/valid-request?
+                 (assoc-in request [::protocol/members 0
+                                    ::protocol/request-id]
+                           "member-id")))
+        "members cannot invent another request identity")
+    (is (every?
+         false?
+         [(protocol/valid-request? (assoc request ::protocol/members []))
+          (protocol/valid-request?
+           (assoc request ::protocol/members
+                  [{::protocol/operation protocol/knn-search-operation
+                    ::protocol/query "vector"
+                    ::protocol/limit 1}]))])
+        "an empty group and non-read members are rejected")
+    (is (false? (protocol/valid-request?
+                 (assoc request ::protocol/members (vec (repeat 65
+                                                              (first members))))))
+        "the semantic member bound is enforced before admission")))
+
 (deftest transaction-coordinate-request-and-response-are-transit-stable
   (let [head
         {::coordinate/database-id

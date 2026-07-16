@@ -18,6 +18,7 @@
                    [::connection-id ::connection-id]
                    [::generation ::generation]])
 (schema/register! ::job-id :seon.db.protocol/request-id)
+(schema/register! ::request-id :seon.db.protocol/request-id)
 (schema/register! ::work-class :keyword)
 (schema/register! ::request-bytes [:int {:min 0}])
 (schema/register! ::maximum-active [:int {:min 1}])
@@ -37,10 +38,14 @@
                    [::database-name ::database-name]
                    [::scope ::scope]
                    [::job-id ::job-id]
+                   [::request-id {:optional true} ::request-id]
                    [::request ::request]
                    [::request-bytes {:optional true} ::request-bytes]])
 (schema/register! ::remove-database-request
                   [:map [::executor ::executor] [::scope ::scope]])
+(schema/register! ::retain-request
+                  [:map [::executor ::executor] [::scope ::scope]
+                   [::request-id ::request-id]])
 (schema/register! ::cancel 'fn?)
 (schema/register! ::cancellation [:enum :not-found :queued :running])
 (schema/register! ::cancel-request [:map [::executor ::executor] [::job-id ::job-id]])
@@ -133,6 +138,7 @@
    ::io-class-cursor 0
    ::ready (zipmap classes (repeat (empty-class-ready)))
    ::jobs {}
+   ::retained-requests {}
    ::closed-scopes #{}
    ::running-by-class {}
    ::running-by-class-database {}
@@ -364,8 +370,8 @@
                                          ::work-class work-class})])
   [{::accepted? false ::joined? false} result])
 
-(defn- admit! [{::keys [executor work-class database-name scope job-id request
-                         request-bytes]
+(defn- admit! [{::keys [executor work-class database-name scope job-id request-id
+                         request request-bytes]
                   :or {request-bytes 0}}]
   (locking (::lock executor)
     (let [state @(::state executor)]
@@ -391,6 +397,7 @@
                         ::database-name database-name
                         ::scope scope
                         ::job-id job-id
+                        ::request-id request-id
                         ::request request
                         ::request-bytes request-bytes
                         ::result result}]
@@ -413,6 +420,35 @@
   [request]
   (let [[outcome value] @(submit-async! request)]
     (if (= ::throwable outcome) (throw value) value)))
+
+(defn retain-request!
+  "Retain one exact database scope under the existing public request identity."
+  [{::keys [executor scope request-id]}]
+  (locking (::lock executor)
+    (let [state @(::state executor)]
+      (when (or @(::stopped executor)
+                (contains? (::closed-scopes state) scope)
+                (contains? (::retained-requests state) request-id))
+        (throw (ex-info "The database request cannot retain this scope."
+                        {::scope scope ::request-id request-id})))
+      (swap! (::state executor) assoc-in
+             [::retained-requests request-id]
+             {::scope scope ::canceled? false})))
+  nil)
+
+(defn release-request!
+  "Release the exact scope retained by one completed request."
+  [{::keys [executor request-id]}]
+  (locking (::lock executor)
+    (swap! (::state executor) update ::retained-requests dissoc request-id)
+    (.notifyAll ^Object (::lock executor)))
+  nil)
+
+(defn request-canceled?
+  "Return whether cancellation reached one retained request."
+  [{::keys [executor request-id]}]
+  (true? (get-in @(::state executor)
+                 [::retained-requests request-id ::canceled?])))
 
 (defn- fence-scope! [executor scope abandon-work-classes]
   (locking (::lock executor)
@@ -455,8 +491,10 @@
   "Forget a fully drained fence after its database attachment is released."
   [{::keys [executor scope]}]
   (locking (::lock executor)
-    (when (some (fn [[_ job]] (= scope (::scope job)))
-                (::jobs @(::state executor)))
+    (when (let [state @(::state executor)]
+            (or (some (fn [[_ job]] (= scope (::scope job))) (::jobs state))
+                (some (fn [[_ retained]] (= scope (::scope retained)))
+                      (::retained-requests state))))
       (throw (ex-info "Cannot release a scope while work still owns it."
                       {::scope scope})))
     (swap! (::state executor) update ::closed-scopes disj scope))
@@ -481,8 +519,10 @@
       (try (cancel job-id) (catch Throwable _)))
     (locking (::lock executor)
       (loop []
-        (when (some (fn [[_ job]] (= scope (::scope job)))
-                    (::jobs @(::state executor)))
+        (when (let [state @(::state executor)]
+                (or (some (fn [[_ job]] (= scope (::scope job))) (::jobs state))
+                    (some (fn [[_ retained]] (= scope (::scope retained)))
+                          (::retained-requests state))))
           (.wait ^Object (::lock executor))
           (recur))))
     {::abandoned-count (count queued)}))
@@ -508,6 +548,41 @@
         {::cancellation :running ::request request})
       {::cancellation :not-found})))
 
+(defn cancel-request!
+  "Cancel every internal job owned by one retained public request."
+  [{::keys [executor request-id]}]
+  (locking (::lock executor)
+    (let [state @(::state executor)
+          retained (get-in state [::retained-requests request-id])
+          matching (into {}
+                         (filter (fn [[_ job]]
+                                   (= request-id (::request-id job))))
+                         (::jobs state))
+          queued (into {}
+                       (filter (fn [[_ job]] (= :queued (::status job))))
+                       matching)
+          running (vals (apply dissoc matching (keys queued)))
+          results (set (map (comp ::result val) queued))]
+      (when retained
+        (swap! (::state executor)
+               (fn [current]
+                 (-> current
+                     (assoc-in [::retained-requests request-id ::canceled?] true)
+                     (remove-queued-results results)
+                     (update ::jobs #(apply dissoc % (keys queued)))))))
+      (doseq [[job-id {::keys [result]}] queued]
+        (deliver result [::throwable
+                         (ex-info "The database request was canceled."
+                                  {::job-id job-id
+                                   ::request-id request-id})]))
+      (.notifyAll ^Object (::lock executor))
+      {::cancellation (cond
+                        (seq running) :running
+                        (seq queued) :queued
+                        retained :queued
+                        :else :not-found)
+       ::requests (mapv ::request running)})))
+
 (defn evidence
   "Return bounded dispatcher counts without retaining request values."
   {:malli/schema [:=> [:cat ::executor] ::evidence]}
@@ -523,7 +598,8 @@
        ::running (reduce + 0 (vals running-by-class))
        ::running-by-class running-by-class
        ::running-by-database (::running-by-database state)
-       ::retained-identities (count (::jobs state))
+       ::retained-identities (+ (count (::jobs state))
+                                (count (::retained-requests state)))
        ::fenced-scopes (count (::closed-scopes state))
        ::fenced (::fenced counts)
        ::completed (::completed counts)

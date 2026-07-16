@@ -230,6 +230,77 @@
       (finally
         (executor/stop! {::executor/executor worker})))))
 
+(deftest retained-request-closes-the-resolution-to-member-release-gap
+  (let [worker (start-worker {:read :request/value})
+        one-scope (scope "a" (random-uuid) (random-uuid))
+        request-id "many/retained"]
+    (try
+      (is (nil? (executor/retain-request!
+                 {::executor/executor worker
+                  ::executor/scope one-scope
+                  ::executor/request-id request-id})))
+      (is (= 1 (::executor/retained-identities (executor/evidence worker))))
+      (let [drained (future
+                      (executor/fence-and-drain!
+                       {::executor/executor worker
+                        ::executor/scope one-scope
+                        ::executor/cancel (constantly nil)}))]
+        (Thread/sleep 25)
+        (is (not (realized? drained))
+            "scope release waits while a request owns the resolved value")
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"still owns"
+             (executor/release-scope!
+              {::executor/executor worker ::executor/scope one-scope})))
+        (is (nil? (executor/release-request!
+                   {::executor/executor worker
+                    ::executor/request-id request-id})))
+        (is (= {::executor/abandoned-count 0} @drained))
+        (is (zero? (::executor/retained-identities
+                    (executor/evidence worker)))))
+      (finally
+        (executor/stop! {::executor/executor worker})))))
+
+(deftest canceling-one-request-removes-all-of-its-queued-jobs
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        worker (start-worker
+                {:read (fn [request]
+                         (.countDown entered)
+                         (.await release)
+                         (:request/value request))})
+        one-scope (scope "a" (random-uuid) (random-uuid))
+        request-id "many/cancel"
+        submit (fn [job-id value]
+                 (executor/submit-async!
+                  (assoc (request worker "a" one-scope job-id value)
+                         ::executor/request-id request-id)))]
+    (try
+      (executor/retain-request!
+       {::executor/executor worker ::executor/scope one-scope
+        ::executor/request-id request-id})
+      (let [running (submit "many/running" :running)
+            _ (is (.await entered 5 TimeUnit/SECONDS))
+            queued-a (submit "many/a" :a)
+            queued-b (submit "many/b" :b)
+            _ (is (await-queued worker 2))
+            canceled (executor/cancel-request!
+                      {::executor/executor worker
+                       ::executor/request-id request-id})]
+        (is (= :running (::executor/cancellation canceled)))
+        (is (= 1 (count (::executor/requests canceled))))
+        (is (executor/request-canceled?
+             {::executor/executor worker ::executor/request-id request-id}))
+        (is (= ::executor/throwable (first @queued-a)))
+        (is (= ::executor/throwable (first @queued-b)))
+        (.countDown release)
+        (is (= [::executor/value :running] @running))
+        (executor/release-request!
+         {::executor/executor worker ::executor/request-id request-id}))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
 (deftest cancellation-distinguishes-queued-running-and-absent-jobs
   (let [entered (CountDownLatch. 1)
         release (CountDownLatch. 1)

@@ -451,6 +451,17 @@ the ordinary completed cache without any Seon cache. Datahike `7eb1b849`
 implements that seam; the focused cache, single-flight, and resource proof
 passes 84 tests and 405 assertions across PSS, HHT, and API specifications.
 
+[[research/execute-many-protocol-implementation-2026-07-16]] grounds the first
+wire shape and shared-value lifetime. Protocol version 3 now defines one closed
+execute-many request with 1–64 existing query, pull, or pull-many member maps;
+members cannot carry another request identity or database coordinate. The
+executor retains the exact generation by the existing outer request ID across
+resolution and progressive member admission, group cancellation addresses all
+internal jobs through that same ID, and final database release waits for that
+owner. Focused executor and Transit proof passes 26 tests and 127 assertions.
+The writer coordinator and progressive member execution remain the next Unit 5
+implementation boundary.
+
 Exit proof: transport-neutral fixtures cover schemas, values, identity,
 query/pull/history, branches, fencing, batching, member errors, cancellation,
 listener ordering, paging, release, malformed input, and version negotiation.

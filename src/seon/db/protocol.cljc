@@ -24,6 +24,7 @@
 (def query-operation :seon.db.protocol.operation/query)
 (def pull-operation :seon.db.protocol.operation/pull)
 (def pull-many-operation :seon.db.protocol.operation/pull-many)
+(def execute-many-operation :seon.db.protocol.operation/execute-many)
 (def cancel-operation :seon.db.protocol.operation/cancel)
 (def ensure-database-operation
   :seon.db.protocol.operation/ensure-database)
@@ -87,7 +88,7 @@
 (def unknown-status :seon.db.protocol.status/unknown)
 (def feed-behind-status :seon.db.protocol.status/feed-behind)
 
-(def current-version 2)
+(def current-version 3)
 
 (def writer-process :seon.dev.process/writer)
 
@@ -101,6 +102,7 @@
   query-operation
   pull-operation
   pull-many-operation
+  execute-many-operation
   cancel-operation
   ensure-database-operation
   observe-database-lifecycle-operation
@@ -340,6 +342,52 @@
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
 (schema/register!
+ ::query-member
+ [:map {:closed true}
+  [::operation [:= query-operation]]
+  [::query-form ::query-form]
+  [::arguments ::arguments]
+  [:datahike.resource/max-work {:optional true} :datahike.resource/max-work]
+  [:datahike.resource/max-results {:optional true} :datahike.resource/max-results]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
+(schema/register!
+ ::pull-member
+ [:map {:closed true}
+  [::operation [:= pull-operation]]
+  [::selector ::selector]
+  [::entity-id ::entity-id]
+  [:datahike.resource/max-work {:optional true} :datahike.resource/max-work]
+  [:datahike.resource/max-results {:optional true} :datahike.resource/max-results]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
+(schema/register!
+ ::pull-many-member
+ [:map {:closed true}
+  [::operation [:= pull-many-operation]]
+  [::selector ::selector]
+  [::entity-ids ::entity-ids]
+  [:datahike.resource/max-work {:optional true} :datahike.resource/max-work]
+  [:datahike.resource/max-results {:optional true} :datahike.resource/max-results]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
+(schema/register!
+ ::member
+ [:multi {:dispatch ::operation}
+  [query-operation ::query-member]
+  [pull-operation ::pull-member]
+  [pull-many-operation ::pull-many-member]])
+(schema/register! ::members [:vector {:min 1 :max 64} ::member])
+(schema/register!
+ ::execute-many-request
+ [:map {:closed true}
+  [::operation [:= execute-many-operation]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::members ::members]])
+(schema/register!
  ::cancel-request
  [:map {:closed true}
   [::operation [:= cancel-operation]]
@@ -424,6 +472,7 @@
   [query-operation ::query-request]
   [pull-operation ::pull-request]
   [pull-many-operation ::pull-many-request]
+  [execute-many-operation ::execute-many-request]
   [cancel-operation ::cancel-request]
   [ensure-database-operation ::ensure-database-request]
   [observe-database-lifecycle-operation
@@ -483,6 +532,31 @@
   [::attachment ::attachment]
   [::coordinate ::coordinate]
   [::result ::result]])
+(schema/register!
+ ::query-member-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [:datahike.query/result :datahike.query/result]
+  [:datahike.query/cache-evidence :datahike.query/cache-evidence]
+  [:datahike.query/resource-evidence :datahike.query/resource-evidence]])
+(schema/register!
+ ::read-member-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::result ::result]])
+(schema/register! ::member-response
+                  [:or ::failed-response ::query-member-response
+                   ::read-member-response])
+(schema/register! ::results [:vector ::member-response])
+(schema/register!
+ ::execute-many-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::results ::results]])
 (schema/register!
  ::cancel-response
  [:map {:closed true}
@@ -583,6 +657,7 @@
   ::resolve-head-response
   ::query-response
   ::read-response
+  ::execute-many-response
   ::cancel-response
   ::ensure-database-response
   ::observe-database-lifecycle-response
@@ -662,6 +737,14 @@
    :datahike.resource/max-results]
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
+(schema/register!
+ ::execute-many-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::members ::members]])
 (schema/register!
  ::cancel-request-input
  [:map {:closed true}
@@ -759,6 +842,13 @@
   {:malli/schema [:=> [:cat ::pull-many-request-input] ::pull-many-request]}
   [input]
   (assoc input ::operation pull-many-operation))
+
+(defn execute-many-request
+  "Construct one coordinate-pinned group of independent database reads."
+  {:malli/schema [:=> [:cat ::execute-many-request-input]
+                  ::execute-many-request]}
+  [input]
+  (assoc input ::operation execute-many-operation))
 
 (defn cancel-request
   "Construct one request to cancel another request by its existing identity."
