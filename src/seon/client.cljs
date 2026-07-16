@@ -1196,10 +1196,11 @@
      (load-error->log replay-error))))
 
 (defn- ^:async evaluate-replay-source!
-  [compile-state source record-failures?]
+  [compile-state authored-sources source record-failures?]
   (try
     (await (seval/eval compile-state source
-                       {:seon.eval/starting-ns 'cljs.user}))
+                       {:seon.eval/starting-ns 'cljs.user
+                        :seon.eval/authored-sources authored-sources}))
     (catch :default error
       (when-not (error/recorded? error)
         (if record-failures?
@@ -1211,13 +1212,13 @@
       {:seon.eval/ok? false :seon/error error})))
 
 (defn- ^:async replay-ordered-sources!
-  [compile-state ordered-sources agent-id record-failures?]
+  [compile-state authored-sources ordered-sources agent-id record-failures?]
   (let [!n-fail (volatile! 0)]
     (doseq [[ns-kw source] ordered-sources]
       (let [result
             (await
              (evaluate-replay-source!
-              compile-state source record-failures?))]
+              compile-state authored-sources source record-failures?))]
         (when-not (:seon.eval/ok? result)
           (vswap! !n-fail inc)
           (await
@@ -1309,7 +1310,8 @@
             ordered-sources (mapv (fn [ns-kw] [ns-kw (get src-of ns-kw)]) order)
             n-fail (await
                     (replay-ordered-sources!
-                     compile-state ordered-sources agent-id record-failures?))]
+                     compile-state src-of ordered-sources agent-id
+                     record-failures?))]
         (let [total (count order)]
           {:seon.client/replay-n-total total
            :seon.client/replay-n-ok    (- total n-fail)

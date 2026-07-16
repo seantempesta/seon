@@ -1628,8 +1628,17 @@ package-size measurement is added for this test.
   expected owned plus boot rows; focused acquisition/canonicalization/real
   compiler proof passes 4 tests/14 assertions, and both execution artifacts
   compile at 415 files/18 pre-existing migration warnings. The remaining
-  `guarded-load*` local fallback is deleted only with the parent replay callers
-  that still depend on it; this slice adds no child database cache or replica.
+  special REPL forms are the next authority-read boundary.
+- Guarded namespace loading now consumes one explicit ordinary map from
+  namespace name to authored source. It has no ambient database fallback and
+  does not copy that map into compiler state, so the child retains only its
+  compiler while the JVM remains the sole database/index/query-cache owner.
+  The trusted eval artifact acquires one coordinate-pinned authored program,
+  installs it in that retained compiler, and invokes the existing eval batch
+  owner. Prompt acquisition remains pinned to its invocation coordinate;
+  mutating eval deliberately is not, so its fenced authority writes and one
+  stale-coordinate retry can advance. Focused connection-free loading,
+  acquisition, coordinate, and adapter proof passes 6 tests/21 assertions.
 - **Next refill:** move the remaining parent eval/schedule/test/authored-route
   consumers onto the existing per-agent child execution owner, delete global
   pod replay rather than adapting it, finish the remaining web synchronous

@@ -22,6 +22,7 @@
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
     [my.kb]
+    [seon.db :as db]
     [seon.error]
     [seon.eval :as seval]
     [seon.repl :as repl]))
@@ -110,3 +111,80 @@
                         "the error names the missing namespace"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest coordinate-program-loads-transitive-authored-source-without-a-db
+  (async done
+    (let [suffix (str (rand-int 1000000000))
+          dep (symbol (str "my.authority.dep" suffix))
+          target (symbol (str "my.authority.target" suffix))
+          caller (symbol (str "my.authority.caller" suffix))
+          sources
+          (seval/authored-sources
+           [{:seon.ns/name (keyword dep)
+             :seon.ns/source (str "(ns " dep ")")
+             :seon.ns/require-edges []
+             :seon.fn/_ns
+             [{:seon.fn/sym (symbol (str dep "/base"))
+               :seon.fn/source "(defn base [] 41)"}]
+             :seon.test/_ns []}
+            {:seon.ns/name (keyword target)
+             :seon.ns/source
+             (str "(ns " target " (:require [" dep " :as dep]))")
+             :seon.ns/require-edges []
+             :seon.fn/_ns
+             [{:seon.fn/sym (symbol (str target "/answer"))
+               :seon.fn/source "(defn answer [] (inc (dep/base)))"}]
+             :seon.test/_ns []}])
+          original-conn db/*conn*]
+      (set! db/*conn* nil)
+      (-> (repl/ensure-bootstrap!)
+          (.then
+           (fn [compile-state]
+             (seval/eval
+              compile-state
+              (str "(ns " caller " (:require [" target " :as target])) "
+                   "(target/answer)")
+              {:seon.eval/starting-ns 'cljs.user
+               :seon.eval/analyze-deps? true
+               :seon.eval/authored-sources sources})))
+          (.then
+           (fn [result]
+             (is (:seon.eval/ok? result) (err-chain result))
+             (is (= 42 (:seon.eval/value result)))))
+          (.finally (fn [] (set! db/*conn* original-conn)))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest absent-authored-dependency-does-not-fall-back-to-a-db
+  (async done
+    (let [suffix (str (rand-int 1000000000))
+          missing (symbol (str "my.authority.missing" suffix))
+          target (symbol (str "my.authority.incomplete" suffix))
+          caller (symbol (str "my.authority.consumer" suffix))
+          sources
+          (seval/authored-sources
+           [{:seon.ns/name (keyword target)
+             :seon.ns/source
+             (str "(ns " target " (:require [" missing " :as missing]))")
+             :seon.ns/require-edges []
+             :seon.fn/_ns []
+             :seon.test/_ns []}])
+          original-conn db/*conn*]
+      (set! db/*conn* nil)
+      (-> (repl/ensure-bootstrap!)
+          (.then
+           (fn [compile-state]
+             (seval/eval
+              compile-state
+              (str "(ns " caller " (:require [" target " :as target]))")
+              {:seon.eval/starting-ns 'cljs.user
+               :seon.eval/analyze-deps? true
+               :seon.eval/authored-sources sources})))
+          (.then
+           (fn [result]
+             (is (false? (:seon.eval/ok? result)))
+             (is (str/includes? (err-chain result) (str missing))
+                 (err-chain result))))
+          (.finally (fn [] (set! db/*conn* original-conn)))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

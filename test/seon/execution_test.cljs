@@ -56,7 +56,9 @@
   (let [messages (atom [])
         state (atom {::execution/startup startup
                      ::execution/compiled-functions
-                     {prompt-function (fn [_ _ _] nil)}})
+                     {prompt-function
+                      {::execution/compiled-function (fn [_ _ _ _] nil)
+                       ::execution/pin-coordinate? true}}})
         request (execution/compiled-invocation
                  "agent-1" 'my.render/view [] coordinate digest)]
     (@#'execution/receive! state (execution/encode-message request)
@@ -72,7 +74,9 @@
         opens (atom 0)
         state (atom {::execution/startup startup
                      ::execution/compiled-functions
-                     {prompt-function (fn [_ _ _] nil)}})
+                     {prompt-function
+                      {::execution/compiled-function (fn [_ _ _ _] nil)
+                       ::execution/pin-coordinate? true}}})
         wrong-digest (apply str (repeat 64 "b"))
         request (execution/compiled-invocation
                  "agent-1" prompt-function [1] coordinate wrong-digest)]
@@ -96,10 +100,17 @@
           state (atom {::execution/startup startup
                        ::execution/compiled-functions
                        {prompt-function
-                        (fn [arguments invoke-selected! compile-state!]
-                          (is (fn? invoke-selected!))
-                          (is (fn? compile-state!))
-                          {:seon.execution-test/value (first arguments)})}})
+                        {::execution/compiled-function
+                         (fn [arguments invoke-selected! compile-state!
+                              prepare-program!]
+                           (is (fn? invoke-selected!))
+                           (is (fn? compile-state!))
+                           (is (fn? prepare-program!))
+                           (is (= coordinate
+                                  (::db/coordinate
+                                   (db/current-tx-context))))
+                           {:seon.execution-test/value (first arguments)})
+                         ::execution/pin-coordinate? true}}})
           request (execution/compiled-invocation
                    "agent-1" prompt-function [7] coordinate digest)]
       (with-redefs [db/open-session! (fn [_] (js/Promise.resolve nil))
@@ -127,6 +138,34 @@
             (.catch
              (fn [error]
                (is false (str "compiled dispatch rejected: " error))
+               (done))))))))
+
+(deftest unpinned-compiled-dispatch-can-read-the-moving-authority-head
+  (async done
+    (let [messages (atom [])
+          state (atom
+                 {::execution/startup startup
+                  ::execution/compiled-functions
+                  {prompt-function
+                   {::execution/compiled-function
+                    (fn [_ _ _ _]
+                      {:seon.execution-test/pinned-coordinate
+                       (::db/coordinate (db/current-tx-context))})
+                    ::execution/pin-coordinate? false}}})
+          request (execution/compiled-invocation
+                   "agent-1" prompt-function [] coordinate digest)]
+      (with-redefs [db/open-session! (fn [_] (js/Promise.resolve nil))]
+        (@#'execution/receive! state (execution/encode-message request)
+         (decoded-sender messages) (fn [_]) 0)
+        (-> (js/Promise. (fn [resolve _] (js/setTimeout resolve 0)))
+            (.then
+             (fn [_]
+               (is (= {:seon.execution-test/pinned-coordinate nil}
+                      (::execution/result (first @messages))))
+               (done)))
+            (.catch
+             (fn [error]
+               (is false (str "unpinned dispatch rejected: " error))
                (done))))))))
 
 (deftest child-compiler-state-initializes-once
@@ -240,6 +279,8 @@
                  (is (= ['my.agent.agent-1/check]
                         (mapv :seon.test/sym (:seon.test/_ns row))))
                  (is (re-find #"deftest check" (seval/namespace-source row))))
+               (is (= #{'my.agent.agent-1/run 'my.agent.agent-1/check}
+                      (set (keys (::execution/source-by-symbol program)))))
                (done)))
             (.catch
              (fn [error]

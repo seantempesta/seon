@@ -15,6 +15,7 @@
    [seon.db :as db]
    [seon.db.protocol :as protocol]
    [seon.execution :as execution]
+   [seon.eval :as eval]
    [seon.schema :as schema]))
 
 (schema/register! ::render-prompt-request
@@ -29,6 +30,13 @@
    [:seon.error/message :string]
    [:seon.error/kind :keyword]
    [:seon.error/data {:optional true} :map]])
+
+(schema/register! ::eval-batch-request
+  [:map {:closed true}
+   [:seon.eval/parsed [:vector :map]]
+   [:seon.eval/starting-ns :symbol]
+   [:seon.agent.turn/id-of-turn :string]
+   [:seon.agent.run/id-of-run {:optional true} :string]])
 
 (defn- block-error-text
   [block result]
@@ -212,11 +220,35 @@
             (assoc :seon.agent.ctx/whole-prompt resolved-whole-prompt)))
          :seon.ai/system-prompt system-prompt)))))
 
+(defn ^:async eval-batch!
+  "Evaluate one parsed batch in this agent's retained child compiler."
+  {:malli/schema [:=> [:cat ::eval-batch-request :any] :map]}
+  [{:seon.eval/keys [parsed starting-ns]
+    turn-id :seon.agent.turn/id-of-turn
+    run-id :seon.agent.run/id-of-run}
+   prepare-program!]
+  (let [{::execution/keys [compile-state program]}
+        (await (prepare-program!))
+        agent-id (db/current-agent-id)]
+    (await
+     (apply eval/eval-batch!
+            [compile-state parsed starting-ns agent-id turn-id run-id
+             (eval/authored-sources
+              (::execution/namespace-rows program))]))))
+
 (def compiled-functions
   "Trusted functions directly reachable through this exact execution artifact."
   {'seon.execution.runtime/render-prompt!
-   (fn [arguments invoke-selected! _compile-state!]
-     (apply render-prompt! (conj arguments invoke-selected!)))})
+   {::execution/compiled-function
+    (fn [arguments invoke-selected! _compile-state! _prepare-program!]
+      (apply render-prompt! (conj arguments invoke-selected!)))
+    ::execution/pin-coordinate? true}
+
+   'seon.execution.runtime/eval-batch!
+   {::execution/compiled-function
+    (fn [arguments _invoke-selected! _compile-state! prepare-program!]
+      (apply eval-batch! (conj arguments prepare-program!)))
+    ::execution/pin-coordinate? false}})
 
 (defn -main
   "Start the execution child from the complete runtime composition root."

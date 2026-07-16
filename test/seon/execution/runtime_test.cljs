@@ -6,6 +6,8 @@
    [seon.db :as db]
    [seon.db.coordinate :as coordinate]
    [seon.db.protocol :as protocol]
+   [seon.eval :as eval]
+   [seon.execution :as execution]
    [seon.execution.runtime :as runtime]))
 
 (def point
@@ -361,3 +363,57 @@
              (done)))
           (.catch (fn [error] (is false (str error)) (done)))
           (.finally (fn [] (set! db/execute-many original)))))))
+
+(deftest eval-adapter-passes-one-explicit-coordinate-program-to-the-eval-owner
+  (async done
+    (let [original-eval eval/eval-batch!
+          original-agent db/current-agent-id
+          compile-state (atom {})
+          observed (atom nil)
+          program
+          {::execution/namespace-rows
+           [{:seon.ns/name :my.agent.agent-1
+             :seon.ns/source "(ns my.agent.agent-1)"
+             :seon.ns/require-edges []
+             :seon.fn/_ns []
+             :seon.test/_ns []}]}
+          request
+          {:seon.eval/parsed [{:seon.repl/kind :form
+                               :seon.repl/source "(+ 1 2)"}]
+           :seon.eval/starting-ns 'my.agent.agent-1
+           :seon.agent.turn/id-of-turn "turn-1"
+           :seon.agent.run/id-of-run "run-1"}]
+      (set! db/current-agent-id (fn [] "agent-1"))
+      (set! eval/eval-batch!
+            (fn [& arguments]
+              (reset! observed arguments)
+              (js/Promise.resolve {:seon.eval/n-ok 1
+                                   :seon.eval/n-fail 0
+                                   :seon.eval/ids ["eval-1"]})))
+      (-> (runtime/eval-batch!
+           request
+           (fn []
+             (js/Promise.resolve
+              {::execution/compile-state compile-state
+               ::execution/program program})))
+          (.then
+           (fn [result]
+             (is (= {:seon.eval/n-ok 1
+                     :seon.eval/n-fail 0
+                     :seon.eval/ids ["eval-1"]}
+                    result))
+             (is (= [compile-state
+                     (:seon.eval/parsed request)
+                     'my.agent.agent-1
+                     "agent-1" "turn-1" "run-1"
+                     {:my.agent.agent-1 "(ns my.agent.agent-1)"}]
+                    @observed))
+             (done)))
+          (.catch
+           (fn [error]
+             (is false (str "eval adapter rejected: " error))
+             (done)))
+          (.finally
+           (fn []
+             (set! eval/eval-batch! original-eval)
+             (set! db/current-agent-id original-agent)))))))

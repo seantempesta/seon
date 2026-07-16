@@ -875,7 +875,7 @@
    its JS has actually executed in this process. Two callers, two
    views of the same fact:
 
-   [[guarded-load]]: a ns missing from the bootstrap bundle's index but
+   [[guarded-load*]]: a ns missing from the bootstrap bundle's index but
    live here is HOST-BUNDLED (compiled into out/client/main.js — `my.kb`,
    `seon.db`, `my.kb.shared`): database-indexed and rendered into the
    agent's prompt as code, but absent from shadow's `:bootstrap
@@ -891,9 +891,8 @@
   "TRUE when `ns-sym` has a `:seon.ns/name` row in `db`.
 
    `ns-sym` a symbol. The
-   discriminator the DB branch of [[guarded-load]] uses to decide a
-   missing ns is agent-authored (loadable from the DB) rather than
-   genuinely absent. `db` is a datahike db value (third-party boundary)."
+   special REPL forms use this while their authority acquisition is being
+   migrated. `db` is a datahike db value (third-party boundary)."
   {:malli/schema [:=> [:catn [::db :any] [::ns-sym :symbol]] :boolean]}
   [db ns-sym]
   (boolean (seq (db/query '[:find ?e
@@ -942,6 +941,17 @@
          distinct
          (str/join "\n\n"))))
 
+(defn authored-sources
+  "Build the loadable namespace source map from ordinary program rows."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:map-of :keyword :string]]}
+  [namespace-rows]
+  (into {}
+        (keep (fn [row]
+                (let [source (namespace-source row)]
+                  (when-not (str/blank? source)
+                    [(:seon.ns/name row) source]))))
+        namespace-rows))
+
 (defn- synthesized-ns-head
   "An `(ns …)` head string rebuilt from `ns-kw`'s persisted require edges.
 
@@ -983,7 +993,7 @@
    Pure string CONCATENATION — no parsing. Same-ns forward refs resolve
    in one `eval-str` pass (LIVE-PROVEN). Member rows are deduped (a batch
    eval tees the same source onto every member it defined). `cljs.js`'s
-   `*load-fn*` (the DB branch of [[guarded-load]]) returns this string so
+   `*load-fn*` can return this string so
    the compiler analyzes the requires and loads each transitive dep, in
    dependency order, with cycle detection + load-once — we write no
    ordering code here. `db` is a datahike db value (third-party boundary)."
@@ -1051,19 +1061,13 @@
    the registry-stomp/shadowing class replay's core-skip exists to
    prevent.
 
-   DB-LAYER BRANCH (db-is-the-running-system PRD, shape B): when the
-   missing ns is NOT compiled (boot/load AND globalThis both failed) but
-   has agent-authored `:seon.ns` rows in the DB, answer with its
-   reconstituted source (`{:lang :clj :source …}`). cljs.js analyzes the
-   `(ns … (:require …))` head, sees the dep edges, and recursively asks
-   this same load-fn for each transitive require — so this ONE branch
-   serves BOTH cold-boot resume AND live agent evals that require an
-   agent ns. `relink-registry!` still runs after the eval (the DB branch
-   evals agent defn/register/deftest source, which doesn't stomp the
-   malli registry the way re-running bundle macro JS did, but the relink
-   is idempotent + cheap, so keep it uniform). Macro loads (`:macros` rc)
-   and genuinely-absent nses rethrow, preserving the legible
-   `Could not require X <- ns X not available` error."
+   AUTHORED-SOURCE BRANCH: when the missing ns is not compiled but exists in
+   the coordinate-pinned ordinary program supplied by the execution owner,
+   answer with that source string. cljs.js analyzes its namespace head and
+   recursively asks this same load function for dependencies. The loader never
+   opens or reads a Datahike value. Macro loads and genuinely absent namespaces
+   rethrow, preserving the legible `Could not require X <- ns X not available`
+   error."
   [compile-state authored-sources rc cb]
   (let [relink-cb (fn [result] (schema/relink-registry!) (cb result))]
     (try
@@ -1076,12 +1080,7 @@
         ;; catch, which `record!`s it (wrapper-fault). Recording here
         ;; would misfire on the recoverable branches, so no record! —
         ;; the re-throw path is where it becomes data.
-        ;; `*conn*` is root-bound at session start, but a load-fn can fire
-        ;; before boot completes or in a conn-less test context — bind once
-        ;; and only take the DB branch when a conn is actually present;
-        ;; otherwise fall through to the legible `Could not require X` throw.
-        (let [nm   (:name rc)
-              conn db/*conn*]
+        (let [nm (:name rc)]
           (cond
             (or (:macros rc) (not (symbol? nm)))
             (throw e)
@@ -1093,15 +1092,8 @@
             (relink-cb {:lang :clj
                         :source (get authored-sources (keyword nm))})
 
-            (and (some? conn) (ns-rows-in-db? @conn nm))
-            (relink-cb {:lang   :clj
-                        :source (reconstitute-ns-source @conn (keyword nm))})
-
             :else
             (throw e)))))))
-
-(defn- guarded-load [compile-state rc cb]
-  (guarded-load* compile-state {} rc cb))
 
 (defn ^:async load-authored-program!
   "Load selected targets and their reachable dependencies through cljs.js.
@@ -1114,12 +1106,7 @@
                           function-symbols compile-state]}]
   (let [compile-state (or compile-state (await (init-bootstrap!)))
         function-symbols (vec (distinct function-symbols))
-        sources (into {}
-                      (keep (fn [row]
-                              (let [source (namespace-source row)]
-                                (when-not (str/blank? source)
-                                  [(:seon.ns/name row) source]))))
-                      namespace-rows)
+        sources (authored-sources namespace-rows)
         namespace-by-symbol
         (into {}
               (mapcat (fn [row]
@@ -1500,6 +1487,7 @@
 (schema/register! ::starting-ns :symbol)
 (schema/register! ::analyze-deps? :boolean)
 (schema/register! ::timeout-ms :int)
+(schema/register! ::authored-sources [:map-of :keyword :string])
 
 (defn ^:async ^:private raw-eval
   "Internal — returns a Promise that resolves with
@@ -1526,7 +1514,7 @@
    After eval, any warning whose target doesn't resolve through the
    strategy in `truly-undeclared?` (which suppresses
    `:macro-present? true`) is promoted to a `:compile`-kind error."
-  [compile-state form-str ns-sym analyze-deps?]
+  [compile-state authored-sources form-str ns-sym analyze-deps?]
   ;; Prime the target ns's analyzer entry FIRST (idempotent) so a `def`
   ;; into a never-set-up ns can't trip `var-ast`→nil→`(ana/ast? sym)`.
   (await (ensure-analyzer-ns! compile-state ns-sym))
@@ -1545,7 +1533,8 @@
           (fn []
             (cljs/eval-str compile-state form-str dynamic-ns-sym
               {:eval          cljs/js-eval
-               :load          (partial guarded-load compile-state)
+               :load          (partial guarded-load* compile-state
+                                       authored-sources)
                :ns            ns-sym
                :context       context
                :def-emits-var true
@@ -1634,6 +1623,8 @@
                     already-loaded globalThis vars (the `:client`
                     bundle's emission).
      ::timeout-ms    override the default timeout for this call.
+     ::authored-sources ordinary namespace sources already acquired at the
+                    caller's immutable database coordinate.
 
    For setup forms that need cljs.core's macro refers wired up via
    `(ns …)` analysis, pass `::analyze-deps? true` explicitly.
@@ -1648,16 +1639,20 @@
           [::opts [:map
                    [::starting-ns   {:optional true} ::starting-ns]
                    [::analyze-deps? {:optional true} ::analyze-deps?]
-                   [::timeout-ms    {:optional true} ::timeout-ms]]]]
+                   [::timeout-ms    {:optional true} ::timeout-ms]
+                   [::authored-sources {:optional true}
+                    ::authored-sources]]]]
      :any]]}
   ([compile-state form-str]
    (eval compile-state form-str {}))
-  ([compile-state form-str {::keys [starting-ns analyze-deps? timeout-ms]}]
+  ([compile-state form-str
+    {::keys [starting-ns analyze-deps? timeout-ms authored-sources]}]
    (try
      (let [ns      (or starting-ns user-ns-sym)
            ms      (or timeout-ms default-timeout-ms)
            raced   (await (race-timeout
-                            (raw-eval compile-state form-str ns
+                            (raw-eval compile-state (or authored-sources {})
+                                      form-str ns
                                       (boolean analyze-deps?))
                             ms))]
        (if (identical? raced timeout-sentinel)
@@ -4237,7 +4232,7 @@
    bucket as `raw-eval`. Analyzer state DOES accumulate trial defs —
    the caller ([[preflight-repair!]]) rolls those back via
    remove-phantom-defs!."
-  [compile-state source ns-sym]
+  [compile-state authored-sources source ns-sym]
   (js/Promise.
     (fn [resolve _reject]
       (let [warnings (atom [])]
@@ -4246,7 +4241,8 @@
             (try
               (cljs/eval-str compile-state source dynamic-ns-sym
                 {:eval          (fn [_] nil)   ; trial: compile, execute NOTHING
-                 :load          (partial guarded-load compile-state)
+                 :load          (partial guarded-load* compile-state
+                                         authored-sources)
                  :ns            ns-sym
                  :context       :statement
                  :def-emits-var true
@@ -4343,14 +4339,14 @@
    over ONE form's source (see [[preflight-repair!]], which owns the
    analyzer cleanup around this). Returns nil / a fix map / a
    suggestions map — never throws to the caller (the wrapper records)."
-  [compile-state source ns-sym]
+  [compile-state authored-sources source ns-sym]
   (let [budget    (config/repair-budget-ms)
         start     (.now js/Date)
         over?     #(> (- (.now js/Date) start) budget)
         max-fixes (config/repair-max-fixes)]
     (loop [src source fixes [] cls nil]
       (let [{::keys [check-ok? check-error check-undeclared]}
-            (await (compile-check compile-state src ns-sym))
+            (await (compile-check compile-state authored-sources src ns-sym))
             w     (first check-undeclared)
             token (when w (source-token-for src (:suffix w)))]
         (cond
@@ -4419,7 +4415,9 @@
                                              {err2 ::check-error
                                               und2 ::check-undeclared}
                                              (await (compile-check
-                                                      compile-state code' ns-sym))]
+                                                      compile-state
+                                                      authored-sources
+                                                      code' ns-sym))]
                                          (and (nil? err2)
                                               (not-any?
                                                 #(contains? #{from-nm to-nm}
@@ -4490,11 +4488,12 @@
    trial's phantoms are removed before returning — the real eval's
    `defs-before` snapshot and the detect-and-tee diff stay
    byte-identical to a run without preflight."
-  [compile-state source ns-sym]
+  [compile-state authored-sources source ns-sym]
   (await (ensure-analyzer-ns! compile-state ns-sym))
   (let [defs-before (analyzer-info/snapshot-defs compile-state)
         outcome     (try
-                      (await (preflight-repair-run! compile-state source ns-sym))
+                      (await (preflight-repair-run!
+                               compile-state authored-sources source ns-sym))
                       (catch :default e
                         ;; OUR repair machinery throwing is a core defect
                         ;; (:core) — record it; the form still evals
@@ -4558,6 +4557,7 @@
 
    Map keys:
      ::compile-state   — the bootstrap compile-state.
+     ::authored-sources — the ordinary source map acquired at one coordinate.
      :seon.agent.turn/id-of-turn — committed owning turn id.
      ::current-ns      — volatile<symbol>, the fold accumulator ns.
      ::n-ok ::n-fail    — volatile<int> counters.
@@ -4566,7 +4566,7 @@
      ::narration       — narration to record (repaired forms prepend the
                         repair note here so the diff is always visible).
      ::source          — the source string to eval (repaired or original)."
-  [{::keys [compile-state current-ns n-ok n-fail
+  [{::keys [compile-state authored-sources current-ns n-ok n-fail
             failed-defs outer-test-run? narration source]
     turn-id :seon.agent.turn/id-of-turn}]
   (let [;; Real requires (#73/#56): if this is a NEW agent-authored `(ns …)`
@@ -4619,7 +4619,8 @@
             ;; eval error below.
             pre        (when (preflight-eligible? source)
                          (await (preflight-repair!
-                                  compile-state source @current-ns)))
+                                  compile-state authored-sources source
+                                  @current-ns)))
             fixed?     (some? (:seon.repair/source pre))
             source     (if fixed? (:seon.repair/source pre) source)
             narration  (if fixed?
@@ -4669,6 +4670,8 @@
                         (fn ^:async run-with-print-capture! []
                           (let [raw (await (eval compile-state source
                                                  {::starting-ns @current-ns
+                                                  ::authored-sources
+                                                  authored-sources
                                                   ::analyze-deps? false}))]
                             {::raw raw
                              ::awaited (when (::ok? raw)
@@ -4981,7 +4984,7 @@
    `form` is the [[repl-form-of]] parse of `::source`. Mutates the
    caller's fold volatiles exactly as eval-form-entry! does."
   {:malli/schema [:=> [:catn [::request :map]] :any]}
-  [{::keys [compile-state current-ns form narration] :as m}]
+  [{::keys [compile-state authored-sources current-ns form narration] :as m}]
   (let [db (some-> db/*conn* deref)]
     (case (first form)
       in-ns
@@ -5000,11 +5003,14 @@
               (vreset! current-ns target)
               (await (record-form-result! (assoc m ::value target))))
 
-          ;; known to the DB but not loaded (post-restart) → load it
-          ;; through the ONE load-fn, then move.
-          (and db (ns-rows-in-db? db target))
+          ;; Known to the accepted program but not loaded → load it through
+          ;; the one explicit source-map load function, then move. The local
+          ;; DB check remains only for the parent replay caller until its cut.
+          (or (contains? authored-sources (keyword target))
+              (and db (ns-rows-in-db? db target)))
           (let [r (await (eval compile-state (str "(require '" target ")")
                                {::starting-ns @current-ns
+                                ::authored-sources authored-sources
                                 ::analyze-deps? true}))]
             (if (::ok? r)
               (do (vreset! current-ns target)
@@ -5012,7 +5018,7 @@
               (await (record-form-result!
                        (assoc m ::error
                               (str "in-ns could not load " target
-                                   " from the db: "
+                                   " from the accepted program: "
                                    (or (some-> r :seon/error
                                                :seon.error/message)
                                        "unknown error")))))))
@@ -5042,6 +5048,7 @@
 
           (not (or (analyzer-ns-entry? compile-state t)
                    (ns-live-on-globalthis? t)
+                   (contains? authored-sources (keyword t))
                    (and db (ns-rows-in-db? db t))))
           (await (record-form-result!
                    (assoc m ::error
@@ -5097,7 +5104,8 @@
           :else
           (let [r (await (eval compile-state
                                (str "(ns-unmap '" ns-arg " '" sym-arg ")")
-                               {::starting-ns @current-ns}))]
+                               {::starting-ns @current-ns
+                                ::authored-sources authored-sources}))]
             (if-not (::ok? r)
               (await (record-form-result!
                        (assoc m ::error
@@ -5177,7 +5185,7 @@
    — supplies `:seon.repl/kind`/`:seon.repl/source`) and `::narration`
    (the final narration, repair note already prepended by the caller for
    a repaired form)."
-  [{::keys [compile-state current-ns n-ok n-fail
+  [{::keys [compile-state authored-sources current-ns n-ok n-fail
             failed-defs outer-test-run? entry narration]
     turn-id :seon.agent.turn/id-of-turn}]
   ;; A `#code` heredoc form carries `:seon.repl/eval-source` — the
@@ -5230,6 +5238,7 @@
       (some? (repl-form-of source))
       (await (dispatch-repl-form!
                {::compile-state   compile-state
+                ::authored-sources authored-sources
                 :seon.agent.turn/id-of-turn turn-id
                 ::current-ns      current-ns
                 ::n-ok            n-ok
@@ -5265,6 +5274,7 @@
       :else
       (await (eval-form-entry!
                {::compile-state   compile-state
+                ::authored-sources authored-sources
                 :seon.agent.turn/id-of-turn turn-id
                 ::current-ns      current-ns
                 ::n-ok            n-ok
@@ -5343,6 +5353,9 @@
                      Mid-batch supersession is caught by the loop's next-turn
                      re-read (§8c); full per-write atomic isolation is the
                      Phase-2 worker-buffer keystone.
+     authored-sources — the ordinary namespace source map acquired at the
+                     batch coordinate. The six-argument arity supplies an
+                     empty map for existing core-only callers.
 
    Returns `{:seon.eval/ids    [<id> ...]   ; ordered, one per entry
              :seon.eval/n-ok   <int>        ; successful evals
@@ -5353,14 +5366,25 @@
    The caller reads ::n-ok for 'progress made this turn' and ::n-fail to
    surface to the agent's warnings surface."
   {:malli/schema
-   [:=> [:catn [::compile-state :any]
-               [::parsed :any]
-               [::agent-ns-sym :any]
-               [::agent-id :string]
-               [::turn-id :string]
-               [::run-id :any]]
-        :map]}
-  [compile-state parsed agent-ns-sym agent-id turn-id run-id]
+   [:function
+    [:=> [:catn [::compile-state :any]
+                [::parsed :any]
+                [::agent-ns-sym :any]
+                [::agent-id :string]
+                [::turn-id :string]
+                [::run-id :any]]
+         :map]
+    [:=> [:catn [::compile-state :any]
+                [::parsed :any]
+                [::agent-ns-sym :any]
+                [::agent-id :string]
+                [::turn-id :string]
+                [::run-id :any]
+                [::authored-sources ::authored-sources]]
+         :map]]}
+  ([compile-state parsed agent-ns-sym agent-id turn-id run-id]
+   (eval-batch! compile-state parsed agent-ns-sym agent-id turn-id run-id {}))
+  ([compile-state parsed agent-ns-sym agent-id turn-id run-id authored-sources]
   (if-not (admission/available?)
     {:seon.eval/ids []
      :seon.eval/n-ok 0
@@ -5482,6 +5506,7 @@
                                 (await
                                   (dispatch-eval-entry!
                                     {::compile-state   compile-state
+                                     ::authored-sources authored-sources
                                      :seon.agent.turn/id-of-turn turn-id
                                      ::current-ns      current-ns
                                      ::n-ok            n-ok
@@ -5522,6 +5547,7 @@
                   (await
                     (dispatch-eval-entry!
                       {::compile-state   compile-state
+                       ::authored-sources authored-sources
                        :seon.agent.turn/id-of-turn turn-id
                        ::current-ns      current-ns
                        ::n-ok            n-ok
@@ -5535,4 +5561,4 @@
              :seon.eval/n-fail @n-fail}
       fence-lost? (assoc :seon.eval/fenced? true)
       (not (admission/available?))
-      (assoc :seon/error (:seon/error (admission/unavailable)))))))
+      (assoc :seon/error (:seon/error (admission/unavailable))))))))

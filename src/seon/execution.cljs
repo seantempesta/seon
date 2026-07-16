@@ -545,10 +545,10 @@
         (mapv query-result (::db/results result))
         program (canonical-program namespaces edges homes functions tests
                                    schemas contracts)
-        source-by-symbol (into {}
-                               (map (fn [[sym source & _]]
-                                      [(symbol sym) source]))
-                               functions)]
+        source-by-symbol
+        (into {}
+              (map (fn [[sym source & _]] [(symbol sym) source]))
+              (concat functions tests))]
     (when-not (= coordinate (::db/coordinate result))
       (throw (ex-info "Authored program acquisition moved coordinates."
                       {:seon.error/kind :core-bug})))
@@ -582,11 +582,9 @@
                  (assoc current ::compile-state initialized))))
       (::compile-state @state))))
 
-(defn- ^:async ensure-program!
-  [state invocation function-symbols verify-identity?]
+(defn- ^:async install-program!
+  [state invocation program function-symbols verify-identity?]
   (let [compile-state (await (ensure-compile-state! state))
-        program (await (acquire-program! (::coordinate invocation)
-                                         (::agent-id invocation)))
         _ (when verify-identity?
             (verify-authored-identity! program invocation))
         loaded (::program @state)
@@ -594,9 +592,6 @@
         (filterv #(contains? (::source-by-symbol program) %) function-symbols)
         load-request (assoc program ::function-symbols function-symbols)]
     (cond
-      (empty? function-symbols)
-      program
-
       (nil? loaded)
       (let [compile-state
             (await (eval/load-authored-program!
@@ -623,6 +618,23 @@
       (throw (ex-info "Authored source changed; a fresh child is required."
                       {::reload-required? true
                        :seon.error/kind :core-bug})))))
+
+(defn- ^:async ensure-program!
+  [state invocation function-symbols verify-identity?]
+  (let [program (await (acquire-program! (::coordinate invocation)
+                                         (::agent-id invocation)))]
+    (await (install-program! state invocation program function-symbols
+                             verify-identity?))))
+
+(defn- ^:async prepare-eval-program!
+  "Prepare the invocation-coordinate program and the child's compiler."
+  [state invocation]
+  (let [program (await (acquire-program! (::coordinate invocation)
+                                         (::agent-id invocation)))
+        symbols (vec (keys (::source-by-symbol program)))
+        _ (await (install-program! state invocation program symbols false))]
+    {::compile-state (::compile-state @state)
+     ::program program}))
 
 (declare exception-value)
 
@@ -763,9 +775,11 @@
         identity (::function-identity invocation)
         function-symbol (::function-symbol identity)
         compiled? (contains? identity ::artifact-digest)
-        compiled-function (when compiled?
-                            (get (::compiled-functions current)
-                                 function-symbol))
+        compiled-descriptor (when compiled?
+                              (get (::compiled-functions current)
+                                   function-symbol))
+        compiled-function (::compiled-function compiled-descriptor)
+        pin-coordinate? (true? (::pin-coordinate? compiled-descriptor))
         remaining (- (::deadline-ms invocation) now-ms)]
     (cond
       (::shutting-down? current)
@@ -825,14 +839,16 @@
                      (::agent-id invocation)
                      (fn []
                        (db/with-tx-context
-                        (assoc (or (::run-fence invocation) {})
-                               ::db/coordinate (::coordinate invocation))
+                        (cond-> (or (::run-fence invocation) {})
+                          pin-coordinate?
+                          (assoc ::db/coordinate (::coordinate invocation)))
                         (fn []
                           (if compiled?
                             (function-value
                              (::arguments invocation)
                              (partial invoke-selected! state invocation)
-                             (partial ensure-compile-state! state))
+                             (partial ensure-compile-state! state)
+                             (partial prepare-eval-program! state invocation))
                             (apply function-value
                                    (::arguments invocation))))))))
                    (catch :default exception
