@@ -1099,6 +1099,17 @@ lookup refs without throwing, retaining nil at the exact input position, and
 preserving lookup syntax/uniqueness errors. Seon keeps only registered-versus-
 installed selector policy; it does not run or zip N pulls.
 
+The dependency change is implemented and pushed at Datahike
+`1296cfc4cb8c9b4868dde8bb6c3f4d4dc523d043`. Persistent-set,
+hitchhiker-tree, attribute-ref, and API-specification proof passes 120 tests and
+393 assertions; the canonical Node CLJS gate, now including pull and API
+specification suites, passes 135 tests and 934 assertions. The full dependency
+`bb test` still aborts later during unrelated suite cleanup because a database
+has active connections; the exact evidence is retained in
+[[research/datahike-ordered-pull-many-seam-2026-07-16]]. The remaining ordered
+pull boundary is Seon's writer/protocol integration and consumer deletion, not
+another Datahike mechanism.
+
 The aggregate `execute-many` result bound is deterministic by member position,
 not completion timing. Admission reserves the outer response plus one fixed
 bounded error per position. Contiguous completed positions replace those

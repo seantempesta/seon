@@ -43,7 +43,7 @@ maps and nils.
 
 | Owner | Exact source | Relevant fact |
 |---|---|---|
-| Datahike | `reference-code/datahike` at `a53158582dd2d8ba12e8bfc0843125d246b573c6` | Maintained fork with bounded pull resources and the protocol capability catalog. |
+| Datahike | `reference-code/datahike` at `1296cfc4cb8c9b4868dde8bb6c3f4d4dc523d043` | Maintained fork with bounded pull resources, ordered missing-value pull, and the protocol capability catalog. |
 | Pull engine | `src/datahike/pull_api.cljc:18-29, 290-359` | One root frame owns ordered entity traversal; `pull-many` parses once and calls `pull-spec` once. |
 | Entity resolution | `src/datahike/db/utils.cljc:109-148` | `entid` returns nil only for a well-formed missing ref and still throws syntax/unique-schema errors; `entid-strict` converts nil to `:entity-id/missing`. |
 | Native index access | `src/datahike/db/interface.cljc:87-103`; `src/datahike/db.cljc:246-254` | Pull uses exact EAVT/AVET prefix slices through the database wrapper's search context. There is no multi-key index cursor primitive. |
@@ -347,6 +347,31 @@ result weight. The selected cut must keep one parse/setup/certification and
 must not increase index calls for lookup refs over the current native
 `pull-many`. Numeric existence probes are expected and must remain exact-prefix
 access, never a database scan.
+
+### Implemented dependency proof
+
+Datahike commit `1296cfc4cb8c9b4868dde8bb6c3f4d4dc523d043`
+implements the selected seam on `codex/database-authority-mesh` and is pushed to
+the maintained fork. It keeps one parser invocation, one root frame machine,
+one resource budget, and one eager result certification. Raw numeric refs use
+one exact EAVT presence probe; lookup refs and idents retain Datahike's native
+AVET resolution. Only the root pull-many frame preserves nil positions.
+
+The focused cross-index/specification gate passes 120 tests and 393 assertions.
+It covers persistent-set, hitchhiker-tree, attribute-ref mode, exact option and
+return schemas, missing numeric/lookup/ident positions, malformed and
+non-unique failures, wildcard absence, duplicate/order behavior, parser counts
+at 1/32/1,000 inputs, and shared budget exhaustion/recovery. The canonical Node
+CLJS gate now includes pull and API specification suites and passes 135 tests
+and 934 assertions, including JavaScript null positions with no Promise or host
+value leakage.
+
+The repository-wide `bb test` remains an unresolved pre-existing aggregate-gate
+failure: after the focused pull suites pass, a later cleanup aborts with
+`Cannot delete a database with active connections. Release them first.` The
+failure is outside the pull seam; no pull test creates a connection, and both
+focused CLJ/CLJS gates release cleanly. This evidence does not graduate the
+later Seon writer/protocol integration proof.
 
 ## Graduation decision
 
