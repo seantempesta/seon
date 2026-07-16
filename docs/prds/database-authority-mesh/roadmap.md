@@ -458,9 +458,14 @@ members cannot carry another request identity or database coordinate. The
 executor retains the exact generation by the existing outer request ID across
 resolution and progressive member admission, group cancellation addresses all
 internal jobs through that same ID, and final database release waits for that
-owner. Focused executor and Transit proof passes 26 tests and 127 assertions.
-The writer coordinator and progressive member execution remain the next Unit 5
-implementation boundary.
+owner. The writer now resolves one immutable value under ordinary read
+admission, progressively refills no more than the per-database queue window in
+completion order, preserves response order, and releases a historical value
+exactly once after all admitted work stops. A 64-member historical request on a
+two-processor capacity completes without overflowing the eight-member queue.
+The affected executor, writer, protocol, embedding, replay, and transaction
+gate passes 60 tests and 357 assertions. Running-query cancellation and
+release-race fixtures remain before Unit 5 graduation.
 
 Exit proof: transport-neutral fixtures cover schemas, values, identity,
 query/pull/history, branches, fencing, batching, member errors, cancellation,

@@ -17,7 +17,9 @@
                    [::coordinate/attachment ::coordinate/attachment]
                    [::connection-id ::connection-id]
                    [::generation ::generation]])
-(schema/register! ::job-id :seon.db.protocol/request-id)
+(schema/register! ::job-id
+                  [:or :seon.db.protocol/request-id
+                   [:tuple :seon.db.protocol/request-id [:or :keyword :int]]])
 (schema/register! ::request-id :seon.db.protocol/request-id)
 (schema/register! ::work-class :keyword)
 (schema/register! ::request-bytes [:int {:min 0}])
@@ -263,7 +265,7 @@
 
 (defn- finish-work! [executor work]
   (locking (::lock executor)
-    (let [{::keys [job-id result work-class database-name]} work]
+    (let [{::keys [job-id request-id result work-class database-name]} work]
       (swap! (::state executor)
              (fn [state]
                (if (identical? result (get-in state [::jobs job-id ::result]))
@@ -299,17 +301,22 @@
                                 [work-class database-name]] class-db-left)
                      (zero? db-left) (update ::running-by-database dissoc database-name)
                      (pos? db-left) (assoc-in [::running-by-database database-name] db-left))))))
+      (when (and request-id
+                 (get-in @(::state executor) [::retained-requests request-id]))
+        (swap! (::state executor) update-in
+               [::retained-requests request-id ::completed-jobs]
+               conj job-id))
       (swap! (::counts executor) update ::completed inc)
       (.notifyAll ^Object (::lock executor)))))
 
 (defn- run-work! [executor work]
   (let [result (::result work)
-        execute (get (::execute executor) (::work-class work))]
-    (try
-      (deliver result [::value (execute (::request work))])
-      (catch Throwable throwable
-        (deliver result [::throwable throwable]))
-      (finally (finish-work! executor work)))))
+        execute (get (::execute executor) (::work-class work))
+        outcome (try
+                  [::value (execute (::request work))]
+                  (catch Throwable throwable [::throwable throwable]))]
+    (finish-work! executor work)
+    (deliver result outcome)))
 
 (defn- run-worker! [executor allowed-classes]
   (loop []
@@ -415,6 +422,9 @@
 (defn submit-async!
   "Admit or join work and return its internal result promise."
   [request] (second (admit! request)))
+(defn submit-async-with-evidence!
+  "Try admission and return its evidence together with the result promise."
+  [request] (admit! request))
 (defn submit!
   "Admit or join work and await its result."
   [request]
@@ -433,7 +443,8 @@
                         {::scope scope ::request-id request-id})))
       (swap! (::state executor) assoc-in
              [::retained-requests request-id]
-             {::scope scope ::canceled? false})))
+             {::scope scope ::canceled? false
+              ::completed-jobs empty-queue})))
   nil)
 
 (defn release-request!
@@ -449,6 +460,26 @@
   [{::keys [executor request-id]}]
   (true? (get-in @(::state executor)
                  [::retained-requests request-id ::canceled?])))
+
+(defn await-completed!
+  "Wait for the next internal job completed by one retained request."
+  [{::keys [executor request-id]}]
+  (locking (::lock executor)
+    (loop []
+      (let [queue (get-in @(::state executor)
+                          [::retained-requests request-id ::completed-jobs])]
+        (cond
+          (seq queue)
+          (let [job-id (peek queue)]
+            (swap! (::state executor) assoc-in
+                   [::retained-requests request-id ::completed-jobs]
+                   (pop queue))
+            job-id)
+
+          (get-in @(::state executor) [::retained-requests request-id])
+          (do (.wait ^Object (::lock executor)) (recur))
+
+          :else nil)))))
 
 (defn- fence-scope! [executor scope abandon-work-classes]
   (locking (::lock executor)
@@ -568,6 +599,8 @@
                (fn [current]
                  (-> current
                      (assoc-in [::retained-requests request-id ::canceled?] true)
+                     (update-in [::retained-requests request-id ::completed-jobs]
+                                #(into (or % empty-queue) (keys queued)))
                      (remove-queued-results results)
                      (update ::jobs #(apply dissoc % (keys queued)))))))
       (doseq [[job-id {::keys [result]}] queued]

@@ -116,6 +116,7 @@
          {::writer/dependencies (dependencies)
           ::writer/database-name database-name
           ::writer/backend :memory
+          ::writer/selected-processors 2
           ::writer/request-socket-path request-path
           ::writer/publish-socket-path publish-path})
         ^SocketChannel request-channel (uds/connect! request-path)]
@@ -184,8 +185,40 @@
                      ::protocol/coordinate frozen
                      ::protocol/selector [:reader/id :reader/score]
                      ::protocol/entity-ids [[:reader/id "alice"]
-                                            [:reader/id "bob"]]}))]
-        (is (every? protocol/valid-response? [owner hit pull pulls]))
+                                            [:reader/id "bob"]]}))
+            many
+            (call! request-channel
+                   (protocol/execute-many-request
+                    {::protocol/request-id "read/many"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen
+                     ::protocol/members
+                     [{::protocol/operation protocol/pull-operation
+                       ::protocol/selector [:reader/id :reader/score]
+                       ::protocol/entity-id [:reader/id "bob"]}
+                      {::protocol/operation protocol/query-operation
+                       ::protocol/query-form (::protocol/query-form query-input)
+                       ::protocol/arguments []}
+                      {::protocol/operation protocol/pull-many-operation
+                       ::protocol/selector [:reader/id]
+                       ::protocol/entity-ids [[:reader/id "alice"]
+                                              [:reader/id "bob"]]}]}))
+            large-many
+            (call! request-channel
+                   (protocol/execute-many-request
+                    {::protocol/request-id "read/many-64"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen
+                     ::protocol/members
+                     (vec
+                      (repeat 64
+                              {::protocol/operation protocol/pull-operation
+                               ::protocol/selector [:reader/id]
+                               ::protocol/entity-id [:reader/id "alice"]}))}))]
+        (is (every? protocol/valid-response?
+                    [owner hit pull pulls many large-many]))
         (is (= #{{:id "alice" :score 1} {:id "bob" :score 2}}
                (set (:datahike.query/result owner))
                (set (:datahike.query/result hit))))
@@ -200,10 +233,21 @@
         (is (= [{:reader/id "alice" :reader/score 1}
                 {:reader/id "bob" :reader/score 2}]
                (::protocol/result pulls)))
+        (is (= {:reader/id "bob" :reader/score 2}
+               (get-in many [::protocol/results 0 ::protocol/result])))
+        (is (= #{"alice" "bob"}
+               (set (map :id
+                         (get-in many [::protocol/results 1
+                                       :datahike.query/result])))))
+        (is (= [{:reader/id "alice"} {:reader/id "bob"}]
+               (get-in many [::protocol/results 2 ::protocol/result])))
+        (is (= 64 (count (::protocol/results large-many))))
+        (is (every? ::protocol/success? (::protocol/results large-many)))
         (is (= frozen (::protocol/coordinate owner)
                (::protocol/coordinate hit)
                (::protocol/coordinate pull)
-               (::protocol/coordinate pulls))))
+               (::protocol/coordinate pulls)
+               (::protocol/coordinate many))))
       (finally
         (try (.close request-channel) (catch Throwable _))
         (writer/stop! server)

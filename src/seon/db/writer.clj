@@ -551,45 +551,50 @@
    ::protocol/attachment (::protocol/attachment request)
    ::protocol/coordinate (::protocol/coordinate request)})
 
+(defn- execute-db-read
+  [db-value request caller-id]
+  (let [options (resource-options request)]
+    (case (::protocol/operation request)
+      :seon.db.protocol.operation/query
+      (update
+       (d/q-with-evidence
+        (merge
+         {:query (::protocol/query-form request)
+          :args (into [db-value] (::protocol/arguments request))
+          :request-id caller-id}
+         options))
+       :datahike.query/result materialize-result)
+
+      :seon.db.protocol.operation/pull
+      {::protocol/result
+       (materialize-result
+        (d/pull db-value
+                (merge {:selector (::protocol/selector request)
+                        :eid (::protocol/entity-id request)}
+                       options)))}
+
+      :seon.db.protocol.operation/pull-many
+      {::protocol/result
+       (materialize-result
+        (d/pull-many db-value
+                     (merge {:selector (::protocol/selector request)
+                             :eids (::protocol/entity-ids request)}
+                            options)))})))
+
 (defn- execute-read!
   [{request ::request :as work}]
-  (let [db-value (pinned-database work)
-        options (resource-options request)]
-    (try
-      (case (::protocol/operation request)
-        :seon.db.protocol.operation/query
-        (merge
-         (read-response-base request)
-         (update
-          (d/q-with-evidence
-           (merge
-            {:query (::protocol/query-form request)
-             :args (into [db-value] (::protocol/arguments request))
-             :request-id (::protocol/request-id request)}
-            options))
-          :datahike.query/result materialize-result))
-
-        :seon.db.protocol.operation/pull
-        (assoc
-         (read-response-base request)
-         ::protocol/result
-         (materialize-result
-          (d/pull db-value
-                  (merge {:selector (::protocol/selector request)
-                          :eid (::protocol/entity-id request)}
-                         options))))
-
-        :seon.db.protocol.operation/pull-many
-        (assoc
-         (read-response-base request)
-         ::protocol/result
-         (materialize-result
-          (d/pull-many db-value
-                       (merge {:selector (::protocol/selector request)
-                               :eids (::protocol/entity-ids request)}
-                              options)))))
-      (finally
-        (d/release-materialized-db db-value)))))
+  (cond
+    (::resolve-only? work) (pinned-database work)
+    (::database-value work)
+    (protocol/success
+     (execute-db-read (::database-value work) request (::caller-id work)))
+    :else
+    (let [db-value (pinned-database work)]
+      (try
+        (merge (read-response-base request)
+               (execute-db-read db-value request (::protocol/request-id request)))
+        (finally
+          (d/release-materialized-db db-value))))))
 
 (defn- scope-for-read
   [request]
@@ -620,6 +625,120 @@
       ::protocol/body
       {::protocol/request-id (::protocol/request-id request)}})))
 
+(defn- member-failure
+  [throwable]
+  (protocol/failure
+   {::protocol/error-kind
+    (or (::failure-kind (ex-data throwable)) protocol/database-error)
+    ::protocol/error (or (.getMessage ^Throwable throwable)
+                         "The database read failed.")}))
+
+(defn- member-outcome
+  [result]
+  (let [[outcome value] @result]
+    (if (= ::executor/throwable outcome) (member-failure value) value)))
+
+(defn- execute-many-members
+  [dispatcher database-name scope request db-value]
+  (let [request-id (::protocol/request-id request)
+        members (::protocol/members request)
+        member-count (count members)
+        active-limit (get-in dispatcher
+                             [::executor/capacity ::executor/classes :read
+                              ::executor/maximum-queued-by-database])
+        canceled-result (member-failure
+                         (ex-info "The database request was canceled."
+                                  {::failure-kind protocol/database-error}))]
+    (loop [next-position 0
+           active {}
+           results (vec (repeat member-count nil))]
+      (let [canceled? (executor/request-canceled?
+                       {::executor/executor dispatcher
+                        ::executor/request-id request-id})
+            [next-position active results]
+            (loop [position next-position
+                   active active
+                   results results]
+              (if (and (not canceled?)
+                       (< position member-count)
+                       (< (count active) active-limit))
+                (let [member (nth members position)
+                      job-id [request-id position]
+                      [admission result]
+                      (executor/submit-async-with-evidence!
+                       {::executor/executor dispatcher
+                        ::executor/work-class :read
+                        ::executor/database-name database-name
+                        ::executor/scope scope
+                        ::executor/job-id job-id
+                        ::executor/request-id request-id
+                        ::executor/request
+                        {::database-name database-name
+                         ::scope scope
+                         ::database-value db-value
+                         ::caller-id job-id
+                         ::request member}})]
+                  (if (::executor/accepted? admission)
+                    (recur (inc position) (assoc active job-id [position result])
+                           results)
+                    (recur (inc position) active
+                           (assoc results position (member-outcome result)))))
+                [position active results]))
+            done? (and (or canceled? (= next-position member-count))
+                       (empty? active))]
+        (if done?
+          (if canceled?
+            (mapv #(or % canceled-result) results)
+            results)
+          (let [job-id (executor/await-completed!
+                        {::executor/executor dispatcher
+                         ::executor/request-id request-id})]
+            (if-let [[position result] (get active job-id)]
+              (recur (long next-position) (dissoc active job-id)
+                     (assoc results position (member-outcome result)))
+              (recur (long next-position) active results))))))))
+
+(defn- handle-execute-many
+  [runtime request]
+  (run! validate-read-input! (::protocol/members request))
+  (if-let [scope (scope-for-read request)]
+    (let [dispatcher (::executor runtime)
+          request-id (::protocol/request-id request)
+          database-name (::protocol/database-name request)]
+      (executor/retain-request!
+       {::executor/executor dispatcher ::executor/scope scope
+        ::executor/request-id request-id})
+      (try
+        (let [resolution-id [request-id :resolve]
+              db-value
+              (executor/submit!
+               {::executor/executor dispatcher
+                ::executor/work-class :read
+                ::executor/database-name database-name
+                ::executor/scope scope
+                ::executor/job-id resolution-id
+                ::executor/request-id request-id
+                ::executor/request
+                {::database-name database-name ::scope scope
+                 ::resolve-only? true ::request request}})]
+          (executor/await-completed!
+           {::executor/executor dispatcher ::executor/request-id request-id})
+          (try
+            (protocol/success
+             (assoc (read-response-base request)
+                    ::protocol/results
+                    (execute-many-members dispatcher database-name scope request
+                                          db-value)))
+            (finally
+              (d/release-materialized-db db-value))))
+        (finally
+          (executor/release-request!
+           {::executor/executor dispatcher ::executor/request-id request-id}))))
+    (protocol/failure
+     {::protocol/error-kind protocol/stale-coordinate-error
+      ::protocol/error "The database attachment is no longer current."
+      ::protocol/body {::protocol/request-id (::protocol/request-id request)}})))
+
 (defn- cancel-running-query
   [dispatcher target-request-id]
   (let [deadline (+ (System/nanoTime) 100000000)]
@@ -645,24 +764,40 @@
   [runtime request]
   (let [target-request-id (::protocol/target-request-id request)
         dispatcher (::executor runtime)
-        cancel-outcome
-        (executor/cancel!
+        grouped
+        (executor/cancel-request!
          {::executor/executor dispatcher
-          ::executor/job-id target-request-id})
+          ::executor/request-id target-request-id})
+        cancel-outcome
+        (if (= :not-found (::executor/cancellation grouped))
+          (executor/cancel!
+           {::executor/executor dispatcher
+            ::executor/job-id target-request-id})
+          grouped)
         cancellation (::executor/cancellation cancel-outcome)
         protocol-request (::request (::executor/request cancel-outcome))
         query-cancellation
-        (when (and (= :running cancellation)
-                   (= protocol/query-operation
-                      (::protocol/operation protocol-request)))
-          (cancel-running-query dispatcher target-request-id))]
+        (cond
+          (seq (::executor/requests grouped))
+          (mapv (fn [internal]
+                  (when (= protocol/query-operation
+                           (::protocol/operation (::request internal)))
+                    (d/cancel-query! (::caller-id internal))))
+                (::executor/requests grouped))
+
+          (and (= :running cancellation)
+               (= protocol/query-operation
+                  (::protocol/operation protocol-request)))
+          [(cancel-running-query dispatcher target-request-id)]
+
+          :else [])]
     (protocol/success
      {::protocol/request-id (::protocol/request-id request)
       ::protocol/target-request-id target-request-id
       ::protocol/canceled?
       (boolean
        (or (= :queued cancellation)
-           (:datahike.query.cancel/detached? query-cancellation)))
+           (some :datahike.query.cancel/detached? query-cancellation)))
       ::protocol/running? (= :running cancellation)})))
 
 (defn- resolve-exact-connection
@@ -1545,6 +1680,9 @@
 
          :seon.db.protocol.operation/pull-many
          (handle-read runtime request)
+
+         :seon.db.protocol.operation/execute-many
+         (handle-execute-many runtime request)
 
          :seon.db.protocol.operation/cancel
          (handle-cancel runtime request)
