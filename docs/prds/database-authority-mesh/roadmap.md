@@ -1220,20 +1220,49 @@ var; no runner or full-suite tax is added. The exact upstream-test mapping,
 test inventory, exclusions, selectors, and graduation matrix are
 [[research/datahike-selective-compatibility-proof-2026-07-16]].
 
-Current parallel portfolio: the JVM proof lane owns only the real writer/UDS
-remote-contract namespace. Commits `74953530`, `ae43154c`, and `022c09ef`
+Commit `dd10db08` now owns the real JVM writer/UDS namespace. Its focused
+selector loads and runs nine tests/53 assertions against real in-memory
+Datahike databases and the real Unix-domain socket with zero harness errors.
+The 45 intentional failures are the exact replacement ledger: reads still
+require an out-of-band database name, attachment, and coordinate; transactions
+still return compact projections; listeners still require attachments and
+reject keyed replacement; and release still requires an attachment/head pair.
+The suite also proves the desired multi-source, temporal, eager pull/entity,
+native index-order, listener-isolation, joined-cancellation, sibling-release,
+and terminal-cleanup behavior as those source contracts turn green.
+
+The source-grounded database-value seam is
+[[research/datahike-remote-database-value-seam-2026-07-16]]. Datahike's native
+`RemoteDB`, `RemoteHistoricalDB`, `RemoteAsOfDB`, and `RemoteSinceDB` records
+confirm the raw-value plus temporal-wrapper semantics, but their Transit tags,
+physical store identity, remote peer, and recursive host records remain inside
+Datahike. The public flat ordinary map is retained deliberately: session-owned
+logical-name routing preserves authorization and future authority neutrality;
+`d/commit-as-db`, `d/as-of`, `d/since`, `d/history`, and
+`d/release-materialized-db` remain the native rehydration/lifetime seam. A
+structural Transit probe measured 161 bytes for a flat as-of value versus 244
+for a one-key tagged-map approximation. This is not a whole-request benchmark;
+the architecture win remains shared indexes and computation rather than tens
+of descriptor bytes.
+
+Current ordered boundary: replace the legacy coordinate-shaped protocol and
+writer resolver with ordinary database values, then turn the two selective
+compatibility namespaces green before migrating consumers. Commits `74953530`,
+`ae43154c`, and `022c09ef`
 settle the always-current database-value architecture, explicit secondary-
 database lifetime, and selective upstream compatibility proof. Commit
 `97f9d6bb` adds the six exact-var-selectable CLJS facade contracts using only
 ordinary database values; they intentionally reject the legacy coordinate
-handshake and remain red until the canonical protocol/facade cut. The top level
-owns that protocol/facade implementation and integration judgment. The stopped plan-consumer draft remains an explicit uncommitted
+handshake and remain red until the canonical protocol/facade cut. Commit
+`dd10db08` adds the matching real JVM writer/UDS contract. The top level owns
+that protocol/facade implementation and integration judgment. The stopped
+plan-consumer draft remains an explicit uncommitted
 handoff because its pure row transformations are reusable but its coordinate
 and compact-envelope transport is not. After the dependency proof, refill that
-slot with the real writer/UDS remote-contract tests; the next independent
-refill is protocol-consumer deletion proof after the public contract turns
+slot with protocol-consumer deletion proof after the public contract turns
 green. Replace protocol, resolver, reports/listeners, and consumers in one
-dependency-ordered cut.
+dependency-ordered cut; the final graduation gate remains the full focused,
+integrated, live, Bun, and modest-hardware density proof.
 
 The previous facade history remains as implementation evidence. Source audit
 found that the JVM discarded the existing
