@@ -185,15 +185,16 @@ numbers wait until the execution child is authority-only, because today's
 child can still construct and retain local Datahike state. Static dependency
 reachability and generated JavaScript size are not density evidence.
 The exact Shadow reachability and launch-environment seam is
-[[research/execution-artifact-database-dependency-seam-2026-07-16]]: 81 heavy
-database implementation imports occupy 8,293,078 of 18,810,383 live
-unoptimized execution bytes (44.1%). The one public `seon.db` namespace selects
-a private build-role implementation only if an independently shipped execution
-artifact must precede the atomic consumer cut. The selected full-control plan
-instead deletes the final local CLJS consumers and Datahike implementation in
-that cut, leaving the remote implementation as canonical `seon.db` without a
-lasting alias layer. The child launch freezes absolute runtime root/cwd and an
-explicit environment instead of inheriting the host.
+[[research/execution-artifact-database-dependency-seam-2026-07-16]]. Its useful
+finding is the import path that still permits an execution child to construct
+and retain a local Datahike database, not the generated JavaScript volume. The
+one public `seon.db` namespace selects a private build-role implementation only
+if an independently shipped execution artifact must precede the atomic
+consumer cut. The selected full-control plan instead deletes the final local
+CLJS consumers and that second live database owner in the same cut, leaving the
+remote implementation as canonical `seon.db` without a lasting alias layer.
+The child launch freezes absolute runtime root/cwd and an explicit environment
+instead of inheriting the host.
 Shadow/ClojureScript remains the sole closure owner: Seon defines the correct
 entrypoint and removes architecturally unreachable local-replica dependencies,
 then accepts the compiler-derived transitive package. There is no manual module
