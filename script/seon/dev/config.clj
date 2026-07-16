@@ -26,8 +26,10 @@
     [:enum :seon.dev.artifact.flavor/default
      :seon.dev.artifact.flavor/acme]]
    [:seon.dev.config/client-build-id :string]
+   [:seon.dev.config/execution-build-id :string]
    [:seon.dev.config/shadow-cache-root :string]
    [:seon.dev.config/client-output :string]
+   [:seon.dev.config/execution-output :string]
    [:seon.dev.config/writer-output :string]
    [:seon.dev.config/artifact-manifest :string]
    [:seon.dev.config/launch-descriptor :seon.launch/descriptor]])
@@ -56,10 +58,14 @@
               {:seon.dev.config/launch-descriptor descriptor})))
   (let [configured
         [(:seon.dev.config/artifact-flavor configuration)
-         (:seon.dev.config/client-build-id configuration)]
+         (:seon.dev.config/client-build-id configuration)
+         (:seon.dev.config/execution-build-id configuration)
+         (:seon.dev.config/execution-output configuration)]
         selected
         [(get-in descriptor [::launch/runtime ::launch/artifact-flavor])
-         (get-in descriptor [::launch/runtime ::launch/client-build-id])]]
+         (get-in descriptor [::launch/runtime ::launch/client-build-id])
+         (get-in descriptor [::launch/runtime ::launch/execution-build-id])
+         (get-in descriptor [::launch/runtime ::launch/execution-output])]]
     (when-not (= configured selected)
       (throw
        (ex-info "The launch descriptor selects another artifact."
@@ -98,22 +104,28 @@
     [:enum :seon.dev.artifact.flavor/default
      :seon.dev.artifact.flavor/acme]]
    [:seon.dev.config/client-build-id :string]
+   [:seon.dev.config/execution-build-id :string]
    [:seon.dev.config/shadow-cache-root :string]
    [:seon.dev.config/client-output :string]
+   [:seon.dev.config/execution-output :string]
    [:seon.dev.config/artifact-manifest-name :string]])
 
 (def ^:private artifact-flavors
   {"default"
    {:seon.dev.config/artifact-flavor :seon.dev.artifact.flavor/default
     :seon.dev.config/client-build-id "client"
+    :seon.dev.config/execution-build-id "execution"
     :seon.dev.config/shadow-cache-root ".shadow-cljs"
     :seon.dev.config/client-output "out/client/main.js"
+    :seon.dev.config/execution-output "out/execution/main.js"
     :seon.dev.config/artifact-manifest-name "artifact.edn"}
    "acme"
    {:seon.dev.config/artifact-flavor :seon.dev.artifact.flavor/acme
     :seon.dev.config/client-build-id "acme-client"
+    :seon.dev.config/execution-build-id "acme-execution"
     :seon.dev.config/shadow-cache-root "tmp/shadow/acme"
     :seon.dev.config/client-output "out-acme/client/main.js"
+    :seon.dev.config/execution-output "out-acme/execution/main.js"
     :seon.dev.config/artifact-manifest-name "artifact-acme.edn"}})
 
 (defn- root-path [root path]
@@ -134,6 +146,8 @@
                                :seon.dev.config/known-artifact-flavors
                                (vec (sort (keys artifact-flavors)))})))
         expected-output (root-path root (:seon.dev.config/client-output target))
+        expected-execution-output
+        (root-path root (:seon.dev.config/execution-output target))
         configured-output (some->> (get environment "SEON_CLIENT_OUT")
                                    (root-path root))]
     (when (and configured-output (not= expected-output configured-output))
@@ -145,7 +159,9 @@
                   :seon.dev.config/configured-client-output configured-output})))
     (-> target
         (update :seon.dev.config/shadow-cache-root #(root-path root %))
-        (assoc :seon.dev.config/client-output expected-output))))
+        (assoc :seon.dev.config/client-output expected-output
+               :seon.dev.config/execution-output
+               expected-execution-output))))
 
 (defn artifact-configurations
   "Artifact coordinates for every supported development flavor."
@@ -279,6 +295,10 @@
           (:seon.dev.config/artifact-flavor artifact)
           ::launch/client-build-id
           (:seon.dev.config/client-build-id artifact)
+          ::launch/execution-build-id
+          (:seon.dev.config/execution-build-id artifact)
+          ::launch/execution-output
+          (:seon.dev.config/execution-output artifact)
           ::launch/request-socket-path req-sock
           ::launch/publish-socket-path pub-sock
           ::launch/writer-repl-port-file writer-port-file

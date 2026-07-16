@@ -31,13 +31,17 @@
 (def ^:private legacy-containment-shutdown-grace-ms 2500)
 
 (def ^:private unpublished-client-digest
-  "unpublished-client-watcher-flush")
+  "unpublished-flavor-watcher-flush")
 
 (def external-dependency-schema
   [:map {:closed true}
    [:seon.dev.process/id qualified-keyword?]
    [:seon.dev.process/owner-process-dir :string]
    [:seon.dev.process/readiness qualified-keyword?]
+   [:seon.dev.process/client-digest {:optional true}
+    [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.process/execution-digest {:optional true}
+    [:re #"[0-9a-f]{64}"]]
    [:seon.dev.process/artifact-digest :string]])
 
 (def process-spec-schema
@@ -53,6 +57,10 @@
    [:seon.dev.process/ready-timeout-ms [:int {:min 1}]]
    [:seon.dev.process/shutdown-grace-ms [:int {:min 1}]]
    [:seon.dev.process/bootstrap-digest {:optional true}
+    [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.process/client-digest {:optional true}
+    [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.process/execution-digest {:optional true}
     [:re #"[0-9a-f]{64}"]]
    [:seon.dev.process/artifact-digest :string]])
 
@@ -228,10 +236,14 @@
 
 (defn- watcher-build-ids [config]
   (let [client-build-id
-        (keyword (:seon.dev.config/client-build-id config))]
+        (keyword (:seon.dev.config/client-build-id config))
+        execution-build-id
+        (keyword (:seon.dev.config/execution-build-id config))]
     (case (:seon.dev.config/artifact-flavor config)
-      :seon.dev.artifact.flavor/default [client-build-id :test]
-      :seon.dev.artifact.flavor/acme [client-build-id]
+      :seon.dev.artifact.flavor/default
+      [client-build-id execution-build-id :test]
+      :seon.dev.artifact.flavor/acme
+      [client-build-id execution-build-id]
       (throw
         (ex-info "Unknown artifact flavor for the managed Shadow watcher."
                  {:seon.dev.config/artifact-flavor
@@ -257,30 +269,53 @@
       (seq config-merge)
       (into ["--config-merge" (pr-str config-merge)]))))
 
-(defn- watcher-spec [config artifact-digest]
-  {:seon.dev.process/id watcher-id
+(defn- watcher-spec
+  [config artifact-digest manifest]
+  (cond->
+   {:seon.dev.process/id watcher-id
    :seon.dev.process/argv (into ["clj"] (extra-cljs-watch-args config))
    :seon.dev.process/environment (:seon.dev.config/environment config)
    :seon.dev.process/dependencies []
    :seon.dev.process/readiness :seon.dev.process.readiness/watcher
    :seon.dev.process/ready-timeout-ms 300000
    :seon.dev.process/shutdown-grace-ms 2500
-   :seon.dev.process/artifact-digest artifact-digest})
+   :seon.dev.process/artifact-digest artifact-digest}
+    (:seon.dev.artifact/client-digest manifest)
+    (assoc :seon.dev.process/client-digest
+           (:seon.dev.artifact/client-digest manifest))
+    (:seon.dev.artifact/execution-digest manifest)
+    (assoc :seon.dev.process/execution-digest
+           (:seon.dev.artifact/execution-digest manifest))))
 
 (defn specs
   "Derive the complete development process graph from one manifest."
   [config manifest]
   (let [environment (:seon.dev.config/environment config)
         descriptor (:seon.dev.config/launch-descriptor config)
+        descriptor
+        (launch/with-execution-artifact
+         {::launch/descriptor descriptor
+          ::launch/execution-build-id
+          (or (:seon.dev.artifact/execution-build-id manifest)
+              (:seon.dev.config/execution-build-id config))
+          ::launch/execution-output
+          (or (:seon.dev.artifact/execution-output manifest)
+              (:seon.dev.config/execution-output config))
+          ::launch/execution-digest
+          (:seon.dev.artifact/execution-digest manifest)})
         descriptor-runtime (::launch/runtime descriptor)
         descriptor-writer (::launch/writer-owner descriptor)
         descriptor-process (::launch/process descriptor)
         selected-artifact
         [(::launch/artifact-flavor descriptor-runtime)
-         (::launch/client-build-id descriptor-runtime)]
+         (::launch/client-build-id descriptor-runtime)
+         (::launch/execution-build-id descriptor-runtime)
+         (::launch/execution-output descriptor-runtime)]
         configured-artifact
         [(:seon.dev.config/artifact-flavor config)
-         (:seon.dev.config/client-build-id config)]
+         (:seon.dev.config/client-build-id config)
+         (:seon.dev.config/execution-build-id config)
+         (:seon.dev.config/execution-output config)]
         _ (when-not (= configured-artifact selected-artifact)
             (throw
              (ex-info "The launch descriptor selects another artifact."
@@ -338,8 +373,12 @@
                    (::launch/writer-process-dir descriptor-writer)
                    :seon.dev.process/readiness
                    :seon.dev.process.readiness/watcher
+                   :seon.dev.process/client-digest
+                   (:seon.dev.artifact/client-digest manifest)
+                   :seon.dev.process/execution-digest
+                   (:seon.dev.artifact/execution-digest manifest)
                    :seon.dev.process/artifact-digest
-                   (:seon.dev.artifact/client-digest manifest)}
+                   (:seon.dev.artifact/application-digest manifest)}
                   {:seon.dev.process/id writer-id
                    :seon.dev.process/owner-process-dir
                    (::launch/writer-process-dir descriptor-writer)
@@ -349,7 +388,9 @@
                    (:seon.dev.artifact/writer-digest manifest)}]))
         spec-map
         {watcher-id
-         (watcher-spec config (:seon.dev.artifact/client-digest manifest))
+         (watcher-spec config
+                       (:seon.dev.artifact/application-digest manifest)
+                       manifest)
 
      writer-id
      {:seon.dev.process/id writer-id
@@ -515,12 +556,18 @@
   (let [text (tail-text (:seon.dev.process/log record))]
     (every? #(build-ready? text %) (watcher-build-ids config))))
 
-(defn- current-client-ready? [config spec]
-  (if-let [expected (:seon.dev.process/artifact-digest spec)]
-    (try
-      (= expected (artifact/current-client-digest config))
-      (catch Throwable _ false))
-    true))
+(defn- current-watcher-outputs-ready? [config spec]
+  (and
+   (if-let [expected (:seon.dev.process/client-digest spec)]
+     (try
+       (= expected (artifact/current-client-digest config))
+       (catch Throwable _ false))
+     true)
+   (if-let [expected (:seon.dev.process/execution-digest spec)]
+     (try
+       (= expected (artifact/current-execution-digest config))
+       (catch Throwable _ false))
+     true)))
 
 (defn- runtime-bootstrap-ready? [spec]
   (if-let [expected (:seon.dev.process/bootstrap-digest spec)]
@@ -549,7 +596,7 @@
          :seon.dev.process.readiness/process true
          :seon.dev.process.readiness/watcher
          (and (watcher-ready? config record)
-              (current-client-ready? config spec))
+              (current-watcher-outputs-ready? config spec))
          :seon.dev.process.readiness/writer (writer-ready? config)
          :seon.dev.process.readiness/pod (pod-ready? config spec record)
          false)))
@@ -869,10 +916,8 @@
          (case (:seon.dev.process/readiness dependency)
            :seon.dev.process.readiness/watcher
            (and (watcher-ready? probe-config record)
-                (current-client-ready?
-                 probe-config
-                 {:seon.dev.process/artifact-digest
-                  (:seon.dev.process/artifact-digest dependency)}))
+                (current-watcher-outputs-ready?
+                 probe-config dependency))
            :seon.dev.process.readiness/writer
            (writer-ready? probe-config)
            false))))
@@ -1885,7 +1930,7 @@
   [config start-owned!]
   (let [spec (validate!
               process-spec-schema
-              (watcher-spec config unpublished-client-digest)
+              (watcher-spec config unpublished-client-digest nil)
               "The prepared watcher specification is invalid."
               :seon.dev.process/explanation)
         record (read-process config watcher-id)]
@@ -1894,30 +1939,37 @@
       (wait-watcher-flush! config spec started))))
 
 (defn admit-watcher-artifact!
-  "Bind a prepared watcher lifetime to its exact published client digest."
+  "Bind a prepared watcher to one complete flavor artifact manifest."
   {:malli/schema
    [:=>
-    [:catn [:config map?] [:client-digest [:re #"[0-9a-f]{64}"]]]
+    [:catn [:config map?] [:manifest map?]]
     process-record-schema]}
-  [config client-digest]
+  [config manifest]
   (let [record (read-process config watcher-id)
-        actual (artifact/current-client-digest config)]
+        client-digest (:seon.dev.artifact/client-digest manifest)
+        execution-digest (:seon.dev.artifact/execution-digest manifest)
+        application-digest (:seon.dev.artifact/application-digest manifest)
+        actual-client (artifact/current-client-digest config)
+        actual-execution (artifact/current-execution-digest config)]
     (when-not (and record
                    (= :seon.dev.process.status/alive (process-status record))
                    (= unpublished-client-digest
                       (:seon.dev.process/artifact-digest record))
                    (watcher-ready? config record)
-                   (= client-digest actual))
+                   (= client-digest actual-client)
+                   (= execution-digest actual-execution))
       (throw
-       (ex-info "The managed watcher cannot admit the published client artifact."
+       (ex-info "The managed watcher cannot admit the published flavor artifact."
                 {:seon.dev.process/id watcher-id
                  :seon.dev.process/expected-client-digest client-digest
-                 :seon.dev.process/actual-client-digest actual
+                 :seon.dev.process/actual-client-digest actual-client
+                 :seon.dev.process/expected-execution-digest execution-digest
+                 :seon.dev.process/actual-execution-digest actual-execution
                  :seon.dev.process/recorded-artifact-digest
                  (:seon.dev.process/artifact-digest record)})))
     (write-process!
      config watcher-id
-     (assoc record :seon.dev.process/artifact-digest client-digest))))
+     (assoc record :seon.dev.process/artifact-digest application-digest))))
 
 (defn- unwind-owned! [ownerships]
   (let [failures

@@ -1,0 +1,277 @@
+(ns seon.execution.host-test
+  (:require
+   [cljs.test :refer [async deftest is testing]]
+   [seon.db.coordinate :as coordinate]
+   [seon.execution :as execution]
+   [seon.execution.host :as host]
+   [seon.launch :as launch]))
+
+(def digest (apply str (repeat 64 "e")))
+(def point
+  {::coordinate/database-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+   ::coordinate/branch :db
+   ::coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+   ::coordinate/t 42})
+(def attachment (coordinate/attachment point))
+
+(defn descriptor []
+  (launch/with-execution-artifact
+   {::launch/descriptor
+    (launch/default-descriptor
+     {::launch/cluster-dir "tmp/test-cluster"
+      ::launch/artifact-flavor :seon.dev.artifact.flavor/default
+      ::launch/client-build-id "client"
+      ::launch/execution-build-id "execution"
+      ::launch/execution-output "out/execution/main.js"
+      ::launch/request-socket-path "tmp/test.req.sock"
+      ::launch/publish-socket-path "tmp/test.pub.sock"
+      ::launch/writer-repl-port-file "tmp/test.writer.port"
+      ::launch/process-dir "tmp/test-processes"
+      ::launch/log-dir "logs/test"
+      ::launch/http-port 0
+      ::launch/http-port-file "tmp/test.http.port"})
+    ::launch/execution-build-id "execution"
+    ::launch/execution-output "out/execution/main.js"
+    ::launch/execution-digest digest}))
+
+(defn invocation [invocation-id]
+  {::execution/message execution/invoke-message
+   ::execution/protocol-version execution/protocol-version
+   ::execution/agent-id "agent-1"
+   ::execution/invocation-id invocation-id
+   ::execution/coordinate point
+   ::execution/function-source-identity
+   {::execution/function-symbol 'my.render/view
+    ::execution/source-digest digest}
+   ::execution/capabilities #{'my.render/view}
+   ::execution/input {:my.render/value 1}
+   ::execution/deadline-ms 9999999999999
+   ::execution/result-limit-bytes 4096})
+
+(defn ready-message []
+  {::execution/message execution/ready-message
+   ::execution/protocol-version execution/protocol-version
+   ::execution/agent-id "agent-1"
+   ::execution/bun-version "1.2.0"
+   ::execution/shadow-build-id "execution"
+   ::execution/artifact-digest digest
+   ::execution/database-attachment attachment
+   ::execution/coordinate point})
+
+(defn result-message [invocation-id value]
+  {::execution/message execution/result-message
+   ::execution/protocol-version execution/protocol-version
+   ::execution/invocation-id invocation-id
+   ::execution/coordinate point
+   ::execution/result value
+   ::execution/result-bytes 32})
+
+(defn fake-process [pid]
+  (let [sent (atom [])
+        kills (atom [])
+        resolve-exit! (atom nil)
+        exited (js/Promise.
+                (fn [resolve-promise _]
+                  (reset! resolve-exit! resolve-promise)))
+        process (js-obj)]
+    (aset process "pid" pid)
+    (aset process "stdout" nil)
+    (aset process "stderr" nil)
+    (aset process "exited" exited)
+    (aset process "send" #(swap! sent conj (execution/decode-message %)))
+    (aset process "kill" #(swap! kills conj %))
+    {:process process
+     :sent sent
+     :kills kills
+     :resolve-exit! @resolve-exit!}))
+
+(defn configure [spawn!]
+  (host/configure!
+   {::host/launch-descriptor (descriptor)
+    ::host/javascript-runtime "bun"
+    ::host/ready-timeout-ms 1000
+    ::host/idle-timeout-ms 60000
+    ::host/cancel-grace-ms 5
+    ::host/spawn! spawn!}))
+
+(defn feed! [options process message]
+  ((::host/ipc options) (execution/encode-message message) process))
+
+(deftest lazy-child-is-reused-and-reconfiguration-terminates-it
+  (async done
+    (let [spawned (atom [])
+          options (atom nil)
+          child (fake-process 101)
+          spawn! (fn [value]
+                   (reset! options value)
+                   (swap! spawned conj (:process child))
+                   (:process child))
+          _ (configure spawn!)
+          first-completion (host/invoke! (invocation "invoke-1"))]
+      (testing "the flavor-owned child is spawned lazily"
+        (is (= 1 (count @spawned)))
+        (is (= ["bun" "out/execution/main.js"]
+               (subvec (::host/cmd @options) 0 2)))
+        (let [startup (execution/decode-message
+                       (last (::host/cmd @options)))]
+          (is (= "execution" (::execution/shadow-build-id startup)))
+          (is (= "tmp/test.req.sock"
+                 (get-in startup [::execution/database-selection
+                                  :seon.db/socket-path])))))
+      (feed! @options (:process child) (ready-message))
+      (-> (js/Promise.resolve nil)
+          (.then
+           (fn [_]
+             (is (= execution/invoke-message
+                    (::execution/message (first @(:sent child)))))
+             (feed! @options (:process child)
+                    (result-message "invoke-1" {:my.render/value 1}))
+             first-completion))
+          (.then
+           (fn [result]
+             (is (= {:my.render/value 1} (::execution/result result)))
+             (let [second-completion (host/invoke! (invocation "invoke-2"))]
+               (-> (js/Promise.resolve nil)
+                   (.then
+                    (fn [_]
+                      (is (= 1 (count @spawned))
+                          "an idle ready child serves the next invocation")
+                      (feed! @options (:process child)
+                             (result-message
+                              "invoke-2" {:my.render/value 2}))))
+                   (.then (fn [_] second-completion))))))
+          (.then
+           (fn [_]
+             (configure spawn!)
+             (is (= execution/shutdown-message
+                    (::execution/message (last @(:sent child)))))
+             (js/Promise.
+              (fn [resolve-promise _]
+                (js/setTimeout resolve-promise 15)))))
+          (.then
+           (fn [_]
+             (is (= ["SIGKILL"] @(:kills child))
+                 "reconfiguration retains a direct terminal kill handle")
+             ((:resolve-exit! child) 0)
+             (done)))
+          (.catch
+           (fn [error]
+             (is false (str "unexpected host failure: " error))
+             (done)))))))
+
+(deftest pre-ready-exit-settles-the-waiting-invocation
+  (async done
+    (let [child (fake-process 102)
+          _ (configure (fn [_] (:process child)))
+          completion (host/invoke! (invocation "pre-ready"))]
+      ((:resolve-exit! child) 17)
+      (-> completion
+          (.then
+           (fn [result]
+             (is (= execution/error-message (::execution/message result)))
+             (is (= "startup" (::execution/invocation-id result)))
+             (is (= 17 (get-in result [::execution/error :seon.error/data
+                                       ::host/exit-code])))
+             (done)))
+          (.catch
+           (fn [error]
+             (is false (str "pre-ready exit rejected: " error))
+             (done)))))))
+
+(deftest reconfiguration-between-ready-and-claim-cannot-create-a-child
+  (async done
+    (let [old-options (atom nil)
+          new-options (atom nil)
+          old-child (fake-process 103)
+          new-child (fake-process 104)
+          _ (configure (fn [value]
+                         (reset! old-options value)
+                         (:process old-child)))
+          old-completion (host/invoke! (invocation "old-invocation"))]
+      (feed! @old-options (:process old-child) (ready-message))
+      ;; The ready Promise continuation has not run yet. Replacing the host
+      ;; here must not let it install an active-only child in the new registry.
+      (configure (fn [value]
+                   (reset! new-options value)
+                   (:process new-child)))
+      (-> old-completion
+          (.then
+           (fn [result]
+             (is (= execution/error-message (::execution/message result)))
+             (is (= "old-invocation" (::execution/invocation-id result)))
+             (let [completion (host/invoke! (invocation "new-invocation"))]
+               (feed! @new-options (:process new-child) (ready-message))
+               (-> (js/Promise.resolve nil)
+                   (.then
+                    (fn [_]
+                      (feed! @new-options (:process new-child)
+                             (result-message "new-invocation"
+                                             {:my.render/value 4}))))
+                   (.then (fn [_] completion))))))
+          (.then
+           (fn [result]
+             (is (= {:my.render/value 4} (::execution/result result)))
+             ((:resolve-exit! old-child) 0)
+             ((:resolve-exit! new-child) 0)
+             (done)))
+          (.catch
+           (fn [error]
+             (is false (str "configure/claim race rejected: " error))
+             (done)))))))
+
+(deftest cancellation-retires-the-child-after-a-terminal-message
+  (async done
+    (let [options (atom nil)
+          child (fake-process 105)
+          _ (configure (fn [value]
+                         (reset! options value)
+                         (:process child)))
+          completion (host/invoke! (invocation "cancelled"))]
+      (feed! @options (:process child) (ready-message))
+      (-> (js/Promise.resolve nil)
+          (.then
+           (fn [_]
+             (is (host/cancel! "agent-1" "cancelled"))
+             ;; Even a cooperative terminal reply cannot make this process
+             ;; reusable: the canceled function may still be running.
+             (feed! @options (:process child)
+                    (result-message "cancelled" {:my.render/value 5}))
+             completion))
+          (.then
+           (fn [result]
+             (is (= execution/error-message (::execution/message result)))
+             (is (= "The invocation was canceled."
+                    (get-in result [::execution/error
+                                    :seon.error/message])))
+             (is (nil? (::execution/result result))
+                 "the late success was discarded")
+             (host/invoke! (invocation "after-cancel"))))
+          (.then
+           (fn [result]
+             (is (= execution/error-message (::execution/message result)))
+             (js/Promise.
+              (fn [resolve-promise _]
+                (js/setTimeout resolve-promise 15)))))
+          (.then
+           (fn [_]
+             (is (= ["SIGKILL"] @(:kills child)))
+             ((:resolve-exit! child) 0)
+             (done)))
+          (.catch
+           (fn [error]
+             (is false (str "hard cancellation rejected: " error))
+             (done)))))))
+
+(deftest synchronous-spawn-failure-is-an-ordinary-error
+  (async done
+    (configure (fn [_] (throw (js/Error. "spawn failed"))))
+    (-> (host/invoke! (invocation "spawn-failure"))
+        (.then
+         (fn [result]
+           (is (= execution/error-message (::execution/message result)))
+           (is (= "startup" (::execution/invocation-id result)))
+           (done)))
+        (.catch
+         (fn [error]
+           (is false (str "spawn failure rejected: " error))
+           (done))))))

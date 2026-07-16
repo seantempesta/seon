@@ -50,21 +50,41 @@
         (is (not= digest (artifact/current-client-digest config))))
       (finally (fs/delete-tree directory)))))
 
+(deftest execution-digest-is-the-exact-child-file
+  (let [directory (fs/create-temp-dir {:prefix "seon-execution-digest-test-"})
+        output (fs/path directory "out-acme/execution/main.js")
+        config {:seon.dev.config/root (str directory)
+                :seon.dev.config/execution-output (str output)}]
+    (try
+      (fs/create-dirs (fs/parent output))
+      (spit (str output) "execution-a")
+      (let [digest (artifact/current-execution-digest config)]
+        (is (= digest (artifact/current-execution-digest config)))
+        (spit (str output) "execution-b")
+        (is (not= digest (artifact/current-execution-digest config))))
+      (finally (fs/delete-tree directory)))))
+
 (deftest current-output-identity-rehashes-every-runtime-component
   (let [component (atom {:writer (apply str (repeat 64 "a"))
                          :client (apply str (repeat 64 "b"))
-                         :bootstrap (apply str (repeat 64 "c"))
-                         :css (apply str (repeat 64 "d"))})
+                         :execution (apply str (repeat 64 "c"))
+                         :bootstrap (apply str (repeat 64 "d"))
+                         :css (apply str (repeat 64 "e"))})
         config {:seon.dev.config/root "/repo"
                 :seon.dev.config/artifact-flavor
                 :seon.dev.artifact.flavor/default
                 :seon.dev.config/client-build-id "client"
+                :seon.dev.config/execution-build-id "execution"
                 :seon.dev.config/client-output "/repo/out/client/main.js"
+                :seon.dev.config/execution-output
+                "/repo/out/execution/main.js"
                 :seon.dev.config/shadow-cache-root "/repo/.shadow-cljs"}
         observe
         #(with-redefs-fn
            {#'artifact/current-writer-digest (fn [_] (:writer @component))
             #'artifact/current-client-digest (fn [_] (:client @component))
+            #'artifact/current-execution-digest
+            (fn [_] (:execution @component))
             #'artifact/maintained-dependencies (constantly [])
             #'artifact/digest-paths
             (fn [_ paths]
@@ -73,12 +93,14 @@
                 "resources/public/css/output.css" (:css @component)))}
            (fn [] (artifact/current-output-digests config)))]
     (let [initial (observe)]
-      (is (= (select-keys @component [:writer :client :bootstrap :css])
+      (is (= (select-keys @component
+                          [:writer :client :execution :bootstrap :css])
              {:writer (:seon.dev.artifact/writer-digest initial)
               :client (:seon.dev.artifact/client-digest initial)
+              :execution (:seon.dev.artifact/execution-digest initial)
               :bootstrap (:seon.dev.artifact/bootstrap-digest initial)
               :css (:seon.dev.artifact/css-digest initial)}))
-      (swap! component assoc :css (apply str (repeat 64 "e")))
+      (swap! component assoc :css (apply str (repeat 64 "f")))
       (let [changed (observe)]
         (is (not= (:seon.dev.artifact/css-digest initial)
                   (:seon.dev.artifact/css-digest changed)))
@@ -411,6 +433,7 @@
   (let [directory (fs/create-temp-dir {:prefix "seon-v4-identity-test-"})
         writer (fs/path directory "target/writer.jar")
         client (fs/path directory "out/client/main.js")
+        execution (fs/path directory "out/execution/main.js")
         runtime (fs/path directory
                          ".shadow-cljs/builds/client/dev/out/cljs-runtime/a.js")
         bootstrap (fs/path directory "out/bootstrap/a.js")
@@ -420,14 +443,17 @@
         config {:seon.dev.config/root (str directory)
                 :seon.dev.config/writer-output (str writer)
                 :seon.dev.config/client-output (str client)
+                :seon.dev.config/execution-output (str execution)
                 :seon.dev.config/shadow-cache-root
                 (str (fs/path directory ".shadow-cljs"))
                 :seon.dev.config/client-build-id "client"
+                :seon.dev.config/execution-build-id "execution"
                 :seon.dev.config/artifact-flavor
                 :seon.dev.artifact.flavor/default}]
     (try
       (write-test-jar! writer "writer-a")
-      (doseq [[path value] [[client "client"] [runtime "runtime"]
+      (doseq [[path value] [[client "client"] [execution "execution"]
+                            [runtime "runtime"]
                             [bootstrap "bootstrap"] [css "css"]]]
         (fs/create-dirs (fs/parent path))
         (spit (str path) value))

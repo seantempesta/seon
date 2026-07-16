@@ -110,7 +110,7 @@
                       configuration
                       #(process/prepare-watcher! configuration start-owned!))
             _ (process/admit-watcher-artifact!
-               configuration (:seon.dev.artifact/client-digest manifest))
+               configuration manifest)
             changed (:seon.dev.artifact/changed manifest)
             stopped-after-readers (stopped-targets stop-results)
             writer-stop

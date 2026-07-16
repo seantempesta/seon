@@ -18,6 +18,9 @@
                   [:enum :seon.dev.artifact.flavor/default
                    :seon.dev.artifact.flavor/acme])
 (schema/register! ::client-build-id [:string {:min 1}])
+(schema/register! ::execution-build-id [:string {:min 1}])
+(schema/register! ::execution-output ::path)
+(schema/register! ::execution-digest [:re "^[0-9a-f]{64}$"])
 (schema/register! ::cluster-dir ::path)
 (schema/register! ::process-dir ::path)
 (schema/register! ::log-dir ::path)
@@ -33,6 +36,9 @@
   [::runtime-cluster ::runtime-cluster]
   [::artifact-flavor ::artifact-flavor]
   [::client-build-id ::client-build-id]
+  [::execution-build-id {:optional true} ::execution-build-id]
+  [::execution-output {:optional true} ::execution-output]
+  [::execution-digest {:optional true} ::execution-digest]
   [:seon.client/launch-capability :seon.client/launch-capability]])
 (schema/register!
  ::database
@@ -111,6 +117,8 @@
   [::cluster-dir ::cluster-dir]
   [::artifact-flavor ::artifact-flavor]
   [::client-build-id ::client-build-id]
+  [::execution-build-id {:optional true} ::execution-build-id]
+  [::execution-output {:optional true} ::execution-output]
   [::request-socket-path ::request-socket-path]
   [::publish-socket-path ::publish-socket-path]
   [::writer-repl-port-file ::writer-repl-port-file]
@@ -221,7 +229,8 @@
 (defn default-descriptor
   "Derive one ordinary autonomous-cluster launch descriptor."
   {:malli/schema [:=> [:cat ::default-descriptor-request] ::descriptor]}
-  [{::keys [cluster-dir artifact-flavor client-build-id request-socket-path
+  [{::keys [cluster-dir artifact-flavor client-build-id execution-build-id
+            execution-output request-socket-path
             publish-socket-path writer-repl-port-file process-dir log-dir
             http-port http-port-file]}]
   (let [cluster-dir (normalize-path cluster-dir)
@@ -230,11 +239,14 @@
                 "A cluster directory must have a basename."
                 {::cluster-dir cluster-dir})
     (validate-descriptor
-     {::runtime
-      {::runtime-cluster cluster
-       ::artifact-flavor artifact-flavor
-       ::client-build-id client-build-id
-       :seon.client/launch-capability {:seon.client/autonomous? true}}
+      {::runtime
+      (cond->
+       {::runtime-cluster cluster
+        ::artifact-flavor artifact-flavor
+        ::client-build-id client-build-id
+        :seon.client/launch-capability {:seon.client/autonomous? true}}
+        execution-build-id (assoc ::execution-build-id execution-build-id)
+        execution-output (assoc ::execution-output execution-output))
       ::database
       {::protocol/database-name cluster
        ::protocol/backend :file
@@ -279,6 +291,36 @@
                    ::coordinate/attachment attachment
                    ::coordinate/coordinate point)))))
 
+(schema/register!
+ ::with-execution-artifact-request
+ [:map {:closed true}
+  [::descriptor ::descriptor]
+  [::execution-build-id ::execution-build-id]
+  [::execution-output ::execution-output]
+  [::execution-digest ::execution-digest]])
+
+(defn with-execution-artifact
+  "Bind one launch to its flavor-owned execution artifact."
+  {:malli/schema
+   [:=> [:cat ::with-execution-artifact-request] ::descriptor]}
+  [{descriptor ::descriptor
+    execution-build-id ::execution-build-id
+    execution-output ::execution-output
+    execution-digest ::execution-digest}]
+  (let [runtime (::runtime descriptor)]
+    (invariant! (= execution-build-id (::execution-build-id runtime))
+                "The execution build does not match the launch flavor."
+                {::execution-build-id execution-build-id
+                 ::runtime runtime})
+    (invariant! (= (normalize-path execution-output)
+                   (normalize-path (::execution-output runtime)))
+                "The execution output does not match the launch flavor."
+                {::execution-output execution-output
+                 ::runtime runtime})
+    (validate-descriptor
+     (assoc descriptor ::runtime
+            (assoc runtime ::execution-digest execution-digest)))))
+
 (defn branch-descriptor
   "Derive one non-autonomous branch descriptor from its source launch."
   {:malli/schema [:=> [:cat ::branch-descriptor-request] ::descriptor]}
@@ -322,10 +364,15 @@
                  ::source-paths source-bases})
     (validate-descriptor
      {::runtime
-      {::runtime-cluster runtime-cluster
-       ::artifact-flavor (::artifact-flavor source-runtime)
-       ::client-build-id (::client-build-id source-runtime)
-       :seon.client/launch-capability {:seon.client/autonomous? false}}
+      (cond->
+       {::runtime-cluster runtime-cluster
+        ::artifact-flavor (::artifact-flavor source-runtime)
+        ::client-build-id (::client-build-id source-runtime)
+        :seon.client/launch-capability {:seon.client/autonomous? false}}
+        (::execution-build-id source-runtime)
+        (assoc ::execution-build-id (::execution-build-id source-runtime))
+        (::execution-output source-runtime)
+        (assoc ::execution-output (::execution-output source-runtime)))
       ::database
       {::protocol/database-name target-database-name
        ::coordinate/attachment target-attachment

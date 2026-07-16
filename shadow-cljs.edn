@@ -138,6 +138,18 @@
                       :optimizations      :simple
                       :externs           ["externs/node_fs.js"]}}
 
+  ;; ACME owns a distinct execution artifact just as it owns :acme-client.
+  ;; bin/acme supplies the downstream source root and preload through the same
+  ;; flavor-selected Shadow cache; no default watcher writes this output.
+  :acme-execution
+  {:target           :node-script
+   :output-to        "out-acme/execution/main.js"
+   :main             seon.execution/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
+                      :externs           ["externs/node_fs.js"]}}
+
   ;; LEAN worker-side PARSE/SYNTACTIC oracle — CO-LOCATED on the diffusion
   ;; GPU worker (diffusion-dynamic-context). The eval-renoise loop
   ;; validates a partial canvas every checkpoint; co-located this is a

@@ -30,30 +30,41 @@
     (is (= :seon.dev.artifact.flavor/default
            (:seon.dev.config/artifact-flavor default)))
     (is (= "client" (:seon.dev.config/client-build-id default)))
+    (is (= "execution" (:seon.dev.config/execution-build-id default)))
     (is (= (str (fs/path root ".shadow-cljs"))
            (:seon.dev.config/shadow-cache-root default)))
     (is (= (str (fs/path root "out/client/main.js"))
            (:seon.dev.config/client-output default)))
+    (is (= (str (fs/path root "out/execution/main.js"))
+           (:seon.dev.config/execution-output default)))
     (is (= "artifact.edn"
            (:seon.dev.config/artifact-manifest-name default)))
     (is (= :seon.dev.artifact.flavor/acme
            (:seon.dev.config/artifact-flavor acme)))
     (is (= "acme-client" (:seon.dev.config/client-build-id acme)))
+    (is (= "acme-execution"
+           (:seon.dev.config/execution-build-id acme)))
     (is (= (str (fs/path root "tmp/shadow/acme"))
            (:seon.dev.config/shadow-cache-root acme)))
     (is (= (str (fs/path root "out-acme/client/main.js"))
            (:seon.dev.config/client-output acme)))
+    (is (= (str (fs/path root "out-acme/execution/main.js"))
+           (:seon.dev.config/execution-output acme)))
     (is (= "artifact-acme.edn"
            (:seon.dev.config/artifact-manifest-name acme)))
     (is (not= (select-keys default
                            [:seon.dev.config/client-build-id
+                            :seon.dev.config/execution-build-id
                             :seon.dev.config/shadow-cache-root
                             :seon.dev.config/client-output
+                            :seon.dev.config/execution-output
                             :seon.dev.config/artifact-manifest-name])
               (select-keys acme
                            [:seon.dev.config/client-build-id
+                            :seon.dev.config/execution-build-id
                             :seon.dev.config/shadow-cache-root
                             :seon.dev.config/client-output
+                            :seon.dev.config/execution-output
                             :seon.dev.config/artifact-manifest-name])))))
 
 (deftest artifact-flavor-rejects-hybrid-or-unknown-coordinates
