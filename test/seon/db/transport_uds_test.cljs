@@ -8,6 +8,8 @@
 (def ^:private decode-payload @#'uds/decode-payload)
 (def ^:private consume-chunk @#'uds/consume-chunk)
 (def ^:private fresh-parser @#'uds/fresh-parser)
+(def ^:private maximum-frame-bytes @#'uds/maximum-frame-bytes)
+(def ^:private maximum-queued-bytes @#'uds/maximum-queued-bytes)
 (def ^:private !connect-native @#'uds/!connect-native)
 
 (defn- concatenate [arrays]
@@ -33,6 +35,13 @@
 (defn- one-byte-chunks [^js bytes]
   (mapv (fn [offset] (.slice bytes offset (inc offset)))
         (range (.-byteLength bytes))))
+
+(defn- frame-header [payload-bytes]
+  (doto (js/Uint8Array. 4)
+    (aset 0 (bit-and (unsigned-bit-shift-right payload-bytes 24) 255))
+    (aset 1 (bit-and (unsigned-bit-shift-right payload-bytes 16) 255))
+    (aset 2 (bit-and (unsigned-bit-shift-right payload-bytes 8) 255))
+    (aset 3 (bit-and payload-bytes 255))))
 
 (defn- request-message [request-id]
   {::protocol/operation protocol/ping-operation
@@ -111,6 +120,21 @@
       (let [{::keys [payloads]}
             (payloads-from-chunks [(concatenate [frame-a frame-b])])]
         (is (= [a b] (mapv decode-payload payloads)))))))
+
+(deftest parser-shares-the-protocol-frame-limit
+  (is (= protocol/maximum-frame-bytes maximum-frame-bytes))
+  (is (<= (+ 4 maximum-frame-bytes) maximum-queued-bytes)
+      "one maximum legal payload and its header fit the output budget")
+  (let [accepted (consume-chunk (fresh-parser)
+                                (frame-header (inc (* 1024 1024))))]
+    (is (= (inc (* 1024 1024))
+           (.-byteLength ^js (::uds/payload (::uds/parser accepted))))
+        "a legal protocol frame above the former Bun-only limit is admitted"))
+  (is (thrown-with-msg?
+       js/Error
+       #"Invalid database frame length"
+       (consume-chunk (fresh-parser)
+                      (frame-header (inc maximum-frame-bytes))))))
 
 (deftest multiplexed-session-correlates-out-of-order-responses
   (async done
@@ -254,7 +278,36 @@
                (is false (str "native Bun roundtrip failed: " error))
                (done))))))))
 
-(deftest deadline-rejects-one-request-and-ignores-its-late-response
+(deftest request-without-deadline-remains-owned-until-response
+  (async done
+    (-> (with-fake-bun
+          []
+          (fn [session fixture]
+            (let [response (uds/request!
+                            {::uds/session session
+                             ::uds/message (request-message "no-deadline")})]
+              (js/Promise.
+               (fn [resolve _reject]
+                 (js/setTimeout
+                  (fn []
+                    (is (= 1 ((::uds/pending-count session))))
+                    (inject! fixture
+                             (encode-frame
+                              (response-message "no-deadline" :done)))
+                    (resolve
+                     (-> response
+                         (.then (fn [value]
+                                  (uds/close! session)
+                                  value)))))
+                  300))))))
+        (.then (fn [response]
+                 (is (= :done (::protocol/result response)))
+                 (done)))
+        (.catch (fn [error]
+                  (is false (str "request without deadline failed: " error))
+                  (done))))))
+
+(deftest deadline-retains-request-identity-and-capacity-until-response
   (async done
     (-> (with-fake-bun
           []
@@ -269,16 +322,75 @@
                  (fn [error]
                    (is (= :seon.db.transport.uds.failure/timeout
                           (::uds/failure (ex-data error))))
-                   (is (zero? ((::uds/pending-count session))))
+                   (is (= 1 ((::uds/pending-count session)))
+                       "physical work still owns its correlation slot")
                    (is (= 2 (count @(::writes fixture)))
                        "the deadline sends one cancellation on the same session")
-                   (inject! fixture
-                            (encode-frame
-                             (response-message "deadline" :late)))
-                   (is (zero? ((::uds/pending-count session)))
-                       "the late response cannot settle another request")
-                   (uds/close! session))))))
+                   (-> (uds/request!
+                        {::uds/session session
+                         ::uds/message (request-message "deadline")})
+                       (.then (fn [_]
+                                (is false "a timed-out id cannot be reused")))
+                       (.catch
+                        (fn [duplicate]
+                          (is (= :seon.db.transport.uds.failure/duplicate
+                                 (::uds/failure (ex-data duplicate))))
+                          (inject! fixture
+                                   (encode-frame
+                                    (response-message "deadline" :late)))
+                          (is (zero? ((::uds/pending-count session)))
+                              "the late response only retires physical ownership")
+                          (let [reused
+                                (uds/request!
+                                 {::uds/session session
+                                  ::uds/message (request-message "deadline")})]
+                            (inject! fixture
+                                     (encode-frame
+                                      (response-message "deadline" :reused)))
+                            reused)))
+                       (.then
+                        (fn [response]
+                          (is (= :reused (::protocol/result response)))
+                          (uds/close! session)))))))))
         (.then (fn [_] (done)))
         (.catch (fn [error]
-                  (is false (str "deadline handling failed: " error))
+                  (is false (str "deadline handling failed: " error
+                                 "\n" (.-stack error)))
+                  (done))))))
+
+(deftest repeated-deadlines-cannot-exceed-physical-in-flight-capacity
+  (async done
+    (-> (with-fake-bun
+          []
+          (fn [session _fixture]
+            (let [requests
+                  (mapv
+                   (fn [index]
+                     (-> (uds/request!
+                          {::uds/session session
+                           ::uds/message (request-message (str "timeout-" index))
+                           ::uds/timeout-ms 1})
+                         (.catch identity)))
+                   (range 16))]
+              (-> (js/Promise.all (into-array requests))
+                  (.then
+                   (fn [errors]
+                     (is (every?
+                          #(= :seon.db.transport.uds.failure/timeout
+                              (::uds/failure (ex-data %)))
+                          (array-seq errors)))
+                     (is (= 16 ((::uds/pending-count session))))
+                     (-> (uds/request!
+                          {::uds/session session
+                           ::uds/message (request-message "over-capacity")})
+                         (.then (fn [_]
+                                  (is false "timed-out work still uses capacity")))
+                         (.catch
+                          (fn [error]
+                            (is (= :seon.db.transport.uds.failure/busy
+                                   (::uds/failure (ex-data error))))
+                            (uds/close! session))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "deadline capacity failed: " error))
                   (done))))))

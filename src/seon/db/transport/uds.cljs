@@ -16,12 +16,10 @@
 (defonce ^:private !connect-native
   (atom (fn [options] (js-invoke js/Bun "connect" options))))
 
-(def ^:private maximum-frame-bytes (* 1024 1024))
+(def ^:private maximum-frame-bytes protocol/maximum-frame-bytes)
 (def ^:private maximum-pending-requests 16)
-(def ^:private maximum-queued-bytes (* 2 1024 1024))
+(def ^:private maximum-queued-bytes (* 2 protocol/maximum-frame-bytes))
 (def ^:private deadline-tick-ms 250)
-
-(def default-request-timeout-ms 5000)
 
 (def default-socket-path
   (or (platform/env-val "SEON_DB_SOCK")
@@ -225,7 +223,8 @@
                      (reset! !output (empty-output))
                      (settle-connect! error nil)
                      (doseq [{::keys [reject]} pending]
-                       (reject error))
+                       (when reject
+                         (reject error)))
                      (when socket
                        (try
                          (js-invoke socket "close")
@@ -288,7 +287,8 @@
                        expired
                        (reduce-kv
                         (fn [entries request-id entry]
-                          (if (<= (::deadline-at entry) now)
+                          (if (and (::deadline-at entry)
+                                   (<= (::deadline-at entry) now))
                             (conj entries [request-id entry])
                             entries))
                         []
@@ -297,7 +297,12 @@
                            expired]
                      (when-let [current-entry (get @!pending request-id)]
                        (when (identical? expired-entry current-entry)
-                         (swap! !pending dissoc request-id)
+                         ;; The caller deadline does not end physical work.
+                         ;; Retain the request ID and capacity until its late
+                         ;; response (or session close), but release the
+                         ;; already-settled Promise callbacks.
+                         (swap! !pending assoc request-id
+                                {::timed-out? true})
                          (reject
                           (failure
                            "Database request timed out."
@@ -312,7 +317,8 @@
                                :seon.db.transport.uds.failure/protocol)))
                    (when-let [{::keys [resolve]} (get @!pending request-id)]
                      (swap! !pending dissoc request-id)
-                     (resolve response))))
+                     (when resolve
+                       (resolve response)))))
                (receive! [chunk]
                  (when-not @!terminal?
                    (try
@@ -323,8 +329,7 @@
                          (deliver-response! (decode-payload payload))))
                      (catch :default error
                        (terminate! error)))))
-               (request-map! [{::keys [message timeout-ms]
-                               :or {timeout-ms default-request-timeout-ms}}]
+               (request-map! [{::keys [message timeout-ms]}]
                  (let [request-id (::protocol/request-id message)]
                    (cond
                      @!terminal?
@@ -353,10 +358,11 @@
                       (fn [resolve reject]
                         (try
                           (let [frame (encode-frame message)
-                                entry {::resolve resolve
-                                       ::reject reject
-                                       ::deadline-at (+ (js/Date.now)
-                                                        timeout-ms)}]
+                                entry (cond-> {::resolve resolve
+                                               ::reject reject}
+                                        timeout-ms
+                                        (assoc ::deadline-at
+                                               (+ (js/Date.now) timeout-ms)))]
                             (swap! !pending assoc request-id entry)
                             (when-not (enqueue-frame! frame)
                               (when-let [owned (get @!pending request-id)]
@@ -417,7 +423,7 @@
                (terminate! error)))))))))
 
 (defn request!
-  "Send one request through an existing multiplexed database session."
+  "Send one request with an optional caller-selected deadline."
   {:malli/schema [:=> [:catn [::request ::request]] :any]}
   [{::keys [session] :as request}]
   ((::request! session) (dissoc request ::session)))
