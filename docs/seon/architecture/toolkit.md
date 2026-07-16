@@ -77,8 +77,8 @@ agent-owned definitions.
 
 ### Database and program graph
 
-`seon.db` owns query, pull, entity, index cursors, transaction envelopes,
-coordinates, and CAS work fences. `seon.schema` owns registered shapes and the
+`seon.db` owns query, pull, eager entity data, index cursors, ordinary database
+values, native-shaped transaction reports, and CAS work fences. `seon.schema` owns registered shapes and the
 Malli-to-Datahike bridge. `seon.eval`, `seon.ns`, and the program graph own code
 lookup and evaluation. `my.kb`, `my.ns`, and `my.plan` compose those contracts;
 they do not bypass them.

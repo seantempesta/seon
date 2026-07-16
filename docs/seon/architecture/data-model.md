@@ -209,7 +209,7 @@ Two storage encodings, both VALUES:
   `[:or :symbol ::hiccup]`).
 
 The render path resolves these through ONE engine: the async outer owner
-acquires the symbol, source closure, and input at one coordinate and asks the
+acquires the symbol, source closure, and input at one immutable database value and asks the
 owning agent's compiled Bun child for an ordinary result. `ai-render` /
 `html-render` remain synchronous pure projections over that result and fall
 through to a pretty-printer when no authored symbol resolves. The render engine
@@ -253,32 +253,33 @@ transaction, never a domain attribute — a `created-by`/`created-at`/`source-tu
 attribute duplicates the transaction/domain record. Turn and eval remain
 ordinary linked domain entities and runtime scopes; they are not copied onto
 every transaction and do not promise complete effect replay. The one
-exception is a PRE-event snapshot coordinate: a fact about a db value observed
+exception is a PRE-event database value: a fact about a db value observed
 *before* the entity's own tx (the turn's rendered
-database/branch/commit/t—other
+database name/basis/commit/filter—other
 agents' txs interleave on the shared conn, so the turn's creation-tx is not that
-coordinate). Those are genuinely underivable and ARE stored as domain attrs.
+value). Those are genuinely underivable and ARE stored as domain attrs.
 Worked recipe: the `datahike` skill, "Transaction metadata".
 
-### 2.5 one database coordinate
+### 2.5 one ordinary database value
 
-Every registry, protocol, feed, UI, lifecycle, turn, and error boundary uses one
-map schema:
+Every registry, protocol, feed, UI, lifecycle, turn, and error boundary uses the
+one registered `:seon.db/database-value` map schema:
 
 ```clojure
-{:seon.db.coordinate/database-id #uuid "..."
- :seon.db.coordinate/branch      :db
- :seon.db.coordinate/commit-id   #uuid "..."
- :seon.db.coordinate/t           536870914}
+{:db-name "default"
+ :t 536870916
+ :as-of nil
+ :since nil
+ :history false
+ :datahike/commit-id #uuid "72482707-c5c3-52b5-b803-8fcd3d89df2f"}
 ```
 
-`{database-id, branch}` is the stable attachment; `commit-id` and `t` are an
-all-or-none resolved point. The commit id pins one immutable containing database
-value and `t` selects the exact temporal cut inside it. Multiple cuts may share
-one containing commit, so neither field is inferred from the other. A logical
-database name travels beside this map as routing data and is never treated as
-storage identity. No `{branch, t}` convenience selector exists. Cache keys and
-durable bookmarks contain the complete coordinate, never bare `t`.
+`:db-name` routes to one registered database. `:t` is the basis transaction of
+the containing committed value, not a temporal cut. `:datahike/commit-id` pins
+that exact retained lineage because branch, restore, and batched-commit behavior
+make `{:db-name :t}` insufficient. `:as-of`, `:since`, and `:history` preserve
+Datahike's temporal meanings separately. Cache keys and durable bookmarks retain
+the complete value; no bare-`:t` selector guesses a commit or filter.
 
 ## 3. Identifying an entity shape — presence, not a stored field
 
@@ -460,10 +461,7 @@ The run model + FSM live in [[agent-runtime]].
 | `:seon.agent.turn/status` | `[:enum :running :done :error :interrupted]` | keyword / one | value enum; `:interrupted` is asserted only by crash recovery when no runtime remains to close the committed turn normally |
 | `:seon.agent.turn/run` | `:seon.db/ref` | ref / one | turn → its run |
 | `:seon.agent.turn/cause-message` | `:seon.db/ref` | ref / one | optional; exact inbound human message this turn is assigned to answer |
-| `:seon.agent.turn/rendered-database-id` | `:uuid` | uuid / one | frozen prompt database identity |
-| `:seon.agent.turn/rendered-branch` | `:keyword` | keyword / one | frozen prompt branch |
-| `:seon.agent.turn/rendered-commit-id` | `:uuid` | uuid / one | canonical frozen prompt commit |
-| `:seon.agent.turn/rendered-t` | `:int` | long / one | frozen prompt t; display/range aid |
+| `:seon.agent.turn/rendered-db` | `:seon.db/database-value` | ordinary encoded map / one | complete frozen prompt database value; includes containing basis, temporal filter, and exact Datahike commit lineage |
 | `:seon.agent.turn/prompt-chars` | `:int` | long / one | |
 | `:seon.agent.turn/prompt-blob` | `:seon.db/ref` | ref / one | optional ref to the byte-ground-truth prompt blob |
 | `:seon.agent.turn/reply-blob` | `:seon.db/ref` | ref / one | optional ref to the raw provider reply blob |
@@ -495,15 +493,15 @@ digest—through the ONE chain: the agent's own override datom → the global
 PLUS `:seon.ai/provenance` (per-key `:agent-override`/`:config-row`/
 `:default`, derived by re-walking the chain, not stored). No per-turn
 resolved-config snapshot exists. Datahike is bitemporal, so intent at a past
-coordinate is the same function over that immutable value:
-`(ai/resolved-config {:seon.db/db (db/at-coordinate rendered-coordinate)
+database value is the same function over that immutable value:
+`(ai/resolved-config {:seon.db/db rendered-db
                       :seon.agent/id id})`.
 
-Intent at the prompt or final-run coordinate does not prove a provider call.
-Every retry attempt therefore records its own complete database coordinate,
+Intent at the prompt or final-run database value does not prove a provider call.
+Every retry attempt therefore records its own complete ordinary database value,
 ordinal, normalized non-secret endpoint/config projection, timeout layers,
 outcome, and present response identity as component facts connected to the
-turn. Request fields remain derivable from the attempt coordinate; response
+turn. Request fields remain derivable from the attempt database value; response
 identity and outcome are non-derivable evidence. `POST /agents/run` projects
 those ordered bounded facts. A compatibility `model_config` may be derived only
 when all attempts agree; drift or missing attempt evidence rejects formal
@@ -532,11 +530,11 @@ happened, not a materialized incident report:
 | `:seon.runtime.recovery/detail` | `[:string {:max 2048}]` | string / one | optional bounded diagnostic only when it is not derivable from transaction facts |
 
 The anchor does **not** copy agent/run/turn refs, timestamps, prior/current
-coordinates, acknowledgement state, or a rendered notice. Query the
+database values, acknowledgement state, or a rendered notice. Query the
 `:seon.runtime.recovery/id` datom's transaction and join it to the run close,
 turn status, and pointer-retraction datoms in that transaction; transaction
 metadata supplies user/process/time, and the commit graph supplies prior/current
-coordinates. Root's recovery notice and “still needs a decision” prominence are
+database values. Root's recovery notice and “still needs a decision” prominence are
 projections of that join and whether each affected agent has opened a later run.
 An interrupted eval that never committed has no durable result, so recovery does
 not invent one; already committed eval rows remain facts as recorded.
@@ -595,8 +593,8 @@ inbound human message's optional `web-session` ref lets root target the
 originating tab without storing ambient session state on root.
 
 Session identity is scoped by the database value that contains it. The browser's
-transient reconnect tuple carries `{database-id, branch, session-id}`; bootstrap
-reuses it only when that attachment matches and the session lookup ref resolves
+transient reconnect tuple carries `{:db-name db-name :session-id session-id}`;
+bootstrap reuses it only when that database name matches and the session lookup ref resolves
 to the current human. No database-id or branch projection is copied onto the
 session entity.
 
@@ -717,8 +715,8 @@ generation, or status attr. `seon.db.id/allocate!` commits the generated id,
 plan digest, every payload fact, and transaction provenance in one whole-head-
 fenced transaction. Readiness and lifecycle observation require every current
 fact to retain that same original transaction and require its exact completion
-coordinate—not merely the same transaction number—to remain the main head.
-An exact plan retry adopts that entity and original coordinate; a different
+database value—not merely the same transaction number—to remain the main head.
+An exact plan retry adopts that entity and original database value; a different
 payload at the same digest fails closed. Optional digest absence means that
 population was preserved. External lifecycle intent is deleted after this fact
 and admission; it is crash-recovery input, not a second history log.
@@ -931,12 +929,12 @@ datom. No selection means no config transaction; it is not an empty manifest and
 does not fall back to `config/system.edn`. After a successful apply, later
 config-free boots use the committed database facts.
 
-From attachment onward every runtime read is a database query via
+After database acquisition every runtime read is a database query via
 `config/config-view` (the accessors keep their names + arities; one projection is
-threaded per snapshot or cached by branch-qualified commit coordinate, never by
-a db value). A tiny compiled kernel fallback may serve only the pre-connection
+threaded per database value or cached by the complete ordinary database value,
+never by a native Datahike object). A tiny compiled kernel fallback may serve only the pre-connection
 database-connect/error path and is never exposed as attached runtime config. A
-required missing DB fact after attachment is a typed readiness error, not a
+required missing DB fact after acquisition is a typed readiness error, not a
 silent current default. Every manifest section is `{:optional true}`, so `{}` is
 a valid explicitly selected desired value; an unknown key fails loud. The full boot/read
 mechanics — the require-direction db→error→config, `seon.db` injecting the
@@ -1117,17 +1115,15 @@ the presence of `:seon.error/fault` and carrying only EDN-safe projections:
 | `:seon.error/fault` | `[:enum :agent :core]` | keyword / one | fault population |
 | `:seon.error/message` | `:string` | string / one | bounded deepest-cause headline |
 | `:seon.error/kind` | `:keyword` | keyword / one | optional diagnostic value enum |
-| `:seon.error/database-id` | `:uuid` | uuid / one | catch-site database identity |
-| `:seon.error/branch` | `:keyword` | keyword / one | catch-site branch |
-| `:seon.error/commit-id` | `:uuid` | uuid / one | canonical catch-site commit |
-| `:seon.error/t` | `:int` | long / one | catch-site t; display/range aid |
+| `:seon.error/db` | `:seon.db/database-value` | ordinary encoded map / one | complete catch-site database value |
 | `:seon.error/stack` | `:string` | string / one | optional bounded raw stack |
 | `:seon.error/frames` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / component | optional parsed frames |
 | `:seon.error/args-edn` | `:string` | string / one | optional bounded arguments |
 | `:seon.error/data-edn` | `:string` | string / one | optional bounded structured data |
 
-The four coordinate attrs are captured together. A partial coordinate is
-invalid; structured reproduction never guesses a lineage from a bare t.
+The stored map is the complete ordinary database value, not a lossy projection.
+Missing lineage or temporal meaning is invalid; structured reproduction never
+guesses from bare `:t`.
 
 ### 6.2 How consumers tell errors apart — structurally, never by a field
 

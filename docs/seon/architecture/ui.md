@@ -89,10 +89,10 @@ hung render yields a `:seon/error` value (see [[data-model]] §6) for THAT rende
 only; siblings never crash.
 
 **prompt == page by construction.** Both derive from the same blocks at the
-turn's `{database-id, branch, commit-id, t}`. The compiled prompt child acquires
+turn's complete ordinary database value. The compiled prompt child acquires
 and formats the AI renders in `:seon.agent.ctx/priority` order; the web UI places
 the same blocks' HTML renders into a layout's slots. "What the agent saw at turn
-N" is a re-derive from that exact coordinate; t alone is not a durable bookmark.
+N" is a re-derive from that exact value; `:t` alone is not a durable bookmark.
 
 **The typed block renderer.** Above `seon.ui.html` sits one reusable value→hiccup
 layer, `seon.render/block` — `(block view x)` dispatches on the value-KIND `x`
@@ -122,7 +122,7 @@ byte-faithful.
 Datastar feed and observed-read invalidation as every other live page. Its
 default navigator derives from installed schema only. Selecting an attribute
 opens a bounded AEVT window through `seon.db/index-datoms`; the URL carries the
-last visible datom coordinate, and the server reads only enough rows to render
+last visible index cursor, and the server reads only enough rows to render
 the page and prove whether a next page exists. It never scans every entity or
 transaction to manufacture counts. Domain attributes lead by default;
 framework attributes remain reachable explicitly.
@@ -135,7 +135,7 @@ default height. Scale is handled by disclosure and windowing, never smaller
 unbounded text.
 
 **Capability + cache.** The async outer web/context owner acquires the authored
-program and its ordinary inputs at one database coordinate, invokes the owning
+program and its ordinary inputs at one immutable database value, invokes the owning
 agent's compiled Bun child under the one host deadline, and gives the pure
 synchronous renderer only the ordinary result. Agent-authored renders, layouts,
 and route handlers never run inside the web host or perform leaf RPCs. The
@@ -186,7 +186,7 @@ render-unit, routing, and live-morph mechanism in one route tree:
   Renderer recency is the latest transaction by this agent through the REPL,
   found by a bounded indexed history lookup over scoped inputs captured by the
   renderer's current runtime-observed database reads; canvas writes share that
-  same coordinate. Content recency orders the rail, while focus recency treats
+  same database value. Content recency orders the rail, while focus recency treats
   either direction of the human-agent conversation as a transcript update and a
   canvas/domain write as a canvas update; eval bookkeeping alone never steals
   focus.
@@ -350,8 +350,8 @@ registered per [[data-model]].)
 ### Database-backed human location and root-directed navigation
 
 Each browser tab owns one compact `:seon.web.session/id` represented by database
-facts defined in [[data-model]]. Tab-local browser storage keeps the attachment
-tuple `{database-id, branch, session-id}` needed to reconnect it. The
+facts defined in [[data-model]]. Tab-local browser storage keeps the
+`{:db-name db-name :session-id session-id}` tuple needed to reconnect it. The
 session carries a ref to the human plus one normalized local location string.
 That location is the fact: route name, agent target, and URL are derived through
 reitit rather than duplicated as more session attributes. Transaction metadata
@@ -359,7 +359,7 @@ provides recency, so there is no stored `updated-at`, `active?`, or presence
 registry.
 
 First load has no browser-generated identity. Bootstrap accepts a stored tuple
-only when its database/branch match the current attachment and its lookup ref
+only when its database name matches the current database and its lookup ref
 exists in that database for the current human. Otherwise the page asks the
 writer's one `seon.db.id/allocate!` path to create the session entity atomically
 with its initial normalized location, returns the replacement tuple, stores it
@@ -408,14 +408,14 @@ move.
 ## The live channel — selective Datastar morph SSE
 
 The live channel is **ours** (reitit has no streaming primitives by design): one
-database-scoped interest receives a committed coordinate plus conservative
-changed-attribute evidence, and the view is a pure coordinate-pinned derivation.
+database-scoped interest receives an ordinary transaction report plus conservative
+changed-attribute evidence, and the view is a pure `:db-after`-pinned derivation.
 There is no web-host Datahike replica or global transaction broadcast. The agent
 only transacts datoms; it never opens or writes a stream. The Bun web host
 implements the `view = f(db)` model through `seon.web.datastar`.
 
-- **view = f(db-at-coordinate), compiled into stable units.** Reitit route
-  match + normalized path/query/resolved coordinate define one view key. Database route,
+- **view = f(db), compiled into stable units.** Reitit route
+  match + normalized path/query/complete database value define one view key. Database route,
   context, and program facts compile to one plan containing a shell, shared
   header, fleet cards, surfaces, focus controller, debug panes, or data result
   as stable ID-addressed units. Initial paint derives the whole
@@ -424,11 +424,11 @@ implements the `view = f(db)` model through `seon.web.datastar`.
   plan/membership change falls back to a whole `#app-view` morph so conditional
   elements disappear honestly. One subscription owns the plan/cache for all
   equivalent tabs. Subscriptions reference an ephemeral normalized-unit registry
-  (unit id + params + attachment/commit), so truly shared units such as the header own
+  (unit id + params + complete database value), so truly shared units such as the header own
   one read/output cache across different page keys and render once. Frozen as-of
   subscriptions do no current work.
 - **Async work is bounded by the normalized subscription.** One subscription
-  runs at most one coordinate-pinned async render and retains at most the newest
+  runs at most one database-value-pinned async render and retains at most the newest
   coherent pending database change. A completion publishes only while the same
   subscription still owns the latest request; a transaction racing the initial
   paint requires a new complete `#app-view`. Equivalent sockets share the one
@@ -459,7 +459,7 @@ implements the `view = f(db)` model through `seon.web.datastar`.
   entity refs, index prefixes/windows, and a broad flag for anything that cannot
   be narrowed safely. One in-memory reverse index maps those descriptors to
   active normalized render units; no dependency datoms are stored. A coalesced
-  authority wakeup retains the latest complete coordinate and conservative
+  authority wakeup retains the latest complete database value and conservative
   changed attributes. Attribute/entity/index intersections select candidate
   units; broad units remain candidates for every transaction. Each unique
   normalized read is replayed once on the new immutable value and compared with
@@ -479,7 +479,7 @@ implements the `view = f(db)` model through `seon.web.datastar`.
   element without invoking the renderer; equal serialized output emits no
   patch. Equivalent open views share this authority through their normalized
   subscription. A bounded LRU may retain recently reusable unit outputs across
-  subscriptions, keyed only by unit coordinate + renderer digest + small plain
+  subscriptions, keyed only by complete database value + renderer digest + small plain
   input/read-result data and bounded by entry count plus estimated output
   tokens. It never keys by or retains a Datahike database/entity value. A source
   change changes the renderer digest; an activation change changes the unit
@@ -503,26 +503,26 @@ implements the `view = f(db)` model through `seon.web.datastar`.
   page code.
 - **Transient state is signals; time-travel and reconnect are just re-renders.**
   Transient client state lives in datastar **signals** only, never DOM attrs. Time
-  travel is `view = f(db-at-coordinate)` over the bitemporal DB—a different
+  travel is `view = f(db)` over the bitemporal DB—a different
   resolved commit, the same render. Reconnect needs no numeric `since-t` replay:
   the first paint fires immediately on open and repaints the current view. A
   historical request carries the complete canonical
-  `{database-id, branch, commit-id, t}`; the server verifies it against the
-  registered database attachment and echoes that coordinate in its
-  response/bookmark. There is no bare-t compatibility selector. That feed is
-  marked frozen and excluded from current broadcasts. No coordinate means the current
+  `{:db-name :t :as-of :since :history :datahike/commit-id}` value; the server
+  verifies its retained lineage and echoes that value in its response/bookmark.
+  There is no bare-`:t` compatibility selector. That feed is marked frozen and
+  excluded from current broadcasts. No explicit database value means the current
   dependency-reactive feed. The `/agent`
   shim's time-travel controls (siblings of `#app-view`) own the feed connection;
   one `data-effect` `@get` lets Datastar's per-attribute auto-cancellation abort
   the prior stream, so exactly one stream targets `#app-view`. Signals hold
-  `$live`, a transient scrub `$t`, and the last resolved branch/commit/t; only
-  the resolved coordinate enters the feed URL/cache key. The slider domain may
-  display branch-local t values and human timestamps, but commit id is the
-  durable bookmark. A reconnect whose attachment changed or
+  `$live`, a transient scrub `$t`, and the last complete database value; only
+  that value enters the feed URL/cache key. The slider domain may display `:t`
+  values and human timestamps, but `:datahike/commit-id` plus `:db-name` is the
+  durable lineage bookmark. A reconnect whose database name changed or
   whose last commit is not an ancestor receives a full reset, never numeric
   replay across lineages.
 - **The hard invariant: no agent code ever touches an SSE connection.** Agent →
-  datom → committed coordinate → selective derivation → morph, one way; actions
+  datom → committed `:db-after` value → selective derivation → morph, one way; actions
   reverse it (a browser POST → the owning agent's sandbox → result datoms →
   selective derivation → morph). The database is the bus both ways.
 
@@ -540,8 +540,8 @@ never to dependency invalidation. Legitimate expensive units are bounded before
 building hidden hiccup; collapsed markup alone is not a compute bound.
 
 The streamer is a role inside the Bun web host: it owns one direct authority
-session plus database-scoped interests, derives render units at exact
-coordinates, and writes browser patches. Page code depends on that role's data
+session plus database-scoped interests, derives render units at exact database
+values, and writes browser patches. Page code depends on that role's data
 contract rather than a transport-global registry.
 
 ## Errors render as surfaces

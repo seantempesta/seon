@@ -117,7 +117,8 @@ surfaces the banked budget, not `deadline − now` (which would keep decaying).
 
 Each **turn** threads **one frozen db value** (re-read once at the top) through
 `next-event`, the prompt render, and the bound checks, so the LLM reasons over a
-single resolved `{database-id, branch, commit-id, t}` coordinate/view. The
+single complete `{:db-name :t :as-of :since :history :datahike/commit-id}`
+database value. The
 **next** turn re-reads the latest database value — and
 because there is a single writer, that read sees every other writer's commits, so
 a turn never runs in a private view.
@@ -319,8 +320,8 @@ Triggering is **DB-reactive**. Each active agent child registers one database
 interest on its direct authority session (`install-wake-trigger!`, idempotent —
 it unlistens the prior request ID first, so a hot reload never doubles up). The
 interest names the existing `:seon.agent.message/to` attribute and exact agent
-entity pattern, so the authority sends only matching committed datoms and their
-coordinate to that child. A datom **wakes** the agent iff:
+entity pattern, so the authority sends only matching committed datoms and the
+report's `:db-after` value to that child. A datom **wakes** the agent iff:
 
 > `to ∋ me` ∧ `from ≠ me` ∧ `origin ∈ {:human :agent}` (never `:core`) ∧ `hops < hop-cap`
 
@@ -500,7 +501,7 @@ The cluster runtime has one boot entry and a strict durable/runtime split:
 1. Open the durable Datahike database. A fresh database performs the one explicit
    un-attributed genesis transaction that installs root and the transaction
    user/process refs; a populated database reuses its native schema/index roots.
-2. Read the branch-qualified attachment descriptor. A fresh-database request
+2. Read the named current database value. A fresh-database request
    explicitly supplies current core and an initial canonical config value
    (`{}` is valid and materializes the safe floor). A
    populated-database startup compiles core/config candidates only when that
@@ -566,7 +567,8 @@ existing host without creating or overwriting initial state.
 
 Runtime “replay” is limited to declaration loading. Scratch/effectful evals,
 Promises, handles, sockets, and external effects are never re-executed to mimic
-a prior runtime; database `as-of` means database state at that coordinate only.
+a prior runtime; a database value's `:as-of` means database state at that
+temporal cut inside its containing retained commit only.
 The complete transition contract is
 [[docs/prds/runtime-reliability/provenance-and-lifecycle-design]].
 
@@ -582,7 +584,7 @@ and no source/effect is replayed.
 
 That same transaction also asserts one `:seon.runtime.recovery/id` anchor with
 the unexpected-exit reason and optional bounded diagnostic. It does not copy
-affected agent/run/turn refs or prior/current coordinates: those are derived by
+affected agent/run/turn refs or prior/current database values: those are derived by
 joining the anchor's transaction to the run/turn/pointer datoms it changed and
 to the commit graph. The root-visible notice is a render of that fact and stays
 prominent while an affected agent has opened no later run. Root or the human
@@ -702,7 +704,7 @@ service), and the following mechanisms make every hang a value:
   provider work; a synchronous loop cannot block the parent's timer, so the
   exact child is poisoned against reuse and terminated after the bounded grace.
 - **One immutable config per provider attempt.** The retry thunk captures one
-  database value and complete coordinate, resolves the agent's complete
+  complete ordinary database value, resolves the agent's complete
   non-secret transport configuration once, and passes that value through
   dispatch and the adapter without reactive rereads. A later retry may capture
   a newer value, but both attempts become ordered database facts and any drift
@@ -763,7 +765,7 @@ shared by every child of that artifact flavor. It precompiles the
 ClojureScript bootstrap, Seon schemas/functions, the thin remote database
 client, and selected downstream libraries. A child starts from one ordinary
 descriptor containing its agent and database selection, artifact identity, and
-resource profile; it then loads only that agent's coordinate-pinned authored
+resource profile; it then loads only that agent's database-value-pinned authored
 overlay and reachable authored dependencies. The launcher supplies an explicit
 minimal environment and immutable runtime root rather than inheriting the host
 environment or requiring a source checkout. Mutable compiler state and heap
@@ -818,5 +820,5 @@ bitemporal, reactive DB. We have one, so:
 - [[roadmap]] — implementation state, gaps, work order, and evidence.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db
   is a value, only values cross the protocol, CAS-as-assertion,
-  resolved-coordinate caching). Read
+  exact database-value caching). Read
   before touching the loop.

@@ -38,11 +38,11 @@ ordered writes, immutable indexed values, and shared query computation. The JVM
 service may host many isolated databases and execute their independent reads and
 writes concurrently while preserving one write order per database. Agent
 processes exchange ordinary protocol data rather than rebuilding Datahike
-indexes in every process. Agent children and the web UI issue direct,
-coordinate-addressed requests to the authority; no Bun process retains a
-Datahike replica. The work fence is arbitrated at that authority. A remote
-request attaches at one complete `{database-id, branch, commit-id, t}`
-coordinate and resolves one immutable value before executing. Attachment,
+indexes in every process. Agent children and the web UI issue requests carrying
+ordinary database values; no Bun process retains a Datahike replica. The work
+fence is arbitrated at that authority. A remote request resolves the complete
+`{:db-name :t :as-of :since :history :datahike/commit-id}` value before
+executing. Database acquisition,
 capabilities, paging, cancellation, selective interests, and retention are
 owned by a versioned database protocol whose semantics do not depend on JVM,
 Bun, Rust, or transport. The JVM/Datahike service is the first conforming
@@ -136,7 +136,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   human render; its response carries `:seon.render/hiccup`, which becomes a
   surface.
 - **prompt** — the agent's assembled context: the compiled prompt child acquires
-  ai renders at one complete coordinate and concatenates them by priority,
+  ai renders at one immutable database value and concatenates them by priority,
   prefixed by a system role resolved by
   `seon.ai/effective-system-prompt` — the per-request `:seon.ai/system-prompt`
   override → the cluster's `:seon.config/system-text` datom → the shipped
@@ -199,7 +199,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   one projection rule for agent state (`seon.derive`). See [[agent-runtime]].
 - **database authority / Bun runtime / database interest** — the process that
   owns indexed database operations; the CLJS agent and web hosts; and one
-  session-owned selective wakeup that causes a coordinate-pinned derivation.
+  session-owned selective wakeup that causes a database-value-pinned derivation.
 
 ## Deployment topology
 
@@ -266,14 +266,14 @@ Units are isolated in **compute** but share one **DB**, so "pull together data f
 all of them" = read the one DB they all write to — there are no silos to aggregate.
 The reactive loop, end to end: a browser action submits a fact → the owning
 database writer commits → the UI host's database-scoped interest receives the
-new complete coordinate → one coordinate-pinned read batch derives the affected
+new `:db-after` value → one database-value-pinned read batch derives the affected
 views → the Bun UI host streams whole-element Datastar **morphs**, which
 idiomorph diffs client-side. A coalescing throttle collapses a transaction burst
 into one derivation. Reads, writes, heavy capabilities, cancellation, and
 selective interests share one versioned database protocol; only ordinary values
 cross. `:db.fn/cas` is data and crosses fine, closures cannot. Interests are
 session-owned wakeups, not replicas or a global transaction broadcast; reconnect
-resolves the current coordinate and derives current truth instead of rebuilding
+resolves the current database value and derives current truth instead of rebuilding
 an index from replay. **No agent code ever touches an SSE connection**—agents
 write facts; the UI host derives and streams. Loopback SSE is uncompressed by
 default; remote compression is an explicit measured transport option.
@@ -288,8 +288,8 @@ work bound is `default-turn-limit` + the inbound-message count, not a per-messag
 write. Renders are projections, never persisted. New ways to surface data are new
 block render fns, not new mechanisms — when the underlying problem is fixed, the
 query returns empty and the surface vanishes (self-healing). Frozen caches key
-on the full resolved `{database-id, branch, commit-id, t}` coordinate, never on a db
-value or bare t.
+on the complete ordinary database value, including `:datahike/commit-id` and any
+`:as-of`, `:since`, or `:history` filter, never on bare `:t`.
 
 ### Failures are data; core faults are explicit
 
@@ -393,9 +393,9 @@ routes: the root agent’s view (`/`), per-agent views (`/agent/{id}`), and apps
 `/call` is the one browser-action door and its gate authorizes registered
 agent-owned home callbacks (it is not lifecycle authorization). The **live
 channel is ours**: one database-scoped selective interest wakes a
-coordinate-pinned authority read that derives every affected view and streams
+database-value-pinned authority read that derives every affected view and streams
 whole-element **morphs** (idiomorph-diffed client-side); reconnect resolves the
-current coordinate and repaints current truth. No Bun process owns a Datahike
+current database value and repaints current truth. No Bun process owns a Datahike
 replica or transaction replay cursor. The doc owns block/render/canvas/slot/layout, the page tree,
 reitit + the gate, the SSE channel, and the seed-copy + variadic `install!`/`remove!`
 override model. See [[ui]].
@@ -414,8 +414,7 @@ not a second catalog in architecture prose.
 Every question about agent behavior — what an agent saw at turn N, what changed
 between turns, why it acted — is answered by a **query against the database plus
 the blob archive**. Process logs remain operational evidence rather than turn
-truth. Each turn persists the frozen
-`{database-id, branch, commit-id, t}` coordinate that makes context
+truth. Each turn persists the frozen ordinary database value that makes context
 re-derivable, the assembled prompt
 verbatim as a blob, and the raw reply. `agent-debug/turn` reconstructs any turn;
 `turn-diff` shows what changed between two; a dedicated **forensic agent** runs
@@ -440,7 +439,7 @@ order, dates, measurements, and acceptance evidence.
   the selective Datastar live channel, configurable compression, and the
   seed-copy + `install!`/`remove!` override.
 - [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
-- [[observability]] — historical turn reconstruction (resolved coordinate + prompt blob + reply), `agent-debug/turn` /
+- [[observability]] — historical turn reconstruction (database value + prompt blob + reply), `agent-debug/turn` /
   `turn-diff`, the blob archive, the forensic agent, cluster lifecycle + the
   `/agents/run` door.
 - [[context]] — the dynamic context system: `context = f(db, location,
@@ -453,7 +452,7 @@ order, dates, measurements, and acceptance evidence.
 - [[roadmap]] — current implementation state, gaps, work order, and evidence.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db is
   a value, only values cross the database protocol, CAS-as-assertion,
-  resolved-coordinate caching). Read before
+  exact database-value caching). Read before
   touching the loop.
 - [[library-grounding]] — the current concept-to-source read map for Datahike,
   Malli, ClojureScript/Bun execution, Reitit, Datastar, and the test selectors.

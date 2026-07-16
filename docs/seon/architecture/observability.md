@@ -15,7 +15,7 @@ by a **query against the database plus the blob archive**. Process logs remain
 necessary operational evidence for startup, readiness, transport, and crashes;
 they are not the durable forensic truth of an agent turn.
 This falls out of the core property: a turn's prompt is a pure render of ONE
-frozen db value, so persisting that value's coordinate makes the whole turn
+frozen db value, so persisting that ordinary database value makes the whole turn
 reproducible. Observability is not a subsystem bolted on; it is the
 derive-everything principle pointed backwards in time.
 
@@ -30,16 +30,15 @@ facts, but Seon does not claim it can enumerate or replay every external effect
 caused inside a turn. What every turn additionally persists—always on, no debug
 flag:
 
-- **The rendered database coordinate** —
-  `:seon.agent.turn/rendered-database-id`,
-  `:seon.agent.turn/rendered-branch`,
-  `:seon.agent.turn/rendered-commit-id`, and
-  `:seon.agent.turn/rendered-t` persist the exact
-  `{database-id, branch, commit-id, t}` of the frozen db value the prompt rendered
-  from. This is the ONE coordinate the turn transaction cannot provide: the
+- **The rendered database value** —
+  `:seon.agent.turn/rendered-db` persists the complete
+  `{:db-name :t :as-of :since :history :datahike/commit-id}` value the
+  prompt rendered from. This is the ONE database value the turn transaction
+  cannot provide: the
   prompt renders before its own tx, with other agents' commits interleaving.
-  Commit id is canonical; t remains an ordered display/query aid.
-  `render-prompt` resolves that retained commit on the named branch and
+  Datahike commit id is canonical; `:t` remains an ordered display/query aid and
+  never substitutes for lineage or a temporal filter.
+  `render-prompt` resolves that retained commit under `:db-name` and
   reproduces the structured context exactly.
 - **`:seon.agent.turn/prompt-blob`** — the assembled prompt verbatim, in the
   blob archive. The as-of re-render is the *structured, queryable* view; the blob
@@ -59,13 +58,13 @@ flag:
 - The existing projections: prompt size (tokens at display), `llm-usage` /
   `llm-meta`, the `:seon.eval` component refs, status, retries.
 - **Provider attempts as facts** — every retry attempt connects to the turn
-  with its ordinal, complete immutable database coordinate, resolved non-secret
+  with its ordinal, complete immutable database value, resolved non-secret
   transport projection, adapter and outer timeout layers, outcome, and present
   response model/fingerprint/request identity. The adapter consumes that one
   resolved value without rereading mutable config. Missing response fields stay
   absent; credentials, headers, and signed parameters never enter evidence.
   Projection re-derives the adapter from the attempt's resolved value and
-  stream mode from the linked turn's frozen rendered coordinate. Evidence-size
+  stream mode from the linked turn's frozen rendered database value. Evidence-size
   policy is read from the config singleton in the final immutable response
   value, once per projection. The process-owned outer attempt bound is retained
   as the exact applied value; admission rejects drift within a run and binds
@@ -106,7 +105,7 @@ Three functions make a turn a first-class object of study:
 - **`agent-debug/turn`** — one call returns the whole bundle for agent X, turn N:
   the exact prompt (blob), the structured context (as-of re-render, per-block),
   the reply, the evals with results, usage, and the messages visible at that
-  resolved coordinate. No joins by hand, no filesystem.
+  database value. No joins by hand, no filesystem.
 - **`agent-debug/turn-diff`** — what changed between two turns: a block-level diff
   of the two rendered contexts plus the datom delta when both commits share the
   required ancestry (`db/since`). Different lineages use two immutable snapshot
@@ -114,9 +113,9 @@ Three functions make a turn a first-class object of study:
   cache-stability instrument: bytes that should have been frozen but moved show
   up here.
 - **`agent-debug/ctx-preview`** — generalized over time: preview any agent's
-  context at any complete resolved coordinate, not just now. An incomplete
-  `{database-id, branch, commit-id, t}` selector is a typed error; no
-  branch-and-`t` compatibility selector guesses a commit.
+  context at any complete ordinary database value, not just now. A descriptor
+  missing `:db-name`, containing basis `:t`, temporal fields, or required
+  `:datahike/commit-id` is a typed error; no bare-`:t` selector guesses a commit.
 
 Search runs at two ends, one door each, and nothing in between:
 
@@ -134,9 +133,8 @@ Search runs at two ends, one door each, and nothing in between:
 Errors join turn replay as first-class DB objects. `seon.error/record!`
 is the catch-site function (the iron rule as a fn: nothing is caught without
 becoming data): it classifies `:seon.error/fault` (`:agent` — expected,
-the agent's learning signal; `:core` — our bug), stamps
-  the full `:seon.error/database-id`, `:seon.error/branch`,
-  `:seon.error/commit-id`, `:seon.error/t` coordinate live at the catch site—the
+the agent's learning signal; `:core` — our bug), stamps the complete ordinary
+database value under `:seon.error/db` live at the catch site—the
 resolved immutable db is the frozen state the failing code saw, composing directly with
 `agent-debug/turn` replay), parses the stack into `:seon.error/frames`
 component entities (Datalog-queryable traces), and keeps the full args
@@ -170,16 +168,16 @@ Triage runs through three `seon.agent.debug` functions, three altitudes over
 the same datoms:
 
 - **`errors`** — compact recent list, newest first (optional
-  `:seon.error/fault` filter + limit): per row the error eid, fault, full
-  database/branch/commit/t coordinate,
+  `:seon.error/fault` filter + limit): per row the error eid, fault, complete
+  ordinary database value,
   deepest-cause short message, top stack frame, and the recording agent.
-- **`error`** — one full envelope by eid (message, fault, full coordinate, frames
+- **`error`** — one full envelope by eid (message, fault, database value, frames
   table, args-edn, data-edn, stack) plus the JOINS: the recording agent and
-  the turn active at that resolved coordinate (derived from the agent's turn windows and
+  the turn active at that database value (derived from the agent's turn windows and
   ordinary domain refs) — the turn eid composes with `agent-debug/turn`
   inspection.
 - **`repro`** — the work-backwards bundle: the LIVE immutable db value resolved
-  from the error's full coordinate (REPL material—render t + abbreviated commit,
+  from the error's ordinary database value (REPL material—render `:t` + abbreviated commit,
   never print the db),
   the failing fn sym + args-edn when the malli envelope captured them, the
   linked turn, a ready-to-eval reproduction expression string built from
@@ -190,24 +188,24 @@ the same datoms:
 The as-of db is read-only; when the fix needs a WRITABLE view—re-running
 safe code, patching data, letting a forensic agent act—the fourth step is
 **fork**: the operator creates a Datahike copy-on-write branch at the retained
-commit, then attaches a branch-qualified non-autonomous forensic runtime. It
+commit, then starts a non-autonomous forensic runtime for the new database name. It
 does not copy Konserve or define another versioning model. Entity/transaction
-ids through the fork point are identical, but coordinates are always
-`{database-id, branch, commit-id}`
-qualified because later transaction ids can diverge/reuse after a reset.
+ids through the fork point are identical, but database values always retain
+`:db-name` and `:datahike/commit-id` because later transaction ids can
+diverge/reuse after a reset.
 
-No branch-and-`t` convenience selector exists; the complete coordinate names a
+No bare-`:t` convenience selector exists; the complete database value names a
 temporal cut inside one retained immutable containing commit. The debug pod starts
 non-autonomously: opening history installs no ticker, wake trigger, or agent
 host and never resumes agents, schedules, providers, or external-effect workers.
 
-The coordinate semantics are precise: it is captured at the catch site—the db
+The database-value semantics are precise: it is captured at the catch site—the db
 value the failing code saw—while the error datom itself commits later, so the
 error datom does not exist inside its own historical view. Branch-local blob
-overlays, promotion, garbage collection, and remote retention are coordinated
+overlays, promotion, garbage collection, and remote retention are related
 designs owned by the database-lifecycle-recovery and blob-lifecycle PRDs. The
 stable forensic flow is fault list → error detail → reproduction bundle →
-non-autonomous historical attachment; operator command names are not part of
+non-autonomous historical runtime; operator command names are not part of
 the data model.
 
 ## The forensic agent
@@ -241,12 +239,12 @@ other clusters exist. Database enumeration, fork, release, and deletion are
 typed root/supervisor operations in `seon.db.registry`, never agent protocol
 operations. The supervisor owns the lifecycle:
 
-- creation establishes one registered database attachment and pod;
-- fork requires a complete retained coordinate and creates a writable Datahike
+- creation establishes one registered database name and pod;
+- fork requires a complete retained database value and creates a writable Datahike
   branch without physically copying the database;
-- a historical or forensic attachment starts non-autonomously; and
+- a historical or forensic runtime starts non-autonomously; and
 - destroy quiesces users of the target and removes only resources owned by that
-  attachment. A branch cannot delete source-database content.
+  database name. A branch cannot delete source-database content.
 
 `POST /agents/run` is the one-shot composition door on every pod, built
 purely from the agent primitives: start-or-reuse an agent in the pod's own
@@ -259,8 +257,8 @@ that same window's eval ids, times, sources, success facts, and present
 narration, the bounded captured database-operation evidence attached to those
 evals, plus the ordered bounded provider-attempt facts connected to those turns.
 The pure `seon.ai/resolved-config` reconstructs configuration intent at each
-attempt coordinate; stored attempt facts preserve non-derivable response
-identity and outcome. A response-time final coordinate is never mislabeled as
+attempt database value; stored attempt facts preserve non-derivable response
+identity and outcome. A response-time final database value is never mislabeled as
 call evidence. Inspect AI copies the projection unchanged and rejects missing
 or drifting transport evidence before capability scoring. Inspect AI drives
 per-sample ephemeral clusters by port through this same production boundary;
@@ -280,7 +278,7 @@ and exact turn-entity set used for the response counts. General eval results,
 printed output, exception stacks, and unrelated source dumps never enter the
 door. An eval may carry a content-addressed vector of database operations
 captured by the ordinary `seon.db` observer. The final snapshot validates its
-blob size, schema, order, source, and complete coordinate before projecting a
+blob size, schema, order, source, and complete database value before projecting a
 lossless bounded tagged value; absence or invalid evidence becomes a bounded
 status, never a preview or parser error. Inspect consumes this production
 response directly; it does not issue arbitrary forms through the writer REPL
@@ -325,6 +323,6 @@ multiple interactions and a pod restart, then host-side scoring reads the
 resulting plan and eval facts. Offline good/bad fixtures exercise the same
 scorer without claiming to measure the pod.
 
-Every turn uses the one complete database coordinate plus prompt/reply blob
+Every turn uses the one complete ordinary database value plus prompt/reply blob
 refs. `seon.agent.debug/turn` and `turn-diff` reconstruct and compare turns from
 those facts. Inspect and debug projections read the same blobs by hash.
