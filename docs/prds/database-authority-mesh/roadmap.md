@@ -1206,9 +1206,16 @@ fallback is prohibited.
   proof passes 5 tests/23 assertions and its artifact/config/process proof
   passes 79/364. Commits `eff08b64` and `62681ee5` own coordinate-pinned core
   program/config acquisition, pure transaction compilation, exact lookup-pair
-  resolution, and bounded stale core-index retry. The independent client lane
-  now migrates recovery/resume over ordinary coordinate-pinned data while the
-  execution lane implements the one authored-source owner grounded in
+  resolution, and bounded stale core-index retry. Commit `551723fc` moves
+  recovery and resumable-agent acquisition to ordinary coordinate-pinned
+  authority reads, makes generated-ID allocation session-native, and removes
+  178 net lines; its CLJ allocation proof passes 12 tests/75 assertions and the
+  complete CLJS artifact compiles, while execution of its four focused CLJS
+  namespaces remains blocked by the intentionally broken legacy replica import.
+  Integration review is now falsifying whether its cached MCP advertisement
+  membership remains current after post-boot birth/termination; no second
+  registry or synchronous fallback is acceptable. The execution lane
+  implements the one authored-source owner grounded in
   [[research/unit-8-authored-source-loading-seam-2026-07-16]]. The independent
   supervision audit rejects heartbeats and polling: the host absolute deadline
   must cancel and retire the exact child, `proc.exited` closes the slot, and an
