@@ -2238,14 +2238,15 @@
           (recur))))))
 
 (defn- register-query-job!
-  [runtime owner-request-id job-id]
+  [runtime owner-request-id job-id db-value]
   (let [jobs (::query-jobs runtime)]
     (locking jobs
       (swap! jobs
              (fn [state]
                (-> state
                    (assoc-in [::by-owner owner-request-id]
-                             {::job-id job-id ::canceled? false})
+                             (cond-> {::job-id job-id ::canceled? false}
+                               db-value (assoc ::database-value db-value)))
                    (assoc-in [::by-job job-id] owner-request-id)))))))
 
 (defn- continue-query-job?
@@ -2260,15 +2261,24 @@
 
 (defn- finish-query-job!
   [runtime job-id]
-  (let [jobs (::query-jobs runtime)]
-    (locking jobs
-      (when-let [owner-request-id (get-in @jobs [::by-job job-id])]
-        (swap! jobs
-               (fn [state]
-                 (-> state
-                     (update ::by-owner dissoc owner-request-id)
-                     (update ::by-job dissoc job-id))))
-        owner-request-id))))
+  (let [jobs (::query-jobs runtime)
+        entry
+        (locking jobs
+          (when-let [owner-request-id (get-in @jobs [::by-job job-id])]
+            (let [entry (get-in @jobs [::by-owner owner-request-id])]
+              (swap! jobs
+                     (fn [state]
+                       (-> state
+                           (update ::by-owner dissoc owner-request-id)
+                           (update ::by-job dissoc job-id))))
+              entry)))]
+    (when-let [db-value (::database-value entry)]
+      (try
+        (d/release-materialized-db db-value)
+        (catch Throwable throwable
+          (log/error throwable "query owner database release failed"
+                     {::job-id job-id}))))
+    entry))
 
 (defn- cancel-unstarted-owner-job!
   [runtime owner-request-id]
@@ -2294,20 +2304,27 @@
 (declare complete-execute-many-query!)
 
 (defn- complete-query-call!
-  [runtime request-id owner job-id request db-value execute-many? completion]
+  [runtime request-id owner job-id request db-value execute-many?
+   release-on-callback? completion]
   (if execute-many?
     (complete-execute-many-query! runtime request-id owner job-id completion)
     (try
       (deliver-active-request! runtime request-id owner
                                (query-response request completion))
       (finally
-        (d/release-materialized-db db-value)))))
+        (when release-on-callback?
+          (try
+            (d/release-materialized-db db-value)
+            (catch Throwable throwable
+              (log/error throwable "query caller database release failed"
+                         {::protocol/request-id request-id}))))))))
 
 (defn- acquire-query-call!
   [runtime {::keys [request database-value caller-id job-id]
             :as work}]
   (let [db-value (or database-value (pinned-database work))
         release-on-error? (nil? database-value)
+        physical-db-owned? (atom false)
         request-id (or (::public-request-id work)
                        (::protocol/request-id request))
         execute-many? (true? (::execute-many-member? work))]
@@ -2337,13 +2354,16 @@
             {::query-acquired? true})
           (do
             (when (= :run state)
-              (register-query-job! runtime caller-id job-id))
+              (register-query-job! runtime caller-id job-id
+                                   (when release-on-error? db-value))
+              (reset! physical-db-owned? release-on-error?))
             (d/on-q-complete!
              call
              (fn [completion]
                (when (.compareAndSet completed? false true)
                  (complete-query-call! runtime request-id (::owner work) job-id
                                        request db-value execute-many?
+                                       (and release-on-error? (not= :run state))
                                        completion))))
             (let [canceled?
                   (locking active
@@ -2358,8 +2378,12 @@
                  #(continue-query-job? runtime caller-id job-id))
                 {::query-acquired? true})))))
       (catch Throwable throwable
-        (when release-on-error?
-          (d/release-materialized-db db-value))
+        (when (and release-on-error? (not @physical-db-owned?))
+          (try
+            (d/release-materialized-db db-value)
+            (catch Throwable release-error
+              (log/error release-error "failed query acquisition database release"
+                         {::protocol/request-id request-id}))))
         (throw throwable)))))
 
 (defn- release-connection-acquisition!

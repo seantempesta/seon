@@ -296,3 +296,85 @@
         (writer/stop! server)
         (.delete (File. request-path))
         (.delete (File. publish-path))))))
+
+(deftest detached-owner-retains-its-database-until-joined-computation-finishes
+  (let [database-name (str "query-owner-release-" (random-uuid))
+        request-path (socket-path "rel-req")
+        publish-path (socket-path "rel-pub")
+        server (writer/start! {::writer/dependencies (dependencies)
+                               ::writer/database-name database-name
+                               ::writer/backend :memory
+                               ::writer/selected-processors 4
+                               ::writer/request-socket-path request-path
+                               ::writer/publish-socket-path publish-path})
+        runtime (::writer/runtime server)
+        transport (#'writer/transport-connection
+                   {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
+        head (ensure-and-acquire! runtime transport database-name)
+        entered (CountDownLatch. 1)
+        release-run (CountDownLatch. 1)
+        releases (atom [])
+        original-run d/run-q!
+        original-release d/release-materialized-db]
+    (try
+      (with-redefs [d/run-q!
+                    (fn [call]
+                      (.countDown entered)
+                      (when-not (.await release-run 5 TimeUnit/SECONDS)
+                        (throw (ex-info "query owner was not released" {})))
+                      (original-run call))
+                    d/release-materialized-db
+                    (fn [db-value]
+                      (swap! releases conj db-value)
+                      (original-release db-value))]
+        (let [owner (request! runtime transport
+                              (query-request database-name head "release/owner"))]
+          (is (.await entered 2 TimeUnit/SECONDS))
+          (let [waiter (request! runtime transport
+                                 (query-request database-name head
+                                                "release/waiter"))]
+            (wait-until!
+             #(= 2 (:datahike.single-flight/active-callers
+                     (d/query-cache-evidence)))
+             "waiter did not join the blocked owner")
+            (let [cancel
+                  @(request!
+                    runtime transport
+                    (protocol/cancel-request
+                     {::protocol/request-id "release/cancel-owner"
+                      ::protocol/target-request-id "release/owner"}))
+                  owner-response (deref owner 2000 ::timeout)]
+              (is (::protocol/canceled? cancel))
+              (is (not= ::timeout owner-response))
+              (is (not (::protocol/success? owner-response)))
+              (is (empty? @releases)
+                  "logical owner cancellation cannot release physical query data")
+              (.countDown release-run)
+              (is (::protocol/success? (deref waiter 5000 {})))
+              (wait-until!
+               #(= 2 (count @releases))
+               "owner and waiter databases were not released exactly once")
+              (wait-until!
+               #(and (empty? @(::writer/active-requests runtime))
+                     (empty? (get @(::writer/query-jobs runtime)
+                                  ::writer/by-owner))
+                     (zero? (::executor/retained-identities
+                             (executor/evidence (::writer/executor server))))
+                     (zero? (:datahike.single-flight/active-callers
+                             (d/query-cache-evidence))))
+               "detached owner retained physical or logical state")
+              (with-redefs [d/release-materialized-db
+                            (fn [_]
+                              (throw (ex-info "injected release failure" {})))]
+                (is (::protocol/success?
+                     (deref
+                      (request! runtime transport
+                                (query-request database-name head
+                                               "release/failure-does-not-wedge"))
+                      2000 {}))))))))
+      (finally
+        (.countDown release-run)
+        (#'writer/close-transport-connection! runtime transport)
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
