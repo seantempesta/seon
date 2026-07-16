@@ -17,8 +17,8 @@
     (let [original execution.host/invoke-compiled!
           observed (atom nil)]
       (set! execution.host/invoke-compiled!
-            (fn [coordinate agent-id arguments]
-              (reset! observed [coordinate agent-id arguments])
+            (fn [coordinate agent-id function-symbol arguments]
+              (reset! observed [coordinate agent-id function-symbol arguments])
               (js/Promise.resolve
                 {::execution/message execution/result-message
                  ::execution/coordinate coordinate
@@ -30,7 +30,9 @@
               (is (= {:seon.render/text "remote prompt"
                       :seon.ai/system-prompt "frozen system"}
                      prompt))
-              (is (= [point "agent-1" [{:seon.agent/id "agent-1"}]]
+              (is (= [point "agent-1"
+                      'seon.execution.runtime/render-prompt!
+                      [{:seon.agent/id "agent-1"}]]
                      @observed))))
           (.catch
             (fn [exception]
@@ -46,8 +48,8 @@
           observed (atom nil)
           profile [{:seon.agent.ctx/name :transcript}]]
       (set! execution.host/invoke-compiled!
-            (fn [coordinate agent-id arguments]
-              (reset! observed [coordinate agent-id arguments])
+            (fn [coordinate agent-id function-symbol arguments]
+              (reset! observed [coordinate agent-id function-symbol arguments])
               (js/Promise.resolve
                 {::execution/message execution/result-message
                  ::execution/coordinate coordinate
@@ -58,6 +60,7 @@
             (fn [prompt]
               (is (= "profile prompt" (:seon.render/text prompt)))
               (is (= [point "agent-1"
+                      'seon.execution.runtime/render-prompt!
                       [{:seon.agent/id "agent-1"
                         :seon.agent.ctx/profile profile}]]
                      @observed))))
@@ -72,7 +75,7 @@
     (let [original execution.host/invoke-compiled!
           moved (assoc point ::coordinate/t 43)]
       (set! execution.host/invoke-compiled!
-            (fn [_ _ _]
+            (fn [_ _ _ _]
               (js/Promise.resolve
                 {::execution/message execution/result-message
                  ::execution/coordinate moved
@@ -101,7 +104,7 @@
                        :seon.error/kind :core-bug
                        :seon.error/data {:seon.db/results []}}]
       (set! execution.host/invoke-compiled!
-            (fn [coordinate _ _]
+            (fn [coordinate _ _ _]
               (js/Promise.resolve
                 {::execution/message execution/result-message
                  ::execution/coordinate coordinate

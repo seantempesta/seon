@@ -212,7 +212,11 @@
             (assoc :seon.agent.ctx/whole-prompt resolved-whole-prompt)))
          :seon.ai/system-prompt system-prompt)))))
 
+(def compiled-functions
+  "Trusted functions directly reachable through this exact execution artifact."
+  {'seon.execution.runtime/render-prompt! render-prompt!})
+
 (defn -main
   "Start the execution child from the complete runtime composition root."
   []
-  (execution/-main))
+  (execution/-main compiled-functions))

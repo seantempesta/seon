@@ -317,6 +317,9 @@
    [:seon.agent.ctx/rendered-blocks {:optional true} [:vector :map]]])
 (schema/register! ::prompt-result [:or ::rendered-prompt ::prompt-error])
 
+(def ^:private render-prompt-function
+  'seon.execution.runtime/render-prompt!)
+
 (defn ^:async render-prompt
   "Render one agent prompt inside its isolated execution child.
 
@@ -341,7 +344,7 @@
          response
          (await
            (execution.host/invoke-compiled!
-             point agent-id [request]))]
+             point agent-id render-prompt-function [request]))]
      (cond
        (not= point (::execution/coordinate response))
        {:seon.error/message

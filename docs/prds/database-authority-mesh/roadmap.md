@@ -1484,6 +1484,13 @@ is prohibited.
   through one remote pull. The execution artifact compiles at its unchanged
   415 files/18-warning inventory; the remaining eval-local branches are the
   ordered preflight/program/test migration boundary.
+- Trusted compiled child calls now use the existing function-symbol plus exact
+  artifact-digest identity without a prompt-specific protocol or version bump.
+  The execution artifact owns one closed direct function map; unknown symbols
+  and digest mismatches fail before session/program work, and trusted dispatch
+  cannot be redirected through global symbol lookup. The execution artifact
+  remains 415 files/18 warnings; focused direct dispatch, host identity, and
+  real turn-caller proof passes 8 tests/20 assertions.
 - **Next refill:** move the remaining parent eval/schedule/test/authored-route
   consumers onto the existing per-agent child execution owner, delete global
   pod replay rather than adapting it, finish the remaining web synchronous

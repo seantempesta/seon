@@ -497,7 +497,7 @@
               (js/Promise.resolve
                (result-message (::execution/invocation-id request) :ok))))
       (-> (host/invoke-compiled!
-           point "agent-1" [:input])
+           point "agent-1" 'seon.execution.runtime/render-prompt! [:input])
           (.then
            (fn [result]
              (is (= :ok (::execution/result result)))

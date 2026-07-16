@@ -516,14 +516,15 @@
   "Invoke one trusted function from the digest-verified execution artifact."
   {:malli/schema [:=> [:cat :seon.db.coordinate/coordinate
                        :seon.execution/agent-id
+                       :seon.execution/function-symbol
                        :seon.execution/arguments]
                   :map]}
-  [coordinate agent-id arguments]
+  [coordinate agent-id function-symbol arguments]
   (let [runtime (get-in (host-configuration)
                         [::launch-descriptor ::launch/runtime])
         invocation
         (execution/compiled-invocation
-         agent-id arguments coordinate
+         agent-id function-symbol arguments coordinate
          (::launch/execution-digest runtime))]
     (await (invoke! invocation))))
 

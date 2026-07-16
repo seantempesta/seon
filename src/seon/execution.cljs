@@ -27,7 +27,6 @@
 (def result-message :seon.execution.message/result)
 (def error-message :seon.execution.message/error)
 (def stopped-message :seon.execution.message/stopped)
-(def ^:private compiled-entrypoint 'seon.execution.runtime/render-prompt!)
 
 (schema/register! ::protocol-version [:= protocol-version])
 (schema/register! ::message :keyword)
@@ -328,18 +327,18 @@
 
 (defn compiled-invocation
   "Pin one parent-selected core call to the verified execution artifact."
-  {:malli/schema [:=> [:cat ::agent-id ::arguments ::coordinate
+  {:malli/schema [:=> [:cat ::agent-id ::function-symbol ::arguments ::coordinate
                        ::artifact-digest]
                   ::invoke]}
-  [agent-id arguments coordinate artifact-digest]
-  (let [plan (invocation-plan agent-id compiled-entrypoint arguments)]
+  [agent-id function-symbol arguments coordinate artifact-digest]
+  (let [plan (invocation-plan agent-id function-symbol arguments)]
     (-> plan
         (dissoc ::function-symbol)
         (assoc ::message invoke-message
                ::protocol-version protocol-version
                ::coordinate coordinate
                ::function-identity
-               {::function-symbol compiled-entrypoint
+               {::function-symbol function-symbol
                 ::artifact-digest artifact-digest}))))
 
 (defn ^:async prepare-invocations!
@@ -609,6 +608,9 @@
         identity (::function-identity invocation)
         function-symbol (::function-symbol identity)
         compiled? (contains? identity ::artifact-digest)
+        compiled-function (when compiled?
+                            (get (::compiled-functions current)
+                                 function-symbol))
         remaining (- (::deadline-ms invocation) now-ms)]
     (cond
       (::shutting-down? current)
@@ -629,7 +631,7 @@
                         "The invocation names another agent." :core-bug)
 
       (and compiled?
-           (or (not= compiled-entrypoint function-symbol)
+           (or (nil? compiled-function)
                (not= (::artifact-digest identity)
                      (get-in current [::startup ::artifact-digest]))))
       (fail-invocation! state invocation send-message!
@@ -642,9 +644,6 @@
 
       :else
       (let [token (js-obj)
-            compiled-function-value
-            (when compiled?
-              (eval/lookup-value function-symbol))
             timeout-ms (min remaining maximum-invocation-ms)
             timer
             (js/setTimeout
@@ -663,7 +662,7 @@
              (fn [_]
                (if-let [function-value
                         (if compiled?
-                          compiled-function-value
+                          compiled-function
                           (eval/lookup-value function-symbol))]
                  (try
                    (js/Promise.resolve
@@ -760,8 +759,9 @@
               ::error (exception-value exception)}))))
 
 (defn- start-child!
-  [startup send-message! on-message! exit!]
-  (let [state (atom {::startup startup})]
+  [compiled-functions startup send-message! on-message! exit!]
+  (let [state (atom {::startup startup
+                     ::compiled-functions compiled-functions})]
     (-> (db/open-session! (::database-selection startup))
         (.then
          (fn [{::db/keys [attachment coordinate]}]
@@ -781,7 +781,13 @@
 
 (defn -main
   "Attach one Bun child to its database and serve parent IPC."
-  []
+  [compiled-functions]
+  (when-not (and (map? compiled-functions)
+                 (every? qualified-symbol? (keys compiled-functions))
+                 (every? fn? (vals compiled-functions)))
+    (throw
+     (ex-info "The execution artifact must supply a closed compiled function map."
+              {:seon.error/kind :core-bug})))
   (let [encoded-startup (aget (.-argv js/process) 2)
         send-message! (fn [encoded] (.send js/process encoded))
         on-message! (fn [handler] (.on js/process "message" handler))
@@ -813,7 +819,8 @@
                           ::compiled-shadow-build-id shadow-env/build-id
                           ::actual-artifact-digest actual-artifact-digest
                           :seon.error/kind :core-bug})))
-             (start-child! startup send-message! on-message! exit!)))
+             (start-child! compiled-functions startup
+                           send-message! on-message! exit!)))
           (.catch
            (fn [exception]
              (send! send-message!

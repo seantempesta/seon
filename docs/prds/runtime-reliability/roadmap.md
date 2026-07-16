@@ -78,6 +78,10 @@ per-agent execution child so global pod replay can be deleted.
 Eval receipt start, terminal recording, fallback stamping, and settled-CAS
 inspection are already session-native, removing the local connection from the
 durable execution boundary before the broader eval preflight cut.
+The child no longer hard-codes one prompt entrypoint. Its existing
+symbol-plus-artifact-digest identity selects from a closed direct function map
+compiled into the execution artifact, preserving one protocol while opening
+the same trusted door for eval and coarse render owners.
 Autocomplete/export and the debug feed already consume the same coordinate-
 pinned compiled child result; the obsolete synchronous AI composer is deleted.
 Stale debug completions cannot install candidate catalogs, and raw AI

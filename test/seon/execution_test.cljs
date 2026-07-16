@@ -38,6 +38,8 @@
     ::db/database-name "test"
     ::db/backend :memory}})
 
+(def prompt-function 'seon.execution.runtime/render-prompt!)
+
 (defn decoded-sender [messages]
   (fn [encoded]
     (swap! messages conj (execution/decode-message encoded))))
@@ -54,12 +56,11 @@
 
 (deftest compiled-identity-refuses-agent-authored-symbols
   (let [messages (atom [])
-        state (atom {::execution/startup startup})
-        request (-> (execution/compiled-invocation
-                     "agent-1" [] coordinate digest)
-                    (assoc-in [::execution/function-identity
-                               ::execution/function-symbol]
-                              'my.render/view))]
+        state (atom {::execution/startup startup
+                     ::execution/compiled-functions
+                     {prompt-function (fn [_ _] nil)}})
+        request (execution/compiled-invocation
+                 "agent-1" 'my.render/view [] coordinate digest)]
     (@#'execution/receive! state (execution/encode-message request)
      (decoded-sender messages) (fn [_]) 0)
     (is (= execution/error-message
@@ -71,10 +72,12 @@
 (deftest child-rejects-a-compiled-identity-from-another-artifact
   (let [messages (atom [])
         opens (atom 0)
-        state (atom {::execution/startup startup})
+        state (atom {::execution/startup startup
+                     ::execution/compiled-functions
+                     {prompt-function (fn [_ _] nil)}})
         wrong-digest (apply str (repeat 64 "b"))
         request (execution/compiled-invocation
-                 "agent-1" [1] coordinate wrong-digest)]
+                 "agent-1" prompt-function [1] coordinate wrong-digest)]
     (with-redefs [db/open-session!
                   (fn [_]
                     (swap! opens inc)
@@ -92,9 +95,14 @@
   (async done
     (let [messages (atom [])
           reads (atom 0)
-          state (atom {::execution/startup startup})
+          state (atom {::execution/startup startup
+                       ::execution/compiled-functions
+                       {prompt-function
+                        (fn [value invoke-selected!]
+                          (is (fn? invoke-selected!))
+                          {:seon.execution-test/value value})}})
           request (execution/compiled-invocation
-                   "agent-1" [7] coordinate digest)]
+                   "agent-1" prompt-function [7] coordinate digest)]
       (with-redefs [db/open-session! (fn [_] (js/Promise.resolve nil))
                     db/execute-many
                     (fn [_]
@@ -103,9 +111,7 @@
                        (js/Error. "compiled dispatch read authored program")))
                     seval/lookup-value
                     (fn [_]
-                      (fn [value invoke-selected!]
-                        (is (fn? invoke-selected!))
-                        {:seon.execution-test/value value}))]
+                      (throw (js/Error. "compiled dispatch used global lookup")))]
         (@#'execution/receive! state (execution/encode-message request)
          (decoded-sender messages) (fn [_]) 0)
         (-> (js/Promise.
