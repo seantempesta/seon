@@ -512,6 +512,76 @@
              (is false (str "eval record retry threw: " error))))
           (.finally done)))))
 
+(deftest special-repl-transactions-compile-from-ordinary-authority-facts
+  (testing "ns-unmap always emits both idempotent identity retractions"
+    (is (= [[:db/retractEntity [:seon.fn/sym "my.agent/f"]]
+            [:db/retractEntity [:seon.test/sym "my.agent/f"]]]
+           (@#'seval/ns-unmap-tx "my.agent/f"))))
+  (testing "ns-unalias declaration rewriting is pure over acquired source"
+    (is (= [{:seon.ns/name :my.agent
+             :seon.ns/source
+             "(ns my.agent (:require clojure.string))"}]
+           (@#'seval/unalias-decl-tx
+            :my.agent 'str
+            "(ns my.agent (:require [clojure.string :as str]))"
+            :seon.db.process/repl)))
+    (is (= []
+           (@#'seval/unalias-decl-tx
+            :seon.core 'str
+            "(ns seon.core (:require [clojure.string :as str]))"
+            :seon.db.process/boot)))))
+
+(deftest special-repl-stale-record-reacquires-before-one-local-effect
+  (async done
+    (let [point-1 {:seon.db.coordinate/database-id
+                   #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+                   :seon.db.coordinate/branch :db
+                   :seon.db.coordinate/commit-id
+                   #uuid "11111111-1111-4111-8111-111111111111"
+                   :seon.db.coordinate/t 1}
+          point-2 (assoc point-1
+                         :seon.db.coordinate/commit-id
+                         #uuid "22222222-2222-4222-8222-222222222222"
+                         :seon.db.coordinate/t 2)
+          acquisitions (atom 0)
+          records (atom [])
+          effects (atom 0)
+          acquire!
+          (fn [_]
+            (js/Promise.resolve
+             {::db/coordinate
+              (if (= 1 (swap! acquisitions inc)) point-1 point-2)}))
+          committed! (fn [] (swap! effects inc))
+          record!
+          (fn [request]
+            (swap! records conj request)
+            (if (= point-1 (::db/expected-coordinate request))
+              (js/Promise.resolve
+               {:seon.db/ok? false
+                :seon.db/error
+                {:seon.error/data
+                 {::protocol/error-kind protocol/stale-coordinate-error}}})
+              (do
+                ((:seon.eval/committed! request))
+                (js/Promise.resolve {:seon.db/ok? true}))))]
+      (-> (js/Promise.resolve
+           (@#'seval/retry-repl-form-record!
+            {:seon.eval/repl-operation 'ns-unmap}
+            {:seon.eval/source "(ns-unmap 'f)"}
+            (fn [_] {:seon.eval/value true})
+            committed! acquire! record!))
+          (.then
+           (fn [_]
+             (is (= 2 @acquisitions))
+             (is (= [point-1 point-2]
+                    (mapv ::db/expected-coordinate @records)))
+             (is (= 1 @effects)
+                 "the compiler mutation runs only after the accepted record")))
+          (.catch
+           (fn [error]
+             (is false (str "special REPL retry threw: " error))))
+          (.finally done)))))
+
 (deftest ambiguous-wire-result-never-starts-a-second-allocation
   (async done
     (let [!calls (atom 0)

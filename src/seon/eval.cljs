@@ -3851,29 +3851,6 @@
                       a))))
           (rest form))))
 
-(defn- ns-source-core-boot?
-  "True when `ns-kw`'s CURRENT `:seon.ns/source` datom was written by
-   the core seed — a REPL-issued require must never rewrite a core ns's
-   stored declaration (the [[reject-core-overrides]] symmetry)."
-  [db ns-kw]
-  (some? (ffirst (db/query '[:find ?e :in $ ?ns
-                             :where
-                             [?e :seon.ns/name ?ns]
-                             [?e :seon.ns/source _ ?tx]
-                             [?tx :seon.db/process ?process]
-                             [?process :seon.db.process/id
-                              :seon.db.process/boot]]
-                           db ns-kw))))
-
-(defn- stored-ns-source
-  "The stored `:seon.ns/source` string for `ns-kw`, or nil."
-  [db ns-kw]
-  (ffirst (db/query '[:find ?src :in $ ?ns
-                      :where
-                      [?e :seon.ns/name ?ns]
-                      [?e :seon.ns/source ?src]]
-                    db ns-kw)))
-
 (defn require-decl-tx
   "Tx upserting `ns-kw`'s stored `:seon.ns/source` with the specs of a
    bare `(require …)` `source` merged in — the durable-by-default rule.
@@ -4095,10 +4072,10 @@
    required — unalias never unloads); a spec that ONLY carried the
    reader alias is dropped whole. `[]` when there's no stored source,
    the declaration is core-seeded, or nothing changed."
-  [db ns-kw alias-sym]
-  (let [ns-src (stored-ns-source db ns-kw)
-        forms  (when (and ns-src (not (ns-source-core-boot? db ns-kw)))
-                 (try (read-all-forms ns-src) (catch :default _ nil)))
+  [ns-kw alias-sym stored-source source-process]
+  (let [forms  (when (and stored-source
+                          (not= :seon.db.process/boot source-process))
+                 (try (read-all-forms stored-source) (catch :default _ nil)))
         form   (when (= 1 (count forms)) (first forms))]
     (if-not (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
       []
@@ -4131,6 +4108,49 @@
                 decl    (apply list 'ns name-sym
                                (concat other (when new-req [new-req])))]
             [{:seon.ns/name ns-kw :seon.ns/source (pr-str decl)}]))))))
+
+(def ^:private repl-symbol-attributes-query
+  '[:find [?attribute ...]
+    :in $ ?symbol [?attribute ...]
+    :where [?entity ?attribute ?symbol]])
+
+(defn- ^:async acquire-repl-form-inputs!
+  "Acquire one special form's database facts at one immutable coordinate."
+  [{::keys [form-namespace form-symbol repl-operation]}]
+  (let [requests
+        (case repl-operation
+          ns-unmap
+          [[::symbol-attributes
+            (eval-query-member repl-symbol-attributes-query
+                               [form-symbol
+                                [:seon.fn/sym :seon.test/sym]])]
+           [::core-boot-function-symbols
+            (eval-query-member eval-core-function-query [[form-symbol]])]]
+          ns-unalias
+          [[::namespace-source
+            (eval-query-member eval-namespace-source-query [form-namespace])]]
+          [])
+        response (await
+                  (db/execute-many
+                   {::db/members (mapv second requests)
+                    ::db/max-result-weight (* 2 1024 1024)}))
+        results (into {}
+                      (map (fn [[[label _] member]]
+                             [label (eval-query-result member)]))
+                      (map vector requests (::db/results response)))
+        [stored-source source-process] (first (::namespace-source results))]
+    {::db/coordinate (::db/coordinate response)
+     ::symbol-attributes (set (::symbol-attributes results))
+     ::core-boot-function-symbols
+     (set (::core-boot-function-symbols results))
+     ::stored-source stored-source
+     ::source-process source-process}))
+
+(defn- ns-unmap-tx
+  "Retract one function and test projection idempotently by identity."
+  [sym-str]
+  [[:db/retractEntity [:seon.fn/sym sym-str]]
+   [:db/retractEntity [:seon.test/sym sym-str]]])
 
 ;; ============================================================
 ;; Pre-flight form autofix (owner rulings 2026-07-05; design:
@@ -4933,7 +4953,8 @@
    committed `result/<id>` after its row records. `::tee` tx ops ride the same
    tx. Mutates the caller's fold counters like eval-form-entry!."
   [{::keys [compile-state current-ns n-ok n-fail narration source
-            value error tee]
+            value error tee committed!]
+    expected-coordinate ::db/expected-coordinate
     turn-id :seon.agent.turn/id-of-turn}]
   (let [result (if error
                  {::ok? false
@@ -4942,19 +4963,56 @@
                  {::ok? true ::value value})
         recorded (await
                    (record-eval!
-                     {:seon.agent.turn/id-of-turn turn-id
-                      ::at          (js/Date.)
-                      ::duration-ms 0
-                      ::narration   narration
-                      ::source      source
-                      ::ending-ns   @current-ns
-                      ::result      result
-                      ::tee         (vec (or tee []))}))]
-    (when (and (:seon.db/ok? recorded) (::ok? result))
-      (bind-admitted-result-var! compile-state (:seon.eval/id recorded)
-                                 (::retained-value recorded)))
-    (if (::ok? result) (vswap! n-ok inc) (vswap! n-fail inc))
+                    (cond->
+                      {:seon.agent.turn/id-of-turn turn-id
+                       ::at          (js/Date.)
+                       ::duration-ms 0
+                       ::narration   narration
+                       ::source      source
+                       ::ending-ns   @current-ns
+                       ::result      result
+                       ::tee         (vec (or tee []))}
+                      expected-coordinate
+                      (assoc ::db/expected-coordinate expected-coordinate))))]
+    (when-not (stale-coordinate-failure? recorded)
+      (when (and (:seon.db/ok? recorded) (::ok? result) committed!)
+        (await (committed!)))
+      (when (and (:seon.db/ok? recorded) (::ok? result))
+        (bind-admitted-result-var! compile-state (:seon.eval/id recorded)
+                                   (::retained-value recorded)))
+      (if (::ok? result) (vswap! n-ok inc) (vswap! n-fail inc)))
     recorded))
+
+(defn- ^:async retry-repl-form-record!
+  "Reacquire and record a special form before applying its local effect."
+  ([request m compile-record committed!]
+   (await (retry-repl-form-record!
+           request m compile-record committed!
+           acquire-repl-form-inputs! record-form-result!)))
+  ([request m compile-record committed! acquire! record!]
+   (loop []
+     (let [acquired (await (acquire! request))
+           prepared (compile-record acquired)
+           record-request
+           (cond-> (merge m prepared)
+             (::db/coordinate acquired)
+             (assoc ::db/expected-coordinate (::db/coordinate acquired))
+             committed!
+             (assoc ::committed! committed!))
+           recorded (await (record! record-request))]
+       (if (stale-coordinate-failure? recorded)
+         (recur)
+         recorded)))))
+
+(defn- unmap-compiled-symbol!
+  "Remove one symbol from the accepted compiler projection."
+  [compile-state ns-sym sym]
+  (swap! compile-state update-in
+         [:cljs.analyzer/namespaces ns-sym :defs] dissoc sym)
+  (when-let [namespace-object
+             (js/goog.getObjectByName (str (cljs.core/munge ns-sym)))]
+    (js/Reflect.deleteProperty namespace-object (cljs.core/munge (str sym))))
+  nil)
 
 (defn ^:async dispatch-repl-form!
   "Execute ONE REPL movement/update form (owner rulings 2026-07-10).
@@ -4985,8 +5043,7 @@
    caller's fold volatiles exactly as eval-form-entry! does."
   {:malli/schema [:=> [:catn [::request :map]] :any]}
   [{::keys [compile-state authored-sources current-ns form narration] :as m}]
-  (let [db (some-> db/*conn* deref)]
-    (case (first form)
+  (case (first form)
       in-ns
       (let [target (quoted-sym (second form))]
         (cond
@@ -5004,10 +5061,8 @@
               (await (record-form-result! (assoc m ::value target))))
 
           ;; Known to the accepted program but not loaded → load it through
-          ;; the one explicit source-map load function, then move. The local
-          ;; DB check remains only for the parent replay caller until its cut.
-          (or (contains? authored-sources (keyword target))
-              (and db (ns-rows-in-db? db target)))
+          ;; the one explicit source-map load function, then move.
+          (contains? authored-sources (keyword target))
           (let [r (await (eval compile-state (str "(require '" target ")")
                                {::starting-ns @current-ns
                                 ::authored-sources authored-sources
@@ -5048,8 +5103,7 @@
 
           (not (or (analyzer-ns-entry? compile-state t)
                    (ns-live-on-globalthis? t)
-                   (contains? authored-sources (keyword t))
-                   (and db (ns-rows-in-db? db t))))
+                   (contains? authored-sources (keyword t))))
           (await (record-form-result!
                    (assoc m ::error
                           (str "No namespace " t " is loaded — nothing to "
@@ -5072,54 +5126,33 @@
             sym-str (when (and ns-arg sym-arg) (str ns-arg "/" sym-arg))
             adef?   (some? (get-in @compile-state
                                    [:cljs.analyzer/namespaces ns-arg
-                                    :defs sym-arg]))
-            fn-row? (when (and db sym-str)
-                      (some? (ffirst (db/query '[:find ?e :in $ ?s
-                                                 :where [?e :seon.fn/sym ?s]]
-                                               db sym-str))))
-            test-row? (when (and db sym-str)
-                        (some? (ffirst (db/query '[:find ?e :in $ ?s
-                                                   :where [?e :seon.test/sym ?s]]
-                                                 db sym-str))))]
-        (cond
-          (or (nil? ns-arg) (nil? sym-arg))
+                                    :defs sym-arg]))]
+        (if (or (nil? ns-arg) (nil? sym-arg))
           (await (record-form-result!
-                   (assoc m ::error (str "ns-unmap takes symbols: "
-                                         "(ns-unmap 'the.ns 'name), or "
-                                         "(ns-unmap 'name) for the current "
-                                         "ns"))))
+                  (assoc m ::error (str "ns-unmap takes symbols: "
+                                        "(ns-unmap 'the.ns 'name), or "
+                                        "(ns-unmap 'name) for the current "
+                                        "ns"))))
+          (await
+           (retry-repl-form-record!
+            {::repl-operation 'ns-unmap ::form-symbol sym-str}
+            m
+            (fn [acquired]
+              (let [attributes (::symbol-attributes acquired)]
+                (cond
+                  (and (not adef?) (empty? attributes))
+                  {::error (str "`" sym-str "` is not defined — "
+                                "nothing to remove.")}
 
-          (not (or adef? fn-row? test-row?))
-          (await (record-form-result!
-                   (assoc m ::error (str "`" sym-str "` is not defined — "
-                                         "nothing to remove."))))
+                  (contains? (::core-boot-function-symbols acquired) sym-str)
+                  {::error (str "`" sym-str "` is a compiled core fn — agents "
+                                "cannot remove core. Define and remove in "
+                                "your OWN namespaces.")}
 
-          (and db (seq (core-boot-fn-syms db [sym-str])))
-          (await (record-form-result!
-                   (assoc m ::error
-                          (str "`" sym-str "` is a compiled core fn — agents "
-                               "cannot remove core. Define and remove in "
-                               "your OWN namespaces."))))
-
-          :else
-          (let [r (await (eval compile-state
-                               (str "(ns-unmap '" ns-arg " '" sym-arg ")")
-                               {::starting-ns @current-ns
-                                ::authored-sources authored-sources}))]
-            (if-not (::ok? r)
-              (await (record-form-result!
-                       (assoc m ::error
-                              (or (some-> r :seon/error :seon.error/message)
-                                  (str "ns-unmap failed for " sym-str)))))
-              (await (record-form-result!
-                       (assoc m ::value true
-                              ::tee (cond-> []
-                                      fn-row?
-                                      (conj [:db/retractEntity
-                                             [:seon.fn/sym sym-str]])
-                                      test-row?
-                                      (conj [:db/retractEntity
-                                             [:seon.test/sym sym-str]])))))))))
+                  :else
+                  {::value true ::tee (ns-unmap-tx sym-str)})))
+            (fn []
+              (unmap-compiled-symbol! compile-state ns-arg sym-arg))))))
 
       ns-unalias
       (let [[ns-arg a] (if (>= (count form) 3)
@@ -5145,23 +5178,39 @@
                                          " — nothing to remove."))))
 
           :else
-          (do
-            (swap! compile-state update-in
-                   [:cljs.analyzer/namespaces ns-arg]
-                   (fn [e] (-> e
+          (let [post-entry (-> entry
                                (update :requires dissoc a)
-                               (update :as-aliases dissoc a))))
-            (let [ns-kw (keyword (str ns-arg))
-                  tee   (when (and db (not (contains? transient-ns-syms
-                                                      ns-arg)))
-                          (vec (concat
-                                 (unalias-decl-tx db ns-kw a)
-                                 (ns-require-edges-tx
-                                   ns-kw
-                                   (analyzer-info/ns-require-edges
-                                     compile-state ns-arg)))))]
+                               (update :as-aliases dissoc a))
+                projected-state
+                (atom (assoc-in @compile-state
+                                [:cljs.analyzer/namespaces ns-arg]
+                                post-entry))
+                require-edges
+                (analyzer-info/ns-require-edges projected-state ns-arg)
+                committed!
+                (fn []
+                  (swap! compile-state assoc-in
+                         [:cljs.analyzer/namespaces ns-arg] post-entry))]
+            (if (contains? transient-ns-syms ns-arg)
               (await (record-form-result!
-                       (assoc m ::value nil ::tee tee))))))))))
+                      (assoc m ::value nil ::committed! committed!)))
+              (await
+               (retry-repl-form-record!
+                {::repl-operation 'ns-unalias
+                 ::form-namespace (keyword (str ns-arg))}
+                m
+                (fn [acquired]
+                  {::value nil
+                   ::tee
+                   (vec
+                    (concat
+                     (unalias-decl-tx
+                      (keyword (str ns-arg)) a
+                      (::stored-source acquired)
+                      (::source-process acquired))
+                     (ns-require-edges-tx
+                      (keyword (str ns-arg)) require-edges)))})
+                committed!))))))))
 
 (defn- ^:async dispatch-eval-entry!
   "Dispatch ONE non-`:read` parsed entry through the per-form mechanism:
