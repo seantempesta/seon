@@ -476,20 +476,26 @@
   [exception]
   {::ok? false ::error (exception-value exception)})
 
+(declare invoke-selected!)
+
 (defn- call-selected!
-  [state {::keys [function-symbol arguments]}]
+  [state invocation {::keys [function-symbol arguments]}]
   (if-let [function-value (eval/lookup-value function-symbol)]
-    (try
-      (-> (js/Promise.resolve (apply function-value arguments))
+    (let [authored? (contains? (::authored-symbols @state) function-symbol)
+          arguments (cond-> arguments
+                      (not authored?)
+                      (conj (partial invoke-selected! state invocation)))]
+      (try
+        (-> (js/Promise.resolve (apply function-value arguments))
           (.then (fn [value]
                    (cond-> {::ok? true ::value value}
-                     (contains? (::authored-symbols @state) function-symbol)
+                     authored?
                      (assoc ::source
                             (get-in @state [::program ::source-by-symbol
                                             function-symbol])))))
           (.catch selected-call-error))
-      (catch :default exception
-        (js/Promise.resolve (selected-call-error exception))))
+        (catch :default exception
+          (js/Promise.resolve (selected-call-error exception)))))
     (js/Promise.resolve
      {::ok? false
       ::error {:seon.error/message
@@ -520,7 +526,7 @@
                   (if (and @load-error
                            (nil? (eval/lookup-value function-symbol)))
                     (js/Promise.resolve (selected-call-error @load-error))
-                    (call-selected! state call)))
+                    (call-selected! state invocation call)))
                 calls)))
         (.then #(vec (array-seq %))))))
 

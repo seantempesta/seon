@@ -246,7 +246,9 @@
                     seval/lookup-value
                     (fn [sym]
                       (when (= 'seon.test/compiled sym)
-                        (fn [value] (inc value))))]
+                        (fn [value invoke-selected!]
+                          (is (fn? invoke-selected!))
+                          (inc value))))]
         (-> (@#'execution/invoke-selected!
               state invocation
               [{::execution/function-symbol 'seon.test/compiled
