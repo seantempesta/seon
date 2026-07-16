@@ -766,15 +766,10 @@
                   [::throwable
                    (ex-info "The database request was canceled."
                             {::job-id job-id ::request-id request-id})])]
-            (when retained
-              (swap! (::state executor)
-                     (fn [current]
+            (swap! (::state executor)
+                   (fn [current]
+                     (cond->
                        (-> current
-                           (assoc-in [::retained-requests request-id ::canceled?]
-                                     true)
-                           (update-in
-                            [::retained-requests request-id ::completed-jobs]
-                            #(into (or % empty-queue) (keys queued)))
                            (remove-queued-results results)
                            (update ::jobs #(apply dissoc % (keys queued)))
                            (update ::jobs
@@ -782,7 +777,13 @@
                                      (reduce
                                       (fn [current job-id]
                                         (assoc-in current [job-id ::canceled?] true))
-                                      jobs (keys running-map))))))))
+                                      jobs (keys running-map)))))
+                       retained
+                       (-> (assoc-in
+                            [::retained-requests request-id ::canceled?] true)
+                           (update-in
+                            [::retained-requests request-id ::completed-jobs]
+                            #(into (or % empty-queue) (keys queued)))))))
             (doseq [[job-id {::keys [result]}] queued]
               (deliver result (outcome-for job-id)))
             (doseq [[job-id {::keys [result]}] running-map]
@@ -795,7 +796,7 @@
                               (seq queued) :queued
                               retained :queued
                               :else :not-found)
-             ::canceled? (boolean retained)
+             ::canceled? (boolean (or retained (seq matching)))
              ::requests (mapv ::request running)
              ::queued (mapv (fn [[job-id work]]
                               [work (outcome-for job-id)])

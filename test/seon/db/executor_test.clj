@@ -210,6 +210,43 @@
         (.countDown release)
         (executor/stop! {::executor/executor worker})))))
 
+(deftest public-request-cancellation-does-not-require-executor-retention
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        worker
+        (start-worker
+         1
+         {:read (fn [request]
+                  (when (:request/block? request)
+                    (.countDown entered)
+                    (.await release))
+                  (:request/value request))})
+        exact-scope (scope "a" (random-uuid) (random-uuid))
+        request-id "cancel/request-owned"
+        running
+        (executor/submit-async!
+         (assoc (request worker "a" exact-scope [request-id 0] :running)
+                ::executor/request-id request-id
+                ::executor/request {:request/value :running
+                                    :request/block? true}))]
+    (try
+      (is (.await entered 5 TimeUnit/SECONDS))
+      (let [queued
+            (executor/submit-async!
+             (assoc (request worker "a" exact-scope [request-id 1] :queued)
+                    ::executor/request-id request-id))]
+        (is (await-queued worker 1))
+        (is (= :running
+               (::executor/cancellation
+                (executor/cancel-request!
+                 {::executor/executor worker
+                  ::executor/request-id request-id}))))
+        (is (= ::executor/throwable (first @queued)))
+        (is (= ::executor/throwable (first @running))))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
 (deftest rejection-and-abandoned-work-each-complete-once
   (let [entered (CountDownLatch. 1)
         release (CountDownLatch. 1)

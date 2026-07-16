@@ -629,6 +629,13 @@ scope drain before delivery. The same cut reserves member positions before
 submission so synchronous admission rejection can safely reenter completion,
 and rechecks cancellation after admission so reserved work cannot escape.
 
+Public request cancellation no longer depends on the executor's temporary
+retained-request entry: it finds ordinary jobs by their existing request ID,
+removes queued jobs, marks running jobs canceled, and publishes physical
+completion normally. This is the first deletion prerequisite for moving request
+lifetime wholly into the writer. The focused executor gate passes 26 tests/664
+assertions and the changed writer boundary passes 72 tests/982 assertions.
+
 Selector source review removes the unwired executor `:encode` class. Encoding
 has no database scope, immediate responses also require it, and a rejected
 encode after semantic completion has no honest response path. The transport
