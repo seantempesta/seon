@@ -188,31 +188,19 @@
   "The set of skill names currently loaded in `agent-id`'s context — derived
    from its `:skill/<name>` block names, no stored flag. #{} when no agent or
    none loaded."
-  [db agent-id]
-  (if (nil? agent-id)
-    #{}
-    (->> (db/query '[:find [?n ...]
-                     :in $ ?aid
-                     :where
-                     [?a :seon.agent/id ?aid]
-                     [?a :seon.agent/ctx ?b]
-                     [?b :seon.agent.ctx/name ?n]]
-                   db agent-id)
-         (filter #(= "skill" (namespace %)))
-         (map #(keyword (name %)))
-         set)))
+  [rows]
+  (->> rows
+       (filter #(= "skill" (namespace %)))
+       (map #(keyword (name %)))
+       set))
 
 (defn- catalog-entries
-  "The derived skill catalog over `db`: one entry per `:my.skills/*` row
+  "The derived skill catalog over ordinary rows: one entry per `:my.skills/*` row
    (name + description), each marked `::loaded?` against `agent-id`'s own
    loaded `:skill/*` blocks. Sorted by name. Pure derivation."
-  [db agent-id]
-  (let [loaded (loaded-skill-names db agent-id)]
-    (->> (db/query '[:find ?n ?d
-                     :where
-                     [?e :my.skills/name ?n]
-                     [?e :my.skills/description ?d]]
-                   db)
+  [catalog-rows loaded-rows]
+  (let [loaded (loaded-skill-names loaded-rows)]
+    (->> catalog-rows
          (sort-by first)
          (mapv (fn [[n d]]
                  {:my.skills/name        n
@@ -233,9 +221,10 @@
      (my.skills/load :datahike)   ; its body now rides your prompt; unload when done"
   {:malli/schema [:=> [:catn [::skill-name :my.skills/name]] ::result]}
   [skill-name]
-  (let [exists? (some? (db/query '[:find ?e . :in $ ?n
-                                   :where [?e :my.skills/name ?n]]
-                                 @db/*conn* skill-name))]
+  (let [exists? (some? (await (db/query
+                               {:seon.db/query '[:find ?e . :in $ ?n
+                                                 :where [?e :my.skills/name ?n]]
+                                :seon.db/args [skill-name]})))]
     (if-not exists?
       {::ok? false
        ::message (str "no skill " skill-name " — (my.skills/list) to see what's available")}
@@ -266,7 +255,7 @@
       {::ok? false
        ::message (str "unload failed: " (:seon.agent.ctx/error res))})))
 
-(defn ^:seon.fn/agent-facing? list
+(defn ^{:async true :seon.fn/agent-facing? true} list
   "The skill catalog: every available skill and whether YOU loaded it.
 
    Each entry carries its description and `::loaded?` — derived from your
@@ -274,41 +263,31 @@
 
      (my.skills/list)
      ; returns «vector: [{:my.skills/name :datahike, :my.skills/description \"…\", :my.skills/loaded? false} …]»"
-  {:malli/schema [:function
-                  [:=> [:cat] [:vector ::catalog-entry]]
-                  [:=> [:catn [::db :seon.db/db]] [:vector ::catalog-entry]]]}
-  ([] (list @db/*conn*))
-  ([db] (catalog-entries db (db/current-agent-id))))
+  {:malli/schema [:=> [:cat] [:vector ::catalog-entry]]}
+  []
+  (let [coordinate (await (db/head-coordinate))
+        agent-id (db/current-agent-id)
+        catalog (await (db/query
+                        {:seon.db/query '[:find ?n ?d
+                                          :where
+                                          [?e :my.skills/name ?n]
+                                          [?e :my.skills/description ?d]]
+                         :seon.db/coordinate coordinate}))
+        loaded (if agent-id
+                 (await (db/query
+                         {:seon.db/query '[:find [?n ...]
+                                           :in $ ?aid
+                                           :where
+                                           [?a :seon.agent/id ?aid]
+                                           [?a :seon.agent/ctx ?b]
+                                           [?b :seon.agent.ctx/name ?n]]
+                          :seon.db/args [agent-id]
+                          :seon.db/coordinate coordinate}))
+                 [])]
+    (catalog-entries catalog loaded)))
 
 ;;; RENDER FNS — the always-on catalog (L0) and the loaded body+footer (L2).
 ;;; Both `;`-comment their text so the whole prompt stays eval-valid Clojure.
-
-(def ^:private catalog-header
-  (str "; SKILLS — loadable knowledge. Each costs nothing here until you load\n"
-       "; its body. Load one with (my.skills/load :name); its full body then\n"
-       "; rides your context showing its token cost — (my.skills/unload :name)\n"
-       "; to drop what you're done with. ● loaded · ○ available."))
-
-(defn- catalog-line
-  [{nm :my.skills/name desc :my.skills/description loaded? ::loaded?}]
-  (str "; - :" (name nm) "  " (if loaded? "● loaded" "○") " — " desc))
-
-(defn catalog-block
-  "DEPRECATED — reference for the `canvas` milestone; see context-rebuild.
-
-   The L0 `:skills-catalog` context block — one `;`-line per skill.
-
-   Each line is cheap: name + description + a DERIVED ●/○ loaded marker.
-   A symbol-slot section wired into `config manifest` at
-   priority 12 (cached prefix). REACTIVE: \"\" when no skill rows exist, so
-   the section drops."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [entries (catalog-entries db id)]
-    (if (empty? entries)
-      ""
-      (str catalog-header "\n"
-           (str/join "\n" (map catalog-line entries))))))
 
 (defn- strip-frontmatter
   "Drop a leading YAML frontmatter block (`---` … `---`) from `text`,
