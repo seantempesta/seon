@@ -148,12 +148,12 @@
        (not (instance? Thread value))
        (if (coll? value) (every? ordinary-data? (seq value)) true)))
 
-(defn- start-authority!
-  [label database-names]
+(defn- start-authority-with-dependencies!
+  [label database-names authority-dependencies]
   (let [path (socket-path label)
         server
         (writer/start!
-         {::writer/dependencies (dependencies)
+         {::writer/dependencies authority-dependencies
           ::writer/database-name (first database-names)
           ::writer/backend :memory
           ::writer/selected-processors 3
@@ -165,6 +165,10 @@
           (throw (ex-info "Could not create remote-contract fixture database."
                           response)))))
     {::server server ::path path ::channel channel}))
+
+(defn- start-authority!
+  [label database-names]
+  (start-authority-with-dependencies! label database-names (dependencies)))
 
 (defn- close-authority!
   [{::keys [server path channel]}]
@@ -284,6 +288,39 @@
                           [(= ?name "name-1")]]
                         [before]))))
             "the old report value remains immutable and usable")))))
+
+(deftest resolve-head-and-acquire-return-the-same-ordinary-database-value
+  (let [database-name (str "remote-acquire-" (random-uuid))]
+    (with-authority [authority "acquire" [database-name]]
+      (let [channel (::channel authority)
+            head
+            (call! channel
+                   (protocol/resolve-head-request
+                    {::protocol/request-id "acquire/head"
+                     ::protocol/database-name database-name}))
+            acquired
+            (call! channel
+                   (protocol/acquire-database-request
+                    {::protocol/request-id "acquire/session"
+                     ::protocol/database-name database-name}))]
+        (is (::protocol/success? head) (pr-str head))
+        (is (::protocol/acquired? acquired) (pr-str acquired))
+        (is (= (:seon.db/db head) (:seon.db/db acquired)))
+        (is (= #{::protocol/success? ::protocol/request-id :seon.db/db}
+               (set (keys head))))
+        (is (= #{::protocol/success? ::protocol/request-id
+                 ::protocol/database-name ::protocol/acquired? :seon.db/db}
+               (set (keys acquired))))
+        (is (= 1
+               (read-result
+                (call! channel
+                       (query-request
+                        "acquire/read"
+                        '[:find ?rank . :in $
+                          :where
+                          [?e :remote.contract/rank ?rank]
+                          [(< ?rank 10)]]
+                        [(:seon.db/db acquired)])))))))))
 
 (deftest query-preserves-every-find-result-shape
   (let [database-name (str "remote-shapes-" (random-uuid))]
@@ -728,6 +765,96 @@
         (is (every? ordinary-data?
                     [first-page second-page empty-page reverse-page
                      history-page]))))))
+
+(deftest knn-validates-before-provider-and-resolves-again-for-native-work
+  (let [database-name (str "remote-knn-" (random-uuid))
+        provider-calls (atom [])
+        knn-calls (atom [])
+        authority-dependencies
+        (assoc
+         (dependencies)
+         ::writer/query-vec
+         (fn [request]
+           (swap! provider-calls conj
+                  {:request request
+                   :thread (.getName (Thread/currentThread))})
+           {:seon.embed/vector [1.0 0.0]})
+         ::writer/knn
+         (fn [database vector limit entity-ids]
+           (swap! knn-calls conj
+                  {:commit-id (d/commit-id database)
+                   :vector vector
+                   :limit limit
+                   :entity-ids entity-ids
+                   :thread (.getName (Thread/currentThread))})
+           [{:entity-id 42 :distance 0.25}]))
+        authority
+        (start-authority-with-dependencies!
+         "knn" [database-name] authority-dependencies)]
+    (try
+      (let [channel (::channel authority)
+            frozen (database-value database-name)
+            search!
+            (fn [request-id database]
+              (call!
+               channel
+               (protocol/knn-search-request
+                {::protocol/request-id request-id
+                 :seon.db/db database
+                 ::protocol/query "nearest"
+                 ::protocol/limit 3
+                 ::protocol/entity-ids [42 99]})))
+            current-response (search! "knn/current" frozen)
+            _
+            (call!
+             channel
+             (transact-request
+              "knn/advance" frozen
+              [{:db/ident :remote.contract/knn-advanced
+                :db/valueType :db.type/boolean
+                :db/cardinality :db.cardinality/one}]
+              nil))
+            materializations (atom 0)
+            releases (atom 0)
+            original-materialize d/commit-as-db
+            original-release d/release-materialized-db
+            historical-response
+            (with-redefs
+              [d/commit-as-db
+               (fn [& arguments]
+                 (swap! materializations inc)
+                 (apply original-materialize arguments))
+               d/release-materialized-db
+               (fn [database]
+                 (swap! releases inc)
+                 (original-release database))]
+              (search! "knn/historical" frozen))
+            temporal-response
+            (search! "knn/temporal" (assoc frozen :as-of (:t frozen)))
+            missing-response
+            (search! "knn/missing"
+                     (assoc frozen :datahike/commit-id (random-uuid)))]
+        (is (= [{:seon.embed/eid 42 :seon.embed/distance 0.25}]
+               (::protocol/hits current-response)))
+        (is (= (::protocol/hits current-response)
+               (::protocol/hits historical-response)))
+        (is (= 2 @materializations)
+            "validation does not retain a database across provider I/O")
+        (is (= 2 @releases))
+        (is (= protocol/protocol-error
+               (::protocol/error-kind temporal-response)))
+        (is (= protocol/not-found-error
+               (::protocol/error-kind missing-response)))
+        (is (= 2 (count @provider-calls))
+            "invalid database values never invoke the embedding provider")
+        (is (= 2 (count @knn-calls)))
+        (is (every? #{(:datahike/commit-id frozen)}
+                    (map :commit-id @knn-calls)))
+        (is (every? #(not= (:thread %) (:thread (first @knn-calls)))
+                    @provider-calls)
+            "provider and KNN use separately bounded worker classes"))
+      (finally
+        (close-authority! authority)))))
 
 (deftest keyed-listeners-preserve-commit-order-and-isolation
   (let [prefix (str "remote-listen-" (random-uuid))

@@ -730,87 +730,6 @@
     (query-plan request)
     {::routing-descriptors [(:seon.db/db request)]}))
 
-(declare ancestor-commit?)
-
-(defn- pinned-database
-  [{::keys [database-name scope connection primary-only?]
-    attachment ::coordinate/attachment
-    request ::request}]
-  (let [conn connection
-        expected-attachment (::protocol/attachment request)
-        expected-coordinate (::protocol/coordinate request)]
-    (when-not (and conn (= attachment expected-attachment))
-      (throw
-       (ex-info "The database attachment is no longer current."
-                {::failure-kind protocol/stale-coordinate-error
-                 ::protocol/expected-coordinate expected-coordinate})))
-    (let [head (d/db conn)
-          head-coordinate (coordinate/resolved head)
-          containing-db
-          (if (= (::coordinate/commit-id expected-coordinate)
-                 (::coordinate/commit-id head-coordinate))
-            head
-            (if primary-only?
-              (d/commit-as-db
-               conn (::coordinate/commit-id expected-coordinate)
-               {:secondary-indices? false})
-              (d/commit-as-db
-               conn (::coordinate/commit-id expected-coordinate))))
-          release? (and containing-db (not (identical? head containing-db)))]
-      (try
-        (when-not (and containing-db
-                       (= (::coordinate/database-id expected-coordinate)
-                          (::coordinate/database-id
-                           (coordinate/resolved containing-db)))
-                       (= (::coordinate/commit-id expected-coordinate)
-                          (d/commit-id containing-db))
-                       (ancestor-commit?
-                        head (::coordinate/commit-id expected-coordinate))
-                       (= scope
-                          (committed-scope database-name attachment containing-db)))
-          (throw
-           (ex-info "The requested database coordinate is unavailable."
-                    {::failure-kind protocol/stale-coordinate-error
-                     ::protocol/expected-coordinate expected-coordinate
-                     ::protocol/current-coordinate head-coordinate})))
-        (let [verified-coordinate
-              (coordinate/at
-               {::coordinate/db-value containing-db
-                ::coordinate/attachment attachment
-                ::coordinate/target-t (::coordinate/t expected-coordinate)})
-              temporal? (< (::coordinate/t expected-coordinate)
-                           (basis-t-of containing-db))]
-          (when-not (= expected-coordinate verified-coordinate)
-            (throw
-             (ex-info "The requested database coordinate is unavailable."
-                      {::failure-kind protocol/stale-coordinate-error
-                       ::protocol/expected-coordinate expected-coordinate
-                       ::protocol/current-coordinate head-coordinate})))
-          {::database-value (if temporal?
-                              (d/as-of containing-db
-                                       (::coordinate/t expected-coordinate))
-                              containing-db)
-           ::containing-database-value containing-db
-           ::release-containing-database? release?
-           ::temporal? temporal?})
-        (catch Throwable throwable
-          (when release?
-            (try
-              (d/release-materialized-db containing-db)
-              (catch Throwable release-error
-                (log/error release-error "failed rejected database value release"
-                           {::protocol/expected-coordinate expected-coordinate}))))
-          (if (= protocol/stale-coordinate-error
-                 (::failure-kind (ex-data throwable)))
-            (throw throwable)
-            (throw
-             (ex-info (or (.getMessage throwable)
-                          "The requested database coordinate is unavailable.")
-                      {::failure-kind protocol/stale-coordinate-error
-                       ::protocol/expected-coordinate expected-coordinate
-                       ::protocol/current-coordinate head-coordinate}
-                      throwable))))))))
-
 (defn- resource-options
   [request]
   (cond-> {}
@@ -879,22 +798,9 @@
    :seon.db/added? (boolean (:added datom))})
 
 (defn- execute-db-read
-  [db-value request caller-id]
+  [db-value request]
   (let [options (resource-options request)]
     (case (::protocol/operation request)
-      :seon.db.protocol.operation/query
-      (update
-       (d/q-with-evidence
-        (merge
-         {:query (::protocol/query-form request)
-          :args (into [(if (true? (::protocol/history? request))
-                        (d/history db-value)
-                        db-value)]
-                      (::protocol/arguments request))
-          :request-id caller-id}
-         options))
-       :datahike.query/result materialize-result)
-
       :seon.db.protocol.operation/pull
       {::protocol/result
        (materialize-result
@@ -948,7 +854,6 @@
     (::resolve-execute-many? work)
     (resolve-execute-many-plan! (::transport-connection work)
                                 (::execute-many-plan work))
-    (::resolve-only? work) (pinned-database work)
     (::transport-connection work)
     (let [resolved
           (resolve-database-value! (::transport-connection work)
@@ -956,34 +861,19 @@
                                    false)]
       (try
         (merge (read-response-base request)
-               (execute-db-read (::database-value resolved) request
-                                (::protocol/request-id request)))
+               (execute-db-read (::database-value resolved) request))
         (finally
           (release-resolved-database-values! [resolved]))))
     (::database-value work)
     (protocol/success
-     (execute-db-read (::database-value work) request (::caller-id work)))
+     (execute-db-read (::database-value work) request))
     :else
-    (let [{::keys [database-value containing-database-value temporal?]}
-          (pinned-database work)]
-      (try
-        (merge (read-response-base request)
-               (execute-db-read database-value request
-                                (::protocol/request-id request)))
-        (finally
-          (d/release-materialized-db containing-database-value))))))
+    (throw
+     (ex-info "The database read reached execution without a resolved value."
+              {::failure-kind protocol/internal-error
+               ::protocol/request-id (::protocol/request-id request)}))))
 
 (declare connection-for-request)
-
-(defn- scope-for-read
-  [transport-connection request]
-  (let [database-name (::protocol/database-name request)
-        {::keys [connection] :as resolved
-         attachment ::coordinate/attachment}
-        (connection-for-request transport-connection request)]
-    (when (= attachment (::protocol/attachment request))
-      (assoc resolved ::scope
-             (committed-scope database-name attachment (d/db connection))))))
 
 (defn- member-failure
   [throwable]
@@ -1858,19 +1748,25 @@
             request ::request}]
   (handle-transact-async runtime connection database-name attachment request))
 
+(defn- assert-knn-database-value!
+  [descriptor]
+  (when (or (some? (:as-of descriptor))
+            (some? (:since descriptor))
+            (true? (:history descriptor)))
+    (throw
+     (ex-info
+      "Semantic search requires an exact committed database value."
+      {::failure-kind protocol/protocol-error
+       :seon.db/db descriptor}))))
+
 (defn- execute-knn-provider!
-  [dependencies {request ::request :as work}]
-  (let [{::keys [containing-database-value
-                 release-containing-database? temporal?]}
-        (pinned-database (assoc work ::primary-only? true))]
-    (try
-      (when temporal?
-        (throw
-         (ex-info "Semantic search is unavailable at an earlier transaction cut."
-                  {::failure-kind protocol/protocol-error})))
-      (finally
-        (when release-containing-database?
-          (d/release-materialized-db containing-database-value)))))
+  [dependencies {request ::request
+                 transport-connection ::transport-connection
+                 :as work}]
+  (assert-knn-database-value! (:seon.db/db request))
+  (let [resolved (resolve-database-value! transport-connection
+                                          (:seon.db/db request) true)]
+    (release-resolved-database-values! [resolved]))
   (let [vector (:seon.embed/vector
                 ((::query-vec dependencies)
                  {:seon.embed/text (::protocol/query request)}))]
@@ -1883,17 +1779,15 @@
     (execute-embedding! dependencies request)))
 
 (defn- execute-knn!
-  [dependencies {request ::request :as work}]
-  (let [{::keys [database-value containing-database-value
-                 release-containing-database? temporal?]}
-        (pinned-database work)]
+  [dependencies {request ::request
+                 transport-connection ::transport-connection
+                 :as work}]
+  (assert-knn-database-value! (:seon.db/db request))
+  (let [resolved (resolve-database-value! transport-connection
+                                          (:seon.db/db request) false)]
     (try
-      (when temporal?
-        (throw
-         (ex-info "Semantic search is unavailable at an earlier transaction cut."
-                  {::failure-kind protocol/protocol-error})))
       (let [rows (or ((::knn dependencies)
-                      database-value (::query-vector work)
+                      (::database-value resolved) (::query-vector work)
                       (long (::protocol/limit request))
                       (seq (::protocol/entity-ids request)))
                      [])]
@@ -1905,8 +1799,7 @@
                          :seon.embed/distance (double distance)})
                       rows))))
       (finally
-        (when release-containing-database?
-          (d/release-materialized-db containing-database-value))))))
+        (release-resolved-database-values! [resolved])))))
 
 (defn- compact-explanation
   [explanation]
@@ -2606,43 +2499,33 @@
     result))
 
 (defn- handle-acquire-database
-  [runtime transport-connection request]
+  [_runtime transport-connection request]
   (when-not transport-connection
     (throw (ex-info "Database acquisition requires a live transport connection."
                     {::protocol/database-name
                      (::protocol/database-name request)})))
   (let [database-name (::protocol/database-name request)
-        attachment (::protocol/attachment request)
         result
         (locking (::connection-lock transport-connection)
           (when @(::closed? transport-connection)
             (throw
              (ex-info "The transport connection closed before acquisition."
-                      {::protocol/database-name database-name
-                       ::protocol/attachment attachment})))
+                      {::protocol/database-name database-name})))
           (let [result
-                (try
-                  (registry/acquire-database!
-                   {::registry/database-name (keyword database-name)
-                    ::registry/attachment attachment
-                    ::registry/transport-connection transport-connection})
-                  (catch clojure.lang.ExceptionInfo exception
-                    (if (= :seon.db.registry.error/attachment-conflict
-                           (:seon.error/kind (ex-data exception)))
-                      (throw
-                       (ex-info (.getMessage exception)
-                                (assoc (ex-data exception)
-                                       ::failure-kind
-                                       protocol/attachment-mismatch-error)
-                                exception))
-                      (throw exception))))]
+                (registry/acquire-database!
+                 {::registry/database-name (keyword database-name)
+                  ::registry/transport-connection transport-connection})]
             (swap! (::acquisitions transport-connection)
-                   conj [database-name attachment])
-            result))]
+                   conj [database-name (::registry/attachment result)])
+            result))
+        resolved
+        (registry/resolve-connection
+         {::registry/database-name (keyword database-name)
+          ::registry/transport-connection transport-connection})]
     (protocol/success
      {::protocol/database-name database-name
-      ::protocol/attachment (::registry/attachment result)
-      ::protocol/coordinate (::registry/coordinate result)
+      :seon.db/db
+      (database-value database-name (d/db (::registry/conn resolved)))
       ::protocol/acquired? (::registry/acquired? result)})))
 
 (defn- single-outcome-response
@@ -3136,16 +3019,14 @@
                   protocol/maximum-frame-bytes)})
 
          :seon.db.protocol.operation/resolve-head
-         (let [{::registry/keys [conn database-name attachment coordinate]}
+         (let [{::registry/keys [conn database-name]}
                (registry/resolve-connection
                 {::registry/database-name
                  (keyword (::protocol/database-name request))})]
            (if conn
              (protocol/success
               {::protocol/request-id (::protocol/request-id request)
-               ::protocol/database-name (name database-name)
-               ::protocol/attachment attachment
-               ::protocol/coordinate coordinate})
+               :seon.db/db (database-value (name database-name) (d/db conn))})
              (protocol/failure
               {::protocol/error-kind protocol/not-found-error
                ::protocol/error
@@ -3212,13 +3093,6 @@
          (protocol/failure
           {::protocol/error-kind protocol/internal-error
            ::protocol/error (.toString throwable)}))))))
-
-(defn- stale-coordinate-response
-  [request]
-  (protocol/failure
-   {::protocol/error-kind protocol/stale-coordinate-error
-    ::protocol/error "The database attachment is no longer current."
-    ::protocol/body {::protocol/request-id (::protocol/request-id request)}}))
 
 (defn- submit-single!
   [runtime request-id owner scope submission]
@@ -3348,27 +3222,26 @@
 
 (defn- start-knn-request!
   [runtime transport-connection request request-id owner]
-  (if-let [{::keys [scope connection]
-            attachment ::coordinate/attachment}
-           (scope-for-read transport-connection request)]
+  (let [{::keys [database-name scope scopes]}
+        (query-admission transport-connection
+                         {::routing-descriptors [(:seon.db/db request)]})]
     (submit-single!
      runtime request-id owner scope
      {::executor/executor (::executor runtime)
       ::executor/work-class :provider
-      ::executor/database-name (::protocol/database-name request)
+      ::executor/database-name database-name
       ::executor/scope scope
+      ::executor/scopes scopes
       ::executor/job-id request-id
       ::executor/request-id request-id
       ::executor/request
-      {::database-name (::protocol/database-name request)
+      {::database-name database-name
        ::scope scope
-       ::connection connection
-       ::coordinate/attachment attachment
+       ::scopes scopes
+       ::transport-connection transport-connection
        ::request request}
       ::executor/reserved-work-class :knn
-      ::executor/reserved-request-bytes (* 64 1024)})
-    (deliver-active-request! runtime request-id owner
-                             (stale-coordinate-response request))))
+      ::executor/reserved-request-bytes (* 64 1024)})))
 
 (defn- cancel-active-request!
   [runtime transport-connection request]

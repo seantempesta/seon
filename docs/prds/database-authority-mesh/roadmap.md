@@ -1288,6 +1288,27 @@ schema. The remote contract, query-admission/single-flight contract, and
 protocol/executor/registry gates pass 74 tests and 980 assertions with zero
 failures or errors.
 
+Head resolution, explicit session acquisition, and KNN now use the same
+ordinary database-value seam. Current acquisition selects the route atomically
+inside the registry lock rather than resolving and echoing an internal
+attachment through the protocol. Exact expected attachments remain an internal
+descriptor-read fence. `resolve-head` and acquire both return the complete
+ordinary database value; no read-facing coordinate response remains.
+
+KNN validates and briefly resolves the selected exact committed database before
+provider work, releases it, then resolves the same descriptor again inside the
+separately bounded native KNN phase. This intentionally avoids retaining a
+historical mmap/index owner across slow provider I/O. Current and exact earlier
+commits work; as-of, since, and history modifiers are rejected because
+Proximum's native secondary index has no temporal-wrapper semantics. Invalid or
+unreachable values invoke neither provider nor KNN. Hits remain ordinary
+`{:seon.embed/eid ... :seon.embed/distance ...}` data for explicit later pull
+enrichment. The coordinate-only pinned read resolver, resolve-only job,
+scope-for-read adapter, history flag injection, and stale-coordinate response
+helper are deleted. The focused remote, query-admission, protocol, executor,
+and registry gates pass 76 tests and 996 assertions with zero failures or
+errors.
+
 The source-grounded database-value seam is
 [[research/datahike-remote-database-value-seam-2026-07-16]]. Datahike's native
 `RemoteDB`, `RemoteHistoricalDB`, `RemoteAsOfDB`, and `RemoteSinceDB` records

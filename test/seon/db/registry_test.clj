@@ -118,7 +118,6 @@
       (let [first-acquire
             (registry/acquire-database!
              {::registry/database-name database-name
-              ::registry/attachment attachment
               ::registry/transport-connection connection-a})
             snapshot-after-first
             (::registry/snapshot (registry/snapshot-registry {}))
@@ -157,6 +156,8 @@
               ::registry/attachment attachment
               ::registry/transport-connection connection-b})]
         (is (::registry/acquired? first-acquire))
+        (is (= attachment (::registry/attachment first-acquire))
+            "an omitted expectation atomically selects the current attachment")
         (is (false? (::registry/acquired? duplicate-acquire)))
         (is (= snapshot-after-first snapshot-after-duplicate)
             "a duplicate correct acquire changes neither membership nor Datahike ownership")

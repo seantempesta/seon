@@ -156,7 +156,7 @@
  ::acquire-database!-request
  [:map {:closed true}
   [::database-name ::database-name]
-  [::attachment ::attachment]
+  [::attachment {:optional true} ::attachment]
   [::transport-connection ::transport-connection]])
 (schema/register!
  ::acquire-database!-response
@@ -708,14 +708,17 @@
    The transport connection object remains process-local. Repeating the same
    acquisition is an idempotent no-op. The first connection takes ownership of
    an existing administrative ensure reference; later connections acquire one
-   matching reference through Datahike's own connection registry. The expected
-   attachment is validated before either membership or connection acquisition."
+   matching reference through Datahike's own connection registry. An optional
+   expected attachment is validated before either membership or connection
+   acquisition; omitting it atomically acquires the route that is current while
+   the registry lock is held."
   {:malli/schema [:=> [:cat ::acquire-database!-request]
                   ::acquire-database!-response]}
   [{::keys [database-name attachment transport-connection]}]
   (locking !registry
     (let [entry (require-ready-entry! database-name)
-          _ (when-not (= attachment (::attachment entry))
+          _ (when (and attachment
+                       (not= attachment (::attachment entry)))
               (fail-attachment!
                "The requested database attachment does not match its logical route."
                {::database-name database-name
