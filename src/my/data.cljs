@@ -21,10 +21,9 @@
      REDUCE   sum-by      items + key        → number
               max-by      items + key        → the winning row (or nil)
 
-   The universal arrow is `(reducer (merge (producer …) {:my.data/key k}))`:
-   a producer's envelope already carries `:seon.items/items`, so merging in
-   the key gives a valid reducer request. All four functions are SYNC (reads
-   only — no `^:async`, no Promise to trip on) and map-in/map-out.
+   `rows` is asynchronous because database reads cross the authority session;
+   the three reducers remain pure synchronous functions over its ordinary
+   envelope.
 
    NB rows does NOT clip — aggregation needs every row, so a truncated
    collection would silently corrupt a sum."
@@ -55,7 +54,7 @@
 (schema/register! ::group-request
   [:map [:seon.items/items :seon.items/items] [::group-key ::group-key] [::key ::key]])
 
-(defn ^:seon.fn/agent-facing? rows
+(defn ^{:async true :seon.fn/agent-facing? true} rows
   "Fetch every entity carrying `attr` as self-describing maps.
 
    Attribute-presence as DATA — there are no kinds; you find a set by the
@@ -71,7 +70,10 @@
    ; returns «map: :my.data/group :dining, :my.data/total 106»"
   {:malli/schema [:=> [:cat ::rows-request] :seon.items/envelope]}
   [{::keys [attr]}]
-  (let [items (vec (db/query '[:find [(pull ?e [*]) ...] :in $ ?a :where [?e ?a]] attr))]
+  (let [items (vec (await
+                    (db/query
+                     '[:find [(pull ?e [*]) ...] :in $ ?a :where [?e ?a]]
+                     attr)))]
     {:seon.result/ok?  true
      :seon.items/items items
      :seon.items/count (count items)}))

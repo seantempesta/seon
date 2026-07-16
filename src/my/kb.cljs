@@ -250,26 +250,30 @@
 ;;; :find shape picks the result: bare relation = SET of tuples; `[?x ...]` =
 ;;; one column as a vector; `?x .` = a single scalar.
 
-(defn titles
+(defn ^:async titles
   "List every stored source title.
 
    FIND by attribute presence: every entity asserting `:my.kb.source/title`.
    Collection find `[?t ...]` → one column as a vector."
   {:malli/schema [:=> [:cat] [:vector :string]]}
   []
-  (db/query '[:find [?t ...] :where [?e :my.kb.source/title ?t]]))
+  (await (db/query '[:find [?t ...] :where [?e :my.kb.source/title ?t]])))
 
-(defn title+rating
+(defn ^:async title+rating
   "List every source's title and rating as `[title rating]` pairs.
 
    Relation find — a SET of tuples, JOINING two attrs on one entity
    (`?e` binds both clauses)."
   {:malli/schema [:=> [:cat] [:set [:tuple :string :int]]]}
   []
-  (db/query '[:find ?title ?rating
-              :where [?e :my.kb.source/title ?title] [?e :my.kb.source/rating ?rating]]))
+  (await
+   (db/query
+    '[:find ?title ?rating
+      :where
+      [?e :my.kb.source/title ?title]
+      [?e :my.kb.source/rating ?rating]])))
 
-(defn titles-by-author
+(defn ^:async titles-by-author
   "List the titles of every source by the named author.
 
    `:in`-bound input + REF-JOIN.
@@ -277,13 +281,14 @@
    `:my.kb.source/author`, never by putting the name in the ref slot."
   {:malli/schema [:=> [:catn [::author-name :string]] [:vector :string]]}
   [author-name]
-  (db/query '[:find [?title ...] :in $ ?name
-              :where [?a :my.kb.author/name ?name]
-                     [?s :my.kb.source/author ?a]
-                     [?s :my.kb.source/title ?title]]
-            author-name))
+  (await
+   (db/query '[:find [?title ...] :in $ ?name
+               :where [?a :my.kb.author/name ?name]
+                      [?s :my.kb.source/author ?a]
+                      [?s :my.kb.source/title ?title]]
+             author-name)))
 
-(defn source-stats
+(defn ^:async source-stats
   "Summarize stored sources: count, rating total, and topic tally.
 
    Aggregation toward a question — the analysis built ON TOP of stored
@@ -294,7 +299,7 @@
    impossible — two sources rated 5 stay 5+5=10."
   {:malli/schema [:=> [:cat] ::source-summary]}
   []
-  (let [sources (data/rows {:my.data/attr :my.kb.source/id})
+  (let [sources (await (data/rows {:my.data/attr :my.kb.source/id}))
         items   (:seon.items/items sources)]
     {::count        (:seon.items/count sources)
      ::rating-total (data/sum-by {:seon.items/items items
@@ -427,7 +432,7 @@
 ;;; PULL / ENTITY — read one entity by lookup-ref `[identity-attr value]`,
 ;;; which IS the "by name" addressing.
 
-(defn source-detail
+(defn ^:async source-detail
   "Fetch one source with its author and findings, by id.
 
    Pull by LOOKUP-REF.
@@ -436,18 +441,20 @@
    its fields."
   {:malli/schema [:=> [:catn [::id :string]] :any]}
   [id]
-  (db/pull '[* {:my.kb.source/author [:my.kb.author/name]}]
-           [:my.kb.source/id id]))
+  (await
+   (db/pull '[* {:my.kb.source/author [:my.kb.author/name]}]
+            [:my.kb.source/id id])))
 
-(defn source-entity
+(defn ^:async source-entity
   "Fetch one source as a plain map, nil when the id is unknown.
 
    Looks up the entity by lookup-ref.
-   The touched map is `:db/id` + every attr. A ref reads back as
-   `{:db/id N}`; drill in with a follow-up `entity`/`pull`."
+   The returned map is `:db/id` plus every attribute. A plain ref reads back as
+   `{:db/id N}`; use [[source-detail]] or a narrower `seon.db/pull` pattern to
+   traverse it."
   {:malli/schema [:=> [:catn [::id :string]] :any]}
   [id]
-  (db/entity [:my.kb.source/id id]))
+  (await (db/pull '[*] [:my.kb.source/id id])))
 
 ;;; WORKFLOW — store data, then build fns that turn it into answers: switch
 ;;; into a domain, register its schema, transact rows, run your analysis fn.
@@ -462,5 +469,5 @@
   (register-kb-schema!)
   (let [{::db/keys [ok?] :as envelope} (await (remember-sources!))]
     (if ok?
-      (source-stats)
+      (await (source-stats))
       envelope)))
