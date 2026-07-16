@@ -28,6 +28,14 @@ startup, hot reload, or a later supervisor retry.
 - A different selection must remain a loud conflict because one Bun process
   owns exactly one database attachment.
 
+The first correction now stores the complete opening Promise in the one session
+state. A same-selection caller joins it; publication succeeds only while the
+original owner still owns the state. Focused proof performs two concurrent
+opens and observes one native connect, one capability/ensure/acquire sequence,
+and equal ordinary results. The session gate passes 7 tests and 41 assertions.
+Failure fanout, conflicting selection, and close-during-opening remain to close
+this issue.
+
 ## Owner
 
 The existing process-local session state in `seon.db`. The native transport

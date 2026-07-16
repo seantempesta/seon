@@ -505,13 +505,29 @@
     :as selection}]
   (let [owner (js-obj)
         claimed? (atom false)
+        published? (atom false)
         opened-session (atom nil)]
+    ;; Same-selection callers share the complete connect/negotiate/ensure/
+    ;; acquire transition. The transport remains selection-agnostic; this is
+    ;; the one process-level owner of database session opening.
+    (let [resolve-opening (atom nil)
+          reject-opening (atom nil)
+          opening
+          (js/Promise.
+           (fn [resolve reject]
+             (reset! resolve-opening resolve)
+             (reset! reject-opening reject)))]
+      ;; Mark a failed opening as observed even when there was no joiner. A
+      ;; later same-selection caller still awaits the original Promise and sees
+      ;; the same rejection.
+      (.catch opening (fn [_] nil))
     (swap! !session
            (fn [current]
              (cond
                (nil? current)
                (do (reset! claimed? true)
                    {::owner owner ::selection selection
+                    ::opening opening
                     ::interest-handlers {}})
 
                (and (= selection (::selection current))
@@ -522,13 +538,19 @@
                :else current)))
     (if-not @claimed?
       (let [current @!session]
-        (if (and (= selection (::selection current))
-                 (::session current)
-                 (uds/connected? (::session current)))
+        (cond
+          (and (= selection (::selection current))
+               (::session current)
+               (uds/connected? (::session current)))
           {::database-name (::database-name current)
            ::attachment (::attachment current)
            ::coordinate (::opened-coordinate current)
            ::capabilities (::capabilities current)}
+
+          (and (= selection (::selection current)) (::opening current))
+          (await (::opening current))
+
+          :else
           (throw (ex-info "Another database session owns this process."
                           {::selection selection
                            :seon.error/kind :core-bug}))))
@@ -579,6 +601,11 @@
                   (throw (ex-info "Acquiring the database failed."
                                   acquire-response)))
               opened-coordinate (::protocol/coordinate acquire-response)
+              result {::database-name database-name
+                      ::attachment attachment
+                      ::coordinate opened-coordinate
+                      ::capabilities (::protocol/capabilities
+                                      capabilities-response)}
               state {::owner owner
                      ::selection selection
                      ::session session
@@ -590,18 +617,24 @@
                      ::interest-handlers {}}]
           (swap! !session
                  (fn [current]
-                   (if (identical? owner (::owner current)) state current)))
-          {::database-name database-name
-           ::attachment attachment
-           ::coordinate opened-coordinate
-           ::capabilities (::capabilities state)})
+                   (if (identical? owner (::owner current))
+                     (do (reset! published? true) state)
+                     current)))
+          (when-not @published?
+            (uds/close! session)
+            (throw (ex-info "Database session closed while opening."
+                            {::selection selection
+                             :seon.error/kind :core-bug})))
+          (@resolve-opening result)
+          result)
         (catch :default exception
           (when-let [session @opened-session]
             (uds/close! session))
           (swap! !session
                  (fn [current]
                    (if (identical? owner (::owner current)) nil current)))
-          (throw exception))))))
+          (@reject-opening exception)
+          (throw exception)))))))
 
 (defn close-session!
   "Close this process's database session before settling pending work."

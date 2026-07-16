@@ -189,6 +189,37 @@
                   (is false (str "session handshake rejected: " error))
                   (done))))))
 
+(deftest concurrent-same-selection-open-shares-the-complete-handshake
+  (async done
+    (-> (with-fake-authority
+          (fn [{::keys [requests]}]
+            (let [connect-count (atom 0)
+                  resolve-connect (atom nil)
+                  opening
+                  (js/Promise.
+                   (fn [resolve _reject]
+                     (reset! resolve-connect resolve)))]
+              (set! uds/connect!
+                    (fn [_]
+                      (swap! connect-count inc)
+                      opening))
+              (let [first-open (open!)
+                    second-open (open!)]
+                (@resolve-connect {::fake-session true})
+                (-> (js/Promise.all #js [first-open second-open])
+                    (.then
+                     (fn [opened]
+                       (is (= 1 @connect-count))
+                       (is (= (aget opened 0) (aget opened 1)))
+                       (is (= [:seon.db.protocol.operation/capabilities
+                               :seon.db.protocol.operation/ensure-database
+                               :seon.db.protocol.operation/acquire-database]
+                              (mapv ::protocol/operation @requests))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "shared session opening rejected: " error))
+                  (done))))))
+
 (deftest reads-use-explicit-then-scoped-then-resolved-coordinates
   (async done
     (-> (with-fake-authority
