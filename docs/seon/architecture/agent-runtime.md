@@ -775,14 +775,15 @@ bitemporal, reactive DB. We have one, so:
 - **No external fencing/lease service (Chubby/etcd).** The run-id on the agent
   record IS the fence; the single writer gives the ordering.
 - **No heartbeat service.** One `last-beat-at` datom; fleet status = one unfiltered
-  query, live over `listen!`.
+  query, woken by one database interest.
 - **No core.async.flow port.** JVM-only, and CLJS channels are single-threaded — no
   parallelism. We borrow its *patterns* (initial state, transition fn, supervision),
   not its channels.
-- **Dead-letter queue / event stream / state-at-T = native.** Hop-exhausted datoms
-  are the dead-letter; the tx-log + `since`-replay IS the event stream; datahike
-  `as-of` is "state at T". Port datahike's primitives — don't roll our own
-  ([[datahike-primer]]).
+- **Dead-letter / history / state-at-T = native.** Hop-exhausted datoms are the
+  dead-letter; Datahike transaction history is the durable audit source; and
+  `as-of` is "state at T". Live processes use selective interests and reread
+  current truth rather than replaying a transaction feed into a replica. Port
+  Datahike's primitives — don't roll our own ([[datahike-primer]]).
 
 ## Detail docs
 

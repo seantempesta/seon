@@ -178,10 +178,11 @@ receipt, not a domain identity.
 That receipt is one transaction-metadata identity plus its content hash and
 protocol version. Caller tempids that must survive a lost reply receive
 same-transaction marker refs. These are durable recovery facts, but they are
-private to `seon.db.protocol`: public transaction reports, replay events,
-changed-attribute routing, and domain datom counts omit every reserved receipt
-attribute. The request ID travels separately on the protocol event solely to
-correlate a replica's own commit with its response.
+private to `seon.db.protocol`: public transaction reports, selective database
+events, changed-attribute routing, and domain datom counts omit every reserved receipt
+attribute. The request ID remains on the transaction response and receipt
+recovery operations. Selective database events carry their interest's existing
+request ID and never expose the mutation receipt or rebuild a local replica.
 
 `:seon.agent.ctx/name` is NOT an identity (see §4.2): it is a plain `:keyword`, a
 per-agent upsert key, not a global identity.
