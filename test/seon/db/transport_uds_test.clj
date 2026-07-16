@@ -9,7 +9,8 @@
            [java.lang.management ManagementFactory]
            [java.nio ByteBuffer]
            [java.nio.channels Channels SocketChannel]
-           [java.util Date UUID]))
+           [java.util Date UUID]
+           [java.util.concurrent CountDownLatch TimeUnit]))
 
 (defn- socket-path
   [label]
@@ -581,18 +582,23 @@
         {close! ::uds/close! send! ::uds/send!}
         (deref control 2000 ::not-opened)]
     (try
-      (is (true? (send! {::event 1})))
-      (is (true? (send! {::event 2})))
+      (is (= uds/send-accepted
+             (::uds/send-status (send! {::event 1}))))
+      (is (= uds/send-accepted
+             (::uds/send-status (send! {::event 2}))))
       (let [input (Channels/newInputStream channel)]
         (is (= [{::event 1} {::event 2}]
                [(uds/read-frame input) (uds/read-frame input)])))
       (wait-until! "addressed response slots"
                    #(zero? @(::uds/authority-response-slot-count server)))
       (close!)
-      (is (false? (send! {::event :after-close-request})))
+      (is (= uds/send-closed
+             (::uds/send-status
+              (send! {::event :after-close-request}))))
       (wait-until! "addressed session close"
                    #(empty? @(::uds/connections server)))
-      (is (false? (send! {::event :after-close})))
+      (is (= uds/send-closed
+             (::uds/send-status (send! {::event :after-close}))))
       (finally
         (.close channel)
         (uds/close-request-server! server)
@@ -624,12 +630,288 @@
                     Integer/MAX_VALUE)
       (wait-until! "partial request slot"
                    #(= 1 @(::uds/authority-response-slot-count server)))
-      (is (true? (send! {::event :while-partial})))
+      (is (= uds/send-accepted
+             (::uds/send-status (send! {::event :while-partial}))))
       (is (= {::event :while-partial} (uds/read-frame input)))
       (write-bytes! channel payload Integer/MAX_VALUE)
       (is (= {::response :partial} (uds/read-frame input)))
       (wait-until! "event and request slots released"
                    #(and (zero? @(::uds/authority-response-slot-count server))
+                         (zero? @(::uds/authority-output-bytes server))))
+      (finally
+        (.close channel)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest addressed-send-admits-without-encoding-and-preserves-session-order
+  (let [path (socket-path "transport-send-admission-order")
+        control (promise)
+        first-entered (promise)
+        second-entered (promise)
+        release-first (CountDownLatch. 1)
+        caller (Thread/currentThread)
+        original-frame @#'seon.db.transport.uds/message-frame
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection!
+          (fn [connection-control]
+            (deliver control connection-control)
+            (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner _request _frame-bytes _complete!] nil)})
+        channel (uds/connect! path)
+        {send! ::uds/send!} (deref control 2000 ::not-opened)]
+    (try
+      (with-redefs-fn
+        {#'seon.db.transport.uds/message-frame
+         (fn [message]
+           (case (::event message)
+             :first
+             (do
+               (deliver first-entered (Thread/currentThread))
+               (.await release-first)
+               (original-frame message))
+
+             :second
+             (do
+               (deliver second-entered (Thread/currentThread))
+               (original-frame message))
+
+             (original-frame message)))}
+        (fn []
+          (let [first-result (send! {::event :first})]
+            (is (= uds/send-accepted (::uds/send-status first-result)))
+            (is (not (identical? caller
+                                 (deref first-entered 2000 ::not-encoding)))
+                "the caller admits while a codec worker performs Transit")
+            (let [second-result (send! {::event :second})]
+              (is (= uds/send-accepted (::uds/send-status second-result)))
+              (is (= ::not-yet
+                     (deref second-entered 50 ::not-yet))
+                  "one session never starts a second concurrent encode")
+              (.countDown release-first)
+              (is (not= ::not-encoding
+                        (deref second-entered 2000 ::not-encoding)))
+              (let [input (Channels/newInputStream channel)]
+                (is (= [{::event :first} {::event :second}]
+                       [(uds/read-frame input) (uds/read-frame input)])))
+              (is (= uds/send-accepted
+                     (deref (::uds/send-completion first-result)
+                            2000 ::not-complete)))
+              (is (= uds/send-accepted
+                     (deref (::uds/send-completion second-result)
+                            2000 ::not-complete)))))))
+      (finally
+        (.countDown release-first)
+        (.close channel)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest separate-sessions-encode-in-parallel
+  (let [path (socket-path "transport-send-parallel")
+        controls (atom [])
+        both-entered (CountDownLatch. 2)
+        release-encodes (CountDownLatch. 1)
+        original-frame @#'seon.db.transport.uds/message-frame
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection!
+          (fn [connection-control]
+            (swap! controls conj connection-control)
+            (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner _request _frame-bytes _complete!] nil)})
+        channels [(uds/connect! path) (uds/connect! path)]]
+    (try
+      (wait-until! "two physical session controls" #(= 2 (count @controls)))
+      (with-redefs-fn
+        {#'seon.db.transport.uds/message-frame
+         (fn [message]
+           (.countDown both-entered)
+           (.await release-encodes)
+           (original-frame message))}
+        (fn []
+          (let [results
+                (mapv (fn [control n]
+                        ((::uds/send! control) {::event n}))
+                      @controls [1 2])]
+            (is (every? #(= uds/send-accepted (::uds/send-status %))
+                        results))
+            (is (.await both-entered 2 TimeUnit/SECONDS)
+                "different sessions occupy different bounded codec workers")
+            (.countDown release-encodes)
+            (is (= #{1 2}
+                   (into #{}
+                         (map (fn [channel]
+                                (::event
+                                 (uds/read-frame
+                                  (Channels/newInputStream channel)))))
+                         channels)))
+            (is (every? #(= uds/send-accepted
+                            (deref (::uds/send-completion %)
+                                   2000 ::not-complete))
+                        results)))))
+      (finally
+        (.countDown release-encodes)
+        (run! #(.close ^SocketChannel %) channels)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest session-pressure-closes-only-that-session
+  (let [path (socket-path "transport-session-pressure")
+        controls (atom [])
+        closed (atom [])
+        slow-entered (promise)
+        release-slow (CountDownLatch. 1)
+        original-frame @#'seon.db.transport.uds/message-frame
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/maximum-response-slots 4
+          ::uds/maximum-session-response-slots 1
+          ::uds/open-connection!
+          (fn [connection-control]
+            (let [owner (assoc connection-control ::connection-id (random-uuid))]
+              (swap! controls conj owner)
+              owner))
+          ::uds/close-connection! #(swap! closed conj (::connection-id %))
+          ::uds/handler
+          (fn [_owner _request _frame-bytes _complete!] nil)})
+        channels [(uds/connect! path) (uds/connect! path)]]
+    (try
+      (wait-until! "two session owners" #(= 2 (count @controls)))
+      (let [[slow healthy] @controls
+            [slow-channel healthy-channel] channels]
+        (with-redefs-fn
+          {#'seon.db.transport.uds/message-frame
+           (fn [message]
+             (when (= :slow (::event message))
+               (deliver slow-entered true)
+               (.await release-slow))
+             (original-frame message))}
+          (fn []
+            (is (= uds/send-accepted
+                   (::uds/send-status ((::uds/send! slow)
+                                       {::event :slow}))))
+            (is (= true (deref slow-entered 2000 ::not-entered)))
+            (is (= uds/send-session-full
+                   (::uds/send-status ((::uds/send! slow)
+                                       {::event :too-many}))))
+            (is (= uds/send-accepted
+                   (::uds/send-status ((::uds/send! healthy)
+                                       {::event :healthy}))))
+            (is (= {::event :healthy}
+                   (uds/read-frame (Channels/newInputStream healthy-channel))))
+            (wait-until! "only slow owner cleanup" #(= 1 (count @closed)))
+            (is (= #{(::connection-id slow)} (set @closed)))
+            (is (= uds/send-accepted
+                   (::uds/send-status ((::uds/send! healthy)
+                                       {::event :still-healthy}))))
+            (is (= {::event :still-healthy}
+                   (uds/read-frame (Channels/newInputStream healthy-channel))))
+            (.countDown release-slow)
+            (try (.close ^SocketChannel slow-channel) (catch Throwable _)))))
+      (finally
+        (.countDown release-slow)
+        (run! #(try (.close ^SocketChannel %) (catch Throwable _)) channels)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest authority-pressure-does-not-close-the-current-session
+  (let [path (socket-path "transport-authority-pressure")
+        controls (atom [])
+        closed (atom 0)
+        first-entered (promise)
+        release-first (CountDownLatch. 1)
+        original-frame @#'seon.db.transport.uds/message-frame
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/maximum-response-slots 1
+          ::uds/maximum-session-response-slots 2
+          ::uds/open-connection!
+          (fn [connection-control]
+            (swap! controls conj connection-control)
+            (Object.))
+          ::uds/close-connection! (fn [_owner] (swap! closed inc))
+          ::uds/handler
+          (fn [_owner _request _frame-bytes _complete!] nil)})
+        channels [(uds/connect! path) (uds/connect! path)]]
+    (try
+      (wait-until! "two authority-pressure sessions"
+                   #(= 2 (count @controls)))
+      (let [[first-control current-control] @controls
+            [first-channel current-channel] channels]
+        (with-redefs-fn
+          {#'seon.db.transport.uds/message-frame
+           (fn [message]
+             (when (= :occupies-authority (::event message))
+               (deliver first-entered true)
+               (.await release-first))
+             (original-frame message))}
+          (fn []
+            (is (= uds/send-accepted
+                   (::uds/send-status
+                    ((::uds/send! first-control)
+                     {::event :occupies-authority}))))
+            (is (= true (deref first-entered 2000 ::not-entered)))
+            (is (= uds/send-authority-full
+                   (::uds/send-status
+                    ((::uds/send! current-control) {::event :deferred}))))
+            (Thread/sleep 25)
+            (is (zero? @closed))
+            (is (= 2 (count @(::uds/connections server))))
+            (.countDown release-first)
+            (is (= {::event :occupies-authority}
+                   (uds/read-frame (Channels/newInputStream first-channel))))
+            (wait-until! "authority response slot release"
+                         #(zero? @(::uds/authority-response-slot-count server)))
+            (is (= uds/send-accepted
+                   (::uds/send-status
+                    ((::uds/send! current-control) {::event :retried}))))
+            (is (= {::event :retried}
+                   (uds/read-frame (Channels/newInputStream current-channel)))))))
+      (finally
+        (.countDown release-first)
+        (run! #(try (.close ^SocketChannel %) (catch Throwable _)) channels)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest asynchronous-encode-failure-is-reported-and-closes-that-session
+  (let [path (socket-path "transport-encode-failure")
+        control (promise)
+        closed (atom 0)
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection!
+          (fn [connection-control]
+            (deliver control connection-control)
+            (Object.))
+          ::uds/close-connection! (fn [_owner] (swap! closed inc))
+          ::uds/handler
+          (fn [_owner _request _frame-bytes _complete!] nil)})
+        channel (uds/connect! path)
+        {send! ::uds/send!} (deref control 2000 ::not-opened)]
+    (try
+      (with-redefs-fn
+        {#'seon.db.transport.uds/message-frame
+         (fn [_message] (throw (ex-info "deliberate encode failure" {})))}
+        (fn []
+          (let [result (send! {::event :broken})]
+            (is (= uds/send-accepted (::uds/send-status result))
+                "admission remains independent from worker encoding")
+            (is (= uds/send-encode-failed
+                   (deref (::uds/send-completion result)
+                          2000 ::not-complete))))))
+      (wait-until! "encode-failed session cleanup" #(= 1 @closed))
+      (wait-until! "encode-failed resource release"
+                   #(and (empty? @(::uds/connections server))
+                         (zero? @(::uds/authority-response-slot-count server))
                          (zero? @(::uds/authority-output-bytes server))))
       (finally
         (.close channel)
@@ -780,6 +1062,7 @@
 
 (deftest forced-close-retains-encoding-until-the-worker-releases-it
   (let [path (socket-path "transport-encoding-close")
+        control (promise)
         encode-entered (promise)
         release-encode (atom false)
         original-frame @#'seon.db.transport.uds/message-frame
@@ -787,12 +1070,16 @@
         (uds/start-request-server!
          {::uds/socket-path path
           ::uds/shutdown-timeout-ms 25
-          ::uds/open-connection! (fn [_control] (Object.))
+          ::uds/open-connection!
+          (fn [connection-control]
+            (deliver control connection-control)
+            (Object.))
           ::uds/close-connection! (constantly nil)
           ::uds/handler
           (fn [_owner _request _frame-bytes complete!]
             (complete! {::response :blocked-encode}))})
-        channel (uds/connect! path)]
+        channel (uds/connect! path)
+        {send! ::uds/send!} (deref control 2000 ::not-opened)]
     (try
       (with-redefs-fn
         {#'seon.db.transport.uds/message-frame
@@ -809,11 +1096,16 @@
           (write-bytes! channel (frame-bytes {::request :encode})
                         Integer/MAX_VALUE)
           (is (= true (deref encode-entered 2000 ::encode-not-entered)))
-          (let [first-close (uds/close-request-server! server)]
+          (let [pending (send! {::event :pending-behind-encode})
+                first-close (uds/close-request-server! server)]
+            (is (= uds/send-accepted (::uds/send-status pending)))
             (is (true? (::uds/selector-stopped? first-close)))
             (is (false? (::uds/workers-stopped? first-close)))
             (is (false? (::uds/cleanup-stopped? first-close)))
             (is (= 1 @(::uds/authority-response-slot-count server)))
+            (is (= uds/send-closed
+                   (deref (::uds/send-completion pending)
+                          2000 ::pending-not-abandoned)))
             (is (= 1 (count @(::uds/connections server))))
             (reset! release-encode true)
             (let [final-close (uds/close-request-server! server)]
