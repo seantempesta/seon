@@ -506,12 +506,22 @@
    (::selector session) (::commands session)
    #(close-session! connections workers close-connection! session)))
 
+(defn- take-pending-encode!
+  [session]
+  (locking (::send-lock session)
+    (if-let [pending
+             (.pollFirst ^ArrayDeque (::pending-encodes session))]
+      pending
+      (do
+        ;; The empty observation and idle publication are one transition.
+        ;; Admission takes this same lock before appending and scheduling.
+        (.set ^AtomicBoolean (::encoding-active? session) false)
+        nil))))
+
 (defn- encode-session!
   [connections workers close-connection! shutting-down? session]
   (loop []
-    (let [pending
-          (locking (::send-lock session)
-            (.pollFirst ^ArrayDeque (::pending-encodes session)))]
+    (let [pending (take-pending-encode! session)]
       (if pending
         (let [slot (::response-slot pending)]
           (.set ^AtomicBoolean (::encoding? slot) true)
@@ -534,11 +544,7 @@
                 (recur))
               (fail-session-encoding!
                connections workers close-connection! session pending))))
-        (locking (::send-lock session)
-          (.set ^AtomicBoolean (::encoding-active? session) false)
-          ;; Admission appends only under this lock, so clearing the flag while
-          ;; the queue is empty cannot strand a later message.
-          nil)))))
+        nil))))
 
 (defn- close-session-after-admission-failure!
   [connections workers close-connection! session]

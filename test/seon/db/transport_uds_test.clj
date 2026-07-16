@@ -9,8 +9,9 @@
            [java.lang.management ManagementFactory]
            [java.nio ByteBuffer]
            [java.nio.channels Channels SocketChannel]
-           [java.util Date UUID]
-           [java.util.concurrent CountDownLatch TimeUnit]))
+           [java.util ArrayDeque Date UUID]
+           [java.util.concurrent CountDownLatch TimeUnit]
+           [java.util.concurrent.atomic AtomicBoolean]))
 
 (defn- socket-path
   [label]
@@ -708,6 +709,40 @@
         (.close channel)
         (uds/close-request-server! server)
         (.delete (File. path))))))
+
+(deftest idle-encoding-handoff-cannot-strand-concurrent-admission
+  (let [poll-entered (promise)
+        release-poll (CountDownLatch. 1)
+        queue
+        (proxy [ArrayDeque] []
+          (pollFirst []
+            (deliver poll-entered true)
+            (.await release-poll)
+            (proxy-super pollFirst)))
+        send-lock (Object.)
+        encoding-active? (AtomicBoolean. true)
+        session {::uds/send-lock send-lock
+                 ::uds/pending-encodes queue
+                 ::uds/encoding-active? encoding-active?}
+        drain-handoff
+        (future
+          (#'seon.db.transport.uds/take-pending-encode! session))]
+    (try
+      (is (= true (deref poll-entered 2000 ::poll-not-entered)))
+      (let [admission
+            (future
+              (locking send-lock
+                (.addLast ^ArrayDeque queue {::event :arrived-at-handoff})
+                (.get encoding-active?)))]
+        (is (= ::blocked (deref admission 50 ::blocked))
+            "admission cannot enter after the empty poll but before idle")
+        (.countDown release-poll)
+        (is (nil? (deref drain-handoff 2000 ::handoff-blocked)))
+        (is (false? (deref admission 2000 ::admission-blocked))
+            "admission observes idle and therefore schedules a new drain")
+        (is (= {::event :arrived-at-handoff} (.peekFirst queue))))
+      (finally
+        (.countDown release-poll)))))
 
 (deftest separate-sessions-encode-in-parallel
   (let [path (socket-path "transport-send-parallel")
