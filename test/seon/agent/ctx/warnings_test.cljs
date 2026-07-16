@@ -19,6 +19,7 @@
     [seon.agent.ctx.warnings :as warnings]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.protocol :as protocol]
     [seon.instrument :as instrument]))
 
 ;; Two namespaces of fns: one carrying a contract defect (a public fn
@@ -47,34 +48,71 @@
                  (-> (db/transact! {:seon.db/tx-data (seed-tx)})
                      (.then (fn [_] (body @conn)))))))))
 
+(def ^:private coordinate
+  {:seon.db.coordinate/database-id "warnings-test"
+   :seon.db.coordinate/branch :db
+   :seon.db.coordinate/commit-id "commit"
+   :seon.db.coordinate/t 1})
+
+(defn- member [result]
+  {::protocol/success? true ::protocol/result result})
+
+(defn- acquisition-responses []
+  [{::db/coordinate coordinate
+    ::db/results
+    [(member [])
+     (member [[:wtest.warns (js/Date. 1) 1]])
+     (member
+       [["wtest.warns/no-spec" :wtest.warns "" true false ""]
+        ["wtest.clean/ok" :wtest.clean
+         "[:=> [:cat :string] :string]" true false ""]])
+     {::protocol/success? true ::protocol/schema {}}
+     (member [])
+     (member [])
+     (member [])]}
+   {::db/coordinate coordinate
+    ::db/results (vec (repeat 7 (member [])))}])
+
 (defn- block-for
-  "Render the warnings block the way the render engine calls it: the
-   block's own map (carrying the scope override) arrives as
-   :seon.render/node."
-  [db scope-kw]
+  [scope-kw]
   (warnings/warnings-block
-    {:seon.db/db       db
-     :seon.agent/id    "wtest-agent"
-     :seon.render/node {:seon.warn/ns scope-kw}}))
+    {:seon.agent/id "wtest-agent"
+     :seon.agent/entity {:seon.agent/id "wtest-agent"}
+     :seon.render/node {:seon.warn/ns scope-kw}}
+    nil))
 
 (deftest warnings-block-honors-scope-override-on-the-block-node
   (async done
-    (-> (with-seeded-db
-          (fn [db]
-            (testing "override scoping the corpus checks to the defective ns RENDERS the warning"
-              (let [out (block-for db :wtest.warns)]
-                (is (not= "" out) "the block is non-empty when a defect is in scope")
-                (is (str/includes? out "[no-malli-schema]")
-                    "the no-malli-schema cluster renders")
-                (is (str/includes? out "wtest.warns/no-spec")
-                    "and names the specific affected fn")))
-            (testing ":seon.warn/all widens scope to the whole core — still sees the defect"
-              (is (str/includes? (block-for db :seon.warn/all) "wtest.warns/no-spec")))
-            (testing "override scoping to a CLEAN ns renders empty — the condition is absent"
-              (is (= "" (block-for db :wtest.clean))
-                  "no defect in scope ⇒ empty string (self-healing, nothing stored)"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [original db/execute-many
+          responses (atom (vec (mapcat identity
+                                       (repeat 3 (acquisition-responses)))))
+          requests (atom [])]
+      (set! db/execute-many
+            (fn [request]
+              (swap! requests conj request)
+              (let [response (first @responses)]
+                (swap! responses subvec 1)
+                (js/Promise.resolve response))))
+      (-> (block-for :wtest.warns)
+          (.then
+            (fn [out]
+              (testing "the remote ordinary-data owner preserves corpus scope"
+                (is (str/includes? out "[no-malli-schema]"))
+                (is (str/includes? out "wtest.warns/no-spec")))
+              (block-for :seon.warn/all)))
+          (.then
+            (fn [out]
+              (is (str/includes? out "wtest.warns/no-spec"))
+              (block-for :wtest.clean)))
+          (.then
+            (fn [out]
+              (is (= "" out))
+              (is (= 6 (count @requests)) "each render uses two owner-local batches")
+              (is (every? #(= coordinate (::db/coordinate %))
+                          (take-nth 2 (rest @requests)))
+                  "every dependent runtime batch retains the first coordinate")))
+          (.catch (fn [e] (is false (str "threw — " e))))
+          (.finally (fn [] (set! db/execute-many original) (done)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Instrumentation-coverage invariant (C46) — `coverage-gaps` + its block.
@@ -123,40 +161,45 @@
 
 (deftest coverage-gaps-surface-then-self-heal
   (async done
-    (-> (client/open-agent-conn!)
-        (.then (fn [conn]
-                 (binding [db/*conn* conn]
-                   (-> (db/transact! {:seon.db/tx-data (coverage-seed-tx)})
-                       (.then
-                         (fn [_]
-                           (let [dbv @conn]
-                             (testing "sync and async live contracts are gaps; dead rows are not"
-                               (let [gaps (instrument/coverage-gaps dbv)]
-                                 (is (= ["seon.agent.ctx.warnings-test/async-gap-probe"
-                                         "seon.agent.ctx.warnings-test/gap-probe"]
-                                        (mapv :seon.instrument/sym gaps)))
-                                 (is (= [:seon.instrument/unwrapped
-                                         :seon.instrument/unwrapped]
-                                        (mapv :seon.instrument/reason gaps)))))
-                             (testing "the block renders the gap (root-agent surface)"
-                               (let [out (warnings/instrumentation-gaps-block {:seon.db/db dbv})]
-                                 (is (str/includes? out "INSTRUMENTATION GAPS"))
-                                 (is (str/includes? out "seon.agent.ctx.warnings-test/gap-probe"))))
-                             (testing "re-asserting coverage self-heals: gap vanishes, block renders empty"
-                               (instrument/instrument-delta!
-                                 {::instrument/changed-syms
-                                  #{'seon.agent.ctx.warnings-test/gap-probe
-                                    'seon.agent.ctx.warnings-test/async-gap-probe}
-                                  ::instrument/targets
-                                  [{::instrument/sym
-                                    'seon.agent.ctx.warnings-test/gap-probe
-                                    ::instrument/schema-form gap-probe-spec}
-                                   {::instrument/sym
-                                    'seon.agent.ctx.warnings-test/async-gap-probe
-                                    ::instrument/schema-form
-                                    async-gap-probe-spec}]})
-                               (is (= [] (instrument/coverage-gaps dbv)))
-                               (is (= "" (warnings/instrumentation-gaps-block
-                                           {:seon.db/db dbv})))))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [rows [["seon.agent.ctx.warnings-test/gap-probe"
+                 (pr-str gap-probe-spec)]
+                ["seon.agent.ctx.warnings-test/async-gap-probe"
+                 (pr-str async-gap-probe-spec)]
+                ["seon.agent.ctx.warnings-test/never-compiled"
+                 (pr-str gap-probe-spec)]]
+          original db/query]
+      (set! db/query (fn [_] (js/Promise.resolve rows)))
+      (testing "sync and async live contracts are gaps; dead rows are not"
+        (let [gaps (instrument/coverage-gaps rows)]
+          (is (= ["seon.agent.ctx.warnings-test/async-gap-probe"
+                  "seon.agent.ctx.warnings-test/gap-probe"]
+                 (mapv :seon.instrument/sym gaps)))
+          (is (= [:seon.instrument/unwrapped :seon.instrument/unwrapped]
+                 (mapv :seon.instrument/reason gaps)))))
+      (-> (warnings/instrumentation-gaps-block
+            {:seon.agent/id "root" :seon.agent/entity {:seon.agent/id "root"}}
+            nil)
+          (.then
+            (fn [out]
+              (is (str/includes? out "INSTRUMENTATION GAPS"))
+              (is (str/includes? out
+                                 "seon.agent.ctx.warnings-test/gap-probe"))
+              (instrument/instrument-delta!
+                {::instrument/changed-syms
+                 #{'seon.agent.ctx.warnings-test/gap-probe
+                   'seon.agent.ctx.warnings-test/async-gap-probe}
+                 ::instrument/targets
+                 [{::instrument/sym
+                   'seon.agent.ctx.warnings-test/gap-probe
+                   ::instrument/schema-form gap-probe-spec}
+                  {::instrument/sym
+                   'seon.agent.ctx.warnings-test/async-gap-probe
+                   ::instrument/schema-form async-gap-probe-spec}]})
+              (is (= [] (instrument/coverage-gaps rows)))
+              (warnings/instrumentation-gaps-block
+                {:seon.agent/id "root"
+                 :seon.agent/entity {:seon.agent/id "root"}}
+                nil)))
+          (.then (fn [out] (is (= "" out))))
+          (.catch (fn [e] (is false (str "threw — " e))))
+          (.finally (fn [] (set! db/query original) (done)))))))

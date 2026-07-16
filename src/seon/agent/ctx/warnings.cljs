@@ -5,13 +5,183 @@
    `'seon.agent.ctx.warnings/warnings-block`."
   (:require
     [clojure.string :as str]
-    [seon.agent.ctx :as ctx]
+    [seon.agent.home :as home]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.instrument :as instrument]
     [seon.warn :as warn]))
 
-(defn warnings-block
+(def ^:private current-ns-query
+  '{:find [?ns ?at ?eval]
+    :in [$ ?agent-id]
+    :where [[?agent :seon.agent/id ?agent-id]
+            [?run :seon.agent.run/agent ?agent]
+            [?turn :seon.agent.turn/run ?run]
+            [?turn :seon.agent.turn/evals ?eval]
+            [?eval :seon.eval/ok? true]
+            [?eval :seon.eval/at ?at]
+            [?eval :seon.eval/ns ?ns]]
+    :order-by [?at :desc ?eval :desc]
+    :limit 1})
+
+(def ^:private function-rows-query
+  '[:find ?sym ?nm ?spec ?fnvar ?priv ?err
+    :where
+    [?f :seon.fn/sym ?sym]
+    [?f :seon.fn/ns ?ns]
+    [?ns :seon.ns/name ?nm]
+    [(get-else $ ?f :seon.fn/spec "") ?spec]
+    [(get-else $ ?f :seon.fn/fn-var? true) ?fnvar]
+    [(get-else $ ?f :seon.fn/private? false) ?priv]
+    [(get-else $ ?f :seon.fn/schema-error "") ?err]])
+
+(def ^:private schema-provenance-query
+  '[:find ?key ?process-id
+    :where
+    [?schema :seon.schema/key ?key ?tx]
+    [?tx :seon.db/process ?process]
+    [?process :seon.db.process/id ?process-id]])
+
+(def ^:private schema-forms-query
+  '[:find ?key ?form
+    :where
+    [?schema :seon.schema/key ?key]
+    [?schema :seon.schema/form ?form]])
+
+(def ^:private attribute-counts-query
+  '[:find ?attr (count-distinct ?entity)
+    :where
+    [?schema :seon.schema/key ?attr]
+    [?entity ?attr _]])
+
+(defn- since-query
+  [find where cutoff]
+  (if cutoff
+    {:find find
+     :in '[$ ?cutoff]
+     :where (conj where '[(> ?at ?cutoff)])}
+    {:find find :where where}))
+
+(declare query-member member-result latest-user-query)
+
+(defn- runtime-members
+  [cutoff now]
+  [(query-member
+     (since-query '[?eid ?err]
+                  '[[?e :seon.eval/ok? false]
+                    [?e :seon.eval/at ?at]
+                    [?e :seon.eval/id ?eid]
+                    [(get-else $ ?e :seon.eval/error "") ?err]]
+                  cutoff)
+     (cond-> [] cutoff (conj cutoff)) 3000000 65536 2097152)
+   (query-member
+     (since-query '[?eid ?edn ?at]
+                  '[[?e :seon.eval/result-edn ?edn]
+                    [?e :seon.eval/at ?at]
+                    [?e :seon.eval/id ?eid]]
+                  cutoff)
+     (cond-> [] cutoff (conj cutoff)) 3000000 65536 2097152)
+   (query-member
+     (since-query '[?mid ?hops ?at ?fid ?tid]
+                  '[[?m :seon.agent.message/hops ?hops]
+                    [(>= ?hops 4)]
+                    [?m :seon.agent.message/id ?mid]
+                    [?m :seon.agent.message/at ?at]
+                    [?m :seon.agent.message/from ?f]
+                    [?m :seon.agent.message/to ?t]
+                    [(get-else $ ?f :seon.agent/id "user") ?fid]
+                    [(get-else $ ?t :seon.agent/id "user") ?tid]]
+                  cutoff)
+     (cond-> [] cutoff (conj cutoff)) 3000000 65536 2097152)
+   (query-member
+     (since-query '[?eid ?err ?at]
+                  '[[?e :seon.eval/record-error ?err]
+                    [?e :seon.eval/id ?eid]
+                    [?e :seon.eval/at ?at]]
+                  cutoff)
+     (cond-> [] cutoff (conj cutoff)) 3000000 65536 2097152)
+   (query-member
+     '[:find ?eid ?dur
+       :in $ ?threshold ?cutoff
+       :where
+       [?e :seon.eval/duration-ms ?dur]
+       [(>= ?dur ?threshold)]
+       [?e :seon.eval/at ?at]
+       [(> ?at ?cutoff)]
+       [?e :seon.eval/id ?eid]]
+     [warn/slow-eval-threshold-ms
+      (js/Date. (- (.getTime ^js now) (* 60 60 1000)))]
+     3000000 65536 1048576)
+   (query-member
+     '[:find ?sym
+       :where
+       [?test :seon.test/sym ?sym]
+       [?test :seon.test/last-failed-at ?failed-at]
+       (or-join [?test ?failed-at]
+                (and (not [?test :seon.test/last-passed-at _])
+                     [(identity ?failed-at) _])
+                (and [?test :seon.test/last-passed-at ?passed-at]
+                     [(> ?failed-at ?passed-at)]))]
+     [] 2000000 65536 1048576)
+   (query-member
+     '[:find ?agent-id ?content
+       :where
+       [?agent :seon.agent/id ?agent-id]
+       [?agent :seon.render.canvas/content ?content]]
+     [] 2000000 65536 1048576)])
+
+(defn ^:async ^:private acquire-warnings
+  [agent-id]
+  (let [first-result
+        (await
+          (db/execute-many
+            {::db/members
+             [(query-member latest-user-query)
+              (query-member current-ns-query [agent-id] 1000000 1 8192)
+              (query-member function-rows-query [] 5000000 65536 2097152)
+              {::protocol/operation protocol/schema-operation}
+              (query-member schema-provenance-query [] 3000000 65536 2097152)
+              (query-member schema-forms-query [] 3000000 65536 2097152)
+              (query-member attribute-counts-query [] 5000000 65536 2097152)]
+             ::db/max-result-weight 3670016}))
+        first-members (::db/results first-result)]
+    (if-not (every? #(true? (::protocol/success? %)) first-members)
+      {:seon.error/message "Warning acquisition failed."
+       :seon.error/data first-members}
+      (let [[cutoff-member ns-member fn-member schema-member provenance-member
+             forms-member counts-member] first-members
+            cutoff (ffirst (member-result cutoff-member))
+            now (js/Date.)
+            runtime-result
+            (await (db/execute-many
+                     {::db/coordinate (::db/coordinate first-result)
+                      ::db/members (runtime-members cutoff now)
+                      ::db/max-result-weight 3145728}))
+            runtime (::db/results runtime-result)]
+        (if (or (not= (::db/coordinate first-result)
+                      (::db/coordinate runtime-result))
+                (not (every? #(true? (::protocol/success? %)) runtime)))
+          {:seon.error/message "Warning runtime acquisition failed."
+           :seon.error/data runtime}
+          (let [[failed fs-results hops record-errors slow failing canvases]
+                (map member-result runtime)]
+            {::db/coordinate (::db/coordinate first-result)
+             ::warn/current-ns (ffirst (member-result ns-member))
+             ::warn/data
+             {::warn/function-rows (member-result fn-member)
+              ::warn/installed-schema (::protocol/schema schema-member)
+              ::warn/schema-provenance (member-result provenance-member)
+              ::warn/schema-forms (member-result forms-member)
+              ::warn/attribute-counts (into {} (member-result counts-member))
+              ::warn/failed-evals failed
+              ::warn/fs-results fs-results
+              ::warn/hop-messages hops
+              ::warn/record-errors record-errors
+              ::warn/slow-evals slow
+              ::warn/failing-tests failing
+              ::warn/canvases canvases}}))))))
+
+(defn ^:async warnings-block
   "Current problems as a `WARNINGS` comment-block, or empty when clean.
 
    A single-`;` block: one explanation + fix example per kind, then
@@ -21,22 +191,28 @@
    `:seon.warn/all`) on the `:seon.agent.ctx` entity overrides. Runtime checks
    (failed-evals, bad-ref, slow-evals, failing-tests) are always global.
    Dev-only checks are not surfaced here. Add a kind via `seon.warn/checks`."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [{:seon.db/keys [db] :seon.agent/keys [id] :as input}]
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [{:seon.agent/keys [id] :as input} _invoke-selected!]
   ;; The render engine injects this block's own map as :seon.render/node
   ;; (seon.render/render) — that is where a per-block :seon.warn/ns override
   ;; lives. (Reading :seon.agent.ctx/block here was a dead key: the input
   ;; never carries it, so the override was silently ignored.)
-  (let [override (:seon.warn/ns (:seon.render/node input))
+  (let [acquired (await (acquire-warnings id))
+        override (:seon.warn/ns (:seon.render/node input))
         scope    (cond
                    (= override :seon.warn/all) nil
                    (some? override)            override
-                   :else
-                   (let [ns (ctx/current-ns {:seon.agent/id id :seon.db/db db})]
-                     (if (keyword? ns) ns (keyword (str ns)))))]
-    (warn/render-warnings
-      (cond-> {:seon.db/db db}
-        (some? scope) (assoc :seon.warn/ns scope)))))
+                   :else (or (::warn/current-ns acquired)
+                             (home/home-ns id)))]
+    (if-let [message (:seon.error/message acquired)]
+      (str "[warnings] render failed: " message " "
+           (pr-str (:seon.error/data acquired)))
+      (warn/render-warnings
+        (cond-> {::warn/data (::warn/data acquired)}
+          (some? scope) (assoc :seon.warn/ns
+                               (if (keyword? scope)
+                                 scope
+                                 (keyword (str scope)))))))))
 
 (def ^:private latest-user-query
   '[:find (max ?at)
@@ -66,12 +242,16 @@
     [?e :seon.fn/sym ?sym]
     [?e :seon.fn/spec ?spec]])
 
-(defn- query-member [query-form]
-  {::protocol/operation protocol/query-operation
-   ::protocol/query-form query-form
-   :datahike.resource/max-work 2000000
-   :datahike.resource/max-results 65536
-   :datahike.resource/max-result-weight 2097152})
+(defn- query-member
+  ([query-form]
+   (query-member query-form [] 2000000 65536 2097152))
+  ([query-form arguments max-work max-results max-result-weight]
+   {::protocol/operation protocol/query-operation
+    ::protocol/query-form query-form
+    ::protocol/arguments arguments
+    :datahike.resource/max-work max-work
+    :datahike.resource/max-results max-results
+    :datahike.resource/max-result-weight max-result-weight}))
 
 (defn- member-result [member]
   (when (true? (::protocol/success? member))

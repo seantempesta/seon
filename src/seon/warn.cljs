@@ -61,6 +61,7 @@
 ;; stored — consistent with the reactive-context model.
 (schema/register! :seon.warn/dev-only?    :boolean)
 (schema/register! :seon.warn/include-dev? :boolean)
+(schema/register! ::data :map)
 
 (schema/register! :seon.warn/affected-entry
   [:map
@@ -72,7 +73,8 @@
 
 (schema/register! ::check-request
   [:map
-   [:seon.db/db   :seon.db/db]
+   [:seon.db/db   {:optional true} :seon.db/db]
+   [::data {:optional true} ::data]
    [:seon.warn/ns {:optional true} :seon.warn/ns]
    ;; When truthy, dev-only clusters are KEPT (the dev/web-UI surface
    ;; opts in). The agent render path passes nothing → dev-only suppressed.
@@ -103,19 +105,20 @@
    (`:seon.fn/sym`/`:seon.ns/name`/`:seon.fn/spec`/`:seon.fn/fn-var?`/
    `:seon.fn/private?`/`:seon.fn/schema-error` — C39, no bare twins).
    Absent attrs come back as \"\" / sentinel defaults via get-else."
-  [db ns-kw]
-  (let [rows (db/query
-               {:seon.db/db db
-                :seon.db/query
-                '[:find ?sym ?nm ?spec ?fnvar ?priv ?err
-                  :where
-                  [?f :seon.fn/sym ?sym]
-                  [?f :seon.fn/ns ?ns]
-                  [?ns :seon.ns/name ?nm]
-                  [(get-else $ ?f :seon.fn/spec "") ?spec]
-                  [(get-else $ ?f :seon.fn/fn-var? true) ?fnvar]
-                  [(get-else $ ?f :seon.fn/private? false) ?priv]
-                  [(get-else $ ?f :seon.fn/schema-error "") ?err]]})
+  [{:seon.db/keys [db] data ::data} ns-kw]
+  (let [rows (or (::function-rows data)
+                 (db/query
+                  {:seon.db/db db
+                   :seon.db/query
+                   '[:find ?sym ?nm ?spec ?fnvar ?priv ?err
+                     :where
+                     [?f :seon.fn/sym ?sym]
+                     [?f :seon.fn/ns ?ns]
+                     [?ns :seon.ns/name ?nm]
+                     [(get-else $ ?f :seon.fn/spec "") ?spec]
+                     [(get-else $ ?f :seon.fn/fn-var? true) ?fnvar]
+                     [(get-else $ ?f :seon.fn/private? false) ?priv]
+                     [(get-else $ ?f :seon.fn/schema-error "") ?err]]}))
         all  (map (fn [[sym nm spec fnvar priv err]]
                     {:seon.fn/sym sym :seon.ns/name nm :seon.fn/spec spec
                      :seon.fn/fn-var? fnvar :seon.fn/private? priv
@@ -128,8 +131,8 @@
 (defn- public-fn-rows
   "fn-rows narrowed to PUBLIC fn vars — the rows the contract checks
    apply to. Private helpers and non-fn defs are exempt."
-  [db ns-kw]
-  (->> (fn-rows db ns-kw)
+  [req ns-kw]
+  (->> (fn-rows req ns-kw)
        (filter :seon.fn/fn-var?)
        (remove :seon.fn/private?)))
 
@@ -190,9 +193,9 @@
   "Build a corpus check response: run `row-fn` over the public specced
    fn rows in scope; `row-fn` returns a seq of affected entries (or
    nil). Sorted by sym for stable rendering."
-  [{:seon.db/keys [db] ns-kw :seon.warn/ns} kind explain example row-fn]
+  [{ns-kw :seon.warn/ns :as req} kind explain example row-fn]
   {:seon.warn/kind     kind
-   :seon.warn/affected (->> (public-fn-rows db ns-kw)
+   :seon.warn/affected (->> (public-fn-rows req ns-kw)
                             (mapcat #(or (row-fn %) []))
                             distinct                ; multi-arity :function
                             (sort-by :seon.warn/sym) ; specs repeat a defect
@@ -353,6 +356,13 @@
                      '[:find ?k ?tx
                        :where [?s :seon.schema/key ?k ?tx]]}))))
 
+(defn- acquired-agent-registered-attrs
+  [data]
+  (into #{}
+        (keep (fn [[attr process-id]]
+                (when (not= process-id :seon.db.process/boot) attr)))
+        (::schema-provenance data)))
+
 (defn domain-attrs
   "Every DOMAIN attr installed on `db` — agent-registered, not core.
 
@@ -368,9 +378,11 @@
    survives pod restarts and stays per-conn. An attr appears once data
    (or schema installation via the first transact!) has landed."
   {:malli/schema [:=> [:cat ::check-request] [:vector :keyword]]}
-  [{:seon.db/keys [db]}]
-  (let [schema      (db/installed-schema db)
-        agent-attrs (agent-registered-attrs db)]
+  [{:seon.db/keys [db] data ::data}]
+  (let [schema      (or (::installed-schema data) (db/installed-schema db))
+        agent-attrs (if data
+                      (acquired-agent-registered-attrs data)
+                      (agent-registered-attrs db))]
     (->> (keys schema)
          (filter keyword?)
          (filter namespace)
@@ -398,9 +410,11 @@
 
 (defn- attr-instance-count
   "Count of entities carrying `attr` — one AEVT count."
-  [db attr]
-  (count (db/query {:seon.db/db db
-                    :seon.db/query [:find '?e :where ['?e attr '_]]})))
+  [{:seon.db/keys [db] data ::data} attr]
+  (if data
+    (get (::attribute-counts data) attr 0)
+    (count (db/query {:seon.db/db db
+                      :seon.db/query [:find '?e :where ['?e attr '_]]}))))
 
 (defn check-parallel-attr
   "DOMAIN attrs naming the SAME quantity in DIFFERENT units.
@@ -413,7 +427,7 @@
    collision group, the attr with the MOST stored instances is the
    established one; every other member is flagged against it."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db] :as req}]
+  [{:as req}]
   (let [groups (->> (domain-attrs req)
                     (keep (fn [attr]
                             (when-let [[stem _] (unit-split attr)]
@@ -430,7 +444,7 @@
               (let [ranked (->> members
                                 (map (fn [{::keys [attr]}]
                                        {::attr attr
-                                        ::n    (attr-instance-count db attr)}))
+                                        ::n    (attr-instance-count req attr)}))
                                 (sort-by (fn [{::keys [attr n]}]
                                            [(- n) (str attr)])))
                     {established ::attr est-n ::n} (first ranked)]
@@ -457,13 +471,22 @@
    (`:db/unique :db.unique/identity`), excluding datahike's own `:db/*`
    attrs (`:db/ident` is unique-identity by construction and carries a
    datom per installed attr — it is schema plumbing, not a kind)."
-  [db]
-  (->> (db/installed-schema db)
+  [{:seon.db/keys [db] data ::data}]
+  (->> (or (::installed-schema data) (db/installed-schema db))
        (keep (fn [[k v]]
                (when (and (keyword? k)
                           (not= "db" (namespace k))
                           (= :db.unique/identity (:db/unique v)))
                  k)))))
+
+(defn- acquired-schema-forms
+  [data]
+  (into {}
+        (keep (fn [[k form]]
+                (when (and k (string? form))
+                  (try [k (edn/read-string form)]
+                       (catch :default _ nil)))))
+        (::schema-forms data)))
 
 (defn- marked-entity-id-attrs
   "The id attrs derived for committed entity-map declarations.
@@ -471,17 +494,20 @@
    Canonical schema forms retain only authored properties. The active
    projection's entity catalog owns the derived identity association; never
    search canonical forms for the retired `:seon.entity/id-attr` copy."
-  []
+  [data]
   (into #{}
         (map :seon.schema.catalog/id-attr)
-        (schema/entity-catalog)))
+        (if data
+          (:seon.schema.projection/catalog
+           (schema/build-projection (acquired-schema-forms data)))
+          (schema/entity-catalog))))
 
 (defn- unmarked-map-schemas-carrying
   "Registered `:map` schemas that have an entry for `attr` but NO
    `{:seon.db/entity true}` marker — the schema(s) an author most
    likely MEANT to mark. Sorted for stable rendering."
-  [attr]
-  (->> (schema/registered-schemas)
+  [data attr]
+  (->> (if data (acquired-schema-forms data) (schema/registered-schemas))
        (keep (fn [[k v]]
                (when (and (vector? v) (= :map (first v)))
                  (let [props   (when (map? (second v)) (second v))
@@ -520,19 +546,25 @@
    runs globally and stays visible in the dev/web-UI surface via
    `:seon.warn/include-dev? true`."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db]}]
-  (let [marked (marked-entity-id-attrs)
-        core   (db/core-attr-namespaces db)]
+  [{:seon.db/keys [db] data ::data :as req}]
+  (let [marked (marked-entity-id-attrs data)
+        core   (if data
+                 (into #{}
+                       (keep (fn [[attr process-id]]
+                               (when (= process-id :seon.db.process/boot)
+                                 (some-> attr namespace keyword))))
+                       (::schema-provenance data))
+                 (db/core-attr-namespaces db))]
     {:seon.warn/kind :unmarked-entity-kinds
      :seon.warn/dev-only? true
      :seon.warn/affected
-     (->> (identity-attrs db)
+     (->> (identity-attrs req)
           (remove marked)
           (remove #(contains? core (keyword (namespace %))))
-          (filter #(pos? (attr-instance-count db %)))
+          (filter #(pos? (attr-instance-count req %)))
           (sort-by str)
           (mapv (fn [attr]
-                  (let [carriers (unmarked-map-schemas-carrying attr)]
+                  (let [carriers (unmarked-map-schemas-carrying data attr)]
                     (cond-> {:seon.warn/sym (str attr)}
                       (seq carriers)
                       (assoc :seon.warn/where
@@ -602,8 +634,10 @@
 (defn- failed-eval-rows
   "[eval-id error-string] rows for failed evals since the latest user
    message (every failed eval when no user message exists yet)."
-  [db]
-  (if-let [cutoff (latest-user-at db)]
+  [{:seon.db/keys [db] data ::data}]
+  (if data
+    (::failed-evals data)
+    (if-let [cutoff (latest-user-at db)]
     (db/query
       {:seon.db/db db
        :seon.db/query
@@ -616,14 +650,14 @@
          [?e :seon.eval/id ?eid]
          [(get-else $ ?e :seon.eval/error "") ?err]]
        :seon.db/args [cutoff]})
-    (db/query
+      (db/query
       {:seon.db/db db
        :seon.db/query
        '[:find ?eid ?err
          :where
          [?e :seon.eval/ok? false]
          [?e :seon.eval/id ?eid]
-         [(get-else $ ?e :seon.eval/error "") ?err]]})))
+         [(get-else $ ?e :seon.eval/error "") ?err]]}))))
 
 (defn- clip [s n]
   (let [s (str s)]
@@ -640,10 +674,10 @@
    Excludes bad-ref failures (check-bad-ref owns those).
    Vanishes when the next user msg lands and subsequent evals succeed."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db]}]
+  [{:as req}]
   {:seon.warn/kind :failed-evals
    :seon.warn/affected
-   (->> (failed-eval-rows db)
+   (->> (failed-eval-rows req)
         (remove (fn [[_ err]] (str/includes? err bad-ref-marker)))
         (sort-by first)
         (mapv (fn [[eid err]]
@@ -662,10 +696,10 @@
    Translated into the real fix: the target attr needs
    {:seon.db/identity true}, or the referenced entity doesn't exist."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db]}]
+  [{:as req}]
   {:seon.warn/kind :bad-ref
    :seon.warn/affected
-   (->> (failed-eval-rows db)
+   (->> (failed-eval-rows req)
         (filter (fn [[_ err]] (str/includes? err bad-ref-marker)))
         (sort-by first)
         (mapv (fn [[eid err]]
@@ -721,16 +755,17 @@
    `:seon.eval/error`. Marker filtering happens in Clojure, not in a
    :where predicate (datahike-cljs string predicates in :where are a
    known trap)."
-  [db]
-  (let [cutoff (latest-user-at db)
-        rows   (db/query
+  [{:seon.db/keys [db] data ::data}]
+  (let [cutoff (when-not data (latest-user-at db))
+        rows   (or (::fs-results data)
+                   (db/query
                  {:seon.db/db db
                   :seon.db/query
                   '[:find ?eid ?edn ?at
                     :where
                     [?e :seon.eval/result-edn ?edn]
                     [?e :seon.eval/at ?at]
-                    [?e :seon.eval/id ?eid]]})]
+                    [?e :seon.eval/id ?eid]]}))]
     (->> rows
          (filter (fn [[_ edn at]]
                    (and (or (nil? cutoff)
@@ -749,10 +784,10 @@
    self-heals when a new user message lands and subsequent fs calls
    stay in scope. GLOBAL — :seon.warn/ns is ignored."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db]}]
+  [{:as req}]
   {:seon.warn/kind :fs-denied
    :seon.warn/affected
-   (->> (fs-denied-eval-rows db)
+   (->> (fs-denied-eval-rows req)
         (sort-by first)
         (mapv (fn [[eid text]]
                 {:seon.warn/sym   (str eid)
@@ -781,9 +816,10 @@
    deadlock. GLOBAL (cross-agent) on purpose. A fresh human message resets
    the chain and scopes these out — self-healing, nothing to clear."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db]}]
-  (let [cutoff (latest-user-at db)
-        rows   (db/query
+  [{:seon.db/keys [db] data ::data}]
+  (let [cutoff (when-not data (latest-user-at db))
+        rows   (or (::hop-messages data)
+                   (db/query
                  {:seon.db/db db
                   :seon.db/query
                   '[:find ?mid ?hops ?at ?fid ?tid
@@ -797,7 +833,7 @@
                     [?m :seon.agent.message/to ?t]
                     [(get-else $ ?f :seon.agent/id "user") ?fid]
                     [(get-else $ ?t :seon.agent/id "user") ?tid]]
-                  :seon.db/args [hop-cap]})]
+                  :seon.db/args [hop-cap]}))]
     {:seon.warn/kind :hop-exhausted
      :seon.warn/affected
      (->> rows
@@ -832,16 +868,17 @@
    DERIVED at render; scoped out by the next user message. GLOBAL —
    :seon.warn/ns is ignored."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db]}]
-  (let [cutoff (latest-user-at db)
-        rows   (db/query
+  [{:seon.db/keys [db] data ::data}]
+  (let [cutoff (when-not data (latest-user-at db))
+        rows   (or (::record-errors data)
+                   (db/query
                  {:seon.db/db db
                   :seon.db/query
                   '[:find ?eid ?err ?at
                     :where
                     [?e :seon.eval/record-error ?err]
                     [?e :seon.eval/id ?eid]
-                    [?e :seon.eval/at ?at]]})]
+                    [?e :seon.eval/at ?at]]}))]
     {:seon.warn/kind :record-errors
      :seon.warn/affected
      (->> rows
@@ -868,11 +905,12 @@
 
    Stops surfacing when new evals are fast and the offenders age out."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db]}]
+  [{:seon.db/keys [db] data ::data}]
   (let [cutoff (js/Date. (- (js/Date.now) (* 60 60 1000)))]
     {:seon.warn/kind :slow-evals
      :seon.warn/affected
-     (->> (db/query
+     (->> (or (::slow-evals data)
+              (db/query
             {:seon.db/db db
              :seon.db/query
              '[:find ?eid ?dur
@@ -883,7 +921,7 @@
                [?e :seon.eval/at ?at]
                [(> ?at ?cutoff)]
                [?e :seon.eval/id ?eid]]
-             :seon.db/args [slow-eval-threshold-ms cutoff]})
+             :seon.db/args [slow-eval-threshold-ms cutoff]}))
           (sort-by first)
           (mapv (fn [[eid dur]]
                   {:seon.warn/sym   (str eid)
@@ -898,10 +936,11 @@
 (defn check-failing-tests
   "Tests whose last run failed (last-failed-at > last-passed-at)."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db]}]
+  [{:seon.db/keys [db] data ::data}]
   {:seon.warn/kind :failing-tests
    :seon.warn/affected
-   (->> (db/query
+   (->> (or (::failing-tests data)
+            (db/query
           {:seon.db/db db
            :seon.db/query
            '[:find ?sym
@@ -912,7 +951,7 @@
                       (and (not [?t :seon.test/last-passed-at _])
                            [(identity ?f-at) _])
                       (and [?t :seon.test/last-passed-at ?p-at]
-                           [(> ?f-at ?p-at)]))]})
+                           [(> ?f-at ?p-at)]))]}))
         (map first)
         sort
         (mapv (fn [sym] {:seon.warn/sym (str sym)})))
@@ -932,14 +971,15 @@
    default) produce nothing. DERIVED at render; self-heals the moment the
    fn is (re)defined. GLOBAL — :seon.warn/ns is ignored."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db]}]
-  (let [rows (db/query
+  [{:seon.db/keys [db] data ::data}]
+  (let [rows (or (::canvases data)
+                 (db/query
                {:seon.db/db db
                 :seon.db/query
                 '[:find ?aid ?content
                   :where
                   [?e :seon.agent/id ?aid]
-                  [?e :seon.render.canvas/content ?content]]})]
+                  [?e :seon.render.canvas/content ?content]]}))]
     {:seon.warn/kind :canvas-unresolved
      :seon.warn/urgent? true
      :seon.warn/affected
