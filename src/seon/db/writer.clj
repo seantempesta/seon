@@ -12,6 +12,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
+            [datahike.committed-report :as committed-report]
             [datahike.constants :as datahike.constants]
             [datahike.connector :as datahike.connector]
             [datahike.datom :as datahike.datom]
@@ -48,6 +49,9 @@
 (schema/register! ::query-vec 'fn?)
 (schema/register! ::knn 'fn?)
 (schema/register! ::active-requests 'some?)
+(schema/register! ::interest-state 'some?)
+(schema/register! ::stopping? 'some?)
+(schema/register! ::readiness-thread 'some?)
 (schema/register! ::transport-connection 'map?)
 (schema/register! ::publisher :seon.db.transport.uds/publisher)
 (schema/register!
@@ -74,6 +78,9 @@
   [::knn ::knn]
   [::executor ::executor]
   [::active-requests {:optional true} ::active-requests]
+  [::interest-state {:optional true} ::interest-state]
+  [::stopping? {:optional true} ::stopping?]
+  [::readiness-thread {:optional true} ::readiness-thread]
   [::publisher ::publisher]])
 (schema/register! ::request-server :seon.db.transport.uds/request-server)
 (schema/register! ::database-name :seon.db.protocol/database-name)
@@ -1755,11 +1762,378 @@
 
 (declare claim-request!)
 
+;;; Selective committed-report interests
+
+(def ^:private committed-report-capacity 256)
+(def ^:private committed-report-batch-size 32)
+
+(defn- empty-interest-state []
+  {::by-scope {}
+   ::by-source {}})
+
+(defn- interest-ref
+  [transport-connection request-id owner]
+  [transport-connection request-id owner])
+
+(defn- interest-attributes
+  [interest]
+  (if (= :all (::dependencies interest))
+    :all
+    (or (::dependencies interest)
+        (into #{} (map :seon.db/a) (::patterns interest)))))
+
+(defn- add-interest-to-entry
+  [entry reference interest]
+  (let [attributes (interest-attributes interest)]
+    (cond-> (update entry ::interest-count (fnil inc 0))
+      (= :all attributes)
+      (update ::all (fnil conj #{}) reference)
+
+      (set? attributes)
+      (update ::by-attribute
+              (fn [by-attribute]
+                (reduce (fn [index attribute]
+                          (update index attribute (fnil conj #{}) reference))
+                        (or by-attribute {}) attributes))))))
+
+(defn- remove-interest-from-entry
+  [entry reference interest]
+  (let [attributes (interest-attributes interest)]
+    (cond-> (update entry ::interest-count dec)
+      (= :all attributes)
+      (update ::all disj reference)
+
+      (set? attributes)
+      (update ::by-attribute
+              (fn [by-attribute]
+                (reduce
+                 (fn [index attribute]
+                   (let [remaining (disj (get index attribute #{}) reference)]
+                     (if (seq remaining)
+                       (assoc index attribute remaining)
+                       (dissoc index attribute))))
+                 by-attribute attributes))))))
+
+(defn- remove-interest-locked!
+  [runtime transport-connection request-id]
+  (when-let [interest (get @(::interests transport-connection) request-id)]
+    (let [state-atom (::interest-state runtime)
+          scope (::scope interest)
+          reference (interest-ref transport-connection request-id
+                                  (::owner interest))
+          state @state-atom
+          entry (get-in state [::by-scope scope])
+          next-entry (when entry
+                       (remove-interest-from-entry entry reference interest))]
+      (swap! (::interests transport-connection) dissoc request-id)
+      (if (and next-entry (pos? (::interest-count next-entry)))
+        (reset! state-atom (assoc-in state [::by-scope scope] next-entry))
+        (do
+          (when-let [source (::source entry)]
+            (committed-report/close! source false))
+          (reset! state-atom
+                  (cond-> (update state ::by-scope dissoc scope)
+                    (::source entry) (update ::by-source dissoc
+                                             (::source entry))))))
+      interest)))
+
+(defn- remove-connection-interests!
+  [runtime transport-connection]
+  (locking (::interest-lock runtime)
+    (doseq [request-id (keys @(::interests transport-connection))]
+      (remove-interest-locked! runtime transport-connection request-id))))
+
+(defn- listen-interest
+  [request scope]
+  (let [dependencies
+        (when-let [query-form (::protocol/query-form request)]
+          (d/query-attribute-dependencies query-form))]
+    (when (and (set? dependencies) (empty? dependencies))
+      (throw
+       (ex-info "A query interest must depend on a database attribute."
+                {::failure-kind protocol/protocol-error
+                 ::protocol/request-id (::protocol/request-id request)})))
+    {::owner (Object.)
+     ::scope scope
+     ::dependencies dependencies
+     ::patterns (::protocol/datom-patterns request)}))
+
+(defn- install-interest-locked!
+  [runtime transport-connection request connection database-name attachment]
+  (let [db-value (d/db connection)
+        scope (committed-scope database-name attachment db-value)
+        request-id (::protocol/request-id request)
+        interest (listen-interest request scope)
+        reference (interest-ref transport-connection request-id
+                                (::owner interest))
+        state-atom (::interest-state runtime)
+        state @state-atom
+        existing (get-in state [::by-scope scope])
+        source (or (::source existing)
+                   (committed-report/open!
+                    (::executor/connection-id scope)
+                    (::executor/generation scope)
+                    committed-report-capacity))
+        entry (or existing
+                  {::scope scope
+                   ::source source
+                   ::connection connection
+                   ::database-name database-name
+                   ::coordinate/attachment attachment
+                   ::interest-count 0
+                   ::all #{}
+                   ::by-attribute {}})
+        next-entry (add-interest-to-entry entry reference interest)
+        next-state (-> state
+                       (assoc-in [::by-scope scope] next-entry)
+                       (assoc-in [::by-source source] scope))]
+    (swap! (::interests transport-connection) assoc request-id interest)
+    (reset! state-atom next-state)
+    (coordinate/resolved (d/db connection))))
+
+(defn- handle-listen!
+  [runtime transport-connection request]
+  (when-not transport-connection
+    (throw (ex-info "Database interests require a live transport connection."
+                    {::failure-kind protocol/protocol-error})))
+  (let [request-id (::protocol/request-id request)]
+    (locking (::connection-lock transport-connection)
+      (when (or @(::closed? transport-connection)
+                (.get ^java.util.concurrent.atomic.AtomicBoolean
+                      (::closing? transport-connection)))
+        (throw (ex-info "The transport connection closed before listen."
+                        {::failure-kind protocol/not-found-error})))
+      (let [{::keys [connection database-name]
+             attachment ::coordinate/attachment}
+            (connection-for-request transport-connection request)
+            _ (when-not (= attachment (::protocol/attachment request))
+                (throw
+                 (ex-info "The listen attachment is no longer current."
+                          {::failure-kind protocol/stale-coordinate-error})))
+            coordinate
+            (locking (::interest-lock runtime)
+              (install-interest-locked! runtime transport-connection request
+                                        connection database-name attachment))]
+        (protocol/success
+         {::protocol/request-id request-id
+          ::protocol/database-name database-name
+          ::protocol/attachment attachment
+          ::protocol/coordinate coordinate
+          ::protocol/listening? true})))))
+
+(defn- handle-unlisten!
+  [runtime transport-connection request]
+  (when-not transport-connection
+    (throw (ex-info "Database interests require a live transport connection."
+                    {::failure-kind protocol/protocol-error})))
+  (locking (::connection-lock transport-connection)
+    (locking (::interest-lock runtime)
+      (remove-interest-locked! runtime transport-connection
+                               (::protocol/target-request-id request)))
+    (protocol/success
+     {::protocol/request-id (::protocol/request-id request)
+      ::protocol/target-request-id (::protocol/target-request-id request)
+      ::protocol/listening? false})))
+
+(defn- bytes-value=
+  [left right]
+  (if (and (instance? byte-array-class left)
+           (instance? byte-array-class right))
+    (java.util.Arrays/equals ^bytes left ^bytes right)
+    (= left right)))
+
+(defn- datom-matches-pattern?
+  [datom pattern]
+  (and (= (:seon.db/a datom) (:seon.db/a pattern))
+       (or (not (contains? pattern :seon.db/e))
+           (= (:seon.db/e datom) (:seon.db/e pattern)))
+       (or (not (contains? pattern :seon.db/v))
+           (bytes-value= (:seon.db/v datom) (:seon.db/v pattern)))
+       (or (not (contains? pattern :seon.db/added?))
+           (= (:seon.db/added? datom) (:seon.db/added? pattern)))))
+
+(defn- matching-datoms
+  [interest datoms]
+  (cond
+    (= :all (::dependencies interest)) datoms
+    (set? (::dependencies interest))
+    (filterv #(contains? (::dependencies interest) (:seon.db/a %)) datoms)
+    :else
+    (filterv (fn [datom]
+               (some #(datom-matches-pattern? datom %)
+                     (::patterns interest)))
+             datoms)))
+
+(defn- current-interest
+  [transport-connection request-id owner]
+  (let [interest (get @(::interests transport-connection) request-id)]
+    (when (and interest (identical? owner (::owner interest))) interest)))
+
+(defn- close-pressured-connection!
+  [transport-connection status request-id]
+  (when (= uds/send-authority-full status)
+    (log/warn "database event session closed after authority delivery pressure"
+              {::protocol/request-id request-id
+               ::uds/send-status status}))
+  (when (.compareAndSet ^java.util.concurrent.atomic.AtomicBoolean
+                        (::closing? transport-connection) false true)
+    ((::close! transport-connection))))
+
+(defn- send-interest-event!
+  [transport-connection request-id owner event]
+  (locking (::connection-lock transport-connection)
+    (when (and (not @(::closed? transport-connection))
+               (not (.get ^java.util.concurrent.atomic.AtomicBoolean
+                          (::closing? transport-connection)))
+               (current-interest transport-connection request-id owner))
+      (let [result ((::send! transport-connection) event)
+            status (::uds/send-status result)]
+        (when-not (= uds/send-accepted status)
+          (close-pressured-connection! transport-connection status request-id))
+        status))))
+
+(defn- candidate-interests
+  [runtime scope datoms]
+  (locking (::interest-lock runtime)
+    (when-let [entry (get-in @(::interest-state runtime) [::by-scope scope])]
+      (let [references
+            (into (::all entry)
+                  (mapcat #(get (::by-attribute entry) (:seon.db/a %) #{}))
+                  datoms)]
+        (into []
+              (keep
+               (fn [[transport-connection request-id owner :as reference]]
+                 (when-let [interest
+                            (current-interest transport-connection request-id
+                                              owner)]
+                   [reference interest])))
+              references)))))
+
+(defn- deliver-report!
+  [runtime scope report]
+  (let [datoms (mapv datom-map
+                     (public-transaction-datoms (:tx-data report)))
+        coordinate (coordinate/resolved (:db-after report))]
+    (doseq [[[transport-connection request-id owner] interest]
+            (candidate-interests runtime scope datoms)
+            :let [matches (matching-datoms interest datoms)]
+            :when (seq matches)]
+      (send-interest-event!
+       transport-connection request-id owner
+       {::protocol/event protocol/datoms-event
+        ::protocol/request-id request-id
+        ::protocol/coordinate coordinate
+        ::protocol/datoms matches}))))
+
+(defn- replace-gapped-source!
+  [runtime scope source]
+  (locking (::interest-lock runtime)
+    (let [state-atom (::interest-state runtime)
+          state @state-atom
+          entry (get-in state [::by-scope scope])]
+      (when (and entry (identical? source (::source entry)))
+        (committed-report/close! source false)
+        (let [replacement
+              (committed-report/open!
+               (::executor/connection-id scope)
+               (::executor/generation scope)
+               committed-report-capacity)
+              coordinate (coordinate/resolved (d/db (::connection entry)))
+              references
+              (into (::all entry) (mapcat val) (::by-attribute entry))
+              next-entry (assoc entry ::source replacement)]
+          (reset! state-atom
+                  (-> state
+                      (assoc-in [::by-scope scope] next-entry)
+                      (update ::by-source dissoc source)
+                      (assoc-in [::by-source replacement] scope)))
+          {::source replacement
+           ::protocol/coordinate coordinate
+           ::references references})))))
+
+(defn- deliver-resynchronization!
+  [runtime scope source]
+  (when-let [{::keys [references]
+              coordinate ::protocol/coordinate}
+             (replace-gapped-source! runtime scope source)]
+    (doseq [[transport-connection request-id owner] references]
+      (send-interest-event!
+       transport-connection request-id owner
+       {::protocol/event protocol/resynchronization-event
+        ::protocol/request-id request-id
+        ::protocol/coordinate coordinate}))))
+
+(defn- execute-delivery!
+  [runtime {::keys [scope source]}]
+  (let [batch (committed-report/poll-batch! source
+                                             committed-report-batch-size)]
+    (if (= :datahike.committed-report.status/gapped
+           (:datahike.committed-report/status batch))
+      (deliver-resynchronization! runtime scope source)
+      (run! #(deliver-report! runtime scope %)
+            (:datahike.committed-report/reports batch)))
+    {::scope scope}))
+
+(defn- requeue-scope!
+  [runtime scope]
+  (when-let [source
+             (locking (::interest-lock runtime)
+               (get-in @(::interest-state runtime)
+                       [::by-scope scope ::source]))]
+    (committed-report/requeue-ready! source)))
+
+(defn- submit-ready-source!
+  [runtime source]
+  (when-let [scope
+             (locking (::interest-lock runtime)
+               (get-in @(::interest-state runtime) [::by-source source]))]
+    (let [admission
+          (executor/try-submit!
+           {::executor/executor (::executor runtime)
+            ::executor/work-class :delivery
+            ::executor/database-name (::executor/database-name scope)
+            ::executor/scope scope
+            ::executor/job-id scope
+            ::executor/request {::scope scope ::source source}})]
+      (when-not (::executor/accepted? admission)
+        (when-not (::executor/joined? admission)
+          (committed-report/requeue-ready! source))))))
+
+(defn- run-readiness!
+  [runtime]
+  (try
+    (while (not (.get ^java.util.concurrent.atomic.AtomicBoolean
+                      (::stopping? runtime)))
+      (when-let [source (committed-report/take-ready!)]
+        (submit-ready-source! runtime source)))
+    (catch InterruptedException _)
+    (catch Throwable throwable
+      (when-not (.get ^java.util.concurrent.atomic.AtomicBoolean
+                      (::stopping? runtime))
+        (log/error throwable "database committed-report readiness failed")))))
+
+(defn- start-readiness!
+  [runtime]
+  (doto (Thread. ^Runnable #(run-readiness! runtime)
+                 "seon-database-committed-report-readiness")
+    (.setDaemon true)
+    (.start)))
+
+(defn- stop-readiness!
+  [runtime]
+  (.set ^java.util.concurrent.atomic.AtomicBoolean (::stopping? runtime) true)
+  (when-let [thread ^Thread (::readiness-thread runtime)]
+    (.interrupt thread)
+    (.join thread))
+  nil)
+
 (defn- transport-connection
   [{close! ::uds/close! send! ::uds/send!}]
   {::connection-lock (Object.)
    ::closed? (atom false)
+   ::closing? (java.util.concurrent.atomic.AtomicBoolean. false)
    ::acquisitions (atom #{})
+   ::interests (atom {})
    ::close! close!
    ::send! send!})
 
@@ -2077,7 +2451,7 @@
 
 (defn- complete-executor!
   [runtime {::executor/keys [request-id job-id outcome]}]
-  (when request-id
+  (if request-id
     (let [active (::active-requests runtime)
           entry (locking active (get @active request-id))]
       (when entry
@@ -2085,7 +2459,9 @@
           (complete-execute-many! runtime request-id (::owner entry) job-id outcome)
           (deliver-active-request!
            runtime request-id (::owner entry)
-           (single-outcome-response (::request entry) outcome)))))))
+           (single-outcome-response (::request entry) outcome)))))
+    (when (map? job-id)
+      (requeue-scope! runtime job-id))))
 
 (defn- handle-request-sync
   "Interpret one complete canonical database protocol request."
@@ -2385,6 +2761,7 @@
         (locking (::connection-lock transport-connection)
           (when-not @(::closed? transport-connection)
             (reset! (::closed? transport-connection) true)
+            (remove-connection-interests! runtime transport-connection)
             (let [active (::active-requests runtime)
                   requests
                   (locking active
@@ -2498,6 +2875,18 @@
                                       (cancel-active-request!
                                        runtime transport-connection request))
 
+             :seon.db.protocol.operation/listen
+             (locking (::connection-lock transport-connection)
+               (deliver-active-request!
+                runtime request-id owner
+                (handle-listen! runtime transport-connection request)))
+
+             :seon.db.protocol.operation/unlisten
+             (locking (::connection-lock transport-connection)
+               (deliver-active-request!
+                runtime request-id owner
+                (handle-unlisten! runtime transport-connection request)))
+
              (deliver-active-request!
               runtime request-id owner
               (handle-request-sync runtime transport-connection request)))
@@ -2533,6 +2922,9 @@
             request-socket-path publish-socket-path]}]
   (let [publisher (uds/start-publisher! publish-socket-path)
         active-requests (atom {})
+        interest-state (atom (empty-interest-state))
+        interest-lock (Object.)
+        stopping? (java.util.concurrent.atomic.AtomicBoolean. false)
         runtime-ref (atom nil)
         dispatcher
         (executor/start!
@@ -2543,6 +2935,8 @@
           {:read execute-read!
            :provider (partial execute-provider! dependencies)
            :knn (partial execute-knn! dependencies)
+           :delivery (fn [request]
+                       (execute-delivery! @runtime-ref request))
            :mutation (fn [request]
                        (execute-mutation! @runtime-ref request))}
           ::executor/complete!
@@ -2551,7 +2945,12 @@
         runtime (assoc dependencies
                        ::publisher publisher
                        ::executor dispatcher
-                       ::active-requests active-requests)
+                       ::active-requests active-requests
+                       ::interest-state interest-state
+                       ::interest-lock interest-lock
+                       ::stopping? stopping?)
+        readiness-thread (start-readiness! runtime)
+        runtime (assoc runtime ::readiness-thread readiness-thread)
         _ (reset! runtime-ref runtime)]
     (try
       (let [ensure-response
@@ -2583,6 +2982,7 @@
         (let [release
               (registry/release-database!
                {::registry/database-name (keyword database-name)})]
+          (stop-readiness! runtime)
           (uds/close-publisher! publisher)
           (executor/stop! {::executor/executor dispatcher})
           (if (::registry/release-error release)
@@ -2611,18 +3011,27 @@
                    request-server-shutdown)
         {::stopped? false ::release-results []})
       (do
-        (executor/stop! {::executor/executor (::executor server)})
-        (let [{::registry/keys [databases]} (registry/list-databases {})
-              release-results
-              (mapv
-               (fn [{::registry/keys [database-name attachment coordinate]}]
-                 (merge
-                  {::registry/database-name database-name
-                   ::registry/attachment attachment
-                   ::registry/coordinate coordinate}
-                  (registry/release-database!
-                   {::registry/database-name database-name})))
-               databases)]
-          (uds/close-publisher! (::publisher server))
-          {::stopped? (every? ::registry/released? release-results)
-           ::release-results release-results})))))
+        (stop-readiness! (::runtime server))
+        (if (seq (::by-scope @(::interest-state (::runtime server))))
+          (do
+            (log/error "Database interests remained after transport shutdown."
+                       {::retained-interests
+                        (count (::by-scope
+                                @(::interest-state (::runtime server))))})
+            {::stopped? false ::release-results []})
+          (do
+            (executor/stop! {::executor/executor (::executor server)})
+            (let [{::registry/keys [databases]} (registry/list-databases {})
+                  release-results
+                  (mapv
+                   (fn [{::registry/keys [database-name attachment coordinate]}]
+                     (merge
+                      {::registry/database-name database-name
+                       ::registry/attachment attachment
+                       ::registry/coordinate coordinate}
+                      (registry/release-database!
+                       {::registry/database-name database-name})))
+                   databases)]
+              (uds/close-publisher! (::publisher server))
+              {::stopped? (every? ::registry/released? release-results)
+               ::release-results release-results})))))))

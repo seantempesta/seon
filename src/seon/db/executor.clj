@@ -21,7 +21,8 @@
                    [::connection-id ::connection-id]
                    [::generation ::generation]])
 (schema/register! ::job-id
-                  [:or :seon.db.protocol/request-id
+                  [:or ::scope
+                   :seon.db.protocol/request-id
                    [:tuple :seon.db.protocol/request-id [:or :keyword :int]]])
 (schema/register! ::request-id :seon.db.protocol/request-id)
 (schema/register! ::work-class :keyword)
