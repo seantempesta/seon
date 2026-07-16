@@ -109,7 +109,7 @@
                    [::stopped? ::stopped?]])
 
 (def ^:private empty-queue clojure.lang.PersistentQueue/EMPTY)
-(def ^:private cpu-classes #{:read :knn :encode :hnsw})
+(def ^:private cpu-classes #{:read :knn :hnsw})
 
 (defn capacity
   "Return one immutable authority capacity map from the selected processors."
@@ -118,7 +118,6 @@
    (let [processors (max 1 selected-processors)
          cpu-workers (max 1 (dec processors))
          knn (max 1 (min 2 (quot cpu-workers 2)))
-         encode (max 1 (min 2 (quot cpu-workers 2)))
          mutation (max 1 (min 4 (quot (inc processors) 2)))
          provider (min 6 processors)]
      {::available-processors (.availableProcessors (Runtime/getRuntime))
@@ -136,9 +135,6 @@
        :knn {::maximum-active knn
              ::maximum-queued (max 4 (* 2 knn))
              ::maximum-queued-by-database 2}
-       :encode {::maximum-active encode
-                ::maximum-queued (max 8 (* 4 encode))
-                ::maximum-queued-by-database 4}
        :provider {::maximum-active provider
                   ::maximum-queued (* 2 provider)
                   ::maximum-queued-by-database 2}
@@ -670,7 +666,7 @@
                   ::remove-database-response]}
   [{::keys [executor scope]}]
   (let [{::keys [queued]} (fence-scope! executor scope #{:read :provider :knn
-                                                         :encode :hnsw
+                                                         :hnsw
                                                          :mutation})]
     {::abandoned-count (count queued)}))
 

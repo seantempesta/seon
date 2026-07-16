@@ -779,7 +779,7 @@
                     (:request/value request)))
         worker (start-worker 2 {:read (execute :read)
                                 :knn (execute :knn)
-                                :encode (execute :encode)})
+                                :hnsw (execute :hnsw)})
         a (scope "a" (random-uuid) (random-uuid))
         b (scope "b" (random-uuid) (random-uuid))]
     (try
@@ -789,14 +789,14 @@
                      (assoc (request worker "a" a "fair/knn" :knn)
                             ::executor/work-class :knn))
                     (executor/submit-async!
-                     (assoc (request worker "b" b "fair/encode" :encode)
-                            ::executor/work-class :encode))
+                     (assoc (request worker "b" b "fair/hnsw" :hnsw)
+                            ::executor/work-class :hnsw))
                     (executor/submit-async!
                      (request worker "b" b "fair/read" :read))]]
           (.countDown release)
           @first
           (run! deref jobs)
-          (is (= [[:read :first] [:knn :knn] [:encode :encode] [:read :read]]
+          (is (= [[:read :first] [:knn :knn] [:hnsw :hnsw] [:read :read]]
                  @selected))))
       (finally
         (.countDown release)

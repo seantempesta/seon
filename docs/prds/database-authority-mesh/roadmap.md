@@ -620,6 +620,25 @@ adapter; the selector cut removes that blocking transport path. Executor,
 receipts, generated identities, transaction coordinates, writer integration,
 and server pass 60 tests/901 assertions.
 
+The active-request deletion review closes the final scope-lifetime ambiguity.
+Writer request ownership replaces executor retained requests, but executor
+drain cannot by itself authorize database release: an execute-many completion
+may still be releasing its shared database value. Finalization retains the
+writer request through that release, then compare-removes it and wakes the
+scope drain before delivery. The same cut reserves member positions before
+submission so synchronous admission rejection can safely reenter completion,
+and rechecks cancellation after admission so reserved work cannot escape.
+
+Selector source review removes the unwired executor `:encode` class. Encoding
+has no database scope, immediate responses also require it, and a rejected
+encode after semantic completion has no honest response path. The transport
+instead reserves one response slot at frame admission, encodes with a small
+ready-session-fair worker set, converts the slot to exact framed bytes, and
+hands immutable output plus offset to the selector. Query, KNN, and mutation
+capacity is already released before that work; slow sockets retain only their
+bounded transport bytes. The focused executor proof remains 25 tests/659
+assertions and the changed writer boundary remains 71 tests/977 assertions.
+
 Exit proof: 1/8/32 children, multiplex limits, fragmented frames, partial
 writes, large pages, slow recipients, cancellation, child crash, reconnect,
 and release preserve bounded independent progress and outperform the removed

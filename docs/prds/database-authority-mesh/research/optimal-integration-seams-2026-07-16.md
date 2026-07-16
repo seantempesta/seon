@@ -83,6 +83,16 @@ value's nonblocking `ReadPort`, and
 `reference-code/datahike/src/datahike/writer.cljc:357-381` for the public
 transaction completion order.
 
+The writer's one active request remains the scope-lifetime owner after the
+executor's final physical job completes. This matters for `execute-many`: the
+executor can report zero jobs before its outside-lock completion callback has
+released the one shared database value. Database release therefore fences and
+drains executor jobs, then waits for writer requests owning that exact scope.
+Execute-many finalization marks the request complete but retains it, releases
+the database value outside the writer lock, compare-removes the request, wakes
+the scope drain, and only then delivers. A lifecycle request never owns the
+scope it is draining.
+
 ### Database transport seam
 
 Use `Bun.connect` and one Java NIO selector over a four-byte big-endian length
@@ -97,6 +107,14 @@ close. It performs no Datahike work and no full-value Transit work. Bun's
 `data` callback stays synchronous, advances a linear exact-size parser, and
 does not start application work. Both sides retain the exact unwritten suffix
 after a partial or zero write and resume only on readiness or `drain`.
+
+Transit/response capacity belongs to this transport owner, not to a database
+executor `:encode` class. Every admitted request reserves one response slot;
+a small fixed worker set selects ready sessions fairly and performs at most one
+encode per session at a time. It converts the reservation to exact framed bytes
+before enqueueing the selector command. This covers immediate responses without
+inventing a database scope and guarantees that semantic completion never faces
+an unreportable encode-admission rejection.
 
 ### Bun child seam
 
@@ -253,3 +271,11 @@ cut is:
 Then replace the request server and Bun client together with the persistent
 selector session, migrate consumers to honest async database functions, delete
 the replica/publisher/Node paths, and add Bun-native child and web owners.
+
+The Bun client and JVM selector are one reachability-changing cut. The current
+JVM connection loop reads the next frame only after the synchronous response,
+so swapping only `node:net` for `Bun.connect` would not multiplex. The cut
+rewrites both transport files plus the writer/server callback, moves every
+replica consumer to remote `seon.db`, and deletes the publisher socket, replay,
+replica, both Node imports, request-per-socket timers, and growing buffer
+concatenation together.
