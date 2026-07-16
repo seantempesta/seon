@@ -1,7 +1,7 @@
 ---
 type: issue
-status: closed
-severity: high
+status: resolved
+severity: cleanup
 tags: [issue, architecture, database]
 ---
 
