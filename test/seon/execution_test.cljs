@@ -1,7 +1,8 @@
 (ns seon.execution-test
   (:require
-   [cljs.test :refer [deftest is testing]]
+   [cljs.test :refer [async deftest is testing]]
    [seon.db :as db]
+   [seon.db.protocol :as protocol]
    [seon.eval :as seval]
    [seon.execution :as execution]))
 
@@ -21,7 +22,7 @@
    ::execution/function-source-identity
    {::execution/function-symbol 'my.render/view
     ::execution/source-digest digest}
-   ::execution/input {:my.render/value 1}
+   ::execution/arguments [{:my.render/value 1}]
    ::execution/deadline-ms 9999999999999
    ::execution/result-limit-bytes 4096})
 
@@ -45,8 +46,8 @@
     (is (= invocation decoded))
     (is (execution/valid-parent-message? decoded)))
   (is (false? (execution/valid-parent-message?
-               (assoc invocation ::execution/input
-                      {:my.render/value (js/Promise.resolve 1)}))))
+               (assoc invocation ::execution/arguments
+                      [(js/Promise.resolve 1)]))))
   (is (execution/valid-parent-message? invocation)))
 
 (deftest bounded-results-are-settled-ordinary-data
@@ -102,6 +103,54 @@
     (is (.startsWith source "(ns my.render (:require [my.dep :as dep]))"))
     (is (= 1 (count (re-seq #"\(def shared 1\)" source)))
         "a batch source is deduplicated rather than split per function")))
+
+(deftest preparation-batches-agents-and-preserves-plan-position
+  (async done
+    (let [requests (atom [])
+          plans [(execution/invocation-plan "agent-2" 'my.two/run [2])
+                 (execution/invocation-plan "agent-1" 'my.one/first [1])
+                 (execution/invocation-plan "agent-1" 'my.one/second [3])]
+          source-by-symbol {"my.one/first" "(defn first [x] x)"
+                            "my.one/second" "(defn second [x] x)"
+                            "my.two/run" "(defn run [x] x)"}]
+      (with-redefs
+        [db/execute-many
+         (fn [request]
+           (swap! requests conj request)
+           (js/Promise.resolve
+            {::db/coordinate coordinate
+             ::db/results
+             [{::protocol/success? true
+               :datahike.query/result
+               [["my.one/first" (get source-by-symbol "my.one/first")]
+                ["my.one/second" (get source-by-symbol "my.one/second")]]}
+              {::protocol/success? true
+               :datahike.query/result
+               [["my.two/run" (get source-by-symbol "my.two/run")]]}]}))]
+        (-> (execution/prepare-invocations!
+             {::execution/coordinate coordinate
+              ::execution/invocation-plans plans})
+            (.then
+             (fn [prepared]
+               (is (= 1 (count @requests)))
+               (is (= coordinate (::db/coordinate (first @requests))))
+               (is (= 2 (count (::db/members (first @requests))))
+                   "one execute-many member is issued per agent")
+               (is (= (mapv ::execution/invocation-id plans)
+                      (mapv ::execution/invocation-id prepared))
+                   "prepared invocations retain caller position")
+               (doseq [[plan invocation] (map vector plans prepared)]
+                 (let [symbol (::execution/function-symbol plan)
+                       identity (::execution/function-source-identity invocation)]
+                   (is (= symbol (::execution/function-symbol identity)))
+                   (is (= (execution/source-digest
+                           (get source-by-symbol (str symbol)))
+                          (::execution/source-digest identity)))))
+               (done)))
+            (.catch
+             (fn [error]
+               (is false (str "preparation rejected: " error))
+               (done))))))))
 
 (deftest every-control-message-is-versioned-and-closed
   (is (execution/valid-parent-message?

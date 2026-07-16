@@ -38,7 +38,7 @@
                   [:map {:closed true}
                    [::function-symbol ::function-symbol]
                    [::source-digest ::digest]])
-(schema/register! ::input [:map-of :qualified-keyword :any])
+(schema/register! ::arguments [:vector :any])
 (schema/register! ::deadline-ms [:int {:min 0}])
 (schema/register! ::result-limit-bytes
                   [:int {:min 1 :max maximum-result-bytes}])
@@ -66,7 +66,7 @@
   [::invocation-id ::invocation-id]
   [::coordinate ::coordinate]
   [::function-source-identity ::function-source-identity]
-  [::input ::input]
+  [::arguments ::arguments]
   [::deadline-ms ::deadline-ms]
   [::result-limit-bytes ::result-limit-bytes]
   [::run-fence {:optional true} ::run-fence]])
@@ -124,6 +124,23 @@
   [::protocol-version ::protocol-version]])
 (schema/register! ::child-message
                   [:or ::ready ::result-message ::error-message ::stopped])
+
+(schema/register!
+ ::invocation-plan
+ [:map {:closed true}
+  [::agent-id ::agent-id]
+  [::invocation-id ::invocation-id]
+  [::function-symbol ::function-symbol]
+  [::arguments ::arguments]
+  [::deadline-ms ::deadline-ms]
+  [::result-limit-bytes ::result-limit-bytes]
+  [::run-fence {:optional true} ::run-fence]])
+(schema/register! ::invocation-plans [:vector {:min 1} ::invocation-plan])
+(schema/register!
+ ::prepare-request
+ [:map {:closed true}
+  [::coordinate ::coordinate]
+  [::invocation-plans ::invocation-plans]])
 
 (defonce ^:private transit-writer (transit/writer :json))
 (defonce ^:private transit-reader (transit/reader :json))
@@ -221,6 +238,18 @@
     [?function :seon.fn/sym ?sym]
     [?function :seon.fn/spec ?form]])
 
+(def ^:private invocation-source-query
+  '[:find ?sym ?source
+    :in $ ?agent-id [?requested ...]
+    :where
+    [?function :seon.fn/sym ?sym]
+    [(= ?sym ?requested)]
+    [?function :seon.fn/source ?source ?tx]
+    [?tx :seon.db/user ?author]
+    [?author :seon.agent/id ?agent-id]
+    [?tx :seon.db/process ?process]
+    [?process :seon.db.process/id :seon.db.process/repl]])
+
 (defn- query-member [query arguments]
   {::db.protocol/operation db.protocol/query-operation
    ::db.protocol/query-form query
@@ -279,6 +308,69 @@
     (-> (.createHash crypto "sha256")
         (.update (pr-str value) "utf8")
         (.digest "hex"))))
+
+(defn invocation-plan
+  "Build one ordinary authored call plan for a captured render coordinate."
+  {:malli/schema [:=> [:cat ::agent-id ::function-symbol ::arguments]
+                  ::invocation-plan]}
+  [agent-id function-symbol arguments]
+  {::agent-id agent-id
+   ::invocation-id (str (random-uuid))
+   ::function-symbol function-symbol
+   ::arguments arguments
+   ::deadline-ms (+ (.now js/Date) maximum-invocation-ms)
+   ::result-limit-bytes maximum-result-bytes})
+
+(defn ^:async prepare-invocations!
+  "Pin ordinary invocation plans to their authored source identities."
+  {:malli/schema [:=> [:cat ::prepare-request] :any]}
+  [{::keys [coordinate invocation-plans]}]
+  (let [by-agent (->> invocation-plans
+                      (group-by ::agent-id)
+                      (sort-by key)
+                      vec)
+        acquisition
+        (await
+         (db/execute-many
+          {::db/coordinate coordinate
+           ::db/max-result-weight (* 1024 1024)
+           ::db/members
+           (mapv (fn [[agent-id plans]]
+                   (query-member invocation-source-query
+                                 [agent-id
+                                  (mapv (comp str ::function-symbol) plans)]))
+                 by-agent)}))
+        _ (when-not (= coordinate (::db/coordinate acquisition))
+            (throw
+             (ex-info "Invocation source acquisition moved coordinates."
+                      {:seon.error/kind :core-bug})))
+        identities
+        (reduce
+         (fn [known [[agent-id _] member]]
+           (into known
+                 (map (fn [[sym source]]
+                        [[agent-id (symbol sym)]
+                         {::function-symbol (symbol sym)
+                          ::source-digest (source-digest source)}]))
+                 (query-result member)))
+         {}
+         (map vector by-agent (::db/results acquisition)))]
+    (mapv
+     (fn [plan]
+       (let [identity (get identities [(::agent-id plan)
+                                       (::function-symbol plan)])]
+         (when-not identity
+           (throw (ex-info "No current authored source matches the invocation."
+                           {::agent-id (::agent-id plan)
+                            ::function-symbol (::function-symbol plan)
+                            :seon.error/kind :agent})))
+         (-> plan
+             (dissoc ::function-symbol)
+             (assoc ::message invoke-message
+                    ::protocol-version protocol-version
+                    ::coordinate coordinate
+                    ::function-source-identity identity))))
+     invocation-plans)))
 
 (defn- ^:async acquire-program! [invocation]
   (let [coordinate (::coordinate invocation)
@@ -465,7 +557,7 @@
                        (db/with-tx-context
                         (assoc (or (::run-fence invocation) {})
                                ::db/coordinate (::coordinate invocation))
-                        (fn [] (function-value (::input invocation)))))))
+                        (fn [] (apply function-value (::arguments invocation)))))))
                    (catch :default exception
                      (js/Promise.reject exception)))
                  (js/Promise.reject

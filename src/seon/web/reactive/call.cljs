@@ -50,7 +50,8 @@
     [clojure.string :as str]
     [seon.agent.home :as home]
     [seon.db :as db]
-    [seon.eval :as seval]
+    [seon.execution :as execution]
+    [seon.execution.host :as execution.host]
     [seon.log :as log]
     [seon.runtime.admission :as admission]
     [seon.web.reactive.transform :as transform]))
@@ -117,31 +118,21 @@
           "fs / core / cross-agent symbols are refused.")}))
 
 ;; ============================================================
-;; Invoke — through the agent's OWN eval (the same path as eval),
-;; scoped to the owning agent so its transacts tag correctly + its
-;; reactive feed updates. NOT a parallel executor.
+;; Invoke — through the one supervised authored-execution service.
 ;; ============================================================
 
 (defn- err->msg [e]
   (or (ex-message e) (str e)))
 
 (defn ^:async invoke!
-  "Invoke the granted `fn-sym` for `agent-id` via resolve-and-apply.
+  "Invoke a granted authored function in its supervised Bun child.
 
-   Called with `args` (already capability-checked). RESOLVE-AND-APPLY:
-   resolve the symbol to its compiled runtime
-   value (`seon.eval/lookup-value`) and `(apply f args)` with the args passed
-   as VALUES — never printed into source, never re-read as code, so a
-   list/symbol arg is inert. Runs inside the agent's `with-agent` +
-   `with-tx-context` scope so `(current-agent-id)` resolves and the transact is
-   agent-tagged. Returns a Promise of `{::ok? true ::value v}` or
-   `{::ok? false ::error <message>}` — errors are values: a throw from the fn
-   (incl. a Malli arg-validation failure from its own instrumentation) is
-   caught and returned, never crashes. An async fn (one that returns a Promise
-   — e.g. a `db/transact!`) is awaited so the committed effect is visible
-   before we respond. If `lookup-value` cannot resolve the (capability-approved)
-   symbol — e.g. its program graph isn't compiled — that is a clean error
-   envelope, not a crash."
+   Captures the current database coordinate, prepares the function's authored
+   source identity at exactly that point, and sends the ordinary argument
+   vector through `seon.execution.host/invoke!`. The child applies the function
+   inside its agent and coordinate transaction context, awaits async work, and
+   returns one bounded ordinary result. Child or preparation failures become
+   `{::ok? false ::error <message>}` values; arguments are never source text."
   {:malli/schema [:=> [:catn [::agent-id :string] [::fn-sym :symbol]
                        [::args [:sequential :any]]]
                   :any]}
@@ -151,30 +142,21 @@
       {::ok? false
        ::unavailable? true
        ::error (get-in refusal [:seon/error :seon.error/message])})
-    (await
-    (db/with-agent agent-id
-      (fn []
-        (db/with-tx-context {:seon.db/user [:seon.agent/id agent-id]
-                             :seon.db/process
-                             [:seon.db.process/id :seon.db.process/repl]}
-          (fn []
-            (let [f (seval/lookup-value fn-sym)]
-              (if-not (fn? f)
-                (js/Promise.resolve
-                  {::ok?   false
-                   ::error (str "could not resolve granted fn `" fn-sym
-                                "` to a runtime value — its program graph may "
-                                "not be compiled")})
-                ;; `(apply f args)` runs SYNCHRONOUSLY inside this with-agent
-                ;; thunk (so (current-agent-id) reads the scope before f's first
-                ;; await). A sync throw escapes to the outer catch; a returned
-                ;; Promise (async transact!) is awaited via .then/.catch.
-                (try
-                  (-> (js/Promise.resolve (apply f args))
-                      (.then  (fn [v] {::ok? true ::value v}))
-                      (.catch (fn [e] {::ok? false ::error (err->msg e)})))
-                  (catch :default e
-                    (js/Promise.resolve {::ok? false ::error (err->msg e)}))))))))))))
+    (try
+      (let [coordinate (await (db/head-coordinate))
+            plan (execution/invocation-plan agent-id fn-sym (vec args))
+            [invocation]
+            (await
+             (execution/prepare-invocations!
+              {::execution/coordinate coordinate
+               ::execution/invocation-plans [plan]}))
+            result (await (execution.host/invoke! invocation))]
+        (if (= execution/result-message (::execution/message result))
+          {::ok? true ::value (::execution/result result)}
+          {::ok? false
+           ::error (get-in result [::execution/error :seon.error/message])}))
+      (catch :default e
+        {::ok? false ::error (err->msg e)}))))
 
 ;; ============================================================
 ;; HTTP handler — POST /call. Opaque (req,res), like the debug +

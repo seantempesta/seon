@@ -7,18 +7,17 @@
        cross-agent/dead-agent namespace, and `fs`/core symbols are REFUSED
        (no owning agent or no `:seon.fn` row) — never invoked.
 
-   (c) A /call that invokes a granted fn which transacts → the datom is
-       written (the reactive push is the debug view feed's job). Proven
-       in-process (ensure-bootstrap! + open-agent-conn! + transact :seon.ns
-       / :seon.fn rows + replay-program-graph! + invoke!), the same harness
-       the SCI tile tests use — no live pod."
+   (c) A granted /call captures one database coordinate and sends one ordinary
+       positional invocation through the supervised execution child."
   (:require
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing async use-fixtures]]
     [seon.agent.home :as home]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.repl :as repl]
+    [seon.db.coordinate :as db.coordinate]
+    [seon.execution :as execution]
+    [seon.execution.host :as execution.host]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]
     [seon.web.reactive.call :as call]))
@@ -99,53 +98,59 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; (c) Granted invoke transacts — the datom is written.
+;; (c) Granted invoke crosses one coordinate-pinned child boundary.
 ;; ---------------------------------------------------------------------------
 
-(deftest call-invokes-granted-fn-and-it-transacts
-  ;; The invoked fn transacts inside invoke!'s internal awaits, so the conn
-  ;; must be ROOT-set! — CLJS `binding` does NOT survive await boundaries
-  ;; (only the root binding / AsyncLocalStorage does; this is exactly how the
-  ;; live pod root-set!s db/*conn* at boot).
+(deftest call-invokes-through-one-coordinate-pinned-child-plan
   (async done
-    (let [prev-conn db/*conn*
-          finish    (fn [] (set! db/*conn* prev-conn) (done))]
-      (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
-          (.then
-            (fn [res]
-              (let [cs   (aget res 0)
-                    conn (aget res 1)]
-                (set! db/*conn* conn)
-                ;; Replay reads canonical schema/program facts from this
-                ;; isolated database, exactly like runtime boot. Seed those
-                ;; facts before asking replay to make them authoritative.
-                (-> (client/boot-seed! {:seon.db/conn conn})
-                    (.then (fn [_] (seed!)))
-                    (.then
-                      (fn [_]
-                        (client/replay-program-graph!
-                          {:seon.client/conn conn :seon.client/compile-state cs :seon.client/agent-id agent-id})))
-                    (.then
-                      (fn [stats]
-                        (testing "the agent ns + fn replay cleanly"
-                          (is (= 0 (:seon.client/replay-n-fail stats))
-                              (str "replay had failures — " (pr-str stats))))
-                        (call/invoke! agent-id granted-sym ["hello from call"])))
-                    (.then
-                      (fn [env]
-                        (testing "invoke returns an ok envelope"
-                          (is (true? (::call/ok? env))
-                              (str "invoke not ok — " (pr-str env))))
-                        (testing "the granted fn transacted onto the agent — datom written"
-                          (is (= "hello from call"
-                                 (ffirst
-                                   (db/query
-                                     '[:find ?p :in $ ?id :where
-                                       [?a :seon.agent/id ?id]
-                                       [?a :seon.agent/purpose ?p]]
-                                     @conn agent-id)))))))))))
-          (.then (fn [_] (finish)))
-          (.catch (fn [e] (is false (str "threw — " e)) (finish)))))))
+    (let [coordinate
+          {::db.coordinate/database-id
+           #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+           ::db.coordinate/branch :db
+           ::db.coordinate/commit-id
+           #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+           ::db.coordinate/t 42}
+          prepared (atom nil)]
+      (with-redefs
+        [db/head-coordinate (fn [] (js/Promise.resolve coordinate))
+         execution/prepare-invocations!
+         (fn [request]
+           (reset! prepared request)
+           (js/Promise.resolve
+            [{::execution/message execution/invoke-message
+              ::execution/protocol-version execution/protocol-version
+              ::execution/agent-id agent-id
+              ::execution/invocation-id "call-test"
+              ::execution/coordinate coordinate
+              ::execution/function-source-identity
+              {::execution/function-symbol granted-sym
+               ::execution/source-digest (apply str (repeat 64 "a"))}
+              ::execution/arguments ["hello from call"]
+              ::execution/deadline-ms 9999999999999
+              ::execution/result-limit-bytes 4096}]))
+         execution.host/invoke!
+         (fn [_]
+           (js/Promise.resolve
+            {::execution/message execution/result-message
+             ::execution/protocol-version execution/protocol-version
+             ::execution/invocation-id "call-test"
+             ::execution/coordinate coordinate
+             ::execution/result {:seon.db/ok? true}
+             ::execution/result-bytes 32}))]
+        (-> (call/invoke! agent-id granted-sym ["hello from call"])
+            (.then
+             (fn [env]
+               (is (true? (::call/ok? env)))
+               (is (= coordinate (::execution/coordinate @prepared)))
+               (is (= ["hello from call"]
+                      (get-in @prepared
+                              [::execution/invocation-plans 0
+                               ::execution/arguments])))
+               (done)))
+            (.catch
+             (fn [e]
+               (is false (str "threw — " e))
+               (done))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; (d) HTTP boundary — the /call RCE is neutralized + malformed args never hang.

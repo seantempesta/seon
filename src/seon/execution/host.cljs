@@ -482,6 +482,36 @@
                         {:seon.error/cause (ex-message exception)})))))
     (::promise completion)))
 
+(defn ^:async invoke-plans!
+  "Prepare and execute ordinary authored calls at one database coordinate."
+  {:malli/schema [:=> [:cat :seon.db.coordinate/coordinate
+                       :seon.execution/invocation-plans]
+                  [:vector :map]]}
+  [coordinate plans]
+  (let [invocations
+        (await
+         (execution/prepare-invocations!
+          {::execution/coordinate coordinate
+           ::execution/invocation-plans plans}))]
+    (let [groups (vals (group-by (comp ::execution/agent-id second)
+                                 (map-indexed vector invocations)))
+          run-group
+          (fn [indexed]
+            (reduce
+             (fn [pending [index invocation]]
+               (.then pending
+                      (fn [results]
+                        (-> (invoke! invocation)
+                            (.then #(conj results [index %]))))))
+             (js/Promise.resolve [])
+             indexed))
+          grouped-results
+          (await (js/Promise.all (clj->js (mapv run-group groups))))]
+      (->> (array-seq grouped-results)
+           (apply concat)
+           (sort-by first)
+           (mapv second)))))
+
 (defn cancel!
   "Cancel one active invocation and bound non-cooperative shutdown."
   {:malli/schema [:=> [:cat ::execution/agent-id ::execution/invocation-id]

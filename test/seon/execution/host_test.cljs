@@ -45,7 +45,7 @@
     ::execution/function-source-identity
     {::execution/function-symbol 'my.render/view
      ::execution/source-digest digest}
-    ::execution/input {:my.render/value 1}
+    ::execution/arguments [{:my.render/value 1}]
     ::execution/deadline-ms 9999999999999
     ::execution/result-limit-bytes 4096}))
 
@@ -416,3 +416,72 @@
            (fn [error]
              (is false (str "pre-ready deadline rejected: " error))
              (done)))))))
+
+(deftest plan-groups-overlap-across-agents-and-preserve-result-position
+  (async done
+    (let [plans [(execution/invocation-plan "agent-1" 'my.one/first [1])
+                 (execution/invocation-plan "agent-2" 'my.two/run [2])
+                 (execution/invocation-plan "agent-1" 'my.one/second [3])]
+          invocations
+          [(invocation "agent-1" "agent-1-first")
+           (invocation "agent-2" "agent-2-run")
+           (invocation "agent-1" "agent-1-second")]
+          started (atom [])
+          resolve-first! (atom nil)
+          first-completion
+          (js/Promise. (fn [resolve _] (reset! resolve-first! resolve)))
+          resolve-first-wave! (atom nil)
+          first-wave-started
+          (js/Promise. (fn [resolve _] (reset! resolve-first-wave! resolve)))
+          resolve-second-agent1! (atom nil)
+          second-agent1-started
+          (js/Promise. (fn [resolve _]
+                         (reset! resolve-second-agent1! resolve)))
+          invoke-stub
+          (fn [request]
+            (let [id (::execution/invocation-id request)]
+              (let [current (swap! started conj id)]
+                (when (= #{"agent-1-first" "agent-2-run"} (set current))
+                  (@resolve-first-wave! true))
+                (when (some #{"agent-1-second"} current)
+                  (@resolve-second-agent1! true)))
+              (case id
+                "agent-1-first" first-completion
+                "agent-2-run"
+                (js/Promise.resolve (result-message id :agent-2))
+                "agent-1-second"
+                (js/Promise.resolve (result-message id :agent-1-second)))))
+          original-prepare execution/prepare-invocations!
+          original-invoke host/invoke!]
+      (set! execution/prepare-invocations!
+            (fn [_] (js/Promise.resolve invocations)))
+      (set! host/invoke! invoke-stub)
+      (let [completion (host/invoke-plans! point plans)]
+        (-> first-wave-started
+            (.then
+             (fn [_]
+               (is (= #{"agent-1-first" "agent-2-run"} (set @started))
+                   "different agents begin without waiting for each other")
+               (is (not-any? #{"agent-1-second"} @started)
+                   "one agent's second call waits for its first")
+               (@resolve-first!
+                (result-message "agent-1-first" :agent-1-first))
+               second-agent1-started))
+            (.then
+             (fn [_]
+               (is (= ["agent-1-first" "agent-2-run" "agent-1-second"]
+                      @started))
+               completion))
+            (.then
+             (fn [results]
+               (is (= [:agent-1-first :agent-2 :agent-1-second]
+                      (mapv ::execution/result results))
+                   "parallel grouping does not change caller position")))
+            (.catch
+             (fn [error]
+               (is false (str "plan scheduling rejected: " error))))
+            (.finally
+             (fn []
+               (set! execution/prepare-invocations! original-prepare)
+               (set! host/invoke! original-invoke)
+               (done))))))))
