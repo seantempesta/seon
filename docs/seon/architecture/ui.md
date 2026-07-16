@@ -12,8 +12,9 @@ tags: [architecture, web, agent]
 The human's UI and the agent's prompt are the same data, dual-rendered. Every
 page is a derived projection of the database; nothing rendered is stored. The
 context unit is the **block**; the engine is `seon.render`; the front door is
-**reitit**; the live channel is a gzip-compressed datastar **morph** stream
-driven by one tx-listener. Every layer is a
+**reitit**; the live channel is a Datastar **morph** stream opened by one
+database-scoped selective interest. Loopback streams are uncompressed by
+default; remote compression is explicit configuration. Every layer is a
 symbol or a datom, so a third party overrides any of it — blocks, canvas,
 layout, the root agent’s view, routes, CSS, client — reusing the same
 primitives, with zero `src/seon` edits.
@@ -119,7 +120,7 @@ and technical data remain available in the separate debug/data surfaces. This
 changes only the HTML projection—the agent's AI transcript remains
 byte-faithful.
 
-**The database browser pays for opened data.** `/data` uses the same gzip
+**The database browser pays for opened data.** `/data` uses the same Datastar
 Datastar feed and observed-read invalidation as every other live page. Its
 default navigator derives from installed schema only. Selecting an attribute
 opens a bounded AEVT window through `seon.db/index-datoms`; the URL carries the
@@ -209,7 +210,7 @@ render-unit, routing, and live-morph mechanism in one route tree:
   select or reorder the root canvas.
 - **the root system view** (`/`) — root remains the supervising
   `:seon.agent/id "root"`, but `/` uses a dedicated system layout over the SAME
-  blocks, render units, route resolution, database projections, and gzip morph
+  blocks, render units, route resolution, database projections, and Datastar morph
   feed as every other page. It is not wrapped in the ordinary-agent heading,
   context rail, or canvas pin. Its primary surface is an attractive, calm grid
   of ordinary-agent work sessions; root itself is not rendered as a recursive
@@ -262,9 +263,9 @@ render-unit, routing, and live-morph mechanism in one route tree:
   once, retains the exact assembled prompt behind a lazy raw unit, and exposes
   source-block bodies plus HTML twins as closed stubs. HTML discovery projects
   metadata only; opening one twin materializes only that current renderer.
-  It uses the same gzip Datastar subscription graph and activation door as every
-  other live page, not a provenance-routed debug listener. With no open page it
-  owns no listener or render work.
+  It uses the same Datastar subscription graph and activation door as every
+  other live page, not a provenance-routed debug interest. With no open page it
+  owns no database interest or render work.
 - **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
   is an agent layout symbol, SCI-bounded.
 
@@ -300,7 +301,7 @@ same no-match redirect to `/`.
 ## Routing is data — reitit + the capability gate
 
 The front door is **reitit** (vendored `reference-code/reitit`, `.cljc`, runs in
-the Node pod) consuming `:seon.route/*` datoms. A route datom carries its pattern,
+  the Bun web host) consuming `:seon.route/*` datoms. A route datom carries its pattern,
 method, unique name (reverse routing), owning agent (`:seon.route/owner`, rides as
 route-data for auth), and a `:seon.route/handler` symbol that **IS a layout
 symbol** — the same render machinery as a block's html render, not a separate
@@ -402,13 +403,14 @@ the browser remains a projection of database state. A missing originating
 session returns an explicit error envelope instead of guessing which tab to
 move.
 
-## The live channel — gzip morph SSE
+## The live channel — selective Datastar morph SSE
 
 The live channel is **ours** (reitit has no streaming primitives by design): one
-**tx-listener** on a read-replica is the refresh signal, and the view is a pure
-derivation of the DB. The agent only `transact!`s datoms; it never opens or writes
-a stream. The Node pod implements the `view = f(db)` model through
-`seon.web.datastar`.
+database-scoped interest receives a committed coordinate plus conservative
+changed-attribute evidence, and the view is a pure coordinate-pinned derivation.
+There is no web-host Datahike replica or global transaction broadcast. The agent
+only transacts datoms; it never opens or writes a stream. The Bun web host
+implements the `view = f(db)` model through `seon.web.datastar`.
 
 - **view = f(db-at-coordinate), compiled into stable units.** Reitit route
   match + normalized path/query/resolved coordinate define one view key. Database route,
@@ -429,25 +431,25 @@ a stream. The Node pod implements the `view = f(db)` model through
   `datastar-patch-elements` event for the complete active unit. Bare HTML is
   not a Datastar action response and is never a second update path. Closing the
   unit restores its stub and releases its observed reads from the view plan.
-- **gzip + immediate flush.** The stream is long-lived and `Content-Encoding:
-  gzip`: each event is written then sync-flushed (`Z_SYNC_FLUSH`) so the
-  compressed bytes reach the browser connection at once; the browser transparently gunzips before
-  datastar reads. The streamer is crash-proofed — error handlers on the gzip
-  stream + the response, a `writableEnded` guard before every write, and
-  response `close` / request `aborted` lifecycle ends the gzip stream and
-  deregisters the connection. One shared heartbeat timer emits inert SSE
+- **native stream + configurable compression.** `Bun.serve` returns one direct
+  `ReadableStream` response whose controller owns browser backpressure and
+  disconnect. Loopback development uses identity encoding for observability and
+  latency; remote deployments enable measured compression by configuration.
+  Compression changes only response bytes, never event or database semantics.
+  One shared heartbeat timer emits inert SSE
   comments for every writable feed, so reverse proxies can keep otherwise-idle
   views open without one timer per socket. A
   backpressured connection retains only its newest derived event and resumes on
   `drain`; stale UI states never form an unbounded write queue.
-- **Observed reads + exact result change.** Each unit renders under a synchronous
-  runtime-only observer at the `seon.db` boundary. Actual query/pull/entity
-  requests compile into one runtime dependency descriptor: concrete attributes,
+- **Observed reads + exact result change.** Each unit renders under a
+  runtime-only observer at the `seon.db` boundary. Actual remote
+  query/pull/entity requests compile into one runtime dependency descriptor:
+  concrete attributes,
   entity refs, index prefixes/windows, and a broad flag for anything that cannot
   be narrowed safely. One in-memory reverse index maps those descriptors to
   active normalized render units; no dependency datoms are stored. A coalesced
-  batch retains earliest `db-before`, latest `db-after`, and changed
-  datoms/attributes. Attribute/entity/index intersections select candidate
+  authority wakeup retains the latest complete coordinate and conservative
+  changed attributes. Attribute/entity/index intersections select candidate
   units; broad units remain candidates for every transaction. Each unique
   normalized read is replayed once on the new immutable value and compared with
   its captured result. Only an unequal result invokes its unit renderer.
@@ -485,8 +487,9 @@ a stream. The Node pod implements the `view = f(db)` model through
   GET/POST same-URL cache collision that forces hyperlith's same-path-POST `&u=`
   hack, and this matches datastar-clojure's own example (`tiny_gzip.clj`: page `/`,
   stream GET `/updates`). reitit routes the feed GET to the SSE handler, which rides
-  the raw `node:http` `res` — the thin Node↔Ring adapter injects it and the handler
-  returns `{:seon.http/hijacked true}` so the adapter does not double-write.
+  Bun's native server. One final host function converts ordinary Ring response
+  data to a Bun `Response`; no Node response object or hijack sentinel enters
+  page code.
 - **Transient state is signals; time-travel and reconnect are just re-renders.**
   Transient client state lives in datastar **signals** only, never DOM attrs. Time
   travel is `view = f(db-at-coordinate)` over the bitemporal DB—a different
@@ -507,10 +510,10 @@ a stream. The Node pod implements the `view = f(db)` model through
   durable bookmark. A reconnect whose attachment changed or
   whose last commit is not an ancestor receives a full reset, never numeric
   replay across lineages.
-- **The hard invariant: no agent code ever touches an SSE connection.** agent →
-  datom → tx-listener → derived render → morph, one way; actions reverse it (a
-  browser POST → the owning agent's sandbox → result datoms → tx-listener →
-  morph). The DB is the bus both ways.
+- **The hard invariant: no agent code ever touches an SSE connection.** Agent →
+  datom → committed coordinate → selective derivation → morph, one way; actions
+  reverse it (a browser POST → the owning agent's sandbox → result datoms →
+  selective derivation → morph). The database is the bus both ways.
 
 Each SCI render owns its input accessor and deadline closure inside its fresh
 interpreter context. No process-global input/deadline cell can be overwritten by
@@ -518,15 +521,16 @@ a nested or future concurrent render. The one-time interpreter warmup uses its
 own local deadline as well. Repeated failure logging/recording uses a bounded
 FIFO suppression window; it cannot retain an unbounded set of broken symbols.
 
-The same gzip subscription mechanism serves root, agent, debug, and data
+The same Datastar subscription mechanism serves root, agent, debug, and data
 views. There is no provenance-routed debug stream or unused generic `/sse`
 registry. Transaction user/process is relevant to agent-derived focus semantics,
 never to dependency invalidation. Legitimate expensive units are bounded before
 building hidden hiccup; collapsed markup alone is not a compute bound.
 
-The streamer is a role inside the CLJS pod: it holds the replica and transaction
-listener, derives render units, and writes browser patches. Page code depends on
-that role's data contract rather than a transport-global registry.
+The streamer is a role inside the Bun web host: it owns one direct authority
+session plus database-scoped interests, derives render units at exact
+coordinates, and writes browser patches. Page code depends on that role's data
+contract rather than a transport-global registry.
 
 ## Errors render as surfaces
 

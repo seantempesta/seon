@@ -196,9 +196,9 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **run / turn / derive-state** — the bounded unit of work a trigger opens
   (`seon.agent.run`), the per-iteration value-transform (`seon.agent.loop`), and the
   one projection rule for agent state (`seon.derive`). See [[agent-runtime]].
-- **database authority / pod / transaction listener** — the JVM Datahike service;
-  the Bun CLJS agent and web UI runtime; and the
-  `listen! → derive → push` role inside the pod.
+- **database authority / Bun runtime / database interest** — the process that
+  owns indexed database operations; the CLJS agent and web hosts; and one
+  session-owned selective wakeup that causes a coordinate-pinned derivation.
 
 ## Deployment topology
 
@@ -253,7 +253,8 @@ compiled namespaces/preload, config delta, routes and renders, brand CSS/assets,
 secrets, and deployment policy. It pins a released Seon SDK/runtime and invokes
 the shipped build/operator commands. Development projects add a compiler
 watcher to the same process graph; immutable packaged operation runs only the
-writer and pod. Product customization composes public data and function seams;
+authority and Bun runtime. Product customization composes public data and
+function seams;
 it does not patch Seon source or introduce a second runtime mechanism.
 
 ## Cross-cutting principles
@@ -435,7 +436,8 @@ order, dates, measurements, and acceptance evidence.
   bootstrap-as-seeded-forms, orchestrator-root lifecycle, and the one
   execution-service contract.
 - [[ui]] — block/render/canvas/slot/layout, the page tree, reitit + the capability gate,
-  the gzip-morph SSE live channel, the seed-copy + `install!`/`remove!` override.
+  the selective Datastar live channel, configurable compression, and the
+  seed-copy + `install!`/`remove!` override.
 - [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
 - [[observability]] — historical turn reconstruction (resolved coordinate + prompt blob + reply), `agent-debug/turn` /
   `turn-diff`, the blob archive, the forensic agent, cluster lifecycle + the
