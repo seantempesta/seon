@@ -157,6 +157,12 @@ The final ordinary-data async database surface and its eight concrete closure
 gaps are [[research/remote-seon-db-contract-freeze-2026-07-16]]. The exact Bun
 child lifecycle, zero-process dormant-agent wake seam, and density proof are
 [[research/bun-child-supervision-seam-2026-07-16]].
+Strict reads inside one containing commit are grounded in
+[[research/strict-temporal-coordinate-seam-2026-07-16]]. The dependency-native
+ordered/missing-value pull contract is
+[[research/datahike-ordered-pull-many-seam-2026-07-16]]. Deterministic aggregate
+member-result admission is
+[[research/aggregate-execute-many-result-bound-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -1057,6 +1063,32 @@ Unit 9 cut, the Bun caller already retains its frozen request and the response
 shrinks directly to request ID, previous/current coordinate, temporary IDs,
 added/retracted counts, optional generated entity IDs, and recovery truth while
 the replay/event schemas and their producers disappear in the same commit.
+
+Strict temporal reads keep the existing four-field coordinate. The authority
+resolves and retains the raw containing commit once, proves that commit is on
+the attached branch lineage, validates `tx0 <= t <= max-t` plus exact
+transaction existence, and shares one `d/as-of` wrapper when `t` is earlier.
+Datahike otherwise treats a future numeric `as-of` as head, and a UUID loaded
+through a native branch may retain the source branch in its immutable config,
+so neither numeric range nor raw full-coordinate equality is sufficient.
+Temporal schema and KNN remain explicitly unsupported until their dependency
+owners can prove earlier-`t` semantics; releasing the raw containing value, not
+only its wrapper, owns restored secondary resources.
+
+Datahike's existing `pull-many` already parses once, owns one pull frame
+machine and resource budget, and certifies one eager result. Its dependency
+change therefore preserves that mechanism while resolving missing numeric and
+lookup refs without throwing, retaining nil at the exact input position, and
+preserving lookup syntax/uniqueness errors. Seon keeps only registered-versus-
+installed selector policy; it does not run or zip N pulls.
+
+The aggregate `execute-many` result bound is deterministic by member position,
+not completion timing. Admission reserves the outer response plus one fixed
+bounded error per position. Contiguous completed positions replace those
+reservations in vector order using Datahike's existing structural-weight
+semantics. The first result that cannot fit stops refill and cancels later work;
+earlier successes remain, already-running work drains, and exact Transit frame
+bytes remain the final independent fence.
 
 Integrated proof that closes it:
 Schema/index/history/selective-interest conformance, including forward/reverse
