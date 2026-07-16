@@ -556,38 +556,41 @@
   [{request ::request :as work}]
   (let [db-value (pinned-database work)
         options (resource-options request)]
-    (case (::protocol/operation request)
-      :seon.db.protocol.operation/query
-      (merge
-       (read-response-base request)
-       (update
-        (d/q-with-evidence
-         (merge
-          {:query (::protocol/query-form request)
-           :args (into [db-value] (::protocol/arguments request))
-           :request-id (::protocol/request-id request)}
-          options))
-        :datahike.query/result materialize-result))
+    (try
+      (case (::protocol/operation request)
+        :seon.db.protocol.operation/query
+        (merge
+         (read-response-base request)
+         (update
+          (d/q-with-evidence
+           (merge
+            {:query (::protocol/query-form request)
+             :args (into [db-value] (::protocol/arguments request))
+             :request-id (::protocol/request-id request)}
+            options))
+          :datahike.query/result materialize-result))
 
-      :seon.db.protocol.operation/pull
-      (assoc
-       (read-response-base request)
-       ::protocol/result
-       (materialize-result
-        (d/pull db-value
-                (merge {:selector (::protocol/selector request)
-                        :eid (::protocol/entity-id request)}
-                       options))))
+        :seon.db.protocol.operation/pull
+        (assoc
+         (read-response-base request)
+         ::protocol/result
+         (materialize-result
+          (d/pull db-value
+                  (merge {:selector (::protocol/selector request)
+                          :eid (::protocol/entity-id request)}
+                         options))))
 
-      :seon.db.protocol.operation/pull-many
-      (assoc
-       (read-response-base request)
-       ::protocol/result
-       (materialize-result
-        (d/pull-many db-value
-                     (merge {:selector (::protocol/selector request)
-                             :eids (::protocol/entity-ids request)}
-                            options)))))))
+        :seon.db.protocol.operation/pull-many
+        (assoc
+         (read-response-base request)
+         ::protocol/result
+         (materialize-result
+          (d/pull-many db-value
+                       (merge {:selector (::protocol/selector request)
+                               :eids (::protocol/entity-ids request)}
+                              options)))))
+      (finally
+        (d/release-materialized-db db-value)))))
 
 (defn- scope-for-read
   [request]

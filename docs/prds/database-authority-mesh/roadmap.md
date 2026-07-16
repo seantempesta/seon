@@ -91,7 +91,7 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `092f5b05` (graduated Units 1–3 at `940810f5`, plus attached
+- Datahike `04213e17` (graduated Units 1–3 at `940810f5`, plus attached
   exact-commit cache identity, atop
   `9ada755087228e10cfb179fa5779ce227a6ed220`):
   `db.cljc`, `connections.cljc`, `connector.cljc`, `core.cljc`,
@@ -322,6 +322,21 @@ gate passes 35 tests and 222 assertions.
 The broader embedding, receipt, replay, generated-ID, and transaction-coordinate
 gate passes 58 tests and 345 assertions.
 
+The source audit in
+[[research/datahike-maximum-safe-parallelism-2026-07-16]] confirms that only
+mutation, commit, and publication serialize per connection. Independent
+database writers and complete reads over one captured immutable database value
+run concurrently; secondary-index concurrency remains adapter-qualified. Its
+focused PSS/HHT/spec proof passes 104 tests and 392 assertions.
+
+Historical committed values now have explicit native secondary-index
+ownership. `commit-as-db` can omit secondary owners for proven primary-only
+work, and `release-materialized-db` idempotently closes owners after readers
+finish without touching the live connection value. The focused Datahike proof
+passes 24 tests and 198 assertions. Seon's single-read path releases every
+historical materialization in `finally`; arbitrary Datalog is not guessed to
+be primary-only because the planner may legitimately select a secondary index.
+
 This is not Unit 4 graduation because query, KNN, encode/delivery, mutation, and
 control capacity are not all wired and 2/4/8-database adversarial proof remains.
 
@@ -389,6 +404,21 @@ yet. Mutation cancellation never claims rollback. Executor and real UDS
 fixtures cover queued/running/absent distinctions and the canonical correlated
 response; the focused gate passes 36 tests and 229 assertions.
 
+[[research/execute-many-value-reuse-2026-07-16]] measures why the batch seam
+must own one immutable database value. At 32 members, resolving once reduced
+historical materialization from 384.2 microseconds and 1.23 MB per request to
+10.9 microseconds and 38 KB. Eight distinct scan-heavy members over that one
+value ran 5.47 times faster concurrently than sequentially. Member jobs stay
+flat in the one fair dispatcher, results retain input order, and only the outer
+request ID crosses the wire.
+
+[[research/bounded-query-cache-semantics-2026-07-16]] finds that bounded
+Datahike queries currently bypass both completed caching and single-flight.
+The selected dependency fix keeps completed semantic identity independent of
+limits, certifies hits per caller, and includes the three resource limits only
+in cold in-flight identity. A successful bounded computation then populates
+the ordinary completed cache without any Seon cache.
+
 Exit proof: transport-neutral fixtures cover schemas, values, identity,
 query/pull/history, branches, fencing, batching, member errors, cancellation,
 listener ordering, paging, release, malformed input, and version negotiation.
@@ -400,6 +430,14 @@ multiplexed `Bun.connect` session per agent child and UI host. Use request IDs,
 out-of-order responses, linear chunk/cursor decoding, exact partial-write
 suffixes, `drain`, bounded in-flight work/bytes, semantic cancel, and independent
 page delivery. Keep four-byte length framing and Transit JSON initially.
+
+[[research/selector-session-source-proof-2026-07-16]] validates the replacement
+against exact Bun and JDK 26 source. A disposable fragmented-frame probe
+delivered 10,000 multiplexed requests at about 164,862 requests per second,
+versus 20,555–23,542 with reconnect per request, a directional 7–8 times gain.
+The selector owns bytes and readiness only; frame-order admission,
+completion-order responses, selector wakeups, exact partial-write suffixes,
+and session-close semantics remain explicit above it.
 
 Encode one exact completed result/page once and deliver it through independent
 session cursors. A slow recipient counts the full body against its own byte
