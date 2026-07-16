@@ -1477,6 +1477,13 @@ is prohibited.
   containing legacy lifecycle namespace has six additional failures because
   its old fixture still opens a local Datahike database; those tests are
   deletion/rewrite inventory, not a compatibility requirement.
+- Eval receipt allocation, terminalization, transcript-first fallback, and
+  settled-CAS inspection now use only the authority facade. Generated eval IDs
+  no longer receive a local connection, transaction requests contain only
+  ordinary data, and a losing terminal CAS resolves the durable receipt status
+  through one remote pull. The execution artifact compiles at its unchanged
+  415 files/18-warning inventory; the remaining eval-local branches are the
+  ordered preflight/program/test migration boundary.
 - **Next refill:** move the remaining parent eval/schedule/test/authored-route
   consumers onto the existing per-agent child execution owner, delete global
   pod replay rather than adapting it, finish the remaining web synchronous

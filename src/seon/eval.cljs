@@ -3391,8 +3391,7 @@
   {:malli/schema [:=> [:catn [::start-request :map]] :any]}
   [{::keys [at narration source starting-ns]
     turn-id :seon.agent.turn/id-of-turn}]
-  (let [conn db/*conn*
-        aid  (db/current-agent-id)
+  (let [aid  (db/current-agent-id)
         started
         (await
           (db.id/allocate!
@@ -3413,8 +3412,7 @@
                                      starting-ns
                                      (keyword (str starting-ns)))}
                     aid
-                    (assoc :seon.eval/agent [:seon.agent/id aid])))})
-             :seon.db/conn conn}))]
+                    (assoc :seon.eval/agent [:seon.agent/id aid])))})}))]
     (if (:seon.db/ok? started)
       {:seon.db/ok? true
        :seon.eval/id (get-in started [::db.id/ids ::eval-allocation])}
@@ -3454,7 +3452,6 @@
         result (if (and (::ok? result) (not pending?))
                  (update result ::value admit-result-value)
                  result)
-        conn db/*conn*
         aid  (db/current-agent-id)
         stable-eval-row
         (cond-> {:seon.eval/at          at
@@ -3520,8 +3517,7 @@
                    {:seon.db/tx-data
                     (into [{:seon.agent.turn/id turn-id
                             :seon.agent.turn/evals [eval-row]}]
-                          accepted-tee)}))
-               :seon.db/conn conn})))
+                          accepted-tee)}))})))
         terminalize-record!
         (fn ^:async terminalize-record! [accepted-tee]
           (let [status (if (::ok? result) :done :error)
@@ -3531,11 +3527,9 @@
                    :seon.eval/status status})]
             (await
               (db/transact!
-                (cond->
-                  {:seon.db/tx-data
-                   (into [fence (merge (eval-row-for eval-id) terminal-row)]
-                         accepted-tee)}
-                  conn (assoc :seon.db/conn conn))))))
+                {:seon.db/tx-data
+                 (into [fence (merge (eval-row-for eval-id) terminal-row)]
+                       accepted-tee)}))))
         transact-record! (if eval-id terminalize-record! allocate-record!)
         primary (await (transact-record! (vec (or tee []))))
         committed-id (or eval-id
@@ -3543,9 +3537,10 @@
         settled-status
         (when (and eval-id (not (:seon.db/ok? primary)))
           (eval.internal/receipt-state
-            (db/entity
-              (cond-> {:seon.db/ref [:seon.eval/id eval-id]}
-                conn (assoc :seon.db/db @conn)))))]
+            (await
+              (db/pull
+                {::db/pull-pattern [:seon.eval/status]
+                 ::db/ref [:seon.eval/id eval-id]}))))]
     (cond
       (:seon.db/ok? primary)
       (cond->
@@ -3588,10 +3583,9 @@
                                       :seon.error/message)))
                     stamped (await
                               (db/transact!
-                                (cond-> {:seon.db/tx-data
-                                         [{:seon.eval/id eval-id
-                                           :seon.eval/record-error reason}]}
-                                  conn (assoc :seon.db/conn conn))))]
+                                {:seon.db/tx-data
+                                 [{:seon.eval/id eval-id
+                                   :seon.eval/record-error reason}]}))]
                 (js/console.error
                   "[seon.eval/record-eval!] eval row RECOVERED without tee —"
                   (count tee) "program-graph tee row(s) DROPPED for eval"

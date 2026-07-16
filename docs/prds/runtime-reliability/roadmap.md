@@ -75,6 +75,9 @@ restart and historical retraction are write-free, and no production birth path
 receives a local Datahike connection. The next ordered boundary is moving the
 remaining parent eval/schedule/test/authored-route consumers into the existing
 per-agent execution child so global pod replay can be deleted.
+Eval receipt start, terminal recording, fallback stamping, and settled-CAS
+inspection are already session-native, removing the local connection from the
+durable execution boundary before the broader eval preflight cut.
 Autocomplete/export and the debug feed already consume the same coordinate-
 pinned compiled child result; the obsolete synchronous AI composer is deleted.
 Stale debug completions cannot install candidate catalogs, and raw AI
