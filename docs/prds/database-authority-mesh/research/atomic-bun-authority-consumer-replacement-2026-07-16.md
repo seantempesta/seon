@@ -23,22 +23,18 @@ interest; the Bun web host has one database interest shared across all browser
 feeds; and every read, cancellation, response, and change is attributable to
 one session, request ID, database, and coordinate.
 
-Two contracts must be settled before the deletion commit:
+Two contracts were settled before the deletion commit:
 
-1. Current render functions may synchronously call `seon.db` while branching.
-   Returning Promises from those functions would leak through SCI and render
-   schemas. Core rendering must instead execute an explicit async coarse read
-   plan before pure rendering. Open-ended agent-authored rendering needs an
-   async execution boundary, naturally supplied by the isolated Bun agent
-   child, rather than a synchronous compatibility shim in the web host.
-2. Generated-ID transactions currently pass a CLJS transaction-builder
-   function around a local database value. Functions cannot cross the wire.
-   A focused caller audit must choose between keeping candidate generation and
-   the pure builder in Bun with rare collision-retry round trips, or defining a
-   small ordinary declarative template that lets the authority generate,
-   substitute, retry, and commit in one operation. The latter is justified only
-   if it is genuinely smaller across every current builder; it must not become
-   a remote code interpreter.
+1. Core rendering executes one async coordinate-pinned coarse read plan before
+   pure rendering. Open-ended agent-authored rendering executes and awaits in
+   the owning isolated Bun child, never through a synchronous compatibility
+   shim in the web host.
+2. Generated-ID candidate generation and all 11 pure builders remain in Bun.
+   The existing ordinary candidate manifest crosses the wire; the JVM retains
+   policy validation, collision detection, serialized commit, durable receipt,
+   and generated-entity recovery. Ambiguous delivery resends identical bytes
+   and the same request ID; only a real collision rebuilds with new candidates
+   and a new request ID. No declarative transaction language is added.
 
 These are semantic prerequisites, not reasons to preserve the replica. Once
 they are closed, the migration should replace the old reachability atomically:
@@ -158,10 +154,11 @@ and do not duplicate Datahike indexes or JVM heap.
   - Replace local temporal materialization and index traversal with protocol
     members resolved at one coordinate.
 - `src/seon/db/id.cljc`
-  - Move generator policy lookup, candidate generation, retry, substitution,
-    commit, and committed-reply recovery into one JVM writer operation.
-  - Preserve returned IDs/eids as ordinary data; remove the client-side
-    transaction-builder function contract.
+  - Keep candidate generation and the pure builder in Bun, then send frozen
+    transaction data plus the existing candidate manifest.
+  - Preserve returned IDs/eids as ordinary data. The JVM owns validation,
+    collision detection, serialized commit, receipt, and recovery; no function
+    or declarative builder language crosses the wire.
 - `src/seon/db/coordinate.cljc`
   - Retain coordinate schemas and pure projections in CLJS.
   - Move `resolved`, `as-of`, `since`, and history database-value construction
@@ -402,9 +399,8 @@ API without a local connection or compatibility namespace.
 
 ### Gate 3 — Close the two risky semantic seams
 
-1. Audit every generated-ID builder and measure the two honest shapes: Bun-side
-   pure builder with bounded collision retries, or one declarative writer
-   operation. Select one mechanism and migrate all allocation callers.
+1. Retain the selected Bun-side pure builders and ordinary candidate manifest;
+   prove bounded collision retry and identical-request recovery.
 2. Make core render/context acquisition async and rendering pure over ordinary
    data.
 3. Put open-ended agent-authored render execution behind the async isolated
@@ -463,38 +459,26 @@ executable and no local Datahike code reachable from Bun.
 | Build reachability | Shadow dependency/source-map inspection and `rg` prove no replica, publisher, Datahike/Konserve CLJS, `node:http`, or `node:zlib`. | Remove Node from `PATH`; build, test, package, start, browse, transact, and shut down using Bun plus one JVM authority. |
 | Performance | Compare old baseline and final p50/p95/p99 latency, CPU, RSS, bytes, query count, render count, and queue depth at 1/8/32 children/feeds. | Sustained modest-hardware run with multiple clusters sharing one JVM; no unbounded queue, replay storm, or browser-count amplification. |
 
-## Key risks and decisions still owned by the roadmap
+## Remaining risks owned by the roadmap
 
-1. **Render execution placement.** Core rendering can cleanly use async coarse
-   plans. Agent-authored render functions are open-ended and may branch on
-   reads, so the roadmap must explicitly choose the isolated child execution
-   boundary before replica deletion. A Promise-returning drop-in `db/query` is
-   not compatible with current synchronous SCI rendering.
-2. **Generated-ID transaction shape.** The ordinary declarative template must
-   be expressive enough for all current builders without becoming a remote
-   code interpreter. Audit every `seon.db.id/allocate!` caller before freezing
-   the schema.
-3. **Selective-interest integration.** Datahike `d9765276` now owns committed
-   fair batching/requeue, but the JVM must still drain, filter, order, address,
-   resynchronize, and release interests through physical session ownership.
-4. **Bun platform detection.** Treating Bun as `:node` hides native seams;
+1. **Bun platform detection.** Treating Bun as `:node` hides native seams;
    changing the platform keyword naively can break compatible filesystem,
    logging, shell, and web branches. Central capability ownership must replace
    scattered runtime conditionals.
-5. **Backpressure has two owners.** The database session and browser SSE have
+2. **Backpressure has two owners.** The database session and browser SSE have
    separate limits and cancellation. Combining them would let a slow browser
    retain authority work or block unrelated agent responses.
-6. **No hidden test replica.** Keeping Datahike in the CLJS test artifact would
+3. **No hidden test replica.** Keeping Datahike in the CLJS test artifact would
    preserve the wrong idiom and weaken reachability proof. Datahike-specific
    tests belong on the JVM; Bun integration tests use the real authority.
 
 ## Final recommendation
 
 Proceed with the native Bun session and selective JVM authority design. Freeze
-the final `seon.db` ordinary-data contract only after the generated-ID tradeoff
-and render execution probes pass. Then migrate computations bottom-up and make one
-atomic reachability cut that deletes the replica, full feed, publisher, local
-Datahike, and Node web adapters together.
+the final `seon.db` ordinary-data contract around the selected generated-ID and
+render seams. Then migrate computations bottom-up and make one atomic
+reachability cut that deletes the replica, full feed, publisher, local Datahike,
+and Node web adapters together.
 
 This design preserves Datahike's strengths—immutable values, indexes, query
 evidence, cache reuse, pull, temporal reads, and serialized commits—while Bun
